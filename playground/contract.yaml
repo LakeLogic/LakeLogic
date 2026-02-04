@@ -1,0 +1,163 @@
+version: 1.0.0
+info:
+  title: Customer Master Data
+  version: 1.1.0
+  description: |
+    Unified customer profile data including PII and membership details.
+    This dataset serves as the source of truth for all marketing and CRM activities.
+  owner: CRM & Growth Team
+  status: active
+  contact:
+    name: Sarah Connor (CRM Lead)
+    email: sarah.connor@example.com
+    url: https://teams.microsoft.com/l/channel/growth/crm
+
+# PHYSICAL LAYER
+server:
+  type: s3
+  path: s3://data-lake/customers/master/
+  format: parquet
+
+# LOCAL DEVELOPMENT OVERRIDES
+environments:
+  dev:
+    path: ./test_customers.csv
+    format: csv
+
+# DEPENDENCIES
+links:
+  - name: dim_geography
+    type: table
+    path: s3://data-lake/dimensions/geography.parquet
+  - name: marketing_opt_outs
+    type: table
+    path: s3://data-lake/compliance/opt_outs.parquet
+
+dataset: customer_master
+primary_key: ["customer_id"]
+
+# SCHEMA ENFORCEMENT POLICY
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+
+# LOGICAL LAYER: The Schema
+model:
+  fields:
+    - name: customer_id
+      type: integer
+      description: Internal CRM system ID.
+    - name: email
+      type: string
+      description: Primary contact email.
+      pii: true
+      classification: sensitive
+    - name: first_name
+      type: string
+      pii: true
+      classification: sensitive
+    - name: last_name
+      type: string
+      pii: true
+      classification: sensitive
+    - name: birth_date
+      type: date
+      description: Customer date of birth for age-restricted services.
+    - name: membership_level
+      type: string
+      description: Loyalty tier (BRONZE, SILVER, GOLD, PLATINUM).
+    - name: country_id
+      type: integer
+      description: Foreign key to dim_geography.
+
+# TRANSFORMATION LAYER
+transformations:
+  - rename: { from: email_address, to: email }
+
+  # ENRICHMENT: Lookup country name for easier reporting
+  - lookup:
+      field: country_name
+      reference: dim_geography
+      on: country_id
+      key: id
+      value: name
+
+  # DERIVATION: Create a display name
+  - derive:
+      field: full_name
+      sql: "CONCAT(first_name, ' ', last_name)"
+
+  # DERIVATION: Masked email for non-PII users
+  - derive:
+      field: email_masked
+      sql: "CONCAT(SUBSTR(email, 1, 3), '****', SUBSTR(email, -4))"
+
+# QUALITY LAYER
+quality:
+  row_rules:
+    - name: completeness_contact
+      description: Customers must have an email and a first name.
+      sql: "email IS NOT NULL AND first_name IS NOT NULL"
+      category: completeness
+
+    - name: valid_email_format
+      sql: "email LIKE '%@%'"
+      category: correctness
+
+    - name: valid_membership_tier
+      sql: "membership_level IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM')"
+      category: consistency
+
+    - name: adult_only
+      description: Verification for age-restricted products.
+      sql: "birth_date <= CURRENT_DATE - INTERVAL '18 years'"
+      category: correctness
+
+    # REFERENTIAL INTEGRITY
+    - name: valid_geography
+      description: Ensure country_id exists in target geography dimension.
+      sql: "country_id IN (SELECT id FROM dim_geography)"
+      category: consistency
+
+    # COMPLIANCE CHECK
+    - name: check_opt_outs
+      description: Ensure we are not processing customers who have opted out.
+      sql: "customer_id NOT IN (SELECT customer_id FROM marketing_opt_outs)"
+      category: compliance
+
+  dataset_rules:
+    - name: unique_emails
+      description: Ensure no duplicate customer accounts by email.
+      sql: "SELECT count(email) - count(distinct email) FROM customer_master"
+      must_be_less_than: 1
+
+    - name: min_customer_base
+      description: Alert if the customer master drop suddenly (indicates source error).
+      sql: "SELECT count(*) FROM customer_master"
+      must_be_greater_than: 1000
+
+# GOVERNANCE & SLAS
+service_levels:
+  freshness:
+    description: Customer data should be updated daily.
+    threshold: 24h
+    field: updated_at
+  availability:
+    description: Master data must be available in the Gold layer.
+    threshold: 99.9%
+
+# QUARANTINE ROUTING
+quarantine:
+  enabled: true
+  include_error_reason: true
+  target: s3://data-lake/customers/quarantine/
+  notifications:
+    - type: email
+      to: "data_owner"
+      on_events: [quarantine_triggered, dataset_rule_failed]
+    - type: slack
+      channel: "#crm-data-alerts"
+      on_events: [dataset_rule_failed]
+    - type: teams
+      url: "https://outlook.office365.com/webhook/..."
+      on_events: [quarantine_triggered]

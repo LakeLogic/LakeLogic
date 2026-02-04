@@ -1,0 +1,24 @@
+name: Publish to PyPI 🚀
+
+on:
+    release:
+        types: [published]
+
+permissions:
+    contents: read
+
+jobs:
+    pypi-publish:
+        name: Build and publish Python distributions to PyPI
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install uv
+              run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+            - name: Build distribution
+              run: uv build
+
+            - name: Publish to PyPI
+              run: uv publish --token ${{ secrets.PYPI_API_TOKEN }}

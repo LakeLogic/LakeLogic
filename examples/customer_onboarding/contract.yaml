@@ -1,0 +1,26 @@
+version: 1.0.0
+info:
+  title: Customer Silver Table
+  version: 1.0.0
+  description: |
+    Validated and Cleaned Customer data.
+    This contract moves data from BRONZE (Raw) to SILVER (Clean).
+  owner: Data Engineering Team
+
+# LAKEHOUSE STRUCTURE
+server: 
+  type: lakehouse
+  source_layer: bronze
+  target_layer: silver
+  path: s3://my-lakehouse/silver/customers/
+
+dataset: customer_silver
+primary_key: ["customer_id"]
+
+# ... (rest of the contract remains consistent with previous version)
+quality:
+  row_rules:
+    - name: valid_bronze_record
+      sql: "raw_id IS NOT NULL"
+      category: completeness
+# ...

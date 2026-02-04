@@ -1,0 +1,59 @@
+site_name: LakeGuard 🛡️
+site_description: Consistent Data Contracts across Polars, Pandas, DuckDB, and Spark.
+site_url: https://your-username.github.io/lakeguard
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - content.code.annotate
+
+nav:
+  - Home: index.md
+  - Why LakeGuard?: comparison.md
+  - Installation: installation.md
+  - Ingestion & Cloud: ingestion.md
+  - Deployment Patterns: deployment_patterns.md
+  - Concepts:
+      - How it Works: concepts.md
+      - Reprocessing & Partitioning: reprocessing.md
+      - Pipelines & Parallelism: pipelines.md
+      - Lineage & Reconciliation: reconciliation.md
+      - Notifications & Alerting: notifications.md
+      - Release & Maintenance: maintenance.md
+  - Examples:
+      - Customer Onboarding: examples/customer_onboarding.md
+      - Sales Gold (Facts): examples/sales_gold.md
+      - Fact Table Patterns: examples/fact_patterns.md
+  - API Reference: api.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - admonition
+  - attr_list
+  - md_in_html
