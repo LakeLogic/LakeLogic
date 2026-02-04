@@ -23,6 +23,7 @@ class PandasAdapter(EngineAdapter):
         # We leverage the DuckDBAdapter logic directly
         duck_adapter = DuckDBAdapter(self.contract)
         good_df, bad_df = duck_adapter.execute(df)
+        self.dataset_rule_results = duck_adapter.dataset_rule_results
         
         # DuckDBAdapter already returns Pandas DataFrames if the input was registerable
         # or if .df() was called (which it is in our DuckDBAdapter).

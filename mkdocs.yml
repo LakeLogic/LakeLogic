@@ -27,12 +27,13 @@ theme:
 
 nav:
   - Home: index.md
-  - Why LakeGuard?: comparison.md
   - Installation: installation.md
+  - Playground: playground.md
   - Ingestion & Cloud: ingestion.md
   - Deployment Patterns: deployment_patterns.md
   - Concepts:
       - How it Works: concepts.md
+      - Contract Organization: organization.md
       - Reprocessing & Partitioning: reprocessing.md
       - Pipelines & Parallelism: pipelines.md
       - Lineage & Reconciliation: reconciliation.md
@@ -40,9 +41,13 @@ nav:
       - Release & Maintenance: maintenance.md
   - Examples:
       - Customer Onboarding: examples/customer_onboarding.md
+      - Ingestion (Bronze): examples/ingestion.md
       - Sales Gold (Facts): examples/sales_gold.md
       - Fact Table Patterns: examples/fact_patterns.md
-  - API Reference: api.md
+  - Reference:
+      - CLI: cli.md
+      - API: api.md
+  - Why LakeGuard?: comparison.md
 
 markdown_extensions:
   - pymdownx.highlight:

@@ -1,5 +1,7 @@
 # Reprocessing & Partitioning
 
+> Note: Materialization and reprocessing policies are on the roadmap. The OSS release focuses on validation, transformations, and quarantine.
+
 In a professional Data Lakehouse, you don't just "upload" data. You need a way to handle **Late Arriving Data** and **Reprocessing** without creating a mess. 
 
 LakeGuard makes your pipelines **Idempotent** (meaning you can run them multiple times safely).

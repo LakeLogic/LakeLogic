@@ -13,7 +13,7 @@ graph LR
     end
 
     subgraph "Silver Layer"
-        C[Cleaned & Validated]
+        C[Filtered, Cleaned, Transformed, Enriched]
     end
 
     subgraph "Gold Layer"
@@ -31,6 +31,28 @@ graph LR
     style D fill:#ffd700,color:#333
     style Q fill:#ef4444,color:#fff
 ```
+
+## Cleansing Transformations (Bronze → Silver)
+
+In the Bronze layer, data is often "dirty." Before you apply strict quality rules or perform heavy calculations, you need to clean the noise.
+
+LakeGuard processes transformations in a specific order to ensure maximum performance and safety:
+
+### 1. Pre-Processing (Cleanse)
+These run **first**, before schema enforcement and quality rules.
+-   **`rename`**: Align column names (e.g., `cust_id` to `customer_id`).
+-   **`filter`**: Drop invalid rows immediately (e.g., `WHERE status = 'active'`).
+-   **`deduplicate`**: Keep the latest version of a record based on a timestamp.
+
+### 2. Validation Gate
+LakeGuard then enforces your **Schema** and runs your **Quality Rules**. Because you've already filtered and deduplicated, this stage is faster and produces fewer "false alerts."
+
+### 3. Post-Processing (Enrich)
+These run **last**, only on the "Good" data.
+-   **`derive`**: Calculate new fields using SQL (e.g., `price * quantity`).
+-   **`lookup`**: Join with dimension tables to add names or categories.
+
+---
 
 ## Handling Complex Patterns (Gold)
 
@@ -51,6 +73,8 @@ If data fails a rule in **Bronze**, it goes to **Quarantine**.
 2.  **Reprocess**: LakeGuard picks up the correction and flows it through to **Silver** and **Gold**.
 
 ## Materialization Strategies
+
+> Note: Materialization execution is on the roadmap. The OSS release focuses on validation, transformations, and quarantine.
 
 | Strategy | When to use it |
 | :--- | :--- |

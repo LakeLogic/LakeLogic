@@ -12,6 +12,7 @@ class EngineAdapter(ABC):
 
     def __init__(self, contract: DataContract):
         self.contract = contract
+        self.dataset_rule_results: List[Dict[str, Any]] = []
 
     @abstractmethod
     def execute(self, df: Any) -> Tuple[Any, Any]:
@@ -25,9 +26,26 @@ class EngineAdapter(ABC):
         """
         Returns all rules that should trigger row-level quarantine.
         """
+        rules: List[QualityRule] = []
+
+        if self.contract.model and self.contract.model.fields:
+            for field in self.contract.model.fields:
+                if field.required:
+                    rules.append(
+                        QualityRule(
+                            name=f"{field.name}_required",
+                            sql=f"{field.name} IS NOT NULL",
+                            category="completeness",
+                            description=f"{field.name} is required"
+                        )
+                    )
+                if field.rules:
+                    rules.extend(field.rules)
+
         if self.contract.quality and self.contract.quality.row_rules:
-            return self.contract.quality.row_rules
-        return []
+            rules.extend(self.contract.quality.row_rules)
+
+        return rules
 
     def get_dataset_rules(self) -> List[QualityRule]:
         """

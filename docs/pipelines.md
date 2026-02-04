@@ -1,5 +1,7 @@
 # Pipelines & Parallel Processing
 
+> Note: Built-in orchestration and parallel scheduling are on the roadmap. The OSS release focuses on contract execution within a single run.
+
 Data engineering is rarely about a single file. It's about a **Network** of tables that depend on each other. LakeGuard helps you manage this network safely and quickly.
 
 ## 1. Managing Dependencies

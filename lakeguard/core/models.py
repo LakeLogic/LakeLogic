@@ -49,11 +49,21 @@ class TransformationLookup(BaseModel):
     value: str
     default_value: Optional[Any] = None # Handles orphaned keys (-1, 'Unknown')
 
+class TransformationFilter(BaseModel):
+    sql: str
+
+class TransformationDeduplicate(BaseModel):
+    on: List[str]
+    sort_by: Optional[List[str]] = None
+    order: str = "desc"
+
 class Transformation(BaseModel):
     model_config = ConfigDict(extra="allow")
     rename: Optional[TransformationRename] = None
     derive: Optional[TransformationDerive] = None
     lookup: Optional[TransformationLookup] = None
+    filter: Optional[TransformationFilter] = None
+    deduplicate: Optional[TransformationDeduplicate] = None
 
 class QualityRule(BaseModel):
     name: str
@@ -72,21 +82,30 @@ class Quality(BaseModel):
     dataset_rules: List[QualityRule] = Field(default_factory=list)
 
 class Notification(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     type: str # slack, teams, email, webhook
-    target: str
+    target: str = Field(alias=AliasChoices("target", "to", "channel", "url"))
     on_events: List[str] = Field(default_factory=lambda: ["quarantine", "failure"])
 
 class Quarantine(BaseModel):
     target: Optional[str] = None
+    enabled: bool = True
+    include_error_reason: bool = True
     notifications: List[Notification] = Field(default_factory=list)
 
+class ServiceLevelObjective(BaseModel):
+    description: Optional[str] = None
+    threshold: Optional[Union[str, float]] = None
+    field: Optional[str] = None
+
 class ServiceLevel(BaseModel):
-    freshness: Optional[str] = None
-    availability: Optional[float] = None # percentage e.g. 99.9
+    freshness: Optional[Union[str, ServiceLevelObjective]] = None
+    availability: Optional[Union[float, ServiceLevelObjective]] = None # percentage e.g. 99.9
 
 class FieldDefinition(BaseModel):
     name: str
     type: str
+    required: bool = False
     pii: bool = False
     classification: Optional[str] = None
     description: Optional[str] = None
@@ -120,6 +139,7 @@ class DataContract(BaseModel):
     
     version: str
     info: Optional[Info] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict) # For generic tagging (status, classification)
     server: Optional[Server] = None
     environments: Dict[str, Environment] = Field(default_factory=dict)
     links: List[Link] = Field(default_factory=list)

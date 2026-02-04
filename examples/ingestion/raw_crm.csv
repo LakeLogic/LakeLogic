@@ -1,0 +1,4 @@
+user_id,signup_date,email,extra_col
+1001,2024-01-01,alice@example.com,unexpected
+1002,2024-01-05,bob@example.com,unexpected
+,2024-01-10,missing@example.com,unexpected

@@ -12,6 +12,8 @@ LakeGuard includes built-in adapters for the most common communication tools:
 -   **SendGrid**: Reliable cloud-based email delivery.
 -   **Generic Webhooks**: Trigger downstream systems or APIs.
 
+> Note: The open-source demo ships with **log-only adapters** (they log a message instead of sending). Swap in real adapters as needed.
+
 ## 2. Configuration Example
 
 You define your notification strategy directly in the YAML contract. You can have different people notified for different events.
@@ -35,9 +37,10 @@ quarantine:
 
 When LakeGuard finishes a run, it calculates the **Recovery Ratio**. 
 
-1.  If **Quarantined Records > 0**, it triggers a `quarantine` event.
-2.  It looks at your `notifications` list.
-3.  It dispatches the message (total records processed, total quarantined, and reason) to your configured channels.
+1.  If **Quarantined Records > 0**, it triggers a `quarantine` or `quarantine_triggered` event.
+2.  If a **dataset rule** fails, it triggers `dataset_rule_failed` (and `failure`).
+3.  It looks at your `notifications` list.
+4.  It dispatches the message (total records processed, total quarantined, and reason) to your configured channels.
 
 ## 💡 Pro Tip: Customizing Alerts
 

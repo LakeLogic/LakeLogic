@@ -1,6 +1,13 @@
 # Example: Managing Customer Data
 
-This example shows how to keep your Customer list clean and safe.
+This example keeps your Customer list clean and safe using a real contract and real data.
+
+## Files
+
+- Contract: `examples/customer_onboarding/contract.yaml`
+- Raw data: `examples/customer_onboarding/customers.csv`
+- Reference data: `examples/customer_onboarding/dim_geography.csv`, `examples/customer_onboarding/marketing_opt_outs.csv`
+- Runner: `examples/customer_onboarding/run.py`
 
 ## The Simple Goal
 We want to make sure every customer in our list:
@@ -33,9 +40,31 @@ When LakeGuard finds a problem, it doesn't just delete it. It puts the row in a 
 | Jane Smith | `under_age`     | The birthday shows she is 15 |
 
 ## How to try it
-1. Copy the `contract.yaml` file from this folder.
-2. Run this command in your terminal:
+1. Run this command in your terminal:
 ```bash
-lakeguard run --engine polars --contract contract.yaml --source customers.csv
+cd examples/customer_onboarding
+python run.py
 ```
-3. Look for `good_customers.csv` and `bad_customers.csv` in your folder!
+2. Look for `good_customers.csv` and `bad_customers.csv` in this folder.
+
+## Contract (excerpt)
+
+```yaml
+transformations:
+  - rename: { from: email_address, to: email }
+  - lookup:
+      field: country_name
+      reference: dim_geography
+      on: country_id
+      key: id
+      value: name
+```
+
+## Raw Input (excerpt)
+
+```csv
+customer_id,email_address,first_name,last_name,birth_date,membership_level,country_id
+1,john.doe@example.com,John,Doe,1985-05-15,GOLD,1
+4,,NoEmail,User,1970-01-01,PLATINUM,3
+7,invalid-email,Bad,Email,1990-01-01,BRONZE,2
+```

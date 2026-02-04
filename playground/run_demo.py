@@ -1,8 +1,8 @@
 import polars as pl
 from lakeguard import DataProcessor
-import os
 from loguru import logger
 import sys
+from pathlib import Path
 
 # Configure logging to be pretty
 logger.remove()
@@ -10,8 +10,11 @@ logger.add(sys.stderr, format="<green>{time:HH:mm:ss}</green> | <level>{level: <
 
 def smoke_test():
     # 1. Load Data
-    source_file = "test_customers.csv"
-    if not os.path.exists(source_file):
+    base_dir = Path(__file__).resolve().parent
+    source_file = base_dir / "customers.csv"
+    contract_file = base_dir / "contract.yaml"
+
+    if not source_file.exists():
         logger.error(f"Test data not found: {source_file}")
         return
 
@@ -20,7 +23,7 @@ def smoke_test():
     
     # 2. Initialize Processor with the new Customer Contract
     try:
-        processor = DataProcessor(engine="polars", contract="test_contract.yaml")
+        processor = DataProcessor(engine="polars", contract=contract_file)
         
         # 3. Run Validation & Transformation
         good_df, bad_df = processor.run(df)
@@ -41,8 +44,8 @@ def smoke_test():
             print(bad_df.head(2))
             
         # 5. Save for manual inspection
-        good_df.write_csv("good_customers.csv")
-        bad_df.write_csv("bad_customers.csv")
+        good_df.write_csv(base_dir / "good_customers.csv")
+        bad_df.write_csv(base_dir / "bad_customers.csv")
         logger.success("Results saved to good_customers.csv and bad_customers.csv")
 
     except Exception as e:

@@ -1,5 +1,7 @@
 # Fact Table Patterns
 
+> Note: These are design patterns. Automated materialization is on the roadmap.
+
 LakeGuard handles the most common fact table designs used in modern Data Lakehouses. By choosing the right **Strategy**, you can automate the complex logic required for each type.
 
 ## Fact Table Comparison

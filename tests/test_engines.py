@@ -50,3 +50,29 @@ def test_polars_adapter_transformations():
     assert "new_name" in good_df.columns
     assert "old_name" not in good_df.columns
     assert good_df["doubled_id"].to_list() == [2, 4]
+
+def test_schema_policy_drop_unknown_fields():
+    """Unknown fields are dropped when policy is 'drop'."""
+    contract = DataContract(
+        version="1.0.0",
+        schema_policy={"unknown_fields": "drop"},
+        model={"fields": [{"name": "id", "type": "integer"}]}
+    )
+    df = pl.DataFrame({"id": [1, 2], "extra": ["x", "y"]})
+    adapter = PolarsAdapter(contract)
+    good_df, bad_df = adapter.execute(df)
+    assert "extra" not in good_df.columns
+    assert len(bad_df) == 0
+
+def test_schema_policy_quarantine_unknown_fields():
+    """Unknown fields are quarantined when policy is 'quarantine'."""
+    contract = DataContract(
+        version="1.0.0",
+        schema_policy={"unknown_fields": "quarantine"},
+        model={"fields": [{"name": "id", "type": "integer"}]}
+    )
+    df = pl.DataFrame({"id": [1], "extra": ["x"]})
+    adapter = PolarsAdapter(contract)
+    good_df, bad_df = adapter.execute(df)
+    assert len(good_df) == 0
+    assert len(bad_df) == 1

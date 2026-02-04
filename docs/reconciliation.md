@@ -1,5 +1,7 @@
 # Lineage & Reconciliation 🧵
 
+> Note: Automated lineage capture is on the roadmap. The OSS release provides contract metadata and run logging.
+
 In a mission-critical Data Lakehouse, you must be able to prove that **nothing was lost** and **everything came from somewhere**. 
 
 LakeGuard provides built-in tools for **Data Reconciliation** and **System-Level Lineage**.

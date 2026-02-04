@@ -21,17 +21,17 @@ server:
 # LOCAL DEVELOPMENT OVERRIDES
 environments:
   dev:
-    path: ./test_customers.csv
+    path: ./customers.csv
     format: csv
 
 # DEPENDENCIES
 links:
   - name: dim_geography
     type: table
-    path: s3://data-lake/dimensions/geography.parquet
+    path: ./dim_geography.csv
   - name: marketing_opt_outs
     type: table
-    path: s3://data-lake/compliance/opt_outs.parquet
+    path: ./marketing_opt_outs.csv
 
 dataset: customer_master
 primary_key: ["customer_id"]
@@ -87,11 +87,6 @@ transformations:
       field: full_name
       sql: "CONCAT(first_name, ' ', last_name)"
 
-  # DERIVATION: Masked email for non-PII users
-  - derive:
-      field: email_masked
-      sql: "CONCAT(SUBSTR(email, 1, 3), '****', SUBSTR(email, -4))"
-
 # QUALITY LAYER
 quality:
   row_rules:
@@ -110,7 +105,7 @@ quality:
 
     - name: adult_only
       description: Verification for age-restricted products.
-      sql: "birth_date <= CURRENT_DATE - INTERVAL '18 years'"
+      sql: "birth_date <= DATE '2006-01-01'"
       category: correctness
 
     # REFERENTIAL INTEGRITY
@@ -150,14 +145,14 @@ service_levels:
 quarantine:
   enabled: true
   include_error_reason: true
-  target: s3://data-lake/customers/quarantine/
+  target: ./quarantine/
   notifications:
     - type: email
-      to: "data_owner"
+      target: "data_owner"
       on_events: [quarantine_triggered, dataset_rule_failed]
     - type: slack
-      channel: "#crm-data-alerts"
+      target: "#crm-data-alerts"
       on_events: [dataset_rule_failed]
     - type: teams
-      url: "https://outlook.office365.com/webhook/..."
+      target: "https://outlook.office365.com/webhook/..."
       on_events: [quarantine_triggered]

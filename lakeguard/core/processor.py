@@ -65,13 +65,26 @@ class DataProcessor:
         
         with open(path, "r") as f:
             data = yaml.safe_load(f)
-            return DataContract(**data)
+            contract = DataContract(**data)
+            try:
+                contract._base_path = path.parent
+            except Exception:
+                pass
+            return contract
 
     def run(self, df: Any) -> Tuple[Any, Any]:
         """
         Runs the contract against the provided dataframe.
         """
-        logger.info(f"🛡️  Starting LakeGuard run [Engine: {self.engine_name}, Contract: {self.contract.name}]")
+        contract_name = None
+        if self.contract.info and self.contract.info.title:
+            contract_name = self.contract.info.title
+        elif self.contract.dataset:
+            contract_name = self.contract.dataset
+        else:
+            contract_name = "unknown"
+
+        logger.info(f"🛡️  Starting LakeGuard run [Engine: {self.engine_name}, Contract: {contract_name}]")
         
         # 1. Load and Register Links (Reference Tables)
         # In a real implementation, this would load from S3/DB
@@ -90,10 +103,26 @@ class DataProcessor:
             pass
 
         if bad > 0:
-            self.notify(
-                event="quarantine",
-                message=f"🛡️ LakeGuard Alert: {bad} records quarantined in '{self.contract.name or 'unknown'}'. Source contains {total} total records."
+            quarantine_msg = (
+                f"🛡️ LakeGuard Alert: {bad} records quarantined in '{contract_name}'. "
+                f"Source contains {total} total records."
             )
+            self.notify(event="quarantine", message=quarantine_msg)
+            self.notify(event="quarantine_triggered", message=quarantine_msg)
+
+        # Notify on dataset rule failures (if any)
+        failures = []
+        if hasattr(self.adapter, "dataset_rule_results"):
+            failures = [r for r in self.adapter.dataset_rule_results if not r.get("passed")]
+
+        if failures:
+            failure_details = "; ".join([f"{r.get('name')}={r.get('value')}" for r in failures])
+            failure_msg = (
+                f"LakeGuard dataset rule failures in '{contract_name}'. "
+                f"Failures: {failure_details}"
+            )
+            self.notify(event="dataset_rule_failed", message=failure_msg)
+            self.notify(event="failure", message=failure_msg)
             
         return good_df, bad_df
 
@@ -101,7 +130,11 @@ class DataProcessor:
         """
         Sends notifications based on contract configuration.
         """
-        if not self.contract.quarantine or not self.contract.quarantine.notifications:
+        if (
+            not self.contract.quarantine
+            or not self.contract.quarantine.notifications
+            or not self.contract.quarantine.enabled
+        ):
             return
 
         for notif in self.contract.quarantine.notifications:

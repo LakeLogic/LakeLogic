@@ -1,5 +1,7 @@
 # Deployment Patterns 🚀
 
+> Note: These patterns describe how LakeGuard is used in production architectures. Full orchestration and materialization features are on the roadmap for the open‑source release.
+
 LakeGuard is flexible. You can choose to process your data in discrete batches (Layer by Layer) or flow it through the entire architecture in a single pass (End-to-End).
 
 ## 1. Pattern A: The Decoupled Medallion (Recommended)
@@ -53,14 +55,30 @@ materialization:
 
 ---
 
+## 3. Pattern C: Streaming & Event-Driven (Real-Time)
+
+For modern data stacks, data doesn't wait for a batch window. It flows continuously. LakeGuard can be integrated into streaming pipelines to provide **real-time quality gating**.
+
+**The Workflow**:
+1.  **Event Trigger**: A file lands in S3 or a message arrives in Kafka.
+2.  **Serverless execution**: An AWS Lambda or Azure Function triggers a LakeGuard execution on that specific record or micro-batch.
+3.  **Spark Streaming**: LakeGuard is used inside a `foreachBatch` sink in Spark Structured Streaming to validate every window before it is committed to the Delta/Iceberg table.
+
+### Why use this?
+-   **Immediate Alerts**: Get a Slack notification for bad data seconds after it is generated.
+-   **Incremental Cost**: Only process the new data, keeping compute costs low.
+-   **Clean Live Dashboards**: Ensures that live "Streaming Gold" tables are never poisoned by malformed events.
+
+---
+
 ## Comparison: Which one is right for you?
 
-| Feature | Decoupled (Layered) | End-to-End (Single Pass) |
-| :--- | :--- | :--- |
-| **Recovery** | Easy: Just re-run the failed layer. | Harder: Must re-run the whole pipe. |
-| **Complexity** | Higher (Needs an Orchestrator). | Lower (Standalone). |
-| **Latency** | Higher (Wait for each layer). | Lower (Instant flow). |
-| **Compliance** | Best: Built-in audit trail at every layer. | Good: Only the end-state is saved. |
+| Feature | Decoupled (Layered) | End-to-End (Single Pass) | Streaming (Micro-Batch) |
+| :--- | :--- | :--- | :--- |
+| **Recovery** | Easy: Re-run failed layer. | Harder: Re-run whole pipe. | Automatic (Checkpointing). |
+| **Complexity** | Medium (Needs Orchestrator). | Low (Standalone). | High (Needs Kafka/Lambda). |
+| **Latency** | High (Minutes/Hours). | Low (Minutes). | Near-Instant (Seconds). |
+| **Use Case** | Financial Reporting. | Simple ETL/ELT. | Fraud Detection / IoT. |
 
 ## 🛡️ Summary
-Most companies start with **Pattern B** for their first project and grow into **Pattern A** as their Lakehouse matures into a "Data Mesh." LakeGuard supports both perfectly.
+Most companies start with **Pattern B** for their first project and grow into **Pattern A** as their Lakehouse matures into a "Data Mesh." Real-time environments leverage **Pattern C** to ensure that streaming tables remain business-ready. LakeGuard provides the building blocks for all three, with full orchestration support planned.

@@ -1,26 +1,80 @@
 version: 1.0.0
 info:
-  title: Customer Silver Table
+  title: Customer Onboarding (Silver)
   version: 1.0.0
   description: |
-    Validated and Cleaned Customer data.
-    This contract moves data from BRONZE (Raw) to SILVER (Clean).
+    Validate and clean customer data before it enters the Silver layer.
   owner: Data Engineering Team
 
-# LAKEHOUSE STRUCTURE
-server: 
-  type: lakehouse
-  source_layer: bronze
-  target_layer: silver
-  path: s3://my-lakehouse/silver/customers/
-
-dataset: customer_silver
+dataset: customer_onboarding
 primary_key: ["customer_id"]
 
-# ... (rest of the contract remains consistent with previous version)
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+
+links:
+  - name: dim_geography
+    type: table
+    path: ./dim_geography.csv
+  - name: marketing_opt_outs
+    type: table
+    path: ./marketing_opt_outs.csv
+
+model:
+  fields:
+    - name: customer_id
+      type: integer
+      required: true
+    - name: email
+      type: string
+      required: true
+    - name: first_name
+      type: string
+      required: true
+    - name: last_name
+      type: string
+    - name: birth_date
+      type: date
+    - name: membership_level
+      type: string
+    - name: country_id
+      type: integer
+
+transformations:
+  - rename: { from: email_address, to: email }
+  - lookup:
+      field: country_name
+      reference: dim_geography
+      on: country_id
+      key: id
+      value: name
+  - derive:
+      field: full_name
+      sql: "CONCAT(first_name, ' ', last_name)"
+
 quality:
   row_rules:
-    - name: valid_bronze_record
-      sql: "raw_id IS NOT NULL"
-      category: completeness
-# ...
+    - name: valid_email_format
+      sql: "email LIKE '%@%'"
+      category: correctness
+
+    - name: valid_membership_tier
+      sql: "membership_level IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM')"
+      category: consistency
+
+    - name: adult_only
+      sql: "birth_date <= DATE '2006-01-01'"
+      category: correctness
+
+    - name: valid_geography
+      sql: "country_id IN (SELECT id FROM dim_geography)"
+      category: consistency
+
+    - name: check_opt_outs
+      sql: "customer_id NOT IN (SELECT customer_id FROM marketing_opt_outs)"
+      category: compliance
+
+quarantine:
+  enabled: true
+  include_error_reason: true

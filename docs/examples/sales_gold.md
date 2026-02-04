@@ -1,6 +1,6 @@
-# Example: Gold Layer Sales Fact
+# Example: Gold Layer Sales Fact (Pattern)
 
-This example shows how to build a **Sales Fact** table from your Silver transactions while handling **Late Arriving Dimensions**.
+This example documents a **Gold Fact** pattern. Full materialization (logic execution) is on the roadmap; use this as a design reference for now.
 
 ## The Goal
 Move sales data to the **Gold** layer. If a salesperson is missing from our system, we map them to `-1` (Unknown) so we don't lose the sale record.
