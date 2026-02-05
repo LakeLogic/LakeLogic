@@ -14,6 +14,12 @@ class PandasAdapter(EngineAdapter):
         """
         Executes the contract by delegating to DuckDBAdapter.
         Input and Output are Pandas DataFrames.
+
+        Args:
+            df: Pandas DataFrame to validate.
+
+        Returns:
+            Tuple of (good_df, bad_df).
         """
         if not isinstance(df, pd.DataFrame):
             raise TypeError(f"Expected Pandas DataFrame, got {type(df)}")

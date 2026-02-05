@@ -21,19 +21,19 @@ server:
 # LOCAL DEVELOPMENT OVERRIDES
 environments:
   dev:
-    path: ./customers.csv
+    path: ./data/customers.csv
     format: csv
 
 # DEPENDENCIES
 links:
   - name: dim_geography
-    type: table
-    path: ./dim_geography.csv
+    type: csv
+    path: ./data/dim_geography.csv
   - name: marketing_opt_outs
-    type: table
-    path: ./marketing_opt_outs.csv
+    type: csv
+    path: ./data/marketing_opt_outs.csv
 
-dataset: customer_master
+dataset: silver_crm_customers
 primary_key: ["customer_id"]
 
 # SCHEMA ENFORCEMENT POLICY
@@ -69,23 +69,34 @@ model:
     - name: country_id
       type: integer
       description: Foreign key to dim_geography.
+    - name: country_name
+      type: string
+      description: Friendly country name.
+    - name: full_name
+      type: string
+      description: Display name.
 
 # TRANSFORMATION LAYER
 transformations:
-  - rename: { from: email_address, to: email }
-
-  # ENRICHMENT: Lookup country name for easier reporting
-  - lookup:
-      field: country_name
-      reference: dim_geography
-      on: country_id
-      key: id
-      value: name
-
-  # DERIVATION: Create a display name
-  - derive:
-      field: full_name
-      sql: "CONCAT(first_name, ' ', last_name)"
+  - sql: |
+      SELECT
+        customer_id,
+        email_address AS email,
+        first_name,
+        last_name,
+        birth_date,
+        membership_level,
+        country_id
+      FROM source
+    phase: pre
+  - sql: |
+      SELECT
+        src.*,
+        geo.name AS country_name,
+        src.first_name || ' ' || src.last_name AS full_name
+      FROM source src
+      LEFT JOIN dim_geography geo ON src.country_id = geo.id
+    phase: post
 
 # QUALITY LAYER
 quality:
@@ -123,12 +134,12 @@ quality:
   dataset_rules:
     - name: unique_emails
       description: Ensure no duplicate customer accounts by email.
-      sql: "SELECT count(email) - count(distinct email) FROM customer_master"
+      sql: "SELECT count(email) - count(distinct email) FROM silver_crm_customers"
       must_be_less_than: 1
 
     - name: min_customer_base
       description: Alert if the customer master drop suddenly (indicates source error).
-      sql: "SELECT count(*) FROM customer_master"
+      sql: "SELECT count(*) FROM silver_crm_customers"
       must_be_greater_than: 1000
 
 # GOVERNANCE & SLAS
@@ -146,13 +157,4 @@ quarantine:
   enabled: true
   include_error_reason: true
   target: ./quarantine/
-  notifications:
-    - type: email
-      target: "data_owner"
-      on_events: [quarantine_triggered, dataset_rule_failed]
-    - type: slack
-      target: "#crm-data-alerts"
-      on_events: [dataset_rule_failed]
-    - type: teams
-      target: "https://outlook.office365.com/webhook/..."
-      on_events: [quarantine_triggered]
+  notifications: []

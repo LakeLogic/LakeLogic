@@ -1,0 +1,91 @@
+version: "1.0.0"
+info:
+  title: Customer Onboarding (Silver)
+
+dataset: silver_crm_customers
+
+links:
+  - name: dim_geography
+    path: data/dim_geography.csv
+    type: csv
+  - name: marketing_opt_outs
+    path: data/marketing_opt_outs.csv
+    type: csv
+
+schema_policy:
+  evolution: strict
+  unknown_fields: drop
+
+model:
+  fields:
+    - name: customer_id
+      type: int
+      required: true
+    - name: email
+      type: string
+      required: true
+    - name: first_name
+      type: string
+    - name: last_name
+      type: string
+    - name: birth_date
+      type: date
+    - name: membership_level
+      type: string
+    - name: country_id
+      type: int
+    - name: created_at
+      type: date
+    - name: region
+      type: string
+    - name: opted_out
+      type: string
+    - name: full_name
+      type: string
+
+transformations:
+  - sql: |
+      SELECT * FROM (
+        SELECT
+          customer_id,
+          email_address AS email,
+          first_name,
+          last_name,
+          birth_date,
+          membership_level,
+          country_id,
+          created_at,
+          ROW_NUMBER() OVER (PARTITION BY email_address ORDER BY created_at DESC) AS rn
+        FROM source
+        WHERE email_address IS NOT NULL
+      ) AS t
+      WHERE rn = 1
+    phase: pre
+  - sql: |
+      SELECT
+        src.*,
+        COALESCE(geo.region, 'Unknown') AS region,
+        COALESCE(opt.opted_out, 'false') AS opted_out,
+        src.first_name || ' ' || src.last_name AS full_name
+      FROM source src
+      LEFT JOIN dim_geography geo ON src.country_id = geo.country_id
+      LEFT JOIN marketing_opt_outs opt ON src.email = opt.email
+    phase: post
+
+quality:
+  row_rules:
+    - name: email_format
+      sql: "email LIKE '%@%'"
+      category: correctness
+    - name: valid_membership
+      sql: "membership_level IN ('GOLD','SILVER','BRONZE','PLATINUM')"
+      category: consistency
+
+lineage:
+  enabled: true
+  capture_source_path: true
+  capture_timestamp: true
+  capture_run_id: true
+
+quarantine:
+  include_error_reason: true

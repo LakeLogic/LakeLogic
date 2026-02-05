@@ -14,8 +14,15 @@ class DuckDBAdapter(EngineAdapter):
         """
         Executes the contract using DuckDB.
         Works with DuckDB relations or existing DataFrames.
+
+        Args:
+            df: Input dataframe or DuckDB relation.
+
+        Returns:
+            Tuple of (good_df, bad_df).
         """
         self.dataset_rule_results = []
+        self.schema_drift = {}
         con = duckdb.connect(database=':memory:')
         
         # Register the input and dependencies
@@ -88,8 +95,20 @@ class DuckDBAdapter(EngineAdapter):
         return good_df, bad_df
 
     def _register_links(self, con: duckdb.DuckDBPyConnection) -> None:
+        """
+        Register linked reference datasets into DuckDB.
+
+        Args:
+            con: DuckDB connection.
+        """
         for link in self.contract.links:
             try:
+                table_path = link.path[6:] if link.path and link.path.startswith("table:") else None
+                if link.table or (link.type and link.type.lower() == "table") or table_path:
+                    table_name = link.table or table_path or link.path
+                    logger.warning(f"Link '{link.name}' references table '{table_name}'. Table links are supported in Spark only for OSS.")
+                    continue
+
                 if not link.path:
                     continue
 
@@ -113,7 +132,29 @@ class DuckDBAdapter(EngineAdapter):
             except Exception as e:
                 logger.warning(f"Could not register link {link.name}: {e}")
 
+    def _get_columns(self, con: duckdb.DuckDBPyConnection, table_name: str) -> List[str]:
+        """
+        Fetch column names for a DuckDB table/view.
+
+        Args:
+            con: DuckDB connection.
+            table_name: Table or view name.
+
+        Returns:
+            List of column names.
+        """
+        return [row[0] for row in con.execute(f"DESCRIBE {table_name}").fetchall()]
+
     def _to_duckdb_type(self, type_name: str) -> str:
+        """
+        Map contract type names to DuckDB SQL types.
+
+        Args:
+            type_name: Logical type name from contract.
+
+        Returns:
+            DuckDB type string.
+        """
         type_name = (type_name or "").lower().strip()
         mapping = {
             "string": "VARCHAR",
@@ -135,7 +176,23 @@ class DuckDBAdapter(EngineAdapter):
         return mapping.get(type_name)
 
     def _apply_schema(self, con: duckdb.DuckDBPyConnection, tbl_name: str) -> Tuple[str, list]:
+        """
+        Apply schema casts, missing columns, and unknown field handling.
+
+        Args:
+            con: DuckDB connection.
+            tbl_name: Source table/view name.
+
+        Returns:
+            Tuple of (schema_view_name, schema_errors).
+        """
         if not self.contract.model or not self.contract.model.fields:
+            if self.contract.server and self.contract.server.mode == "ingest" and self.contract.server.cast_to_string:
+                cols = [row[0] for row in con.execute(f"DESCRIBE {tbl_name}").fetchall()]
+                if cols:
+                    cast_exprs = [f"CAST({c} AS VARCHAR) AS {c}" for c in cols]
+                    con.execute(f"CREATE OR REPLACE VIEW schema_applied AS SELECT {', '.join(cast_exprs)} FROM {tbl_name}")
+                    return "schema_applied", []
             return tbl_name, []
 
         cols = [row[0] for row in con.execute(f"DESCRIBE {tbl_name}").fetchall()]
@@ -146,11 +203,26 @@ class DuckDBAdapter(EngineAdapter):
         missing = expected - existing
         unknown = existing - expected
 
+        server = self.contract.server
+        evolution = None
         policy = self.contract.schema_policy.unknown_fields if self.contract.schema_policy else "allow"
+        cast_to_string = False
+        allow_schema_drift = True
+
+        if server and server.mode == "ingest":
+            evolution = (server.schema_evolution or "strict").lower()
+            cast_to_string = bool(server.cast_to_string)
+            allow_schema_drift = bool(server.allow_schema_drift)
+            if evolution in ["append", "merge", "overwrite"]:
+                policy = "allow"
+            else:
+                policy = "quarantine"
 
         select_exprs = []
         for field in self.contract.model.fields:
             duck_type = self._to_duckdb_type(field.type)
+            if cast_to_string:
+                duck_type = "VARCHAR"
             if field.name in existing:
                 if duck_type:
                     select_exprs.append(f"CAST({field.name} AS {duck_type}) AS {field.name}")
@@ -163,18 +235,38 @@ class DuckDBAdapter(EngineAdapter):
                     select_exprs.append(f"NULL AS {field.name}")
 
         if policy in ["allow", "quarantine"] and unknown:
-            select_exprs.extend(sorted(unknown))
+            if cast_to_string:
+                select_exprs.extend([f"CAST({c} AS VARCHAR) AS {c}" for c in sorted(unknown)])
+            else:
+                select_exprs.extend(sorted(unknown))
 
         schema_view = "schema_applied"
         con.execute(f"CREATE OR REPLACE VIEW {schema_view} AS SELECT {', '.join(select_exprs)} FROM {tbl_name}")
 
         schema_errors = []
+        if evolution == "strict" and missing:
+            schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
         if policy == "quarantine" and unknown:
             schema_errors.append(f"Unknown fields present: {', '.join(sorted(unknown))}")
+
+        self.schema_drift = {
+            "missing_fields": sorted(missing),
+            "unknown_fields": sorted(unknown),
+            "policy": policy,
+            "evolution": evolution or "",
+            "allow_schema_drift": allow_schema_drift,
+        }
 
         return schema_view, schema_errors
 
     def _run_dataset_rules(self, rel: Any, con: duckdb.DuckDBPyConnection):
+        """
+        Execute dataset-level quality rules.
+
+        Args:
+            rel: DuckDB relation of good records.
+            con: DuckDB connection.
+        """
         rules = self.get_dataset_rules()
         if not rules:
             return
@@ -193,7 +285,7 @@ class DuckDBAdapter(EngineAdapter):
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
                 
-                status = "✅ PASS" if passed else "❌ FAIL"
+                status = "PASS" if passed else "FAIL"
                 logger.info(f"Quality Check (DuckDB): {rule.name} | Result: {val} | Status: {status}")
                 self.dataset_rule_results.append({
                     "name": rule.name,
@@ -205,19 +297,180 @@ class DuckDBAdapter(EngineAdapter):
                 logger.error(f"Error executing dataset rule '{rule.name}': {e}")
 
     def _apply_pre_transformations(self, con: duckdb.DuckDBPyConnection, tbl_name: str) -> str:
-        """Apply filters, renames, and deduplication via SQL views."""
+        """
+        Apply pre-processing transformations (rename, filter, deduplicate, and cleanup helpers) via SQL views.
+
+        Args:
+            con: DuckDB connection.
+            tbl_name: Source table/view name.
+
+        Returns:
+            Name of the final view to use.
+        """
         current_tbl = tbl_name
         view_idx = 0
         
         for trans in self.contract.transformations:
+            if trans.sql and (trans.phase or "post").lower() == "pre":
+                logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
+                view_name = f"pre_trans_{view_idx}"
+                con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {current_tbl}")
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS {trans.sql}")
+                current_tbl = view_name
+                view_idx += 1
+                continue
+
             view_name = f"pre_trans_{view_idx}"
             if trans.rename:
-                cols = [row[0] for row in con.execute(f"DESCRIBE {current_tbl}").fetchall()]
+                cols = self._get_columns(con, current_tbl)
                 if trans.rename.from_name not in cols:
                     logger.warning(f"Pre-Transform [Rename] skipped; column not found: {trans.rename.from_name}")
                 else:
                     logger.debug(f"Pre-Transform [Rename]: {trans.rename.from_name} -> {trans.rename.to_name}")
                     con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * REPLACE ({trans.rename.from_name} AS {trans.rename.to_name}) FROM {current_tbl}")
+                    current_tbl = view_name
+                    view_idx += 1
+            elif trans.select:
+                logger.debug(f"Pre-Transform [Select]: {trans.select.columns}")
+                select_cols = [col for col in trans.select.columns if col]
+                if select_cols:
+                    con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(select_cols)} FROM {current_tbl}")
+                    current_tbl = view_name
+                    view_idx += 1
+            elif trans.drop:
+                logger.debug(f"Pre-Transform [Drop]: {trans.drop.columns}")
+                cols = self._get_columns(con, current_tbl)
+                keep = [col for col in cols if col not in set(trans.drop.columns)]
+                if keep:
+                    con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(keep)} FROM {current_tbl}")
+                    current_tbl = view_name
+                    view_idx += 1
+                else:
+                    logger.warning("Pre-Transform [Drop] produced empty column set; skipping.")
+            elif trans.cast:
+                logger.debug(f"Pre-Transform [Cast]: {list(trans.cast.columns.keys())}")
+                cols = self._get_columns(con, current_tbl)
+                exprs = []
+                for col in cols:
+                    if col in trans.cast.columns:
+                        duck_type = self._to_duckdb_type(trans.cast.columns[col]) or trans.cast.columns[col]
+                        exprs.append(f"CAST({col} AS {duck_type}) AS {col}")
+                    else:
+                        exprs.append(col)
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
+                current_tbl = view_name
+                view_idx += 1
+            elif trans.trim:
+                logger.debug(f"Pre-Transform [Trim]: {trans.trim.fields}")
+                cols = self._get_columns(con, current_tbl)
+                exprs = []
+                for col in cols:
+                    if col in trans.trim.fields:
+                        if trans.trim.side == "left":
+                            exprs.append(f"LTRIM({col}) AS {col}")
+                        elif trans.trim.side == "right":
+                            exprs.append(f"RTRIM({col}) AS {col}")
+                        else:
+                            exprs.append(f"TRIM({col}) AS {col}")
+                    else:
+                        exprs.append(col)
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
+                current_tbl = view_name
+                view_idx += 1
+            elif trans.lower:
+                logger.debug(f"Pre-Transform [Lower]: {trans.lower.fields}")
+                cols = self._get_columns(con, current_tbl)
+                exprs = []
+                for col in cols:
+                    if col in trans.lower.fields:
+                        exprs.append(f"LOWER({col}) AS {col}")
+                    else:
+                        exprs.append(col)
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
+                current_tbl = view_name
+                view_idx += 1
+            elif trans.upper:
+                logger.debug(f"Pre-Transform [Upper]: {trans.upper.fields}")
+                cols = self._get_columns(con, current_tbl)
+                exprs = []
+                for col in cols:
+                    if col in trans.upper.fields:
+                        exprs.append(f"UPPER({col}) AS {col}")
+                    else:
+                        exprs.append(col)
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
+                current_tbl = view_name
+                view_idx += 1
+            elif trans.coalesce:
+                sources = trans.coalesce.sources or []
+                if not sources:
+                    sources = [trans.coalesce.field]
+                expr_parts = ", ".join(sources + ([self._format_literal(trans.coalesce.default)] if trans.coalesce.default is not None else []))
+                output = trans.coalesce.output or trans.coalesce.field
+                expr = f"COALESCE({expr_parts}) AS {output}"
+                cols = self._get_columns(con, current_tbl)
+                exprs = []
+                replaced = False
+                for col in cols:
+                    if col == output:
+                        exprs.append(expr)
+                        replaced = True
+                    else:
+                        exprs.append(col)
+                if not replaced:
+                    exprs.append(expr)
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
+                current_tbl = view_name
+                view_idx += 1
+            elif trans.split:
+                output = trans.split.output or trans.split.field
+                cols = self._get_columns(con, current_tbl)
+                exprs = []
+                split_expr = f"str_split({trans.split.field}, {self._format_literal(trans.split.delimiter)}) AS {output}"
+                replaced = False
+                for col in cols:
+                    if col == output:
+                        exprs.append(split_expr)
+                        replaced = True
+                    else:
+                        exprs.append(col)
+                if not replaced:
+                    exprs.append(split_expr)
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
+                current_tbl = view_name
+                view_idx += 1
+            elif trans.explode:
+                output = trans.explode.output or trans.explode.field
+                cols = self._get_columns(con, current_tbl)
+                select_cols = [col for col in cols if col != output]
+                if output == trans.explode.field:
+                    select_cols = [col for col in cols if col != trans.explode.field]
+                exprs = select_cols + [f"unnest({trans.explode.field}) AS {output}"]
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
+                current_tbl = view_name
+                view_idx += 1
+            elif trans.map_values:
+                field = trans.map_values.field
+                mapping = trans.map_values.mapping or {}
+                if mapping:
+                    cases = []
+                    for key, value in mapping.items():
+                        cases.append(f"WHEN {field} = {self._format_literal(key)} THEN {self._format_literal(value)}")
+                    default_expr = self._format_literal(trans.map_values.default) if trans.map_values.default is not None else field
+                    case_expr = f"CASE {' '.join(cases)} ELSE {default_expr} END"
+                    output = trans.map_values.output or field
+                    cols = self._get_columns(con, current_tbl)
+                    exprs = []
+                    replaced = False
+                    for col in cols:
+                        if col == output:
+                            exprs.append(f"{case_expr} AS {output}")
+                            replaced = True
+                        else:
+                            exprs.append(col)
+                    if not replaced:
+                        exprs.append(f"{case_expr} AS {output}")
+                    con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                     current_tbl = view_name
                     view_idx += 1
             elif trans.filter:
@@ -247,7 +500,16 @@ class DuckDBAdapter(EngineAdapter):
         return current_tbl
 
     def _apply_post_transformations(self, rel: Any, con: duckdb.DuckDBPyConnection) -> Any:
-        """Apply derive and lookup transformations."""
+        """
+        Apply derive, lookup, and join transformations.
+
+        Args:
+            rel: DuckDB relation of good records.
+            con: DuckDB connection.
+
+        Returns:
+            Pandas dataframe of transformed records.
+        """
         if not self.contract.transformations:
             return rel.df()
             
@@ -255,6 +517,12 @@ class DuckDBAdapter(EngineAdapter):
         tbl_alias = "src_tbl"
         
         for trans in self.contract.transformations:
+            if trans.sql and (trans.phase or "post").lower() != "pre":
+                logger.debug(f"Post-Transform [SQL]: {trans.sql}")
+                current_rel.create_view("source")
+                current_rel = con.query(trans.sql)
+                continue
+
             if trans.derive:
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 current_rel.create_view(tbl_alias)
@@ -263,11 +531,19 @@ class DuckDBAdapter(EngineAdapter):
             elif trans.lookup:
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_rel.create_view("src")
+                value_expr = f"ref.{trans.lookup.value}"
+                if trans.lookup.default_value is not None:
+                    value_expr = f"COALESCE(ref.{trans.lookup.value}, {self._format_literal(trans.lookup.default_value)})"
                 query = f"""
-                SELECT src.*, ref.{trans.lookup.value} AS {trans.lookup.field}
+                SELECT src.*, {value_expr} AS {trans.lookup.field}
                 FROM src
                 LEFT JOIN {trans.lookup.reference} ref ON src.{trans.lookup.on} = ref.{trans.lookup.key}
                 """
+                current_rel = con.query(query)
+            elif trans.join:
+                logger.debug(f"Post-Transform [Join]: {trans.join.reference}")
+                current_rel.create_view("source")
+                query = self._build_join_sql(trans.join)
                 current_rel = con.query(query)
             elif trans.filter:
                  # Also allow filters in post-transformation if needed
@@ -277,3 +553,34 @@ class DuckDBAdapter(EngineAdapter):
                 current_rel = con.query(query)
         
         return current_rel.df()
+
+    def _build_join_sql(self, join_cfg, source_table: str = "source") -> str:
+        """
+        Build SQL for a join transformation.
+
+        Args:
+            join_cfg: Join configuration.
+            source_table: Source table/view name.
+
+        Returns:
+            SQL query string.
+        """
+        join_type = (join_cfg.type or "left").upper()
+        if join_type == "FULL":
+            join_type = "FULL OUTER"
+
+        select_fields = ["src.*"]
+        for field in join_cfg.fields:
+            alias = f"{join_cfg.prefix}{field}" if join_cfg.prefix else field
+            default = join_cfg.defaults.get(field) if join_cfg.defaults else None
+            if default is not None:
+                expr = f"COALESCE(ref.{field}, {self._format_literal(default)}) AS {alias}"
+            else:
+                expr = f"ref.{field} AS {alias}"
+            select_fields.append(expr)
+
+        return f"""
+        SELECT {', '.join(select_fields)}
+        FROM {source_table} src
+        {join_type} JOIN {join_cfg.reference} ref ON src.{join_cfg.on} = ref.{join_cfg.key}
+        """

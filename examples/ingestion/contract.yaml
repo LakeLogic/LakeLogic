@@ -5,7 +5,7 @@ info:
   description: |
     Ingest CRM export files into Bronze with strict schema protection.
 
-dataset: crm_ingestion
+dataset: bronze_crm_users
 
 schema_policy:
   evolution: strict

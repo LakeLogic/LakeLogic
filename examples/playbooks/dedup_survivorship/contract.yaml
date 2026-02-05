@@ -1,0 +1,57 @@
+version: "1.0.0"
+info:
+  title: Dedup & Survivorship
+
+dataset: silver_crm_customer_updates
+
+schema_policy:
+  evolution: strict
+  unknown_fields: drop
+
+model:
+  fields:
+    - name: customer_id
+      type: int
+      required: true
+    - name: email
+      type: string
+      required: true
+    - name: status
+      type: string
+    - name: updated_at
+      type: date
+    - name: last_login
+      type: date
+    - name: is_active
+      type: boolean
+
+transformations:
+  - sql: |
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY updated_at DESC) AS rn
+        FROM source
+      ) AS t
+      WHERE rn = 1
+    phase: pre
+  - sql: |
+      SELECT *, status = 'active' AS is_active
+      FROM source
+    phase: post
+
+quality:
+  row_rules:
+    - name: email_format
+      sql: "email LIKE '%@%'"
+      category: correctness
+    - name: valid_status
+      sql: "status IN ('active','inactive')"
+      category: consistency
+
+lineage:
+  enabled: true
+  capture_source_path: true
+  capture_timestamp: true
+  capture_run_id: true
+
+quarantine:
+  include_error_reason: true

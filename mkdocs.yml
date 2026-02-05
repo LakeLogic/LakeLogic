@@ -28,26 +28,48 @@ theme:
 nav:
   - Home: index.md
   - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Starter Kit: starter_kit.md
+  - Tutorial Notebooks:
+      - Basic Tutorial: examples/tutorial_basic/tutorial.ipynb
+      - Notifications & Secrets: examples/notifications_secrets/notifications_secrets.ipynb
+  - Playbooks:
+      - Overview: playbooks.md
+      - Bronze Quality Gate: examples/playbooks/bronze_quality_gate/playbook.ipynb
+      - Customer Onboarding: examples/playbooks/customer_onboarding/playbook.ipynb
+      - Dedup & Survivorship: examples/playbooks/dedup_survivorship/playbook.ipynb
+      - Late Arriving Reprocess: examples/playbooks/late_arriving_reprocess/playbook.ipynb
+      - SCD2 Dimension: examples/playbooks/scd2_dimension/playbook.ipynb
   - Playground: playground.md
   - Ingestion & Cloud: ingestion.md
   - Deployment Patterns: deployment_patterns.md
+  - Monitoring & Observability:
+      - Overview: observability.md
+      - Lineage & Reconciliation: reconciliation.md
+      - Notifications & Alerting: notifications.md
   - Concepts:
       - How it Works: concepts.md
       - Contract Organization: organization.md
       - Reprocessing & Partitioning: reprocessing.md
       - Pipelines & Parallelism: pipelines.md
-      - Lineage & Reconciliation: reconciliation.md
-      - Notifications & Alerting: notifications.md
       - Release & Maintenance: maintenance.md
   - Examples:
       - Customer Onboarding: examples/customer_onboarding.md
       - Ingestion (Bronze): examples/ingestion.md
+      - External Gold Logic: examples/external_logic.md
       - Sales Gold (Facts): examples/sales_gold.md
       - Fact Table Patterns: examples/fact_patterns.md
   - Reference:
       - CLI: cli.md
       - API: api.md
+      - Capability Matrix: capabilities.md
+      - Warehouse Adapters: warehouse_adapters.md
   - Why LakeGuard?: comparison.md
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      include_source: true
 
 markdown_extensions:
   - pymdownx.highlight:

@@ -1,5 +1,7 @@
 # Contract Organization & Governance 🏗️
 
+> Note: These are **recommended patterns**. Automatic registry resolution and contract discovery are planned but not yet built into the OSS runtime.
+
 As your Data Lakehouse grows from 10 to 1,000 tables, how you organize your contracts determines whether your team succeeds or drowns in "Contract YAML Hell."
 
 ## 1. Directory Hierarchy: The Domain-First Pattern
@@ -14,14 +16,14 @@ contracts/
 │   ├── _registry.yaml           <-- Master Registry for the domain
 │   ├── sap_erp/                 <-- Source System
 │   │   ├── bronze/              <-- Technical Layer
-│   │   │   ├── customers_v1.yml
-│   │   │   └── customers_v2.yml
+│   │   │   ├── bronze_erp_customers_v1.yml
+│   │   │   └── bronze_erp_customers_v2.yml
 │   │   └── silver/
-│   │       └── customers_active.yml
+│   │       └── silver_erp_customers_active.yml
 │   └── payment_gateway/
 ├── marketing/
 └── warehouse/                   <-- Shared/Gold Layer
-    └── sales_summary_v1.yml
+    └── gold_sales_summary_v1.yml
 ```
 
 ---
@@ -33,13 +35,15 @@ Consistency in naming allows your **ETL Driver** to find contracts automatically
 ### Contract Filenames
 We recommend matching the contract filename to the **Target Table Name**, including a version suffix.
 
-*   **Pattern**: `[entity]_v[version].yml`
-*   **Example**: `bronze_customers_v1.yml` (validates table `bronze_customers`)
-*   **Example**: `silver_orders_v2.yml` (validates table `silver_orders`)
+*   **Pattern (Bronze/Silver)**: `[layer]_[system]_[entity]_v[version].yml`
+*   **Example**: `bronze_erp_customers_v1.yml` (validates table `bronze_erp_customers`)
+*   **Example**: `silver_erp_orders_v2.yml` (validates table `silver_erp_orders`)
+*   **Pattern (Gold, shared)**: `[layer]_[domain]_[entity]_v[version].yml`
+*   **Example**: `gold_dim_customers_v1.yml` (validates table `gold_dim_customers`)
 
 ### Why match table names?
-1.  **Traceability**: When a dbt test or Spark job fails on `silver_orders`, you immediately know to look for `silver_orders_v[X].yml`.
-2.  **Automation**: Your runner script can assume that `lakeguard run --table silver_orders` maps to the contract in that domain folder.
+1.  **Traceability**: When a dbt test or Spark job fails on `silver_erp_orders`, you immediately know to look for `silver_erp_orders_v[X].yml`.
+2.  **Automation**: Your runner script can assume that `lakeguard run --table silver_erp_orders` maps to the contract in that domain folder.
 
 ---
 
@@ -53,12 +57,12 @@ entries:
   - entity: customers
     layer: bronze
     active_version: v2
-    contract_path: sap_erp/bronze/customers_v2.yml
+    contract_path: sap_erp/bronze/bronze_erp_customers_v2.yml
     
   - entity: customers
     layer: silver
     active_version: v1
-    contract_path: sap_erp/silver/customers_v1.yml
+    contract_path: sap_erp/silver/silver_erp_customers_v1.yml
 ```
 
 ### Benefits of the Registry:
@@ -87,7 +91,7 @@ Reference data (ISO country codes, currency lists, product categories) is often 
 contracts/
 ├── shared/                     <-- Global Reference Data
 │   ├── geo/
-│   │   └── countries_v1.yml    <-- Used by Finance, Marketing, and Logisitics
+│   │   └── silver_reference_countries_v1.yml    <-- Used by Finance, Marketing, and Logisitics
 │   └── currency/
 │       └── rates_v1.yml
 ```
@@ -95,8 +99,19 @@ contracts/
 ### The "Lookup" Lifecycle
 When a **Finance** contract needs to perform a `lookup` against **Shared** reference data, it should reference the "Silver" (cleaned) version of that reference table.
 
-1.  **Shared Owner**: Validates and publishes `silver_countries` using the `countries_v1.yml` contract.
-2.  **Finance Owner**: Points their `lookup` rule to `silver_countries`.
-3.  **Safety**: Because `silver_countries` has its own contract, the Finance team is guaranteed that the lookup data is valid and schema-compliant.
+1.  **Shared Owner**: Validates and publishes `silver_reference_countries` using the `silver_reference_countries_v1.yml` contract.
+2.  **Finance Owner**: Points their `lookup` rule to `silver_reference_countries`.
+3.  **Safety**: Because `silver_reference_countries` has its own contract, the Finance team is guaranteed that the lookup data is valid and schema-compliant.
 
 By centralizing reference data contracts, you ensure that "United States" is represented as `US` (or `USA`) consistently across your entire company. 🛡️🌍
+
+### Table-Based Links (Lakehouse)
+If your reference data already lives in a Lakehouse table, you can point `links` directly at a table name (Spark only in OSS).
+
+```yaml
+links:
+  - name: dim_geography
+    type: table
+    table: main.reference.dim_geography
+    broadcast: true  # Spark-only hint for small lookup tables
+```

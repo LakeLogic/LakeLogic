@@ -5,25 +5,36 @@ LakeGuard ships with a simple CLI for validating files with a contract.
 ## Basic Usage
 
 ```bash
-lakeguard run --contract contract.yaml --source data.csv --engine polars
+lakeguard run --contract contract.yaml --source data.csv
+```
+
+For warehouse engines, pass a table name:
+
+```bash
+lakeguard run --engine snowflake --contract contract.yaml --source table:ANALYTICS.SILVER.CUSTOMERS
 ```
 
 ## Options
 
 - `--contract, -c`: Path to the YAML contract
-- `--source, -s`: Input file (CSV or Parquet)
-- `--engine, -e`: Engine (`polars`, `pandas`, `duckdb`, `spark`)
-- `--output-good`: Save good records to CSV
-- `--output-bad`: Save quarantined records to CSV
+- `--source, -s`: Input file (CSV or Parquet; Delta/Iceberg with Spark + `server.format`) or a table name for Snowflake/BigQuery engines
+- `--engine, -e`: (Optional) Force an engine (`polars`, `pandas`, `duckdb`, `spark`, `snowflake`, `bigquery`). If omitted, LakeGuard discovery is used.
+- `--output-good`: Save good records to CSV/Parquet (or write to Delta/Iceberg via `--materialize`)
+- `--output-bad`: Save quarantined records to CSV/Parquet
+- `--output-format`: `csv` or `parquet` (defaults to CSV or inferred from file extension)
+- `--materialize`: Write good data to the contract materialization target
+- `--materialize-target`: Override the materialization target path
 - `--verbose, -v`: Enable debug logs
 
-## Example
+> Note: When using the Spark engine, `--output-good/--output-bad` are written with the Spark writer and may create a directory with part files (standard Spark behavior).
+
+## Example (Auto-Engine)
 
 ```bash
 lakeguard run \
   --contract examples/customer_onboarding/contract.yaml \
-  --source examples/customer_onboarding/customers.csv \
-  --engine polars \
+  --source examples/customer_onboarding/data/customers.csv \
   --output-good good.csv \
-  --output-bad bad.csv
+  --output-bad bad.csv \
+  --materialize
 ```

@@ -1,0 +1,6 @@
+customer_id,email,status,updated_at,last_login
+1,alice@example.com,active,2024-01-01,2024-01-10
+1,alice@example.com,inactive,2024-02-01,2024-02-05
+2,bob@example.com,active,2024-01-05,2024-02-01
+2,bob@example.com,active,2023-12-20,2023-12-30
+3,carla@example.com,active,2024-01-20,2024-01-25

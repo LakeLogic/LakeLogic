@@ -1,0 +1,9 @@
+customer_id,email_address,first_name,last_name,birth_date,membership_level,country_id,created_at
+1,john.doe@example.com,John,Doe,1985-05-15,GOLD,1,2024-01-01
+2,jane.smith@gmail.com,Jane,Smith,1990-10-20,SILVER,2,2024-01-02
+3,kid@outlook.com,Billy,Kid,2015-01-01,BRONZE,1,2024-01-03
+4,,NoEmail,User,1970-01-01,PLATINUM,3,2024-01-04
+5,duplicate@example.com,First,Dup,1980-01-01,GOLD,1,2024-01-05
+6,duplicate@example.com,Second,Dup,1980-01-01,GOLD,1,2024-02-01
+7,invalid-email,Bad,Email,1990-01-01,BRONZE,2,2024-02-02
+8,opted@out.com,Opted,Out,1988-08-08,GOLD,1,2024-02-03

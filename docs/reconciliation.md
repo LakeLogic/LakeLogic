@@ -1,8 +1,8 @@
-# Lineage & Reconciliation 🧵
+# Lineage & Reconciliation
 
-> Note: Automated lineage capture is on the roadmap. The OSS release provides contract metadata and run logging.
+> Note: Automated lineage capture, run logging, and SLO scoring are available in the OSS release. Full orchestration is still on the roadmap.
 
-In a mission-critical Data Lakehouse, you must be able to prove that **nothing was lost** and **everything came from somewhere**. 
+In a mission-critical Data Lakehouse, you must be able to prove that **nothing was lost** and **everything came from somewhere**.
 
 LakeGuard provides built-in tools for **Data Reconciliation** and **System-Level Lineage**.
 
@@ -12,6 +12,7 @@ LakeGuard can automatically inject lineage columns into every record as it moves
 
 ```yaml
 lineage:
+  enabled: true
   capture_source_path: true
   capture_timestamp: true
   source_column_name: "_bronze_file_name"
@@ -28,9 +29,10 @@ To ensure that `Bronze = Silver + Quarantine`, you can use **Dataset Rules**.
 | **Bronze** | 1,000 | Ingested |
 | **Silver** | 995 | Cleaned |
 | **Quarantine** | 5 | Isolated |
-| **Total** | **1,000** | ✅ Reconciled |
+| **Total** | **1,000** | ? Reconciled |
 
 LakeGuard logs these counts automatically at the end of every run, providing a clear audit trail for your data platform.
+Reconciliation is simply checking that `total == good + quarantined`, which you can validate from the run report counts.
 
 ## 3. Gold Column "Key Roll-up"
 
@@ -39,18 +41,20 @@ When you aggregate data in the **Gold** layer (e.g., summarizing 1,000 sales int
 **The LakeGuard Solution**: Use "Key Rolling" in your SQL logic to keep a list of the source IDs.
 
 ```yaml
-# sales_daily_gold.yaml
-logic: |
-  SELECT 
-    sale_date,
-    SUM(amount) as total_sales,
-    ARRAY_AGG(sale_id) as silver_source_ids # Roll-up the source keys
-  FROM silver_sales
-  GROUP BY sale_date
+# gold_sales_daily.yaml
+transformations:
+  - sql: |
+      SELECT 
+        sale_date,
+        SUM(amount) as total_sales,
+        ARRAY_AGG(sale_id) as silver_source_ids # Roll-up the source keys
+      FROM source
+      GROUP BY sale_date
+    phase: post
 ```
 
 ### Why do this?
 By keeping the `silver_source_ids` in your Gold table:
 1.  **Drill-down**: A business user seeing a weird total can immediately find the exact 500 sales that created it.
 2.  **Audit**: You can mathematically prove that every row in Gold is backed by a specific set of records in Silver.
-3.  **Trust**: It turns your "Black Box" aggregates into "Open Book" data. 🛡️📒
+3.  **Trust**: It turns your "Black Box" aggregates into "Open Book" data.

@@ -4,12 +4,13 @@ from lakeguard import DataProcessor
 
 
 def main() -> None:
+    """Run the customer onboarding example contract locally."""
     base_dir = Path(__file__).resolve().parent
-    data_path = base_dir / "customers.csv"
+    data_path = base_dir / "data" / "customers.csv"
     contract_path = base_dir / "contract.yaml"
 
     df = pl.read_csv(data_path)
-    processor = DataProcessor(engine="polars", contract=contract_path)
+    processor = DataProcessor(engine="duckdb", contract=contract_path)
     good_df, bad_df = processor.run(df)
 
     print(f"Good records: {len(good_df)}")

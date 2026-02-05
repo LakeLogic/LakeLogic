@@ -21,17 +21,34 @@ server:
   schema_evolution: append # Allow new columns, but don't break old ones
 ```
 
-> Note: The `server` block is metadata in the OSS release. Execution uses your local input file paths.
+> Note: The `server` block is metadata for remote storage in the OSS release, but ingestion controls (`mode`, `schema_evolution`, `cast_to_string`) are now enforced locally.
 
-### Schema Evolution Strategies (Roadmap)
+### Schema Evolution Strategies
 | Strategy | Behavior |
 | :--- | :--- |
 | **`strict`** | Job fails if the incoming file doesn't match the Bronze table exactly. |
 | **`append`** | Automatically adds new columns to the Bronze table if they appear in the source. |
 | **`merge`** | Upgrades the table schema to the "greatest common denominator" of all files. |
 
-## 3. Schema Drift Protection (Roadmap)
-Schema drift detection and automated alerts are part of the roadmap. The current OSS release focuses on schema enforcement and quarantine at ingest time.
+> Note: In the OSS runtime, `append` and `merge` allow unknown columns to pass through locally. Type unification is handled by your downstream table engine.
+
+## 3. Schema Drift Protection
+Schema drift is now detected during ingestion. Unknown or missing fields are recorded in the run report and can trigger notifications.
+
+```yaml
+server:
+  mode: ingest
+  schema_evolution: append
+  allow_schema_drift: false  # send schema_drift alerts when drift is detected
+```
+
+```yaml
+quarantine:
+  notifications:
+    - type: slack
+      channel: "#data-alerts"
+      on_events: ["schema_drift"]
+```
 
 ## 4. Cleanse-on-Arrival (Deduplication & Filtering)
 
@@ -39,18 +56,19 @@ Bronze data is often delivered with duplicates or "deleted" flags from source sy
 
 ```yaml
 transformations:
-  # 1. Filter out deleted records immediately
-  - filter:
-      sql: "is_deleted = false"
-
-  # 2. Keep only the latest version of a record
-  - deduplicate:
-      on: ["id"]
-      sort_by: ["updated_at"]
-      order: "desc"
+  - sql: |
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) AS rn
+        FROM source
+        WHERE is_deleted = false
+      ) AS t
+      WHERE rn = 1
+    phase: pre
 ```
 
 This "Pre-Processing" ensures that your Bronze layer stays lean and accurate, saving storage costs and compute time in downstream layers.
+
+> Note: Window-function SQL (like `ROW_NUMBER`) is supported in DuckDB and Spark engines.
 
 ---
 
@@ -80,7 +98,7 @@ model:
       type: timestamp
 ```
 
-## 💡 Pro Tip: The "All Strings" Bronze Pattern (Roadmap)
+## 💡 Pro Tip: The "All Strings" Bronze Pattern
 
 Many high-scale data teams use the **"Bronze as Strings"** pattern. 
 
@@ -92,7 +110,7 @@ In this setup, you read **every** column from the source as a `string` (or `varc
 3.  **Fix in Silver**: You perform the casting and data cleaning in the **Silver** layer, where you can use LakeGuard's `quarantine` to isolate the rows that won't cast to the correct type.
 
 ```yaml
-# A "Safe" Bronze Ingestion Contract (planned)
+# A "Safe" Bronze Ingestion Contract
 server:
   mode: ingest
   cast_to_string: true

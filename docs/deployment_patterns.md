@@ -1,6 +1,6 @@
 # Deployment Patterns 🚀
 
-> Note: These patterns describe how LakeGuard is used in production architectures. Full orchestration and materialization features are on the roadmap for the open‑source release.
+> Note: These patterns describe how LakeGuard is used in production architectures. Local materialization is available; full orchestration remains on the roadmap.
 
 LakeGuard is flexible. You can choose to process your data in discrete batches (Layer by Layer) or flow it through the entire architecture in a single pass (End-to-End).
 
@@ -17,6 +17,7 @@ In this pattern, each layer is a separate "Job" with its own Data Contract. This
 -   **Isolation**: If the Gold job fails, your Silver data is still safe and available.
 -   **Independent Scaling**: You can run Ingestion every 5 minutes, but only run Gold aggregates once an hour.
 -   **Easier Debugging**: You can see exactly which layer failed.
+-   **Multi-Platform Orchestration**: You can run Bronze in **Azure Data Factory**, Silver in **Databricks**, and Gold in **Spark-based lakehouses** (Fabric/Synapse/Databricks) or Snowflake/BigQuery (table‑only).
 
 ---
 
@@ -39,14 +40,15 @@ server:
   
 # In-memory transformation from Bronze to Silver logic
 transformations:
-  - derive:
-      field: cleaner_email
-      sql: "LOWER(email)"
+  - sql: |
+      SELECT *, LOWER(email) AS cleaner_email
+      FROM source
+    phase: post
 
 # Final Materialization into Gold
+primary_key: [user_id]
 materialization:
   strategy: merge
-  primary_key: [user_id]
 ```
 
 ### Why use this?

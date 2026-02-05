@@ -1,8 +1,9 @@
 # Notifications & Alerting 🔔
 
 LakeGuard keeps you informed. When data fails a quality rule or is sent to **Quarantine**, you can automatically notify the right people via multiple channels.
+Deliver the right alert to the right team, automatically.
 
-## 1. Multi-Channel Support
+## 1. Multi-Channel Support 🔔
 
 LakeGuard includes built-in adapters for the most common communication tools:
 
@@ -12,9 +13,22 @@ LakeGuard includes built-in adapters for the most common communication tools:
 -   **SendGrid**: Reliable cloud-based email delivery.
 -   **Generic Webhooks**: Trigger downstream systems or APIs.
 
-> Note: The open-source demo ships with **log-only adapters** (they log a message instead of sending). Swap in real adapters as needed.
+> Note: Adapters are now functional, but require configuration (see examples below).
 
-## 2. Configuration Example
+
+## 2. Install Notification Extras 📦
+
+If you want all optional secret providers, install:
+
+```bash
+uv pip install "lakeguard[notifications]"
+# or
+pip install "lakeguard[notifications]"
+```
+
+`lakeguard[all]` also includes these dependencies.
+
+## 3. Configuration Example 🧩
 
 You define your notification strategy directly in the YAML contract. You can have different people notified for different events.
 
@@ -30,18 +44,188 @@ quarantine:
     # Notify the Data Owner via SendGrid for critical failures
     - type: sendgrid
       target: "data-owner@company.com"
+      api_key: "env:SENDGRID_API_KEY"
+      from_email: "lakeguard@company.com"
+      on_events: ["failure"]
+
+    # SMTP example
+    - type: smtp
+      target: "alerts@company.com"
+      smtp_host: "smtp.company.com"
+      smtp_port: 587
+      smtp_username: "env:SMTP_USER"
+      smtp_password: "${ENV:SMTP_PASS}"
+      from_email: "lakeguard@company.com"
+      use_tls: true
+      on_events: ["quarantine"]
+
+    # Generic webhook
+    - type: webhook
+      target: "https://example.com/webhook"
+      on_events: ["dataset_rule_failed"]
+```
+
+For lakehouse tables (Spark/Unity Catalog), you can use a table target:
+
+```yaml
+quarantine:
+  target: "table:main.silver.quarantine_customers"
+```
+
+Format defaults and overrides:
+
+- File targets default to **Parquet**. Override with a file suffix or `metadata.quarantine_format` (csv or parquet for non-Spark engines).
+- Spark file targets can use `csv`, `parquet`, `delta`, `iceberg`, or `json`.
+- Spark table targets default to **Iceberg**. Override with `metadata.quarantine_table_format` (for example, `delta`).
+
+```yaml
+metadata:
+  quarantine_format: parquet
+  quarantine_table_format: iceberg
+```
+
+## 4. Azure Key Vault (Optional) 🔒
+
+You can resolve secrets from Azure Key Vault by using `keyvault:` or `${AZURE_KEY_VAULT:...}`:
+
+```yaml
+quarantine:
+  notifications:
+    - type: sendgrid
+      target: "data-owner@company.com"
+      api_key: "keyvault:sendgrid-api-key"
+      key_vault_url: "https://my-vault.vault.azure.net/"
+      from_email: "lakeguard@company.com"
       on_events: ["failure"]
 ```
 
-## 3. How it Works
+Install dependencies (or use `lakeguard[notifications]`):
 
-When LakeGuard finishes a run, it calculates the **Recovery Ratio**. 
+```bash
+pip install azure-identity azure-keyvault-secrets
+```
 
-1.  If **Quarantined Records > 0**, it triggers a `quarantine` or `quarantine_triggered` event.
-2.  If a **dataset rule** fails, it triggers `dataset_rule_failed` (and `failure`).
-3.  It looks at your `notifications` list.
-4.  It dispatches the message (total records processed, total quarantined, and reason) to your configured channels.
+## 5. AWS Secrets Manager (Optional) 🔒
 
-## 💡 Pro Tip: Customizing Alerts
+```yaml
+quarantine:
+  notifications:
+    - type: smtp
+      target: "alerts@company.com"
+      smtp_host: "smtp.company.com"
+      smtp_password: "aws:lakeguard/smtp-password"
+      from_email: "lakeguard@company.com"
+      on_events: ["quarantine"]
+```
 
-You can map specific **Quality Categories** to different channels. For example, you might want **PII Failures** to go to a Security-specific Slack channel, while **Completeness Failures** go to the general Data Engineering channel. 🛡️📢
+Install dependencies (or use `lakeguard[notifications]`):
+
+```bash
+pip install boto3
+```
+
+## 6. GCP Secret Manager (Optional) 🔒
+
+```yaml
+quarantine:
+  notifications:
+    - type: sendgrid
+      target: "data-owner@company.com"
+      api_key: "gcp:sendgrid-api-key"
+      gcp_project: "my-project"
+      from_email: "lakeguard@company.com"
+      on_events: ["failure"]
+```
+
+Install dependencies (or use `lakeguard[notifications]`):
+
+```bash
+pip install google-cloud-secret-manager
+```
+
+## 7. HashiCorp Vault (Optional) 🔒
+
+```yaml
+quarantine:
+  notifications:
+    - type: webhook
+      target: "vault:secret/data/lakeguard#webhook_url"
+      vault_url: "https://vault.company.com"
+      vault_token: "env:VAULT_TOKEN"
+      vault_kv_version: 2
+      on_events: ["dataset_rule_failed"]
+```
+
+Install dependencies (or use `lakeguard[notifications]`):
+
+```bash
+pip install hvac
+```
+
+## 8. Encrypted Local Secrets File 🔒
+
+You can store secrets locally in an **encrypted** JSON file and reference them with `local:`:
+
+```yaml
+quarantine:
+  notifications:
+    - type: smtp
+      target: "alerts@company.com"
+      smtp_host: "smtp.company.com"
+      smtp_password: "local:smtp_password"
+      secrets_file: "./secrets.enc"
+      secrets_key: "env:LAKEGUARD_SECRETS_KEY"
+      from_email: "lakeguard@company.com"
+      on_events: ["quarantine"]
+```
+
+Create the encrypted file:
+
+```bash
+python - <<'PY'
+from cryptography.fernet import Fernet
+import json
+
+key = Fernet.generate_key()
+print("Set LAKEGUARD_SECRETS_KEY=", key.decode())
+
+secrets = {"smtp_password": "super-secret"}
+token = Fernet(key).encrypt(json.dumps(secrets).encode("utf-8"))
+open("secrets.enc", "wb").write(token)
+PY
+```
+
+Install dependency (or use `lakeguard[notifications]`):
+
+```bash
+pip install cryptography
+```
+
+## 9. Validation & Fail-Fast ✅
+
+Notifications now validate required fields when created. Missing config or unresolved secrets raise a `ValueError` immediately.
+
+If you want to **continue the run** even when notifications fail, set:
+
+```yaml
+quarantine:
+  strict_notifications: false
+```
+
+## 10. Secret Caching ⚡
+
+LakeGuard caches resolved secrets during a run to avoid repeated provider calls.
+
+## 11. How it Works 🧠
+
+When LakeGuard finishes a run, it calculates the **Quarantine Ratio**. 
+
+1.  If **Quarantined Records > 0**, it triggers a `quarantine` event.
+2.  If a **dataset rule** fails, it triggers `failure` (you can also subscribe to `dataset_rule_failed` as an alias).
+3.  If **schema drift** is detected and `allow_schema_drift: false`, it triggers `schema_drift`.
+4.  It looks at your `notifications` list.
+5.  It dispatches the message (total records processed, total quarantined, and reason) to your configured channels.
+
+## 12. Pro Tip: Customizing Alerts 💡
+
+You can map specific **Quality Categories** to different channels. For example, you might want **PII Failures** to go to a Security-specific Slack channel, while **Completeness Failures** go to the general Data Engineering channel. 

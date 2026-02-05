@@ -1,0 +1,46 @@
+version: "1.0.0"
+info:
+  title: Customer Dimension (SCD2)
+
+dataset: gold_dim_customers
+primary_key: ["customer_id"]
+
+schema_policy:
+  evolution: strict
+  unknown_fields: drop
+
+model:
+  fields:
+    - name: customer_id
+      type: int
+      required: true
+    - name: name
+      type: string
+    - name: status
+      type: string
+    - name: updated_at
+      type: date
+
+quality:
+  row_rules:
+    - name: valid_status
+      sql: "status IN ('active','inactive')"
+      category: consistency
+
+materialization:
+  strategy: scd2
+  target_path: output/gold_dim_customers
+  format: csv
+  scd2:
+    effective_from_field: updated_at
+    effective_to_field: effective_to
+    current_flag_field: is_current
+
+lineage:
+  enabled: true
+  capture_source_path: true
+  capture_timestamp: true
+  capture_run_id: true
+
+quarantine:
+  include_error_reason: true

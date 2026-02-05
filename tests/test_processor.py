@@ -27,3 +27,31 @@ def test_processor_run_mock():
     
     assert len(good_df) == 2
     assert len(bad_df) == 1
+
+
+def test_processor_slo_scores():
+    """Test freshness and availability scoring."""
+    import datetime as dt
+
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    contract_data = {
+        "version": "1.0.0",
+        "dataset": "test_ds",
+        "service_levels": {
+            "freshness": {"field": "updated_at", "threshold": "24h"},
+            "availability": {"field": "email", "threshold": 50.0},
+        },
+    }
+    df = pl.DataFrame(
+        {
+            "email": ["a@example.com", None],
+            "updated_at": [now.isoformat(), now.isoformat()],
+        }
+    )
+
+    processor = DataProcessor(engine="polars", contract=contract_data)
+    processor.run(df)
+
+    slos = processor.last_report.get("slos", {})
+    assert slos["freshness"]["passed"] is True
+    assert slos["availability"]["passed"] is True

@@ -78,3 +78,45 @@ def test_service_level_objective():
     assert contract.service_levels.freshness.description == "Daily"
     assert contract.service_levels.freshness.threshold == "24h"
     assert contract.service_levels.availability.threshold == 99.9
+
+def test_notification_extra_fields():
+    """Extra notification fields should be preserved for adapters."""
+    data = {
+        "version": "1.0.0",
+        "quarantine": {
+            "notifications": [
+                {
+                    "type": "smtp",
+                    "target": "alerts@example.com",
+                    "smtp_host": "smtp.example.com",
+                    "smtp_port": 587,
+                    "from_email": "lakeguard@example.com",
+                }
+            ]
+        }
+    }
+    contract = DataContract(**data)
+    notif = contract.quarantine.notifications[0]
+    dumped = notif.model_dump()
+    assert dumped["smtp_host"] == "smtp.example.com"
+    assert dumped["from_email"] == "lakeguard@example.com"
+
+def test_external_logic_parsing():
+    """Test external logic configuration parsing."""
+    data = {
+        "version": "1.0.0",
+        "external_logic": {
+            "type": "python",
+            "path": "gold/build_sales.py",
+            "entrypoint": "build_sales",
+            "args": {"target_table": "fact_sales"},
+            "output_path": "output/fact_sales.parquet",
+            "output_format": "parquet",
+            "handles_output": True,
+        }
+    }
+    contract = DataContract(**data)
+    logic = contract.external_logic
+    assert logic.type == "python"
+    assert logic.entrypoint == "build_sales"
+    assert logic.output_format == "parquet"

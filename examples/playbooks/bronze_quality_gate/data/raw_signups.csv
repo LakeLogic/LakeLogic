@@ -1,0 +1,7 @@
+signup_id,email,event_date,source,age,utm_campaign
+s1,alice@example.com,2024-01-01,ads,29,winter
+s2,bobexample.com,2024-01-01,ads,34,winter
+,carol@example.com,2024-01-01,organic,22,referral
+s4,dave@example.com,2024-01-02,affiliate,-5,spring
+s5,erin@example.com,2024-01-02,organic,27,summer
+s6,frank@example.com,2024-01-03,ads,,winter

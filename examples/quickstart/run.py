@@ -8,10 +8,11 @@ from pathlib import Path
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>")
 
-def smoke_test():
+def main() -> None:
+    """Run the quickstart contract end-to-end with sample data."""
     # 1. Load Data
     base_dir = Path(__file__).resolve().parent
-    source_file = base_dir / "customers.csv"
+    source_file = base_dir / "data" / "customers.csv"
     contract_file = base_dir / "contract.yaml"
 
     if not source_file.exists():
@@ -52,4 +53,4 @@ def smoke_test():
         logger.exception(f"Smoke test failed: {e}")
 
 if __name__ == "__main__":
-    smoke_test()
+    main()

@@ -16,7 +16,7 @@ In a Data Lakehouse, raw data (Bronze) is often messy. Moving it to Silver and G
 LakeGuard solves this by providing **One Contract** that runs on **Any Engine**:
 
 1. **Define Once**: Use YAML to declare your schema, quality rules, and business logic.
-2. **Execute Anywhere**: Run the same contract on Spark, Polars, DuckDB, or Pandas.
+2. **Execute Anywhere**: Run the same contract on Spark, Polars, DuckDB, Pandas, or directly in Snowflake/BigQuery (table-only).
 3. **Governance Built-in**: Automatically isolate bad data into **Quarantine** with detailed failure reasons.
 
 ## Key Features
@@ -24,8 +24,11 @@ LakeGuard solves this by providing **One Contract** that runs on **Any Engine**:
 - **SQL-First Logic**: Use the SQL expressions you already know for transformations and quality rules.
 - **Schema Enforcement**: Type casting, required fields, and unknown-field handling.
 - **Intelligent Quarantine**: Records that fail rules are detoured, tagged with error messages, and saved for correction.
+- **Lineage Injection**: Tag records with source path, run ID, and processing timestamp.
+- **Materialization**: Write validated data to local CSV/Parquet targets or Delta/Iceberg when running on Spark.
 - **Referential Integrity**: Validate keys against dimensions using local reference tables.
 - **Notifications (Demo)**: Built-in adapters log alerts for quarantine and rule failures.
+- **External Logic Hooks**: Run dedicated Python modules or notebooks for advanced Gold processing.
 
 ## Installation
 
@@ -42,27 +45,19 @@ See the full installation guide in `docs/installation.md`.
 ## Quick Start
 
 ```python
-import polars as pl
-from lakeguard import DataProcessor
-
-# 1. Load your Bronze (Raw) data
-df = pl.read_csv("bronze_customers.csv")
-
-# 2. Run the Quality Gate
-processor = DataProcessor(engine="polars", contract="silver_customers.yaml")
-good_df, bad_df = processor.run(df)
+# 1. Run the Quality Gate (Automatic Engine Selection)
+processor = DataProcessor(contract="silver_crm_customers.yaml")
+good_df, bad_df = processor.run_source("bronze_crm_customers.csv")
 
 # good_df -> Ready for Silver Layer
 # bad_df  -> Sent to Quarantine
 ```
 
-## Playground
-
-Try the runnable end-to-end demo in `docs/playground.md`.
-
 ## Documentation
 
 Visit our documentation for:
+- **Notebooks**: Hands-on tutorials in the `examples/` folder.
+- **Playbooks**: End-to-end scenarios with data, contracts, and notebooks.
 - Concepts: `docs/concepts.md`
 - Reprocessing: `docs/reprocessing.md`
 - Playground: `docs/playground.md`

@@ -1,0 +1,34 @@
+version: 1.0.0
+info:
+  title: Sales Gold (Notebook External Logic)
+
+dataset: silver_pos_sales
+
+model:
+  fields:
+    - name: sale_id
+      type: int
+      required: true
+    - name: sale_date
+      type: date
+    - name: amount
+      type: double
+    - name: salesperson_id
+      type: int
+
+quality:
+  row_rules:
+    - name: positive_amount
+      sql: "amount > 0"
+      category: correctness
+
+external_logic:
+  type: notebook
+  path: ./gold/sales_gold.ipynb
+  output_path: output/gold_fact_sales.csv
+  output_format: csv
+
+materialization:
+  strategy: overwrite
+  target_path: output/gold_fact_sales
+  format: csv

@@ -12,8 +12,15 @@ class SparkAdapter(EngineAdapter):
     def execute(self, df: Any) -> Tuple[Any, Any]:
         """
         Executes the contract using PySpark.
+
+        Args:
+            df: Spark DataFrame to validate.
+
+        Returns:
+            Tuple of (good_df, bad_df).
         """
         self.dataset_rule_results = []
+        self.schema_drift = {}
         try:
             from pyspark.sql import functions as F
             from pyspark.sql import DataFrame
@@ -106,6 +113,12 @@ class SparkAdapter(EngineAdapter):
         return good_df, bad_df
 
     def _run_dataset_rules(self, df: Any):
+        """
+        Execute dataset-level quality rules.
+
+        Args:
+            df: Spark DataFrame of good records.
+        """
         rules = self.get_dataset_rules()
         if not rules:
             return
@@ -127,7 +140,7 @@ class SparkAdapter(EngineAdapter):
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
                 
-                status = "✅ PASS" if passed else "❌ FAIL"
+                status = "PASS" if passed else "FAIL"
                 logger.info(f"Quality Check (Spark): {rule.name} | Result: {val} | Status: {status}")
                 self.dataset_rule_results.append({
                     "name": rule.name,
@@ -139,12 +152,30 @@ class SparkAdapter(EngineAdapter):
                 logger.error(f"Error executing dataset rule '{rule.name}': {e}")
 
     def _apply_pre_transformations(self, df: Any) -> Any:
+        """
+        Apply pre-processing transformations (rename, filter, deduplicate, and cleanup helpers).
+
+        Args:
+            df: Spark DataFrame.
+
+        Returns:
+            Transformed Spark DataFrame.
+        """
         from pyspark.sql import functions as F
         from pyspark.sql import Window
         
         current_df = df
         existing = set(current_df.columns)
         for trans in self.contract.transformations:
+            if trans.sql and (trans.phase or "post").lower() == "pre":
+                logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
+                current_df.createOrReplaceTempView("source")
+                if self.contract.dataset:
+                    current_df.createOrReplaceTempView(self.contract.dataset)
+                current_df = current_df.sparkSession.sql(trans.sql)
+                existing = set(current_df.columns)
+                continue
+
             if trans.rename:
                 if trans.rename.from_name not in existing:
                     logger.warning(f"Pre-Transform [Rename] skipped; column not found: {trans.rename.from_name}")
@@ -153,6 +184,87 @@ class SparkAdapter(EngineAdapter):
                     current_df = current_df.withColumnRenamed(trans.rename.from_name, trans.rename.to_name)
                     existing.remove(trans.rename.from_name)
                     existing.add(trans.rename.to_name)
+            elif trans.select:
+                logger.debug(f"Pre-Transform [Select]: {trans.select.columns}")
+                current_df = current_df.select(*trans.select.columns)
+                existing = set(current_df.columns)
+            elif trans.drop:
+                logger.debug(f"Pre-Transform [Drop]: {trans.drop.columns}")
+                current_df = current_df.drop(*trans.drop.columns)
+                existing = set(current_df.columns)
+            elif trans.cast:
+                logger.debug(f"Pre-Transform [Cast]: {list(trans.cast.columns.keys())}")
+                for col, dtype_name in trans.cast.columns.items():
+                    if col not in current_df.columns:
+                        continue
+                    spark_type = self._to_spark_type(dtype_name) or dtype_name
+                    current_df = current_df.withColumn(col, F.col(col).cast(spark_type))
+                existing = set(current_df.columns)
+            elif trans.trim:
+                logger.debug(f"Pre-Transform [Trim]: {trans.trim.fields}")
+                for col in trans.trim.fields:
+                    if col not in current_df.columns:
+                        continue
+                    if trans.trim.side == "left":
+                        current_df = current_df.withColumn(col, F.ltrim(F.col(col)))
+                    elif trans.trim.side == "right":
+                        current_df = current_df.withColumn(col, F.rtrim(F.col(col)))
+                    else:
+                        current_df = current_df.withColumn(col, F.trim(F.col(col)))
+                existing = set(current_df.columns)
+            elif trans.lower:
+                logger.debug(f"Pre-Transform [Lower]: {trans.lower.fields}")
+                for col in trans.lower.fields:
+                    if col not in current_df.columns:
+                        continue
+                    current_df = current_df.withColumn(col, F.lower(F.col(col)))
+                existing = set(current_df.columns)
+            elif trans.upper:
+                logger.debug(f"Pre-Transform [Upper]: {trans.upper.fields}")
+                for col in trans.upper.fields:
+                    if col not in current_df.columns:
+                        continue
+                    current_df = current_df.withColumn(col, F.upper(F.col(col)))
+                existing = set(current_df.columns)
+            elif trans.coalesce:
+                sources = trans.coalesce.sources or []
+                if not sources:
+                    sources = [trans.coalesce.field]
+                exprs = [F.col(col) for col in sources if col in current_df.columns]
+                if trans.coalesce.default is not None:
+                    exprs.append(F.lit(trans.coalesce.default))
+                if exprs:
+                    output = trans.coalesce.output or trans.coalesce.field
+                    logger.debug(f"Pre-Transform [Coalesce]: {output}")
+                    current_df = current_df.withColumn(output, F.coalesce(*exprs))
+                    existing = set(current_df.columns)
+            elif trans.split:
+                output = trans.split.output or trans.split.field
+                if trans.split.field in current_df.columns:
+                    logger.debug(f"Pre-Transform [Split]: {trans.split.field} -> {output}")
+                    current_df = current_df.withColumn(output, F.split(F.col(trans.split.field), trans.split.delimiter))
+                    existing = set(current_df.columns)
+            elif trans.explode:
+                output = trans.explode.output or trans.explode.field
+                if trans.explode.field in current_df.columns:
+                    logger.debug(f"Pre-Transform [Explode]: {trans.explode.field} -> {output}")
+                    current_df = current_df.withColumn(output, F.explode(F.col(trans.explode.field)))
+                    existing = set(current_df.columns)
+            elif trans.map_values:
+                field = trans.map_values.field
+                mapping = trans.map_values.mapping or {}
+                if field in current_df.columns and mapping:
+                    logger.debug(f"Pre-Transform [Map Values]: {field}")
+                    expr = None
+                    for key, value in mapping.items():
+                        cond = F.col(field) == F.lit(key)
+                        expr = F.when(cond, F.lit(value)) if expr is None else expr.when(cond, F.lit(value))
+                    if expr is not None:
+                        default_val = trans.map_values.default
+                        expr = expr.otherwise(F.lit(default_val) if default_val is not None else F.col(field))
+                        output = trans.map_values.output or field
+                        current_df = current_df.withColumn(output, expr)
+                        existing = set(current_df.columns)
             elif trans.filter:
                 logger.debug(f"Pre-Transform [Filter]: {trans.filter.sql}")
                 current_df = current_df.filter(trans.filter.sql)
@@ -172,10 +284,27 @@ class SparkAdapter(EngineAdapter):
         return current_df
 
     def _apply_post_transformations(self, df: Any) -> Any:
+        """
+        Apply post-processing transformations (derive, lookup, join, SQL).
+
+        Args:
+            df: Spark DataFrame.
+
+        Returns:
+            Transformed Spark DataFrame.
+        """
         current_df = df
         tbl_name = "current_transform"
         
         for trans in self.contract.transformations:
+            if trans.sql and (trans.phase or "post").lower() != "pre":
+                logger.debug(f"Post-Transform [SQL]: {trans.sql}")
+                current_df.createOrReplaceTempView("source")
+                if self.contract.dataset:
+                    current_df.createOrReplaceTempView(self.contract.dataset)
+                current_df = current_df.sparkSession.sql(trans.sql)
+                continue
+
             if trans.derive:
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 current_df.createOrReplaceTempView(tbl_name)
@@ -184,20 +313,94 @@ class SparkAdapter(EngineAdapter):
             elif trans.lookup:
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_df.createOrReplaceTempView("src")
+                hint = ""
+                if self._should_broadcast(trans.lookup.reference):
+                    hint = "/*+ BROADCAST(ref) */ "
+                value_expr = f"ref.{trans.lookup.value}"
+                if trans.lookup.default_value is not None:
+                    value_expr = f"COALESCE(ref.{trans.lookup.value}, {self._format_literal(trans.lookup.default_value)})"
                 query = f"""
-                SELECT src.*, ref.{trans.lookup.value} AS {trans.lookup.field}
+                SELECT {hint}src.*, {value_expr} AS {trans.lookup.field}
                 FROM src
                 LEFT JOIN {trans.lookup.reference} ref ON src.{trans.lookup.on} = ref.{trans.lookup.key}
                 """
+                current_df = current_df.sparkSession.sql(query)
+            elif trans.join:
+                logger.debug(f"Post-Transform [Join]: {trans.join.reference}")
+                current_df.createOrReplaceTempView("source")
+                query = self._build_join_sql(trans.join, broadcast=self._should_broadcast(trans.join.reference))
                 current_df = current_df.sparkSession.sql(query)
             elif trans.filter:
                 logger.debug(f"Post-Transform [Filter]: {trans.filter.sql}")
                 current_df = current_df.filter(trans.filter.sql)
         return current_df
 
+    def _build_join_sql(self, join_cfg, broadcast: bool = False, source_table: str = "source") -> str:
+        """
+        Build SQL for a join transformation.
+
+        Args:
+            join_cfg: Join configuration.
+            broadcast: Whether to broadcast the reference table.
+            source_table: Source table/view name.
+
+        Returns:
+            SQL query string.
+        """
+        join_type = (join_cfg.type or "left").upper()
+        if join_type == "FULL":
+            join_type = "FULL OUTER"
+
+        select_fields = ["src.*"]
+        for field in join_cfg.fields:
+            alias = f"{join_cfg.prefix}{field}" if join_cfg.prefix else field
+            default = join_cfg.defaults.get(field) if join_cfg.defaults else None
+            if default is not None:
+                expr = f"COALESCE(ref.{field}, {self._format_literal(default)}) AS {alias}"
+            else:
+                expr = f"ref.{field} AS {alias}"
+            select_fields.append(expr)
+
+        hint = "/*+ BROADCAST(ref) */ " if broadcast else ""
+        return f"""
+        SELECT {hint}{', '.join(select_fields)}
+        FROM {source_table} src
+        {join_type} JOIN {join_cfg.reference} ref ON src.{join_cfg.on} = ref.{join_cfg.key}
+        """
+
+    def _should_broadcast(self, reference: str) -> bool:
+        """
+        Determine whether a lookup reference should be broadcast.
+
+        Args:
+            reference: Link name used in the transformation.
+
+        Returns:
+            True if the link is marked for broadcast.
+        """
+        for link in self.contract.links:
+            if link.name == reference and getattr(link, "broadcast", False):
+                return True
+        return False
+
     def _register_links(self, spark) -> None:
+        """
+        Register linked reference datasets into Spark.
+
+        Args:
+            spark: SparkSession.
+        """
         for link in self.contract.links:
             try:
+                if link.table or (link.type and link.type.lower() == "table"):
+                    table_name = link.table or (link.path[6:] if link.path and link.path.startswith("table:") else link.path)
+                    if not table_name:
+                        logger.warning(f"Link '{link.name}' missing table name.")
+                        continue
+                    ref_df = spark.table(table_name)
+                    ref_df.createOrReplaceTempView(link.name)
+                    continue
+
                 if not link.path:
                     continue
 
@@ -225,6 +428,15 @@ class SparkAdapter(EngineAdapter):
                 logger.warning(f"Could not register link {link.name}: {e}")
 
     def _to_spark_type(self, type_name: str) -> str:
+        """
+        Map contract type names to Spark SQL types.
+
+        Args:
+            type_name: Logical type name from contract.
+
+        Returns:
+            Spark SQL type string.
+        """
         type_name = (type_name or "").lower().strip()
         mapping = {
             "string": "string",
@@ -246,15 +458,43 @@ class SparkAdapter(EngineAdapter):
         return mapping.get(type_name)
 
     def _apply_schema(self, df: Any) -> Tuple[Any, List[str]]:
+        """
+        Apply schema casts, missing columns, and unknown field handling.
+
+        Args:
+            df: Spark DataFrame.
+
+        Returns:
+            Tuple of (Spark DataFrame, schema_errors).
+        """
         from pyspark.sql import functions as F
 
         if not self.contract.model or not self.contract.model.fields:
+            if self.contract.server and self.contract.server.mode == "ingest" and self.contract.server.cast_to_string:
+                for col in df.columns:
+                    df = df.withColumn(col, F.col(col).cast("string"))
             return df, []
 
         expected_fields = [f.name for f in self.contract.model.fields]
         existing = set(df.columns)
         expected = set(expected_fields)
+        missing = expected - existing
         unknown = existing - expected
+
+        server = self.contract.server
+        evolution = None
+        policy = self.contract.schema_policy.unknown_fields if self.contract.schema_policy else "allow"
+        cast_to_string = False
+        allow_schema_drift = True
+
+        if server and server.mode == "ingest":
+            evolution = (server.schema_evolution or "strict").lower()
+            cast_to_string = bool(server.cast_to_string)
+            allow_schema_drift = bool(server.allow_schema_drift)
+            if evolution in ["append", "merge", "overwrite"]:
+                policy = "allow"
+            else:
+                policy = "quarantine"
 
         select_exprs = []
         for field in self.contract.model.fields:
@@ -263,20 +503,32 @@ class SparkAdapter(EngineAdapter):
             else:
                 col_expr = F.lit(None)
 
-            spark_type = self._to_spark_type(field.type)
+            spark_type = "string" if cast_to_string else self._to_spark_type(field.type)
             if spark_type:
                 col_expr = col_expr.cast(spark_type)
 
             select_exprs.append(col_expr.alias(field.name))
 
-        policy = self.contract.schema_policy.unknown_fields if self.contract.schema_policy else "allow"
         if policy in ["allow", "quarantine"] and unknown:
-            select_exprs.extend([F.col(c) for c in sorted(unknown)])
+            if cast_to_string:
+                select_exprs.extend([F.col(c).cast("string") for c in sorted(unknown)])
+            else:
+                select_exprs.extend([F.col(c) for c in sorted(unknown)])
 
         df = df.select(*select_exprs)
 
         schema_errors = []
+        if evolution == "strict" and missing:
+            schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
         if policy == "quarantine" and unknown:
             schema_errors.append(f"Unknown fields present: {', '.join(sorted(unknown))}")
+
+        self.schema_drift = {
+            "missing_fields": sorted(missing),
+            "unknown_fields": sorted(unknown),
+            "policy": policy,
+            "evolution": evolution or "",
+            "allow_schema_drift": allow_schema_drift,
+        }
 
         return df, schema_errors

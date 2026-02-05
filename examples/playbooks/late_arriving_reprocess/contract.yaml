@@ -1,0 +1,45 @@
+version: "1.0.0"
+info:
+  title: Late Arriving Events (Reprocess)
+
+dataset: silver_pos_sales_events
+primary_key: ["event_id"]
+
+schema_policy:
+  evolution: strict
+  unknown_fields: drop
+
+model:
+  fields:
+    - name: event_id
+      type: int
+      required: true
+    - name: event_date
+      type: date
+      required: true
+    - name: amount
+      type: float
+    - name: customer_id
+      type: int
+
+quality:
+  row_rules:
+    - name: positive_amount
+      sql: "amount > 0"
+      category: correctness
+
+materialization:
+  strategy: append
+  partition_by: ["event_date"]
+  reprocess_policy: overwrite_partition_safe
+  target_path: output/silver_pos_sales_events
+  format: csv
+
+lineage:
+  enabled: true
+  capture_source_path: true
+  capture_timestamp: true
+  capture_run_id: true
+
+quarantine:
+  include_error_reason: true

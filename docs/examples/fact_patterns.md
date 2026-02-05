@@ -1,6 +1,6 @@
 # Fact Table Patterns
 
-> Note: These are design patterns. Automated materialization is on the roadmap.
+> Note: These are design patterns. Local materialization is available for CSV/Parquet targets (and Delta/Iceberg on Spark); remote execution is still on the roadmap.
 
 LakeGuard handles the most common fact table designs used in modern Data Lakehouses. By choosing the right **Strategy**, you can automate the complex logic required for each type.
 

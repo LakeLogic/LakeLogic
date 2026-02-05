@@ -4,8 +4,9 @@ from lakeguard import DataProcessor
 
 
 def main() -> None:
+    """Run the ingestion example contract locally."""
     base_dir = Path(__file__).resolve().parent
-    data_path = base_dir / "raw_crm.csv"
+    data_path = base_dir / "data" / "raw_crm.csv"
     contract_path = base_dir / "contract.yaml"
 
     df = pl.read_csv(data_path)

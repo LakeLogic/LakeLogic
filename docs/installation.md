@@ -1,8 +1,8 @@
 # Installation Guide 🚀
 
-LakeGuard is designed to be lightweight. You can install only the engines you need, or get everything at once.
+LakeGuard is designed to be lightweight. Install only what you need and scale up anytime.
 
-## 1. Using [uv](https://github.com/astral-sh/uv) (Recommended)
+## 1. Using [uv](https://github.com/astral-sh/uv) (Recommended) ⚡
 `uv` is the fastest way to install and manage LakeGuard.
 
 ```bash
@@ -14,14 +14,14 @@ uv pip install "lakeguard[polars]"
 uv pip install "lakeguard[spark]"
 ```
 
-## 2. Using pip
+## 2. Using pip 📦
 If you prefer standard `pip`:
 
 ```bash
 pip install "lakeguard[all]"
 ```
 
-## Installation Options (Extras)
+## Installation Options (Extras) 🧩
 
 | Extra | What it includes | Use case |
 | :--- | :--- | :--- |
@@ -29,12 +29,18 @@ pip install "lakeguard[all]"
 | `[pandas]` | Pandas + DuckDB | For data science teams. |
 | `[spark]` | PySpark | Large-scale Lakehouse jobs. |
 | `[duckdb]` | DuckDB native | Fast analytical SQL in-memory. |
+| `[snowflake]` | Snowflake connector | Run contracts directly in Snowflake (table-only). |
+| `[bigquery]` | BigQuery client | Run contracts directly in BigQuery (table-only). |
+| `[notebook]` | nbclient + nbformat | Run external notebook logic hooks. |
+| `[notifications]` | Secret manager clients (Azure/AWS/GCP/Vault) + cryptography | Enable optional notification secret providers. |
 | `[docs]` | MkDocs + Plugins | Only if you are building this website. |
 | `[all]` | **Every engine** | When you want total flexibility. |
 
+Materialization helpers (append/merge/scd2 to CSV/Parquet) require `pandas`. Install `[pandas]` or `[all]` if you plan to use them. Delta/Iceberg materialization is supported when using the Spark engine.
+
 ---
 
-## Developer Installation
+## Developer Installation 🛠️
 If you want to contribute to LakeGuard:
 
 1. **Clone the repo**:
@@ -53,6 +59,6 @@ If you want to contribute to LakeGuard:
    uv run pytest
    ```
 
-## Requirements
+## Requirements ✅
 - **Python**: 3.9 or higher.
 - **OS**: Windows, macOS, or Linux.

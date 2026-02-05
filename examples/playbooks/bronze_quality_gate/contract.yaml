@@ -1,0 +1,48 @@
+version: "1.0.0"
+info:
+  title: Bronze Web Signups
+  owner: marketing-data
+
+dataset: bronze_web_signups
+
+schema_policy:
+  evolution: strict
+  unknown_fields: drop
+
+model:
+  fields:
+    - name: signup_id
+      type: string
+      required: true
+    - name: email
+      type: string
+      required: true
+    - name: event_date
+      type: date
+      required: true
+    - name: source
+      type: string
+    - name: age
+      type: int
+
+quality:
+  row_rules:
+    - name: email_format
+      sql: "email LIKE '%@%'"
+      category: correctness
+    - name: age_positive
+      sql: "age IS NULL OR age >= 0"
+      category: correctness
+  dataset_rules:
+    - name: total_signups
+      sql: "SELECT COUNT(*) FROM bronze_web_signups"
+      must_be_greater_than: 0
+
+lineage:
+  enabled: true
+  capture_source_path: true
+  capture_timestamp: true
+  capture_run_id: true
+
+quarantine:
+  include_error_reason: true

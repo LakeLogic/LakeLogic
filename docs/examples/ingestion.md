@@ -5,14 +5,14 @@ This example shows how to use LakeGuard as a **schema gate** during raw ingestio
 ## Files
 
 - Contract: `examples/ingestion/contract.yaml`
-- Raw data: `examples/ingestion/raw_crm.csv`
+- Raw data: `examples/ingestion/data/raw_crm.csv`
 - Runner: `examples/ingestion/run.py`
 
 ## Contract (excerpt)
 
 ```yaml
 version: 1.0.0
-dataset: crm_ingestion
+dataset: bronze_crm_users
 
 schema_policy:
   evolution: strict
