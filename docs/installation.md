@@ -32,6 +32,7 @@ pip install "lakeguard[all]"
 | `[snowflake]` | Snowflake connector | Run contracts directly in Snowflake (table-only). |
 | `[bigquery]` | BigQuery client | Run contracts directly in BigQuery (table-only). |
 | `[notebook]` | nbclient + nbformat | Run external notebook logic hooks. |
+| `[profiling]` | DataProfiler + Presidio | Schema profiling + PII detection (bootstrap). |
 | `[notifications]` | Secret manager clients (Azure/AWS/GCP/Vault) + cryptography | Enable optional notification secret providers. |
 | `[docs]` | MkDocs + Plugins | Only if you are building this website. |
 | `[all]` | **Every engine** | When you want total flexibility. |

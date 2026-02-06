@@ -23,6 +23,7 @@ spark = ["pyspark>=3.3.0"]
 snowflake = ["snowflake-connector-python>=3.5.0"]
 bigquery = ["google-cloud-bigquery>=3.11.0"]
 notebook = ["nbclient>=0.9.0", "nbformat>=5.9.0"]
+profiling = ["dataprofiler>=0.9.0", "presidio-analyzer>=2.2.0"]
 notifications = [
     "azure-identity>=1.15.0",
     "azure-keyvault-secrets>=4.7.0",
@@ -51,6 +52,8 @@ all = [
     "google-cloud-bigquery>=3.11.0",
     "nbclient>=0.9.0",
     "nbformat>=5.9.0",
+    "dataprofiler>=0.9.0",
+    "presidio-analyzer>=2.2.0",
     "azure-identity>=1.15.0",
     "azure-keyvault-secrets>=4.7.0",
     "boto3>=1.28.0",

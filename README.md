@@ -38,6 +38,9 @@ uv pip install "lakeguard[all]"
 
 # Or just use Polars for local speed
 uv pip install "lakeguard[polars]"
+
+# Profiling + PII detection (bootstrap)
+uv pip install "lakeguard[profiling]"
 ```
 
 See the full installation guide in `docs/installation.md`.

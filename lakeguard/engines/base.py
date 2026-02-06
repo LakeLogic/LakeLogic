@@ -8,6 +8,7 @@ from lakeguard.core.models import (
     RowRuleRegexMatch,
     RowRuleRange,
     RowRuleReferentialIntegrity,
+    RowRuleLifecycleWindow,
     DatasetRuleUnique,
     DatasetRuleNullRatio,
     DatasetRuleRowCountBetween,
@@ -242,6 +243,32 @@ class EngineAdapter(ABC):
             return QualityRule(
                 name=name,
                 sql=f"{field} IN (SELECT {key} FROM {reference})",
+                category=cfg.get("category", "consistency"),
+                description=cfg.get("description"),
+                severity=cfg.get("severity", "error"),
+            )
+
+        if isinstance(spec, RowRuleLifecycleWindow):
+            cfg = spec.lifecycle_window or {}
+            event_ts = cfg.get("event_ts") or cfg.get("timestamp_field")
+            event_key = cfg.get("event_key") or cfg.get("field")
+            reference = cfg.get("reference") or cfg.get("dim_table")
+            reference_key = cfg.get("reference_key") or cfg.get("dim_key")
+            start_field = cfg.get("start_field") or "start_date"
+            end_field = cfg.get("end_field") or "end_date"
+            end_default = cfg.get("end_default") or "9999-12-31"
+            if not event_ts or not event_key or not reference or not reference_key:
+                return None
+            name = cfg.get("name") or f"{event_key}_lifecycle_window"
+            sql = (
+                f"{event_ts} >= (SELECT {start_field} FROM {reference} r "
+                f"WHERE r.{reference_key} = {event_key}) AND "
+                f"COALESCE((SELECT {end_field} FROM {reference} r "
+                f"WHERE r.{reference_key} = {event_key}), '{end_default}') >= {event_ts}"
+            )
+            return QualityRule(
+                name=name,
+                sql=sql,
                 category=cfg.get("category", "consistency"),
                 description=cfg.get("description"),
                 severity=cfg.get("severity", "error"),

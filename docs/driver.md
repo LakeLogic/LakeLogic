@@ -181,6 +181,24 @@ This enforces approval gates before publishing Gold outputs when thresholds are 
 
 **Use case**: Require sign-off before publishing Gold data when quarantine ratio spikes.
 
+## Lifecycle Window Rule
+
+Validate that event timestamps fall within a subscriber lifecycle:
+
+```yaml
+quality:
+  row_rules:
+    - lifecycle_window:
+        event_ts: event_ts
+        event_key: subscriber_id
+        reference: subscribers
+        reference_key: subscriber_id
+        start_field: start_date
+        end_field: end_date
+        end_default: "9999-12-31"
+```
+This catches events that occur before a subscriber starts or after they end.
+
 ## Upstream Freshness Policy
 
 Allow non-critical upstreams to be stale within a grace window:

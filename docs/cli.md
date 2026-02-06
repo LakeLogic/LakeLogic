@@ -8,6 +8,24 @@ LakeGuard ships with a simple CLI for validating files with a contract.
 lakeguard run --contract contract.yaml --source data.csv
 ```
 
+### CLI Help
+
+```bash
+lakeguard help
+lakeguard help bootstrap
+```
+This prints short usage guidance and examples directly in the terminal.
+
+Python helper:
+
+```bash
+python -c "import lakeguard; lakeguard.help()"
+python -c "import lakeguard; lakeguard.driver.help()"
+python -c "import lakeguard; lakeguard.bootstrap.help()"
+python -c "import lakeguard; lakeguard.policy_packs.help()"
+python -c "import lakeguard; lakeguard.observability.help()"
+```
+
 For warehouse engines, pass a table name:
 
 ```bash
@@ -63,6 +81,17 @@ lakeguard bootstrap \
   --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
   --format csv \
   --pattern "*.csv"
+```
+Use `--sync` to align an existing registry with new landing data:
+
+```bash
+lakeguard bootstrap \
+  --landing examples/insurance_elt/data/bronze \
+  --output-dir examples/insurance_elt/bootstrap_contracts \
+  --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
+  --format csv \
+  --pattern "*.csv" \
+  --sync
 ```
 
 ### Driver Options (Highlights)

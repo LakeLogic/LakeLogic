@@ -11,6 +11,23 @@ uv pip install "lakeguard[all]"
 pip install "lakeguard[all]"
 ```
 
+Optional profiling + PII detection for bootstrap:
+
+```bash
+uv pip install "lakeguard[profiling]"
+```
+
+Quick bootstrap example:
+
+```bash
+lakeguard bootstrap \
+  --landing examples/insurance_elt/data/bronze \
+  --output-dir examples/insurance_elt/bootstrap_contracts \
+  --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
+  --format csv \
+  --pattern "*.csv"
+```
+
 ## 2. Run the Example
 
 ```bash

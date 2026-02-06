@@ -185,6 +185,10 @@ class RowRuleReferentialIntegrity(BaseModel):
     """Business-friendly referential integrity rule."""
     referential_integrity: Dict[str, Any]
 
+class RowRuleLifecycleWindow(BaseModel):
+    """Business-friendly lifecycle window rule."""
+    lifecycle_window: Dict[str, Any]
+
 class DatasetRuleUnique(BaseModel):
     """Business-friendly unique rule."""
     unique: Union[str, Dict[str, Any]]
@@ -212,7 +216,7 @@ class QualityRule(BaseModel):
 
 class Quality(BaseModel):
     """Quality rule groups for row and dataset checks."""
-    row_rules: List[Union[QualityRule, RowRuleNotNull, RowRuleAcceptedValues, RowRuleRegexMatch, RowRuleRange, RowRuleReferentialIntegrity]] = Field(default_factory=list)
+    row_rules: List[Union[QualityRule, RowRuleNotNull, RowRuleAcceptedValues, RowRuleRegexMatch, RowRuleRange, RowRuleReferentialIntegrity, RowRuleLifecycleWindow]] = Field(default_factory=list)
     dataset_rules: List[Union[QualityRule, DatasetRuleUnique, DatasetRuleNullRatio, DatasetRuleRowCountBetween]] = Field(default_factory=list)
 
 class Notification(BaseModel):

@@ -4,6 +4,7 @@ from typing import Optional, Any, Dict, List
 from loguru import logger
 import sys
 import yaml
+import json
 
 from lakeguard.core.processor import DataProcessor
 
@@ -156,6 +157,14 @@ def bootstrap(
     pattern: str = typer.Option("*.csv", "--pattern", help="File glob pattern."),
     layer: str = typer.Option("bronze", "--layer", help="Layer name prefix for datasets."),
     sample_rows: int = typer.Option(1000, "--sample-rows", help="Rows to sample for schema inference."),
+    sync: bool = typer.Option(False, "--sync", help="Sync registry/contracts with landing zone."),
+    sync_update_schema: bool = typer.Option(False, "--sync-update-schema", help="Update schema for existing contracts."),
+    sync_overwrite: bool = typer.Option(False, "--sync-overwrite", help="Overwrite existing contracts."),
+    profile: bool = typer.Option(False, "--profile", help="Generate a data profile for each entity."),
+    detect_pii: bool = typer.Option(False, "--detect-pii", help="Detect PII using Presidio."),
+    suggest_rules: bool = typer.Option(False, "--suggest-rules", help="Suggest quality rules from profile."),
+    profile_output_dir: Optional[Path] = typer.Option(None, "--profile-output-dir", help="Directory for profile reports."),
+    pii_sample_size: int = typer.Option(50, "--pii-sample-size", help="Number of sample values per column for PII detection."),
 ):
     """
     Bootstrap contracts and registry from a landing zone.
@@ -169,6 +178,20 @@ def bootstrap(
         layer: Dataset layer prefix.
         sample_rows: Rows to sample for schema inference.
     """
+    def _flag(value: Any) -> bool:
+        return True if value is True else False
+
+    sync = _flag(sync)
+    sync_update_schema = _flag(sync_update_schema)
+    sync_overwrite = _flag(sync_overwrite)
+    profile = _flag(profile)
+    detect_pii = _flag(detect_pii)
+    suggest_rules = _flag(suggest_rules)
+    if not isinstance(profile_output_dir, Path):
+        profile_output_dir = None
+    if not isinstance(pii_sample_size, int):
+        pii_sample_size = 50
+
     if not landing.exists():
         logger.error(f"Landing path not found: {landing}")
         raise typer.Exit(code=1)
@@ -203,6 +226,73 @@ def bootstrap(
             fields.append({"name": col, "type": field_type})
         return fields
 
+    def _load_dataframe(file_path: Path):
+        import pandas as pd
+
+        fmt = format.lower()
+        if fmt == "csv":
+            return pd.read_csv(file_path, nrows=sample_rows)
+        if fmt == "parquet":
+            return pd.read_parquet(file_path)
+        if fmt == "json":
+            return pd.read_json(file_path, lines=True)
+        raise typer.BadParameter("format must be csv, parquet, or json.")
+
+    def _profile_dataframe(df) -> Dict[str, Any]:
+        try:
+            from dataprofiler import Profiler
+        except Exception as exc:
+            raise typer.BadParameter(
+                "DataProfiler not installed. Install with: pip install \"lakeguard[profiling]\""
+            ) from exc
+        profiler = Profiler(df)
+        return profiler.profile
+
+    def _detect_pii_for_fields(df) -> Dict[str, str]:
+        try:
+            from presidio_analyzer import AnalyzerEngine
+        except Exception as exc:
+            raise typer.BadParameter(
+                "Presidio not installed. Install with: pip install \"lakeguard[profiling]\""
+            ) from exc
+
+        analyzer = AnalyzerEngine()
+        pii_map: Dict[str, str] = {}
+        for col in df.columns:
+            series = df[col].dropna().astype(str).head(pii_sample_size)
+            found = []
+            for value in series.tolist():
+                try:
+                    results = analyzer.analyze(text=value, language="en")
+                except Exception:
+                    results = []
+                for result in results:
+                    found.append(result.entity_type)
+            if found:
+                # Choose the most common entity type
+                entity = max(set(found), key=found.count)
+                pii_map[col] = entity
+        return pii_map
+
+    def _suggest_quality_rules(df) -> Dict[str, Any]:
+        rules = {"row_rules": [], "dataset_rules": []}
+        total = len(df)
+        if total == 0:
+            return rules
+
+        for col in df.columns:
+            series = df[col]
+            null_ratio = series.isna().mean()
+            distinct = series.nunique(dropna=True)
+            if null_ratio < 0.01:
+                rules["row_rules"].append({"not_null": col})
+            if distinct == total and total > 1:
+                rules["dataset_rules"].append({"unique": col})
+            if distinct > 0 and distinct <= 20 and series.dtype == "object":
+                values = [v for v in series.dropna().unique().tolist() if v is not None]
+                rules["row_rules"].append({"accepted_values": {"field": col, "values": values}})
+        return rules
+
     def _discover_entities(root: Path) -> Dict[str, List[Path]]:
         subdirs = [p for p in root.iterdir() if p.is_dir()]
         if subdirs:
@@ -228,11 +318,66 @@ def bootstrap(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     registry_entries = []
+    existing_registry = {}
+    existing_entries = {}
+    if sync and registry.exists():
+        existing_registry = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
+        for entry in existing_registry.get("entries", []):
+            name = str(entry.get("entity") or "").strip()
+            if name:
+                existing_entries[name] = entry
 
     for entity, files in entities.items():
         sample_file = files[0]
         fields = _infer_fields(sample_file)
+        df = None
+        profile_data = None
+        pii_map: Dict[str, str] = {}
+        if profile or detect_pii or suggest_rules:
+            df = _load_dataframe(sample_file)
+        if profile:
+            profile_data = _profile_dataframe(df)
+        if detect_pii:
+            pii_map = _detect_pii_for_fields(df)
+        suggested_rules = _suggest_quality_rules(df) if suggest_rules else None
         dataset = f"{layer}_{entity}"
+        contract_path = output_dir / f"{dataset}.yaml"
+
+        if sync and entity in existing_entries and contract_path.exists():
+            if sync_overwrite:
+                pass
+            elif sync_update_schema:
+                try:
+                    existing_contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+                    model = existing_contract.get("model") or {}
+                    existing_fields = model.get("fields") or []
+                    existing_names = {f.get("name") for f in existing_fields if isinstance(f, dict)}
+                    for field in fields:
+                        if field["name"] not in existing_names:
+                            existing_fields.append(field)
+                    existing_contract["model"] = {"fields": existing_fields}
+                    contract_path.write_text(
+                        yaml.safe_dump(existing_contract, sort_keys=False),
+                        encoding="utf-8",
+                    )
+                    registry_entries.append(existing_entries[entity])
+                    continue
+                except Exception as exc:
+                    logger.warning(f"Failed to update schema for {entity}: {exc}")
+                    registry_entries.append(existing_entries[entity])
+                    continue
+            else:
+                registry_entries.append(existing_entries[entity])
+                continue
+
+        model_fields = []
+        for field in fields:
+            field_name = field.get("name")
+            if field_name and field_name in pii_map:
+                field["pii"] = True
+                field["classification"] = pii_map[field_name].lower()
+            model_fields.append(field)
+
         contract = {
             "version": "1.0.0",
             "info": {
@@ -255,7 +400,7 @@ def bootstrap(
                 "pattern": pattern,
             },
             "dataset": dataset,
-            "model": {"fields": fields},
+            "model": {"fields": model_fields},
             "materialization": {
                 "strategy": "append",
                 "target_path": str(output_dir / "output" / layer / entity),
@@ -267,19 +412,40 @@ def bootstrap(
             },
         }
 
-        contract_path = output_dir / f"{dataset}.yaml"
+        if suggested_rules:
+            contract["quality"] = suggested_rules
+
+        if profile_data is not None:
+            profile_dir = profile_output_dir or (output_dir / "profiles")
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            profile_path = profile_dir / f"{entity}_profile.json"
+            profile_path.write_text(json.dumps(profile_data, indent=2, default=str), encoding="utf-8")
+
         contract_path.write_text(
             yaml.safe_dump(contract, sort_keys=False),
             encoding="utf-8",
         )
+        if entity in existing_entries:
+            entry = existing_entries[entity]
+            contracts_block = entry.get("contracts") or {}
+            if isinstance(contracts_block, dict):
+                contracts_block[layer] = contract_path.name
+                entry["contracts"] = contracts_block
+            registry_entries.append(entry)
+        else:
+            registry_entries.append(
+                {
+                    "entity": entity,
+                    "enabled": True,
+                    "contracts": {layer: contract_path.name},
+                }
+            )
 
-        registry_entries.append(
-            {
-                "entity": entity,
-                "enabled": True,
-                "contracts": {layer: contract_path.name},
-            }
-        )
+    if sync and existing_registry.get("entries"):
+        seen = {e.get("entity") for e in registry_entries}
+        for entry in existing_registry.get("entries", []):
+            if entry.get("entity") not in seen:
+                registry_entries.append(entry)
 
     registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(
@@ -289,6 +455,54 @@ def bootstrap(
 
     logger.info(f"Generated {len(registry_entries)} contracts in {output_dir}")
     logger.info(f"Registry written to {registry}")
+
+
+@app.command("help")
+def help_command(topic: Optional[str] = typer.Argument(None)):
+    """
+    Show contextual help for LakeGuard commands.
+    """
+    base = """LakeGuard Help
+
+Commands:
+  run          Run a contract against a source file.
+  bootstrap    Generate starter contracts and a registry from a landing zone.
+  help         Show help for a command (driver, bootstrap).
+
+Examples:
+  lakeguard help
+  lakeguard help bootstrap
+"""
+    driver = """LakeGuard Driver Help
+
+Use lakeguard-driver to run registry-driven Bronze -> Silver -> Gold pipelines.
+
+Examples:
+  lakeguard-driver --registry contracts/_registry.yaml --layers bronze
+  lakeguard-driver --window range --window-start-date 2026-02-01 --window-end-date 2026-02-05
+  lakeguard-driver --policy-pack baseline_silver --policy-pack-dir policy_packs
+"""
+    bootstrap_text = """LakeGuard Bootstrap Help
+
+Generate contracts and registry from a landing zone.
+
+Example:
+  lakeguard bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml
+
+Sync mode:
+  lakeguard bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync
+"""
+    if not topic:
+        typer.echo(base)
+        return
+    topic = topic.lower()
+    if topic in ["driver", "lakeguard-driver"]:
+        typer.echo(driver)
+        return
+    if topic in ["bootstrap", "boot"]:
+        typer.echo(bootstrap_text)
+        return
+    typer.echo(base)
 
 if __name__ == "__main__":
     app()
