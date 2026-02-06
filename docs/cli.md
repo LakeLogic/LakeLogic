@@ -38,3 +38,16 @@ lakeguard run \
   --output-bad bad.csv \
   --materialize
 ```
+
+## Pipeline Driver
+
+The registry-driven driver is exposed as `lakeguard-driver` and orchestrates bronze/silver/gold layers.
+
+```bash
+lakeguard-driver \
+  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --layers reference,bronze,silver,gold \
+  --window last_success
+```

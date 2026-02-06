@@ -109,3 +109,5 @@ for node in topo_sort(DAG):
 ```
 
 You can implement this flow in Airflow, Dagster, Prefect, or any workflow engine you already use.
+
+See `Job Templates` for concrete examples across Databricks, Synapse, Fabric, AWS, and more.

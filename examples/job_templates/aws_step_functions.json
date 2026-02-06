@@ -1,0 +1,66 @@
+{
+  "Comment": "LakeGuard pipeline on AWS Step Functions",
+  "StartAt": "RunReference",
+  "States": {
+    "RunReference": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "lakeguard-reference",
+        "Arguments": {
+          "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--LAYERS": "reference",
+          "--WINDOW": "last_success"
+        }
+      },
+      "Next": "RunBronze"
+    },
+    "RunBronze": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "lakeguard-bronze",
+        "Arguments": {
+          "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--LAYERS": "bronze",
+          "--WINDOW": "last_success"
+        }
+      },
+      "Next": "RunSilver"
+    },
+    "RunSilver": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "lakeguard-silver",
+        "Arguments": {
+          "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--LAYERS": "silver",
+          "--WINDOW": "last_success"
+        }
+      },
+      "Next": "RunGold"
+    },
+    "RunGold": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "lakeguard-gold",
+        "Arguments": {
+          "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--LAYERS": "gold",
+          "--WINDOW": "last_success"
+        }
+      },
+      "End": true
+    }
+  }
+}

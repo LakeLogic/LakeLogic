@@ -1,0 +1,60 @@
+{
+  "name": "lakeguard_insurance_elt",
+  "tasks": [
+    {
+      "task_key": "run_reference",
+      "spark_python_task": {
+        "python_file": "dbfs:/Repos/your-repo/tools/lakeguard_driver.py",
+        "parameters": [
+          "--registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--layers", "reference",
+          "--window", "last_success"
+        ]
+      }
+    },
+    {
+      "task_key": "run_bronze",
+      "depends_on": [{"task_key": "run_reference"}],
+      "spark_python_task": {
+        "python_file": "dbfs:/Repos/your-repo/tools/lakeguard_driver.py",
+        "parameters": [
+          "--registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--layers", "bronze",
+          "--window", "last_success"
+        ]
+      }
+    },
+    {
+      "task_key": "run_silver",
+      "depends_on": [{"task_key": "run_bronze"}],
+      "spark_python_task": {
+        "python_file": "dbfs:/Repos/your-repo/tools/lakeguard_driver.py",
+        "parameters": [
+          "--registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--layers", "silver",
+          "--window", "last_success"
+        ]
+      }
+    },
+    {
+      "task_key": "run_gold",
+      "depends_on": [{"task_key": "run_silver"}],
+      "spark_python_task": {
+        "python_file": "dbfs:/Repos/your-repo/tools/lakeguard_driver.py",
+        "parameters": [
+          "--registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/_registry.yaml",
+          "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+          "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+          "--layers", "gold",
+          "--window", "last_success"
+        ]
+      }
+    }
+  ]
+}

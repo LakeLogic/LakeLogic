@@ -1,0 +1,16 @@
+entries:
+- entity: policies
+  enabled: true
+  contracts:
+    bronze: policy_admin/bronze/bronze_policy_admin_policies_v1.yaml
+    silver: policy_admin/silver/silver_policies_v1.yaml
+- entity: claims
+  enabled: true
+  contracts:
+    bronze: claims_system/bronze/bronze_claims_claims_v1.yaml
+    silver: claims_system/silver/silver_claims_v1.yaml
+- entity: payments
+  enabled: true
+  contracts:
+    bronze: billing/bronze/bronze_billing_payments_v1.yaml
+    silver: billing/silver/silver_payments_v1.yaml

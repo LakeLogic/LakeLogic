@@ -43,6 +43,7 @@ nav:
   - Playground: playground.md
   - Ingestion & Cloud: ingestion.md
   - Deployment Patterns: deployment_patterns.md
+  - Job Templates: job_templates.md
   - Monitoring & Observability:
       - Overview: observability.md
       - Lineage & Reconciliation: reconciliation.md
@@ -56,6 +57,7 @@ nav:
   - Examples:
       - Customer Onboarding: examples/customer_onboarding.md
       - Ingestion (Bronze): examples/ingestion.md
+      - Insurance ELT: examples/insurance_elt.md
       - External Gold Logic: examples/external_logic.md
       - Sales Gold (Facts): examples/sales_gold.md
       - Fact Table Patterns: examples/fact_patterns.md

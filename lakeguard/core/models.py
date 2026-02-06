@@ -31,6 +31,16 @@ class Environment(BaseModel):
     path: str
     format: Optional[str] = None
 
+class SourceConfig(BaseModel):
+    """Source acquisition settings for landing/stream/table inputs."""
+    type: str  # landing | stream | table
+    path: Optional[str] = None
+    load_mode: str = "full"  # full | incremental | cdc
+    pattern: Optional[str] = None
+    watermark_field: Optional[str] = None
+    cdc_op_field: Optional[str] = None
+    cdc_delete_values: List[str] = Field(default_factory=list)
+
 class SchemaPolicy(BaseModel):
     """Schema enforcement rules for unknown and evolving fields."""
     evolution: str = "strict" # strict, compatible, allow
@@ -290,6 +300,7 @@ class DataContract(BaseModel):
     info: Optional[Info] = None
     metadata: Dict[str, Any] = Field(default_factory=dict) # For generic tagging (status, classification)
     server: Optional[Server] = None
+    source: Optional[SourceConfig] = None
     environments: Dict[str, Environment] = Field(default_factory=dict)
     links: List[Link] = Field(default_factory=list)
     

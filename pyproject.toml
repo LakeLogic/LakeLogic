@@ -61,6 +61,7 @@ all = [
 
 [project.scripts]
 lakeguard = "lakeguard.cli.main:app"
+lakeguard-driver = "lakeguard.cli.driver:main"
 
 [build-system]
 requires = ["hatchling"]

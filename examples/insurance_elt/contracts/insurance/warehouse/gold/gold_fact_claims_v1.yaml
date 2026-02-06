@@ -1,0 +1,103 @@
+version: 1.0.0
+info:
+  title: Gold Fact Claims
+  version: 1.0.0
+  description: Conformed claims fact table for analytics.
+  owner: Analytics Engineering
+  status: active
+  classification: Financial
+metadata:
+  run_log_path: ../../../../output/run_logs/gold_fact_claims.json
+  run_log_table: lakeguard.run_logs
+  run_log_backend: duckdb
+  run_log_database: ../../../../output/run_logs/lakeguard_run_logs.duckdb
+server:
+  type: local
+  path: ../../../../output/silver/claims.parquet
+  format: parquet
+environments:
+  dev:
+    path: ../../../../output/silver/claims.parquet
+    format: parquet
+links:
+- name: silver_policies
+  type: parquet
+  path: ../../../../output/silver/policies.parquet
+- name: silver_payments
+  type: parquet
+  path: ../../../../output/silver/payments.parquet
+dataset: gold_fact_claims
+primary_key:
+- claim_id
+model:
+  fields:
+  - name: claim_id
+    type: string
+    required: true
+  - name: policy_id
+    type: string
+  - name: claim_number
+    type: string
+  - name: claim_date
+    type: date
+  - name: claim_amount
+    type: double
+  - name: claim_status
+    type: string
+  - name: status_group
+    type: string
+  - name: policy_status
+    type: string
+  - name: coverage_type
+    type: string
+  - name: premium_amount
+    type: double
+  - name: last_payment_amount
+    type: double
+  - name: loss_ratio
+    type: double
+transformations:
+- sql: "SELECT\n  c.claim_id,\n  c.policy_id,\n  c.claim_number,\n  c.claim_date,\n\
+    \  c.claim_amount,\n  c.claim_status,\n  c.status_group,\n  p.policy_status,\n\
+    \  p.coverage_type,\n  p.premium_amount,\n  pay.last_payment_amount,\n  CASE WHEN\
+    \ p.premium_amount > 0 THEN c.claim_amount / p.premium_amount ELSE NULL END AS\
+    \ loss_ratio\nFROM source c\nLEFT JOIN silver_policies p ON c.policy_id = p.policy_id\n\
+    LEFT JOIN (\n  SELECT policy_id, MAX(payment_amount) AS last_payment_amount\n\
+    \  FROM silver_payments\n  GROUP BY policy_id\n) pay ON c.policy_id = pay.policy_id\n"
+  phase: post
+quality:
+  row_rules:
+  - not_null: claim_id
+  dataset_rules:
+  - unique: claim_id
+service_levels:
+  availability:
+    description: Claims gold should be >= 99% available daily
+    threshold: 99.0
+lineage:
+  enabled: true
+materialization:
+  strategy: overwrite
+  target_path: ../../../../output/gold/fact_claims
+  format: parquet
+quarantine:
+  enabled: true
+  strict_notifications: false
+  include_error_reason: true
+  target: ../../../../output/quarantine/fact_claims
+  notifications:
+  - type: webhook
+    target: env:LAKEGUARD_ALERT_WEBHOOK
+    on_events:
+    - quarantine
+    - failure
+source:
+  type: landing
+  path: ../../../../output/silver
+  load_mode: incremental
+  pattern: claims*.parquet
+  watermark_field: updated_at
+upstream:
+- silver_claims
+- silver_policies
+- silver_payments

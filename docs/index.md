@@ -60,6 +60,7 @@ This keeps your business logic portable whether you are running locally, on **Az
 - **Containerized Pipelines (AKS/ACA)**: Run millions of checks per second in lightweight Python pods.
 - **Data Mesh**: Enforce contracts between decentralized domain teams (Finance, Marketing, HR).
 - **Multi-Engine Migration**: Move logic from **Synapse** to **Fabric** or **Databricks** without rewriting rules.
+- **Job Templates**: Ready-to-run orchestrator examples for **Airflow**, **Databricks**, **Synapse**, **Fabric**, and **AWS**.
 - **Streaming Gates**: Validate micro-batches before they hit your Delta/Iceberg tables.
 
 ## Quick Start
@@ -88,6 +89,7 @@ LakeGuard turns your Data Contract from passive documentation into a **living se
 
 - [Customer Onboarding Example](examples/customer_onboarding.md)
 - [Bronze Ingestion Example](examples/ingestion.md)
+- [Insurance ELT (End-to-End)](examples/insurance_elt.md)
 - [External Gold Logic Example](examples/external_logic.md)
 - [Sales Gold Example](examples/sales_gold.md)
 - [Fact Pattern Examples](examples/fact_patterns.md)

@@ -1,0 +1,51 @@
+version: 1.0.0
+info:
+  title: Reference Claim Status (Silver)
+  version: 1.0.0
+  description: Claim status reference.
+  owner: Shared Reference Data
+  status: active
+  classification: Public
+metadata:
+  run_log_path: ../../../../output/run_logs/ref_claim_status.json
+  run_log_table: lakeguard.run_logs
+  run_log_backend: duckdb
+  run_log_database: ../../../../output/run_logs/lakeguard_run_logs.duckdb
+server:
+  type: local
+  path: ../../../../data/reference/claim_status.csv
+  format: csv
+environments:
+  dev:
+    path: ../../../../data/reference/claim_status.csv
+    format: csv
+dataset: silver_reference_claim_status
+primary_key:
+- claim_status
+model:
+  fields:
+  - name: claim_status
+    type: string
+    required: true
+  - name: status_group
+    type: string
+quality:
+  row_rules:
+  - not_null: claim_status
+  dataset_rules:
+  - unique: claim_status
+lineage:
+  enabled: true
+materialization:
+  strategy: overwrite
+  target_path: ../../../../output/silver/reference_claim_status
+  format: parquet
+quarantine:
+  enabled: true
+  include_error_reason: true
+  target: ../../../../output/quarantine/reference_claim_status
+source:
+  type: landing
+  path: ../../../../data/reference
+  load_mode: full
+  pattern: claim_status*.csv

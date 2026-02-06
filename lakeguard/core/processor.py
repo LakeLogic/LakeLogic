@@ -1,4 +1,5 @@
 import yaml
+import re
 import os
 import sys
 from typing import Any, Tuple, Union, Dict, Optional
@@ -115,9 +116,29 @@ class DataProcessor:
         path = Path(contract)
         if not path.exists():
             raise FileNotFoundError(f"Contract file not found: {path}")
-        
+
+        def _load_yaml_no_on_bool(handle):
+            """
+            Load YAML without treating 'on/off/yes/no' as booleans.
+            Keeps true/false boolean parsing intact.
+            """
+            class Loader(yaml.SafeLoader):
+                pass
+
+            # Remove default bool resolver
+            for key, mappings in list(Loader.yaml_implicit_resolvers.items()):
+                Loader.yaml_implicit_resolvers[key] = [
+                    (tag, regex) for tag, regex in mappings if tag != "tag:yaml.org,2002:bool"
+                ]
+
+            # Re-add bool resolver for true/false only
+            bool_regex = re.compile(r"^(?:true|false)$", re.IGNORECASE)
+            Loader.add_implicit_resolver("tag:yaml.org,2002:bool", bool_regex, list("tTfF"))
+
+            return yaml.load(handle, Loader=Loader)
+
         with open(path, "r") as f:
-            data = yaml.safe_load(f)
+            data = _load_yaml_no_on_bool(f)
             contract = DataContract(**data)
             try:
                 contract._base_path = path.parent
@@ -248,6 +269,10 @@ class DataProcessor:
         elif self.engine_name == "spark":
             from pyspark.sql import SparkSession
             spark = SparkSession.builder.getOrCreate()
+            if path.startswith("table:"):
+                table_name = path[6:]
+                df = spark.table(table_name)
+                return self.run(df, source_path=table_name)
             fmt = None
             if path.endswith(".csv"):
                 fmt = "csv"

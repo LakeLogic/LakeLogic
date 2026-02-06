@@ -1,0 +1,103 @@
+version: 1.0.0
+info:
+  title: Claims System CDC (Bronze)
+  version: 1.0.0
+  description: CDC feed from Claims system.
+  owner: Claims Data Team
+  status: active
+  classification: PII
+metadata:
+  run_log_path: ../../../../output/run_logs/claims_bronze.json
+  run_log_table: lakeguard.run_logs
+  run_log_backend: duckdb
+  run_log_database: ../../../../output/run_logs/lakeguard_run_logs.duckdb
+server:
+  type: local
+  path: ../../../../data/bronze/claims_cdc.csv
+  format: csv
+  mode: ingest
+  schema_evolution: strict
+  allow_schema_drift: false
+environments:
+  dev:
+    path: ../../../../data/bronze/claims_cdc.csv
+    format: csv
+dataset: bronze_claims
+primary_key:
+- claim_id
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+model:
+  fields:
+  - name: claim_id
+    type: string
+    required: true
+  - name: policy_id
+    type: string
+    required: true
+  - name: claim_number
+    type: string
+  - name: claim_date
+    type: date
+  - name: claim_amount
+    type: double
+  - name: claim_status
+    type: string
+  - name: loss_cause
+    type: string
+  - name: updated_at
+    type: timestamp
+  - name: op
+    type: string
+transformations:
+- filter:
+    sql: op <> 'D'
+  phase: pre
+- deduplicate:
+    on:
+    - claim_id
+    sort_by:
+    - updated_at
+    order: desc
+  phase: pre
+quality:
+  row_rules:
+  - not_null: claim_id
+  - accepted_values:
+      field: op
+      values:
+      - I
+      - U
+      - D
+  - regex_match:
+      field: claim_number
+      pattern: ^CL-\d+$
+  dataset_rules:
+  - unique: claim_id
+lineage:
+  enabled: true
+materialization:
+  strategy: append
+  target_path: ../../../../output/bronze/claims
+  format: parquet
+quarantine:
+  enabled: true
+  strict_notifications: false
+  include_error_reason: true
+  target: ../../../../output/quarantine/claims
+  notifications:
+  - type: webhook
+    target: env:LAKEGUARD_ALERT_WEBHOOK
+    on_events:
+    - quarantine
+    - failure
+source:
+  type: landing
+  path: ../../../../data/bronze
+  load_mode: cdc
+  pattern: claims_cdc*.csv
+  watermark_field: updated_at
+  cdc_op_field: op
+  cdc_delete_values:
+  - D

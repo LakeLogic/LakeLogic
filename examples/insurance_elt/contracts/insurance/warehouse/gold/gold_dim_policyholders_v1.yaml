@@ -1,0 +1,90 @@
+version: 1.0.0
+info:
+  title: Gold Dim Policyholders
+  version: 1.0.0
+  description: Conformed policyholder dimension for analytics.
+  owner: Analytics Engineering
+  status: active
+  classification: PII
+metadata:
+  run_log_path: ../../../../output/run_logs/gold_dim_policyholders.json
+  run_log_table: lakeguard.run_logs
+  run_log_backend: duckdb
+  run_log_database: ../../../../output/run_logs/lakeguard_run_logs.duckdb
+server:
+  type: local
+  path: ../../../../output/silver/policies.parquet
+  format: parquet
+environments:
+  dev:
+    path: ../../../../output/silver/policies.parquet
+    format: parquet
+links:
+- name: ref_policyholders
+  type: parquet
+  path: ../../../../output/silver/reference_policyholders.parquet
+- name: ref_states
+  type: parquet
+  path: ../../../../output/silver/reference_states.parquet
+dataset: gold_dim_policyholders
+primary_key:
+- customer_id
+model:
+  fields:
+  - name: customer_id
+    type: integer
+    required: true
+  - name: policyholder_name
+    type: string
+  - name: email
+    type: string
+  - name: phone
+    type: string
+  - name: date_of_birth
+    type: date
+  - name: state_code
+    type: string
+  - name: state_name
+    type: string
+  - name: region
+    type: string
+  - name: active_policy_count
+    type: integer
+transformations:
+- sql: "SELECT\n  p.customer_id,\n  ph.first_name || ' ' || ph.last_name AS policyholder_name,\n\
+    \  ph.email,\n  ph.phone,\n  ph.date_of_birth,\n  ph.state_code,\n  st.state_name,\n\
+    \  st.region,\n  COUNT(CASE WHEN p.policy_status = 'ACTIVE' THEN 1 END) AS active_policy_count\n\
+    FROM source p\nLEFT JOIN ref_policyholders ph ON p.customer_id = ph.customer_id\n\
+    LEFT JOIN ref_states st ON ph.state_code = st.state_code\nGROUP BY 1,2,3,4,5,6,7,8\n"
+  phase: post
+quality:
+  row_rules:
+  - not_null: customer_id
+  dataset_rules:
+  - unique: customer_id
+lineage:
+  enabled: true
+materialization:
+  strategy: overwrite
+  target_path: ../../../../output/gold/dim_policyholders
+  format: parquet
+quarantine:
+  enabled: true
+  strict_notifications: false
+  include_error_reason: true
+  target: ../../../../output/quarantine/dim_policyholders
+  notifications:
+  - type: webhook
+    target: env:LAKEGUARD_ALERT_WEBHOOK
+    on_events:
+    - quarantine
+    - failure
+source:
+  type: landing
+  path: ../../../../output/silver
+  load_mode: incremental
+  pattern: policies*.parquet
+  watermark_field: updated_at
+upstream:
+- silver_policies
+- silver_reference_states

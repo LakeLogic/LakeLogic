@@ -50,6 +50,7 @@ Use a YAML file or a dict. Key sections:
 - `transformations` structured helpers: rename, derive, lookup, filter, deduplicate, select, drop, cast, trim, lower, upper, coalesce, split, explode, map_values, join
 - `links`: reference datasets (file path or table name)
 - `links[].broadcast`: Spark-only hint to broadcast small lookup tables
+- `source`: ingestion metadata for pipelines (`type`, `path`, `load_mode`, `pattern`, `watermark_field`, `cdc_op_field`, `cdc_delete_values`)
 - `quarantine`: quarantine settings + notifications (supports file paths or `table:` targets)
 - `lineage`: lineage injection settings (`enabled`, source path, timestamp, run id)
 - `materialization`: append/merge/scd2/overwrite + partitioning (CSV/Parquet locally, Delta/Iceberg on Spark)
