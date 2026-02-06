@@ -86,7 +86,16 @@ In practice, this lets you run all Bronze contracts in parallel, then all Silver
 - Orchestrators handle task-level parallelism.
 - LakeGuard engines are multi-threaded by default (Polars and DuckDB) so each task is efficient.
 
-## 4. Gating Rules (When to Block Downstream)
+## 4. Missing Upstreams and Log Tables
+
+When `--window last_success` is used, LakeGuard checks the run log table for upstream freshness.
+
+- **Missing log table/entry**: The driver logs a warning and falls back to a full load.
+- **Missing upstream**: The driver skips the downstream contract and records the reason in the run summary.
+
+This keeps pipelines safe by default without silently producing stale Gold data.
+
+## 5. Gating Rules (When to Block Downstream)
 
 Common policy:
 
@@ -96,7 +105,7 @@ Common policy:
 
 Use the run log table to enforce this logic in your orchestrator.
 
-## 5. Example Orchestrator Flow (Pseudo)
+## 6. Example Orchestrator Flow (Pseudo)
 
 ```text
 registry = load_all_contracts("contracts/")
@@ -111,3 +120,8 @@ for node in topo_sort(DAG):
 You can implement this flow in Airflow, Dagster, Prefect, or any workflow engine you already use.
 
 See `Job Templates` for concrete examples across Databricks, Synapse, Fabric, AWS, and more.
+
+## 7. Run Summaries
+
+Use `--summary-path` to write a JSON file with per-run metrics and per-contract statuses.
+This is useful for dashboards, alerting, and audit trails.

@@ -82,11 +82,64 @@ metadata:
 LakeGuard will create the table if it doesn't exist and append a new run record on every execution.
 For Unity Catalog or other Lakehouse catalogs, run with the Spark engine.
 
+### Pipeline Summary Tables
+If you orchestrate with `lakeguard-driver`, you can emit a single summary row per pipeline run:
+
+```bash
+lakeguard-driver \
+  --registry contracts/_registry.yaml \
+  --summary-table main.governance.lakeguard_pipeline_runs \
+  --summary-backend spark
+```
+
+This writes aggregate metrics like `successful`, `failed`, and `skipped_missing_upstream`, plus a JSON payload
+containing the full per-contract run list.
+
+You can also write pipeline summaries to Snowflake/BigQuery by setting:
+
+```
+--summary-backend snowflake
+```
+
+or
+
+```
+--summary-backend bigquery
+```
+
+Snowflake uses `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`, `SNOWFLAKE_ROLE`.
+BigQuery uses `BIGQUERY_PROJECT` or `GOOGLE_CLOUD_PROJECT` plus standard Google credentials.
+Summary table writes require the Snowflake or BigQuery Python clients installed.
+Snowflake/BigQuery summary tables will be created if missing and schema is extended when new columns appear.
+
+### Metrics Export
+For lightweight monitoring, export pipeline metrics as JSON or StatsD gauges:
+
+```bash
+lakeguard-driver \
+  --registry contracts/_registry.yaml \
+  --metrics-path logs/pipeline_metrics.json \
+  --metrics-backend statsd \
+  --metrics-host 127.0.0.1 \
+  --metrics-port 8125 \
+  --metrics-tags env=prod,team=data
+```
+For Prometheus scraping, start the driver with:
+
+```bash
+lakeguard-driver \
+  --registry contracts/_registry.yaml \
+  --metrics-backend prometheus \
+  --metrics-host 0.0.0.0 \
+  --metrics-port 9100
+```
+
 ### Example Run Log (JSON)
 
 ```json
 {
   "run_id": "3c2b6e1e-8b4a-4c2e-9b71-9a6d6f9c7b2a",
+  "pipeline_run_id": "f4f86bb1d6ad4a7a8db74ea95aa324e5",
   "timestamp": "2026-02-05T12:34:56.789+00:00",
   "engine": "polars",
   "contract": "Customer Master Data",
@@ -130,6 +183,7 @@ The table backend stores the same information in columnar form for analytics and
 | Column | Example |
 | --- | --- |
 | run_id | 3c2b6e1e-8b4a-4c2e-9b71-9a6d6f9c7b2a |
+| pipeline_run_id | f4f86bb1d6ad4a7a8db74ea95aa324e5 |
 | timestamp | 2026-02-05T12:34:56.789+00:00 |
 | engine | polars |
 | contract | Customer Master Data |

@@ -17,6 +17,7 @@ graph LR
 - [Quickstart](quickstart.md)
 - [Starter Kit](starter_kit.md)
 - [CLI Usage](cli.md)
+- [Pipeline Driver](driver.md)
 - [How It Works](concepts.md)
 - [Playbooks Overview](playbooks.md)
 - [Capability Matrix](capabilities.md)
@@ -52,6 +53,8 @@ This keeps your business logic portable whether you are running locally, on **Az
 - **Materialization**: Write validated data to local CSV/Parquet targets or Delta/Iceberg when running on Spark.
 - **Lock-in Friendly Defaults**: Quarantine writes default to Parquet files and Iceberg tables, with explicit overrides for Delta, CSV, or JSON.
 - **SQL-First Rules**: Use standard SQL for Completeness, Correctness, and Consistency checks.
+- **Registry-Driven Orchestration**: A generic driver runs Bronze → Silver → Gold from registries with parallelism, incremental windows, and reprocessing.
+- **Operational Observability**: Per-run summaries, pipeline metrics, and optional Prometheus `/metrics` endpoint.
 - **Cross-Platform Governance**: Consistent enforcement across **Databricks**, **Fabric**, **Synapse** (Spark), plus Snowflake/BigQuery (table-only).
 - **External Logic Hooks**: Run dedicated Python modules or notebooks for Gold processing when needed.
 
@@ -62,6 +65,7 @@ This keeps your business logic portable whether you are running locally, on **Az
 - **Multi-Engine Migration**: Move logic from **Synapse** to **Fabric** or **Databricks** without rewriting rules.
 - **Job Templates**: Ready-to-run orchestrator examples for **Airflow**, **Databricks**, **Synapse**, **Fabric**, and **AWS**.
 - **Streaming Gates**: Validate micro-batches before they hit your Delta/Iceberg tables.
+- **Production ELT Runs**: Use the registry driver for controlled incremental windows, safe reprocessing, and auditable run logs.
 
 ## Quick Start
 

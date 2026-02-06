@@ -12,7 +12,11 @@
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "reference",
-          "--WINDOW": "last_success"
+          "--WINDOW": "last_success",
+          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_BACKEND": "duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },
       "Next": "RunBronze"
@@ -27,7 +31,11 @@
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "bronze",
-          "--WINDOW": "last_success"
+          "--WINDOW": "last_success",
+          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_BACKEND": "duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },
       "Next": "RunSilver"
@@ -42,7 +50,11 @@
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "silver",
-          "--WINDOW": "last_success"
+          "--WINDOW": "last_success",
+          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_BACKEND": "duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },
       "Next": "RunGold"
@@ -57,7 +69,11 @@
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "gold",
-          "--WINDOW": "last_success"
+          "--WINDOW": "last_success",
+          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_BACKEND": "duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },
       "End": true

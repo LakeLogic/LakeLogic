@@ -51,3 +51,23 @@ lakeguard-driver \
   --layers reference,bronze,silver,gold \
   --window last_success
 ```
+
+### Driver Options (Highlights)
+
+- `--summary-path`: Write a per-run summary JSON (metrics + per-contract status).
+- `--summary-table`: Write a pipeline summary row to a table backend.
+- `--summary-backend`: `spark`, `duckdb`, `sqlite`, `snowflake`, or `bigquery` for summary tables (Snowflake/BigQuery use environment credentials).
+- `--summary-database`: Database path for `duckdb/sqlite` summary tables.
+- `--summary-table-format`: Spark table format (default `delta`).
+- `--summary-merge-on-run-id` / `--no-summary-merge-on-run-id`: Control Spark summary upserts.
+- `--metrics-path`: Write a metrics JSON payload for monitoring.
+- `--metrics-backend`: `statsd` or `prometheus`.
+- `--metrics-host`: StatsD host or Prometheus bind host (default `127.0.0.1` for StatsD, `0.0.0.0` for Prometheus).
+- `--metrics-port`: StatsD port (default `8125`) or Prometheus port (default `9100`).
+- `--metrics-prefix`: StatsD metric prefix (default `lakeguard`).
+- `--metrics-tags`: Comma-separated tags, e.g. `env=prod,team=data`.
+- `--continue-on-error`: Keep running other contracts even if one fails.
+- `--window range --window-start-date YYYY-MM-DD --window-end-date YYYY-MM-DD`: Explicit window.
+- `--reprocess-date` or `--reprocess-start-date/--reprocess-end-date`: Late-arriving data replay.
+- `--entities`: Run only specific entities without editing the registry.
+- `--contracts`: Run specific contract paths directly.

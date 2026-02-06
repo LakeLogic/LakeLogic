@@ -21,13 +21,20 @@ class DataProcessor:
     processing to the appropriate engine adapter.
     """
 
-    def __init__(self, contract: Union[str, Path, dict, DataContract], engine: Optional[str] = None):
+    def __init__(
+        self,
+        contract: Union[str, Path, dict, DataContract],
+        engine: Optional[str] = None,
+        *,
+        pipeline_run_id: Optional[str] = None,
+    ):
         """
         Initialize the DataProcessor.
         
         Args:
             contract: The Data Contract definition (path to YAML, dict, or DataContract object).
             engine: The execution engine to use. If None, it uses the auto-discovery logic.
+            pipeline_run_id: Optional pipeline-level run id for correlation across contracts.
         """
         self.engine_name = (engine or self._discover_engine()).lower()
         self.contract = self._load_contract(contract)
@@ -35,6 +42,7 @@ class DataProcessor:
         self.adapter.engine_name = self.engine_name
         self.last_report: Optional[Dict[str, Any]] = None
         self.last_run_id: Optional[str] = None
+        self.pipeline_run_id: Optional[str] = pipeline_run_id
         self.last_source_path: Optional[str] = None
 
     def _discover_engine(self) -> str:
@@ -410,6 +418,7 @@ class DataProcessor:
         """
         return {
             "run_id": self.last_run_id,
+            "pipeline_run_id": self.pipeline_run_id,
             "engine": self.engine_name,
             "contract": contract_title,
             "source_path": self.last_source_path,

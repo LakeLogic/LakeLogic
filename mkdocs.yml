@@ -63,6 +63,7 @@ nav:
       - Fact Table Patterns: examples/fact_patterns.md
   - Reference:
       - CLI: cli.md
+      - Driver: driver.md
       - API: api.md
       - Capability Matrix: capabilities.md
       - Warehouse Adapters: warehouse_adapters.md

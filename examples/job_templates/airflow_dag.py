@@ -21,7 +21,11 @@ with DAG(
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers reference "
-            "--window last_success"
+            "--window last_success "
+            "--summary-table lakeguard.pipeline_runs "
+            "--summary-backend duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )
 
@@ -33,7 +37,11 @@ with DAG(
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers bronze "
-            "--window last_success"
+            "--window last_success "
+            "--summary-table lakeguard.pipeline_runs "
+            "--summary-backend duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )
 
@@ -45,7 +53,11 @@ with DAG(
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers silver "
-            "--window last_success"
+            "--window last_success "
+            "--summary-table lakeguard.pipeline_runs "
+            "--summary-backend duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )
 
@@ -57,7 +69,11 @@ with DAG(
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers gold "
-            "--window last_success"
+            "--window last_success "
+            "--summary-table lakeguard.pipeline_runs "
+            "--summary-backend duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )
 

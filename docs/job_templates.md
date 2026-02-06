@@ -3,6 +3,16 @@
 These templates show how to call `lakeguard-driver` in major orchestrators.
 Update paths, credentials, and schedules to match your environment.
 
+## State & Scheduling Notes
+
+- Use your orchestrator for schedules, retries, and alerting.
+- Set `--window last_success` to pick up where the prior run left off (uses run log tables).
+- Add `--summary-path` to emit a per-run JSON summary that you can archive or parse into metrics.
+- Add `--summary-table` with `--summary-backend` to write run summaries into a table for dashboards (Spark, Snowflake, BigQuery, DuckDB, SQLite).
+- Add `--metrics-path` for a lightweight metrics payload or `--metrics-backend statsd` for real-time monitoring.
+- Use `--metrics-backend prometheus` to expose a `/metrics` endpoint for scraping.
+- Use `--continue-on-error` if you want a best-effort run that reports all failures in one pass.
+
 ## Airflow
 
 File: `examples/job_templates/airflow_dag.py`

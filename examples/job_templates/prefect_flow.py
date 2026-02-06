@@ -14,6 +14,10 @@ def run_layer(layer: str) -> None:
         "--gold-registry", GOLD_REGISTRY,
         "--layers", layer,
         "--window", "last_success",
+        "--summary-table", "lakeguard.pipeline_runs",
+        "--summary-backend", "duckdb",
+        "--summary-database", "examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+        "--metrics-path", "examples/insurance_elt/output/run_logs/pipeline_metrics.json",
     ]
     subprocess.run(cmd, check=True)
 

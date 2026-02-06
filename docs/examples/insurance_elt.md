@@ -88,6 +88,36 @@ Spark can use the same driver by switching engines.
 When `--window last_success` is used, the driver consults `metadata.run_log_table`. If no log table exists or no entry is found, a full load is performed before incremental loads.
 For the insurance example, the run log table uses DuckDB, so ensure `duckdb` is installed if you want `last_success` to work.
 
+### Observability Outputs (Summary + Metrics)
+
+Write a pipeline summary row to a table and emit metrics:
+
+```bash
+lakeguard-driver \
+  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --layers reference,bronze,silver,gold \
+  --window last_success \
+  --summary-table lakeguard.pipeline_runs \
+  --summary-backend duckdb \
+  --summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb \
+  --metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json
+```
+
+For Prometheus scraping, expose `/metrics`:
+
+```bash
+lakeguard-driver \
+  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --layers reference,bronze,silver,gold \
+  --metrics-backend prometheus \
+  --metrics-host 0.0.0.0 \
+  --metrics-port 9100
+```
+
 To run only specific entities without editing registries:
 
 ```bash
@@ -122,6 +152,19 @@ lakeguard-driver \
   --window range \
   --window-start-date 2026-02-01 \
   --window-end-date 2026-02-05
+```
+
+### Incremental Windows with Dated Files
+
+The bronze contracts use filename patterns like `claims_cdc*.csv`. If filenames include a date
+(for example `claims_cdc_2026-02-05.csv`), the driver will pick files within the requested window.
+
+Example:
+
+```
+examples/insurance_elt/data/bronze/
+  claims_cdc_2026-02-05.csv
+  claims_cdc_2026-02-06.csv
 ```
 
 ## Features Demonstrated

@@ -934,6 +934,7 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "run_id": report.get("run_id"),
+        "pipeline_run_id": report.get("pipeline_run_id"),
         "timestamp": report.get("timestamp"),
         "engine": report.get("engine"),
         "contract": report.get("contract"),
@@ -1017,6 +1018,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         table_format = metadata.get("run_log_table_format") or "delta"
 
         if spark.catalog.tableExists(table_name):
+            try:
+                existing_cols = set(spark.table(table_name).columns)
+                if "pipeline_run_id" not in existing_cols:
+                    spark.sql(f"ALTER TABLE {table_name} ADD COLUMNS (pipeline_run_id STRING)")
+            except Exception as exc:
+                logger.warning(f"Failed to align run log table schema for {table_name}: {exc}")
             if merge_on_run_id:
                 view_name = f"lakeguard_run_log_updates_{uuid4().hex}"
                 df.createOrReplaceTempView(view_name)
@@ -1072,6 +1079,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         con.execute(f"""
             CREATE TABLE IF NOT EXISTS {full_table} (
                 run_id VARCHAR,
+                pipeline_run_id VARCHAR,
                 timestamp VARCHAR,
                 engine VARCHAR,
                 contract VARCHAR,
@@ -1092,10 +1100,38 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 report_json VARCHAR
             )
         """)
+        try:
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS pipeline_run_id VARCHAR")
+        except Exception:
+            pass
         con.execute(
-            f"INSERT INTO {full_table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"""
+            INSERT INTO {full_table} (
+                run_id,
+                pipeline_run_id,
+                timestamp,
+                engine,
+                contract,
+                source_path,
+                counts_total,
+                counts_good,
+                counts_quarantined,
+                quarantine_ratio,
+                freshness_seconds,
+                freshness_pass,
+                freshness_threshold_seconds,
+                availability_ratio,
+                availability_pass,
+                availability_threshold,
+                dataset_rules_json,
+                row_rule_failures_json,
+                schema_drift_json,
+                report_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             [
                 record["run_id"],
+                record["pipeline_run_id"],
                 record["timestamp"],
                 record["engine"],
                 record["contract"],
@@ -1133,6 +1169,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         con.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 run_id TEXT,
+                pipeline_run_id TEXT,
                 timestamp TEXT,
                 engine TEXT,
                 contract TEXT,
@@ -1153,10 +1190,40 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 report_json TEXT
             )
         """)
+        try:
+            cols = [row[1] for row in con.execute(f"PRAGMA table_info({table_name})").fetchall()]
+            if "pipeline_run_id" not in cols:
+                con.execute(f"ALTER TABLE {table_name} ADD COLUMN pipeline_run_id TEXT")
+        except Exception:
+            pass
         con.execute(
-            f"INSERT INTO {table_name} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"""
+            INSERT INTO {table_name} (
+                run_id,
+                pipeline_run_id,
+                timestamp,
+                engine,
+                contract,
+                source_path,
+                counts_total,
+                counts_good,
+                counts_quarantined,
+                quarantine_ratio,
+                freshness_seconds,
+                freshness_pass,
+                freshness_threshold_seconds,
+                availability_ratio,
+                availability_pass,
+                availability_threshold,
+                dataset_rules_json,
+                row_rule_failures_json,
+                schema_drift_json,
+                report_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             [
                 record["run_id"],
+                record["pipeline_run_id"],
                 record["timestamp"],
                 record["engine"],
                 record["contract"],

@@ -10,7 +10,11 @@
           "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--layers", "reference",
-          "--window", "last_success"
+          "--window", "last_success",
+          "--summary-table", "lakeguard.pipeline_runs",
+          "--summary-backend", "duckdb",
+          "--summary-database", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--metrics-path", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ]
       }
     },
@@ -24,7 +28,11 @@
           "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--layers", "bronze",
-          "--window", "last_success"
+          "--window", "last_success",
+          "--summary-table", "lakeguard.pipeline_runs",
+          "--summary-backend", "duckdb",
+          "--summary-database", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--metrics-path", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ]
       }
     },
@@ -38,7 +46,11 @@
           "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--layers", "silver",
-          "--window", "last_success"
+          "--window", "last_success",
+          "--summary-table", "lakeguard.pipeline_runs",
+          "--summary-backend", "duckdb",
+          "--summary-database", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--metrics-path", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ]
       }
     },
@@ -52,7 +64,11 @@
           "--reference-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--gold-registry", "dbfs:/Repos/your-repo/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--layers", "gold",
-          "--window", "last_success"
+          "--window", "last_success",
+          "--summary-table", "lakeguard.pipeline_runs",
+          "--summary-backend", "duckdb",
+          "--summary-database", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--metrics-path", "dbfs:/Repos/your-repo/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ]
       }
     }
