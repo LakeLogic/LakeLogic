@@ -1,4 +1,4 @@
-site_name: LakeGuard 🛡️
+site_name: LakeGuard
 site_description: Consistent Data Contracts across Polars, Pandas, DuckDB, and Spark.
 site_url: https://your-username.github.io/lakeguard
 
@@ -64,6 +64,7 @@ nav:
   - Reference:
       - CLI: cli.md
       - Driver: driver.md
+      - Bootstrap: bootstrap.md
       - API: api.md
       - Capability Matrix: capabilities.md
       - Warehouse Adapters: warehouse_adapters.md

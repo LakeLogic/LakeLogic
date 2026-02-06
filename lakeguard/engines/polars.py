@@ -9,6 +9,7 @@ class PolarsAdapter(EngineAdapter):
     Polars execution engine for LakeGuard.
     Supports row-level validation, aggregate metrics, and SQL-first transformations.
     """
+    _link_cache: Dict[str, pl.LazyFrame] = {}
 
     def _get_context(self, source_lf: pl.LazyFrame) -> pl.SQLContext:
         """
@@ -55,6 +56,16 @@ class PolarsAdapter(EngineAdapter):
                     logger.warning(f"Link file not found: {path}")
                     continue
 
+                cache_enabled = False
+                try:
+                    cache_enabled = bool(self.contract.metadata.get("cache_reference_links"))
+                except Exception:
+                    cache_enabled = False
+                cache_key = f"{link.name}:{path}"
+                if cache_enabled and cache_key in self._link_cache:
+                    ctx.register(link.name, self._link_cache[cache_key])
+                    continue
+
                 if path.suffix.lower() == ".parquet":
                     link_lf = pl.read_parquet(path).lazy()
                 elif path.suffix.lower() == ".csv":
@@ -63,6 +74,8 @@ class PolarsAdapter(EngineAdapter):
                     logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
                     continue
 
+                if cache_enabled:
+                    self._link_cache[cache_key] = link_lf
                 ctx.register(link.name, link_lf)
             except Exception as e:
                 logger.warning(f"Could not register link {link.name}: {e}")

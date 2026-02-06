@@ -1,0 +1,14 @@
+name: baseline_bronze
+defaults:
+  schema_policy:
+    evolution: strict
+    unknown_fields: quarantine
+  quarantine:
+    enabled: true
+    include_error_reason: true
+  metadata:
+    approval_required: false
+bronze_defaults:
+  quality:
+    row_rules:
+      - not_null: policy_id

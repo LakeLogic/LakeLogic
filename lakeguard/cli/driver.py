@@ -9,15 +9,15 @@ import argparse
 import json
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
 from pathlib import Path
-from threading import Lock
-from typing import Dict, List, Optional, Tuple
+from threading import Lock, Thread
+from typing import Any, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 import yaml
 
@@ -286,6 +286,17 @@ class PipelineDriver:
         metrics_port: Optional[int] = None,
         metrics_prefix: Optional[str] = None,
         metrics_tags: Optional[Dict[str, str]] = None,
+        overrides: Optional[Dict[str, Any]] = None,
+        policy_pack: Optional[str] = None,
+        policy_pack_dir: Optional[Path] = None,
+        state_path: Optional[Path] = None,
+        resume: bool = False,
+        retries: int = 0,
+        retry_backoff: float = 1.0,
+        retry_max_delay: float = 60.0,
+        approval_required: bool = False,
+        approval_file: Optional[Path] = None,
+        cache_references: bool = False,
         fail_fast: bool = True,
     ) -> None:
         """
@@ -298,7 +309,7 @@ class PipelineDriver:
             fail_fast: Whether to stop on first error.
         """
         self.engine = engine
-        self.max_workers = max_workers
+        self.max_workers = self._resolve_max_workers(max_workers)
         self.loader = ContractLoader()
         self.completed_lock = Lock()
         self.completed: set[str] = set()
@@ -318,6 +329,17 @@ class PipelineDriver:
         self.metrics_snapshot: Dict[str, object] = {}
         self.prometheus_server: Optional[HTTPServer] = None
         self.prometheus_thread: Optional[Thread] = None
+        self.overrides = overrides or {}
+        self.policy_pack = policy_pack
+        self.policy_pack_dir = policy_pack_dir
+        self.state_path = state_path
+        self.resume = resume
+        self.retries = max(0, int(retries))
+        self.retry_backoff = max(0.1, float(retry_backoff))
+        self.retry_max_delay = max(1.0, float(retry_max_delay))
+        self.approval_required = approval_required
+        self.approval_file = approval_file
+        self.cache_references = cache_references
         self.fail_fast = fail_fast
         self.pipeline_run_id = uuid4().hex
         self.summary: Dict[str, object] = {
@@ -338,6 +360,7 @@ class PipelineDriver:
         }
         if (self.metrics_backend or "").lower() == "prometheus":
             self._start_prometheus_server()
+        self.state = self._load_state()
 
     def run(
         self,
@@ -490,6 +513,11 @@ class PipelineDriver:
             registry_index: Mapping of dataset to contract path.
         """
         dataset = contract.dataset or path.stem
+        run_key = self._state_key(dataset, stage, window)
+        if self.resume and self._state_completed(run_key):
+            logger.info(f"Skipping {dataset}: already completed in state.")
+            self._increment_metric("successful", 1)
+            return
         run_record = {
             "pipeline_run_id": self.pipeline_run_id,
             "dataset": dataset,
@@ -500,7 +528,7 @@ class PipelineDriver:
         }
         upstreams = contract.upstream or []
 
-        upstream_ok, upstream_details = self._upstreams_fresh(upstreams, registry_index, window)
+        upstream_ok, upstream_details = self._upstreams_fresh(contract, upstreams, registry_index, window)
         if not upstream_ok:
             detail_str = ", ".join(
                 f"{item['upstream']}({item['reason']})" for item in upstream_details
@@ -515,6 +543,13 @@ class PipelineDriver:
             return
 
         contract = self._prepare_contract_for_stage(contract, stage, reprocess)
+        contract = self._apply_policy_pack(contract, stage)
+        contract = self._apply_overrides(contract)
+        if self.cache_references:
+            try:
+                contract.metadata["cache_reference_links"] = True
+            except Exception:
+                pass
         sources, effective_window, window_reason = self._resolve_sources(contract, window)
         run_record["window"] = {
             "label": effective_window.label,
@@ -535,14 +570,16 @@ class PipelineDriver:
         try:
             for source in sources:
                 processor = DataProcessor(engine=self.engine, contract=contract, pipeline_run_id=self.pipeline_run_id)
-                good_df, bad_df = processor.run_source(source)
+                good_df, bad_df = self._execute_with_retries(processor, source)
                 processor.materialize(good_df, bad_df)
+                self._evaluate_approvals(processor.last_report, contract, dataset)
             self._record_success(dataset)
             run_record["status"] = "success"
             if effective_window.label == "full":
                 self._increment_metric("full_loads", 1)
                 logger.info(f"{dataset}: full load executed")
             self._increment_metric("successful", 1)
+            self._state_mark_completed(run_key)
         except Exception as exc:
             run_record["status"] = "failed"
             run_record["reason"] = str(exc)
@@ -646,6 +683,7 @@ class PipelineDriver:
 
     def _upstreams_fresh(
         self,
+        contract: DataContract,
         upstreams: List[str],
         registry_index: Dict[str, Path],
         window: Window
@@ -664,6 +702,16 @@ class PipelineDriver:
         if not upstreams:
             return True, []
 
+        metadata = contract.metadata or {}
+        policy = (metadata.get("upstream_policy") or "strict").lower()
+        grace_hours = metadata.get("upstream_grace_hours")
+        grace_delta = None
+        try:
+            if grace_hours is not None:
+                grace_delta = timedelta(hours=float(grace_hours))
+        except Exception:
+            grace_delta = None
+
         log_reader = RunLogReader(self.engine)
         missing = []
         for upstream in upstreams:
@@ -680,8 +728,14 @@ class PipelineDriver:
                 missing.append({"upstream": upstream, "reason": reason or "missing_last_success"})
                 continue
             if window.start and last_success < window.start:
-                missing.append({"upstream": upstream, "reason": "stale_last_success"})
+                if grace_delta and last_success >= (window.start - grace_delta):
+                    missing.append({"upstream": upstream, "reason": "stale_within_grace"})
+                else:
+                    missing.append({"upstream": upstream, "reason": "stale_last_success"})
         if missing:
+            if policy == "warn":
+                logger.warning(f"Upstream policy=warn; proceeding with stale/missing upstreams: {missing}")
+                return True, missing
             return False, missing
         return True, []
 
@@ -806,6 +860,205 @@ class PipelineDriver:
         if end:
             return start <= mtime < end
         return mtime >= start
+
+    @staticmethod
+    def _resolve_max_workers(max_workers: int) -> int:
+        """
+        Resolve adaptive concurrency based on CPU when max_workers <= 0.
+
+        Args:
+            max_workers: Requested max workers (<=0 means auto).
+
+        Returns:
+            Resolved worker count.
+        """
+        if max_workers and max_workers > 0:
+            return max_workers
+        cpu = os.cpu_count() or 4
+        return min(32, max(1, cpu * 2))
+
+    def _execute_with_retries(self, processor: DataProcessor, source: str) -> Tuple[Any, Any]:
+        """
+        Execute a contract with retry and exponential backoff.
+
+        Args:
+            processor: DataProcessor instance.
+            source: Source path.
+
+        Returns:
+            Tuple of (good_df, bad_df).
+        """
+        attempt = 0
+        delay = self.retry_backoff
+        while True:
+            try:
+                return processor.run_source(source)
+            except Exception as exc:
+                attempt += 1
+                if attempt > self.retries:
+                    raise
+                logger.warning(f"Retry {attempt}/{self.retries} for source {source} after error: {exc}")
+                time.sleep(min(delay, self.retry_max_delay))
+                delay = min(delay * 2, self.retry_max_delay)
+
+    def _load_state(self) -> Dict[str, Any]:
+        """
+        Load state from disk if resume mode is enabled.
+        """
+        if not self.state_path:
+            return {}
+        if not self.state_path.exists():
+            return {}
+        try:
+            return json.loads(self.state_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _save_state(self) -> None:
+        """
+        Persist state to disk.
+        """
+        if not self.state_path:
+            return
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(json.dumps(self.state, indent=2), encoding="utf-8")
+
+    def _state_key(self, dataset: str, stage: str, window: Window) -> str:
+        """
+        Build a unique state key for a dataset/layer/window.
+        """
+        return f"{stage}:{dataset}:{window.label}:{window.start}:{window.end}"
+
+    def _state_completed(self, key: str) -> bool:
+        """
+        Check if a state key is marked completed.
+        """
+        return bool(self.state.get("completed", {}).get(key))
+
+    def _state_mark_completed(self, key: str) -> None:
+        """
+        Mark a state key as completed.
+        """
+        completed = self.state.setdefault("completed", {})
+        completed[key] = True
+        self._save_state()
+
+    def _apply_overrides(self, contract: DataContract) -> DataContract:
+        """
+        Apply run-level overrides to a contract.
+        """
+        if not self.overrides:
+            return contract
+        data = contract.model_dump(by_alias=True)
+        for key, value in self.overrides.items():
+            self._set_nested_value(data, key, value)
+        new_contract = DataContract(**data)
+        new_contract._base_path = getattr(contract, "_base_path", None)
+        return new_contract
+
+    def _apply_policy_pack(self, contract: DataContract, stage: str) -> DataContract:
+        """
+        Merge a policy pack into a contract if configured.
+        """
+        policy_name = self.policy_pack
+        if contract.metadata and contract.metadata.get("policy_pack"):
+            policy_name = contract.metadata.get("policy_pack")
+        if not policy_name:
+            return contract
+
+        pack_dir = self.policy_pack_dir or Path("policy_packs")
+        pack_path = Path(policy_name)
+        if not pack_path.is_absolute():
+            pack_path = pack_dir / f"{policy_name}.yaml"
+        if not pack_path.exists():
+            logger.warning(f"Policy pack not found: {pack_path}")
+            return contract
+
+        pack_data = yaml.safe_load(pack_path.read_text(encoding="utf-8")) or {}
+        stage_key = f"{stage}_defaults"
+        defaults = pack_data.get("defaults", {})
+        stage_defaults = pack_data.get(stage_key, {})
+
+        merged = contract.model_dump(by_alias=True)
+        self._deep_merge(merged, defaults)
+        self._deep_merge(merged, stage_defaults)
+        if pack_data.get("quality"):
+            merged_quality = merged.get("quality") or {}
+            pack_quality = pack_data.get("quality") or {}
+            for key, items in pack_quality.items():
+                merged_quality.setdefault(key, [])
+                if isinstance(merged_quality[key], list) and isinstance(items, list):
+                    merged_quality[key].extend(items)
+            merged["quality"] = merged_quality
+        if pack_data.get("service_levels"):
+            merged["service_levels"] = pack_data.get("service_levels")
+
+        new_contract = DataContract(**merged)
+        new_contract._base_path = getattr(contract, "_base_path", None)
+        return new_contract
+
+    def _evaluate_approvals(self, report: Optional[Dict[str, Any]], contract: DataContract, dataset: str) -> None:
+        """
+        Enforce approval gates for schema drift or quarantine ratio.
+        """
+        if not report:
+            return
+
+        metadata = contract.metadata or {}
+        approval_required = bool(metadata.get("approval_required", self.approval_required))
+        approval_file = metadata.get("approval_file") or (str(self.approval_file) if self.approval_file else None)
+        quarantine_threshold = metadata.get("approval_quarantine_ratio_threshold")
+        drift_gate = metadata.get("approval_schema_drift", False)
+
+        if not approval_required:
+            return
+
+        violations = []
+        counts = report.get("counts") or {}
+        ratio = counts.get("quarantine_ratio")
+        if quarantine_threshold is not None and ratio is not None:
+            try:
+                threshold_val = float(quarantine_threshold)
+                if threshold_val > 1:
+                    threshold_val = threshold_val / 100.0
+                if ratio > threshold_val:
+                    violations.append(f"quarantine_ratio {ratio:.2f} > {threshold_val:.2f}")
+            except Exception:
+                pass
+
+        drift = report.get("schema_drift") or {}
+        if drift_gate and (drift.get("missing_fields") or drift.get("unknown_fields")):
+            violations.append("schema_drift")
+
+        if violations and approval_required:
+            if approval_file and Path(approval_file).exists():
+                logger.warning(f"Approval file found; proceeding despite: {', '.join(violations)}")
+                return
+            raise RuntimeError(f"Approval required for {dataset}: {', '.join(violations)}")
+
+    @staticmethod
+    def _set_nested_value(data: Dict[str, Any], path: str, value: Any) -> None:
+        """
+        Set a dotted-path value in a dict.
+        """
+        parts = path.split(".")
+        cursor = data
+        for part in parts[:-1]:
+            if part not in cursor or not isinstance(cursor[part], dict):
+                cursor[part] = {}
+            cursor = cursor[part]
+        cursor[parts[-1]] = value
+
+    @staticmethod
+    def _deep_merge(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """
+        Deep merge source into target dict.
+        """
+        for key, value in source.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                PipelineDriver._deep_merge(target[key], value)
+            else:
+                target[key] = value
 
     def _record_success(self, dataset: str) -> None:
         """
@@ -1297,7 +1550,9 @@ class PipelineDriver:
             logger.info(f"Wrote metrics payload to {self.metrics_path}")
 
         backend = (self.metrics_backend or "").lower()
-        if backend not in ["statsd", "prometheus"]:
+        if backend == "prometheus":
+            return
+        if backend != "statsd":
             return
 
         host = self.metrics_host or "127.0.0.1"
@@ -1493,6 +1748,49 @@ def parse_metrics_tags(raw: Optional[str]) -> Dict[str, str]:
     return tags
 
 
+def parse_overrides(values: Optional[List[str]]) -> Dict[str, Any]:
+    """
+    Parse --set key=value overrides into a dict.
+    """
+    overrides: Dict[str, Any] = {}
+    if not values:
+        return overrides
+    for item in values:
+        if "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        key = key.strip()
+        raw = value.strip()
+        try:
+            parsed = yaml.safe_load(raw)
+        except Exception:
+            parsed = raw
+        overrides[key] = parsed
+    return overrides
+
+
+def build_backfill_windows(start: str, end: str, granularity: str) -> List[Window]:
+    """
+    Build a list of windows for backfill execution.
+    """
+    start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    if end_dt < start_dt:
+        raise ValueError("Backfill end date must be on or after start date.")
+
+    step = timedelta(days=1)
+    if granularity == "week":
+        step = timedelta(days=7)
+
+    windows: List[Window] = []
+    cursor = start_dt
+    while cursor <= end_dt:
+        window_end = cursor + step
+        windows.append(Window(cursor, window_end, "backfill"))
+        cursor = window_end
+    return windows
+
+
 def parse_window(
     raw: str,
     window_start_date: Optional[str],
@@ -1563,7 +1861,7 @@ def main() -> None:
     parser.add_argument("--reprocess-start-date", help="Reprocess start date (YYYY-MM-DD).")
     parser.add_argument("--reprocess-end-date", help="Reprocess end date (YYYY-MM-DD).")
     parser.add_argument("--engine", default="polars")
-    parser.add_argument("--max-workers", type=int, default=4)
+    parser.add_argument("--max-workers", type=int, default=4, help="Max parallel workers (0 = auto).")
     parser.add_argument("--summary-path", help="Write a run summary JSON to this path.")
     parser.add_argument("--summary-table", help="Write a pipeline summary row to a table backend.")
     parser.add_argument("--summary-backend", help="Summary backend: spark | duckdb | sqlite.")
@@ -1576,11 +1874,25 @@ def main() -> None:
         help="Merge summary rows on run_id (Spark only).",
     )
     parser.add_argument("--metrics-path", help="Write a metrics JSON payload to this path.")
-    parser.add_argument("--metrics-backend", help="Metrics backend: statsd.")
+    parser.add_argument("--metrics-backend", help="Metrics backend: statsd | prometheus.")
     parser.add_argument("--metrics-host", help="StatsD host (default 127.0.0.1).")
     parser.add_argument("--metrics-port", type=int, help="StatsD port (default 8125).")
     parser.add_argument("--metrics-prefix", help="StatsD metric prefix (default lakeguard).")
     parser.add_argument("--metrics-tags", help="Comma-separated tags (key=value) for metrics.")
+    parser.add_argument("--set", dest="overrides", action="append", help="Override contract fields (key=value).")
+    parser.add_argument("--policy-pack", help="Apply a policy pack by name.")
+    parser.add_argument("--policy-pack-dir", help="Directory containing policy packs.")
+    parser.add_argument("--state-path", help="State file for partial resume.")
+    parser.add_argument("--resume", action="store_true", help="Resume from last successful state.")
+    parser.add_argument("--retries", type=int, default=0, help="Retry count for transient failures.")
+    parser.add_argument("--retry-backoff", type=float, default=1.0, help="Initial retry backoff in seconds.")
+    parser.add_argument("--retry-max-delay", type=float, default=60.0, help="Max retry delay in seconds.")
+    parser.add_argument("--approval-required", action="store_true", help="Require approvals on drift/quarantine thresholds.")
+    parser.add_argument("--approval-file", help="Approval file path to bypass approval gates.")
+    parser.add_argument("--cache-references", action="store_true", help="Cache reference datasets across runs.")
+    parser.add_argument("--backfill-start-date", help="Backfill start date (YYYY-MM-DD).")
+    parser.add_argument("--backfill-end-date", help="Backfill end date (YYYY-MM-DD).")
+    parser.add_argument("--backfill-granularity", default="day", help="Backfill granularity: day | week.")
     parser.add_argument("--continue-on-error", action="store_true", help="Continue running after a contract failure.")
     args = parser.parse_args()
 
@@ -1596,6 +1908,11 @@ def main() -> None:
         args.reprocess_start_date,
         args.reprocess_end_date,
     )
+    overrides = parse_overrides(args.overrides)
+    policy_pack_dir = Path(args.policy_pack_dir) if args.policy_pack_dir else None
+    state_path = Path(args.state_path) if args.state_path else None
+    if args.resume and not state_path:
+        state_path = Path("logs/driver_state.json")
 
     driver = PipelineDriver(
         args.engine,
@@ -1612,6 +1929,17 @@ def main() -> None:
         metrics_port=args.metrics_port,
         metrics_prefix=args.metrics_prefix,
         metrics_tags=metrics_tags,
+        overrides=overrides,
+        policy_pack=args.policy_pack,
+        policy_pack_dir=policy_pack_dir,
+        state_path=state_path,
+        resume=args.resume,
+        retries=args.retries,
+        retry_backoff=args.retry_backoff,
+        retry_max_delay=args.retry_max_delay,
+        approval_required=args.approval_required,
+        approval_file=Path(args.approval_file) if args.approval_file else None,
+        cache_references=args.cache_references,
         fail_fast=not args.continue_on_error,
     )
 
@@ -1624,14 +1952,26 @@ def main() -> None:
     if window.label == "last_success":
         print("Window=last_success: using run log tables (if available).")
 
-    driver.run(
-        registry_paths,
-        layers,
-        window,
-        reprocess,
-        entity_filter=entity_filter,
-        contract_filter=contract_filter,
-    )
+    if args.backfill_start_date and args.backfill_end_date:
+        windows = build_backfill_windows(args.backfill_start_date, args.backfill_end_date, args.backfill_granularity)
+        for backfill_window in windows:
+            driver.run(
+                registry_paths,
+                layers,
+                backfill_window,
+                reprocess=False,
+                entity_filter=entity_filter,
+                contract_filter=contract_filter,
+            )
+    else:
+        driver.run(
+            registry_paths,
+            layers,
+            window,
+            reprocess,
+            entity_filter=entity_filter,
+            contract_filter=contract_filter,
+        )
 
 
 if __name__ == "__main__":

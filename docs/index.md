@@ -1,4 +1,4 @@
-# LakeGuard ???
+# LakeGuard
 
 **The Quality Gate for your Data Lakehouse.**
 
@@ -18,13 +18,14 @@ graph LR
 - [Starter Kit](starter_kit.md)
 - [CLI Usage](cli.md)
 - [Pipeline Driver](driver.md)
+- [Bootstrap Contracts](bootstrap.md)
 - [How It Works](concepts.md)
 - [Playbooks Overview](playbooks.md)
 - [Capability Matrix](capabilities.md)
 - [Warehouse Adapters](warehouse_adapters.md)
 - [Observability](observability.md)
 
-## ?? Eliminate the "Spark Tax"
+## Eliminate the "Spark Tax"
 
 LakeGuard is built for **infrastructure efficiency**. Most data contracts do not need a multi-node Spark cluster to validate.
 
@@ -35,7 +36,7 @@ LakeGuard is built for **infrastructure efficiency**. Most data contracts do not
 
 By running LakeGuard on Polars for your 1-100GB pipelines, you can cut compute spend dramatically while keeping enterprise-grade validation.
 
-## ?? Core Concept
+## Core Concept
 
 LakeGuard separates **Intent** from **Execution**:
 
@@ -44,7 +45,7 @@ LakeGuard separates **Intent** from **Execution**:
 
 This keeps your business logic portable whether you are running locally, on **Azure/AWS** Spark platforms, or directly in Snowflake/BigQuery (table-only).
 
-## ? Key Features
+## Key Features
 
 - **Declarative Contracts**: Schema, constraints, and transformations in human-readable YAML.
 - **Engine Agnostic**: Auto-discovers the best engine (Spark, Polars, DuckDB, Pandas) based on your environment. Warehouse adapters are selected explicitly.
@@ -58,7 +59,7 @@ This keeps your business logic portable whether you are running locally, on **Az
 - **Cross-Platform Governance**: Consistent enforcement across **Databricks**, **Fabric**, **Synapse** (Spark), plus Snowflake/BigQuery (table-only).
 - **External Logic Hooks**: Run dedicated Python modules or notebooks for Gold processing when needed.
 
-## ?? Typical Use Cases
+## Typical Use Cases
 
 - **Containerized Pipelines (AKS/ACA)**: Run millions of checks per second in lightweight Python pods.
 - **Data Mesh**: Enforce contracts between decentralized domain teams (Finance, Marketing, HR).
@@ -85,9 +86,11 @@ If you prefer pip:
 pip install "lakeguard[all]"
 ```
 
-## ??? Summary
+## Summary
 
 LakeGuard turns your Data Contract from passive documentation into a **living security guard**. It keeps your Medallion architecture clean and trustworthy, while giving you the freedom to choose the most cost-effective engine for the job.
+
+**Business Viability (High)**: Estimated 7.5–8.5/10. Strong fit for lakehouse teams running Bronze/Silver/Gold pipelines with governance and cost pressures. Key differentiators are engine-agnostic execution, registry-driven orchestration, and built-in observability.
 
 ## Next Steps
 

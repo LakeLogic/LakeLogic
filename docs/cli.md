@@ -52,6 +52,19 @@ lakeguard-driver \
   --window last_success
 ```
 
+## Bootstrap Contracts
+
+Generate starter contracts and a registry from a landing zone:
+
+```bash
+lakeguard bootstrap \
+  --landing examples/insurance_elt/data/bronze \
+  --output-dir examples/insurance_elt/bootstrap_contracts \
+  --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
+  --format csv \
+  --pattern "*.csv"
+```
+
 ### Driver Options (Highlights)
 
 - `--summary-path`: Write a per-run summary JSON (metrics + per-contract status).
@@ -66,6 +79,20 @@ lakeguard-driver \
 - `--metrics-port`: StatsD port (default `8125`) or Prometheus port (default `9100`).
 - `--metrics-prefix`: StatsD metric prefix (default `lakeguard`).
 - `--metrics-tags`: Comma-separated tags, e.g. `env=prod,team=data`.
+- `--set`: Override contract fields at runtime (repeatable).
+- `--policy-pack`: Apply a policy pack by name.
+- `--policy-pack-dir`: Directory containing policy packs.
+- `--state-path`: State file for partial resume.
+- `--resume`: Resume from last successful state.
+- `--retries`: Retry count for transient failures.
+- `--retry-backoff`: Initial retry backoff in seconds.
+- `--retry-max-delay`: Max retry delay in seconds.
+- `--approval-required`: Require approvals on drift/quarantine thresholds.
+- `--approval-file`: Approval file path to bypass approval gates.
+- `--cache-references`: Cache reference datasets across runs.
+- `--backfill-start-date`: Backfill start date (YYYY-MM-DD).
+- `--backfill-end-date`: Backfill end date (YYYY-MM-DD).
+- `--backfill-granularity`: Backfill granularity (`day` or `week`).
 - `--continue-on-error`: Keep running other contracts even if one fails.
 - `--window range --window-start-date YYYY-MM-DD --window-end-date YYYY-MM-DD`: Explicit window.
 - `--reprocess-date` or `--reprocess-start-date/--reprocess-end-date`: Late-arriving data replay.
