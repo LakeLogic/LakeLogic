@@ -2,6 +2,13 @@ name: Publish to PyPI 🚀
 
 on:
     workflow_dispatch:
+        inputs:
+            version:
+                description: "Package version to publish (must match pyproject.toml)"
+                required: true
+            tag:
+                description: "Optional tag reference (e.g., v1.2.3)"
+                required: false
     push:
         tags:
             - "v*"
@@ -9,7 +16,7 @@ on:
     #     types: [published]
 
 permissions:
-    contents: read
+    contents: write
 
 jobs:
     pypi-publish:
@@ -24,6 +31,81 @@ jobs:
                   echo "$HOME/.local/bin" >> $GITHUB_PATH
             - name: Verify uv
               run: uv --version
+
+            - name: Validate manual inputs
+              if: github.event_name == 'workflow_dispatch'
+              env:
+                  INPUT_VERSION: ${{ github.event.inputs.version }}
+                  INPUT_TAG: ${{ github.event.inputs.tag }}
+              run: |
+                  python - <<'PY'
+                  import os
+                  import re
+                  import sys
+
+                  version = os.environ.get("INPUT_VERSION", "").strip()
+                  tag = os.environ.get("INPUT_TAG", "").strip()
+
+                  if not version:
+                      print("Input 'version' is required.")
+                      sys.exit(1)
+
+                  # Minimal parser to extract project.version from pyproject.toml
+                  in_project = False
+                  found = None
+                  with open("pyproject.toml", "r", encoding="utf-8") as f:
+                      for line in f:
+                          line = line.strip()
+                          if line.startswith("[") and line.endswith("]"):
+                              in_project = (line == "[project]")
+                              continue
+                          if in_project:
+                              m = re.match(r'version\s*=\s*"([^"]+)"', line)
+                              if m:
+                                  found = m.group(1)
+                                  break
+
+                  if not found:
+                      print("Could not find [project] version in pyproject.toml.")
+                      sys.exit(1)
+
+                  if found != version:
+                      print(f"Version mismatch: pyproject.toml has {found}, input is {version}.")
+                      sys.exit(1)
+
+                  if tag and tag != f"v{version}":
+                      print(f"Tag mismatch: expected v{version}, input is {tag}.")
+                      sys.exit(1)
+
+                  print(f"Manual inputs OK. version={version}, tag={tag or '(none)'}")
+                  PY
+
+            - name: Create and push tag (manual)
+              if: github.event_name == 'workflow_dispatch'
+              env:
+                  INPUT_VERSION: ${{ github.event.inputs.version }}
+                  INPUT_TAG: ${{ github.event.inputs.tag }}
+              run: |
+                  set -euo pipefail
+                  TAG="${INPUT_TAG:-v${INPUT_VERSION}}"
+
+                  git fetch --tags
+
+                  if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+                      echo "Tag $TAG already exists locally."
+                      exit 1
+                  fi
+
+                  if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+                      echo "Tag $TAG already exists on origin."
+                      exit 1
+                  fi
+
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+                  git tag "$TAG"
+                  git push origin "$TAG"
 
             - name: Build distribution
               run: uv build
