@@ -1,3 +1,0 @@
-claim_id,policy_id,claim_number,claim_date,claim_amount,claim_status,loss_cause,updated_at,op
-C300,P200,CL-300,2025-12-01,700.00,OPEN,Collision,2026-02-05T09:00:00Z,I
-C301,P201,CL-301,2025-12-05,1500.00,CLOSED,Fire,2026-02-05T09:10:00Z,U

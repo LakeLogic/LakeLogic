@@ -160,6 +160,25 @@ class BigQueryAdapter(EngineAdapter):
         job = client.query(sql)
         job.result()
 
+    def _quote_ident(self, name: str) -> str:
+        """
+        Quote an identifier for BigQuery SQL.
+
+        Args:
+            name: Raw identifier.
+
+        Returns:
+            Quoted identifier.
+        """
+        text = str(name)
+        if text.startswith("`") and text.endswith("`"):
+            return text
+        return f"`{text.replace('`', '\\\\`')}`"
+
+    def _qualify(self, alias: str, name: str) -> str:
+        """Build a qualified identifier (alias + column)."""
+        return f"{alias}.{self._quote_ident(name)}"
+
     def _create_source_alias(self, client, table_name: str) -> None:
         """
         Create/replace the source table for SQL transformations.
@@ -228,10 +247,11 @@ class BigQueryAdapter(EngineAdapter):
         def select_with_replacements(replacements: Dict[str, str], extra_exprs: Optional[List[str]] = None) -> str:
             exprs: List[str] = []
             for col in columns:
+                qcol = self._quote_ident(col)
                 if col in replacements:
-                    exprs.append(f"{replacements[col]} AS {col}")
+                    exprs.append(f"{replacements[col]} AS {qcol}")
                 else:
-                    exprs.append(col)
+                    exprs.append(qcol)
             if extra_exprs:
                 exprs.extend(extra_exprs)
             return f"SELECT {', '.join(exprs)} FROM source"
@@ -242,24 +262,32 @@ class BigQueryAdapter(EngineAdapter):
             if not columns:
                 logger.warning("Rename transformation skipped; could not resolve columns.")
                 return None
+            rename_pairs = trans.rename.iter_pairs()
+            if not rename_pairs:
+                return None
+            rename_map = dict(rename_pairs)
+            for src in rename_map:
+                if src not in columns:
+                    logger.warning(f"Rename transformation skipped; column not found: {src}")
+            dest_set = set(rename_map.values())
             select_exprs: List[str] = []
             for col in columns:
-                if col == trans.rename.from_name:
-                    select_exprs.append(f"{trans.rename.from_name} AS {trans.rename.to_name}")
-                elif col == trans.rename.to_name:
+                if col in rename_map:
+                    select_exprs.append(f"{self._quote_ident(col)} AS {self._quote_ident(rename_map[col])}")
+                elif col in dest_set and col not in rename_map:
                     continue
                 else:
-                    select_exprs.append(col)
+                    select_exprs.append(self._quote_ident(col))
             return f"SELECT {', '.join(select_exprs)} FROM source"
 
         if trans.select:
-            return f"SELECT {', '.join(trans.select.columns)} FROM source"
+            return f"SELECT {', '.join(self._quote_ident(col) for col in trans.select.columns)} FROM source"
 
         if trans.drop:
             if not columns:
                 logger.warning("Drop transformation skipped; could not resolve columns.")
                 return None
-            keep = [col for col in columns if col not in set(trans.drop.columns)]
+            keep = [self._quote_ident(col) for col in columns if col not in set(trans.drop.columns)]
             if not keep:
                 logger.warning("Drop transformation skipped; empty column set.")
                 return None
@@ -269,26 +297,27 @@ class BigQueryAdapter(EngineAdapter):
             replacements: Dict[str, str] = {}
             for col, dtype in trans.cast.columns.items():
                 target_type = self._to_bigquery_type(dtype)
-                replacements[col] = f"SAFE_CAST({col} AS {target_type})"
+                replacements[col] = f"SAFE_CAST({self._quote_ident(col)} AS {target_type})"
             return select_with_replacements(replacements)
 
         if trans.trim:
             replacements = {}
             for field in trans.trim.fields:
+                qfield = self._quote_ident(field)
                 if trans.trim.side == "left":
-                    replacements[field] = f"LTRIM({field})"
+                    replacements[field] = f"LTRIM({qfield})"
                 elif trans.trim.side == "right":
-                    replacements[field] = f"RTRIM({field})"
+                    replacements[field] = f"RTRIM({qfield})"
                 else:
-                    replacements[field] = f"TRIM({field})"
+                    replacements[field] = f"TRIM({qfield})"
             return select_with_replacements(replacements)
 
         if trans.lower:
-            replacements = {field: f"LOWER({field})" for field in trans.lower.fields}
+            replacements = {field: f"LOWER({self._quote_ident(field)})" for field in trans.lower.fields}
             return select_with_replacements(replacements)
 
         if trans.upper:
-            replacements = {field: f"UPPER({field})" for field in trans.upper.fields}
+            replacements = {field: f"UPPER({self._quote_ident(field)})" for field in trans.upper.fields}
             return select_with_replacements(replacements)
 
         if trans.coalesce:
@@ -298,9 +327,9 @@ class BigQueryAdapter(EngineAdapter):
             parts = sources[:]
             if trans.coalesce.default is not None:
                 parts.append(self._format_literal(trans.coalesce.default))
-            expr = f"COALESCE({', '.join(parts)})"
+            expr = f"COALESCE({', '.join(self._quote_ident(part) for part in sources) + (', ' + self._format_literal(trans.coalesce.default) if trans.coalesce.default is not None else '')})"
             output = trans.coalesce.output or trans.coalesce.field
-            extra_exprs = [f"{expr} AS {output}"]
+            extra_exprs = [f"{expr} AS {self._quote_ident(output)}"]
             replacements: Dict[str, str] = {}
             if output in columns:
                 replacements[output] = expr
@@ -309,9 +338,9 @@ class BigQueryAdapter(EngineAdapter):
 
         if trans.split:
             output = trans.split.output or trans.split.field
-            expr = f"SPLIT({trans.split.field}, {self._format_literal(trans.split.delimiter)})"
+            expr = f"SPLIT({self._quote_ident(trans.split.field)}, {self._format_literal(trans.split.delimiter)})"
             replacements: Dict[str, str] = {}
-            extra_exprs = [f"{expr} AS {output}"]
+            extra_exprs = [f"{expr} AS {self._quote_ident(output)}"]
             if output in columns:
                 replacements[output] = expr
                 extra_exprs = None
@@ -322,28 +351,29 @@ class BigQueryAdapter(EngineAdapter):
             if not columns:
                 logger.warning("Explode transformation skipped; could not resolve columns.")
                 return None
-            select_cols = [f"src.{col}" for col in columns if col != output]
+            select_cols = [f"src.{self._quote_ident(col)}" for col in columns if col != output]
             if output == trans.explode.field:
-                select_cols = [f"src.{col}" for col in columns if col != trans.explode.field]
-            select_exprs = select_cols + [f"{output}"]
+                select_cols = [f"src.{self._quote_ident(col)}" for col in columns if col != trans.explode.field]
+            select_exprs = select_cols + [f"{self._quote_ident(output)}"]
             return (
                 f"SELECT {', '.join(select_exprs)} "
-                f"FROM source src, UNNEST(src.{trans.explode.field}) AS {output}"
+                f"FROM source src, UNNEST(src.{self._quote_ident(trans.explode.field)}) AS {self._quote_ident(output)}"
             )
 
         if trans.map_values:
             field = trans.map_values.field
+            qfield = self._quote_ident(field)
             mapping = trans.map_values.mapping or {}
             if not mapping:
                 return None
             cases = []
             for key, value in mapping.items():
-                cases.append(f"WHEN {field} = {self._format_literal(key)} THEN {self._format_literal(value)}")
-            default_expr = self._format_literal(trans.map_values.default) if trans.map_values.default is not None else field
+                cases.append(f"WHEN {qfield} = {self._format_literal(key)} THEN {self._format_literal(value)}")
+            default_expr = self._format_literal(trans.map_values.default) if trans.map_values.default is not None else qfield
             case_expr = f"CASE {' '.join(cases)} ELSE {default_expr} END"
             output = trans.map_values.output or field
             replacements = {}
-            extra_exprs = [f"{case_expr} AS {output}"]
+            extra_exprs = [f"{case_expr} AS {self._quote_ident(output)}"]
             if output in columns:
                 replacements[output] = case_expr
                 extra_exprs = None
@@ -353,10 +383,10 @@ class BigQueryAdapter(EngineAdapter):
             return f"SELECT * FROM source WHERE {trans.filter.sql}"
 
         if trans.deduplicate:
-            on_cols = ", ".join(trans.deduplicate.on)
+            on_cols = ", ".join(self._quote_ident(col) for col in trans.deduplicate.on)
             order_clause = ""
             if trans.deduplicate.sort_by:
-                cols = ", ".join(trans.deduplicate.sort_by)
+                cols = ", ".join(self._quote_ident(col) for col in trans.deduplicate.sort_by)
                 order_clause = f"ORDER BY {cols} {trans.deduplicate.order}"
             return f"""
             SELECT * FROM (
@@ -366,17 +396,17 @@ class BigQueryAdapter(EngineAdapter):
             """
 
         if trans.derive:
-            return f"SELECT *, ({trans.derive.sql}) AS {trans.derive.field} FROM source"
+            return f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(trans.derive.field)} FROM source"
 
         if trans.lookup:
-            value_expr = f"ref.{trans.lookup.value}"
+            value_expr = f"ref.{self._quote_ident(trans.lookup.value)}"
             if trans.lookup.default_value is not None:
                 default_val = self._format_literal(trans.lookup.default_value)
-                value_expr = f"COALESCE(ref.{trans.lookup.value}, {default_val})"
+                value_expr = f"COALESCE(ref.{self._quote_ident(trans.lookup.value)}, {default_val})"
             return f"""
-            SELECT src.*, {value_expr} AS {trans.lookup.field}
+            SELECT src.*, {value_expr} AS {self._quote_ident(trans.lookup.field)}
             FROM source src
-            LEFT JOIN {trans.lookup.reference} ref ON src.{trans.lookup.on} = ref.{trans.lookup.key}
+            LEFT JOIN {self._quote_ident(trans.lookup.reference)} ref ON src.{self._quote_ident(trans.lookup.on)} = ref.{self._quote_ident(trans.lookup.key)}
             """
 
         if trans.join:
@@ -388,14 +418,14 @@ class BigQueryAdapter(EngineAdapter):
                 alias = f"{trans.join.prefix}{field}" if trans.join.prefix else field
                 default = trans.join.defaults.get(field) if trans.join.defaults else None
                 if default is not None:
-                    expr = f"COALESCE(ref.{field}, {self._format_literal(default)}) AS {alias}"
+                    expr = f"COALESCE(ref.{self._quote_ident(field)}, {self._format_literal(default)}) AS {self._quote_ident(alias)}"
                 else:
-                    expr = f"ref.{field} AS {alias}"
+                    expr = f"ref.{self._quote_ident(field)} AS {self._quote_ident(alias)}"
                 select_fields.append(expr)
             return f"""
             SELECT {', '.join(select_fields)}
             FROM source src
-            {join_type} JOIN {trans.join.reference} ref ON src.{trans.join.on} = ref.{trans.join.key}
+            {join_type} JOIN {self._quote_ident(trans.join.reference)} ref ON src.{self._quote_ident(trans.join.on)} = ref.{self._quote_ident(trans.join.key)}
             """
 
         return None
@@ -465,6 +495,7 @@ class BigQueryAdapter(EngineAdapter):
 
         missing = expected - existing_cols
         unknown = existing_cols - expected
+        unknown = unknown - self._lineage_columns()
 
         server = self.contract.server
         evolution = None
@@ -485,15 +516,17 @@ class BigQueryAdapter(EngineAdapter):
         for field in self.contract.model.fields:
             target_type = "STRING" if cast_to_string else self._to_bigquery_type(field.type)
             if field.name in existing_cols:
-                select_exprs.append(f"SAFE_CAST({field.name} AS {target_type}) AS {field.name}")
+                qfield = self._quote_ident(field.name)
+                select_exprs.append(f"SAFE_CAST({qfield} AS {target_type}) AS {qfield}")
             else:
-                select_exprs.append(f"CAST(NULL AS {target_type}) AS {field.name}")
+                qfield = self._quote_ident(field.name)
+                select_exprs.append(f"CAST(NULL AS {target_type}) AS {qfield}")
 
         if policy in ["allow", "quarantine"] and unknown:
             if cast_to_string:
-                select_exprs.extend([f"SAFE_CAST({col} AS STRING) AS {col}" for col in sorted(unknown)])
+                select_exprs.extend([f"SAFE_CAST({self._quote_ident(col)} AS STRING) AS {self._quote_ident(col)}" for col in sorted(unknown)])
             else:
-                select_exprs.extend(sorted(unknown))
+                select_exprs.extend([self._quote_ident(col) for col in sorted(unknown)])
 
         schema_table = self._temp_name("schema")
         self._execute(client, f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {table_name}")

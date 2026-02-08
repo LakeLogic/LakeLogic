@@ -3,6 +3,7 @@ from typing import Tuple, Any, List
 from lakeguard.engines.base import EngineAdapter
 from loguru import logger
 from pathlib import Path
+from uuid import uuid4
 
 class DuckDBAdapter(EngineAdapter):
     """
@@ -23,15 +24,38 @@ class DuckDBAdapter(EngineAdapter):
         """
         self.dataset_rule_results = []
         self.schema_drift = {}
-        con = duckdb.connect(database=':memory:')
-        
         # Register the input and dependencies
-        tbl_name = self.contract.dataset or "source"
-        con.register(tbl_name, df)
+        # Use a shared connection for all operations in this execution
+        self.con = duckdb.connect(database=':memory:')
+        con = self.con
+        
+        # Use a internal unique name for the actual data to avoid "source" name collisions
+        internal_input_name = "__lakeguard_raw_source__"
+        self.internal_input_name = internal_input_name
+        
+        # Handle string paths directly via DuckDB native readers
+        if isinstance(df, (str, Path)):
+            path_str = str(df)
+            ext = path_str.lower()
+            if ext.endswith(".csv"):
+                con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM read_csv_auto('{path_str}')")
+            elif ext.endswith(".parquet"):
+                con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM read_parquet('{path_str}')")
+            elif "/_delta_log" in ext or "delta" in ext:
+                con.execute("INSTALL delta; LOAD delta;")
+                con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM delta_scan('{path_str}')")
+            elif "iceberg" in ext:
+                con.execute("INSTALL iceberg; LOAD iceberg;")
+                con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM iceberg_scan('{path_str}')")
+            else:
+                con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM read_csv_auto('{path_str}')")
+        else:
+            con.register(internal_input_name, df)
+            
         self._register_links(con)
 
         # 0. Apply pre-processing (renames, filters, deduplication)
-        processed_tbl = self._apply_pre_transformations(con, tbl_name)
+        processed_tbl = self._apply_pre_transformations(con, internal_input_name)
         
         # 0.5 Apply schema enforcement
         schema_tbl, schema_errors = self._apply_schema(con, processed_tbl)
@@ -54,8 +78,9 @@ class DuckDBAdapter(EngineAdapter):
             category_clauses.extend([f"'schema'" for _ in schema_errors])
         
         for i, rule in enumerate(row_rules):
-            error_msg = f"Rule failed: {rule.name} ({rule.sql})"
-            error_clauses.append(f"CASE WHEN _rule_{i} IS NOT TRUE THEN '{error_msg}' ELSE NULL END")
+            # Escape single quotes for SQL string literals
+            escaped_msg = f"Rule failed: {rule.name} ({rule.sql})".replace("'", "''")
+            error_clauses.append(f"CASE WHEN _rule_{i} IS NOT TRUE THEN '{escaped_msg}' ELSE NULL END")
             category_clauses.append(f"CASE WHEN _rule_{i} IS NOT TRUE THEN '{rule.category}' ELSE NULL END")
             
         if not error_clauses:
@@ -70,29 +95,70 @@ class DuckDBAdapter(EngineAdapter):
             """
         con.execute(f"CREATE OR REPLACE VIEW final_results AS {agg_sql}")
         
-        # 3. Split Good and Bad
-        bad_df = con.execute(f"""
-            SELECT *, 'active' as quarantine_state, FALSE as quarantine_reprocessed 
+        include_errors = True
+        if self.contract.quarantine:
+            include_errors = self.contract.quarantine.include_error_reason
+
+        # 3. Split Good and Bad (Return as Relations)
+        # Build explicit exclude list since DuckDB doesn't support wildcards in EXCLUDE
+        internal_cols = []
+        if row_rules:
+            internal_cols.extend([f"_rule_{i}" for i in range(len(row_rules))])
+        else:
+            internal_cols.append("_dummy")
+            
+        bad_exclude_cols = list(internal_cols)
+        if not include_errors:
+            bad_exclude_cols.extend([self.ERROR_COLUMN, self.CATEGORY_COLUMN])
+        bad_exclude = ", ".join(bad_exclude_cols)
+        bad_rel = con.sql(f"""
+            SELECT * EXCLUDE ({bad_exclude}), 
+                   'active' as quarantine_state, 
+                   FALSE as quarantine_reprocessed 
             FROM final_results 
             WHERE len({self.ERROR_COLUMN}) > 0
-        """).df()
+        """)
+
+        # Materialize bad rows to avoid view recursion/type changes later
+        bad_view = f"bad_view_{uuid4().hex[:8]}"
+        bad_table = f"__bad_buffer_{uuid4().hex[:8]}"
+        bad_rel.create_view(bad_view)
+        con.execute(f"CREATE OR REPLACE TEMP TABLE {bad_table} AS SELECT * FROM {bad_view}")
+        bad_rel = con.table(bad_table)
         
-        good_rel = con.execute(f"SELECT * EXCLUDE (_rule_*, _dummy, {self.ERROR_COLUMN}, {self.CATEGORY_COLUMN}) FROM final_results WHERE len({self.ERROR_COLUMN}) = 0")
+        good_exclude = ", ".join(internal_cols + [self.ERROR_COLUMN, self.CATEGORY_COLUMN])
+        good_rel = con.sql(f"SELECT * EXCLUDE ({good_exclude}) FROM final_results WHERE len({self.ERROR_COLUMN}) = 0")
         
         # 4. Apply Dataset-Level Checks
         self._run_dataset_rules(good_rel, con)
 
         # 5. Apply heavy Transformations
-        good_df = self._apply_post_transformations(good_rel, con)
+        good_out = self._apply_post_transformations(good_rel, con)
             
-        include_errors = True
-        if self.contract.quarantine:
-            include_errors = self.contract.quarantine.include_error_reason
+        # Result is natively a relation unless post-processing forced a DF
+        # We wrap in a simple property to allow .df() if needed later
+        
+        # Cleanup
+        # Note: Closing connection here might invalidate relations if they are lazy
+        # Keeping it open for the lifecycle of the result
+        return good_out, bad_rel
 
-        if not include_errors:
-            bad_df = bad_df.drop(columns=[self.ERROR_COLUMN, self.CATEGORY_COLUMN], errors="ignore")
-
-        return good_df, bad_df
+    @classmethod
+    def setup_extensions(cls):
+        """
+        Pre-install required DuckDB extensions for OSS data lakehouse support.
+        """
+        import duckdb
+        con = duckdb.connect()
+        extensions = ["iceberg", "delta", "httpfs", "aws", "azure"]
+        logger.info(f"Pre-installing DuckDB extensions: {', '.join(extensions)}")
+        for ext in extensions:
+            try:
+                con.execute(f"INSTALL {ext}")
+                logger.debug(f"Extension {ext} installed.")
+            except Exception as e:
+                logger.warning(f"Failed to install extension {ext}: {e}")
+        con.close()
 
     def _register_links(self, con: duckdb.DuckDBPyConnection) -> None:
         """
@@ -145,6 +211,25 @@ class DuckDBAdapter(EngineAdapter):
         """
         return [row[0] for row in con.execute(f"DESCRIBE {table_name}").fetchall()]
 
+    def _quote_ident(self, name: str) -> str:
+        """Quote an identifier for DuckDB SQL."""
+        text = str(name)
+        if text.startswith('"') and text.endswith('"'):
+            return text
+        escaped = text.replace('"', '""')
+        return f"\"{escaped}\""
+
+    def _quote_qualified(self, name: str) -> str:
+        """Quote dotted identifiers (schema.table) for DuckDB SQL."""
+        text = str(name)
+        if '"' in text:
+            return text
+        return ".".join(self._quote_ident(part) for part in text.split("."))
+
+    def _qualify(self, alias: str, name: str) -> str:
+        """Build a qualified identifier (alias + column)."""
+        return f"{alias}.{self._quote_ident(name)}"
+
     def _to_duckdb_type(self, type_name: str) -> str:
         """
         Map contract type names to DuckDB SQL types.
@@ -190,7 +275,7 @@ class DuckDBAdapter(EngineAdapter):
             if self.contract.server and self.contract.server.mode == "ingest" and self.contract.server.cast_to_string:
                 cols = [row[0] for row in con.execute(f"DESCRIBE {tbl_name}").fetchall()]
                 if cols:
-                    cast_exprs = [f"CAST({c} AS VARCHAR) AS {c}" for c in cols]
+                    cast_exprs = [f"CAST({self._quote_ident(c)} AS VARCHAR) AS {self._quote_ident(c)}" for c in cols]
                     con.execute(f"CREATE OR REPLACE VIEW schema_applied AS SELECT {', '.join(cast_exprs)} FROM {tbl_name}")
                     return "schema_applied", []
             return tbl_name, []
@@ -202,6 +287,7 @@ class DuckDBAdapter(EngineAdapter):
 
         missing = expected - existing
         unknown = existing - expected
+        unknown = unknown - self._lineage_columns()
 
         server = self.contract.server
         evolution = None
@@ -225,20 +311,25 @@ class DuckDBAdapter(EngineAdapter):
                 duck_type = "VARCHAR"
             if field.name in existing:
                 if duck_type:
-                    select_exprs.append(f"CAST({field.name} AS {duck_type}) AS {field.name}")
+                    qfield = self._quote_ident(field.name)
+                    if cast_to_string:
+                        select_exprs.append(f"CAST({qfield} AS {duck_type}) AS {qfield}")
+                    else:
+                        select_exprs.append(f"TRY_CAST({qfield} AS {duck_type}) AS {qfield}")
                 else:
-                    select_exprs.append(field.name)
+                    select_exprs.append(self._quote_ident(field.name))
             else:
                 if duck_type:
-                    select_exprs.append(f"CAST(NULL AS {duck_type}) AS {field.name}")
+                    qfield = self._quote_ident(field.name)
+                    select_exprs.append(f"CAST(NULL AS {duck_type}) AS {qfield}")
                 else:
-                    select_exprs.append(f"NULL AS {field.name}")
+                    select_exprs.append(f"NULL AS {self._quote_ident(field.name)}")
 
         if policy in ["allow", "quarantine"] and unknown:
             if cast_to_string:
-                select_exprs.extend([f"CAST({c} AS VARCHAR) AS {c}" for c in sorted(unknown)])
+                select_exprs.extend([f"CAST({self._quote_ident(c)} AS VARCHAR) AS {self._quote_ident(c)}" for c in sorted(unknown)])
             else:
-                select_exprs.extend(sorted(unknown))
+                select_exprs.extend([self._quote_ident(c) for c in sorted(unknown)])
 
         schema_view = "schema_applied"
         con.execute(f"CREATE OR REPLACE VIEW {schema_view} AS SELECT {', '.join(select_exprs)} FROM {tbl_name}")
@@ -278,7 +369,9 @@ class DuckDBAdapter(EngineAdapter):
             try:
                 val = con.execute(rule.sql).fetchone()[0]
                 passed = True
-                if rule.must_be_between:
+                if val is None:
+                    passed = False
+                elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                 elif rule.must_be_less_than is not None:
                     passed = val < rule.must_be_less_than
@@ -309,12 +402,22 @@ class DuckDBAdapter(EngineAdapter):
         """
         current_tbl = tbl_name
         view_idx = 0
+        dataset_name = self.contract.dataset or "source"
         
         for trans in self.contract.transformations:
             if trans.sql and (trans.phase or "post").lower() == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
                 view_name = f"pre_trans_{view_idx}"
-                con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {current_tbl}")
+                
+                # Setup aliases so users can reference either 'source' or the dataset name.
+                # Use a temp table (materialized) to avoid recursive view binding.
+                buffer_name = f"__pre_buffer_{uuid4().hex[:8]}"
+                con.execute(f"CREATE OR REPLACE TEMP TABLE {buffer_name} AS SELECT * FROM {current_tbl}")
+                con.execute(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM {buffer_name}")
+                if dataset_name != "source":
+                    con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
+                
+                # Run the actual transformation
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS {trans.sql}")
                 current_tbl = view_name
                 view_idx += 1
@@ -323,16 +426,33 @@ class DuckDBAdapter(EngineAdapter):
             view_name = f"pre_trans_{view_idx}"
             if trans.rename:
                 cols = self._get_columns(con, current_tbl)
-                if trans.rename.from_name not in cols:
-                    logger.warning(f"Pre-Transform [Rename] skipped; column not found: {trans.rename.from_name}")
-                else:
-                    logger.debug(f"Pre-Transform [Rename]: {trans.rename.from_name} -> {trans.rename.to_name}")
-                    con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * REPLACE ({trans.rename.from_name} AS {trans.rename.to_name}) FROM {current_tbl}")
+                rename_pairs = trans.rename.iter_pairs()
+                if not rename_pairs:
+                    continue
+                rename_map = {}
+                for from_col, to_col in rename_pairs:
+                    if from_col not in cols:
+                        logger.warning(f"Pre-Transform [Rename] skipped; column not found: {from_col}")
+                        continue
+                    logger.debug(f"Pre-Transform [Rename]: {from_col} -> {to_col}")
+                    rename_map[from_col] = to_col
+                if rename_map:
+                    target_cols = set(rename_map.values())
+                    exprs = []
+                    for col in cols:
+                        if col in rename_map:
+                            exprs.append(f"{self._quote_ident(col)} AS {self._quote_ident(rename_map[col])}")
+                        elif col in target_cols:
+                            # Skip existing target columns to avoid duplicates.
+                            continue
+                        else:
+                            exprs.append(self._quote_ident(col))
+                    con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                     current_tbl = view_name
                     view_idx += 1
             elif trans.select:
                 logger.debug(f"Pre-Transform [Select]: {trans.select.columns}")
-                select_cols = [col for col in trans.select.columns if col]
+                select_cols = [self._quote_ident(col) for col in trans.select.columns if col]
                 if select_cols:
                     con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(select_cols)} FROM {current_tbl}")
                     current_tbl = view_name
@@ -340,7 +460,7 @@ class DuckDBAdapter(EngineAdapter):
             elif trans.drop:
                 logger.debug(f"Pre-Transform [Drop]: {trans.drop.columns}")
                 cols = self._get_columns(con, current_tbl)
-                keep = [col for col in cols if col not in set(trans.drop.columns)]
+                keep = [self._quote_ident(col) for col in cols if col not in set(trans.drop.columns)]
                 if keep:
                     con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(keep)} FROM {current_tbl}")
                     current_tbl = view_name
@@ -354,9 +474,10 @@ class DuckDBAdapter(EngineAdapter):
                 for col in cols:
                     if col in trans.cast.columns:
                         duck_type = self._to_duckdb_type(trans.cast.columns[col]) or trans.cast.columns[col]
-                        exprs.append(f"CAST({col} AS {duck_type}) AS {col}")
+                        qcol = self._quote_ident(col)
+                        exprs.append(f"CAST({qcol} AS {duck_type}) AS {qcol}")
                     else:
-                        exprs.append(col)
+                        exprs.append(self._quote_ident(col))
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                 current_tbl = view_name
                 view_idx += 1
@@ -366,14 +487,15 @@ class DuckDBAdapter(EngineAdapter):
                 exprs = []
                 for col in cols:
                     if col in trans.trim.fields:
+                        qcol = self._quote_ident(col)
                         if trans.trim.side == "left":
-                            exprs.append(f"LTRIM({col}) AS {col}")
+                            exprs.append(f"LTRIM({qcol}) AS {qcol}")
                         elif trans.trim.side == "right":
-                            exprs.append(f"RTRIM({col}) AS {col}")
+                            exprs.append(f"RTRIM({qcol}) AS {qcol}")
                         else:
-                            exprs.append(f"TRIM({col}) AS {col}")
+                            exprs.append(f"TRIM({qcol}) AS {qcol}")
                     else:
-                        exprs.append(col)
+                        exprs.append(self._quote_ident(col))
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                 current_tbl = view_name
                 view_idx += 1
@@ -383,9 +505,10 @@ class DuckDBAdapter(EngineAdapter):
                 exprs = []
                 for col in cols:
                     if col in trans.lower.fields:
-                        exprs.append(f"LOWER({col}) AS {col}")
+                        qcol = self._quote_ident(col)
+                        exprs.append(f"LOWER({qcol}) AS {qcol}")
                     else:
-                        exprs.append(col)
+                        exprs.append(self._quote_ident(col))
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                 current_tbl = view_name
                 view_idx += 1
@@ -395,9 +518,10 @@ class DuckDBAdapter(EngineAdapter):
                 exprs = []
                 for col in cols:
                     if col in trans.upper.fields:
-                        exprs.append(f"UPPER({col}) AS {col}")
+                        qcol = self._quote_ident(col)
+                        exprs.append(f"UPPER({qcol}) AS {qcol}")
                     else:
-                        exprs.append(col)
+                        exprs.append(self._quote_ident(col))
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                 current_tbl = view_name
                 view_idx += 1
@@ -405,9 +529,12 @@ class DuckDBAdapter(EngineAdapter):
                 sources = trans.coalesce.sources or []
                 if not sources:
                     sources = [trans.coalesce.field]
-                expr_parts = ", ".join(sources + ([self._format_literal(trans.coalesce.default)] if trans.coalesce.default is not None else []))
+                expr_parts = ", ".join(
+                    [self._quote_ident(part) for part in sources]
+                    + ([self._format_literal(trans.coalesce.default)] if trans.coalesce.default is not None else [])
+                )
                 output = trans.coalesce.output or trans.coalesce.field
-                expr = f"COALESCE({expr_parts}) AS {output}"
+                expr = f"COALESCE({expr_parts}) AS {self._quote_ident(output)}"
                 cols = self._get_columns(con, current_tbl)
                 exprs = []
                 replaced = False
@@ -416,7 +543,7 @@ class DuckDBAdapter(EngineAdapter):
                         exprs.append(expr)
                         replaced = True
                     else:
-                        exprs.append(col)
+                        exprs.append(self._quote_ident(col))
                 if not replaced:
                     exprs.append(expr)
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
@@ -426,14 +553,14 @@ class DuckDBAdapter(EngineAdapter):
                 output = trans.split.output or trans.split.field
                 cols = self._get_columns(con, current_tbl)
                 exprs = []
-                split_expr = f"str_split({trans.split.field}, {self._format_literal(trans.split.delimiter)}) AS {output}"
+                split_expr = f"str_split({self._quote_ident(trans.split.field)}, {self._format_literal(trans.split.delimiter)}) AS {self._quote_ident(output)}"
                 replaced = False
                 for col in cols:
                     if col == output:
                         exprs.append(split_expr)
                         replaced = True
                     else:
-                        exprs.append(col)
+                        exprs.append(self._quote_ident(col))
                 if not replaced:
                     exprs.append(split_expr)
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
@@ -445,18 +572,19 @@ class DuckDBAdapter(EngineAdapter):
                 select_cols = [col for col in cols if col != output]
                 if output == trans.explode.field:
                     select_cols = [col for col in cols if col != trans.explode.field]
-                exprs = select_cols + [f"unnest({trans.explode.field}) AS {output}"]
+                exprs = [self._quote_ident(col) for col in select_cols] + [f"unnest({self._quote_ident(trans.explode.field)}) AS {self._quote_ident(output)}"]
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                 current_tbl = view_name
                 view_idx += 1
             elif trans.map_values:
                 field = trans.map_values.field
+                qfield = self._quote_ident(field)
                 mapping = trans.map_values.mapping or {}
                 if mapping:
                     cases = []
                     for key, value in mapping.items():
-                        cases.append(f"WHEN {field} = {self._format_literal(key)} THEN {self._format_literal(value)}")
-                    default_expr = self._format_literal(trans.map_values.default) if trans.map_values.default is not None else field
+                        cases.append(f"WHEN {qfield} = {self._format_literal(key)} THEN {self._format_literal(value)}")
+                    default_expr = self._format_literal(trans.map_values.default) if trans.map_values.default is not None else qfield
                     case_expr = f"CASE {' '.join(cases)} ELSE {default_expr} END"
                     output = trans.map_values.output or field
                     cols = self._get_columns(con, current_tbl)
@@ -464,12 +592,12 @@ class DuckDBAdapter(EngineAdapter):
                     replaced = False
                     for col in cols:
                         if col == output:
-                            exprs.append(f"{case_expr} AS {output}")
+                            exprs.append(f"{case_expr} AS {self._quote_ident(output)}")
                             replaced = True
                         else:
-                            exprs.append(col)
+                            exprs.append(self._quote_ident(col))
                     if not replaced:
-                        exprs.append(f"{case_expr} AS {output}")
+                        exprs.append(f"{case_expr} AS {self._quote_ident(output)}")
                     con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                     current_tbl = view_name
                     view_idx += 1
@@ -480,10 +608,10 @@ class DuckDBAdapter(EngineAdapter):
                 view_idx += 1
             elif trans.deduplicate:
                 logger.debug(f"Pre-Transform [Deduplicate]: {trans.deduplicate.on}")
-                on_cols = ", ".join(trans.deduplicate.on)
+                on_cols = ", ".join(self._quote_ident(col) for col in trans.deduplicate.on)
                 order_clause = ""
                 if trans.deduplicate.sort_by:
-                    cols = ", ".join(trans.deduplicate.sort_by)
+                    cols = ", ".join(self._quote_ident(col) for col in trans.deduplicate.sort_by)
                     order_clause = f"ORDER BY {cols} {trans.deduplicate.order}"
                 
                 # Standard window function approach
@@ -514,30 +642,56 @@ class DuckDBAdapter(EngineAdapter):
             return rel.df()
             
         current_rel = rel
-        tbl_alias = "src_tbl"
+        dataset_name = self.contract.dataset or "source"
         
         for trans in self.contract.transformations:
             if trans.sql and (trans.phase or "post").lower() != "pre":
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
-                current_rel.create_view("source")
-                current_rel = con.query(trans.sql)
+                
+                # Create a physical view from relation so we can reference it by name in SQL
+                view_name = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(view_name)
+                buffer_name = f"__post_buffer_{uuid4().hex[:8]}"
+                con.execute(f"CREATE OR REPLACE TEMP TABLE {buffer_name} AS SELECT * FROM {view_name}")
+                
+                # Provide aliases for the SQL snippet (avoid view recursion)
+                con.execute(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM {buffer_name}")
+                if dataset_name != "source":
+                    con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
+                
+                current_rel = con.sql(trans.sql)
+                continue
+            if trans.rollup and (trans.phase or "post").lower() != "pre":
+                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=dataset_name)
+                logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
+
+                view_name = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(view_name)
+                buffer_name = f"__post_buffer_{uuid4().hex[:8]}"
+                con.execute(f"CREATE OR REPLACE TEMP TABLE {buffer_name} AS SELECT * FROM {view_name}")
+
+                con.execute(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM {buffer_name}")
+                if dataset_name != "source":
+                    con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
+
+                current_rel = con.sql(rollup_sql)
                 continue
 
             if trans.derive:
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 current_rel.create_view(tbl_alias)
-                query = f"SELECT *, ({trans.derive.sql}) AS {trans.derive.field} FROM {tbl_alias}"
+                query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(trans.derive.field)} FROM {tbl_alias}"
                 current_rel = con.query(query)
             elif trans.lookup:
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_rel.create_view("src")
-                value_expr = f"ref.{trans.lookup.value}"
+                value_expr = f"ref.{self._quote_ident(trans.lookup.value)}"
                 if trans.lookup.default_value is not None:
-                    value_expr = f"COALESCE(ref.{trans.lookup.value}, {self._format_literal(trans.lookup.default_value)})"
+                    value_expr = f"COALESCE(ref.{self._quote_ident(trans.lookup.value)}, {self._format_literal(trans.lookup.default_value)})"
                 query = f"""
-                SELECT src.*, {value_expr} AS {trans.lookup.field}
+                SELECT src.*, {value_expr} AS {self._quote_ident(trans.lookup.field)}
                 FROM src
-                LEFT JOIN {trans.lookup.reference} ref ON src.{trans.lookup.on} = ref.{trans.lookup.key}
+                LEFT JOIN {self._quote_qualified(trans.lookup.reference)} ref ON src.{self._quote_ident(trans.lookup.on)} = ref.{self._quote_ident(trans.lookup.key)}
                 """
                 current_rel = con.query(query)
             elif trans.join:
@@ -552,7 +706,7 @@ class DuckDBAdapter(EngineAdapter):
                 query = f"SELECT * FROM {tbl_alias} WHERE {trans.filter.sql}"
                 current_rel = con.query(query)
         
-        return current_rel.df()
+        return current_rel
 
     def _build_join_sql(self, join_cfg, source_table: str = "source") -> str:
         """
@@ -574,13 +728,13 @@ class DuckDBAdapter(EngineAdapter):
             alias = f"{join_cfg.prefix}{field}" if join_cfg.prefix else field
             default = join_cfg.defaults.get(field) if join_cfg.defaults else None
             if default is not None:
-                expr = f"COALESCE(ref.{field}, {self._format_literal(default)}) AS {alias}"
+                expr = f"COALESCE(ref.{self._quote_ident(field)}, {self._format_literal(default)}) AS {self._quote_ident(alias)}"
             else:
-                expr = f"ref.{field} AS {alias}"
+                expr = f"ref.{self._quote_ident(field)} AS {self._quote_ident(alias)}"
             select_fields.append(expr)
 
         return f"""
         SELECT {', '.join(select_fields)}
         FROM {source_table} src
-        {join_type} JOIN {join_cfg.reference} ref ON src.{join_cfg.on} = ref.{join_cfg.key}
+        {join_type} JOIN {self._quote_qualified(join_cfg.reference)} ref ON src.{self._quote_ident(join_cfg.on)} = ref.{self._quote_ident(join_cfg.key)}
         """

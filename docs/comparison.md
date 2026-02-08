@@ -56,8 +56,22 @@ LakeGuard provides a unified interface for data quality across your entire enter
 - **Mid-Scale Production**: Deploy to **AKS (Azure Kubernetes Service)** or **ACA (Azure Container Apps)** using **Polars**.
 - **Large-Scale Production**: Seamlessly transition to **Databricks**, **Fabric**, or **Synapse** using **Spark**.
 
+### 3. Spark-Native Scaling
+
+When running on Spark, LakeGuard uses distributed operations throughout:
+
+- **Merge/SCD2**: Uses native DataFrame joins (or Delta Lake `MERGE INTO`) instead of collecting to driver memory.
+- **Counts/Metrics**: Single-pass aggregations to avoid multiple DAG executions.
+- **No pandas bottleneck**: Data stays distributed for merge and SCD2 operations at any scale.
+
 ---
 
 ## Summary: The LakeGuard Edge
 
 LakeGuard is about **Runtime Reliability** and **Infrastructure Flexibility**. It turns your Data Contract from passive documentation into an active layer of your Medallion architecture—Ensuring your **Silver** layer is Filtered, Cleaned, Transformed, and Enriched—working in harmony with your existing modeling and observability tools to ensure data integrity at every step across **Azure** and **AWS** Spark platforms and Snowflake/BigQuery (table‑only). 🛡️🏛️
+
+---
+
+## Need More?
+
+LakeGuard is fully open source and works standalone. For enterprise teams looking for additional capabilities, [LineageLogic](https://lineagelogic.com) extends LakeGuard with AI-powered contract generation, visual lineage mapping, and collaborative governance workflows.

@@ -1,19 +1,34 @@
-# Playbooks
+# Patterns
 
-Playbooks are end-to-end, real-world scenarios. Each playbook ships with:
+Patterns are reusable recipes for common data engineering problems. Each pattern includes:
 
-- A small dataset you can run locally
-- A production-style contract YAML
-- A notebook walkthrough that executes the contract
+- A working contract YAML
+- Sample data you can run locally
+- A README explaining when and how to use it
 
-Note: Some playbooks use SQL window functions (e.g., `ROW_NUMBER`) and are best run with the DuckDB or Spark engine.
+Note: Some patterns use SQL window functions (e.g., `ROW_NUMBER`) and are best run with the DuckDB or Spark engine.
 
-## Available Playbooks
+## Available Patterns
 
-| Playbook | What it Tests | Assets |
+| Pattern | What it Solves | Location |
 | --- | --- | --- |
-| Bronze Quality Gate | Schema enforcement, row rules, lineage injection | `examples/playbooks/bronze_quality_gate/contract.yaml`, `examples/playbooks/bronze_quality_gate/data/raw_signups.csv`, `examples/playbooks/bronze_quality_gate/playbook.ipynb` |
-| Customer Onboarding | Dedup, lookups, enrichment, opt-out flagging | `examples/playbooks/customer_onboarding/contract.yaml`, `examples/playbooks/customer_onboarding/data/*.csv`, `examples/playbooks/customer_onboarding/playbook.ipynb` |
-| Dedup & Survivorship | Deduplicate by most recent update, derive status | `examples/playbooks/dedup_survivorship/contract.yaml`, `examples/playbooks/dedup_survivorship/data/customer_updates.csv`, `examples/playbooks/dedup_survivorship/playbook.ipynb` |
-| Late Arriving Reprocess | Partitioned materialization with overwrite partition | `examples/playbooks/late_arriving_reprocess/contract.yaml`, `examples/playbooks/late_arriving_reprocess/data/*.csv`, `examples/playbooks/late_arriving_reprocess/playbook.ipynb` |
-| SCD2 Dimension | Historical tracking with SCD2 materialization | `examples/playbooks/scd2_dimension/contract.yaml`, `examples/playbooks/scd2_dimension/data/*.csv`, `examples/playbooks/scd2_dimension/playbook.ipynb` |
+| [Bronze Quality Gate](patterns/bronze_quality_gate.md) | Reject bad data at ingestion | `examples/03_patterns/bronze_quality_gate/` |
+| [Dedup & Survivorship](patterns/dedup_survivorship.md) | Handle duplicate records | `examples/03_patterns/dedup_survivorship/` |
+| [SCD2 Dimension](patterns/scd2_dimension.md) | Track historical changes | `examples/03_patterns/scd2_dimension/` |
+| [Late Arriving Reprocess](patterns/late_arriving_reprocess.md) | Safe partition backfill | `examples/03_patterns/late_arriving_reprocess/` |
+| [External Python Logic](patterns/external_python_logic.md) | Custom Python/notebook hooks | `examples/03_patterns/external_python_logic/` |
+
+## When to Use Each Pattern
+
+| Problem | Pattern |
+| --- | --- |
+| Reject garbage at ingestion | Bronze Quality Gate |
+| Multiple records per key | Dedup & Survivorship |
+| Track historical changes | SCD2 Dimension |
+| Backfill without data loss | Late Arriving Reprocess |
+| Complex business logic | External Python Logic |
+
+## See Also
+
+- [Tutorials](quickstart.md) - Start with the basics first
+- [Production Examples](examples/insurance_elt.md) - Complete end-to-end pipeline

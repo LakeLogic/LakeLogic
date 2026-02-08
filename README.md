@@ -1,23 +1,21 @@
 # LakeGuard
 
-**The Quality Gate for your Data Lakehouse.**
+**The Open-Source Runtime Engine for Data Contracts with Quarantine.**
 
-LakeGuard is a SQL-first, declarative data contract runtime that keeps your data clean, validated, and enriched as it moves through Bronze, Silver, and Gold layers.
+LakeGuard is a SQL-first, infrastructure-agnostic quality gate that ensures your business decisions are based on data you can trust. It scales your validation logic from local Polars to petabyte-scale Spark without rewriting a single rule.
 
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://your-username.github.io/lakeguard)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LineageLogic.github.io/LakeGuard)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
 ---
 
-## Why LakeGuard?
+## The Core Value: Write Once. Run Anywhere
 
-In a Data Lakehouse, raw data (Bronze) is often messy. Moving it to Silver and Gold usually requires writing complex, custom code that is hard to maintain and inconsistent across different engines (Spark vs. Polars).
+Stop paying the **"Infrastructure Lock-In Tax."** In a traditional stack, moving from a Warehouse (Snowflake) to a Lakehouse (Databricks) means months of rewriting validation rules. LakeGuard decouples your **Business Logic** from your **Execution Engine**.
 
-LakeGuard solves this by providing **One Contract** that runs on **Any Engine**:
-
-1. **Define Once**: Use YAML to declare your schema, quality rules, and business logic.
-2. **Execute Anywhere**: Run the same contract on Spark, Polars, DuckDB, Pandas, or directly in Snowflake/BigQuery (table-only).
-3. **Governance Built-in**: Automatically isolate bad data into **Quarantine** with detailed failure reasons.
+1. **Cost Efficiency (The Spark Tax ROI):** Run 80% of your maintenance checks on **Polars** or **DuckDB** for pennies, while reserving **Spark** for your massive production scales.
+2. **Risk Mitigation (100% Reconciliation):** Ensure `Source = Good + Quarantined`. Mathematically prove that no record was lost or double-counted across your layers.
+3. **Stakeholder Trust (Visual Traceability):** Use aggregate roll-ups to give your business users a visual drill-down from board-level KPIs back to raw source records.
 
 ## Key Features
 
@@ -59,11 +57,13 @@ good_df, bad_df = processor.run_source("bronze_crm_customers.csv")
 ## Documentation
 
 Visit our documentation for:
-- **Notebooks**: Hands-on tutorials in the `examples/` folder.
+
+- **Notebooks**:
+  - [5-Minute Data Contract Quickstart](examples/tutorial_quickstart/quickstart_tutorial.ipynb)
+  - Hands-on tutorials in the `examples/` folder.
 - **Playbooks**: End-to-end scenarios with data, contracts, and notebooks.
 - Concepts: `docs/concepts.md`
 - Reprocessing: `docs/reprocessing.md`
-- Playground: `docs/playground.md`
 - CLI: `docs/cli.md`
 
 ## Contributing
@@ -71,4 +71,7 @@ Visit our documentation for:
 See `docs/installation.md#developer-installation` to get started.
 
 ---
-*License: Apache-2.0*
+
+### License
+
+Apache-2.0

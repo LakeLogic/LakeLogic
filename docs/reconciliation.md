@@ -2,13 +2,12 @@
 
 > Note: Automated lineage capture, run logging, and SLO scoring are available in the OSS release. Full orchestration is still on the roadmap.
 
-In a mission-critical Data Lakehouse, you must be able to prove that **nothing was lost** and **everything came from somewhere**.
+In a mission-critical data lakehouse, you must be able to prove that **nothing was lost** and **everything came from somewhere**. LakeGuard provides built-in tools for **Data Reconciliation** and **System-Level Lineage**.
 
-LakeGuard provides built-in tools for **Data Reconciliation** and **System-Level Lineage**.
+---
 
-## 1. Automated Metadata Capture
-
-LakeGuard can automatically inject lineage columns into every record as it moves from Bronze to Silver. This happens for both **Good Data** and **Quarantined Data**.
+## 1. Automated metadata capture
+LakeGuard can inject lineage columns into every record as it moves from Bronze to Silver (and beyond). This happens for both **Good Data** and **Quarantined Data**.
 
 ```yaml
 lineage:
@@ -18,43 +17,93 @@ lineage:
   source_column_name: "_bronze_file_name"
 ```
 
-When this is enabled, every row in your Silver table will tell you exactly which file it came from. This is vital for debugging "garbage" data back to the source provider.
+If you only want a run id in tables, set explicit capture flags and keep the rest in run logs:
 
-## 2. Reconciliation: The "Count" Rule
+```yaml
+lineage:
+  enabled: true
+  capture_run_id: true
+  capture_timestamp: false
+  capture_source_path: false
+  capture_domain: false
+  capture_system: false
+```
 
-To ensure that `Bronze = Silver + Quarantine`, you can use **Dataset Rules**.
+You can preserve upstream lineage columns before stamping the current run:
+
+```yaml
+lineage:
+  enabled: true
+  preserve_upstream: ["_lakeguard_run_id"]
+  upstream_prefix: "_upstream"
+```
+
+And for Gold, you can use a pipeline-wide id for `_lakeguard_run_id`:
+
+```yaml
+lineage:
+  enabled: true
+  capture_run_id: true
+  run_id_source: pipeline_run_id
+```
+
+---
+
+## 2. Reconciliation: the count rule
+To ensure that `Bronze = Silver + Quarantine`, use the counts LakeGuard logs on every run.
 
 | Layer | Records | Status |
 | :--- | :--- | :--- |
 | **Bronze** | 1,000 | Ingested |
 | **Silver** | 995 | Cleaned |
 | **Quarantine** | 5 | Isolated |
-| **Total** | **1,000** | ? Reconciled |
+| **Total** | **1,000** | Reconciled |
 
-LakeGuard logs these counts automatically at the end of every run, providing a clear audit trail for your data platform.
-Reconciliation is simply checking that `total == good + quarantined`, which you can validate from the run report counts.
+Run logs include:
+- `counts_source` (source rows before transforms)
+- `counts_total` (post-transform total)
+- `counts_pre_transform_dropped`
 
-## 3. Gold Column "Key Roll-up"
+Reconciliation is simply checking that `counts_total == counts_good + counts_quarantined`.
 
-When you aggregate data in the **Gold** layer (e.g., summarizing 1,000 sales into 1 daily total), you lose the connection to the individual records.
+---
 
-**The LakeGuard Solution**: Use "Key Rolling" in your SQL logic to keep a list of the source IDs.
+## 3. Incremental manifests and watermarks
+When you ingest from file globs, the run log captures:
+- `source_files_json`: list of files processed in that batch
+- `max_source_mtime`: max file timestamp in that batch
+
+This supports lightweight watermarks for incremental processing and auditability.
+
+---
+
+## 4. Gold key roll-up (traceability for aggregates)
+When you aggregate data in the Gold layer, you lose direct row-to-row traceability. Use a rollup transform to keep source keys.
 
 ```yaml
-# gold_sales_daily.yaml
 transformations:
-  - sql: |
-      SELECT 
-        sale_date,
-        SUM(amount) as total_sales,
-        ARRAY_AGG(sale_id) as silver_source_ids # Roll-up the source keys
-      FROM source
-      GROUP BY sale_date
-    phase: post
+  - rollup:
+      group_by: ["sale_date"]
+      aggregations:
+        total_sales: "SUM(amount)"
+      keys: "sale_id"
+      rollup_keys_column: "_lakeguard_rollup_keys"
+      rollup_keys_count_column: "_lakeguard_rollup_keys_count"  # optional
+      upstream_run_id_column: "_upstream_run_id"                # optional
+      upstream_run_ids_column: "_upstream_lakeguard_run_ids"     # optional
 ```
 
 ### Why do this?
-By keeping the `silver_source_ids` in your Gold table:
-1.  **Drill-down**: A business user seeing a weird total can immediately find the exact 500 sales that created it.
-2.  **Audit**: You can mathematically prove that every row in Gold is backed by a specific set of records in Silver.
-3.  **Trust**: It turns your "Black Box" aggregates into "Open Book" data.
+By keeping the rollup keys in Gold:
+1. **Drill-down**: a business user can trace a total back to its component rows.
+2. **Audit**: you can prove each Gold row is backed by specific Silver records.
+3. **Trust**: aggregates become transparent and explainable.
+
+---
+
+## Summary: business value
+
+- **Auditability**: verifiable evidence for regulators and internal governance.
+- **Traceability**: fast root-cause analysis when a metric looks wrong.
+- **Operational confidence**: clear reconciliation across medallion layers.
+- **Transparent aggregates**: Gold tables remain explainable and defensible.

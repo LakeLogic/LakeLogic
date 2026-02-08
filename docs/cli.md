@@ -1,8 +1,18 @@
 # CLI Reference
 
-LakeGuard ships with a simple CLI for validating files with a contract.
+The LakeGuard CLI is the high-efficiency entry point for enforcing your data contracts. It is designed for **Speed-to-Production** and **Engine Portability**.
 
-## Basic Usage
+## Strategic Value
+
+- **Developer Productivity:** Bootstrap production-ready contracts from raw data in seconds.
+- **Infrastructure Optionality:** Use the `--engine` flag to swap between Polars (local speed) and Spark (cluster scale) with zero code changes.
+- **Audit Readiness:** Every execution generates a run summary for instant reconciliation.
+
+## Commands
+
+### 🟢 `lakeguard run`
+
+Validates a source dataset against a contract.
 
 ```bash
 lakeguard run --contract contract.yaml --source data.csv
@@ -14,6 +24,7 @@ lakeguard run --contract contract.yaml --source data.csv
 lakeguard help
 lakeguard help bootstrap
 ```
+
 This prints short usage guidance and examples directly in the terminal.
 
 Python helper:
@@ -37,6 +48,7 @@ lakeguard run --engine snowflake --contract contract.yaml --source table:ANALYTI
 - `--contract, -c`: Path to the YAML contract
 - `--source, -s`: Input file (CSV or Parquet; Delta/Iceberg with Spark + `server.format`) or a table name for Snowflake/BigQuery engines
 - `--engine, -e`: (Optional) Force an engine (`polars`, `pandas`, `duckdb`, `spark`, `snowflake`, `bigquery`). If omitted, LakeGuard discovery is used.
+- `--stage`: Apply contract stage overrides (e.g., `bronze`, `silver`) from a top-level `stages` block.
 - `--output-good`: Save good records to CSV/Parquet (or write to Delta/Iceberg via `--materialize`)
 - `--output-bad`: Save quarantined records to CSV/Parquet
 - `--output-format`: `csv` or `parquet` (defaults to CSV or inferred from file extension)
@@ -70,7 +82,9 @@ lakeguard-driver \
   --window last_success
 ```
 
-## Bootstrap Contracts
+### 🛠️ `lakeguard bootstrap`
+
+Generate starter contracts and a registry from a landing zone. This is the **Governance Accelerator** for Day 1 compliance.
 
 Generate starter contracts and a registry from a landing zone:
 
@@ -82,6 +96,7 @@ lakeguard bootstrap \
   --format csv \
   --pattern "*.csv"
 ```
+
 Use `--sync` to align an existing registry with new landing data:
 
 ```bash
@@ -94,7 +109,7 @@ lakeguard bootstrap \
   --sync
 ```
 
-### Driver Options (Highlights)
+## Driver Options (Highlights)
 
 - `--summary-path`: Write a per-run summary JSON (metrics + per-contract status).
 - `--summary-table`: Write a pipeline summary row to a table backend.

@@ -1,7 +1,6 @@
 import pandas as pd
 from typing import Tuple, Any
 from lakeguard.engines.base import EngineAdapter
-from lakeguard.engines.duckdb import DuckDBAdapter
 from loguru import logger
 
 class PandasAdapter(EngineAdapter):
@@ -24,11 +23,23 @@ class PandasAdapter(EngineAdapter):
         if not isinstance(df, pd.DataFrame):
             raise TypeError(f"Expected Pandas DataFrame, got {type(df)}")
 
-        logger.info("Using DuckDB backend for Pandas SQL execution.")
-        
+        logger.info("Pandas engine selected; using DuckDB backend for SQL execution.")
+
         # We leverage the DuckDBAdapter logic directly
+        try:
+            from lakeguard.engines.duckdb import DuckDBAdapter
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "Pandas engine requires DuckDB for SQL execution. "
+                "Install with `pip install lakeguard[pandas]` or `pip install duckdb`."
+            ) from exc
+
         duck_adapter = DuckDBAdapter(self.contract)
         good_df, bad_df = duck_adapter.execute(df)
+        if hasattr(good_df, "df"):
+            good_df = good_df.df()
+        if hasattr(bad_df, "df"):
+            bad_df = bad_df.df()
         self.dataset_rule_results = duck_adapter.dataset_rule_results
         
         # DuckDBAdapter already returns Pandas DataFrames if the input was registerable

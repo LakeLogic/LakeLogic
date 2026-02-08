@@ -55,3 +55,26 @@ def test_processor_slo_scores():
     slos = processor.last_report.get("slos", {})
     assert slos["freshness"]["passed"] is True
     assert slos["availability"]["passed"] is True
+
+
+def test_processor_stage_overrides():
+    """Stage overrides should merge into the base contract."""
+    contract_data = {
+        "version": "1.0.0",
+        "transformations": [{"rename": {"from": "a", "to": "b"}}],
+        "stages": {
+            "bronze": {
+                "server": {
+                    "type": "local",
+                    "path": "data/bronze",
+                    "mode": "ingest",
+                    "cast_to_string": True,
+                },
+                "transformations": [],
+            }
+        },
+    }
+    processor = DataProcessor(engine="polars", contract=contract_data, stage="bronze")
+    assert processor.contract.server.mode == "ingest"
+    assert processor.contract.server.cast_to_string is True
+    assert processor.contract.transformations == []

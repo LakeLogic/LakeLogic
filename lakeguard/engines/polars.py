@@ -175,15 +175,21 @@ class PolarsAdapter(EngineAdapter):
         """
         if not self.contract.model or not self.contract.model.fields:
             if self.contract.server and self.contract.server.mode == "ingest" and self.contract.server.cast_to_string:
-                lf = lf.with_columns([pl.col(col).cast(pl.Utf8, strict=False) for col in lf.columns])
+                columns = lf.collect_schema().names()
+                lf = lf.with_columns([pl.col(col).cast(pl.Utf8, strict=False) for col in columns])
             return lf, []
 
         expected_fields = [f.name for f in self.contract.model.fields]
-        existing = set(lf.columns)
+        existing_cols = lf.collect_schema().names()
+        existing = set(existing_cols)
         expected = set(expected_fields)
 
         missing = expected - existing
         unknown = existing - expected
+        
+        # Exclude transient and lineage columns from unknown field assessment
+        transient_cols = {"rn", "__index_level_0__", "_row_number"}
+        unknown = unknown - transient_cols - self._lineage_columns()
 
         for col in missing:
             lf = lf.with_columns(pl.lit(None).alias(col))
@@ -204,7 +210,8 @@ class PolarsAdapter(EngineAdapter):
                 policy = "quarantine"
 
         if cast_to_string:
-            lf = lf.with_columns([pl.col(col).cast(pl.Utf8, strict=False) for col in lf.columns])
+            columns = lf.collect_schema().names()
+            lf = lf.with_columns([pl.col(col).cast(pl.Utf8, strict=False) for col in columns])
         else:
             for field in self.contract.model.fields:
                 dtype = self._to_polars_dtype(field.type)
@@ -350,7 +357,9 @@ class PolarsAdapter(EngineAdapter):
                 val = res.row(0)[0]
                 
                 passed = True
-                if rule.must_be_between:
+                if val is None:
+                    passed = False
+                elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                 elif rule.must_be_less_than is not None:
                     passed = val < rule.must_be_less_than
@@ -379,49 +388,53 @@ class PolarsAdapter(EngineAdapter):
             Transformed LazyFrame.
         """
         current_lf = lf
-        existing = set(current_lf.columns)
+        existing = set(current_lf.collect_schema().names())
         for trans in self.contract.transformations:
             if trans.sql and (trans.phase or "post").lower() == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
                 try:
                     current_lf = self._apply_sql_transformation(current_lf, trans.sql)
-                    existing = set(current_lf.columns)
+                    existing = set(current_lf.collect_schema().names())
                 except Exception as e:
                     logger.warning(f"Pre-Transform [SQL] failed: {e}")
                 continue
 
             if trans.rename:
-                if trans.rename.from_name not in existing:
-                    logger.warning(f"Pre-Transform [Rename] skipped; column not found: {trans.rename.from_name}")
+                rename_pairs = trans.rename.iter_pairs()
+                if not rename_pairs:
                     continue
-                logger.debug(f"Pre-Transform [Rename]: {trans.rename.from_name} -> {trans.rename.to_name}")
-                current_lf = current_lf.rename({trans.rename.from_name: trans.rename.to_name})
-                existing.remove(trans.rename.from_name)
-                existing.add(trans.rename.to_name)
+                for from_col, to_col in rename_pairs:
+                    if from_col not in existing:
+                        logger.warning(f"Pre-Transform [Rename] skipped; column not found: {from_col}")
+                        continue
+                    logger.debug(f"Pre-Transform [Rename]: {from_col} -> {to_col}")
+                    current_lf = current_lf.rename({from_col: to_col})
+                    existing.remove(from_col)
+                    existing.add(to_col)
             elif trans.select:
                 logger.debug(f"Pre-Transform [Select]: {trans.select.columns}")
                 current_lf = current_lf.select(trans.select.columns)
-                existing = set(current_lf.columns)
+                existing = set(current_lf.collect_schema().names())
             elif trans.drop:
                 logger.debug(f"Pre-Transform [Drop]: {trans.drop.columns}")
                 current_lf = current_lf.drop(trans.drop.columns)
-                existing = set(current_lf.columns)
+                existing = set(current_lf.collect_schema().names())
             elif trans.cast:
                 logger.debug(f"Pre-Transform [Cast]: {list(trans.cast.columns.keys())}")
                 exprs = []
                 for col, dtype_name in trans.cast.columns.items():
-                    if col not in current_lf.columns:
+                    if col not in existing:
                         continue
                     dtype = self._to_polars_dtype(dtype_name) or pl.Utf8
                     exprs.append(pl.col(col).cast(dtype, strict=False).alias(col))
                 if exprs:
                     current_lf = current_lf.with_columns(exprs)
-                    existing = set(current_lf.columns)
+                    existing = set(current_lf.collect_schema().names())
             elif trans.trim:
                 logger.debug(f"Pre-Transform [Trim]: {trans.trim.fields}")
                 exprs = []
                 for col in trans.trim.fields:
-                    if col not in current_lf.columns:
+                    if col not in existing:
                         continue
                     if trans.trim.side == "left":
                         exprs.append(pl.col(col).str.strip_chars_start().alias(col))
@@ -433,45 +446,45 @@ class PolarsAdapter(EngineAdapter):
                     current_lf = current_lf.with_columns(exprs)
             elif trans.lower:
                 logger.debug(f"Pre-Transform [Lower]: {trans.lower.fields}")
-                exprs = [pl.col(col).str.to_lowercase().alias(col) for col in trans.lower.fields if col in current_lf.columns]
+                exprs = [pl.col(col).str.to_lowercase().alias(col) for col in trans.lower.fields if col in existing]
                 if exprs:
                     current_lf = current_lf.with_columns(exprs)
             elif trans.upper:
                 logger.debug(f"Pre-Transform [Upper]: {trans.upper.fields}")
-                exprs = [pl.col(col).str.to_uppercase().alias(col) for col in trans.upper.fields if col in current_lf.columns]
+                exprs = [pl.col(col).str.to_uppercase().alias(col) for col in trans.upper.fields if col in existing]
                 if exprs:
                     current_lf = current_lf.with_columns(exprs)
             elif trans.coalesce:
                 sources = trans.coalesce.sources or []
                 if not sources:
                     sources = [trans.coalesce.field]
-                exprs = [pl.col(col) for col in sources if col in current_lf.columns]
+                exprs = [pl.col(col) for col in sources if col in existing]
                 if trans.coalesce.default is not None:
                     exprs.append(pl.lit(trans.coalesce.default))
                 if exprs:
                     output = trans.coalesce.output or trans.coalesce.field
                     logger.debug(f"Pre-Transform [Coalesce]: {output}")
                     current_lf = current_lf.with_columns(pl.coalesce(exprs).alias(output))
-                    existing = set(current_lf.columns)
+                    existing = set(current_lf.collect_schema().names())
             elif trans.split:
                 output = trans.split.output or trans.split.field
-                if trans.split.field in current_lf.columns:
+                if trans.split.field in existing:
                     logger.debug(f"Pre-Transform [Split]: {trans.split.field} -> {output}")
                     current_lf = current_lf.with_columns(
                         pl.col(trans.split.field).str.split(trans.split.delimiter).alias(output)
                     )
-                    existing = set(current_lf.columns)
+                    existing = set(current_lf.collect_schema().names())
             elif trans.explode:
                 output = trans.explode.output or trans.explode.field
-                if trans.explode.field in current_lf.columns:
+                if trans.explode.field in existing:
                     logger.debug(f"Pre-Transform [Explode]: {trans.explode.field} -> {output}")
                     if output != trans.explode.field:
                         current_lf = current_lf.with_columns(pl.col(trans.explode.field).alias(output))
                     current_lf = current_lf.explode(output)
-                    existing = set(current_lf.columns)
+                    existing = set(current_lf.collect_schema().names())
             elif trans.map_values:
                 field = trans.map_values.field
-                if field in current_lf.columns:
+                if field in existing:
                     logger.debug(f"Pre-Transform [Map Values]: {field}")
                     expr = None
                     for key, value in trans.map_values.mapping.items():
@@ -482,7 +495,7 @@ class PolarsAdapter(EngineAdapter):
                         expr = expr.otherwise(pl.lit(default_val) if default_val is not None else pl.col(field))
                         output = trans.map_values.output or field
                         current_lf = current_lf.with_columns(expr.alias(output))
-                        existing = set(current_lf.columns)
+                        existing = set(current_lf.collect_schema().names())
             else:
                 filter_cfg = getattr(trans, "filter", None)
                 dedupe_cfg = getattr(trans, "deduplicate", None)
@@ -522,6 +535,11 @@ class PolarsAdapter(EngineAdapter):
             if trans.sql and (trans.phase or "post").lower() != "pre":
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
                 current_lf = self._apply_sql_transformation(current_lf, trans.sql)
+                continue
+            if trans.rollup and (trans.phase or "post").lower() != "pre":
+                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=tbl_name)
+                logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
+                current_lf = self._apply_sql_transformation(current_lf, rollup_sql)
                 continue
 
             if trans.derive:

@@ -1,3 +1,0 @@
-policy_id,customer_id,policy_number,coverage_code,policy_status,effective_date,expiry_date,premium_amount,updated_at,op
-P200,2001,PN-2001,AUTO,ACTIVE,2025-01-01,2025-12-31,1300.00,2026-02-05T08:00:00Z,I
-P201,2002,PN-2002,HOME,ACTIVE,2024-06-01,2025-05-31,900.00,2026-02-05T08:05:00Z,U

@@ -1,72 +1,93 @@
 # LakeGuard
 
-**The Quality Gate for your Data Lakehouse.**
+**The SQL-First Quality Gate for your Data Lakehouse.**
 
-In a Data Lakehouse, data moves from **Bronze** (Raw) to **Silver** (Filtered, Cleaned, Transformed, Enriched) to **Gold** (Ready). LakeGuard keeps bad data at the gate so it never pollutes downstream tables.
+LakeGuard ensures that your business decisions are based on data you can trust. By separating your **Business Logic (The Intent)** from your **Infrastructure (The Execution)**, LakeGuard lets you enforce strict quality gates across your entire Medallion architecture with **zero code rewrites**.
 
 ```mermaid
-graph LR
-    B[Bronze] -->|LakeGuard| S[Silver]
-    S -->|LakeGuard| G[Gold]
-    B -.-> Q[Quarantine]
+graph TD
+    %% Control Center
+    Contract[<br/><b><font size='6'>DATA CONTRACT</font></b><br/>YAML / SQL Rules<br/>]
+    
+    %% Main Flow
+    Source[(<br/><b><font size='6'>RAW SOURCE</font></b><br/>Files / DBs / Tables<br/>)]
+    
+    Gate{<br/><b><font size='7'>LAKEGUARD</font></b><br/><b><font size='5'>Quality Gate</font></b><br/>}
+    
+    Q[<br/><b><font size='6'>SAFE QUARANTINE</font></b><br/>Failure Logic / Reason Codes<br/>]
+    
+    Silver[<br/><b><font size='6'>SILVER LAYER</font></b><br/>Clean / Enriched<br/>]
+    Gold[<br/><b><font size='6'>GOLD LAYER</font></b><br/>Aggregates / KPIs<br/>]
+    Plat[<br/><b><font size='6'>PLATINUM</font></b><br/>AI / RAG Ready<br/>]
+
+    %% Dependencies
+    Contract ===>|<b><font size='5'>ENFORCES</font></b>| Gate
+    Source ===>|<b><font size='5'>INGEST</font></b>| Gate
+    
+    Gate ===>|<b><font size='5'>VALIDATED</font></b>| Silver
+    Gate ===>|<b><font size='5'>BROKEN</font></b>| Q
+    
+    Silver ===> Gold ===> Plat
+
+    %% Telemetry Branch
+    Gate -.-|<b><font size='4'>CAPTURES</font></b>| Telem[<br/><b><font size='6'>TELEMETRY</font></b><br/>]
+    Telem -.- Lineage[<b><font size='5'>LINEAGE</font></b>]
+    Telem -.- Metrics[<b><font size='5'>METRICS</font></b>]
+
+    %% Styles
+    style Gate fill:#1e40af,stroke:#1e3a8a,color:#ffffff,stroke-width:8px
+    style Q fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:4px
+    style Source fill:#c2410c,stroke:#78350f,color:#ffffff,stroke-width:4px
+    style Silver fill:#0f172a,stroke:#1e293b,color:#ffffff,stroke-width:3px
+    style Gold fill:#a16207,stroke:#713f12,color:#ffffff,stroke-width:3px
+    style Plat fill:#020617,stroke:#000000,color:#ffffff,stroke-width:3px
+    style Contract fill:#f8fafc,stroke:#cbd5e1,color:#1e293b,stroke-width:3px
+    
+    style Telem fill:#f1f5f9,stroke:#94a3b8,color:#1e293b,stroke-width:2px,stroke-dasharray: 5 5
+    style Lineage fill:#f8fafc,stroke:#cbd5e1,color:#1e293b,stroke-width:2px
+    style Metrics fill:#f8fafc,stroke:#cbd5e1,color:#1e293b,stroke-width:2px
+
+    %% Line Thickness
+    linkStyle default stroke:#475569,stroke-width:6px
+    linkStyle 6,7,8 stroke:#94a3b8,stroke-width:4px,stroke-dasharray: 5 5
 ```
 
-## Start Here
+## The Core Value: Write Once. Run Anywhere
 
-- [Installation](installation.md)
-- [Quickstart](quickstart.md)
-- [Starter Kit](starter_kit.md)
-- [CLI Usage](cli.md)
-- [Pipeline Driver](driver.md)
-- [Bootstrap Contracts](bootstrap.md)
-- [How It Works](concepts.md)
-- [Playbooks Overview](playbooks.md)
-- [Capability Matrix](capabilities.md)
-- [Warehouse Adapters](warehouse_adapters.md)
-- [Observability](observability.md)
+Stop paying the "Re-adaptation Tax." In a traditional stack, moving from a Warehouse (SQL) to a Lakehouse (PySpark) means rewriting your validation rules. With LakeGuard, your **Data Contract is the Source of Truth**.
 
-## Eliminate the "Spark Tax"
+- **SQL-First:** Define your constraints, rules, and logic in standard SQL—the language your team already speaks.
+- **Zero Adaptation:** Move your pipelines from **dbt/Snowflake** to **Databricks/Spark** to **Local/Polars** with **zero changes** to your contract.
+- **No Vendor Lock-in:** Your business logic is a portable asset, independent of your cloud provider or execution engine.
 
-LakeGuard is built for **infrastructure efficiency**. Most data contracts do not need a multi-node Spark cluster to validate.
+## Business ROI: Cost, Risk, & Trust
 
-**Run the exact same contract on:**
-- **Polars/DuckDB**: Lightning-fast, low-cost execution in single-node containers (AKS, ECS, Lambda, ACA).
-- **Spark**: Petabyte-scale pipelines on **Databricks**, **Microsoft Fabric**, **Azure Synapse**, or **Amazon EMR**.
-- **Snowflake & BigQuery**: Table-only warehouse adapters with SQL pushdown. See [Warehouse Adapters](warehouse_adapters.md).
+### 1. Eliminate the "Spark Tax" (Cost Savings)
 
-By running LakeGuard on Polars for your 1-100GB pipelines, you can cut compute spend dramatically while keeping enterprise-grade validation.
+- **Result:** Cut compute spend by up to 80% for maintenance and small-to-medium datasets.
 
-## Core Concept
+### 2. 100% Reconciliation (Risk Mitigation)
 
-LakeGuard separates **Intent** from **Execution**:
+- **Result:** Mathematically provable data integrity. Bad data is detoured into a **Safe Quarantine** area, ensuring production dashboards are never poisoned.
 
-- **Data Contract = Intent**: Declare what the data must look like and how it should be validated.
-- **Engine Adapter = Execution**: LakeGuard runs that contract optimally on your chosen engine.
+### 3. Visual Traceability (Stakeholder Trust)
 
-This keeps your business logic portable whether you are running locally, on **Azure/AWS** Spark platforms, or directly in Snowflake/BigQuery (table-only).
+Gold-layer metrics should never be "Black Boxes." LakeGuard supports aggregate roll-ups that preserve source keys.
 
-## Key Features
+- **Result:** Provide business users with a visual drill-down from board-level KPIs back to the raw source records.
 
-- **Declarative Contracts**: Schema, constraints, and transformations in human-readable YAML.
-- **Engine Agnostic**: Auto-discovers the best engine (Spark, Polars, DuckDB, Pandas) based on your environment. Warehouse adapters are selected explicitly.
-- **Safe Quarantine**: Detour bad rows into a reprocessing area without crashing the pipeline.
-- **Lineage Injection**: Automatically tag records with source path, run ID, and processing timestamp.
-- **Materialization**: Write validated data to local CSV/Parquet targets or Delta/Iceberg when running on Spark.
-- **Lock-in Friendly Defaults**: Quarantine writes default to Parquet files and Iceberg tables, with explicit overrides for Delta, CSV, or JSON.
-- **SQL-First Rules**: Use standard SQL for Completeness, Correctness, and Consistency checks.
-- **Registry-Driven Orchestration**: A generic driver runs Bronze → Silver → Gold from registries with parallelism, incremental windows, and reprocessing.
-- **Operational Observability**: Per-run summaries, pipeline metrics, and optional Prometheus `/metrics` endpoint.
-- **Cross-Platform Governance**: Consistent enforcement across **Databricks**, **Fabric**, **Synapse** (Spark), plus Snowflake/BigQuery (table-only).
-- **External Logic Hooks**: Run dedicated Python modules or notebooks for Gold processing when needed.
+---
 
-## Typical Use Cases
+## Technical Capabilities
 
-- **Containerized Pipelines (AKS/ACA)**: Run millions of checks per second in lightweight Python pods.
-- **Data Mesh**: Enforce contracts between decentralized domain teams (Finance, Marketing, HR).
-- **Multi-Engine Migration**: Move logic from **Synapse** to **Fabric** or **Databricks** without rewriting rules.
-- **Job Templates**: Ready-to-run orchestrator examples for **Airflow**, **Databricks**, **Synapse**, **Fabric**, and **AWS**.
-- **Streaming Gates**: Validate micro-batches before they hit your Delta/Iceberg tables.
-- **Production ELT Runs**: Use the registry driver for controlled incremental windows, safe reprocessing, and auditable run logs.
+| Feature | Description |
+| :--- | :--- |
+| **Declarative Contracts** | Human-readable YAML defines schema, rules, and transforms. |
+| **Engine Agnostic** | Auto-discovers and optimizes for Spark, Polars, DuckDB, or Pandas. |
+| **SQL-First Rules** | Use standard SQL for Completeness, Correctness, and Consistency checks. |
+| **Safe Quarantine** | Isolate bad rows without crashing the pipeline, with built-in reason codes. |
+| **Lineage Injection** | Automatically audit every record with Run IDs, Timestamps, and Source paths. |
+| **Registry Orchestration** | A generic driver to run Bronze → Silver → Gold layers with parallel execution. |
 
 ## Quick Start
 
@@ -76,27 +97,18 @@ The fastest way to get started is with **[uv](https://github.com/astral-sh/uv)**
 # Install with all engines
 uv pip install "lakeguard[all]"
 
-# Run your first contract (auto-discovers Polars/Spark/DuckDB)
+# Run your first contract (auto-discovers the best engine)
 lakeguard run --contract my_contract.yaml --source raw_data.parquet
 ```
 
-If you prefer pip:
+## Scale with LineageLogic
 
-```bash
-pip install "lakeguard[all]"
-```
+LakeGuard is the open-source engine that enforces your rules. For enterprise-scale management, **[LineageLogic](https://lineagelogic.com)** provides:
 
-## Summary
+- **AI-Powered Contract Generation:** Don't write YAML by hand; generate it from your data in seconds.
+- **Visual Governance:** See your real-time data health and lineage across your entire mesh.
+- **Collaborative Approvals:** Manage contract lifecycle and versioning across decentralized teams.
 
-LakeGuard turns your Data Contract from passive documentation into a **living security guard**. It keeps your Medallion architecture clean and trustworthy, while giving you the freedom to choose the most cost-effective engine for the job.
+---
 
-**Business Viability (High)**: Estimated 7.5–8.5/10. Strong fit for lakehouse teams running Bronze/Silver/Gold pipelines with governance and cost pressures. Key differentiators are engine-agnostic execution, registry-driven orchestration, and built-in observability.
-
-## Next Steps
-
-- [Customer Onboarding Example](examples/customer_onboarding.md)
-- [Bronze Ingestion Example](examples/ingestion.md)
-- [Insurance ELT (End-to-End)](examples/insurance_elt.md)
-- [External Gold Logic Example](examples/external_logic.md)
-- [Sales Gold Example](examples/sales_gold.md)
-- [Fact Pattern Examples](examples/fact_patterns.md)
+[Quickstart](quickstart.md) | [How It Works](concepts.md) | [Patterns](deployment_patterns.md) | [CLI Usage](cli.md)

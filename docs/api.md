@@ -7,7 +7,8 @@ from lakeguard import DataProcessor
 
 processor = DataProcessor(
     engine="polars",
-    contract="contract.yaml"
+    contract="contract.yaml",
+    stage="silver",
 )
 
 good_df, bad_df = processor.run(df)
@@ -17,6 +18,7 @@ good_df, bad_df = processor.run(df)
 
 - `engine` (str): `polars`, `pandas`, `duckdb`, `spark`, `snowflake`, or `bigquery`
 - `contract` (str | Path | dict | DataContract): YAML path or dict
+- `stage` (str | None): Apply contract stage overrides (e.g., `bronze`, `silver`)
 
 ### run(df, source_path=None, materialize=False, materialize_target=None)
 
@@ -74,6 +76,7 @@ Use a YAML file or a dict. Key sections:
 - `server.cast_to_string`: ingest all columns as strings (Bronze pattern)
 - `service_levels`: freshness/availability SLO scoring
 - `quality` helpers: not_null, accepted_values, regex_match, range, unique, null_ratio, row_count_between, referential_integrity
+- `stages`: optional stage override map (e.g., `stages.bronze`, `stages.silver`) to reuse one contract across layers
 
 ### external_logic
 Run dedicated Python modules or notebooks for advanced processing.

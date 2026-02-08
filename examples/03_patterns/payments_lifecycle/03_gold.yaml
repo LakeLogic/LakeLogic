@@ -1,0 +1,37 @@
+version: "1.0.0"
+upstream: ["02_silver"]
+
+info:
+  title: "Transaction Fact (Gold)"
+  description: "Official transaction source of truth joined with customer dimension."
+  target_layer: "gold"
+
+server:
+  type: "local"
+  format: "parquet"
+  path: "data/silver_payments.parquet"
+
+# Link to the Customer Dimension (SCD2)
+links:
+  - name: "ref_customers"
+    path: "data/gold_customers_scd2.parquet"
+    type: "parquet"
+
+transformations:
+  # Join with ONLY the current customer records to avoid record duplication
+  - sql: |
+      SELECT 
+        source.*,
+        cust.name as customer_name,
+        cust.plan as customer_plan
+      FROM source
+      LEFT JOIN (
+        SELECT * FROM ref_customers WHERE is_current = true
+      ) cust ON source.customer_id = cust.customer_id
+
+primary_key: ["raw_id"]
+
+materialization:
+  strategy: "merge"
+  format: "iceberg"
+  target_path: "data/gold_transactions"

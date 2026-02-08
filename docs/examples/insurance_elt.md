@@ -23,10 +23,10 @@ This is a realistic, end-to-end ELT example for an insurance company. It uses th
 
 ## Recommended Structure
 
-This example mirrors the structure described in `docs/organization.md`:
+This example mirrors the structure described in [Contract Organization](../organization.md):
 
 ```text
-examples/insurance_elt/
+examples/05_production/insurance_elt/
   contracts/
     insurance/
       _registry.yaml
@@ -76,9 +76,9 @@ You can also point both stages to the **same contract** if you want Bronze/Silve
 
 ```bash
 lakeguard-driver \
-  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
-  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
-  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers reference,bronze,silver,gold \
   --window last_success
 ```
@@ -94,24 +94,24 @@ Write a pipeline summary row to a table and emit metrics:
 
 ```bash
 lakeguard-driver \
-  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
-  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
-  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers reference,bronze,silver,gold \
   --window last_success \
   --summary-table lakeguard.pipeline_runs \
   --summary-backend duckdb \
-  --summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb \
-  --metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json
+  --summary-database examples/05_production/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb \
+  --metrics-path examples/05_production/insurance_elt/output/run_logs/pipeline_metrics.json
 ```
 
 For Prometheus scraping, expose `/metrics`:
 
 ```bash
 lakeguard-driver \
-  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
-  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
-  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers reference,bronze,silver,gold \
   --metrics-backend prometheus \
   --metrics-host 0.0.0.0 \
@@ -122,9 +122,9 @@ To run only specific entities without editing registries:
 
 ```bash
 lakeguard-driver \
-  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
-  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
-  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers bronze,silver,gold \
   --entities policies
 ```
@@ -133,9 +133,9 @@ To reprocess late-arriving data:
 
 ```bash
 lakeguard-driver \
-  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
-  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
-  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers silver,gold \
   --reprocess-start-date 2026-02-01 \
   --reprocess-end-date 2026-02-05
@@ -145,9 +145,9 @@ For an explicit window range:
 
 ```bash
 lakeguard-driver \
-  --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
-  --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
-  --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
+  --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
+  --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
+  --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers bronze,silver,gold \
   --window range \
   --window-start-date 2026-02-01 \
@@ -162,7 +162,7 @@ The bronze contracts use filename patterns like `claims_cdc*.csv`. If filenames 
 Example:
 
 ```
-examples/insurance_elt/data/bronze/
+examples/05_production/insurance_elt/data/bronze/
   claims_cdc_2026-02-05.csv
   claims_cdc_2026-02-06.csv
 ```
@@ -195,7 +195,7 @@ source:
 ## Output Locations
 
 ```text
-examples/insurance_elt/output/
+examples/05_production/insurance_elt/output/
   bronze/
   silver/
   gold/

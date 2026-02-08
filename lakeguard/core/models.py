@@ -1,7 +1,33 @@
-from pydantic import BaseModel, Field, ConfigDict, AliasChoices
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices, field_validator
 from typing import List, Optional, Dict, Any, Union
 from enum import Enum
 from datetime import datetime
+import warnings
+
+_QUALITY_CATEGORIES = {
+    "correctness",
+    "completeness",
+    "consistency",
+    "validity",
+    "accuracy",
+    "timeliness",
+    "uniqueness",
+    "integrity",
+    "schema",
+    "rule",
+}
+
+_QUALITY_CATEGORY_SYNONYMS = {
+    "complete": "completeness",
+    "consistant": "consistency",
+    "consistent": "consistency",
+    "valid": "validity",
+    "accurate": "accuracy",
+    "timely": "timeliness",
+    "unique": "uniqueness",
+    "referential_integrity": "integrity",
+    "referential": "integrity",
+}
 
 class Info(BaseModel):
     """Contract metadata such as title, version, and ownership."""
@@ -56,8 +82,17 @@ class Link(BaseModel):
 
 class TransformationRename(BaseModel):
     """Rename a column prior to validation."""
-    from_name: str = Field(alias="from")
-    to_name: str = Field(alias="to")
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+    from_name: Optional[str] = Field(default=None, alias="from")
+    to_name: Optional[str] = Field(default=None, alias="to")
+    mappings: Optional[Dict[str, str]] = None
+
+    def iter_pairs(self) -> List[tuple[str, str]]:
+        if self.mappings:
+            return [(src, dst) for src, dst in self.mappings.items() if src and dst]
+        if self.from_name and self.to_name:
+            return [(self.from_name, self.to_name)]
+        return []
 
 class TransformationDerive(BaseModel):
     """Derive a new field from a SQL expression."""
@@ -133,6 +168,18 @@ class TransformationMapValues(BaseModel):
     default: Optional[Any] = None
     output: Optional[str] = None
 
+class TransformationRollup(BaseModel):
+    """Aggregate data and retain rollup lineage keys."""
+    group_by: List[str] = Field(default_factory=list)
+    aggregations: Dict[str, str] = Field(default_factory=dict)  # output_name -> SQL expression
+    keys: Optional[Union[str, List[str]]] = None
+    key_expr: Optional[str] = None
+    rollup_keys_column: Optional[str] = "_lakeguard_rollup_keys"
+    rollup_keys_count_column: Optional[str] = "_lakeguard_rollup_keys_count"
+    upstream_run_id_column: Optional[str] = "_upstream_run_id"
+    upstream_run_ids_column: Optional[str] = "_upstream_lakeguard_run_ids"
+    distinct: bool = True
+
 class TransformationJoin(BaseModel):
     """Join a reference table to enrich multiple fields."""
     reference: str
@@ -161,13 +208,14 @@ class Transformation(BaseModel):
     split: Optional[TransformationSplit] = None
     explode: Optional[TransformationExplode] = None
     map_values: Optional[TransformationMapValues] = None
+    rollup: Optional[TransformationRollup] = None
     join: Optional[TransformationJoin] = None
     sql: Optional[str] = None
     phase: str = "post"  # pre | post
 
 class RowRuleNotNull(BaseModel):
     """Business-friendly not-null rule."""
-    not_null: Union[str, Dict[str, Any]]
+    not_null: Union[str, Dict[str, Any], List[Union[str, Dict[str, Any]]]]
 
 class RowRuleAcceptedValues(BaseModel):
     """Business-friendly accepted values rule."""
@@ -214,8 +262,26 @@ class QualityRule(BaseModel):
     must_be_less_than: Optional[float] = None
     must_be_greater_than: Optional[float] = None
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def _normalize_category(cls, value: Any) -> str:
+        if value is None:
+            return "correctness"
+        text = str(value).strip().lower()
+        if not text:
+            return "correctness"
+        text = _QUALITY_CATEGORY_SYNONYMS.get(text, text)
+        if text not in _QUALITY_CATEGORIES:
+            warnings.warn(
+                f"Unknown quality rule category '{value}'. "
+                f"Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}.",
+                UserWarning,
+            )
+        return text
+
 class Quality(BaseModel):
     """Quality rule groups for row and dataset checks."""
+    enforce_required: bool = True
     row_rules: List[Union[QualityRule, RowRuleNotNull, RowRuleAcceptedValues, RowRuleRegexMatch, RowRuleRange, RowRuleReferentialIntegrity, RowRuleLifecycleWindow]] = Field(default_factory=list)
     dataset_rules: List[Union[QualityRule, DatasetRuleUnique, DatasetRuleNullRatio, DatasetRuleRowCountBetween]] = Field(default_factory=list)
 
@@ -280,6 +346,13 @@ class LineageConfig(BaseModel):
     source_column_name: str = "_lakeguard_source"
     timestamp_column_name: str = "_lakeguard_processed_at"
     run_id_column_name: str = "_lakeguard_run_id"
+    capture_domain: bool = True
+    capture_system: bool = True
+    domain_column_name: str = "_lakeguard_domain"
+    system_column_name: str = "_lakeguard_system"
+    preserve_upstream: List[str] = Field(default_factory=list)
+    upstream_prefix: str = "_upstream"
+    run_id_source: str = "run_id"  # run_id | pipeline_run_id
 
 
 class ExternalLogic(BaseModel):

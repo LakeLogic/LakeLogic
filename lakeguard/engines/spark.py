@@ -9,6 +9,15 @@ class SparkAdapter(EngineAdapter):
     Uses Spark SQL and Column Expressions for evaluation.
     """
 
+    def _quote_ident(self, name: str) -> str:
+        """
+        Quote an identifier for Spark SQL (backticks).
+        """
+        text = str(name)
+        if text.startswith("`") and text.endswith("`"):
+            return text
+        return f"`{text.replace('`', '``')}`"
+
     def execute(self, df: Any) -> Tuple[Any, Any]:
         """
         Executes the contract using PySpark.
@@ -70,20 +79,15 @@ class SparkAdapter(EngineAdapter):
                 error_exprs.append(F.when(cond, F.lit(error_msg)).otherwise(None))
                 category_exprs.append(F.when(cond, F.lit(rule.category)).otherwise(None))
 
-            df_with_errors = df_eval.withColumn(
-                self.ERROR_COLUMN,
-                F.array_remove(F.array(*error_exprs), None)
-            ).withColumn(
-                self.CATEGORY_COLUMN,
-                F.array_remove(F.array(*category_exprs), None)
-            )
-        else:
-            if error_exprs:
-                df_with_errors = df_eval.withColumn(self.ERROR_COLUMN, F.array(*error_exprs)) \
-                                   .withColumn(self.CATEGORY_COLUMN, F.array(*category_exprs))
-            else:
-                df_with_errors = df_eval.withColumn(self.ERROR_COLUMN, F.array().cast("array<string>")) \
-                                   .withColumn(self.CATEGORY_COLUMN, F.array().cast("array<string>"))
+        error_array = F.array(*error_exprs) if error_exprs else F.array().cast("array<string>")
+        category_array = F.array(*category_exprs) if category_exprs else F.array().cast("array<string>")
+
+        # Ensure arrays are non-null to avoid NULL comparisons dropping all rows.
+        error_array = F.filter(error_array, lambda x: x.isNotNull())
+        category_array = F.filter(category_array, lambda x: x.isNotNull())
+
+        df_with_errors = df_eval.withColumn(self.ERROR_COLUMN, error_array) \
+            .withColumn(self.CATEGORY_COLUMN, category_array)
 
         # 3. Split Good and Bad
         has_errors = F.size(F.col(self.ERROR_COLUMN)) > 0
@@ -133,7 +137,9 @@ class SparkAdapter(EngineAdapter):
                 val = res[0][0]
                 
                 passed = True
-                if rule.must_be_between:
+                if val is None:
+                    passed = False
+                elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                 elif rule.must_be_less_than is not None:
                     passed = val < rule.must_be_less_than
@@ -177,13 +183,17 @@ class SparkAdapter(EngineAdapter):
                 continue
 
             if trans.rename:
-                if trans.rename.from_name not in existing:
-                    logger.warning(f"Pre-Transform [Rename] skipped; column not found: {trans.rename.from_name}")
-                else:
-                    logger.debug(f"Pre-Transform [Rename]: {trans.rename.from_name} -> {trans.rename.to_name}")
-                    current_df = current_df.withColumnRenamed(trans.rename.from_name, trans.rename.to_name)
-                    existing.remove(trans.rename.from_name)
-                    existing.add(trans.rename.to_name)
+                rename_pairs = trans.rename.iter_pairs()
+                if not rename_pairs:
+                    continue
+                for from_col, to_col in rename_pairs:
+                    if from_col not in existing:
+                        logger.warning(f"Pre-Transform [Rename] skipped; column not found: {from_col}")
+                        continue
+                    logger.debug(f"Pre-Transform [Rename]: {from_col} -> {to_col}")
+                    current_df = current_df.withColumnRenamed(from_col, to_col)
+                    existing.remove(from_col)
+                    existing.add(to_col)
             elif trans.select:
                 logger.debug(f"Pre-Transform [Select]: {trans.select.columns}")
                 current_df = current_df.select(*trans.select.columns)
@@ -303,6 +313,14 @@ class SparkAdapter(EngineAdapter):
                 if self.contract.dataset:
                     current_df.createOrReplaceTempView(self.contract.dataset)
                 current_df = current_df.sparkSession.sql(trans.sql)
+                continue
+            if trans.rollup and (trans.phase or "post").lower() != "pre":
+                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self.contract.dataset or "source")
+                logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
+                current_df.createOrReplaceTempView("source")
+                if self.contract.dataset:
+                    current_df.createOrReplaceTempView(self.contract.dataset)
+                current_df = current_df.sparkSession.sql(rollup_sql)
                 continue
 
             if trans.derive:
@@ -480,6 +498,7 @@ class SparkAdapter(EngineAdapter):
         expected = set(expected_fields)
         missing = expected - existing
         unknown = existing - expected
+        unknown = unknown - self._lineage_columns()
 
         server = self.contract.server
         evolution = None

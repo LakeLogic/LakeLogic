@@ -569,7 +569,7 @@ class PipelineDriver:
 
         try:
             for source in sources:
-                processor = DataProcessor(engine=self.engine, contract=contract, pipeline_run_id=self.pipeline_run_id)
+                processor = DataProcessor(engine=self.engine, contract=contract, stage=stage, pipeline_run_id=self.pipeline_run_id)
                 good_df, bad_df = self._execute_with_retries(processor, source)
                 processor.materialize(good_df, bad_df)
                 self._evaluate_approvals(processor.last_report, contract, dataset)

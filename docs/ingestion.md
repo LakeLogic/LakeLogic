@@ -117,9 +117,3 @@ server:
 ```
 
 By using LakeGuard at the **Ingestion** point, you ensure that every row in your **Bronze** layer has a known schema and a clean lineage, right from the start. 🛡️☁️
-
----
-
-## Runnable Example
-
-See `docs/examples/ingestion.md` for a runnable Bronze ingestion example with real data and a real contract.

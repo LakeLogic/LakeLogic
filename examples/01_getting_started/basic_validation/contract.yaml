@@ -1,0 +1,65 @@
+version: 1.0.0
+info:
+  title: "Tutorial Contract"
+  version: "1.0.0"
+  description: "Getting started with LakeGuard validation and transformations."
+
+dataset: "silver_crm_customers"
+primary_key: ["id"]
+
+schema_policy:
+  evolution: strict
+  unknown_fields: allow
+
+model:
+  fields:
+    - name: id
+      type: long
+      required: true
+    - name: name
+      type: string
+    - name: email
+      type: string
+      required: true
+    - name: age
+      type: int
+    - name: signup_date
+      type: date
+    - name: status
+      type: string
+
+transformations:
+  - sql: |
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY email ORDER BY signup_date DESC) AS rn
+        FROM source
+      ) AS t
+      WHERE rn = 1
+    description: "Deduplicate by latest signup per email before validation"
+    phase: pre
+  - drop:
+      columns: ["rn"]
+    description: "Remove helper column from dedup step"
+    phase: pre
+  - sql: |
+      SELECT *, CASE WHEN age > 25 THEN true ELSE false END AS is_premium
+      FROM source
+    description: "Enrichment: derive is_premium for downstream analysis (applied to good data)"
+    phase: post
+
+quality:
+  row_rules:
+    - name: "Valid Email"
+      description: "Email must contain @"
+      sql: "email LIKE '%@%'"
+    - name: "Valid Age"
+      description: "Age must be greater than 0"
+      sql: "age > 0"
+    - name: "Active Only"
+      description: "Only process active customers"
+      sql: "status = 'active'"
+
+quarantine:
+  enabled: true
+  include_error_reason: true
+  notifications: []

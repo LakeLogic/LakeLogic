@@ -24,6 +24,9 @@ def run(
     engine: str = typer.Option(
         "polars", "--engine", "-e", help="Execution engine (polars, pandas, duckdb, spark, snowflake, bigquery)."
     ),
+    stage: Optional[str] = typer.Option(
+        None, "--stage", help="Apply contract stage overrides (e.g., bronze or silver)."
+    ),
     output_good: Optional[Path] = typer.Option(
         None, "--output-good", help="Path to save good records (CSV/Parquet)."
     ),
@@ -126,7 +129,7 @@ def run(
             raise typer.Exit(code=1)
 
     try:
-        processor = DataProcessor(engine=engine, contract=contract)
+        processor = DataProcessor(engine=engine, contract=contract, stage=stage)
         good_df, bad_df = processor.run_source(source)
 
         if materialize:
@@ -146,6 +149,31 @@ def run(
     except Exception as e:
         logger.exception(f"Fatal error during execution: {e}")
         raise typer.Exit(code=1)
+
+
+@app.command("setup-oss")
+def setup_oss():
+    """
+    Setup the OSS engine environment by pre-installing required extensions and checking dependencies.
+    """
+    logger.info("Setting up LakeGuard OSS environment...")
+    
+    # Check deltalake
+    try:
+        import deltalake
+        logger.info("✅ deltalake is installed.")
+    except ImportError:
+        logger.warning("❌ deltalake is NOT installed. Run: pip install \"lakeguard[duckdb]\" or pip install deltalake")
+
+    # Setup DuckDB extensions
+    try:
+        from lakeguard.engines.duckdb import DuckDBAdapter
+        DuckDBAdapter.setup_extensions()
+        logger.info("✅ DuckDB extensions setup complete.")
+    except Exception as e:
+        logger.error(f"❌ Failed to setup DuckDB extensions: {e}")
+        
+    logger.info("OSS environment setup finished.")
 
 
 @app.command()

@@ -171,6 +171,8 @@ materialization:
 | **`scd2`** | For "History Tracking" (Keeping old and new versions). |
 | **`overwrite`** | For small summary tables or daily snapshots. |
 
+**Spark advantage:** Merge and SCD2 strategies run natively using distributed DataFrame operations (or Delta Lake `MERGE INTO` when available), avoiding driver memory bottlenecks at scale.
+
 ---
 
 ## External Logic Hooks (Gold Patterns)

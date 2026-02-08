@@ -1,6 +1,6 @@
 site_name: LakeGuard
 site_description: Consistent Data Contracts across Polars, Pandas, DuckDB, and Spark.
-site_url: https://your-username.github.io/lakeguard
+site_url: https://LineageLogic.github.io/LakeGuard
 
 theme:
   name: material
@@ -27,40 +27,34 @@ theme:
 
 nav:
   - Home: index.md
-  - Installation: installation.md
-  - Quickstart: quickstart.md
-  - Starter Kit: starter_kit.md
-  - Tutorial Notebooks:
-      - Basic Tutorial: examples/tutorial_basic/tutorial.ipynb
-      - Notifications & Secrets: examples/notifications_secrets/notifications_secrets.ipynb
-  - Playbooks:
+  - Getting Started:
+      - Installation: installation.md
+      - Quickstart: quickstart.md
+  - Tutorials:
+      - Basic Validation: tutorials/basic_validation.md
+      - Medallion Architecture: tutorials/medallion_architecture.md
+      - Notifications & Secrets: tutorials/notifications_secrets.md
+  - Patterns:
       - Overview: playbooks.md
-      - Bronze Quality Gate: examples/playbooks/bronze_quality_gate/playbook.ipynb
-      - Customer Onboarding: examples/playbooks/customer_onboarding/playbook.ipynb
-      - Dedup & Survivorship: examples/playbooks/dedup_survivorship/playbook.ipynb
-      - Late Arriving Reprocess: examples/playbooks/late_arriving_reprocess/playbook.ipynb
-      - SCD2 Dimension: examples/playbooks/scd2_dimension/playbook.ipynb
-  - Playground: playground.md
-  - Ingestion & Cloud: ingestion.md
-  - Deployment Patterns: deployment_patterns.md
-  - Job Templates: job_templates.md
-  - Monitoring & Observability:
-      - Overview: observability.md
-      - Lineage & Reconciliation: reconciliation.md
-      - Notifications & Alerting: notifications.md
+      - Bronze Quality Gate: patterns/bronze_quality_gate.md
+      - Dedup & Survivorship: patterns/dedup_survivorship.md
+      - SCD2 Dimension: patterns/scd2_dimension.md
+      - Late Arriving Reprocess: patterns/late_arriving_reprocess.md
+      - External Python Logic: patterns/external_python_logic.md
   - Concepts:
       - How it Works: concepts.md
       - Contract Organization: organization.md
+      - Ingestion & Cloud: ingestion.md
       - Reprocessing & Partitioning: reprocessing.md
       - Pipelines & Parallelism: pipelines.md
-      - Release & Maintenance: maintenance.md
-  - Examples:
-      - Customer Onboarding: examples/customer_onboarding.md
-      - Ingestion (Bronze): examples/ingestion.md
-      - Insurance ELT: examples/insurance_elt.md
-      - External Gold Logic: examples/external_logic.md
-      - Sales Gold (Facts): examples/sales_gold.md
-      - Fact Table Patterns: examples/fact_patterns.md
+  - Production:
+      - Deployment Patterns: deployment_patterns.md
+      - Job Templates: job_templates.md
+      - Insurance ELT Example: examples/insurance_elt.md
+  - Observability:
+      - Overview: observability.md
+      - Lineage & Reconciliation: reconciliation.md
+      - Notifications & Alerting: notifications.md
   - Reference:
       - CLI: cli.md
       - Driver: driver.md
@@ -68,6 +62,7 @@ nav:
       - API: api.md
       - Capability Matrix: capabilities.md
       - Warehouse Adapters: warehouse_adapters.md
+      - Release & Maintenance: maintenance.md
   - Why LakeGuard?: comparison.md
 
 plugins:

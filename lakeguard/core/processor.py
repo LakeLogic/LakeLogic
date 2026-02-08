@@ -1,8 +1,9 @@
-import yaml
-import re
 import os
 import sys
-from typing import Any, Tuple, Union, Dict, Optional
+import yaml
+import re
+import warnings
+from typing import Any, Tuple, Union, Dict, Optional, List
 from pathlib import Path
 from datetime import datetime, timezone
 import uuid
@@ -11,7 +12,41 @@ from lakeguard.core.models import DataContract
 from lakeguard.engines.base import EngineAdapter
 from lakeguard.notifications.base import get_notification_adapter
 from lakeguard.core.materialization import materialize_dataframe, materialize_quarantine, write_run_log
+from lakeguard.core.observer import RemoteObserver
 from loguru import logger
+
+class ValidationResult:
+    """
+    Richer result object for LakeGuard runs.
+    Unpacks as (good_df, bad_df) for backward compatibility, 
+    but provides .raw, .good, and .bad attributes.
+    """
+    def __init__(self, good, bad, raw):
+        self.good = good
+        self.bad = bad
+        self.raw = raw
+    
+    def __iter__(self):
+        yield self.raw
+        yield self.good
+        yield self.bad
+        
+    def __getitem__(self, idx):
+        return [self.raw, self.good, self.bad][idx]
+
+    def __len__(self):
+        return 3
+
+    def __repr__(self):
+        def _count(obj):
+            if obj is None: return 0
+            if hasattr(obj, "height"): return obj.height
+            if hasattr(obj, "count"): 
+                try: return obj.count().fetchone()[0]
+                except: return "?"
+            try: return len(obj)
+            except: return "?"
+        return f"ValidationResult(good={_count(self.good)}, bad={_count(self.bad)}, raw={_count(self.raw)})"
 
 class DataProcessor:
     """
@@ -26,6 +61,7 @@ class DataProcessor:
         contract: Union[str, Path, dict, DataContract],
         engine: Optional[str] = None,
         *,
+        stage: Optional[str] = None,
         pipeline_run_id: Optional[str] = None,
     ):
         """
@@ -34,9 +70,12 @@ class DataProcessor:
         Args:
             contract: The Data Contract definition (path to YAML, dict, or DataContract object).
             engine: The execution engine to use. If None, it uses the auto-discovery logic.
+            stage: Optional stage override (e.g., bronze/silver) applied from contract "stages".
             pipeline_run_id: Optional pipeline-level run id for correlation across contracts.
         """
+        self._configure_logging()
         self.engine_name = (engine or self._discover_engine()).lower()
+        self.stage = stage
         self.contract = self._load_contract(contract)
         self.adapter = self._get_adapter()
         self.adapter.engine_name = self.engine_name
@@ -44,6 +83,8 @@ class DataProcessor:
         self.last_run_id: Optional[str] = None
         self.pipeline_run_id: Optional[str] = pipeline_run_id
         self.last_source_path: Optional[str] = None
+        self._source_files: List[Dict[str, Any]] = []
+        self._source_max_mtime: Optional[float] = None
 
     def _discover_engine(self) -> str:
         """
@@ -117,9 +158,11 @@ class DataProcessor:
             Loaded DataContract.
         """
         if isinstance(contract, DataContract):
-            return contract
+            loaded = contract
+            return self._apply_stage_overrides(loaded)
         if isinstance(contract, dict):
-            return DataContract(**contract)
+            loaded = DataContract(**contract)
+            return self._apply_stage_overrides(loaded)
         
         path = Path(contract)
         if not path.exists():
@@ -152,7 +195,63 @@ class DataProcessor:
                 contract._base_path = path.parent
             except Exception:
                 pass
+            return self._apply_stage_overrides(contract)
+
+    def _apply_stage_overrides(self, contract: DataContract) -> DataContract:
+        """
+        Apply stage-specific overrides from the contract "stages" block.
+
+        Args:
+            contract: Loaded DataContract.
+
+        Returns:
+            DataContract with stage overrides applied.
+        """
+        if not self.stage:
             return contract
+        stage_key = str(self.stage).strip()
+        if not stage_key:
+            return contract
+
+        stage_map = getattr(contract, "stages", None)
+        if not isinstance(stage_map, dict):
+            data = contract.model_dump()
+            stage_map = data.get("stages")
+        if not isinstance(stage_map, dict):
+            return contract
+
+        overrides = None
+        if stage_key in stage_map:
+            overrides = stage_map.get(stage_key)
+        else:
+            lower = stage_key.lower()
+            for key, value in stage_map.items():
+                if isinstance(key, str) and key.lower() == lower:
+                    overrides = value
+                    break
+        if not isinstance(overrides, dict):
+            return contract
+
+        base_data = contract.model_dump(by_alias=True)
+        merged = self._deep_merge(base_data, overrides)
+        new_contract = DataContract(**merged)
+        try:
+            new_contract._base_path = getattr(contract, "_base_path", None)
+        except Exception:
+            pass
+        return new_contract
+
+    def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively merge override into base (dicts only). Lists and scalars replace.
+        """
+        merged = dict(base)
+        for key, value in override.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = self._deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     def run(
         self,
@@ -160,7 +259,7 @@ class DataProcessor:
         source_path: Optional[Union[str, Path]] = None,
         materialize: bool = False,
         materialize_target: Optional[Union[str, Path]] = None,
-    ) -> Tuple[Any, Any]:
+    ) -> ValidationResult:
         """
         Runs the contract against the provided dataframe.
 
@@ -171,12 +270,12 @@ class DataProcessor:
             materialize_target: Optional override target for materialization.
 
         Returns:
-            Tuple of (good_df, bad_df).
+            ValidationResult object (unpacks to good_df, bad_df).
         """
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
         self.last_run_id = uuid.uuid4().hex
         self.last_source_path = str(source_path) if source_path else None
-        logger.info(f"???  Starting LakeGuard run [Auto-Engine: {self.engine_name}, Contract: {contract_title}]")
+        logger.info(f"Starting LakeGuard run [Auto-Engine: {self.engine_name}, Contract: {contract_title}]")
         
         # Execute via adapter
         good_df, bad_df = self.adapter.execute(df)
@@ -186,15 +285,48 @@ class DataProcessor:
         
         # Summary logging
         counts = self._compute_counts(df, good_df, bad_df)
+        source_total = counts.get("source")
         total = counts.get("total")
         bad = counts.get("quarantined")
         if total is not None and bad is not None:
+            quality_cfg = getattr(self.contract, "quality", None)
+            enforce_required = True
+            has_row_rules = False
+            has_dataset_rules = False
+            if quality_cfg is not None:
+                enforce_required = bool(getattr(quality_cfg, "enforce_required", True))
+                has_row_rules = bool(getattr(quality_cfg, "row_rules", []))
+                has_dataset_rules = bool(getattr(quality_cfg, "dataset_rules", []))
+            quality_enabled = enforce_required or has_row_rules or has_dataset_rules
+            metadata = getattr(self.contract, "metadata", {}) or {}
+            domain = metadata.get("domain")
+            system = metadata.get("system")
+            data_layer = metadata.get("data_layer")
+            tags = []
+            if domain:
+                tags.append(f"domain={domain}")
+            if system:
+                tags.append(f"system={system}")
+            if data_layer:
+                tags.append(f"layer={data_layer}")
+            tags_display = f" [{', '.join(tags)}]" if tags else ""
             ratio = counts.get("quarantine_ratio")
             ratio_display = f"{ratio:.2%}" if ratio is not None else "n/a"
-            logger.info(f"? Run complete. Total: {total}, Good: {counts.get('good')}, Quarantined: {bad}, Ratio: {ratio_display}")
+            dropped = counts.get("pre_transform_dropped")
+            dropped_display = f", Pre-Transform Dropped: {dropped}" if dropped is not None else ""
+            source_display = f"Source: {source_total}, " if source_total is not None else ""
+            if quality_enabled:
+                logger.info(
+                    f"Run complete.{tags_display} {source_display}Total (post-transform): {total}, "
+                    f"Good: {counts.get('good')}, Quarantined: {bad}{dropped_display}, Ratio: {ratio_display}"
+                )
+            else:
+                logger.info(
+                    f"Run complete.{tags_display} {source_display}Total: {total}{dropped_display}"
+                )
 
             if bad > 0:
-                msg = f"LakeGuard Alert: {bad} records quarantined in '{contract_title}'. Total: {total} (ratio {ratio_display})"
+                msg = f"LakeGuard Alert: {bad} records quarantined in '{contract_title}'. Total (post-transform): {total} (ratio {ratio_display})"
                 self.notify(event="quarantine", message=msg)
 
         # Check dataset rules
@@ -232,48 +364,108 @@ class DataProcessor:
         if materialize and not external_handled:
             self.materialize(good_df, bad_df, target_path=materialize_target)
 
-        return good_df, bad_df
+        # Optional Remote Reporting (SaaS Bridge)
+        try:
+            from lakeguard.core.observer import RemoteObserver
+            observer = RemoteObserver()
+            observer.report(self.last_report)
+        except Exception:
+            pass
 
-    def run_source(self, source: Union[str, Path]) -> Tuple[Any, Any]:
+        # Call to action for SaaS (opt-in only)
+        quarantined = counts.get("quarantined")
+        if quarantined is None:
+            quarantined = 0
+        if quarantined > 0 and os.getenv("LAKEGUARD_SHOW_TIPS", "false").lower() == "true":
+            logger.info("🛡️  View deep quarantine analysis & historical drift on Lineage Logic: https://lineagelogic.com")
+
+        return ValidationResult(good_df, bad_df, df)
+
+    def run_source(self, source: Optional[Union[str, Path]] = None) -> ValidationResult:
         """
         Loads data from a source file and runs the contract in one step.
         The data is loaded using the engine's optimized reader.
 
         Args:
-            source: File path to load.
+            source: Optional file path to load. If None, uses path from contract.
 
         Returns:
-            Tuple of (good_df, bad_df).
+            ValidationResult object (unpacks to good_df, bad_df).
         """
-        path = str(source)
-        logger.info(f"?? Loading source: {path} via {self.engine_name}")
-        
+        path_val = source or (self.contract.source.path if self.contract.source else None)
+        if not path_val:
+            raise ValueError("No source path provided and no path found in contract.")
+        path = self._resolve_source_path(path_val)
+        logger.info(f"Loading source: {path} via {self.engine_name}")
+
+        source_files = self._expand_source_files(path)
+        load_mode = getattr(self.contract.source, "load_mode", "full") if self.contract.source else "full"
+        if load_mode == "incremental" and source_files:
+            watermark = self._get_last_source_watermark()
+            if watermark is not None:
+                source_files = [f for f in source_files if f.get("mtime", 0) > watermark]
+            if not source_files:
+                logger.info("No new files detected for incremental load; skipping run.")
+                return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
+
+        self._source_files = source_files or []
+        self._source_max_mtime = None
+        if source_files:
+            self._source_max_mtime = max(f.get("mtime", 0) for f in source_files)
+
         df = None
+        file_paths = [f["path"] for f in source_files] if source_files else None
         if self.engine_name == "polars":
             import polars as pl
             if self.contract.server and self.contract.server.format:
                 fmt = self.contract.server.format.lower()
                 if fmt in ["delta", "iceberg"]:
                     raise ValueError("Delta/Iceberg sources require Spark engine.")
-            if path.endswith(".csv"): df = pl.read_csv(path)
-            elif path.endswith(".parquet"): df = pl.read_parquet(path)
-            else: df = pl.read_csv(path) # default
+            if file_paths:
+                if len(file_paths) == 1:
+                    if path.endswith(".parquet"):
+                        df = pl.read_parquet(file_paths[0])
+                    else:
+                        df = pl.read_csv(file_paths[0])
+                else:
+                    if path.endswith(".parquet"):
+                        df = pl.concat([pl.read_parquet(p) for p in file_paths], how="vertical")
+                    else:
+                        df = pl.concat([pl.read_csv(p) for p in file_paths], how="vertical")
+            else:
+                if path.endswith(".csv"): df = pl.read_csv(path)
+                elif path.endswith(".parquet"): df = pl.read_parquet(path)
+                else: df = pl.read_csv(path) # default
         elif self.engine_name == "pandas":
             import pandas as pd
             if self.contract.server and self.contract.server.format:
                 fmt = self.contract.server.format.lower()
                 if fmt in ["delta", "iceberg"]:
                     raise ValueError("Delta/Iceberg sources require Spark engine.")
-            if path.endswith(".csv"): df = pd.read_csv(path)
-            elif path.endswith(".parquet"): df = pd.read_parquet(path)
-            else: df = pd.read_csv(path)
+            if file_paths:
+                frames = []
+                for file in file_paths:
+                    if file.endswith(".parquet"):
+                        frames.append(pd.read_parquet(file))
+                    else:
+                        frames.append(pd.read_csv(file))
+                df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            else:
+                if path.endswith(".csv"): df = pd.read_csv(path)
+                elif path.endswith(".parquet"): df = pd.read_parquet(path)
+                else: df = pd.read_csv(path)
         elif self.engine_name == "duckdb":
             import duckdb
             if self.contract.server and self.contract.server.format:
                 fmt = self.contract.server.format.lower()
                 if fmt in ["delta", "iceberg"]:
                     raise ValueError("Delta/Iceberg sources require Spark engine.")
-            df = duckdb.read_csv(path) if path.endswith(".csv") else duckdb.read_parquet(path)
+            # Convert to Pandas DF immediately to ensure connection-agnostic transfer
+            if file_paths:
+                rel = duckdb.read_parquet(file_paths) if path.endswith(".parquet") else duckdb.read_csv(file_paths)
+            else:
+                rel = duckdb.read_csv(path) if path.endswith(".csv") else duckdb.read_parquet(path)
+            df = rel.df()
         elif self.engine_name == "spark":
             from pyspark.sql import SparkSession
             spark = SparkSession.builder.getOrCreate()
@@ -293,15 +485,143 @@ class DataProcessor:
             reader = spark.read.format(fmt)
             if fmt == "csv":
                 reader = reader.option("header", "true")
-            df = reader.load(path)
+            load_path = path
+            if not self._is_uri_path(path):
+                try:
+                    load_path = Path(path).expanduser().resolve().as_posix()
+                except Exception:
+                    load_path = path
+            if file_paths:
+                df = reader.load(file_paths)
+            else:
+                df = reader.load(load_path)
         elif self.engine_name in ["snowflake", "bigquery"]:
             table_name = path[6:] if path.startswith("table:") else path
             return self.run(table_name, source_path=table_name)
             
-        if df is None:
-            raise ValueError(f"Could not load data from {path} using engine {self.engine_name}")
+        # If the adapter can handle paths natively, pass the path string
+        # Otherwise, the engine-specific loading above will have populated 'df'
+        input_data = df if df is not None else path
             
-        return self.run(df, source_path=path)
+        return self.run(input_data, source_path=path)
+
+    def _expand_source_files(self, path: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Expand local file patterns into concrete file paths and mtimes.
+        """
+        if self._is_uri_path(path) or path.startswith("table:"):
+            return None
+        if not any(ch in path for ch in ["*", "?", "["]):
+            return None
+
+        from glob import glob
+
+        pattern = path
+        base = getattr(self.contract, "_base_path", None)
+        if base and not Path(pattern).is_absolute():
+            pattern = str(Path(base) / pattern)
+
+        files = [f for f in glob(pattern) if Path(f).is_file()]
+        results = []
+        for file in sorted(files):
+            try:
+                results.append({"path": str(Path(file).resolve()), "mtime": Path(file).stat().st_mtime})
+            except Exception:
+                continue
+        return results or None
+
+    def _get_last_source_watermark(self) -> Optional[float]:
+        """
+        Fetch the last max_source_mtime for this contract/stage from run logs.
+        """
+        try:
+            from lakeguard.core.materialization import get_last_run_watermark
+        except Exception:
+            return None
+        contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
+        stage = self.stage or "default"
+        return get_last_run_watermark(self.contract, contract_title, stage, engine_name=self.engine_name)
+
+    def _empty_frame(self) -> Any:
+        """
+        Return an empty frame suitable for the current engine.
+        """
+        if self.engine_name == "polars":
+            try:
+                import polars as pl
+                return pl.DataFrame()
+            except Exception:
+                return []
+        if self.engine_name == "pandas":
+            try:
+                import pandas as pd
+                return pd.DataFrame()
+            except Exception:
+                return []
+        if self.engine_name == "spark":
+            try:
+                from pyspark.sql import SparkSession
+                return SparkSession.builder.getOrCreate().createDataFrame([], schema=None)
+            except Exception:
+                return []
+        return []
+
+    def _is_uri_path(self, path: str) -> bool:
+        """
+        Check if a path is a URI (s3://, gs://, file://, etc.).
+        """
+        return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", str(path)))
+
+    def _resolve_source_path(self, path_val: Union[str, Path]) -> str:
+        """
+        Resolve a source path relative to the contract base path when appropriate.
+        """
+        path_str = str(path_val)
+        if path_str.startswith("table:") or self._is_uri_path(path_str):
+            return path_str
+
+        path_obj = Path(path_str).expanduser()
+        if path_obj.is_absolute():
+            return str(path_obj)
+
+        # Prefer explicit CWD if it exists there.
+        if path_obj.exists():
+            try:
+                return str(path_obj.resolve())
+            except Exception:
+                return str(path_obj)
+
+        base = getattr(self.contract, "_base_path", None)
+        if base:
+            candidate = Path(base) / path_obj
+            if candidate.exists():
+                try:
+                    return str(candidate.resolve())
+                except Exception:
+                    return str(candidate)
+
+        return str(path_obj)
+
+    def _configure_logging(self) -> None:
+        """
+        Configure logging based on environment variables.
+        """
+        debug = os.getenv("LAKEGUARD_DEBUG", "false").lower() == "true"
+        if not debug:
+            try:
+                logger.remove()
+                logger.add(sys.stderr, level="INFO")
+            except Exception:
+                pass
+        
+        # Suppress third-party warnings
+        warnings.filterwarnings("ignore", message=".*PerformanceWarning.*")
+        try:
+            import polars as pl
+            # This is specific to polars but global for the process
+            warnings.filterwarnings("ignore", category=pl.PerformanceWarning)
+        except ImportError:
+            pass
 
     def notify(self, event: str, message: str):
         """
@@ -362,6 +682,9 @@ class DataProcessor:
         """
         Compute row counts and quarantine ratio for a run.
 
+        For Spark, uses a single-pass aggregation to avoid multiple .count() calls
+        which would each trigger a full DAG execution.
+
         Args:
             source_df: Original input dataframe.
             good_df: Validated dataframe.
@@ -370,30 +693,88 @@ class DataProcessor:
         Returns:
             Dict with total, good, quarantined, and ratio values.
         """
-        def _count(obj: Any) -> Optional[int]:
-            """
-            Return row count for supported dataframe types.
-
-            Args:
-                obj: Dataframe-like object.
-
-            Returns:
-                Row count or None.
-            """
+        # For Spark, optimize by computing counts in a single action where possible
+        if self.engine_name == "spark":
             try:
-                if self.engine_name == "spark":
-                    return int(obj.count())
+                from pyspark.sql import functions as F
+
+                # Cache good_df and bad_df if they share lineage to avoid recomputation
+                # Then compute counts together
+                good_count = None
+                bad_count = None
+                source_count = None
+
+                # Use a union with a marker column to count source/good/bad in one action
+                marked_frames = []
+                if source_df is not None:
+                    marked_frames.append(source_df.select(F.lit("source").alias("_count_marker")))
+                if good_df is not None:
+                    marked_frames.append(good_df.select(F.lit("good").alias("_count_marker")))
+                if bad_df is not None:
+                    marked_frames.append(bad_df.select(F.lit("bad").alias("_count_marker")))
+
+                if marked_frames:
+                    combined = marked_frames[0]
+                    for frame in marked_frames[1:]:
+                        combined = combined.union(frame)
+                    counts_result = combined.groupBy("_count_marker").count().collect()
+                    counts_map = {row["_count_marker"]: row["count"] for row in counts_result}
+                    source_count = counts_map.get("source")
+                    good_count = counts_map.get("good", 0)
+                    bad_count = counts_map.get("bad", 0)
+                else:
+                    good_count = 0
+                    bad_count = 0
+
+                total = (good_count or 0) + (bad_count or 0)
+                ratio = bad_count / total if total > 0 else None
+                dropped = None
+                if source_count is not None:
+                    dropped = source_count - total
+                    if dropped < 0:
+                        dropped = 0
+                return {
+                    "source": source_count,
+                    "total": total,
+                    "good": good_count,
+                    "quarantined": bad_count,
+                    "quarantine_ratio": ratio,
+                    "pre_transform_dropped": dropped,
+                }
+            except Exception:
+                pass  # Fall back to individual counts
+
+        # Non-Spark engines: use len() which is O(1) for most dataframe types
+        def _count(obj: Any) -> Optional[int]:
+            try:
+                if hasattr(obj, "height"):  # Polars
+                    return int(obj.height)
                 return len(obj)
             except Exception:
                 return None
 
-        total = _count(source_df)
+        source_total = _count(source_df)
         good = _count(good_df)
         bad = _count(bad_df)
+        total = None
+        if good is not None and bad is not None:
+            total = good + bad
+        dropped = None
+        if source_total is not None and total is not None:
+            dropped = source_total - total
+            if dropped < 0:
+                dropped = 0
         ratio = None
         if total is not None and bad is not None and total > 0:
             ratio = bad / total
-        return {"total": total, "good": good, "quarantined": bad, "quarantine_ratio": ratio}
+        return {
+            "source": source_total,
+            "total": total,
+            "good": good,
+            "quarantined": bad,
+            "quarantine_ratio": ratio,
+            "pre_transform_dropped": dropped,
+        }
 
     def _build_report(
         self,
@@ -416,12 +797,23 @@ class DataProcessor:
         Returns:
             Run report dict.
         """
+        metadata = getattr(self.contract, "metadata", {}) or {}
+        domain = metadata.get("domain")
+        system = metadata.get("system")
+        data_layer = metadata.get("data_layer")
         return {
             "run_id": self.last_run_id,
             "pipeline_run_id": self.pipeline_run_id,
             "engine": self.engine_name,
             "contract": contract_title,
+            "stage": self.stage or "default",
+            "dataset": self.contract.dataset,
+            "domain": domain,
+            "system": system,
+            "data_layer": data_layer,
             "source_path": self.last_source_path,
+            "source_files": self._source_files or [],
+            "max_source_mtime": self._source_max_mtime,
             "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "counts": counts,
             "dataset_rules": getattr(self.adapter, "dataset_rule_results", []),
@@ -451,22 +843,135 @@ class DataProcessor:
         if not lineage or not getattr(lineage, "enabled", False):
             return good_df, bad_df
 
+        preserve_cols = list(getattr(lineage, "preserve_upstream", []) or [])
+        if preserve_cols:
+            prefix = getattr(lineage, "upstream_prefix", "_upstream") or "_upstream"
+            good_df = self._preserve_upstream_lineage(good_df, preserve_cols, prefix)
+            bad_df = self._preserve_upstream_lineage(bad_df, preserve_cols, prefix)
+
         source_value = str(source_path) if source_path else None
         timestamp_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         run_id_value = self.last_run_id
+        if getattr(lineage, "run_id_source", "run_id") == "pipeline_run_id" and self.pipeline_run_id:
+            run_id_value = self.pipeline_run_id
 
+        # If any capture_* field is explicitly set, only honor those explicitly set fields.
+        capture_fields = {
+            "capture_source_path",
+            "capture_timestamp",
+            "capture_run_id",
+            "capture_domain",
+            "capture_system",
+        }
+        explicit_fields = set()
+        if hasattr(lineage, "model_fields_set"):
+            explicit_fields = set(getattr(lineage, "model_fields_set"))
+        elif hasattr(lineage, "__pydantic_fields_set__"):
+            explicit_fields = set(getattr(lineage, "__pydantic_fields_set__"))
+        explicit_capture = explicit_fields & capture_fields
+
+        metadata = getattr(self.contract, "metadata", {}) or {}
+        domain_value = metadata.get("domain")
+        system_value = metadata.get("system")
         columns: Dict[str, Any] = {}
-        if getattr(lineage, "capture_source_path", False):
+        if (("capture_source_path" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_source_path", False):
             columns[lineage.source_column_name] = source_value
-        if getattr(lineage, "capture_timestamp", False):
+        if (("capture_timestamp" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_timestamp", False):
             columns[lineage.timestamp_column_name] = timestamp_value
-        if getattr(lineage, "capture_run_id", False):
+        if (("capture_run_id" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_run_id", False):
             columns[lineage.run_id_column_name] = run_id_value
+        if (("capture_domain" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_domain", False) and domain_value is not None:
+            columns[lineage.domain_column_name] = domain_value
+        if (("capture_system" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_system", False) and system_value is not None:
+            columns[lineage.system_column_name] = system_value
 
         if not columns:
             return good_df, bad_df
 
         return self._add_columns(good_df, columns), self._add_columns(bad_df, columns)
+
+    def _preserve_upstream_lineage(self, df: Any, columns: List[str], prefix: str) -> Any:
+        """
+        Rename existing lineage columns to preserve upstream lineage before injecting new lineage values.
+
+        Args:
+            df: Engine dataframe.
+            columns: Column names to preserve.
+            prefix: Prefix for preserved columns.
+
+        Returns:
+            Updated dataframe.
+        """
+        if df is None:
+            return df
+
+        def _new_name(col: str) -> str:
+            if col.startswith("_lakeguard_"):
+                return col.replace("_lakeguard", prefix, 1)
+            return f"{prefix}_{col.lstrip('_')}"
+
+        rename_map: Dict[str, str] = {col: _new_name(col) for col in columns}
+
+        try:
+            import polars as pl
+            if isinstance(df, pl.DataFrame):
+                existing = set(df.columns)
+                mapping = {src: dst for src, dst in rename_map.items() if src in existing and dst not in existing}
+                return df.rename(mapping) if mapping else df
+        except Exception:
+            pass
+
+        try:
+            import pandas as pd
+            if isinstance(df, pd.DataFrame):
+                existing = set(df.columns)
+                mapping = {src: dst for src, dst in rename_map.items() if src in existing and dst not in existing}
+                return df.rename(columns=mapping) if mapping else df
+        except Exception:
+            pass
+
+        if self.engine_name == "spark":
+            try:
+                existing = set(df.columns)
+                updated = df
+                for src, dst in rename_map.items():
+                    if src in existing and dst not in existing:
+                        updated = updated.withColumnRenamed(src, dst)
+                return updated
+            except Exception:
+                return df
+
+        try:
+            import duckdb
+            if isinstance(df, duckdb.DuckDBPyRelation):
+                cols = []
+                try:
+                    cols = list(df.columns)
+                except Exception:
+                    try:
+                        cols = [row[0] for row in df.connection.execute(f"DESCRIBE {df.sql_query()}").fetchall()]
+                    except Exception:
+                        cols = [row[0] for row in df.connection.execute(f"DESCRIBE SELECT * FROM ({df.sql_query()})").fetchall()]
+
+                existing = set(cols)
+                target_set = set(rename_map.values())
+                exprs = []
+                for col in cols:
+                    if col in rename_map and rename_map[col] not in existing:
+                        col_name = col.replace('"', '""')
+                        new_name = rename_map[col].replace('"', '""')
+                        exprs.append(f"\"{col_name}\" AS \"{new_name}\"")
+                    elif col in target_set:
+                        # Drop existing target columns to avoid duplicates.
+                        continue
+                    else:
+                        exprs.append(f"\"{col.replace('\"', '\"\"')}\"")
+                query = f"SELECT {', '.join(exprs)} FROM ({df.sql_query()})"
+                return df.connection.sql(query)
+        except Exception:
+            pass
+
+        return df
 
     def _add_columns(self, df: Any, columns: Dict[str, Any]) -> Any:
         """
@@ -495,6 +1000,29 @@ class DataProcessor:
                 for name, value in columns.items():
                     updated[name] = value
                 return updated
+        except Exception:
+            pass
+
+        # DuckDB relation support
+        try:
+            import duckdb
+            if isinstance(df, duckdb.DuckDBPyRelation):
+                def _lit(val):
+                    if val is None:
+                        return "NULL"
+                    if isinstance(val, bool):
+                        return "TRUE" if val else "FALSE"
+                    if isinstance(val, (int, float)):
+                        return str(val)
+                    text = str(val).replace("'", "''")
+                    return f"'{text}'"
+
+                exprs = ["*"]
+                for name, value in columns.items():
+                    col_name = str(name).replace('"', '""')
+                    exprs.append(f"{_lit(value)} AS \"{col_name}\"")
+                query = f"SELECT {', '.join(exprs)} FROM ({df.sql_query()})"
+                return df.connection.sql(query)
         except Exception:
             pass
 
@@ -936,10 +1464,16 @@ class DataProcessor:
                 from pyspark.sql import functions as F
                 if field not in df.columns:
                     return None
-                total = df.count()
+                # Single aggregation: compute total and non-null count together
+                # Avoids two separate .count() calls (each triggering full DAG)
+                result = df.agg(
+                    F.count("*").alias("total"),
+                    F.count(F.col(field)).alias("non_null")
+                ).first()
+                total = result["total"]
+                non_null = result["non_null"]
                 if total == 0:
                     return None
-                non_null = df.filter(F.col(field).isNotNull()).count()
                 return float(non_null) / float(total)
             except Exception:
                 return None

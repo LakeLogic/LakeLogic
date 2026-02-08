@@ -26,6 +26,28 @@ def test_contract_quality_rules():
     assert contract.quality.row_rules[0].name == "test_rule"
     assert contract.quality.row_rules[0].sql == "id > 0"
 
+def test_row_rule_not_null_list_expands():
+    """Ensure not_null accepts a list of fields and expands into rules."""
+    from lakeguard.engines.base import EngineAdapter
+
+    class DummyAdapter(EngineAdapter):
+        def execute(self, df):
+            raise NotImplementedError
+
+    data = {
+        "version": "1.0.0",
+        "quality": {
+            "row_rules": [
+                {"not_null": ["a", "b", "c"]}
+            ]
+        }
+    }
+    contract = DataContract(**data)
+    adapter = DummyAdapter(contract)
+    rules = adapter.get_row_rules()
+    names = {rule.name for rule in rules}
+    assert names == {"a_not_null", "b_not_null", "c_not_null"}
+
 def test_transformation_lookup():
     """Test the lookup transformation model."""
     data = {
@@ -120,3 +142,31 @@ def test_external_logic_parsing():
     assert logic.type == "python"
     assert logic.entrypoint == "build_sales"
     assert logic.output_format == "parquet"
+
+def test_transformation_rename_mappings():
+    """Rename transformation should accept mappings dict."""
+    data = {
+        "version": "1.0.0",
+        "transformations": [
+            {"rename": {"mappings": {"old_a": "new_a", "old_b": "new_b"}}}
+        ],
+    }
+    contract = DataContract(**data)
+    rename = contract.transformations[0].rename
+    assert rename is not None
+    assert rename.iter_pairs() == [("old_a", "new_a"), ("old_b", "new_b")]
+
+def test_quality_rule_category_normalization_warns():
+    """Unknown categories should warn and be normalized to lowercase."""
+    data = {
+        "version": "1.0.0",
+        "quality": {
+            "row_rules": [
+                {"name": "weird_cat", "sql": "id > 0", "category": "WeirdCategory"}
+            ]
+        }
+    }
+    with pytest.warns(UserWarning):
+        contract = DataContract(**data)
+    rule = contract.quality.row_rules[0]
+    assert rule.category == "weirdcategory"

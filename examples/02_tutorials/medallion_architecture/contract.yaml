@@ -1,0 +1,105 @@
+dataset: silver_crm_customers
+version: 1.0.0
+primary_key: ["customer_id"]
+# ---------------------------------------------------------
+# 1. PIPELINE STAGES
+# Define operational overrides for different lifecycle steps.
+# ---------------------------------------------------------
+stages:
+  # BRONZE: Ingest raw CSV files and output standardized Parquet.
+  # This stage ignores business rules to ensure we capture all raw data first.
+  bronze:
+    metadata:
+      domain: "customer_analytics"
+      system: "crm_export"
+    source:
+      type: raw_landing
+      path: "data/crm_*.csv"  # Supports glob patterns for multiple files
+      #load_mode: incremental
+    materialization:
+      strategy: append
+      target_path: "data/bronze/bronze_customers.parquet"
+      format: parquet
+    model: null
+    transformations: []
+    quality:
+      enforce_required: false
+      row_rules: []
+
+# ---------------------------------------------------------
+# 2. DEFAULT CONTRACT (SILVER LAYER)
+# Consumes standardized Bronze Parquet and enforces strict quality gates.
+# ---------------------------------------------------------
+info:
+  title: "Validated CRM customers"
+  version: 1.0.0
+  description: "Deduplicated and validated customer data for analytical use."
+metadata:
+  domain: "customer_analytics"
+  system: "crm_export"
+  run_log_table: "lakeguard_run_logs"
+  run_log_backend: "duckdb"
+  run_log_database: "logs/lakeguard_run_logs.duckdb"
+
+lineage:
+  enabled: true
+
+source:
+  type: bronze_layer
+  path: "data/bronze/bronze_customers.parquet"
+
+model:
+  fields:
+    - name: customer_id
+      type: integer
+      required: true
+    - name: name
+      type: string
+      required: true
+    - name: email
+      type: string
+      required: true
+    - name: signup_date
+      type: date
+      required: true
+    - name: tier
+      type: string
+    - name: total_spend
+      type: float
+    - name: is_active
+      type: boolean
+
+quality:
+  row_rules:
+    - regex_match:
+        field: email
+        pattern: "^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+$"
+    - name: positive_spend
+      sql: "total_spend >= 0"
+      category: "correctness"
+      description: "Total spend cannot be negative"
+
+transformations:
+  # Deduplication now happens in Silver to keep Bronze fully raw.
+  - deduplicate:
+      on: ["customer_id"]
+      sort_by: ["signup_date"]
+      order: "desc"
+    phase: "pre"
+  
+  # Rename incoming fields to match our standardized model.
+  - rename:
+      mappings:
+        plan_type: tier
+    phase: "pre"
+
+materialization:
+  strategy: merge
+  primary_key: customer_id
+  target_path: "data/silver/silver_customers.parquet"
+  format: parquet
+
+quarantine:
+  enabled: true
+  include_error_reason: true
+  notifications: []

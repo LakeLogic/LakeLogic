@@ -128,6 +128,10 @@ def _to_pandas(df: Any) -> Any:
 
     if isinstance(df, pd.DataFrame):
         return df
+    if isinstance(df, (list, tuple)):
+        return pd.DataFrame(df)
+    if isinstance(df, dict):
+        return pd.DataFrame([df])
     if hasattr(df, "to_pandas"):
         return df.to_pandas()
     if hasattr(df, "toPandas"):
@@ -143,19 +147,184 @@ def _to_pandas(df: Any) -> Any:
 
 def _write_frame(df, path: Path, output_format: str) -> None:
     """
-    Write a pandas DataFrame to disk.
+    Write a DataFrame-like object to disk.
 
     Args:
-        df: pandas.DataFrame to write.
+        df: pandas/polars DataFrame to write.
         path: Destination path.
         output_format: csv or parquet.
     """
     if output_format == "csv":
-        df.to_csv(path, index=False)
+        if hasattr(df, "write_csv"):
+            df.write_csv(path)
+        elif hasattr(df, "to_csv"):
+            df.to_csv(path, index=False)
+        else:
+            raise ValueError("Unsupported dataframe type for CSV materialization.")
     elif output_format == "parquet":
-        df.to_parquet(path, index=False)
+        if hasattr(df, "write_parquet"):
+            df.write_parquet(path)
+        elif hasattr(df, "to_parquet"):
+            try:
+                df.to_parquet(path, index=False)
+            except Exception as exc:
+                # Fallback to DuckDB COPY for parquet without pyarrow/fastparquet.
+                try:
+                    import duckdb
+
+                    owns_connection = False
+                    con = None
+                    if hasattr(df, "connection") and hasattr(df, "sql_query"):
+                        con = df.connection
+                    else:
+                        con = duckdb.connect()
+                        owns_connection = True
+
+                    try:
+                        if hasattr(df, "sql_query"):
+                            con.execute(f"COPY ({df.sql_query()}) TO '{path}' (FORMAT PARQUET)")
+                        else:
+                            con.register("incoming_df", df)
+                            con.execute(f"COPY incoming_df TO '{path}' (FORMAT PARQUET)")
+                    finally:
+                        if owns_connection and con is not None:
+                            con.close()
+                    return
+                except Exception:
+                    pass
+                try:
+                    import polars as pl
+                    pl.from_pandas(df).write_parquet(path)
+                except Exception:
+                    raise ValueError(
+                        "Parquet materialization requires pyarrow/fastparquet, duckdb, or polars as a fallback."
+                    ) from exc
+        else:
+            raise ValueError("Unsupported dataframe type for Parquet materialization.")
+    elif output_format == "iceberg":
+        try:
+            import duckdb
+            # Create a localized connection or use existing if it's a relation
+            if hasattr(df, "connection") and hasattr(df, "sql_query"): 
+                con = df.connection
+                con.execute("INSTALL iceberg; LOAD iceberg;")
+                con.execute("INSTALL httpfs; LOAD httpfs;")
+                con.execute(f"COPY ({df.sql_query()}) TO '{path}' (FORMAT ICEBERG)")
+            else:
+                con = duckdb.connect()
+                con.execute("INSTALL iceberg; LOAD iceberg;")
+                con.execute("INSTALL httpfs; LOAD httpfs;")
+                con.register("incoming_df", df)
+                con.execute(f"COPY incoming_df TO '{path}' (FORMAT ICEBERG)")
+        except ImportError:
+            raise ValueError("Iceberg materialization requires 'duckdb' installed.")
+        except Exception as e:
+            raise ValueError(f"Iceberg materialization failed: {e}")
+    elif output_format == "delta":
+        try:
+            from deltalake import write_deltalake
+            # If it's a DuckDB relation, we need to bring it to memory (Arrow preferred)
+            data = df
+            if hasattr(df, "to_arrow_table"):
+                data = df.to_arrow_table()
+            elif hasattr(df, "to_pandas"):
+                data = df.to_pandas()
+                
+            write_deltalake(path, data)
+        except ImportError:
+            raise ValueError("Delta materialization requires 'deltalake' installed (pip install deltalake).")
+        except Exception as e:
+            raise ValueError(f"Delta materialization failed: {e}")
     else:
         raise ValueError(f"Unsupported output format: {output_format}")
+
+
+def _pandas_available() -> bool:
+    try:
+        import pandas  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _row_count(df: Any) -> Optional[int]:
+    try:
+        if hasattr(df, "height"):
+            return int(df.height)
+        return int(len(df))
+    except Exception:
+        return None
+
+
+def _is_polars_frame(df: Any) -> bool:
+    try:
+        import polars as pl
+    except Exception:
+        return False
+    return isinstance(df, (pl.DataFrame, pl.LazyFrame))
+
+
+def _frame_has_columns(df: Any) -> bool:
+    """
+    Best-effort check whether a frame has defined columns.
+    Used to avoid writing empty/invalid files (e.g., 0-column parquet).
+    """
+    if df is None:
+        return False
+    try:
+        if hasattr(df, "columns"):
+            return len(df.columns) > 0
+    except Exception:
+        pass
+    try:
+        if hasattr(df, "schema"):
+            schema = df.schema
+            if schema is not None:
+                return len(schema) > 0
+    except Exception:
+        pass
+    try:
+        if hasattr(df, "collect_schema"):
+            schema = df.collect_schema()
+            return len(schema) > 0
+    except Exception:
+        pass
+    if isinstance(df, dict):
+        return len(df) > 0
+    if isinstance(df, (list, tuple)):
+        if not df:
+            return False
+        first = df[0]
+        if isinstance(first, dict):
+            return len(first) > 0
+        return True
+    return True
+
+
+def _append_without_pandas(df: Any, target_file: Path, output_format: str) -> int:
+    try:
+        import polars as pl
+    except Exception as exc:
+        raise ValueError("Append without pandas requires polars installed.") from exc
+
+    if isinstance(df, pl.LazyFrame):
+        df = df.collect()
+    if not isinstance(df, pl.DataFrame):
+        raise ValueError("Append without pandas requires a Polars DataFrame.")
+
+    if target_file.exists():
+        if output_format == "csv":
+            existing = pl.read_csv(target_file)
+        elif output_format == "parquet":
+            existing = pl.read_parquet(target_file)
+        else:
+            raise ValueError(f"Unsupported output format: {output_format}")
+        combined = pl.concat([existing, df], how="vertical")
+        _write_frame(combined, target_file, output_format)
+        return int(combined.height)
+
+    _write_frame(df, target_file, output_format)
+    return int(df.height)
 
 
 def _read_frame(path: Path, output_format: str):
@@ -173,7 +342,33 @@ def _read_frame(path: Path, output_format: str):
     if output_format == "csv":
         return pd.read_csv(path)
     if output_format == "parquet":
-        return pd.read_parquet(path)
+        try:
+            return pd.read_parquet(path)
+        except Exception as exc:
+            try:
+                import duckdb
+                return duckdb.read_parquet(str(path)).df()
+            except Exception:
+                pass
+            try:
+                import polars as pl
+                return pl.read_parquet(path).to_pandas()
+            except Exception:
+                raise ValueError(
+                    "Parquet reads require pyarrow/fastparquet, duckdb, or polars as a fallback."
+                ) from exc
+    if output_format == "delta":
+        try:
+            import polars as pl
+            return pl.read_delta(str(path)).to_pandas()
+        except (ImportError, Exception):
+            from deltalake import DeltaTable
+            return DeltaTable(path).to_pandas()
+    if output_format == "iceberg":
+        import duckdb
+        con = duckdb.connect()
+        con.execute("INSTALL iceberg; LOAD iceberg; INSTALL httpfs; LOAD httpfs;")
+        return con.execute(f"SELECT * FROM iceberg_scan('{path}')").to_df()
     raise ValueError(f"Unsupported output format: {output_format}")
 
 
@@ -304,9 +499,255 @@ def _partition_groups(df, partition_by: List[str]) -> Iterable[Tuple[Dict[str, A
         yield values, group.reset_index(drop=True)
 
 
+def _spark_merge_dataframe(
+    spark,
+    incoming_df: Any,
+    target: str,
+    primary_key: List[str],
+    output_format: str,
+) -> Dict[str, Any]:
+    """
+    Perform a native Spark merge (upsert) without collecting to pandas.
+
+    Uses DataFrame joins to update existing records and insert new ones.
+    For Delta Lake tables, uses MERGE INTO when available.
+
+    Args:
+        spark: SparkSession.
+        incoming_df: New data to merge.
+        target: Target path or table name.
+        primary_key: Primary key columns for matching.
+        output_format: Output format (delta, parquet, etc.).
+
+    Returns:
+        Metadata about the write.
+    """
+    from pyspark.sql import functions as F
+
+    is_table = target.startswith("table:")
+    table_or_path = target[6:] if is_table else target
+
+    # For Delta tables, use native MERGE INTO
+    if output_format == "delta" and is_table:
+        try:
+            from delta.tables import DeltaTable
+            if DeltaTable.isDeltaTable(spark, table_or_path) or spark.catalog.tableExists(table_or_path):
+                delta_table = DeltaTable.forName(spark, table_or_path) if is_table else DeltaTable.forPath(spark, table_or_path)
+                merge_condition = " AND ".join([f"target.{col} = source.{col}" for col in primary_key])
+                update_cols = {col: f"source.{col}" for col in incoming_df.columns if col not in primary_key}
+                insert_cols = {col: f"source.{col}" for col in incoming_df.columns}
+
+                delta_table.alias("target").merge(
+                    incoming_df.alias("source"),
+                    merge_condition
+                ).whenMatchedUpdate(set=update_cols).whenNotMatchedInsert(values=insert_cols).execute()
+
+                rows_written = incoming_df.count()
+                logger.info(f"Merged {rows_written} rows into Delta table {table_or_path}")
+                return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+        except ImportError:
+            logger.debug("Delta Lake not available, falling back to DataFrame merge")
+        except Exception as e:
+            logger.debug(f"Delta MERGE failed, falling back to DataFrame merge: {e}")
+
+    # Fallback: DataFrame-based merge for non-Delta or when Delta unavailable
+    try:
+        if is_table and spark.catalog.tableExists(table_or_path):
+            existing_df = spark.table(table_or_path)
+        elif not is_table and Path(table_or_path).exists():
+            existing_df = spark.read.format(output_format).load(table_or_path)
+        else:
+            # No existing data, just write
+            writer = incoming_df.write.format(output_format).mode("overwrite")
+            if is_table:
+                writer.saveAsTable(table_or_path)
+            else:
+                writer.save(table_or_path)
+            rows_written = incoming_df.count()
+            logger.info(f"Wrote {rows_written} rows to {table_or_path} (no existing data)")
+            return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+    except Exception:
+        # Target doesn't exist yet
+        writer = incoming_df.write.format(output_format).mode("overwrite")
+        if is_table:
+            writer.saveAsTable(table_or_path)
+        else:
+            writer.save(table_or_path)
+        rows_written = incoming_df.count()
+        logger.info(f"Wrote {rows_written} rows to {table_or_path} (new target)")
+        return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+
+    # Perform merge via anti-join + union
+    # 1. Find rows in existing that DON'T match incoming (to keep unchanged)
+    # 2. Union with all incoming rows (which are updates or inserts)
+    join_condition = [existing_df[col] == incoming_df[col] for col in primary_key]
+
+    # Get non-matching existing rows (rows not being updated)
+    unchanged = existing_df.join(incoming_df, on=primary_key, how="left_anti")
+
+    # Align columns
+    all_columns = list(dict.fromkeys(existing_df.columns + [c for c in incoming_df.columns if c not in existing_df.columns]))
+    for col in all_columns:
+        if col not in unchanged.columns:
+            unchanged = unchanged.withColumn(col, F.lit(None))
+        if col not in incoming_df.columns:
+            incoming_df = incoming_df.withColumn(col, F.lit(None))
+
+    unchanged = unchanged.select(*all_columns)
+    incoming_df = incoming_df.select(*all_columns)
+
+    merged = unchanged.union(incoming_df)
+
+    writer = merged.write.format(output_format).mode("overwrite")
+    if is_table:
+        writer.saveAsTable(table_or_path)
+    else:
+        writer.save(table_or_path)
+
+    rows_written = merged.count()
+    logger.info(f"Merged {rows_written} rows to {table_or_path}")
+    return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+
+
+def _spark_scd2_dataframe(
+    spark,
+    incoming_df: Any,
+    target: str,
+    primary_key: List[str],
+    scd2_cfg: Dict[str, Any],
+    output_format: str,
+) -> Dict[str, Any]:
+    """
+    Perform native Spark SCD2 (Slowly Changing Dimension Type 2) without collecting to pandas.
+
+    Closes current records and appends new versions using Spark DataFrame operations.
+
+    Args:
+        spark: SparkSession.
+        incoming_df: New data with updates.
+        target: Target path or table name.
+        primary_key: Primary key columns.
+        scd2_cfg: SCD2 configuration (effective_from_field, effective_to_field, current_flag_field).
+        output_format: Output format.
+
+    Returns:
+        Metadata about the write.
+    """
+    from pyspark.sql import functions as F
+
+    effective_from = scd2_cfg.get("effective_from_field", "effective_from")
+    effective_to = scd2_cfg.get("effective_to_field", "effective_to")
+    current_flag = scd2_cfg.get("current_flag_field", "is_current")
+
+    now_value = scd2_cfg.get("default_effective_from")
+    if not now_value:
+        now_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    is_table = target.startswith("table:")
+    table_or_path = target[6:] if is_table else target
+
+    # Add SCD2 columns to incoming if missing
+    if effective_from not in incoming_df.columns:
+        incoming_df = incoming_df.withColumn(effective_from, F.lit(now_value))
+    if effective_to not in incoming_df.columns:
+        incoming_df = incoming_df.withColumn(effective_to, F.lit(None).cast("string"))
+    if current_flag not in incoming_df.columns:
+        incoming_df = incoming_df.withColumn(current_flag, F.lit(True))
+
+    # Try to read existing data
+    existing_df = None
+    try:
+        if is_table and spark.catalog.tableExists(table_or_path):
+            existing_df = spark.table(table_or_path)
+        elif not is_table and Path(table_or_path).exists():
+            existing_df = spark.read.format(output_format).load(table_or_path)
+    except Exception:
+        pass
+
+    if existing_df is None or existing_df.count() == 0:
+        # No existing data, just write incoming
+        writer = incoming_df.write.format(output_format).mode("overwrite")
+        if is_table:
+            writer.saveAsTable(table_or_path)
+        else:
+            writer.save(table_or_path)
+        rows_written = incoming_df.count()
+        logger.info(f"Wrote {rows_written} SCD2 rows to {table_or_path} (initial load)")
+        return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+
+    # Ensure existing has SCD2 columns
+    if effective_from not in existing_df.columns:
+        existing_df = existing_df.withColumn(effective_from, F.lit(None).cast("string"))
+    if effective_to not in existing_df.columns:
+        existing_df = existing_df.withColumn(effective_to, F.lit(None).cast("string"))
+    if current_flag not in existing_df.columns:
+        existing_df = existing_df.withColumn(current_flag, F.lit(True))
+
+    # Get incoming keys
+    incoming_keys = incoming_df.select(*primary_key).distinct()
+
+    # Records to close: existing current records that have matching incoming keys
+    join_condition = [existing_df[col] == incoming_keys[col] for col in primary_key]
+    records_to_close = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
+        F.col(current_flag) == True
+    )
+
+    # Get the effective_from from incoming for closing
+    incoming_effective = incoming_df.select(
+        *primary_key,
+        F.col(effective_from).alias("_new_effective_from")
+    ).distinct()
+
+    # Close the records
+    closed_records = records_to_close.join(incoming_effective, on=primary_key, how="left").withColumn(
+        effective_to, F.col("_new_effective_from")
+    ).withColumn(
+        current_flag, F.lit(False)
+    ).drop("_new_effective_from")
+
+    # Records to keep unchanged: existing records NOT matching incoming keys OR already closed
+    unchanged = existing_df.join(incoming_keys, on=primary_key, how="left_anti")
+    already_closed = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
+        F.col(current_flag) == False
+    )
+
+    # Align all columns
+    all_columns = list(existing_df.columns)
+    for col in incoming_df.columns:
+        if col not in all_columns:
+            all_columns.append(col)
+
+    def align_columns(df, cols):
+        for col in cols:
+            if col not in df.columns:
+                df = df.withColumn(col, F.lit(None))
+        return df.select(*cols)
+
+    unchanged = align_columns(unchanged, all_columns)
+    already_closed = align_columns(already_closed, all_columns)
+    closed_records = align_columns(closed_records, all_columns)
+    incoming_df = align_columns(incoming_df, all_columns)
+
+    # Union all: unchanged + already closed + newly closed + incoming
+    result = unchanged.union(already_closed).union(closed_records).union(incoming_df)
+
+    writer = result.write.format(output_format).mode("overwrite")
+    if is_table:
+        writer.saveAsTable(table_or_path)
+    else:
+        writer.save(table_or_path)
+
+    rows_written = result.count()
+    logger.info(f"Applied SCD2 with {rows_written} total rows to {table_or_path}")
+    return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+
+
 def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format: str) -> Dict[str, Any]:
     """
     Materialize Spark DataFrames to a path (CSV, Parquet, Delta, Iceberg).
+
+    Supports append, overwrite, merge, and scd2 strategies natively without
+    collecting to pandas (avoiding driver memory issues at scale).
 
     Args:
         df: Spark DataFrame to write.
@@ -321,10 +762,26 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     strategy = (mat.strategy or "append").lower()
     partition_by = list(mat.partition_by or [])
     reprocess_policy = getattr(mat, "reprocess_policy", "overwrite_partition")
+    primary_key = list(contract.primary_key or [])
+    scd2_cfg = getattr(mat, "scd2", None)
+    scd2_cfg = scd2_cfg if isinstance(scd2_cfg, dict) else {}
 
-    if strategy not in ["append", "overwrite"]:
-        raise ValueError("Spark materialization supports append/overwrite only in OSS.")
+    spark = df.sparkSession
+    target_str = str(target)
 
+    # Handle merge strategy natively
+    if strategy == "merge":
+        if not primary_key:
+            raise ValueError("primary_key is required for merge strategy.")
+        return _spark_merge_dataframe(spark, df, target_str, primary_key, output_format)
+
+    # Handle SCD2 strategy natively
+    if strategy == "scd2":
+        if not primary_key:
+            raise ValueError("primary_key is required for scd2 strategy.")
+        return _spark_scd2_dataframe(spark, df, target_str, primary_key, scd2_cfg, output_format)
+
+    # Standard append/overwrite
     writer = df.write.format(output_format)
     if partition_by:
         writer = writer.partitionBy(*partition_by)
@@ -332,14 +789,13 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     mode = "append" if strategy == "append" else "overwrite"
     if strategy == "append" and reprocess_policy in ["overwrite_partition", "overwrite_partition_safe"]:
         try:
-            df.sparkSession.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+            spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
         except Exception:
             pass
         mode = "overwrite"
 
-    target_str = str(target)
     if target_str.startswith("table:"):
-        table_name = target_str[len("table:") :]
+        table_name = target_str[len("table:"):]
         writer.mode(mode).saveAsTable(table_name)
         logger.info(f"Materialized Spark dataframe to table {table_name} ({output_format})")
         return {"target": table_name, "rows_written": df.count(), "format": output_format}
@@ -403,6 +859,51 @@ def materialize_dataframe(
     if partition_by and strategy in ["merge", "scd2"]:
         raise ValueError("merge/scd2 strategies do not support partition_by in OSS materialization.")
 
+    is_dir_target = bool(partition_by) or resolved_target.suffix == ""
+    if resolved_target.exists() and resolved_target.is_dir():
+        is_dir_target = True
+
+    if is_dir_target:
+        resolved_target.mkdir(parents=True, exist_ok=True)
+        target_file = resolved_target / f"data.{resolved_format}"
+    else:
+        target_file = resolved_target
+        if target_file.suffix == "":
+            target_file = target_file.with_suffix(f".{resolved_format}")
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not _frame_has_columns(df):
+        logger.info("Materialization skipped: dataframe has no columns (empty incremental batch).")
+        return {"target": str(target_file), "rows_written": 0, "format": resolved_format}
+
+    if not _pandas_available():
+        if partition_by:
+            raise ValueError("Partitioned materialization requires pandas (or Spark). Install pandas to proceed.")
+        if strategy not in ["overwrite", "append"]:
+            raise ValueError(f"Materialization strategy '{strategy}' requires pandas (or Spark). Install pandas to proceed.")
+        if strategy == "append" and target_file.exists():
+            rows_written = _append_without_pandas(df, target_file, resolved_format)
+        else:
+            _write_frame(df, target_file, resolved_format)
+            rows_written = _row_count(df)
+        logger.info(f"Materialized {rows_written if rows_written is not None else '?'} rows to {target_file}")
+        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+
+    # Prefer native Polars writes for csv/parquet to avoid pyarrow dependency.
+    if _is_polars_frame(df) and resolved_format in ["csv", "parquet"] and not partition_by and strategy in ["overwrite", "append"]:
+        if strategy == "append" and target_file.exists():
+            rows_written = _append_without_pandas(df, target_file, resolved_format)
+        else:
+            _write_frame(df, target_file, resolved_format)
+            rows_written = _row_count(df)
+            if rows_written is None and hasattr(df, "collect"):
+                try:
+                    rows_written = int(df.collect().height)
+                except Exception:
+                    pass
+        logger.info(f"Materialized {rows_written if rows_written is not None else '?'} rows to {target_file}")
+        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+
     pdf = _to_pandas(df)
 
     if partition_by:
@@ -415,10 +916,6 @@ def materialize_dataframe(
         if missing_pk:
             raise ValueError(f"Primary key columns missing from data: {', '.join(missing_pk)}")
     rows_written = 0
-
-    is_dir_target = bool(partition_by) or resolved_target.suffix == ""
-    if resolved_target.exists() and resolved_target.is_dir():
-        is_dir_target = True
 
     if partition_by:
         base_dir = resolved_target
@@ -464,15 +961,6 @@ def materialize_dataframe(
 
         logger.info(f"Materialized {rows_written} rows to partitioned path: {base_dir}")
         return {"target": str(base_dir), "rows_written": rows_written, "format": resolved_format}
-
-    if is_dir_target:
-        resolved_target.mkdir(parents=True, exist_ok=True)
-        target_file = resolved_target / f"data.{resolved_format}"
-    else:
-        target_file = resolved_target
-        if target_file.suffix == "":
-            target_file = target_file.with_suffix(f".{resolved_format}")
-        target_file.parent.mkdir(parents=True, exist_ok=True)
 
     if strategy == "overwrite":
         _write_frame(pdf, target_file, resolved_format)
@@ -570,11 +1058,39 @@ def materialize_quarantine(
             logger.info(f"Wrote {rows_written} quarantined rows to {target_file} ({resolved_format})")
             return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
 
+    if not _frame_has_columns(df):
+        logger.info("Quarantine materialization skipped: dataframe has no columns.")
+        return {"target": str(target_file), "rows_written": 0, "format": resolved_format}
+
     if resolved_format not in ["csv", "parquet"]:
         raise ValueError(
             f"Unsupported quarantine format '{resolved_format}'. Use csv/parquet, "
             "or run Spark for delta/iceberg/json outputs."
         )
+
+    # Prefer native Polars writes for csv/parquet to avoid pyarrow dependency.
+    if _is_polars_frame(df) and resolved_format in ["csv", "parquet"]:
+        if target_file.exists():
+            rows_written = _append_without_pandas(df, target_file, resolved_format)
+        else:
+            _write_frame(df, target_file, resolved_format)
+            rows_written = _row_count(df)
+            if rows_written is None and hasattr(df, "collect"):
+                try:
+                    rows_written = int(df.collect().height)
+                except Exception:
+                    pass
+        logger.info(f"Wrote {rows_written if rows_written is not None else '?'} quarantined rows to {target_file}")
+        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+
+    if not _pandas_available():
+        if target_file.exists():
+            rows_written = _append_without_pandas(df, target_file, resolved_format)
+        else:
+            _write_frame(df, target_file, resolved_format)
+            rows_written = _row_count(df)
+        logger.info(f"Wrote {rows_written if rows_written is not None else '?'} quarantined rows to {target_file}")
+        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
 
     pdf = _to_pandas(df)
 
@@ -938,11 +1454,20 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "timestamp": report.get("timestamp"),
         "engine": report.get("engine"),
         "contract": report.get("contract"),
+        "stage": report.get("stage"),
+        "dataset": report.get("dataset"),
+        "domain": report.get("domain"),
+        "system": report.get("system"),
+        "data_layer": report.get("data_layer"),
         "source_path": report.get("source_path"),
+        "counts_source": counts.get("source"),
         "counts_total": counts.get("total"),
         "counts_good": counts.get("good"),
         "counts_quarantined": counts.get("quarantined"),
+        "counts_pre_transform_dropped": counts.get("pre_transform_dropped"),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
+        "max_source_mtime": report.get("max_source_mtime"),
+        "source_files_json": json.dumps(report.get("source_files", []), default=str),
         "freshness_seconds": _num(freshness.get("age_seconds")),
         "freshness_pass": freshness.get("passed"),
         "freshness_threshold_seconds": _num(freshness.get("threshold_seconds")),
@@ -1020,8 +1545,23 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         if spark.catalog.tableExists(table_name):
             try:
                 existing_cols = set(spark.table(table_name).columns)
-                if "pipeline_run_id" not in existing_cols:
-                    spark.sql(f"ALTER TABLE {table_name} ADD COLUMNS (pipeline_run_id STRING)")
+                missing_cols = []
+                for col_name, col_type in [
+                    ("pipeline_run_id", "STRING"),
+                    ("stage", "STRING"),
+                    ("dataset", "STRING"),
+                    ("domain", "STRING"),
+                    ("system", "STRING"),
+                    ("data_layer", "STRING"),
+                    ("counts_source", "BIGINT"),
+                    ("counts_pre_transform_dropped", "BIGINT"),
+                    ("max_source_mtime", "DOUBLE"),
+                    ("source_files_json", "STRING"),
+                ]:
+                    if col_name not in existing_cols:
+                        missing_cols.append(f"{col_name} {col_type}")
+                if missing_cols:
+                    spark.sql(f"ALTER TABLE {table_name} ADD COLUMNS ({', '.join(missing_cols)})")
             except Exception as exc:
                 logger.warning(f"Failed to align run log table schema for {table_name}: {exc}")
             if merge_on_run_id:
@@ -1083,11 +1623,20 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 timestamp VARCHAR,
                 engine VARCHAR,
                 contract VARCHAR,
+                stage VARCHAR,
+                dataset VARCHAR,
+                domain VARCHAR,
+                system VARCHAR,
+                data_layer VARCHAR,
                 source_path VARCHAR,
+                counts_source BIGINT,
                 counts_total BIGINT,
                 counts_good BIGINT,
                 counts_quarantined BIGINT,
+                counts_pre_transform_dropped BIGINT,
                 quarantine_ratio DOUBLE,
+                max_source_mtime DOUBLE,
+                source_files_json VARCHAR,
                 freshness_seconds DOUBLE,
                 freshness_pass BOOLEAN,
                 freshness_threshold_seconds DOUBLE,
@@ -1102,55 +1651,53 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         """)
         try:
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS pipeline_run_id VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS stage VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS dataset VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS domain VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS system VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS data_layer VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_source BIGINT")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_pre_transform_dropped BIGINT")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_source_mtime DOUBLE")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS source_files_json VARCHAR")
         except Exception:
             pass
+        columns = [
+            "run_id",
+            "pipeline_run_id",
+            "timestamp",
+            "engine",
+            "contract",
+            "stage",
+            "dataset",
+            "domain",
+            "system",
+            "data_layer",
+            "source_path",
+            "counts_source",
+            "counts_total",
+            "counts_good",
+            "counts_quarantined",
+            "counts_pre_transform_dropped",
+            "quarantine_ratio",
+            "max_source_mtime",
+            "source_files_json",
+            "freshness_seconds",
+            "freshness_pass",
+            "freshness_threshold_seconds",
+            "availability_ratio",
+            "availability_pass",
+            "availability_threshold",
+            "dataset_rules_json",
+            "row_rule_failures_json",
+            "schema_drift_json",
+            "report_json",
+        ]
+        values = [record.get(col) for col in columns]
+        placeholders = ", ".join(["?"] * len(columns))
         con.execute(
-            f"""
-            INSERT INTO {full_table} (
-                run_id,
-                pipeline_run_id,
-                timestamp,
-                engine,
-                contract,
-                source_path,
-                counts_total,
-                counts_good,
-                counts_quarantined,
-                quarantine_ratio,
-                freshness_seconds,
-                freshness_pass,
-                freshness_threshold_seconds,
-                availability_ratio,
-                availability_pass,
-                availability_threshold,
-                dataset_rules_json,
-                row_rule_failures_json,
-                schema_drift_json,
-                report_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                record["run_id"],
-                record["pipeline_run_id"],
-                record["timestamp"],
-                record["engine"],
-                record["contract"],
-                record["source_path"],
-                record["counts_total"],
-                record["counts_good"],
-                record["counts_quarantined"],
-                record["quarantine_ratio"],
-                record["freshness_seconds"],
-                record["freshness_pass"],
-                record["freshness_threshold_seconds"],
-                record["availability_ratio"],
-                record["availability_pass"],
-                record["availability_threshold"],
-                record["dataset_rules_json"],
-                record["row_rule_failures_json"],
-                record["schema_drift_json"],
-                record["report_json"],
-            ],
+            f"INSERT INTO {full_table} ({', '.join(columns)}) VALUES ({placeholders})",
+            values,
         )
         con.close()
         logger.info(f"Wrote run log to DuckDB table {full_table} ({db_path})")
@@ -1173,11 +1720,20 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 timestamp TEXT,
                 engine TEXT,
                 contract TEXT,
+                stage TEXT,
+                dataset TEXT,
+                domain TEXT,
+                system TEXT,
+                data_layer TEXT,
                 source_path TEXT,
+                counts_source INTEGER,
                 counts_total INTEGER,
                 counts_good INTEGER,
                 counts_quarantined INTEGER,
+                counts_pre_transform_dropped INTEGER,
                 quarantine_ratio REAL,
+                max_source_mtime REAL,
+                source_files_json TEXT,
                 freshness_seconds REAL,
                 freshness_pass INTEGER,
                 freshness_threshold_seconds REAL,
@@ -1194,55 +1750,66 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             cols = [row[1] for row in con.execute(f"PRAGMA table_info({table_name})").fetchall()]
             if "pipeline_run_id" not in cols:
                 con.execute(f"ALTER TABLE {table_name} ADD COLUMN pipeline_run_id TEXT")
+            for col_name, col_type in [
+                ("stage", "TEXT"),
+                ("dataset", "TEXT"),
+                ("domain", "TEXT"),
+                ("system", "TEXT"),
+                ("data_layer", "TEXT"),
+                ("counts_source", "INTEGER"),
+                ("counts_pre_transform_dropped", "INTEGER"),
+                ("max_source_mtime", "REAL"),
+                ("source_files_json", "TEXT"),
+            ]:
+                if col_name not in cols:
+                    con.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
         except Exception:
             pass
+        columns = [
+            "run_id",
+            "pipeline_run_id",
+            "timestamp",
+            "engine",
+            "contract",
+            "stage",
+            "dataset",
+            "domain",
+            "system",
+            "data_layer",
+            "source_path",
+            "counts_source",
+            "counts_total",
+            "counts_good",
+            "counts_quarantined",
+            "counts_pre_transform_dropped",
+            "quarantine_ratio",
+            "max_source_mtime",
+            "source_files_json",
+            "freshness_seconds",
+            "freshness_pass",
+            "freshness_threshold_seconds",
+            "availability_ratio",
+            "availability_pass",
+            "availability_threshold",
+            "dataset_rules_json",
+            "row_rule_failures_json",
+            "schema_drift_json",
+            "report_json",
+        ]
+        values = []
+        for col in columns:
+            if col == "freshness_pass":
+                value = record.get(col)
+                values.append(1 if value else 0 if value is not None else None)
+            elif col == "availability_pass":
+                value = record.get(col)
+                values.append(1 if value else 0 if value is not None else None)
+            else:
+                values.append(record.get(col))
+        placeholders = ", ".join(["?"] * len(columns))
         con.execute(
-            f"""
-            INSERT INTO {table_name} (
-                run_id,
-                pipeline_run_id,
-                timestamp,
-                engine,
-                contract,
-                source_path,
-                counts_total,
-                counts_good,
-                counts_quarantined,
-                quarantine_ratio,
-                freshness_seconds,
-                freshness_pass,
-                freshness_threshold_seconds,
-                availability_ratio,
-                availability_pass,
-                availability_threshold,
-                dataset_rules_json,
-                row_rule_failures_json,
-                schema_drift_json,
-                report_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                record["run_id"],
-                record["pipeline_run_id"],
-                record["timestamp"],
-                record["engine"],
-                record["contract"],
-                record["source_path"],
-                record["counts_total"],
-                record["counts_good"],
-                record["counts_quarantined"],
-                record["quarantine_ratio"],
-                record["freshness_seconds"],
-                1 if record["freshness_pass"] else 0 if record["freshness_pass"] is not None else None,
-                record["freshness_threshold_seconds"],
-                record["availability_ratio"],
-                1 if record["availability_pass"] else 0 if record["availability_pass"] is not None else None,
-                record["availability_threshold"],
-                record["dataset_rules_json"],
-                record["row_rule_failures_json"],
-                record["schema_drift_json"],
-                record["report_json"],
-            ],
+            f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})",
+            values,
         )
         con.commit()
         con.close()
@@ -1293,3 +1860,133 @@ def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] =
 
     _write_run_log_table(report, contract, engine_name=engine_name)
     return str(log_path) if log_path else None
+
+
+def get_last_run_watermark(contract, contract_title: str, stage: str, engine_name: Optional[str] = None) -> Optional[float]:
+    """
+    Fetch the last max_source_mtime for a contract/stage from run logs.
+    """
+    if not contract:
+        return None
+
+    metadata = contract.metadata or {}
+    table_value = metadata.get("run_log_table")
+    backend = (metadata.get("run_log_backend") or "").lower()
+    if table_value and not backend:
+        backend = "spark" if engine_name == "spark" else "duckdb"
+
+    if table_value and backend == "duckdb":
+        try:
+            import duckdb
+        except Exception:
+            return None
+        base_path = getattr(contract, "_base_path", None)
+        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.duckdb"
+        db_path = _resolve_path(str(db_path), base_path)
+        if not Path(db_path).exists():
+            return None
+        try:
+            con = duckdb.connect(database=str(db_path), read_only=True)
+        except Exception:
+            try:
+                con = duckdb.connect(database=str(db_path))
+            except Exception:
+                return None
+        try:
+            table_name = _prepare_table_name(table_value, backend)
+            parts = table_name.split(".")
+            if len(parts) >= 2:
+                schema_name = parts[-2]
+                table_only = parts[-1]
+                full_table = f"{schema_name}.{table_only}"
+            else:
+                full_table = table_name
+            res = con.execute(
+                f"""
+                SELECT max(max_source_mtime) FROM {full_table}
+                WHERE contract = ? AND stage = ?
+                """,
+                [contract_title, stage],
+            ).fetchone()
+            return res[0] if res and res[0] is not None else None
+        except Exception:
+            return None
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+    if table_value and backend == "sqlite":
+        import sqlite3
+        base_path = getattr(contract, "_base_path", None)
+        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.sqlite"
+        db_path = _resolve_path(str(db_path), base_path)
+        if not Path(db_path).exists():
+            return None
+        con = sqlite3.connect(str(db_path))
+        try:
+            table_name = _prepare_table_name(table_value, backend)
+            cursor = con.execute(
+                f"SELECT max(max_source_mtime) FROM {table_name} WHERE contract = ? AND stage = ?",
+                (contract_title, stage),
+            )
+            res = cursor.fetchone()
+            return res[0] if res and res[0] is not None else None
+        except Exception:
+            return None
+        finally:
+            con.close()
+
+    if table_value and backend == "spark":
+        try:
+            from pyspark.sql import SparkSession
+            from pyspark.sql import functions as F
+        except Exception:
+            return None
+        try:
+            spark = SparkSession.builder.getOrCreate()
+            df = spark.table(table_value)
+            res = (
+                df.filter((F.col("contract") == contract_title) & (F.col("stage") == stage))
+                .agg(F.max(F.col("max_source_mtime")).alias("max_mtime"))
+                .collect()
+            )
+            if res:
+                return res[0]["max_mtime"]
+        except Exception:
+            return None
+
+    dir_value = metadata.get("run_log_dir")
+    if dir_value:
+        base_path = getattr(contract, "_base_path", None)
+        log_dir = _resolve_path(str(dir_value), base_path)
+        if not log_dir.exists():
+            return None
+        try:
+            candidates = sorted(log_dir.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            for path in candidates:
+                try:
+                    with open(path, "r", encoding="utf-8") as handle:
+                        data = json.load(handle)
+                    if data.get("contract") == contract_title and data.get("stage") == stage:
+                        return data.get("max_source_mtime")
+                except Exception:
+                    continue
+        except Exception:
+            return None
+
+    path_value = metadata.get("run_log_path")
+    if path_value:
+        base_path = getattr(contract, "_base_path", None)
+        log_path = _resolve_path(str(path_value), base_path)
+        if log_path.exists():
+            try:
+                with open(log_path, "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+                if data.get("contract") == contract_title and data.get("stage") == stage:
+                    return data.get("max_source_mtime")
+            except Exception:
+                return None
+
+    return None

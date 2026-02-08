@@ -138,13 +138,23 @@ def test_quality_helper_expansion():
     row_rules = adapter.get_row_rules()
     dataset_rules = adapter.get_dataset_rules()
 
-    assert any(rule.sql == "email IS NOT NULL" for rule in row_rules)
-    assert any("status IN ('A', 'B')" in rule.sql for rule in row_rules)
-    assert any("age >=" in rule.sql and "age <=" in rule.sql for rule in row_rules)
+    assert any(rule.sql == "\"email\" IS NOT NULL" for rule in row_rules)
+    assert any("\"status\" IN ('A', 'B')" in rule.sql for rule in row_rules)
+    assert any("\"age\" >=" in rule.sql and "\"age\" <=" in rule.sql for rule in row_rules)
 
     unique_rule = next(rule for rule in dataset_rules if rule.name == "id_unique")
-    assert "COUNT(DISTINCT id)" in unique_rule.sql
+    assert "COUNT(DISTINCT \"id\")" in unique_rule.sql
     null_ratio_rule = next(rule for rule in dataset_rules if rule.name == "email_null_ratio")
     assert null_ratio_rule.must_be_less_than == 0.1
     row_count_rule = next(rule for rule in dataset_rules if rule.name == "row_count_between")
     assert row_count_rule.must_be_between == [1, 100]
+
+def test_quality_helper_quotes_spaced_fields():
+    """Generated rules should quote spaced identifiers."""
+    contract = DataContract(
+        version="1.0.0",
+        quality={"row_rules": [{"not_null": "full name"}]},
+    )
+    adapter = PolarsAdapter(contract)
+    rule = adapter.get_row_rules()[0]
+    assert rule.sql == "\"full name\" IS NOT NULL"
