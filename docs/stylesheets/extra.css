@@ -1,0 +1,145 @@
+/* Gemini API-inspired styling for LakeGuard documentation */
+
+:root {
+  --md-primary-fg-color: #1a73e8;
+  --md-primary-fg-color--light: #4285f4;
+  --md-primary-fg-color--dark: #0d47a1;
+  --md-accent-fg-color: #00bfa5;
+}
+
+/* Hero section styling */
+.md-typeset h1:first-of-type {
+  font-size: 3rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin-bottom: 1rem;
+}
+
+.md-typeset h1:first-of-type + p {
+  font-size: 1.25rem;
+  color: var(--md-default-fg-color--light);
+  margin-bottom: 2rem;
+}
+
+/* Tabbed content styling */
+.tabbed-set {
+  margin: 2rem 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.tabbed-labels {
+  display: flex;
+  background: var(--md-code-bg-color);
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.tabbed-labels > label {
+  padding: 1rem 1.5rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.tabbed-labels > label:hover {
+  background: var(--md-default-bg-color);
+}
+
+.tabbed-set > input:checked + label {
+  border-bottom-color: var(--md-primary-fg-color);
+  color: var(--md-primary-fg-color);
+}
+
+/* Code block enhancements */
+.md-typeset pre > code {
+  border-radius: 8px;
+}
+
+.highlight {
+  border-radius: 8px;
+}
+
+/* Button styling */
+.md-button {
+  border-radius: 24px;
+  padding: 0.75rem 2rem;
+  font-weight: 500;
+  text-transform: none;
+  transition: all 0.2s;
+}
+
+.md-button--primary {
+  background-color: var(--md-primary-fg-color);
+  color: white;
+  box-shadow: 0 2px 4px rgba(26, 115, 232, 0.3);
+}
+
+.md-button--primary:hover {
+  background-color: var(--md-primary-fg-color--dark);
+  box-shadow: 0 4px 8px rgba(26, 115, 232, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Card grid styling */
+.grid.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.grid.cards > * {
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.2s;
+}
+
+.grid.cards > *:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  border-color: var(--md-primary-fg-color--light);
+}
+
+.grid.cards .lg.middle {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  color: var(--md-primary-fg-color);
+}
+
+/* Admonition enhancements */
+.md-typeset .admonition {
+  border-radius: 8px;
+  border-left-width: 4px;
+}
+
+/* Table styling */
+.md-typeset table:not([class]) {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.md-typeset table:not([class]) th {
+  background: var(--md-code-bg-color);
+  font-weight: 600;
+}
+
+/* Navigation enhancements */
+.md-tabs {
+  background: var(--md-primary-fg-color);
+}
+
+/* Responsive adjustments */
+@media screen and (max-width: 76.1875em) {
+  .md-typeset h1:first-of-type {
+    font-size: 2rem;
+  }
+  
+  .grid.cards {
+    grid-template-columns: 1fr;
+  }
+}

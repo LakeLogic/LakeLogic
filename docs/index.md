@@ -1,58 +1,161 @@
 # LakeGuard
 
-**The SQL-First Quality Gate for your Data Lakehouse.**
+The fastest path from data ingestion to production-ready quality gates with Polars, Spark, DuckDB, Pandas, Snowflake, and more.
 
-LakeGuard ensures that your business decisions are based on data you can trust. By separating your **Business Logic (The Intent)** from your **Infrastructure (The Execution)**, LakeGuard lets you enforce strict quality gates across your entire Medallion architecture with **zero code rewrites**.
+=== "Python"
 
-```mermaid
-graph TD
-    %% Control Center
-    Contract[<br/><b><font size='6'>DATA CONTRACT</font></b><br/>YAML / SQL Rules<br/>]
+    ```python
+    from lakeguard import DataProcessor
     
-    %% Main Flow
-    Source[(<br/><b><font size='6'>RAW SOURCE</font></b><br/>Files / DBs / Tables<br/>)]
+    processor = DataProcessor(
+        contract="contract.yaml",
+        engine="polars"  # or spark, duckdb, pandas
+    )
     
-    Gate{<br/><b><font size='7'>LAKEGUARD</font></b><br/><b><font size='5'>Quality Gate</font></b><br/>}
+    source_df, good_df, bad_df = processor.run_source("data.csv")
     
-    Q[<br/><b><font size='6'>SAFE QUARANTINE</font></b><br/>Failure Logic / Reason Codes<br/>]
-    
-    Silver[<br/><b><font size='6'>SILVER LAYER</font></b><br/>Clean / Enriched<br/>]
-    Gold[<br/><b><font size='6'>GOLD LAYER</font></b><br/>Aggregates / KPIs<br/>]
-    Plat[<br/><b><font size='6'>PLATINUM</font></b><br/>AI / RAG Ready<br/>]
+    print(f"📊 {len(source_df)} source records")
+    print(f"✓ {len(good_df)} validated records")
+    print(f"✗ {len(bad_df)} quarantined records")
+    ```
 
-    %% Dependencies
-    Contract ===>|<b><font size='5'>ENFORCES</font></b>| Gate
-    Source ===>|<b><font size='5'>INGEST</font></b>| Gate
+=== "CLI"
+
+    ```bash
+    # Install LakeGuard
+    pip install "lakeguard[all]"
     
-    Gate ===>|<b><font size='5'>VALIDATED</font></b>| Silver
-    Gate ===>|<b><font size='5'>BROKEN</font></b>| Q
+    # Run your first contract
+    lakeguard run \
+      --contract contract.yaml \
+      --source data.csv \
+      --output-good validated.csv \
+      --output-bad quarantine.csv
+    ```
+
+=== "YAML Contract"
+
+    ```yaml
+    version: "1.0.0"
+    dataset: customer_data
     
-    Silver ===> Gold ===> Plat
-
-    %% Telemetry Branch
-    Gate -.-|<b><font size='4'>CAPTURES</font></b>| Telem[<br/><b><font size='6'>TELEMETRY</font></b><br/>]
-    Telem -.- Lineage[<b><font size='5'>LINEAGE</font></b>]
-    Telem -.- Metrics[<b><font size='5'>METRICS</font></b>]
-
-    %% Styles
-    style Gate fill:#1e40af,stroke:#1e3a8a,color:#ffffff,stroke-width:8px
-    style Q fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:4px
-    style Source fill:#c2410c,stroke:#78350f,color:#ffffff,stroke-width:4px
-    style Silver fill:#0f172a,stroke:#1e293b,color:#ffffff,stroke-width:3px
-    style Gold fill:#a16207,stroke:#713f12,color:#ffffff,stroke-width:3px
-    style Plat fill:#020617,stroke:#000000,color:#ffffff,stroke-width:3px
-    style Contract fill:#f8fafc,stroke:#cbd5e1,color:#1e293b,stroke-width:3px
+    model:
+      fields:
+        - name: email
+          type: string
+          required: true
+        - name: age
+          type: integer
     
-    style Telem fill:#f1f5f9,stroke:#94a3b8,color:#1e293b,stroke-width:2px,stroke-dasharray: 5 5
-    style Lineage fill:#f8fafc,stroke:#cbd5e1,color:#1e293b,stroke-width:2px
-    style Metrics fill:#f8fafc,stroke:#cbd5e1,color:#1e293b,stroke-width:2px
+    quality:
+      row_rules:
+        - not_null: email
+        - regex_match:
+            field: email
+            pattern: "^[^@]+@[^@]+\\.[^@]+$"
+        - range:
+            field: age
+            min: 18
+            max: 120
+    
+    materialization:
+      strategy: merge
+      target_path: output/customers
+      format: parquet
+    ```
 
-    %% Line Thickness
-    linkStyle default stroke:#475569,stroke-width:6px
-    linkStyle 6,7,8 stroke:#94a3b8,stroke-width:4px,stroke-dasharray: 5 5
-```
+=== "Spark"
 
-## The Core Value: Write Once. Run Anywhere
+    ```python
+    from lakeguard import DataProcessor
+    
+    # Auto-discovers Spark in Databricks/Synapse
+    processor = DataProcessor(
+        contract="contract.yaml"
+    )
+    
+    # Works with Delta Lake, Iceberg, Unity Catalog
+    source_df, good_df, bad_df = processor.run_source(
+        "catalog.schema.table"
+    )
+    
+    processor.materialize(good_df, bad_df)
+    ```
+
+=== "Snowflake"
+
+    ```python
+    from lakeguard import DataProcessor
+    
+    # Direct Snowflake execution (table-only)
+    processor = DataProcessor(
+        engine="snowflake",
+        contract="contract.yaml"
+    )
+    
+    source_df, good_df, bad_df = processor.run_source(
+        "ANALYTICS.SILVER.CUSTOMERS"
+    )
+    ```
+
+[Start building](quickstart.md){ .md-button .md-button--primary }
+
+Follow our Quickstart guide to get started and make your first quality gate in minutes.
+
+!!! tip "Explore More Examples"
+    The [`examples/` directory](https://github.com/LineageLogic/LakeGuard/tree/main/examples) in the repo contains 90+ runnable examples organized by skill level:
+    
+    - **Getting Started**: Your first contract in 5 minutes
+    - **Tutorials**: Medallion architecture, reference joins
+    - **Patterns**: Bronze quality gates, SCD2, deduplication
+    - **Production**: Complete insurance ELT pipeline
+    - **Integrations**: Airflow, Prefect, Dagster, Databricks templates
+
+---
+
+## Meet the engines
+
+<div class="grid cards" markdown>
+
+-   :material-lightning-bolt:{ .lg .middle } **Polars**
+
+    ---
+
+    Blazing-fast local engine for single-node processing. Best for development, testing, and production workloads under 100GB.
+
+    [:octicons-arrow-right-24: Learn more](capabilities.md)
+
+-   :material-chart-timeline:{ .lg .middle } **Spark**
+
+    ---
+
+    Distributed processing for petabyte-scale data. Native support for Delta Lake, Iceberg, and Unity Catalog.
+
+    [:octicons-arrow-right-24: Learn more](capabilities.md)
+
+-   :material-database:{ .lg .middle } **DuckDB**
+
+    ---
+
+    Fast analytical SQL engine with native Iceberg and Delta support. Perfect for local development and CI/CD.
+
+    [:octicons-arrow-right-24: Learn more](capabilities.md)
+
+-   :material-snowflake:{ .lg .middle } **Snowflake & BigQuery**
+
+    ---
+
+    Direct warehouse execution with SQL pushdown. Table-only adapters for cloud data warehouses.
+
+    [:octicons-arrow-right-24: Learn more](warehouse_adapters.md)
+
+</div>
+
+---
+
+## Why LakeGuard?
+
+### Write Once. Run Anywhere.
 
 Stop paying the "Re-adaptation Tax." In a traditional stack, moving from a Warehouse (SQL) to a Lakehouse (PySpark) means rewriting your validation rules. With LakeGuard, your **Data Contract is the Source of Truth**.
 
@@ -60,21 +163,16 @@ Stop paying the "Re-adaptation Tax." In a traditional stack, moving from a Wareh
 - **Zero Adaptation:** Move your pipelines from **dbt/Snowflake** to **Databricks/Spark** to **Local/Polars** with **zero changes** to your contract.
 - **No Vendor Lock-in:** Your business logic is a portable asset, independent of your cloud provider or execution engine.
 
-## Business ROI: Cost, Risk, & Trust
+### Business ROI: Cost, Risk, & Trust
 
-### 1. Eliminate the "Spark Tax" (Cost Savings)
+!!! success "Eliminate the Spark Tax"
+    Cut compute spend by up to 80% for maintenance and small-to-medium datasets by using Polars or DuckDB instead of Spark.
 
-- **Result:** Cut compute spend by up to 80% for maintenance and small-to-medium datasets.
+!!! info "100% Reconciliation"
+    Mathematically provable data integrity. Bad data is detoured into a **Safe Quarantine** area, ensuring production dashboards are never poisoned.
 
-### 2. 100% Reconciliation (Risk Mitigation)
-
-- **Result:** Mathematically provable data integrity. Bad data is detoured into a **Safe Quarantine** area, ensuring production dashboards are never poisoned.
-
-### 3. Visual Traceability (Stakeholder Trust)
-
-Gold-layer metrics should never be "Black Boxes." LakeGuard supports aggregate roll-ups that preserve source keys.
-
-- **Result:** Provide business users with a visual drill-down from board-level KPIs back to the raw source records.
+!!! tip "Visual Traceability"
+    Gold-layer metrics should never be "Black Boxes." LakeGuard supports aggregate roll-ups that preserve source keys, providing business users with a visual drill-down from board-level KPIs back to the raw source records.
 
 ---
 
@@ -89,6 +187,8 @@ Gold-layer metrics should never be "Black Boxes." LakeGuard supports aggregate r
 | **Lineage Injection** | Automatically audit every record with Run IDs, Timestamps, and Source paths. |
 | **Registry Orchestration** | A generic driver to run Bronze → Silver → Gold layers with parallel execution. |
 
+---
+
 ## Quick Start
 
 The fastest way to get started is with **[uv](https://github.com/astral-sh/uv)**:
@@ -100,6 +200,8 @@ uv pip install "lakeguard[all]"
 # Run your first contract (auto-discovers the best engine)
 lakeguard run --contract my_contract.yaml --source raw_data.parquet
 ```
+
+---
 
 ## Scale with LineageLogic
 

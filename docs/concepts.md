@@ -26,10 +26,10 @@ graph LR
     B -.->|Fail| Q[Quarantine 🛑]
     Q -.->|Correction| B
     
-    style B fill:#cd7f32,color:#fff
-    style C fill:#c0c0c0,color:#333
-    style D fill:#ffd700,color:#333
-    style Q fill:#ef4444,color:#fff
+    style B fill:#cd7f32,stroke:#8b5a00,color:#fff,stroke-width:3px
+    style C fill:#e8e8e8,stroke:#666,color:#000,stroke-width:3px
+    style D fill:#ffd700,stroke:#b8860b,color:#000,stroke-width:3px
+    style Q fill:#ef4444,stroke:#991b1b,color:#fff,stroke-width:3px
 ```
 
 ## Cleansing Transformations (Bronze → Silver)

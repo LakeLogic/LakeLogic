@@ -133,7 +133,7 @@ lakeguard run --engine snowflake --contract contract.yaml --source ANALYTICS.SIL
 from lakeguard import DataProcessor
 
 processor = DataProcessor(engine="snowflake", contract="contract.yaml")
-good_df, bad_df = processor.run_source("ANALYTICS.SILVER.CRM_CUSTOMERS")
+source_df, good_df, bad_df = processor.run_source("ANALYTICS.SILVER.CRM_CUSTOMERS")
 ```
 
 ## BigQuery Usage
@@ -173,7 +173,7 @@ lakeguard run --engine bigquery --contract contract.yaml --source my-project-id.
 from lakeguard import DataProcessor
 
 processor = DataProcessor(engine="bigquery", contract="contract.yaml")
-good_df, bad_df = processor.run_source("my-project-id.silver.crm_customers")
+source_df, good_df, bad_df = processor.run_source("my-project-id.silver.crm_customers")
 ```
 
 ## Table Links (Lookups)
