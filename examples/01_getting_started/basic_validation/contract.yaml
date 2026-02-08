@@ -35,7 +35,7 @@ transformations:
         FROM source
       ) AS t
       WHERE rn = 1
-    description: "Deduplicate by latest signup per email before validation"
+    description: "Deduplicate by latest signup per email before validation."
     phase: pre
   - drop:
       columns: ["rn"]
