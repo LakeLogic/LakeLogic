@@ -3,7 +3,7 @@
 ## DataProcessor
 
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 processor = DataProcessor(
     engine="polars",
@@ -97,4 +97,4 @@ Run dedicated Python modules or notebooks for advanced processing.
 - `external_logic.output_format`: `csv` or `parquet` (optional)
 - `external_logic.handles_output`: If true, skip built-in materialize
 - `external_logic.kernel_name`: Notebook kernel override
-- Notebook params include `lakeguard_input_path` and `lakeguard_input_format` for validated data access.
+- Notebook params include `lakelogic_input_path` and `lakelogic_input_format` for validated data access.

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Tuple, List, Dict, Optional
-from lakeguard.core.models import (
+from lakelogic.core.models import (
     DataContract,
     QualityRule,
     RowRuleNotNull,
@@ -19,8 +19,8 @@ class EngineAdapter(ABC):
     Abstract Base Class for all execution engines.
     """
     
-    ERROR_COLUMN = "_lakeguard_errors"
-    CATEGORY_COLUMN = "_lakeguard_categories"
+    ERROR_COLUMN = "_lakelogic_errors"
+    CATEGORY_COLUMN = "_lakelogic_categories"
 
     def __init__(self, contract: DataContract):
         """

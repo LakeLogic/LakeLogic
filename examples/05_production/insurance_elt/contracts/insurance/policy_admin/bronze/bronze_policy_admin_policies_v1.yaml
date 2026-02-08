@@ -9,9 +9,9 @@ info:
 metadata:
   run_log_path: ../../../../output/run_logs/policy_admin_bronze.json
   notifications_note: Use env-based webhook targets in prod.
-  run_log_table: lakeguard.run_logs
+  run_log_table: lakelogic.run_logs
   run_log_backend: duckdb
-  run_log_database: ../../../../output/run_logs/lakeguard_run_logs.duckdb
+  run_log_database: ../../../../output/run_logs/lakelogic_run_logs.duckdb
 server:
   type: local
   path: ../../../../data/bronze/policy_admin_policies_cdc.csv
@@ -92,7 +92,7 @@ quarantine:
   target: ../../../../output/quarantine/policy_admin
   notifications:
   - type: webhook
-    target: env:LAKEGUARD_ALERT_WEBHOOK
+    target: env:LAKELOGIC_ALERT_WEBHOOK
     on_events:
     - quarantine
     - failure

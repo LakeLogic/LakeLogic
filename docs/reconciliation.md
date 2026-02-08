@@ -2,12 +2,12 @@
 
 > Note: Automated lineage capture, run logging, and SLO scoring are available in the OSS release. Full orchestration is still on the roadmap.
 
-In a mission-critical data lakehouse, you must be able to prove that **nothing was lost** and **everything came from somewhere**. LakeGuard provides built-in tools for **Data Reconciliation** and **System-Level Lineage**.
+In a mission-critical data lakehouse, you must be able to prove that **nothing was lost** and **everything came from somewhere**. LakeLogic provides built-in tools for **Data Reconciliation** and **System-Level Lineage**.
 
 ---
 
 ## 1. Automated metadata capture
-LakeGuard can inject lineage columns into every record as it moves from Bronze to Silver (and beyond). This happens for both **Good Data** and **Quarantined Data**.
+LakeLogic can inject lineage columns into every record as it moves from Bronze to Silver (and beyond). This happens for both **Good Data** and **Quarantined Data**.
 
 ```yaml
 lineage:
@@ -34,11 +34,11 @@ You can preserve upstream lineage columns before stamping the current run:
 ```yaml
 lineage:
   enabled: true
-  preserve_upstream: ["_lakeguard_run_id"]
+  preserve_upstream: ["_lakelogic_run_id"]
   upstream_prefix: "_upstream"
 ```
 
-And for Gold, you can use a pipeline-wide id for `_lakeguard_run_id`:
+And for Gold, you can use a pipeline-wide id for `_lakelogic_run_id`:
 
 ```yaml
 lineage:
@@ -50,7 +50,7 @@ lineage:
 ---
 
 ## 2. Reconciliation: the count rule
-To ensure that `Bronze = Silver + Quarantine`, use the counts LakeGuard logs on every run.
+To ensure that `Bronze = Silver + Quarantine`, use the counts LakeLogic logs on every run.
 
 | Layer | Records | Status |
 | :--- | :--- | :--- |
@@ -87,10 +87,10 @@ transformations:
       aggregations:
         total_sales: "SUM(amount)"
       keys: "sale_id"
-      rollup_keys_column: "_lakeguard_rollup_keys"
-      rollup_keys_count_column: "_lakeguard_rollup_keys_count"  # optional
+      rollup_keys_column: "_lakelogic_rollup_keys"
+      rollup_keys_count_column: "_lakelogic_rollup_keys_count"  # optional
       upstream_run_id_column: "_upstream_run_id"                # optional
-      upstream_run_ids_column: "_upstream_lakeguard_run_ids"     # optional
+      upstream_run_ids_column: "_upstream_lakelogic_run_ids"     # optional
 ```
 
 ### Why do this?

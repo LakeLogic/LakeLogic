@@ -7,7 +7,7 @@ import uuid
 
 from loguru import logger
 
-from lakeguard.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter
 
 
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
@@ -35,7 +35,7 @@ def _resolve_env_value(value: Optional[str]) -> Optional[str]:
 
 class BigQueryAdapter(EngineAdapter):
     """
-    BigQuery execution engine for LakeGuard.
+    BigQuery execution engine for LakeLogic.
 
     This adapter executes contracts directly in BigQuery using SQL.
     """

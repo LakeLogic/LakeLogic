@@ -11,7 +11,7 @@ def build_sales_gold(df: Any, contract=None, engine: str | None = None, **kwargs
     Args:
         df: Input dataframe (polars/pandas/spark).
         contract: Optional DataContract instance.
-        engine: Engine name used by LakeGuard.
+        engine: Engine name used by LakeLogic.
         **kwargs: Optional extra parameters.
 
     Returns:

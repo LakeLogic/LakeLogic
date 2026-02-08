@@ -4,7 +4,7 @@ A full-featured contract template for production use.
 
 ## What's Included
 
-This template demonstrates every major LakeGuard feature:
+This template demonstrates every major LakeLogic feature:
 
 1. **Metadata** - Title, description, owner, contact
 2. **Environment Overrides** - Dev vs production paths

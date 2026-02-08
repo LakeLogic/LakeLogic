@@ -8,7 +8,7 @@ REF_REGISTRY = "examples/insurance_elt/contracts/shared/reference/_registry.yaml
 GOLD_REGISTRY = "examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml"
 
 with DAG(
-    dag_id="lakeguard_insurance_elt",
+    dag_id="lakelogic_insurance_elt",
     start_date=datetime(2026, 1, 1),
     schedule="@daily",
     catchup=False,
@@ -16,15 +16,15 @@ with DAG(
     run_reference = BashOperator(
         task_id="run_reference",
         bash_command=(
-            "lakeguard-driver "
+            "lakelogic-driver "
             f"--registry {REGISTRY} "
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers reference "
             "--window last_success "
-            "--summary-table lakeguard.pipeline_runs "
+            "--summary-table lakelogic.pipeline_runs "
             "--summary-backend duckdb "
-            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb "
             "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )
@@ -32,15 +32,15 @@ with DAG(
     run_bronze = BashOperator(
         task_id="run_bronze",
         bash_command=(
-            "lakeguard-driver "
+            "lakelogic-driver "
             f"--registry {REGISTRY} "
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers bronze "
             "--window last_success "
-            "--summary-table lakeguard.pipeline_runs "
+            "--summary-table lakelogic.pipeline_runs "
             "--summary-backend duckdb "
-            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb "
             "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )
@@ -48,15 +48,15 @@ with DAG(
     run_silver = BashOperator(
         task_id="run_silver",
         bash_command=(
-            "lakeguard-driver "
+            "lakelogic-driver "
             f"--registry {REGISTRY} "
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers silver "
             "--window last_success "
-            "--summary-table lakeguard.pipeline_runs "
+            "--summary-table lakelogic.pipeline_runs "
             "--summary-backend duckdb "
-            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb "
             "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )
@@ -64,15 +64,15 @@ with DAG(
     run_gold = BashOperator(
         task_id="run_gold",
         bash_command=(
-            "lakeguard-driver "
+            "lakelogic-driver "
             f"--registry {REGISTRY} "
             f"--reference-registry {REF_REGISTRY} "
             f"--gold-registry {GOLD_REGISTRY} "
             "--layers gold "
             "--window last_success "
-            "--summary-table lakeguard.pipeline_runs "
+            "--summary-table lakelogic.pipeline_runs "
             "--summary-backend duckdb "
-            "--summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb "
+            "--summary-database examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb "
             "--metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         ),
     )

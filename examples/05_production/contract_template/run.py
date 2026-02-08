@@ -1,5 +1,5 @@
 import polars as pl
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 from loguru import logger
 import sys
 from pathlib import Path

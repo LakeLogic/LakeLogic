@@ -22,7 +22,7 @@ A complete multi-entity ELT pipeline for an insurance company:
 - Registry-driven orchestration
 - Jupyter notebook walkthrough
 
-This is the flagship example showing LakeGuard at scale.
+This is the flagship example showing LakeLogic at scale.
 
 ---
 

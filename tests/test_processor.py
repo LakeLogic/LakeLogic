@@ -1,7 +1,7 @@
 import pytest
 import polars as pl
-from lakeguard import DataProcessor
-from lakeguard.core.models import DataContract
+from lakelogic import DataProcessor
+from lakelogic.core.models import DataContract
 
 def test_processor_init():
     """Test processor initialization with different contract formats."""

@@ -1,7 +1,7 @@
 # Job Templates
 
-This folder contains runnable templates for orchestrating LakeGuard pipelines using the registry-driven driver.
-Each template calls `lakeguard-driver` with the registry paths for the target environment.
+This folder contains runnable templates for orchestrating LakeLogic pipelines using the registry-driven driver.
+Each template calls `lakelogic-driver` with the registry paths for the target environment.
 You can add `--summary-path`, `--summary-table`, or `--metrics-path` for observability outputs.
 For Prometheus scraping, run with `--metrics-backend prometheus`.
 

@@ -1,6 +1,6 @@
 # External Python Logic
 
-Extend LakeGuard with custom Python functions or Jupyter notebooks.
+Extend LakeLogic with custom Python functions or Jupyter notebooks.
 
 ## When to Use
 
@@ -63,7 +63,7 @@ The notebook receives `df` as input and must output `df` as the result.
 ## Run It
 
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 # Python function approach
 proc = DataProcessor(contract="contract_python.yaml")

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from lakeguard.cli import main
+from lakelogic.cli import main
 
 
 def test_bootstrap_generates_contracts(tmp_path: Path) -> None:

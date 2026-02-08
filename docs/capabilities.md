@@ -22,7 +22,7 @@ This matrix summarizes what each engine supports in the OSS runtime. When a feat
 | `merge` | Requires pandas | Native | Requires pandas | Native (distributed) |
 | `scd2` | Requires pandas | Native | Requires pandas | Native (distributed) |
 
-**Spark advantage:** Merge and SCD2 operations run natively using distributed DataFrame operations, avoiding driver memory bottlenecks. For Delta Lake tables, LakeGuard uses `MERGE INTO` when available.
+**Spark advantage:** Merge and SCD2 operations run natively using distributed DataFrame operations, avoiding driver memory bottlenecks. For Delta Lake tables, LakeLogic uses `MERGE INTO` when available.
 
 ## Format Defaults
 

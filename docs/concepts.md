@@ -1,6 +1,6 @@
 # The Medallion Architecture
 
-LakeGuard is the **quality gate** between the layers of your Data Lakehouse.
+LakeLogic is the **quality gate** between the layers of your Data Lakehouse.
 
 ```mermaid
 graph LR
@@ -36,7 +36,7 @@ graph LR
 
 In the Bronze layer, data is often "dirty." Before you apply strict quality rules or perform heavy calculations, you need to clean the noise.
 
-LakeGuard processes transformations in a specific order to ensure maximum performance and safety:
+LakeLogic processes transformations in a specific order to ensure maximum performance and safety:
 
 ### 1. Pre-Processing (Cleanse)
 These run **first**, before schema enforcement and quality rules.
@@ -88,7 +88,7 @@ transformations:
 ```
 
 ### 2. Validation Gate
-LakeGuard then enforces your **Schema** and runs your **Quality Rules**. Because you've already filtered and deduplicated, this stage is faster and produces fewer "false alerts."
+LakeLogic then enforces your **Schema** and runs your **Quality Rules**. Because you've already filtered and deduplicated, this stage is faster and produces fewer "false alerts."
 
 Common quality helpers:
 - Row-level: `not_null`, `accepted_values`, `regex_match`, `range`, `referential_integrity`
@@ -137,12 +137,12 @@ transformations:
 
 ## Handling Complex Patterns (Gold)
 
-When moving from **Silver to Gold**, LakeGuard doesn't just check rules; it uses a **Strategy** to build your tables.
+When moving from **Silver to Gold**, LakeLogic doesn't just check rules; it uses a **Strategy** to build your tables.
 
 ### 1. The "Orphaned Key" Problem
 Sometimes a transaction (Fact) arrives before its customer info (Dimension). This is a **Late Arriving Dimension**.
 
-**The LakeGuard Solution**:
+**The LakeLogic Solution**:
 Instead of losing the transaction, we use the `default_value` feature.
 -   If `customer_id` is found: Use it.
 -   If `customer_id` is missing: Map it to `-1` (Unknown).
@@ -151,11 +151,11 @@ Instead of losing the transaction, we use the `default_value` feature.
 ### 2. The Correction Loop
 If data fails a rule in **Bronze**, it goes to **Quarantine**. 
 1.  **Fix**: The data owner fixes the raw source or provides a correction file.
-2.  **Reprocess**: LakeGuard picks up the correction and flows it through to **Silver** and **Gold**.
+2.  **Reprocess**: LakeLogic picks up the correction and flows it through to **Silver** and **Gold**.
 
 ## Materialization Strategies
 
-LakeGuard can materialize validated data to local CSV/Parquet targets or Delta/Iceberg when running on Spark. Use `processor.materialize(...)` or `lakeguard run --materialize`.
+LakeLogic can materialize validated data to local CSV/Parquet targets or Delta/Iceberg when running on Spark. Use `processor.materialize(...)` or `lakelogic run --materialize`.
 
 ```yaml
 materialization:
@@ -199,19 +199,19 @@ external_logic:
   output_format: parquet
 ```
 
-If `output_path` is provided, LakeGuard will read it back in for materialization.
+If `output_path` is provided, LakeLogic will read it back in for materialization.
 Otherwise, set `handles_output: true` if the external logic writes the final table itself.
 
 ---
 
 ## Intelligent Engine Selection (Portable Logic)
 
-LakeGuard is designed to be **write-once, run-anywhere**. It intelligently discovers the most efficient engine for your current environment so you don't have to manage engine-specific imports or libraries.
+LakeLogic is designed to be **write-once, run-anywhere**. It intelligently discovers the most efficient engine for your current environment so you don't have to manage engine-specific imports or libraries.
 
 ### Auto-Discovery Priority
-When you initialize a `DataProcessor` without an explicit engine, LakeGuard follows this priority:
+When you initialize a `DataProcessor` without an explicit engine, LakeLogic follows this priority:
 
-1.  **LAKEGUARD_ENGINE Environment Variable**: Uses your global preference (ideal for CI/CD).
+1.  **LAKELOGIC_ENGINE Environment Variable**: Uses your global preference (ideal for CI/CD).
 2.  **Spark (pyspark)**: Automatically used if running inside **Databricks**, **Synapse**, or a Spark cluster.
 3.  **Polars**: Used if installed (the preferred high-performance engine for local/single-node).
 4.  **DuckDB**: Used as a fast alternative if Polars is missing.

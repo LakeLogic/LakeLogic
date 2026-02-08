@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 
-from lakeguard.core.processor import DataProcessor
-from lakeguard.core.models import DataContract, FieldDefinition, QualityRule, Transformation
+from lakelogic.core.processor import DataProcessor
+from lakelogic.core.models import DataContract, FieldDefinition, QualityRule, Transformation
 
 __version__ = "0.1.0"
 
@@ -36,7 +36,7 @@ class HelpIndex:
         raise AttributeError(name)
 
     def __call__(self, topic: Optional[str] = None, full: bool = False) -> None:
-        base = """LakeGuard Help
+        base = """LakeLogic Help
 
 Topics:
   run         Run a contract against a source file.
@@ -44,9 +44,9 @@ Topics:
   driver      Registry-driven pipeline driver (Bronze -> Silver -> Gold).
 
 Examples:
-  lakeguard.help()
-  lakeguard.help("bootstrap")
-  lakeguard.driver.help()
+  lakelogic.help()
+  lakelogic.help("bootstrap")
+  lakelogic.driver.help()
 """
         if full:
             print(base)
@@ -63,12 +63,12 @@ Examples:
         print(base)
 
 
-_driver_text = """LakeGuard Driver Help
+_driver_text = """LakeLogic Driver Help
 
 Examples:
-  lakeguard-driver --registry contracts/_registry.yaml --layers bronze
-  lakeguard-driver --window range --window-start-date 2026-02-01 --window-end-date 2026-02-05
-  lakeguard-driver --policy-pack baseline_silver --policy-pack-dir policy_packs
+  lakelogic-driver --registry contracts/_registry.yaml --layers bronze
+  lakelogic-driver --window range --window-start-date 2026-02-01 --window-end-date 2026-02-05
+  lakelogic-driver --policy-pack baseline_silver --policy-pack-dir policy_packs
 
 Flags:
   --set                      Override contract fields at runtime (repeatable).
@@ -87,15 +87,15 @@ Flags:
   --backfill-granularity     Backfill granularity (day or week).
 """
 
-_bootstrap_text = """LakeGuard Bootstrap Help
+_bootstrap_text = """LakeLogic Bootstrap Help
 
 Example:
-  lakeguard bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml
+  lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml
 
 Sync mode:
-  lakeguard bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync
-  lakeguard bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync --sync-update-schema
-  lakeguard bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync --sync-overwrite
+  lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync
+  lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync --sync-update-schema
+  lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync --sync-overwrite
 
 Flags:
   --sync               Add new entities to the registry without changing existing contracts.
@@ -103,25 +103,25 @@ Flags:
   --sync-overwrite     Regenerate existing contracts from landing files.
 """
 
-_run_text = """LakeGuard Run Help
+_run_text = """LakeLogic Run Help
 
 Example:
-  lakeguard run --contract contract.yaml --source data.csv
+  lakelogic run --contract contract.yaml --source data.csv
 """
 
-_policy_pack_text = """LakeGuard Policy Packs Help
+_policy_pack_text = """LakeLogic Policy Packs Help
 
 Apply standardized rules and defaults across contracts.
 
 Example:
-  lakeguard-driver --policy-pack baseline_silver --policy-pack-dir policy_packs
+  lakelogic-driver --policy-pack baseline_silver --policy-pack-dir policy_packs
 """
 
-_observability_text = """LakeGuard Observability Help
+_observability_text = """LakeLogic Observability Help
 
 Examples:
-  lakeguard-driver --summary-table lakeguard.pipeline_runs --summary-backend duckdb
-  lakeguard-driver --metrics-backend prometheus --metrics-host 0.0.0.0 --metrics-port 9100
+  lakelogic-driver --summary-table lakelogic.pipeline_runs --summary-backend duckdb
+  lakelogic-driver --metrics-backend prometheus --metrics-host 0.0.0.0 --metrics-port 9100
 """
 
 help = HelpIndex(

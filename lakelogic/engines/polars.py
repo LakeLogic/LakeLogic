@@ -1,12 +1,12 @@
 import polars as pl
 from typing import Tuple, Any, List, Dict
-from lakeguard.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter
 from loguru import logger
 from pathlib import Path
 
 class PolarsAdapter(EngineAdapter):
     """
-    Polars execution engine for LakeGuard.
+    Polars execution engine for LakeLogic.
     Supports row-level validation, aggregate metrics, and SQL-first transformations.
     """
     _link_cache: Dict[str, pl.LazyFrame] = {}

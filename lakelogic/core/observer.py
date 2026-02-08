@@ -12,14 +12,14 @@ class RemoteObserver:
     Sends run metadata to a remote endpoint for centralized observability.
 
     This is completely optional and disabled by default. To enable:
-    - Set LAKEGUARD_REMOTE_OBSERVER=true
+    - Set LAKELOGIC_REMOTE_OBSERVER=true
     - Set LINEAGELOGIC_REPORT_URL to your endpoint
     - Optionally set LINEAGELOGIC_API_KEY for authentication
 
     LineageLogic SaaS users: This enables Weekly Trust Reports and quality dashboards.
     """
     def __init__(self, api_url: Optional[str] = None):
-        self.enabled = os.getenv("LAKEGUARD_REMOTE_OBSERVER", "false").lower() == "true"
+        self.enabled = os.getenv("LAKELOGIC_REMOTE_OBSERVER", "false").lower() == "true"
         self.api_url = os.getenv("LINEAGELOGIC_REPORT_URL", api_url)
         self.api_key = os.getenv("LINEAGELOGIC_API_KEY")  # Optional
 
@@ -32,7 +32,7 @@ class RemoteObserver:
             return
 
         # Skip if offline mode enabled (legacy support)
-        if os.getenv("LAKEGUARD_OFFLINE", "false").lower() == "true":
+        if os.getenv("LAKELOGIC_OFFLINE", "false").lower() == "true":
             return
 
         # Skip if no endpoint configured
@@ -58,7 +58,7 @@ class RemoteObserver:
                 response = client.post(
                     self.api_url,
                     json=payload,
-                    headers={"X-LakeGuard-Version": __version__}
+                    headers={"X-LakeLogic-Version": __version__}
                 )
                 if response.status_code == 200:
                     logger.debug("Successfully reported metrics to LineageLogic")

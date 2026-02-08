@@ -50,7 +50,7 @@ quarantine:
 
 ## Secret Resolution
 
-LakeGuard resolves secrets at runtime. Your YAML is safe to commit!
+LakeLogic resolves secrets at runtime. Your YAML is safe to commit!
 
 ### Environment Variables
 ```yaml
@@ -67,7 +67,7 @@ key_vault_url: "https://my-vault.vault.azure.net/"
 
 ### AWS Secrets Manager
 ```yaml
-smtp_password: "aws:lakeguard/prod/smtp-password"
+smtp_password: "aws:lakelogic/prod/smtp-password"
 ```
 
 ### GCP Secret Manager
@@ -80,7 +80,7 @@ gcp_project: "my-project-id"
 ```yaml
 smtp_password: "local:smtp_password"
 secrets_file: "./secrets.enc"
-secrets_key: "env:LAKEGUARD_SECRETS_KEY"
+secrets_key: "env:LAKELOGIC_SECRETS_KEY"
 ```
 
 ## Event Types

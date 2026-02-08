@@ -1,11 +1,11 @@
-# LakeGuard
+# LakeLogic
 
 **The Open-Source Runtime Engine for Data Contracts with Quarantine.**
 
-LakeGuard is a SQL-first, infrastructure-agnostic quality gate that ensures your business decisions are based on data you can trust. It scales your validation logic from local Polars to petabyte-scale Spark without rewriting a single rule.
+LakeLogic is a SQL-first, infrastructure-agnostic quality gate that ensures your business decisions are based on data you can trust. It scales your validation logic from local Polars to petabyte-scale Spark without rewriting a single rule.
 
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LineageLogic.github.io/LakeGuard)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-black?logo=github)](https://github.com/LineageLogic/LakeGuard)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LineageLogic.github.io/LakeLogic)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-black?logo=github)](https://github.com/LineageLogic/LakeLogic)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python)](https://www.python.org)
 
@@ -13,7 +13,7 @@ LakeGuard is a SQL-first, infrastructure-agnostic quality gate that ensures your
 
 ## The Core Value: Write Once. Run Anywhere
 
-Stop paying the **"Infrastructure Lock-In Tax."** In a traditional stack, moving from a Warehouse (Snowflake) to a Lakehouse (Databricks) means months of rewriting validation rules. LakeGuard decouples your **Business Logic** from your **Execution Engine**.
+Stop paying the **"Infrastructure Lock-In Tax."** In a traditional stack, moving from a Warehouse (Snowflake) to a Lakehouse (Databricks) means months of rewriting validation rules. LakeLogic decouples your **Business Logic** from your **Execution Engine**.
 
 1. **Cost Efficiency (The Spark Tax ROI):** Run 80% of your maintenance checks on **Polars** or **DuckDB** for pennies, while reserving **Spark** for your massive production scales.
 2. **Risk Mitigation (100% Reconciliation):** Ensure `Source = Good + Quarantined`. Mathematically prove that no record was lost or double-counted across your layers.
@@ -34,13 +34,13 @@ Stop paying the **"Infrastructure Lock-In Tax."** In a traditional stack, moving
 
 ```bash
 # Get the full engine suite
-uv pip install "lakeguard[all]"
+uv pip install "lakelogic[all]"
 
 # Or just use Polars for local speed
-uv pip install "lakeguard[polars]"
+uv pip install "lakelogic[polars]"
 
 # Profiling + PII detection (bootstrap)
-uv pip install "lakeguard[profiling]"
+uv pip install "lakelogic[profiling]"
 ```
 
 See the full installation guide in `docs/installation.md`.
@@ -58,17 +58,17 @@ source_df, good_df, bad_df = processor.run_source("bronze_crm_customers.csv")
 
 ## Get Started
 
-**[📚 Read the Docs](https://LineageLogic.github.io/LakeGuard)** | **[🚀 Quickstart Guide](https://LineageLogic.github.io/LakeGuard/quickstart/)** | **[💬 Discussions](https://github.com/LineageLogic/LakeGuard/discussions)**
+**[📚 Read the Docs](https://LineageLogic.github.io/LakeLogic)** | **[🚀 Quickstart Guide](https://LineageLogic.github.io/LakeLogic/quickstart/)** | **[💬 Discussions](https://github.com/LineageLogic/LakeLogic/discussions)**
 
 ### Run Your First Contract (5 Minutes)
 
 ```bash
 # Clone the repo
-git clone https://github.com/LineageLogic/LakeGuard.git
-cd LakeGuard/examples/01_getting_started/basic_validation
+git clone https://github.com/LineageLogic/LakeLogic.git
+cd LakeLogic/examples/01_getting_started/basic_validation
 
 # Run the example
-lakeguard run --contract contract.yaml --source data/sample_customers.csv
+lakelogic run --contract contract.yaml --source data/sample_customers.csv
 ```
 
 You'll see:
@@ -78,7 +78,7 @@ You'll see:
 
 ## Explore 90+ Examples
 
-The [`examples/`](https://github.com/LineageLogic/LakeGuard/tree/main/examples) directory contains runnable examples organized by skill level:
+The [`examples/`](https://github.com/LineageLogic/LakeLogic/tree/main/examples) directory contains runnable examples organized by skill level:
 
 - **Getting Started** - Your first contract in 5 minutes
 - **Tutorials** - Medallion architecture, reference joins, notifications
@@ -88,11 +88,11 @@ The [`examples/`](https://github.com/LineageLogic/LakeGuard/tree/main/examples) 
 
 ## Documentation
 
-- **[Full Documentation](https://LineageLogic.github.io/LakeGuard)** - Complete guides and API reference
-- **[How It Works](https://LineageLogic.github.io/LakeGuard/concepts/)** - Medallion architecture and core concepts
-- **[CLI Reference](https://LineageLogic.github.io/LakeGuard/cli/)** - Command-line usage
-- **[API Reference](https://LineageLogic.github.io/LakeGuard/api/)** - Python API documentation
-- **[Reprocessing Guide](https://LineageLogic.github.io/LakeGuard/reprocessing/)** - Handle late-arriving data
+- **[Full Documentation](https://LineageLogic.github.io/LakeLogic)** - Complete guides and API reference
+- **[How It Works](https://LineageLogic.github.io/LakeLogic/concepts/)** - Medallion architecture and core concepts
+- **[CLI Reference](https://LineageLogic.github.io/LakeLogic/cli/)** - Command-line usage
+- **[API Reference](https://LineageLogic.github.io/LakeLogic/api/)** - Python API documentation
+- **[Reprocessing Guide](https://LineageLogic.github.io/LakeLogic/reprocessing/)** - Handle late-arriving data
 
 ## Contributing
 

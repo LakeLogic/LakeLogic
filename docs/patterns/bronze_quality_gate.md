@@ -72,7 +72,7 @@ quality:
 ```bash
 cd examples/03_patterns/bronze_quality_gate
 python -c "
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 proc = DataProcessor(contract='contract.yaml')
 good, bad = proc.run('data/raw_signups.csv')
 print(f'Passed: {len(good)}, Rejected: {len(bad)}')

@@ -1,6 +1,6 @@
 from pathlib import Path
 import polars as pl
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 
 def main() -> None:

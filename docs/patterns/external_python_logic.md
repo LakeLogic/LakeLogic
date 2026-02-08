@@ -1,6 +1,6 @@
 # External Python Logic
 
-Extend LakeGuard with custom Python functions or Jupyter notebooks.
+Extend LakeLogic with custom Python functions or Jupyter notebooks.
 
 ## When to Use
 

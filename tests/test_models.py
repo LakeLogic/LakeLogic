@@ -1,5 +1,5 @@
 import pytest
-from lakeguard.core.models import DataContract
+from lakelogic.core.models import DataContract
 
 def test_contract_parsing_minimal():
     """Test that a minimal contract can be parsed."""
@@ -28,7 +28,7 @@ def test_contract_quality_rules():
 
 def test_row_rule_not_null_list_expands():
     """Ensure not_null accepts a list of fields and expands into rules."""
-    from lakeguard.engines.base import EngineAdapter
+    from lakelogic.engines.base import EngineAdapter
 
     class DummyAdapter(EngineAdapter):
         def execute(self, df):
@@ -112,7 +112,7 @@ def test_notification_extra_fields():
                     "target": "alerts@example.com",
                     "smtp_host": "smtp.example.com",
                     "smtp_port": 587,
-                    "from_email": "lakeguard@example.com",
+                    "from_email": "lakelogic@example.com",
                 }
             ]
         }
@@ -121,7 +121,7 @@ def test_notification_extra_fields():
     notif = contract.quarantine.notifications[0]
     dumped = notif.model_dump()
     assert dumped["smtp_host"] == "smtp.example.com"
-    assert dumped["from_email"] == "lakeguard@example.com"
+    assert dumped["from_email"] == "lakelogic@example.com"
 
 def test_external_logic_parsing():
     """Test external logic configuration parsing."""

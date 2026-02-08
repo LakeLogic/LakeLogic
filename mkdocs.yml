@@ -1,6 +1,6 @@
-site_name: LakeGuard
+site_name: LakeLogic
 site_description: Consistent Data Contracts across Polars, Pandas, DuckDB, and Spark.
-site_url: https://lineagelogic.github.io/LakeGuard/
+site_url: https://lineagelogic.github.io/LakeLogic/
 
 theme:
   name: material
@@ -69,7 +69,7 @@ nav:
       - Capability Matrix: capabilities.md
       - Warehouse Adapters: warehouse_adapters.md
       - Release & Maintenance: maintenance.md
-  - Why LakeGuard?: comparison.md
+  - Why LakeLogic?: comparison.md
 
 plugins:
   - search

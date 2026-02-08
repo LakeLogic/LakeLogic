@@ -1,6 +1,6 @@
 # Payments Lifecycle Pattern (Bronze -> Silver -> Gold -> Platinum)
 
-This pattern demonstrates a complete 4-layer data lifecycle using LakeGuard linked contracts. It shows how data transitions from raw ingestion to a certified, immutable monthly snapshot.
+This pattern demonstrates a complete 4-layer data lifecycle using LakeLogic linked contracts. It shows how data transitions from raw ingestion to a certified, immutable monthly snapshot.
 
 ## The Layers
 
@@ -18,10 +18,10 @@ This pattern demonstrates a complete 4-layer data lifecycle using LakeGuard link
 
 ## How to Run
 
-You can run the entire pipeline using the LakeGuard Driver:
+You can run the entire pipeline using the LakeLogic Driver:
 
 ```bash
-lakeguard-driver --registry .
+lakelogic-driver --registry .
 ```
 
 Or step-by-step in the included Jupyter Notebook: `payments_lifecycle.ipynb`.

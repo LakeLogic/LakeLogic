@@ -8,9 +8,9 @@ info:
   classification: PII
 metadata:
   run_log_path: ../../../../output/run_logs/ref_policyholders.json
-  run_log_table: lakeguard.run_logs
+  run_log_table: lakelogic.run_logs
   run_log_backend: duckdb
-  run_log_database: ../../../../output/run_logs/lakeguard_run_logs.duckdb
+  run_log_database: ../../../../output/run_logs/lakelogic_run_logs.duckdb
 server:
   type: local
   path: ../../../../data/reference/policyholders.csv

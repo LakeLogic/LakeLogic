@@ -2,7 +2,7 @@ version: 1.0.0
 info:
   title: "Tutorial Contract"
   version: "1.0.0"
-  description: "Getting started with LakeGuard validation and transformations."
+  description: "Getting started with LakeLogic validation and transformations."
 
 dataset: "silver_crm_customers"
 primary_key: ["id"]

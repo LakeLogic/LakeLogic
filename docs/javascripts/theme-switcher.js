@@ -1,4 +1,4 @@
-// Theme switcher for LakeGuard documentation
+// Theme switcher for LakeLogic documentation
 // Enhances the Material for MkDocs theme toggle
 
 document.addEventListener("DOMContentLoaded", function () {

@@ -90,7 +90,7 @@ WHERE effective_from <= '2024-03-01'
 ```bash
 cd examples/03_patterns/scd2_dimension
 python -c "
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 proc = DataProcessor(contract='contract.yaml')
 # Load initial snapshot
 proc.run('data/dim_customers_snapshot1.csv')

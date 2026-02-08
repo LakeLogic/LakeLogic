@@ -2,7 +2,7 @@
 
 > Note: The OSS release focuses on contract execution. Use your orchestrator to schedule DAGs. The `upstream` field defines dependencies.
 
-Data engineering is a network of tables. LakeGuard helps you define the network, while your orchestrator runs it safely.
+Data engineering is a network of tables. LakeLogic helps you define the network, while your orchestrator runs it safely.
 
 ## 1. Contract Registry (Source of Truth)
 
@@ -84,11 +84,11 @@ In practice, this lets you run all Bronze contracts in parallel, then all Silver
 ## 3. Parallelism
 
 - Orchestrators handle task-level parallelism.
-- LakeGuard engines are multi-threaded by default (Polars and DuckDB) so each task is efficient.
+- LakeLogic engines are multi-threaded by default (Polars and DuckDB) so each task is efficient.
 
 ## 4. Missing Upstreams and Log Tables
 
-When `--window last_success` is used, LakeGuard checks the run log table for upstream freshness.
+When `--window last_success` is used, LakeLogic checks the run log table for upstream freshness.
 
 - **Missing log table/entry**: The driver logs a warning and falls back to a full load.
 - **Missing upstream**: The driver skips the downstream contract and records the reason in the run summary.

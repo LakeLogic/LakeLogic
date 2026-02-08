@@ -1120,7 +1120,7 @@ def _default_quarantine_db(base_path: Optional[Path], backend: str) -> Path:
         Path to the backend database file.
     """
     root = base_path or Path.cwd()
-    folder = root / ".lakeguard"
+    folder = root / ".lakelogic"
     folder.mkdir(parents=True, exist_ok=True)
     filename = "quarantine.duckdb" if backend == "duckdb" else "quarantine.sqlite"
     return folder / filename
@@ -1565,7 +1565,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             except Exception as exc:
                 logger.warning(f"Failed to align run log table schema for {table_name}: {exc}")
             if merge_on_run_id:
-                view_name = f"lakeguard_run_log_updates_{uuid4().hex}"
+                view_name = f"lakelogic_run_log_updates_{uuid4().hex}"
                 df.createOrReplaceTempView(view_name)
                 try:
                     spark.sql(f"""
@@ -1598,7 +1598,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             return None
 
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.duckdb"
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
         db_path = _resolve_path(str(db_path), base_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1707,7 +1707,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         import sqlite3
 
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.sqlite"
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
         db_path = _resolve_path(str(db_path), base_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1881,7 +1881,7 @@ def get_last_run_watermark(contract, contract_title: str, stage: str, engine_nam
         except Exception:
             return None
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.duckdb"
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
             return None
@@ -1920,7 +1920,7 @@ def get_last_run_watermark(contract, contract_title: str, stage: str, engine_nam
     if table_value and backend == "sqlite":
         import sqlite3
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.sqlite"
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
             return None

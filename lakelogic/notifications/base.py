@@ -25,7 +25,7 @@ class NotificationAdapter(ABC):
         self.config = config
 
     @abstractmethod
-    def send(self, message: str, subject: str = "LakeGuard Alert"):
+    def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a notification message.
 
@@ -299,10 +299,10 @@ def _load_local_secrets(config: Dict[str, Any]) -> Dict[str, Any]:
     if not path.is_absolute() and base_path:
         path = Path(base_path) / path
 
-    secrets_key = config.get("secrets_key") or os.getenv("LAKEGUARD_SECRETS_KEY")
+    secrets_key = config.get("secrets_key") or os.getenv("LAKELOGIC_SECRETS_KEY")
     secrets_key = _resolve_env_only(secrets_key)
     if not secrets_key:
-        raise ValueError("secrets_key is required for local secrets (or set LAKEGUARD_SECRETS_KEY).")
+        raise ValueError("secrets_key is required for local secrets (or set LAKELOGIC_SECRETS_KEY).")
 
     cache_key = (str(path), secrets_key)
     cached = _LOCAL_SECRET_CACHE.get(cache_key)
@@ -485,7 +485,7 @@ def validate_notification_config(notif_type: str, config: Dict[str, Any]) -> Non
 
 class SMTPAdapter(NotificationAdapter):
     """SMTP-based notification adapter."""
-    def send(self, message: str, subject: str = "LakeGuard Alert"):
+    def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send an SMTP email message.
 
@@ -521,7 +521,7 @@ class SMTPAdapter(NotificationAdapter):
 
 class SendGridAdapter(NotificationAdapter):
     """SendGrid-based notification adapter."""
-    def send(self, message: str, subject: str = "LakeGuard Alert"):
+    def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a SendGrid email message.
 
@@ -554,7 +554,7 @@ class SendGridAdapter(NotificationAdapter):
 
 class SlackAdapter(NotificationAdapter):
     """Slack webhook notification adapter."""
-    def send(self, message: str, subject: str = "LakeGuard Alert"):
+    def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a Slack webhook message.
 
@@ -573,7 +573,7 @@ class SlackAdapter(NotificationAdapter):
 
 class TeamsAdapter(NotificationAdapter):
     """Microsoft Teams webhook notification adapter."""
-    def send(self, message: str, subject: str = "LakeGuard Alert"):
+    def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a Microsoft Teams webhook message.
 
@@ -592,7 +592,7 @@ class TeamsAdapter(NotificationAdapter):
 
 class WebhookAdapter(NotificationAdapter):
     """Generic webhook notification adapter."""
-    def send(self, message: str, subject: str = "LakeGuard Alert"):
+    def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a generic webhook message.
 

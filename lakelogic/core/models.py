@@ -174,10 +174,10 @@ class TransformationRollup(BaseModel):
     aggregations: Dict[str, str] = Field(default_factory=dict)  # output_name -> SQL expression
     keys: Optional[Union[str, List[str]]] = None
     key_expr: Optional[str] = None
-    rollup_keys_column: Optional[str] = "_lakeguard_rollup_keys"
-    rollup_keys_count_column: Optional[str] = "_lakeguard_rollup_keys_count"
+    rollup_keys_column: Optional[str] = "_lakelogic_rollup_keys"
+    rollup_keys_count_column: Optional[str] = "_lakelogic_rollup_keys_count"
     upstream_run_id_column: Optional[str] = "_upstream_run_id"
-    upstream_run_ids_column: Optional[str] = "_upstream_lakeguard_run_ids"
+    upstream_run_ids_column: Optional[str] = "_upstream_lakelogic_run_ids"
     distinct: bool = True
 
 class TransformationJoin(BaseModel):
@@ -343,13 +343,13 @@ class LineageConfig(BaseModel):
     capture_source_path: bool = True
     capture_timestamp: bool = True
     capture_run_id: bool = True
-    source_column_name: str = "_lakeguard_source"
-    timestamp_column_name: str = "_lakeguard_processed_at"
-    run_id_column_name: str = "_lakeguard_run_id"
+    source_column_name: str = "_lakelogic_source"
+    timestamp_column_name: str = "_lakelogic_processed_at"
+    run_id_column_name: str = "_lakelogic_run_id"
     capture_domain: bool = True
     capture_system: bool = True
-    domain_column_name: str = "_lakeguard_domain"
-    system_column_name: str = "_lakeguard_system"
+    domain_column_name: str = "_lakelogic_domain"
+    system_column_name: str = "_lakelogic_system"
     preserve_upstream: List[str] = Field(default_factory=list)
     upstream_prefix: str = "_upstream"
     run_id_source: str = "run_id"  # run_id | pipeline_run_id

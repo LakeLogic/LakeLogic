@@ -54,7 +54,7 @@ After processing two snapshots:
 ## Run It
 
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 # Load initial snapshot
 proc = DataProcessor(contract="contract.yaml")

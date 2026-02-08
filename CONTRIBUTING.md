@@ -1,6 +1,6 @@
-# Contributing to LakeGuard
+# Contributing to LakeLogic
 
-Thank you for your interest in contributing to LakeGuard! 🎉
+Thank you for your interest in contributing to LakeLogic! 🎉
 
 We welcome contributions from the community and are pleased to have you join us.
 
@@ -25,17 +25,17 @@ This project and everyone participating in it is governed by our [Code of Conduc
 
 ## 🎯 Ways to Contribute
 
-There are many ways to contribute to LakeGuard:
+There are many ways to contribute to LakeLogic:
 
 ### 🐛 Report Bugs
-Found a bug? Please [open an issue](https://github.com/LineageLogic/LakeGuard/issues/new?template=bug_report.md) with:
+Found a bug? Please [open an issue](https://github.com/LineageLogic/LakeLogic/issues/new?template=bug_report.md) with:
 - Clear description of the issue
 - Steps to reproduce
 - Expected vs actual behavior
 - Environment details (OS, Python version, engine)
 
 ### 💡 Suggest Features
-Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeGuard/discussions/new?category=ideas) or [open a feature request](https://github.com/LineageLogic/LakeGuard/issues/new?template=feature_request.md)
+Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeLogic/discussions/new?category=ideas) or [open a feature request](https://github.com/LineageLogic/LakeLogic/issues/new?template=feature_request.md)
 
 ### 📝 Improve Documentation
 - Fix typos or unclear explanations
@@ -50,7 +50,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeGuard/dis
 - Improve performance
 
 ### 💬 Help Others
-- Answer questions in [Discussions](https://github.com/LineageLogic/LakeGuard/discussions)
+- Answer questions in [Discussions](https://github.com/LineageLogic/LakeLogic/discussions)
 - Help triage issues
 - Review pull requests
 
@@ -66,17 +66,17 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeGuard/dis
 ### Setup Steps
 
 1. **Fork the repository**
-   - Click "Fork" button on [GitHub](https://github.com/LineageLogic/LakeGuard)
+   - Click "Fork" button on [GitHub](https://github.com/LineageLogic/LakeLogic)
 
 2. **Clone your fork**
    ```bash
-   git clone https://github.com/YOUR-USERNAME/LakeGuard.git
-   cd lakeguard
+   git clone https://github.com/YOUR-USERNAME/LakeLogic.git
+   cd lakelogic
    ```
 
 3. **Add upstream remote**
    ```bash
-   git remote add upstream https://github.com/LineageLogic/LakeGuard.git
+   git remote add upstream https://github.com/LineageLogic/LakeLogic.git
    ```
 
 4. **Install dependencies** (using uv - recommended)
@@ -105,7 +105,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeGuard/dis
 ## 🔄 Pull Request Process
 
 ### Before You Start
-1. Check existing [issues](https://github.com/LineageLogic/LakeGuard/issues) and [PRs](https://github.com/LineageLogic/LakeGuard/pulls)
+1. Check existing [issues](https://github.com/LineageLogic/LakeLogic/issues) and [PRs](https://github.com/LineageLogic/LakeLogic/pulls)
 2. For major changes, open an issue first to discuss your approach
 3. Ensure your fork is up to date with upstream
 
@@ -133,19 +133,19 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeGuard/dis
    uv run pytest tests/test_processor.py
 
    # Run with coverage
-   uv run pytest --cov=lakeguard --cov-report=html
+   uv run pytest --cov=lakelogic --cov-report=html
    ```
 
 4. **Lint your code**
    ```bash
    # Format with black
-   uv run black lakeguard tests
+   uv run black lakelogic tests
 
    # Check with ruff
-   uv run ruff check lakeguard tests
+   uv run ruff check lakelogic tests
 
    # Type check with mypy (optional but encouraged)
-   uv run mypy lakeguard
+   uv run mypy lakelogic
    ```
 
 5. **Commit your changes**
@@ -169,7 +169,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeGuard/dis
    ```
 
 7. **Create Pull Request**
-   - Go to [LakeGuard repository](https://github.com/LineageLogic/LakeGuard)
+   - Go to [LakeLogic repository](https://github.com/LineageLogic/LakeLogic)
    - Click "New Pull Request"
    - Select your fork and branch
    - Fill out the PR template
@@ -240,7 +240,7 @@ def my_function(param1: str, param2: int) -> bool:
 ### Test Structure
 ```python
 import pytest
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 def test_feature_name():
     """Test that feature works correctly"""
@@ -266,7 +266,7 @@ uv run pytest tests/test_processor.py
 uv run pytest tests/test_processor.py::test_feature_name
 
 # With coverage
-uv run pytest --cov=lakeguard --cov-report=html
+uv run pytest --cov=lakelogic --cov-report=html
 
 # Watch mode (re-run on file changes)
 uv run pytest-watch
@@ -311,12 +311,12 @@ mkdocs serve
 ## 💬 Community
 
 ### Get Help
-- [GitHub Discussions](https://github.com/LineageLogic/LakeGuard/discussions) - Q&A and general discussions
-- [Discord](https://discord.gg/lakeguard) - Real-time chat (coming soon)
-- [Documentation](https://LineageLogic.github.io/LakeGuard) - Comprehensive guides
+- [GitHub Discussions](https://github.com/LineageLogic/LakeLogic/discussions) - Q&A and general discussions
+- [Discord](https://discord.gg/lakelogic) - Real-time chat (coming soon)
+- [Documentation](https://LineageLogic.github.io/LakeLogic) - Comprehensive guides
 
 ### Stay Updated
-- Watch the [repository](https://github.com/LineageLogic/LakeGuard) for updates
+- Watch the [repository](https://github.com/LineageLogic/LakeLogic) for updates
 - Follow [@lineagelogic](https://twitter.com/lineagelogic) on Twitter
 - Subscribe to release notifications
 
@@ -325,7 +325,7 @@ mkdocs serve
 ## 🏆 Recognition
 
 Contributors will be:
-- Listed in our [Contributors](https://github.com/LineageLogic/LakeGuard/graphs/contributors) page
+- Listed in our [Contributors](https://github.com/LineageLogic/LakeLogic/graphs/contributors) page
 - Mentioned in release notes for significant contributions
 - Eligible for contributor swag (coming soon!)
 
@@ -333,7 +333,7 @@ Contributors will be:
 
 ## 📞 Questions?
 
-- **Technical questions**: [GitHub Discussions](https://github.com/LineageLogic/LakeGuard/discussions)
+- **Technical questions**: [GitHub Discussions](https://github.com/LineageLogic/LakeLogic/discussions)
 - **Security issues**: security@lineagelogic.com
 - **Code of Conduct**: conduct@lineagelogic.com
 - **General inquiries**: hello@lineagelogic.com
@@ -342,8 +342,8 @@ Contributors will be:
 
 ## 📄 License
 
-By contributing to LakeGuard, you agree that your contributions will be licensed under the [Apache 2.0 License](LICENSE).
+By contributing to LakeLogic, you agree that your contributions will be licensed under the [Apache 2.0 License](LICENSE).
 
 ---
 
-**Thank you for contributing to LakeGuard! Together we're building the future of data quality.** 🚀
+**Thank you for contributing to LakeLogic! Together we're building the future of data quality.** 🚀

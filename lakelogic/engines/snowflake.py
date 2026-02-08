@@ -7,7 +7,7 @@ import uuid
 
 from loguru import logger
 
-from lakeguard.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter
 
 
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
@@ -35,7 +35,7 @@ def _resolve_env_value(value: Optional[str]) -> Optional[str]:
 
 class SnowflakeAdapter(EngineAdapter):
     """
-    Snowflake execution engine for LakeGuard.
+    Snowflake execution engine for LakeLogic.
 
     This adapter executes contracts directly in Snowflake using SQL.
     """

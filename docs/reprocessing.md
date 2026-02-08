@@ -4,7 +4,7 @@
 
 In a professional Data Lakehouse, you don't just "upload" data. You need a way to handle **Late Arriving Data** and **Reprocessing** without creating a mess.
 
-LakeGuard makes your pipelines **Idempotent** (meaning you can run them multiple times safely).
+LakeLogic makes your pipelines **Idempotent** (meaning you can run them multiple times safely).
 
 ## 1. Partitioning
 
@@ -19,13 +19,13 @@ materialization:
   format: csv  # use delta/iceberg with Spark
 ```
 
-When LakeGuard runs with this config, it ensures data is written to the correct "folder" (`event_date=2024-01-01`).
+When LakeLogic runs with this config, it ensures data is written to the correct "folder" (`event_date=2024-01-01`).
 
 ## 2. Handling Late Arriving Data
 
 What if a sale from **yesterday** arrives **today**?
 
-If you use `strategy: merge`, LakeGuard doesn't care when the data arrives. It will:
+If you use `strategy: merge`, LakeLogic doesn't care when the data arrives. It will:
 1. Look for the `primary_key` (e.g., `order_id`).
 2. If it exists: Update the old record.
 3. If it's new: Insert the new record.
@@ -39,7 +39,7 @@ Sometimes you find a bug in your logic and need to fix data from the last 30 day
 ```mermaid
 sequenceDiagram
     participant D as Developer
-    participant L as LakeGuard
+    participant L as LakeLogic
     participant S as Silver Layer
     
     D->>L: Update Logic (Add new column)
@@ -48,13 +48,13 @@ sequenceDiagram
     L->>S: Insert Fixed Data
 ```
 
-By using `reprocess_policy: overwrite_partition`, LakeGuard handles the "Clean up" step for you. It deletes the data for the specific day you are running and replaces it with the new, fixed data.
+By using `reprocess_policy: overwrite_partition`, LakeLogic handles the "Clean up" step for you. It deletes the data for the specific day you are running and replaces it with the new, fixed data.
 
 If you want an extra safety guard, use `reprocess_policy: overwrite_partition_safe`. This writes the new partition to a temporary folder first and only swaps it into place after the write succeeds.
 
 ### Key Benefits:
 - **No Duplicates**: Running the same job twice won't double your sales numbers.
-- **Safety**: LakeGuard won't "Overwrite" your whole table by accident; it only touches the partitions it needs.
+- **Safety**: LakeLogic won't "Overwrite" your whole table by accident; it only touches the partitions it needs.
 - **Speed**: By using `partition_by`, the engine only reads the data it needs to work on.
 
 ## 4. Quarantine Reprocessing Strategy
@@ -112,5 +112,5 @@ Then mark the rows in a follow-up SQL step (example for Spark):
 ```sql
 UPDATE main.silver.quarantine_pos_sales_events
 SET quarantine_reprocessed = true
-WHERE _lakeguard_run_id = '<run_id_from_reprocess>';
+WHERE _lakelogic_run_id = '<run_id_from_reprocess>';
 ```

@@ -1,6 +1,6 @@
 # Release & Maintenance Guide 🔄
 
-Maintaining a reliable release cycle is key to building trust with your users. Here is the recommended "SemVer" (Semantic Versioning) cycle for LakeGuard.
+Maintaining a reliable release cycle is key to building trust with your users. Here is the recommended "SemVer" (Semantic Versioning) cycle for LakeLogic.
 
 ## 1. Versioning Strategy (X.Y.Z)
 

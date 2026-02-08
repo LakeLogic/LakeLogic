@@ -1,6 +1,6 @@
 # Integrations
 
-Connect LakeGuard to your orchestration platform.
+Connect LakeLogic to your orchestration platform.
 
 ## Examples
 
@@ -27,8 +27,8 @@ Ready-to-use templates for:
 All templates follow the same pattern:
 
 ```bash
-# Run the LakeGuard driver with your registry
-lakeguard-driver \
+# Run the LakeLogic driver with your registry
+lakelogic-driver \
   --registry contracts/_registry.yaml \
   --layers bronze,silver \
   --summary-path output/run_summary.json
@@ -37,7 +37,7 @@ lakeguard-driver \
 ## Prerequisites
 
 1. Complete the [insurance_elt](../05_production/insurance_elt/) example to understand registries
-2. Have LakeGuard installed in your orchestration environment
+2. Have LakeLogic installed in your orchestration environment
 3. Configure your registry and contracts
 
 ## Next Steps

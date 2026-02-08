@@ -75,7 +75,7 @@ entries:
 You can also point both stages to the **same contract** if you want Bronze/Silver to be controlled by runtime mode.
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -93,22 +93,22 @@ For the insurance example, the run log table uses DuckDB, so ensure `duckdb` is 
 Write a pipeline summary row to a table and emit metrics:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers reference,bronze,silver,gold \
   --window last_success \
-  --summary-table lakeguard.pipeline_runs \
+  --summary-table lakelogic.pipeline_runs \
   --summary-backend duckdb \
-  --summary-database examples/05_production/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb \
+  --summary-database examples/05_production/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb \
   --metrics-path examples/05_production/insurance_elt/output/run_logs/pipeline_metrics.json
 ```
 
 For Prometheus scraping, expose `/metrics`:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -121,7 +121,7 @@ lakeguard-driver \
 To run only specific entities without editing registries:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -132,7 +132,7 @@ lakeguard-driver \
 To reprocess late-arriving data:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -144,7 +144,7 @@ lakeguard-driver \
 For an explicit window range:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/05_production/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/05_production/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/05_production/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -173,7 +173,7 @@ examples/05_production/insurance_elt/data/bronze/
 - **Parallel Execution**: bronze + reference in parallel, then silver, then gold
 - **Quarantine**: bad rows routed to quarantine folders
 - **Notifications**: webhook-based alerts (env-driven)
-- **Lineage**: `_lakeguard_*` columns
+- **Lineage**: `_lakelogic_*` columns
 - **Reference data joins**: coverage, status, state
 - **Gold facts/dimensions**: claims fact and policyholder dimension
 - **Registry-driven execution**: enable/disable entities per system registry
@@ -205,6 +205,6 @@ examples/05_production/insurance_elt/output/
 
 ## Notes
 
-- Set `LAKEGUARD_ALERT_WEBHOOK` to receive webhook alerts.
-- This example writes Parquet outputs; ensure `pyarrow` is available (`pip install "lakeguard[pandas]"` or `pip install pyarrow`).
+- Set `LAKELOGIC_ALERT_WEBHOOK` to receive webhook alerts.
+- This example writes Parquet outputs; ensure `pyarrow` is available (`pip install "lakelogic[pandas]"` or `pip install pyarrow`).
 - For lakehouse tables, switch to `table:` targets and set `quarantine_table_backend: spark`.

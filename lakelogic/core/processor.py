@@ -8,16 +8,16 @@ from pathlib import Path
 from datetime import datetime, timezone
 import uuid
 
-from lakeguard.core.models import DataContract
-from lakeguard.engines.base import EngineAdapter
-from lakeguard.notifications.base import get_notification_adapter
-from lakeguard.core.materialization import materialize_dataframe, materialize_quarantine, write_run_log
-from lakeguard.core.observer import RemoteObserver
+from lakelogic.core.models import DataContract
+from lakelogic.engines.base import EngineAdapter
+from lakelogic.notifications.base import get_notification_adapter
+from lakelogic.core.materialization import materialize_dataframe, materialize_quarantine, write_run_log
+from lakelogic.core.observer import RemoteObserver
 from loguru import logger
 
 class ValidationResult:
     """
-    Richer result object for LakeGuard runs.
+    Richer result object for LakeLogic runs.
     Unpacks as (good_df, bad_df) for backward compatibility, 
     but provides .raw, .good, and .bad attributes.
     """
@@ -50,7 +50,7 @@ class ValidationResult:
 
 class DataProcessor:
     """
-    The main entry point for running LakeGuard contracts.
+    The main entry point for running LakeLogic contracts.
     
     This class handles contract loading, engine selection, and dispatches 
     processing to the appropriate engine adapter.
@@ -90,14 +90,14 @@ class DataProcessor:
         """
         Automatically discovers the best available engine.
         Priority:
-        1. LAKEGUARD_ENGINE env var
+        1. LAKELOGIC_ENGINE env var
         2. Spark (if running in Databricks/Spark environment)
         3. Polars (if installed)
         4. DuckDB (if installed)
         5. Pandas (fallback)
         """
         # 1. Check Env Var
-        env_engine = os.getenv("LAKEGUARD_ENGINE")
+        env_engine = os.getenv("LAKELOGIC_ENGINE")
         if env_engine:
             return env_engine
 
@@ -127,22 +127,22 @@ class DataProcessor:
         Instantiates the correct adapter based on the engine name.
         """
         if self.engine_name == "polars":
-            from lakeguard.engines.polars import PolarsAdapter
+            from lakelogic.engines.polars import PolarsAdapter
             return PolarsAdapter(self.contract)
         elif self.engine_name == "pandas":
-            from lakeguard.engines.pandas import PandasAdapter
+            from lakelogic.engines.pandas import PandasAdapter
             return PandasAdapter(self.contract)
         elif self.engine_name == "duckdb":
-            from lakeguard.engines.duckdb import DuckDBAdapter
+            from lakelogic.engines.duckdb import DuckDBAdapter
             return DuckDBAdapter(self.contract)
         elif self.engine_name in ["spark", "pyspark"]:
-            from lakeguard.engines.spark import SparkAdapter
+            from lakelogic.engines.spark import SparkAdapter
             return SparkAdapter(self.contract)
         elif self.engine_name == "snowflake":
-            from lakeguard.engines.snowflake import SnowflakeAdapter
+            from lakelogic.engines.snowflake import SnowflakeAdapter
             return SnowflakeAdapter(self.contract)
         elif self.engine_name == "bigquery":
-            from lakeguard.engines.bigquery import BigQueryAdapter
+            from lakelogic.engines.bigquery import BigQueryAdapter
             return BigQueryAdapter(self.contract)
         else:
             raise ValueError(f"Unsupported engine: {self.engine_name}")
@@ -275,7 +275,7 @@ class DataProcessor:
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
         self.last_run_id = uuid.uuid4().hex
         self.last_source_path = str(source_path) if source_path else None
-        logger.info(f"Starting LakeGuard run [Auto-Engine: {self.engine_name}, Contract: {contract_title}]")
+        logger.info(f"Starting LakeLogic run [Auto-Engine: {self.engine_name}, Contract: {contract_title}]")
         
         # Execute via adapter
         good_df, bad_df = self.adapter.execute(df)
@@ -326,7 +326,7 @@ class DataProcessor:
                 )
 
             if bad > 0:
-                msg = f"LakeGuard Alert: {bad} records quarantined in '{contract_title}'. Total (post-transform): {total} (ratio {ratio_display})"
+                msg = f"LakeLogic Alert: {bad} records quarantined in '{contract_title}'. Total (post-transform): {total} (ratio {ratio_display})"
                 self.notify(event="quarantine", message=msg)
 
         # Check dataset rules
@@ -334,7 +334,7 @@ class DataProcessor:
             failures = [r for r in self.adapter.dataset_rule_results if not r.get("passed")]
             if failures:
                 details = "; ".join([f"{r.get('name')}={r.get('value')}" for r in failures])
-                msg = f"LakeGuard dataset rule failures in '{contract_title}': {details}"
+                msg = f"LakeLogic dataset rule failures in '{contract_title}': {details}"
                 self.notify(event="failure", message=msg)
 
         # Schema drift detection (ingest mode)
@@ -366,7 +366,7 @@ class DataProcessor:
 
         # Optional Remote Reporting (SaaS Bridge)
         try:
-            from lakeguard.core.observer import RemoteObserver
+            from lakelogic.core.observer import RemoteObserver
             observer = RemoteObserver()
             observer.report(self.last_report)
         except Exception:
@@ -376,7 +376,7 @@ class DataProcessor:
         quarantined = counts.get("quarantined")
         if quarantined is None:
             quarantined = 0
-        if quarantined > 0 and os.getenv("LAKEGUARD_SHOW_TIPS", "false").lower() == "true":
+        if quarantined > 0 and os.getenv("LAKELOGIC_SHOW_TIPS", "false").lower() == "true":
             logger.info("🛡️  View deep quarantine analysis & historical drift on Lineage Logic: https://lineagelogic.com")
 
         return ValidationResult(good_df, bad_df, df)
@@ -535,7 +535,7 @@ class DataProcessor:
         Fetch the last max_source_mtime for this contract/stage from run logs.
         """
         try:
-            from lakeguard.core.materialization import get_last_run_watermark
+            from lakelogic.core.materialization import get_last_run_watermark
         except Exception:
             return None
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
@@ -606,7 +606,7 @@ class DataProcessor:
         """
         Configure logging based on environment variables.
         """
-        debug = os.getenv("LAKEGUARD_DEBUG", "false").lower() == "true"
+        debug = os.getenv("LAKELOGIC_DEBUG", "false").lower() == "true"
         if not debug:
             try:
                 logger.remove()
@@ -642,7 +642,7 @@ class DataProcessor:
                     if hasattr(self.contract, "_base_path"):
                         config["_base_path"] = str(self.contract._base_path)
                     adapter = get_notification_adapter(notif.type, config)
-                    adapter.send(message, subject=f"LakeGuard {event.capitalize()} Alert")
+                    adapter.send(message, subject=f"LakeLogic {event.capitalize()} Alert")
                 except Exception as e:
                     logger.error(f"Failed to send notification: {e}")
                     if getattr(q, "strict_notifications", True):
@@ -906,8 +906,8 @@ class DataProcessor:
             return df
 
         def _new_name(col: str) -> str:
-            if col.startswith("_lakeguard_"):
-                return col.replace("_lakeguard", prefix, 1)
+            if col.startswith("_lakelogic_"):
+                return col.replace("_lakelogic", prefix, 1)
             return f"{prefix}_{col.lstrip('_')}"
 
         rename_map: Dict[str, str] = {col: _new_name(col) for col in columns}
@@ -1087,7 +1087,7 @@ class DataProcessor:
         if not path.exists():
             raise FileNotFoundError(f"External logic file not found: {path}")
 
-        spec = importlib.util.spec_from_file_location(f"lakeguard_external_{self.last_run_id}", path)
+        spec = importlib.util.spec_from_file_location(f"lakelogic_external_{self.last_run_id}", path)
         if spec is None or spec.loader is None:
             raise ValueError(f"Could not load external logic module: {path}")
         module = importlib.util.module_from_spec(spec)
@@ -1135,18 +1135,18 @@ class DataProcessor:
             import nbformat  # type: ignore
             from nbclient import NotebookClient  # type: ignore
         except Exception as exc:
-            raise ValueError("Notebook execution requires nbformat and nbclient. Install lakeguard[notebook].") from exc
+            raise ValueError("Notebook execution requires nbformat and nbclient. Install lakelogic[notebook].") from exc
 
         params = dict(logic.args or {})
         base_path = getattr(self.contract, "_base_path", None)
         if base_path:
-            params.setdefault("lakeguard_contract_dir", str(Path(base_path)))
-        params.setdefault("lakeguard_engine", self.engine_name)
-        params.setdefault("lakeguard_run_id", self.last_run_id)
-        params.setdefault("lakeguard_source_path", self.last_source_path)
+            params.setdefault("lakelogic_contract_dir", str(Path(base_path)))
+        params.setdefault("lakelogic_engine", self.engine_name)
+        params.setdefault("lakelogic_run_id", self.last_run_id)
+        params.setdefault("lakelogic_source_path", self.last_source_path)
 
         # Write validated input to a temp CSV for notebook access
-        tmp_dir = Path(base_path) / ".lakeguard" if base_path else (Path.cwd() / ".lakeguard")
+        tmp_dir = Path(base_path) / ".lakelogic" if base_path else (Path.cwd() / ".lakelogic")
         tmp_dir.mkdir(parents=True, exist_ok=True)
         input_path = tmp_dir / f"input_{self.last_run_id}.csv"
         try:
@@ -1160,8 +1160,8 @@ class DataProcessor:
             if not isinstance(pdf, pd.DataFrame):
                 pdf = pd.DataFrame(pdf)
             pdf.to_csv(input_path, index=False)
-            params.setdefault("lakeguard_input_path", str(input_path))
-            params.setdefault("lakeguard_input_format", "csv")
+            params.setdefault("lakelogic_input_path", str(input_path))
+            params.setdefault("lakelogic_input_format", "csv")
         except Exception as exc:
             logger.warning(f"Failed to write notebook input data: {exc}")
 
@@ -1170,10 +1170,10 @@ class DataProcessor:
             output_path = Path(logic.output_path)
             if not output_path.is_absolute() and getattr(self.contract, "_base_path", None):
                 output_path = Path(self.contract._base_path) / output_path
-            params.setdefault("lakeguard_output_path", str(output_path))
+            params.setdefault("lakelogic_output_path", str(output_path))
 
         nb = nbformat.read(path, as_version=4)
-        inject_cell = nbformat.v4.new_code_cell(f"LAKEGUARD_PARAMS = {repr(params)}")
+        inject_cell = nbformat.v4.new_code_cell(f"LAKELOGIC_PARAMS = {repr(params)}")
         nb.cells.insert(0, inject_cell)
 
         client = NotebookClient(nb, kernel_name=logic.kernel_name)
@@ -1492,7 +1492,7 @@ class DataProcessor:
         """
         if bad_df is None:
             return []
-        error_col = getattr(self.adapter, "ERROR_COLUMN", "_lakeguard_errors")
+        error_col = getattr(self.adapter, "ERROR_COLUMN", "_lakelogic_errors")
         errors = []
 
         try:

@@ -1,6 +1,6 @@
 # Warehouse Adapters (Snowflake & BigQuery)
 
-LakeGuard can execute contracts directly inside Snowflake and BigQuery using SQL pushdown.
+LakeLogic can execute contracts directly inside Snowflake and BigQuery using SQL pushdown.
 These adapters are **table-only** (no file staging). They are ideal when the data already lives in the warehouse.
 
 ## Install Extras
@@ -15,8 +15,8 @@ pip install -e ".[bigquery]"
 If you are installing from a package index, use the package name:
 
 ```bash
-pip install "lakeguard[snowflake]"
-pip install "lakeguard[bigquery]"
+pip install "lakelogic[snowflake]"
+pip install "lakelogic[bigquery]"
 ```
 
 ## How It Works
@@ -24,18 +24,18 @@ pip install "lakeguard[bigquery]"
 - `--engine snowflake` or `--engine bigquery` runs the contract in-warehouse.
 - `--source` expects a **table name** (or use `metadata.source_table`). You can also prefix with `table:`.
 - Links must be **tables** (use `links[].table` or `path: table:...`).
-- LakeGuard creates **temporary tables/views** for intermediate steps.
+- LakeLogic creates **temporary tables/views** for intermediate steps.
 
 ## Authentication and Secrets
 
-LakeGuard resolves `metadata` values with `env:VAR` or `${ENV:VAR}`. This means you can
+LakeLogic resolves `metadata` values with `env:VAR` or `${ENV:VAR}`. This means you can
 use your platform's secret manager to inject environment variables, without putting
 secrets in the contract.
 
 - **Snowflake**: Provide connection fields in `metadata` or environment variables:
   `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_WAREHOUSE`,
   `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA`, `SNOWFLAKE_ROLE`.
-- **Snowflake secret vaults**: Not called directly by LakeGuard yet. Use your
+- **Snowflake secret vaults**: Not called directly by LakeLogic yet. Use your
   orchestrator or platform to surface the secret into an environment variable and
   reference it with `env:SNOWFLAKE_PASSWORD`.
 - **BigQuery**: Uses Application Default Credentials (ADC). Set
@@ -44,7 +44,7 @@ secrets in the contract.
 
 ### Secret Manager Patterns (Examples)
 
-LakeGuard does not call vendor secret APIs directly. Instead, pull the secret using
+LakeLogic does not call vendor secret APIs directly. Instead, pull the secret using
 your platform's mechanism and export it as an environment variable.
 
 GitHub Actions:
@@ -60,7 +60,7 @@ Databricks (notebook/job):
 
 ```python
 import os
-os.environ["SNOWFLAKE_PASSWORD"] = dbutils.secrets.get(scope="lakeguard", key="snowflake_password")
+os.environ["SNOWFLAKE_PASSWORD"] = dbutils.secrets.get(scope="lakelogic", key="snowflake_password")
 ```
 
 Kubernetes:
@@ -70,7 +70,7 @@ env:
   - name: SNOWFLAKE_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: lakeguard-secrets
+        name: lakelogic-secrets
         key: snowflake_password
 ```
 
@@ -124,13 +124,13 @@ transformations:
 ### CLI
 
 ```bash
-lakeguard run --engine snowflake --contract contract.yaml --source ANALYTICS.SILVER.CRM_CUSTOMERS
+lakelogic run --engine snowflake --contract contract.yaml --source ANALYTICS.SILVER.CRM_CUSTOMERS
 ```
 
 ### Python
 
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 processor = DataProcessor(engine="snowflake", contract="contract.yaml")
 source_df, good_df, bad_df = processor.run_source("ANALYTICS.SILVER.CRM_CUSTOMERS")
@@ -164,13 +164,13 @@ transformations:
 ### CLI
 
 ```bash
-lakeguard run --engine bigquery --contract contract.yaml --source my-project-id.silver.crm_customers
+lakelogic run --engine bigquery --contract contract.yaml --source my-project-id.silver.crm_customers
 ```
 
 ### Python
 
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 processor = DataProcessor(engine="bigquery", contract="contract.yaml")
 source_df, good_df, bad_df = processor.run_source("my-project-id.silver.crm_customers")
@@ -202,4 +202,4 @@ links:
 - Warehouse adapters are **not auto-discovered**. Always set `engine`.
 - File paths (CSV/Parquet) are **not** supported here; use Spark/Polars/DuckDB for file-based runs.
 
-If you need staged file ingestion into the warehouse, use Spark or a warehouse-native load step before running LakeGuard.
+If you need staged file ingestion into the warehouse, use Spark or a warehouse-native load step before running LakeLogic.

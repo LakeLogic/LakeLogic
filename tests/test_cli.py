@@ -1,6 +1,6 @@
 import pytest
 from typer.testing import CliRunner
-from lakeguard.cli.main import app
+from lakelogic.cli.main import app
 import os
 
 runner = CliRunner()

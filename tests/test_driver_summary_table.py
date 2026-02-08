@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from lakeguard.cli import driver
+from lakelogic.cli import driver
 
 
 def test_driver_summary_table_sqlite(tmp_path: Path) -> None:

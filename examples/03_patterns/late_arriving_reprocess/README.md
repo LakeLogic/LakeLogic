@@ -46,7 +46,7 @@ materialization:
 ## Run It
 
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 proc = DataProcessor(contract="contract.yaml")
 

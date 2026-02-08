@@ -1,5 +1,5 @@
 {
-  "name": "lakeguard_adf_pipeline",
+  "name": "lakelogic_adf_pipeline",
   "properties": {
     "activities": [
       {
@@ -7,16 +7,16 @@
         "type": "Custom",
         "dependsOn": [],
         "typeProperties": {
-          "command": "lakeguard-driver",
+          "command": "lakelogic-driver",
           "args": [
             "--registry", "adls://code/examples/insurance_elt/contracts/insurance/_registry.yaml",
             "--reference-registry", "adls://code/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
             "--gold-registry", "adls://code/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
             "--layers", "reference",
             "--window", "last_success",
-            "--summary-table", "lakeguard.pipeline_runs",
+            "--summary-table", "lakelogic.pipeline_runs",
             "--summary-backend", "duckdb",
-            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
             "--metrics-path", "adls://code/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
           ]
         }
@@ -26,16 +26,16 @@
         "type": "Custom",
         "dependsOn": [{"activity": "RunReference", "dependencyConditions": ["Succeeded"]}],
         "typeProperties": {
-          "command": "lakeguard-driver",
+          "command": "lakelogic-driver",
           "args": [
             "--registry", "adls://code/examples/insurance_elt/contracts/insurance/_registry.yaml",
             "--reference-registry", "adls://code/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
             "--gold-registry", "adls://code/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
             "--layers", "bronze",
             "--window", "last_success",
-            "--summary-table", "lakeguard.pipeline_runs",
+            "--summary-table", "lakelogic.pipeline_runs",
             "--summary-backend", "duckdb",
-            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
             "--metrics-path", "adls://code/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
           ]
         }
@@ -45,16 +45,16 @@
         "type": "Custom",
         "dependsOn": [{"activity": "RunBronze", "dependencyConditions": ["Succeeded"]}],
         "typeProperties": {
-          "command": "lakeguard-driver",
+          "command": "lakelogic-driver",
           "args": [
             "--registry", "adls://code/examples/insurance_elt/contracts/insurance/_registry.yaml",
             "--reference-registry", "adls://code/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
             "--gold-registry", "adls://code/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
             "--layers", "silver",
             "--window", "last_success",
-            "--summary-table", "lakeguard.pipeline_runs",
+            "--summary-table", "lakelogic.pipeline_runs",
             "--summary-backend", "duckdb",
-            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
             "--metrics-path", "adls://code/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
           ]
         }
@@ -64,16 +64,16 @@
         "type": "Custom",
         "dependsOn": [{"activity": "RunSilver", "dependencyConditions": ["Succeeded"]}],
         "typeProperties": {
-          "command": "lakeguard-driver",
+          "command": "lakelogic-driver",
           "args": [
             "--registry", "adls://code/examples/insurance_elt/contracts/insurance/_registry.yaml",
             "--reference-registry", "adls://code/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
             "--gold-registry", "adls://code/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
             "--layers", "gold",
             "--window", "last_success",
-            "--summary-table", "lakeguard.pipeline_runs",
+            "--summary-table", "lakelogic.pipeline_runs",
             "--summary-backend", "duckdb",
-            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+            "--summary-database", "adls://code/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
             "--metrics-path", "adls://code/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
           ]
         }

@@ -17,7 +17,7 @@ Build Slowly Changing Dimension Type 2 tables. Track historical changes with eff
 Safely backfill partitions when late-arriving data comes in. Uses `overwrite_partition_safe` strategy.
 
 ### [external_python_logic/](external_python_logic/)
-Extend LakeGuard with custom Python functions or Jupyter notebooks for complex business logic.
+Extend LakeLogic with custom Python functions or Jupyter notebooks for complex business logic.
 
 ---
 

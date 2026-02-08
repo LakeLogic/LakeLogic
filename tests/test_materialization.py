@@ -1,6 +1,6 @@
 import polars as pl
 
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 
 def test_lineage_injection(tmp_path):
@@ -15,10 +15,10 @@ def test_lineage_injection(tmp_path):
     good_df, bad_df = processor.run(df, source_path=tmp_path / "source.csv")
 
     for frame in (good_df, bad_df):
-        assert "_lakeguard_source" in frame.columns
-        assert "_lakeguard_processed_at" in frame.columns
-        assert "_lakeguard_run_id" in frame.columns
-        assert frame["_lakeguard_source"][0] == str(tmp_path / "source.csv")
+        assert "_lakelogic_source" in frame.columns
+        assert "_lakelogic_processed_at" in frame.columns
+        assert "_lakelogic_run_id" in frame.columns
+        assert frame["_lakelogic_source"][0] == str(tmp_path / "source.csv")
 
 
 def test_materialization_partitioned_append(tmp_path):

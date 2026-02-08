@@ -1,10 +1,10 @@
-# 💰 Stop the Spark Tax: Slashed Validation Costs by 80% with LakeGuard & Polars
+# 💰 Stop the Spark Tax: Slashed Validation Costs by 80% with LakeLogic & Polars
 
 **The Problem**: 
 Most Data Lakehouses use massive Spark clusters to perform simple schema checks on 1-50GB files. This "Spark Tax" is eating your cloud budget. You are paying for JVM warm-ups and cluster orchestration just to see if a CSV header is correct.
 
 **The Solution**:
-LakeGuard allows you to run the exact same Data Contract on **Polars** inside a lightweight **Azure Container App (ACA)** or **AWS Lambda**.
+LakeLogic allows you to run the exact same Data Contract on **Polars** inside a lightweight **Azure Container App (ACA)** or **AWS Lambda**.
 
 **Key Value Points**:
 *   **Infrastructure Efficiency**: 10x faster startup than Spark for small/medium workloads.

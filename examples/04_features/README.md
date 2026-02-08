@@ -1,6 +1,6 @@
 # Features
 
-Advanced LakeGuard capabilities.
+Advanced LakeLogic capabilities.
 
 ## Examples
 

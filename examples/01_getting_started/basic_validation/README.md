@@ -1,6 +1,6 @@
 # Basic Validation
 
-The simplest LakeGuard example. Perfect for your first run.
+The simplest LakeLogic example. Perfect for your first run.
 
 ## What You'll Learn
 
@@ -23,12 +23,12 @@ basic_validation/
 
 ### Option 1: Command Line
 ```bash
-lakeguard run --contract contract.yaml --source data/sample_customers.csv
+lakelogic run --contract contract.yaml --source data/sample_customers.csv
 ```
 
 ### Option 2: Python
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 proc = DataProcessor(contract="contract.yaml")
 good_df, bad_df = proc.run("data/sample_customers.csv")

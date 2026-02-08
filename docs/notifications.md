@@ -1,11 +1,11 @@
 # Notifications & Alerting 🔔
 
-LakeGuard keeps you informed. When data fails a quality rule or is sent to **Quarantine**, you can automatically notify the right people via multiple channels.
+LakeLogic keeps you informed. When data fails a quality rule or is sent to **Quarantine**, you can automatically notify the right people via multiple channels.
 Deliver the right alert to the right team, automatically.
 
 ## 1. Multi-Channel Support 🔔
 
-LakeGuard includes built-in adapters for the most common communication tools:
+LakeLogic includes built-in adapters for the most common communication tools:
 
 -   **Slack**: Send messages to specific channels via Webhooks.
 -   **Microsoft Teams**: Direct alerting to Team channels.
@@ -21,12 +21,12 @@ LakeGuard includes built-in adapters for the most common communication tools:
 If you want all optional secret providers, install:
 
 ```bash
-uv pip install "lakeguard[notifications]"
+uv pip install "lakelogic[notifications]"
 # or
-pip install "lakeguard[notifications]"
+pip install "lakelogic[notifications]"
 ```
 
-`lakeguard[all]` also includes these dependencies.
+`lakelogic[all]` also includes these dependencies.
 
 ## 3. Configuration Example 🧩
 
@@ -45,7 +45,7 @@ quarantine:
     - type: sendgrid
       target: "data-owner@company.com"
       api_key: "env:SENDGRID_API_KEY"
-      from_email: "lakeguard@company.com"
+      from_email: "lakelogic@company.com"
       on_events: ["failure"]
 
     # SMTP example
@@ -55,7 +55,7 @@ quarantine:
       smtp_port: 587
       smtp_username: "env:SMTP_USER"
       smtp_password: "${ENV:SMTP_PASS}"
-      from_email: "lakeguard@company.com"
+      from_email: "lakelogic@company.com"
       use_tls: true
       on_events: ["quarantine"]
 
@@ -95,11 +95,11 @@ quarantine:
       target: "data-owner@company.com"
       api_key: "keyvault:sendgrid-api-key"
       key_vault_url: "https://my-vault.vault.azure.net/"
-      from_email: "lakeguard@company.com"
+      from_email: "lakelogic@company.com"
       on_events: ["failure"]
 ```
 
-Install dependencies (or use `lakeguard[notifications]`):
+Install dependencies (or use `lakelogic[notifications]`):
 
 ```bash
 pip install azure-identity azure-keyvault-secrets
@@ -113,12 +113,12 @@ quarantine:
     - type: smtp
       target: "alerts@company.com"
       smtp_host: "smtp.company.com"
-      smtp_password: "aws:lakeguard/smtp-password"
-      from_email: "lakeguard@company.com"
+      smtp_password: "aws:lakelogic/smtp-password"
+      from_email: "lakelogic@company.com"
       on_events: ["quarantine"]
 ```
 
-Install dependencies (or use `lakeguard[notifications]`):
+Install dependencies (or use `lakelogic[notifications]`):
 
 ```bash
 pip install boto3
@@ -133,11 +133,11 @@ quarantine:
       target: "data-owner@company.com"
       api_key: "gcp:sendgrid-api-key"
       gcp_project: "my-project"
-      from_email: "lakeguard@company.com"
+      from_email: "lakelogic@company.com"
       on_events: ["failure"]
 ```
 
-Install dependencies (or use `lakeguard[notifications]`):
+Install dependencies (or use `lakelogic[notifications]`):
 
 ```bash
 pip install google-cloud-secret-manager
@@ -149,14 +149,14 @@ pip install google-cloud-secret-manager
 quarantine:
   notifications:
     - type: webhook
-      target: "vault:secret/data/lakeguard#webhook_url"
+      target: "vault:secret/data/lakelogic#webhook_url"
       vault_url: "https://vault.company.com"
       vault_token: "env:VAULT_TOKEN"
       vault_kv_version: 2
       on_events: ["dataset_rule_failed"]
 ```
 
-Install dependencies (or use `lakeguard[notifications]`):
+Install dependencies (or use `lakelogic[notifications]`):
 
 ```bash
 pip install hvac
@@ -174,8 +174,8 @@ quarantine:
       smtp_host: "smtp.company.com"
       smtp_password: "local:smtp_password"
       secrets_file: "./secrets.enc"
-      secrets_key: "env:LAKEGUARD_SECRETS_KEY"
-      from_email: "lakeguard@company.com"
+      secrets_key: "env:LAKELOGIC_SECRETS_KEY"
+      from_email: "lakelogic@company.com"
       on_events: ["quarantine"]
 ```
 
@@ -187,7 +187,7 @@ from cryptography.fernet import Fernet
 import json
 
 key = Fernet.generate_key()
-print("Set LAKEGUARD_SECRETS_KEY=", key.decode())
+print("Set LAKELOGIC_SECRETS_KEY=", key.decode())
 
 secrets = {"smtp_password": "super-secret"}
 token = Fernet(key).encrypt(json.dumps(secrets).encode("utf-8"))
@@ -195,7 +195,7 @@ open("secrets.enc", "wb").write(token)
 PY
 ```
 
-Install dependency (or use `lakeguard[notifications]`):
+Install dependency (or use `lakelogic[notifications]`):
 
 ```bash
 pip install cryptography
@@ -214,11 +214,11 @@ quarantine:
 
 ## 10. Secret Caching ⚡
 
-LakeGuard caches resolved secrets during a run to avoid repeated provider calls.
+LakeLogic caches resolved secrets during a run to avoid repeated provider calls.
 
 ## 11. How it Works 🧠
 
-When LakeGuard finishes a run, it calculates the **Quarantine Ratio**. 
+When LakeLogic finishes a run, it calculates the **Quarantine Ratio**. 
 
 1.  If **Quarantined Records > 0**, it triggers a `quarantine` event.
 2.  If a **dataset rule** fails, it triggers `failure` (you can also subscribe to `dataset_rule_failed` as an alias).

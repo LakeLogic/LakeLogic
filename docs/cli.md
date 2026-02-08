@@ -1,6 +1,6 @@
 # CLI Reference
 
-The LakeGuard CLI is the high-efficiency entry point for enforcing your data contracts. It is designed for **Speed-to-Production** and **Engine Portability**.
+The LakeLogic CLI is the high-efficiency entry point for enforcing your data contracts. It is designed for **Speed-to-Production** and **Engine Portability**.
 
 ## Strategic Value
 
@@ -10,19 +10,19 @@ The LakeGuard CLI is the high-efficiency entry point for enforcing your data con
 
 ## Commands
 
-### 🟢 `lakeguard run`
+### 🟢 `lakelogic run`
 
 Validates a source dataset against a contract.
 
 ```bash
-lakeguard run --contract contract.yaml --source data.csv
+lakelogic run --contract contract.yaml --source data.csv
 ```
 
 ### CLI Help
 
 ```bash
-lakeguard help
-lakeguard help bootstrap
+lakelogic help
+lakelogic help bootstrap
 ```
 
 This prints short usage guidance and examples directly in the terminal.
@@ -30,24 +30,24 @@ This prints short usage guidance and examples directly in the terminal.
 Python helper:
 
 ```bash
-python -c "import lakeguard; lakeguard.help()"
-python -c "import lakeguard; lakeguard.driver.help()"
-python -c "import lakeguard; lakeguard.bootstrap.help()"
-python -c "import lakeguard; lakeguard.policy_packs.help()"
-python -c "import lakeguard; lakeguard.observability.help()"
+python -c "import lakelogic; lakelogic.help()"
+python -c "import lakelogic; lakelogic.driver.help()"
+python -c "import lakelogic; lakelogic.bootstrap.help()"
+python -c "import lakelogic; lakelogic.policy_packs.help()"
+python -c "import lakelogic; lakelogic.observability.help()"
 ```
 
 For warehouse engines, pass a table name:
 
 ```bash
-lakeguard run --engine snowflake --contract contract.yaml --source table:ANALYTICS.SILVER.CUSTOMERS
+lakelogic run --engine snowflake --contract contract.yaml --source table:ANALYTICS.SILVER.CUSTOMERS
 ```
 
 ## Options
 
 - `--contract, -c`: Path to the YAML contract
 - `--source, -s`: Input file (CSV or Parquet; Delta/Iceberg with Spark + `server.format`) or a table name for Snowflake/BigQuery engines
-- `--engine, -e`: (Optional) Force an engine (`polars`, `pandas`, `duckdb`, `spark`, `snowflake`, `bigquery`). If omitted, LakeGuard discovery is used.
+- `--engine, -e`: (Optional) Force an engine (`polars`, `pandas`, `duckdb`, `spark`, `snowflake`, `bigquery`). If omitted, LakeLogic discovery is used.
 - `--stage`: Apply contract stage overrides (e.g., `bronze`, `silver`) from a top-level `stages` block.
 - `--output-good`: Save good records to CSV/Parquet (or write to Delta/Iceberg via `--materialize`)
 - `--output-bad`: Save quarantined records to CSV/Parquet
@@ -61,7 +61,7 @@ lakeguard run --engine snowflake --contract contract.yaml --source table:ANALYTI
 ## Example (Auto-Engine)
 
 ```bash
-lakeguard run \
+lakelogic run \
   --contract examples/customer_onboarding/contract.yaml \
   --source examples/customer_onboarding/data/customers.csv \
   --output-good good.csv \
@@ -71,10 +71,10 @@ lakeguard run \
 
 ## Pipeline Driver
 
-The registry-driven driver is exposed as `lakeguard-driver` and orchestrates bronze/silver/gold layers.
+The registry-driven driver is exposed as `lakelogic-driver` and orchestrates bronze/silver/gold layers.
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -82,14 +82,14 @@ lakeguard-driver \
   --window last_success
 ```
 
-### 🛠️ `lakeguard bootstrap`
+### 🛠️ `lakelogic bootstrap`
 
 Generate starter contracts and a registry from a landing zone. This is the **Governance Accelerator** for Day 1 compliance.
 
 Generate starter contracts and a registry from a landing zone:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing examples/insurance_elt/data/bronze \
   --output-dir examples/insurance_elt/bootstrap_contracts \
   --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
@@ -100,7 +100,7 @@ lakeguard bootstrap \
 Use `--sync` to align an existing registry with new landing data:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing examples/insurance_elt/data/bronze \
   --output-dir examples/insurance_elt/bootstrap_contracts \
   --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
@@ -121,7 +121,7 @@ lakeguard bootstrap \
 - `--metrics-backend`: `statsd` or `prometheus`.
 - `--metrics-host`: StatsD host or Prometheus bind host (default `127.0.0.1` for StatsD, `0.0.0.0` for Prometheus).
 - `--metrics-port`: StatsD port (default `8125`) or Prometheus port (default `9100`).
-- `--metrics-prefix`: StatsD metric prefix (default `lakeguard`).
+- `--metrics-prefix`: StatsD metric prefix (default `lakelogic`).
 - `--metrics-tags`: Comma-separated tags, e.g. `env=prod,team=data`.
 - `--set`: Override contract fields at runtime (repeatable).
 - `--policy-pack`: Apply a policy pack by name.

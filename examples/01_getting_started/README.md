@@ -1,13 +1,13 @@
 # Getting Started
 
-Your first LakeGuard experience. Start here.
+Your first LakeLogic experience. Start here.
 
 ## Examples
 
 ### [basic_validation/](basic_validation/)
 **Time**: 5 minutes
 
-The simplest possible LakeGuard contract. Learn:
+The simplest possible LakeLogic contract. Learn:
 - Schema definition with field types
 - Basic quality rules (email format, positive age)
 - Pre/post transformations
@@ -16,7 +16,7 @@ The simplest possible LakeGuard contract. Learn:
 **Run it**:
 ```bash
 cd basic_validation
-lakeguard run --contract contract.yaml --source data/sample_customers.csv
+lakelogic run --contract contract.yaml --source data/sample_customers.csv
 ```
 
 ---

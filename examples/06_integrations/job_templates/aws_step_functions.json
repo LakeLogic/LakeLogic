@@ -1,21 +1,21 @@
 {
-  "Comment": "LakeGuard pipeline on AWS Step Functions",
+  "Comment": "LakeLogic pipeline on AWS Step Functions",
   "StartAt": "RunReference",
   "States": {
     "RunReference": {
       "Type": "Task",
       "Resource": "arn:aws:states:::glue:startJobRun.sync",
       "Parameters": {
-        "JobName": "lakeguard-reference",
+        "JobName": "lakelogic-reference",
         "Arguments": {
           "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "reference",
           "--WINDOW": "last_success",
-          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_TABLE": "lakelogic.pipeline_runs",
           "--SUMMARY_BACKEND": "duckdb",
-          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
           "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },
@@ -25,16 +25,16 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::glue:startJobRun.sync",
       "Parameters": {
-        "JobName": "lakeguard-bronze",
+        "JobName": "lakelogic-bronze",
         "Arguments": {
           "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "bronze",
           "--WINDOW": "last_success",
-          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_TABLE": "lakelogic.pipeline_runs",
           "--SUMMARY_BACKEND": "duckdb",
-          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
           "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },
@@ -44,16 +44,16 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::glue:startJobRun.sync",
       "Parameters": {
-        "JobName": "lakeguard-silver",
+        "JobName": "lakelogic-silver",
         "Arguments": {
           "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "silver",
           "--WINDOW": "last_success",
-          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_TABLE": "lakelogic.pipeline_runs",
           "--SUMMARY_BACKEND": "duckdb",
-          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
           "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },
@@ -63,16 +63,16 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::glue:startJobRun.sync",
       "Parameters": {
-        "JobName": "lakeguard-gold",
+        "JobName": "lakelogic-gold",
         "Arguments": {
           "--REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/_registry.yaml",
           "--REF_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
           "--GOLD_REGISTRY": "s3://your-bucket/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
           "--LAYERS": "gold",
           "--WINDOW": "last_success",
-          "--SUMMARY_TABLE": "lakeguard.pipeline_runs",
+          "--SUMMARY_TABLE": "lakelogic.pipeline_runs",
           "--SUMMARY_BACKEND": "duckdb",
-          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+          "--SUMMARY_DATABASE": "s3://your-bucket/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
           "--METRICS_PATH": "s3://your-bucket/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
         }
       },

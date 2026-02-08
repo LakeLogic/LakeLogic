@@ -1,6 +1,6 @@
 import polars as pl
 
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 
 def test_schema_evolution_append_allows_unknown():

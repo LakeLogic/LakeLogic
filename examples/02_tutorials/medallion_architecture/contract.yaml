@@ -37,9 +37,9 @@ info:
 metadata:
   domain: "customer_analytics"
   system: "crm_export"
-  run_log_table: "lakeguard_run_logs"
+  run_log_table: "lakelogic_run_logs"
   run_log_backend: "duckdb"
-  run_log_database: "logs/lakeguard_run_logs.duckdb"
+  run_log_database: "logs/lakelogic_run_logs.duckdb"
 
 lineage:
   enabled: true

@@ -43,7 +43,7 @@ We recommend matching the contract filename to the **Target Table Name**, includ
 
 ### Why match table names?
 1.  **Traceability**: When a dbt test or Spark job fails on `silver_erp_orders`, you immediately know to look for `silver_erp_orders_v[X].yml`.
-2.  **Automation**: Your runner script can assume that `lakeguard run --table silver_erp_orders` maps to the contract in that domain folder.
+2.  **Automation**: Your runner script can assume that `lakelogic run --table silver_erp_orders` maps to the contract in that domain folder.
 
 ---
 
@@ -73,7 +73,7 @@ entries:
 
 ## 4. Metadata Standard
 
-Every contract in the LakeGuard ecosystem should include standard metadata. This allows tools to "Capture" and "Browse" your contracts easily.
+Every contract in the LakeLogic ecosystem should include standard metadata. This allows tools to "Capture" and "Browse" your contracts easily.
 
 | Field | Description |
 | :--- | :--- |

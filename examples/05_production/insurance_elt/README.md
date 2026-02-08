@@ -1,6 +1,6 @@
 # Insurance ELT Pipeline
 
-A complete multi-entity ELT pipeline demonstrating LakeGuard at scale.
+A complete multi-entity ELT pipeline demonstrating LakeLogic at scale.
 
 ## Overview
 
@@ -57,7 +57,7 @@ insurance_elt/
 │   ├── bronze/                         # Raw CDC files
 │   └── reference/                      # Lookup tables
 ├── output/                             # Materialized tables
-└── lakeguard_driver.ipynb              # Interactive walkthrough
+└── lakelogic_driver.ipynb              # Interactive walkthrough
 ```
 
 ## Registry-Driven Processing
@@ -89,13 +89,13 @@ entries:
 
 ```bash
 # Process all Bronze layers
-lakeguard-driver --registry contracts/insurance/_registry.yaml --layers bronze
+lakelogic-driver --registry contracts/insurance/_registry.yaml --layers bronze
 
 # Process all Silver layers
-lakeguard-driver --registry contracts/insurance/_registry.yaml --layers silver
+lakelogic-driver --registry contracts/insurance/_registry.yaml --layers silver
 
 # Process specific entity
-lakeguard-driver --registry contracts/insurance/_registry.yaml --entities claims --layers silver
+lakelogic-driver --registry contracts/insurance/_registry.yaml --entities claims --layers silver
 ```
 
 ## Key Concepts Demonstrated
@@ -110,7 +110,7 @@ lakeguard-driver --registry contracts/insurance/_registry.yaml --entities claims
 
 ## Run the Notebook
 
-Open `lakeguard_driver.ipynb` for an interactive walkthrough of the entire pipeline.
+Open `lakelogic_driver.ipynb` for an interactive walkthrough of the entire pipeline.
 
 ## Scaling This Pattern
 

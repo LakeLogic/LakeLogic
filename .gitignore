@@ -105,13 +105,13 @@ celerybeat.pid
 # Environments
 .env
 .venv
-.venv_lakeguard/
+.venv_lakelogic/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
-env_lakeguard/
+env_lakelogic/
 
 # Spyder project settings
 .spyderproject
@@ -177,8 +177,8 @@ examples/**/data/landing/*.delta
 examples/**/data/landing/*.db
 
 # LakeGuard state files
-_lakeguard_state/
-.lakeguard/
+_lakelogic_state/
+.lakelogic/
 *.state.json
 run_logs/
 

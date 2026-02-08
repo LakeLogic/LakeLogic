@@ -1,9 +1,9 @@
 # Multi-Cloud Ingestion ☁️
 
-LakeGuard can act as a **schema gate** for ingestion. For local and OSS use, it focuses on validating and quarantining data before it reaches Bronze.
+LakeLogic can act as a **schema gate** for ingestion. For local and OSS use, it focuses on validating and quarantining data before it reaches Bronze.
 
 ## 1. Cloud Storage Support
-LakeGuard adapters can read from cloud-native paths in hosted environments, but the open-source demo currently focuses on **local files**.
+LakeLogic adapters can read from cloud-native paths in hosted environments, but the open-source demo currently focuses on **local files**.
 
 -   **Amazon S3 (Simple Storage Service)**: `s3://my-bucket/raw_data/`
 -   **Google GCS (Google Cloud Storage)**: `gs://my-bucket/raw_data/`
@@ -17,7 +17,7 @@ When moving data from external sources (Raw) into your **Bronze** layer, you mig
 server:
   type: gcs
   path: gs://landing-zone/daily_extract/
-  mode: ingest # Tells LakeGuard to focus on Ingestion
+  mode: ingest # Tells LakeLogic to focus on Ingestion
   schema_evolution: append # Allow new columns, but don't break old ones
 ```
 
@@ -52,7 +52,7 @@ quarantine:
 
 ## 4. Cleanse-on-Arrival (Deduplication & Filtering)
 
-Bronze data is often delivered with duplicates or "deleted" flags from source systems. LakeGuard allows you to cleanse this data the moment it arrives.
+Bronze data is often delivered with duplicates or "deleted" flags from source systems. LakeLogic allows you to cleanse this data the moment it arrives.
 
 ```yaml
 transformations:
@@ -107,7 +107,7 @@ In this setup, you read **every** column from the source as a `string` (or `varc
 ### Why do this?
 1.  **Zero Ingestion Failures**: You never crash your pipeline because an API sent "N/A" into a numeric field.
 2.  **100% Data Capture**: You capture the "dirty" data exactly as it was sent.
-3.  **Fix in Silver**: You perform the casting and data cleaning in the **Silver** layer, where you can use LakeGuard's `quarantine` to isolate the rows that won't cast to the correct type.
+3.  **Fix in Silver**: You perform the casting and data cleaning in the **Silver** layer, where you can use LakeLogic's `quarantine` to isolate the rows that won't cast to the correct type.
 
 ```yaml
 # A "Safe" Bronze Ingestion Contract
@@ -116,4 +116,4 @@ server:
   cast_to_string: true
 ```
 
-By using LakeGuard at the **Ingestion** point, you ensure that every row in your **Bronze** layer has a known schema and a clean lineage, right from the start. 🛡️☁️
+By using LakeLogic at the **Ingestion** point, you ensure that every row in your **Bronze** layer has a known schema and a clean lineage, right from the start. 🛡️☁️

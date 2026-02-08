@@ -1,13 +1,13 @@
 import duckdb
 from typing import Tuple, Any, List
-from lakeguard.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter
 from loguru import logger
 from pathlib import Path
 from uuid import uuid4
 
 class DuckDBAdapter(EngineAdapter):
     """
-    DuckDB execution engine for LakeGuard.
+    DuckDB execution engine for LakeLogic.
     Handles data processing using native DuckDB SQL.
     """
 
@@ -30,7 +30,7 @@ class DuckDBAdapter(EngineAdapter):
         con = self.con
         
         # Use a internal unique name for the actual data to avoid "source" name collisions
-        internal_input_name = "__lakeguard_raw_source__"
+        internal_input_name = "__lakelogic_raw_source__"
         self.internal_input_name = internal_input_name
         
         # Handle string paths directly via DuckDB native readers

@@ -1,6 +1,6 @@
-# 🚀 LakeGuard Traction Strategy
+# 🚀 LakeLogic Traction Strategy
 
-This folder captures the high-performance promotional playbooks built for the LakeGuard OSS ecosystem. Each playbook focuses on a high-value data engineering pain point.
+This folder captures the high-performance promotional playbooks built for the LakeLogic OSS ecosystem. Each playbook focuses on a high-value data engineering pain point.
 
 ## 📈 The Campaign Roadmap
 
@@ -20,6 +20,6 @@ This folder captures the high-performance promotional playbooks built for the La
 *   **Primary Channel**: Medium, Technical Whitepapers, and Architecture Conferences.
 
 ## 🎯 Conversion Hooks
-*   **Local-First Demo**: "Run LakeGuard in 60 seconds with `uv` and Polars."
+*   **Local-First Demo**: "Run LakeLogic in 60 seconds with `uv` and Polars."
 *   **Multi-Cloud Power**: "The same contract for Fabric and Snowflake."
 *   **Open Standard**: "ODCS-aligned governance you can actually execute."

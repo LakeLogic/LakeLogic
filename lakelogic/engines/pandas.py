@@ -1,11 +1,11 @@
 import pandas as pd
 from typing import Tuple, Any
-from lakeguard.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter
 from loguru import logger
 
 class PandasAdapter(EngineAdapter):
     """
-    Pandas execution engine for LakeGuard.
+    Pandas execution engine for LakeLogic.
     Uses DuckDB as a high-performance SQL backend to process Pandas DataFrames.
     """
 
@@ -27,11 +27,11 @@ class PandasAdapter(EngineAdapter):
 
         # We leverage the DuckDBAdapter logic directly
         try:
-            from lakeguard.engines.duckdb import DuckDBAdapter
+            from lakelogic.engines.duckdb import DuckDBAdapter
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
                 "Pandas engine requires DuckDB for SQL execution. "
-                "Install with `pip install lakeguard[pandas]` or `pip install duckdb`."
+                "Install with `pip install lakelogic[pandas]` or `pip install duckdb`."
             ) from exc
 
         duck_adapter = DuckDBAdapter(self.contract)

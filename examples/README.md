@@ -1,6 +1,6 @@
-# LakeGuard Examples
+# LakeLogic Examples
 
-Learn LakeGuard through hands-on examples, organized by skill level.
+Learn LakeLogic through hands-on examples, organized by skill level.
 
 ---
 
@@ -47,7 +47,7 @@ Alerts, secrets, and complete examples.
 ```
 
 ### Level 5: Integrate with Your Stack
-Connect LakeGuard to your orchestrator.
+Connect LakeLogic to your orchestrator.
 
 ```
 06_integrations/
@@ -59,12 +59,12 @@ Connect LakeGuard to your orchestrator.
 ## Quick Start
 
 ```bash
-# 1. Install LakeGuard
-pip install lakeguard
+# 1. Install LakeLogic
+pip install lakelogic
 
 # 2. Run your first example
 cd examples/01_getting_started/basic_validation
-lakeguard run --contract contract.yaml --source data/sample_customers.csv
+lakelogic run --contract contract.yaml --source data/sample_customers.csv
 
 # 3. Explore the output
 # Good records pass, bad records go to quarantine with error reasons
@@ -88,6 +88,6 @@ example_name/
 
 ## Need Help?
 
-- [Documentation](https://LineageLogic.github.io/LakeGuard)
-- [GitHub Issues](https://github.com/LineageLogic/LakeGuard/issues)
-- [GitHub Discussions](https://github.com/LineageLogic/LakeGuard/discussions)
+- [Documentation](https://LineageLogic.github.io/LakeLogic)
+- [GitHub Issues](https://github.com/LineageLogic/LakeLogic/issues)
+- [GitHub Discussions](https://github.com/LineageLogic/LakeLogic/discussions)

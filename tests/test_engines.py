@@ -1,7 +1,7 @@
 import pytest
 import polars as pl
-from lakeguard.core.models import DataContract
-from lakeguard.engines.polars import PolarsAdapter
+from lakelogic.core.models import DataContract
+from lakelogic.engines.polars import PolarsAdapter
 
 @pytest.fixture
 def mock_contract_simple():
@@ -28,7 +28,7 @@ def test_polars_adapter_basic(mock_contract_simple):
     assert len(good_df) == 2
     assert len(bad_df) == 1
     assert bad_df["id"][0] == 5
-    assert "_lakeguard_errors" in bad_df.columns
+    assert "_lakelogic_errors" in bad_df.columns
 
 def test_polars_adapter_transformations():
     """Test that transformations are applied to good data."""

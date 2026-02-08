@@ -2,7 +2,7 @@ import os
 import json
 import pytest
 from pathlib import Path
-from lakeguard.notifications.base import resolve_config_secrets, get_notification_adapter
+from lakelogic.notifications.base import resolve_config_secrets, get_notification_adapter
 
 
 def test_env_resolution(monkeypatch):
@@ -42,12 +42,12 @@ def test_local_secrets_resolution(tmp_path, monkeypatch):
     secrets_file = tmp_path / "secrets.enc"
     secrets_file.write_bytes(token)
 
-    monkeypatch.setenv("LAKEGUARD_SECRETS_KEY", key.decode("utf-8"))
+    monkeypatch.setenv("LAKELOGIC_SECRETS_KEY", key.decode("utf-8"))
     config = {
         "smtp_password": "local:smtp_password",
         "secrets_file": str(secrets_file),
         "smtp_host": "smtp.example.com",
-        "from_email": "lakeguard@example.com",
+        "from_email": "lakelogic@example.com",
         "target": "alerts@example.com",
     }
 

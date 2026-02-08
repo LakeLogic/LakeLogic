@@ -65,7 +65,7 @@ materialization:
 
 ### Full Pipeline (Bronze then Silver)
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 # Run Bronze stage
 proc = DataProcessor(contract="contract.yaml", stage="bronze")

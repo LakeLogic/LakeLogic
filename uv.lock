@@ -2298,7 +2298,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lakeguard"
+name = "lakelogic"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

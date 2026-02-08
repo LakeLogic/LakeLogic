@@ -64,7 +64,7 @@ python run.py
 
 Or in Python:
 ```python
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 proc = DataProcessor(contract="contract.yaml")
 good_df, bad_df = proc.run("data/customers.csv")

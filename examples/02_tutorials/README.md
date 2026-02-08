@@ -1,6 +1,6 @@
 # Tutorials
 
-Core LakeGuard concepts through step-by-step examples.
+Core LakeLogic concepts through step-by-step examples.
 
 ## Examples
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from lakeguard.cli import driver
+from lakelogic.cli import driver
 
 
 def test_parse_layers_strict_valid():

@@ -1,4 +1,4 @@
-# LakeGuard Driver
+# LakeLogic Driver
 
 The registry-driven driver runs Bronze -> Silver -> Gold pipelines with a single CLI.
 It is designed for production orchestration: parallel execution, incremental windows, reprocessing, and observability outputs.
@@ -31,7 +31,7 @@ It is designed for production orchestration: parallel execution, incremental win
 ## Basic Usage
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -43,7 +43,7 @@ This runs the full Insurance ELT pipeline using registry-defined contracts and u
 ## Run Only One Entity
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -57,7 +57,7 @@ This limits execution to the `policies` entity without changing registry files.
 Use `--set` to override contract fields at runtime:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --layers bronze \
   --set source.path=examples/insurance_elt/data/bronze \
@@ -70,7 +70,7 @@ This overrides the source path and file pattern for a one-off run, without editi
 ## Incremental Window (Range)
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -88,7 +88,7 @@ This processes only data in the requested date range (end date inclusive).
 Generate daily or weekly windows and run them sequentially:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --layers bronze,silver \
   --backfill-start-date 2026-02-01 \
@@ -102,7 +102,7 @@ This generates daily windows and executes them sequentially for controlled backf
 ## Reprocess (Late Arriving Data)
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
@@ -119,7 +119,7 @@ This reprocesses the selected date window and overwrites affected partitions.
 Persist state so a failed run can resume without re-running successful contracts:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --layers bronze,silver,gold \
   --state-path logs/driver_state.json \
@@ -134,15 +134,15 @@ This skips already completed contracts and resumes from the last failed step.
 Write a per-run summary row into a table and emit metrics:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \
   --layers reference,bronze,silver,gold \
   --window last_success \
-  --summary-table lakeguard.pipeline_runs \
+  --summary-table lakelogic.pipeline_runs \
   --summary-backend duckdb \
-  --summary-database examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb \
+  --summary-database examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb \
   --metrics-path examples/insurance_elt/output/run_logs/pipeline_metrics.json
 ```
 This writes pipeline summaries to DuckDB and emits a metrics JSON file for monitoring.
@@ -154,7 +154,7 @@ This writes pipeline summaries to DuckDB and emits a metrics JSON file for monit
 Apply standardized rules and defaults across layers:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --layers silver \
   --policy-pack baseline_silver \
@@ -171,7 +171,7 @@ You can also set `metadata.policy_pack` inside a contract.
 Require explicit approval when schema drift or quarantine ratio breaches:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --layers gold \
   --approval-required \
@@ -217,7 +217,7 @@ This allows upstreams to be stale within a grace window while continuing executi
 Cache lookup datasets across contracts to reduce re-reads:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --layers silver \
   --cache-references
@@ -231,7 +231,7 @@ This caches reference datasets in memory to avoid repeated reads during the run.
 Generate starter contracts and a registry from a landing zone:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing examples/insurance_elt/data/bronze \
   --output-dir examples/insurance_elt/bootstrap_contracts \
   --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
@@ -245,7 +245,7 @@ This scans the landing zone, infers schema, and generates starter contracts plus
 Prometheus scraping:
 
 ```bash
-lakeguard-driver \
+lakelogic-driver \
   --registry examples/insurance_elt/contracts/insurance/_registry.yaml \
   --reference-registry examples/insurance_elt/contracts/shared/reference/_registry.yaml \
   --gold-registry examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml \

@@ -1,5 +1,5 @@
 """
-Registry-driven pipeline driver for LakeGuard.
+Registry-driven pipeline driver for LakeLogic.
 
 This module orchestrates bronze/silver/gold runs from contract registries, supports
 incremental windows (last_success), and reprocessing of late-arriving data.
@@ -21,8 +21,8 @@ from uuid import uuid4
 
 import yaml
 
-from lakeguard import DataProcessor
-from lakeguard.core.models import DataContract, Quality
+from lakelogic import DataProcessor
+from lakelogic.core.models import DataContract, Quality
 from loguru import logger
 
 
@@ -172,7 +172,7 @@ class RunLogReader:
             return None, "duckdb_unavailable"
 
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.duckdb"
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
         db_path = self._resolve_path(db_path, base_path)
         if not db_path.exists():
             return None, "run_log_db_missing"
@@ -208,7 +208,7 @@ class RunLogReader:
         import sqlite3
 
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakeguard_run_logs.sqlite"
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
         db_path = self._resolve_path(db_path, base_path)
         if not db_path.exists():
             return None, "run_log_db_missing"
@@ -324,7 +324,7 @@ class PipelineDriver:
         self.metrics_backend = metrics_backend
         self.metrics_host = metrics_host
         self.metrics_port = metrics_port
-        self.metrics_prefix = metrics_prefix or "lakeguard"
+        self.metrics_prefix = metrics_prefix or "lakelogic"
         self.metrics_tags = metrics_tags or {}
         self.metrics_snapshot: Dict[str, object] = {}
         self.prometheus_server: Optional[HTTPServer] = None
@@ -1170,7 +1170,7 @@ class PipelineDriver:
                     logger.warning(f"Failed to align summary table schema for {table_name}: {exc}")
 
                 if self.summary_merge_on_run_id:
-                    view_name = f"lakeguard_summary_updates_{uuid4().hex}"
+                    view_name = f"lakelogic_summary_updates_{uuid4().hex}"
                     df.createOrReplaceTempView(view_name)
                     try:
                         spark.sql(f"""
@@ -1204,7 +1204,7 @@ class PipelineDriver:
                 logger.warning(f"Summary table backend 'duckdb' unavailable: {exc}")
                 return
 
-            db_path = Path(self.summary_database or "logs/lakeguard_pipeline_runs.duckdb")
+            db_path = Path(self.summary_database or "logs/lakelogic_pipeline_runs.duckdb")
             db_path.parent.mkdir(parents=True, exist_ok=True)
             table_name = self.summary_table
             con = duckdb.connect(database=str(db_path))
@@ -1272,7 +1272,7 @@ class PipelineDriver:
         if backend == "sqlite":
             import sqlite3
 
-            db_path = Path(self.summary_database or "logs/lakeguard_pipeline_runs.sqlite")
+            db_path = Path(self.summary_database or "logs/lakelogic_pipeline_runs.sqlite")
             db_path.parent.mkdir(parents=True, exist_ok=True)
             table_name = self.summary_table.replace(".", "_")
             if table_name != self.summary_table:
@@ -1557,7 +1557,7 @@ class PipelineDriver:
 
         host = self.metrics_host or "127.0.0.1"
         port = int(self.metrics_port or 8125)
-        prefix = self.metrics_prefix or "lakeguard"
+        prefix = self.metrics_prefix or "lakelogic"
 
         tag_str = ""
         if self.metrics_tags:
@@ -1846,7 +1846,7 @@ def parse_window(
 
 def main() -> None:
     """CLI entrypoint for the registry-driven pipeline driver."""
-    parser = argparse.ArgumentParser(description="LakeGuard pipeline driver (registry-based).")
+    parser = argparse.ArgumentParser(description="LakeLogic pipeline driver (registry-based).")
     parser.add_argument("--registry", required=True, help="Path to system registry (bronze/silver contracts).")
     parser.add_argument("--reference-registry", help="Path to reference registry (optional).")
     parser.add_argument("--gold-registry", help="Path to gold registry (optional).")
@@ -1877,7 +1877,7 @@ def main() -> None:
     parser.add_argument("--metrics-backend", help="Metrics backend: statsd | prometheus.")
     parser.add_argument("--metrics-host", help="StatsD host (default 127.0.0.1).")
     parser.add_argument("--metrics-port", type=int, help="StatsD port (default 8125).")
-    parser.add_argument("--metrics-prefix", help="StatsD metric prefix (default lakeguard).")
+    parser.add_argument("--metrics-prefix", help="StatsD metric prefix (default lakelogic).")
     parser.add_argument("--metrics-tags", help="Comma-separated tags (key=value) for metrics.")
     parser.add_argument("--set", dest="overrides", action="append", help="Override contract fields (key=value).")
     parser.add_argument("--policy-pack", help="Apply a policy pack by name.")

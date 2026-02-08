@@ -2,12 +2,12 @@
 
 > Note: The OSS release includes lineage injection, run logs (JSON + table backends), quarantine ratios, and SLO scoring (freshness/availability). Full orchestration remains on the roadmap.
 
-Building a Data Lakehouse is only half the battle. Operating it requires transparency that ensures stakeholders trust the data. LakeGuard provides a practical set of visibility tools across **Data Quality**, **Lineage**, and **Observability**.
+Building a Data Lakehouse is only half the battle. Operating it requires transparency that ensures stakeholders trust the data. LakeLogic provides a practical set of visibility tools across **Data Quality**, **Lineage**, and **Observability**.
 
 ---
 
 ## 1. Data Quality Health
-LakeGuard treats data quality as a first-class citizen during the transmission process.
+LakeLogic treats data quality as a first-class citizen during the transmission process.
 
 - **Automated health scores**: quarantine ratio per run plus freshness/availability SLOs.
 - **Rule categorization**: rules are tagged by category (e.g., `completeness`, `correctness`, `consistency`) to help triage issues.
@@ -15,7 +15,7 @@ LakeGuard treats data quality as a first-class citizen during the transmission p
 
 ### The 3Cs of Data Quality
 
-LakeGuard uses the classic 3Cs to classify rules and make triage faster:
+LakeLogic uses the classic 3Cs to classify rules and make triage faster:
 
 - **Completeness**: required fields exist and are not null.
 - **Correctness**: values satisfy business or validation rules.
@@ -46,7 +46,7 @@ lineage:
   capture_system: false
 ```
 
-**Important behavior**: if you explicitly set any `capture_*` field, only those explicitly set fields are emitted. This makes it safe to keep only `_lakeguard_run_id` in tables.
+**Important behavior**: if you explicitly set any `capture_*` field, only those explicitly set fields are emitted. This makes it safe to keep only `_lakelogic_run_id` in tables.
 
 ### Preserve upstream lineage
 You can preserve upstream lineage columns before stamping the current run:
@@ -54,14 +54,14 @@ You can preserve upstream lineage columns before stamping the current run:
 ```yaml
 lineage:
   enabled: true
-  preserve_upstream: ["_lakeguard_run_id"]
+  preserve_upstream: ["_lakelogic_run_id"]
   upstream_prefix: "_upstream"
 ```
 
-This produces `_upstream_run_id` (or `_upstream_lakeguard_run_id`, depending on naming) while still adding the current `_lakeguard_run_id`.
+This produces `_upstream_run_id` (or `_upstream_lakelogic_run_id`, depending on naming) while still adding the current `_lakelogic_run_id`.
 
 ### Use pipeline_run_id as the run_id column
-For Gold (or any stage) you can use a pipeline-level id for `_lakeguard_run_id`:
+For Gold (or any stage) you can use a pipeline-level id for `_lakelogic_run_id`:
 
 ```yaml
 lineage:
@@ -70,10 +70,10 @@ lineage:
   run_id_source: pipeline_run_id
 ```
 
-When a `pipeline_run_id` is passed to `DataProcessor`, `_lakeguard_run_id` will be set to that value.
+When a `pipeline_run_id` is passed to `DataProcessor`, `_lakelogic_run_id` will be set to that value.
 
 ### Key roll-ups (Gold traceability)
-Gold aggregates can retain rollup lineage keys for drill-down. LakeGuard supports an explicit rollup transform:
+Gold aggregates can retain rollup lineage keys for drill-down. LakeLogic supports an explicit rollup transform:
 
 ```yaml
 transformations:
@@ -82,10 +82,10 @@ transformations:
       aggregations:
         total_sales: "SUM(amount)"
       keys: "sale_id"
-      rollup_keys_column: "_lakeguard_rollup_keys"
-      rollup_keys_count_column: "_lakeguard_rollup_keys_count"  # optional
+      rollup_keys_column: "_lakelogic_rollup_keys"
+      rollup_keys_count_column: "_lakelogic_rollup_keys_count"  # optional
       upstream_run_id_column: "_upstream_run_id"                # optional
-      upstream_run_ids_column: "_upstream_lakeguard_run_ids"     # optional
+      upstream_run_ids_column: "_upstream_lakelogic_run_ids"     # optional
 ```
 
 All rollup outputs are optional. If you omit a column name, it will not be created.
@@ -96,7 +96,7 @@ All rollup outputs are optional. If you omit a column name, it will not be creat
 Observability is about knowing your data is broken before your users do.
 
 ### Proactive notifications
-LakeGuard dispatches alerts to multiple channels (Slack, Teams, Email) based on runtime events:
+LakeLogic dispatches alerts to multiple channels (Slack, Teams, Email) based on runtime events:
 - **`quarantine`**: send a message when row-level errors exceed a threshold.
 - **`failure`**: trigger a webhook or pager when a dataset-level rule fails.
 
@@ -111,7 +111,7 @@ Enable run logs by adding one of the following to `metadata`:
 
 ```yaml
 metadata:
-  run_log_path: logs/lakeguard_run.json
+  run_log_path: logs/lakelogic_run.json
   # or
   run_log_dir: logs/
 ```
@@ -120,14 +120,14 @@ To write logs into a table (Unity Catalog, DuckDB, SQLite), use:
 
 ```yaml
 metadata:
-  run_log_table: main.governance.lakeguard_runs
+  run_log_table: main.governance.lakelogic_runs
   run_log_backend: spark   # spark | duckdb | sqlite
-  run_log_database: logs/lakeguard_run_logs.duckdb  # used for duckdb/sqlite only
+  run_log_database: logs/lakelogic_run_logs.duckdb  # used for duckdb/sqlite only
   run_log_merge_on_run_id: true  # idempotent upsert on run_id (Delta/Spark)
   run_log_table_format: delta    # delta | parquet (spark only)
 ```
 
-LakeGuard will create the table if it doesn't exist and append a new run record on every execution.
+LakeLogic will create the table if it doesn't exist and append a new run record on every execution.
 
 ### Example run log (JSON)
 
@@ -183,7 +183,7 @@ Quarantine trend by day:
 SELECT
   DATE(timestamp) AS run_date,
   AVG(quarantine_ratio) AS avg_quarantine_ratio
-FROM main.governance.lakeguard_runs
+FROM main.governance.lakelogic_runs
 GROUP BY DATE(timestamp)
 ORDER BY run_date;
 ```
@@ -196,7 +196,7 @@ SELECT
   timestamp,
   freshness_pass,
   availability_pass
-FROM main.governance.lakeguard_runs
+FROM main.governance.lakelogic_runs
 WHERE timestamp >= CURRENT_DATE - INTERVAL '7' DAY
   AND (freshness_pass = false OR availability_pass = false)
 ORDER BY timestamp DESC;
@@ -211,4 +211,4 @@ ORDER BY timestamp DESC;
 - **Audit readiness**: run logs and lineage provide a verifiable trail.
 - **Self-serve trust**: analysts can see exactly where data came from.
 
-By combining quality, lineage, and observability, LakeGuard turns your lakehouse into a transparent and defensible data platform.
+By combining quality, lineage, and observability, LakeLogic turns your lakehouse into a transparent and defensible data platform.

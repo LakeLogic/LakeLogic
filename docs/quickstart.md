@@ -6,17 +6,17 @@ This is the fastest path from install to a successful run.
 
 ```bash
 # With all engines (recommended for testing)
-pip install "lakeguard[all]"
+pip install "lakelogic[all]"
 
 # Or using uv (faster)
-uv pip install "lakeguard[all]"
+uv pip install "lakelogic[all]"
 ```
 
 ## 2. Run Your First Contract
 
 ```bash
 cd examples/01_getting_started/basic_validation
-lakeguard run --contract contract.yaml --source data/sample_customers.csv
+lakelogic run --contract contract.yaml --source data/sample_customers.csv
 ```
 
 You should see output showing:
@@ -49,10 +49,10 @@ examples/
 
 ## 5. Try Another Engine
 
-LakeGuard supports multiple engines. Try DuckDB:
+LakeLogic supports multiple engines. Try DuckDB:
 
 ```bash
-lakeguard run --engine duckdb \
+lakelogic run --engine duckdb \
   --contract examples/01_getting_started/basic_validation/contract.yaml \
   --source examples/01_getting_started/basic_validation/data/sample_customers.csv
 ```
@@ -62,7 +62,7 @@ lakeguard run --engine duckdb \
 Generate a contract from existing data:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing examples/05_production/insurance_elt/data/bronze \
   --output-dir my_contracts \
   --registry my_contracts/_registry.yaml \

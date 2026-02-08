@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from lakeguard.cli import driver
+from lakelogic.cli import driver
 
 
 def test_driver_apply_overrides(tmp_path: Path) -> None:

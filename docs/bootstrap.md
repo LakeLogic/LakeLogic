@@ -1,4 +1,4 @@
-# LakeGuard Bootstrap
+# LakeLogic Bootstrap
 
 The bootstrap command generates **starter contracts + a registry** by scanning a landing zone.
 It accelerates onboarding for new systems when no contracts exist yet.
@@ -7,12 +7,12 @@ It accelerates onboarding for new systems when no contracts exist yet.
 
 - **New system onboarding** with only raw landing files available.
 - **Legacy data dump** where schemas are unknown.
-- **Rapid POC** to validate whether LakeGuard fits a data source.
+- **Rapid POC** to validate whether LakeLogic fits a data source.
 
 ## Basic Usage
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing data/landing/new_system \
   --output-dir contracts/new_system \
   --registry contracts/new_system/_registry.yaml \
@@ -26,7 +26,7 @@ This scans the landing zone, infers a schema for each entity, writes contracts, 
 Generate profiles and detect PII during bootstrap:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing data/landing/new_system \
   --output-dir contracts/new_system \
   --registry contracts/new_system/_registry.yaml \
@@ -43,7 +43,7 @@ This writes a profile report per entity and annotates detected PII fields in the
 If new files or entities appear later, you can sync the registry without re-creating everything:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing data/landing/new_system \
   --output-dir contracts/new_system \
   --registry contracts/new_system/_registry.yaml \
@@ -56,7 +56,7 @@ This adds new entities to the registry but leaves existing contracts unchanged.
 ### Update Existing Schemas
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing data/landing/new_system \
   --output-dir contracts/new_system \
   --registry contracts/new_system/_registry.yaml \
@@ -70,7 +70,7 @@ This appends any newly discovered columns to existing contract schemas.
 ### Overwrite Existing Contracts
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing data/landing/new_system \
   --output-dir contracts/new_system \
   --registry contracts/new_system/_registry.yaml \
@@ -111,7 +111,7 @@ landing/crm/contacts/*.csv
 Bootstrap:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing landing/crm \
   --output-dir contracts/crm \
   --registry contracts/crm/_registry.yaml \
@@ -137,7 +137,7 @@ landing/vendor/accounts/*.parquet
 Bootstrap:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing landing/vendor \
   --output-dir contracts/vendor \
   --registry contracts/vendor/_registry.yaml \
@@ -158,7 +158,7 @@ landing/audit/roles_2026-02-05.csv
 Bootstrap:
 
 ```bash
-lakeguard bootstrap \
+lakelogic bootstrap \
   --landing landing/audit \
   --output-dir contracts/audit \
   --registry contracts/audit/_registry.yaml \
@@ -174,7 +174,7 @@ This bootstraps contracts from file prefixes when there are no entity subfolders
 - You can immediately run with:
 
 ```bash
-lakeguard-driver --registry contracts/new_system/_registry.yaml --layers bronze
+lakelogic-driver --registry contracts/new_system/_registry.yaml --layers bronze
 ```
 This runs the generated Bronze contracts immediately after bootstrap.
 
@@ -190,5 +190,5 @@ This runs the generated Bronze contracts immediately after bootstrap.
 For profiling and PII detection, install the optional dependencies:
 
 ```bash
-pip install "lakeguard[profiling]"
+pip install "lakelogic[profiling]"
 ```

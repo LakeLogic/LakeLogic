@@ -1,11 +1,11 @@
 from typing import Tuple, Any, List
-from lakeguard.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter
 from loguru import logger
 from pathlib import Path
 
 class SparkAdapter(EngineAdapter):
     """
-    Spark execution engine for LakeGuard.
+    Spark execution engine for LakeLogic.
     Uses Spark SQL and Column Expressions for evaluation.
     """
 

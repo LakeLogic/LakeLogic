@@ -1,4 +1,4 @@
-from lakeguard.cli.main import app
+from lakelogic.cli.main import app
 
 __all__ = ["app"]
 

@@ -1,18 +1,18 @@
 # Installation Guide
 
-LakeGuard is designed to be lightweight. Install only what you need and scale up anytime.
+LakeLogic is designed to be lightweight. Install only what you need and scale up anytime.
 
 ## 1. Using [uv](https://github.com/astral-sh/uv) (Recommended)
 
-`uv` is the fastest way to install and manage LakeGuard.
+`uv` is the fastest way to install and manage LakeLogic.
 
 ```bash
 # Install everything (recommended for testing)
-uv pip install "lakeguard[all]"
+uv pip install "lakelogic[all]"
 
 # Or install only what you need
-uv pip install "lakeguard[polars]"
-uv pip install "lakeguard[spark]"
+uv pip install "lakelogic[polars]"
+uv pip install "lakelogic[spark]"
 ```
 
 ## 2. Using pip
@@ -20,7 +20,7 @@ uv pip install "lakeguard[spark]"
 If you prefer standard `pip`:
 
 ```bash
-pip install "lakeguard[all]"
+pip install "lakelogic[all]"
 ```
 
 ## Installation Options (Extras)
@@ -49,7 +49,7 @@ Install `[duckdb]` or `[polars]` for high-performance OSS processing. After inst
 
 ```bash
 
-lakeguard setup-oss
+lakelogic setup-oss
 
 ```
 This command pre-installs the necessary DuckDB extensions (Iceberg, Delta, Cloud Drivers) so they are available offline and during runtime.
@@ -58,13 +58,13 @@ This command pre-installs the necessary DuckDB extensions (Iceberg, Delta, Cloud
 
 ## Developer Installation
 
-If you want to contribute to LakeGuard:
+If you want to contribute to LakeLogic:
 
 1. **Clone the repo**:
    ```bash
 
-   git clone https://github.com/LineageLogic/LakeGuard.git
-   cd lakeguard
+   git clone https://github.com/LineageLogic/LakeLogic.git
+   cd lakelogic
 
    ```
 

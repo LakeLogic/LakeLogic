@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from lakeguard.cli import driver
+from lakelogic.cli import driver
 
 
 def test_driver_end_to_end_pipeline(tmp_path: Path) -> None:

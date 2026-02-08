@@ -8,15 +8,15 @@ GOLD_REGISTRY = "examples/insurance_elt/contracts/insurance/warehouse/_registry.
 
 def run_layer(layer: str) -> None:
     cmd = [
-        "lakeguard-driver",
+        "lakelogic-driver",
         "--registry", REGISTRY,
         "--reference-registry", REF_REGISTRY,
         "--gold-registry", GOLD_REGISTRY,
         "--layers", layer,
         "--window", "last_success",
-        "--summary-table", "lakeguard.pipeline_runs",
+        "--summary-table", "lakelogic.pipeline_runs",
         "--summary-backend", "duckdb",
-        "--summary-database", "examples/insurance_elt/output/run_logs/lakeguard_pipeline_runs.duckdb",
+        "--summary-database", "examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
         "--metrics-path", "examples/insurance_elt/output/run_logs/pipeline_metrics.json",
     ]
     subprocess.run(cmd, check=True)
@@ -42,7 +42,7 @@ def run_gold():
     run_layer("gold")
 
 
-@flow(name="lakeguard-insurance-elt")
+@flow(name="lakelogic-insurance-elt")
 def insurance_elt():
     ref = run_reference()
     bronze = run_bronze(wait_for=[ref])

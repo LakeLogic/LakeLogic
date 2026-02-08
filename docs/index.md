@@ -1,11 +1,11 @@
-# LakeGuard
+# LakeLogic
 
 The fastest path from data ingestion to production-ready quality gates with Polars, Spark, DuckDB, Pandas, Snowflake, and more.
 
 === "Python"
 
     ```python
-    from lakeguard import DataProcessor
+    from lakelogic import DataProcessor
     
     processor = DataProcessor(
         contract="contract.yaml",
@@ -22,11 +22,11 @@ The fastest path from data ingestion to production-ready quality gates with Pola
 === "CLI"
 
     ```bash
-    # Install LakeGuard
-    pip install "lakeguard[all]"
+    # Install LakeLogic
+    pip install "lakelogic[all]"
     
     # Run your first contract
-    lakeguard run \
+    lakelogic run \
       --contract contract.yaml \
       --source data.csv \
       --output-good validated.csv \
@@ -67,7 +67,7 @@ The fastest path from data ingestion to production-ready quality gates with Pola
 === "Spark"
 
     ```python
-    from lakeguard import DataProcessor
+    from lakelogic import DataProcessor
     
     # Auto-discovers Spark in Databricks/Synapse
     processor = DataProcessor(
@@ -85,7 +85,7 @@ The fastest path from data ingestion to production-ready quality gates with Pola
 === "Snowflake"
 
     ```python
-    from lakeguard import DataProcessor
+    from lakelogic import DataProcessor
     
     # Direct Snowflake execution (table-only)
     processor = DataProcessor(
@@ -103,7 +103,7 @@ The fastest path from data ingestion to production-ready quality gates with Pola
 Follow our Quickstart guide to get started and make your first quality gate in minutes.
 
 !!! tip "Explore More Examples"
-    The [`examples/` directory](https://github.com/LineageLogic/LakeGuard/tree/main/examples) in the repo contains 90+ runnable examples organized by skill level:
+    The [`examples/` directory](https://github.com/LineageLogic/LakeLogic/tree/main/examples) in the repo contains 90+ runnable examples organized by skill level:
     
     - **Getting Started**: Your first contract in 5 minutes
     - **Tutorials**: Medallion architecture, reference joins
@@ -153,11 +153,11 @@ Follow our Quickstart guide to get started and make your first quality gate in m
 
 ---
 
-## Why LakeGuard?
+## Why LakeLogic?
 
 ### Write Once. Run Anywhere.
 
-Stop paying the "Re-adaptation Tax." In a traditional stack, moving from a Warehouse (SQL) to a Lakehouse (PySpark) means rewriting your validation rules. With LakeGuard, your **Data Contract is the Source of Truth**.
+Stop paying the "Re-adaptation Tax." In a traditional stack, moving from a Warehouse (SQL) to a Lakehouse (PySpark) means rewriting your validation rules. With LakeLogic, your **Data Contract is the Source of Truth**.
 
 - **SQL-First:** Define your constraints, rules, and logic in standard SQL—the language your team already speaks.
 - **Zero Adaptation:** Move your pipelines from **dbt/Snowflake** to **Databricks/Spark** to **Local/Polars** with **zero changes** to your contract.
@@ -172,7 +172,7 @@ Stop paying the "Re-adaptation Tax." In a traditional stack, moving from a Wareh
     Mathematically provable data integrity. Bad data is detoured into a **Safe Quarantine** area, ensuring production dashboards are never poisoned.
 
 !!! tip "Visual Traceability"
-    Gold-layer metrics should never be "Black Boxes." LakeGuard supports aggregate roll-ups that preserve source keys, providing business users with a visual drill-down from board-level KPIs back to the raw source records.
+    Gold-layer metrics should never be "Black Boxes." LakeLogic supports aggregate roll-ups that preserve source keys, providing business users with a visual drill-down from board-level KPIs back to the raw source records.
 
 ---
 
@@ -195,17 +195,17 @@ The fastest way to get started is with **[uv](https://github.com/astral-sh/uv)**
 
 ```bash
 # Install with all engines
-uv pip install "lakeguard[all]"
+uv pip install "lakelogic[all]"
 
 # Run your first contract (auto-discovers the best engine)
-lakeguard run --contract my_contract.yaml --source raw_data.parquet
+lakelogic run --contract my_contract.yaml --source raw_data.parquet
 ```
 
 ---
 
 ## Scale with LineageLogic
 
-LakeGuard is the open-source engine that enforces your rules. For enterprise-scale management, **[LineageLogic](https://lineagelogic.com)** provides:
+LakeLogic is the open-source engine that enforces your rules. For enterprise-scale management, **[LineageLogic](https://lineagelogic.com)** provides:
 
 - **AI-Powered Contract Generation:** Don't write YAML by hand; generate it from your data in seconds.
 - **Visual Governance:** See your real-time data health and lineage across your entire mesh.
