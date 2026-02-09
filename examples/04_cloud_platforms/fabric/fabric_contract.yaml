@@ -1,0 +1,26 @@
+version: 1.0.0
+dataset: fabric_orders
+description: "Orders from Microsoft Fabric Lakehouse"
+
+source:
+  type: database
+  connector: fabric
+  connection:
+    server: "${env:FABRIC_ENDPOINT}"
+    database: "${env:LAKEHOUSE_NAME}"
+    authentication: azure_ad
+  query: "SELECT * FROM [${env:LAKEHOUSE_NAME}].[dbo].[Orders]"
+
+quality:
+  row_rules:
+    - name: valid_order_date
+      rule: not_null
+      column: OrderDate
+      severity: error
+
+materialization:
+  bronze:
+    enabled: true
+    path: "abfss://your-workspace@onelake.dfs.fabric.microsoft.com/${env:LAKEHOUSE_NAME}.Lakehouse/Tables/BronzeOrders"
+    format: delta
+    mode: overwrite

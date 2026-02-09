@@ -1,33 +1,39 @@
-# Tutorials
+# LakeLogic Tutorials
 
-Core LakeLogic concepts through step-by-step examples.
-
-## Examples
-
-### [medallion_architecture/](medallion_architecture/)
-**Time**: 15 minutes
-
-Learn the Bronze → Silver pipeline pattern:
-- **Bronze stage**: Ingest raw data with minimal validation
-- **Silver stage**: Apply quality rules and transformations
-- Materialization to Parquet files
-
-### [reference_joins/](reference_joins/)
-**Time**: 15 minutes
-
-Enrich your data with lookup tables:
-- Link external reference data (geography, opt-outs)
-- SQL joins in transformations
-- Referential integrity checks
+Step-by-step guides to help you master LakeLogic.
 
 ---
 
-## Prerequisites
+## 🎓 **Available Tutorials**
 
-Complete [01_getting_started/basic_validation](../01_getting_started/basic_validation/) first.
+### **1. 🌊 Streaming Quickstart (Interactive)**
+**Goal:** Stream live Wikipedia edits in under 5 minutes.  
+**Notebook:** `02_tutorials/streaming_quickstart/streaming_quickstart.ipynb`
 
-## Next Steps
+### **2. 🗄️ Database Quickstart (Interactive)**
+**Goal:** Connect to your first SQL database and extract data.  
+**Notebook:** `02_tutorials/database_quickstart/database_quickstart.ipynb`
 
-After mastering these concepts:
-- [03_patterns/](../03_patterns/) - Solve specific data engineering problems
-- [04_features/](../04_features/) - Learn notifications and secrets
+### **3. ☁️ Cloud Quickstart**
+**Goal:** Load data into a cloud lakehouse (Databricks/Fabric/Snowflake).  
+**Path:** `04_cloud_platforms/`
+
+### **4. ✅ Data Quality & Validation**
+**Goal:** Learn how to use quality gates to quarantine bad data.  
+**Path:** `01_getting_started/basic_validation/`
+
+---
+
+## 🛠️ **Universal Prerequisites**
+
+```bash
+# Install the core library
+pip install lakelogic
+
+# Install all common extras
+pip install "lakelogic[all]"
+```
+
+---
+
+*New tutorials added every week!*
