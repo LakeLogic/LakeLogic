@@ -62,6 +62,7 @@ nav:
       - Lineage & Reconciliation: reconciliation.md
       - Notifications & Alerting: notifications.md
   - Reference:
+      - Contract Template: contract_template.md
       - CLI: cli.md
       - Driver: driver.md
       - Bootstrap: bootstrap.md

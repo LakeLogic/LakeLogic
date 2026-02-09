@@ -297,3 +297,6 @@ __pycache__/
 !prod.tfvars
 **/secrets*.tfvars
 **/*.auto.tfvars
+
+
+.product_vision/
