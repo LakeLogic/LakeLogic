@@ -49,6 +49,7 @@ nav:
   - Concepts:
       - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md
+      - Return Values: return_values.md
       - Contract Organization: organization.md
       - Ingestion & Cloud: ingestion.md
       - Reprocessing & Partitioning: reprocessing.md
