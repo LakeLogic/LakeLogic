@@ -113,6 +113,72 @@ Follow our Quickstart guide to get started and make your first quality gate in m
 
 ---
 
+## How It Works (In a Nutshell)
+
+LakeLogic enforces **Data Contracts as Quality Gates** across your medallion architecture:
+
+```text
+┌──────────────┐
+│  Raw Data    │  CSV, Parquet, Delta, APIs
+│  (Landing)   │
+└──────┬───────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────────┐
+│  🟤 BRONZE LAYER  (Capture Everything)                  │
+│  contract.yaml: Minimal validation, catch obvious junk  │
+└──────┬───────────────────────────────────────────┬──────┘
+       │                                            │
+       │ ✅ PASSED                                   ✗ FAILED
+       │                                            │
+       ▼                                            ▼
+┌────────────────────────┐              ┌─────────────────┐
+│  🛡️ Quality Gate       │              │ 🛑 QUARANTINE   │
+│  ───────────────       │              │                 │
+│  Pre-Process           │              │ Bad data saved  │
+│  ✓ Deduplicate         │              │ with reasons    │
+│  ✓ Filter junk         │              │                 │
+│  Validate              │              │ ↻ Reprocess     │
+│  ✓ Schema checks       │              │   after fix     │
+│  ✓ Quality rules       │              └─────────────────┘
+│  Post-Process          │
+│  ✓ Enrich data         │
+└────────┬───────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  ⚪ SILVER LAYER  (Validated & Clean)                   │
+│  contract.yaml: Full validation, business rules         │
+└──────┬───────────────────────────────────────────┬──────┘
+       │                                            │
+       │ ✅ PASSED                                   ✗ QUARANTINE
+       │                                            │
+       ▼                                            ▼
+┌────────────────────────┐              ┌─────────────────┐
+│  🛡️ Quality Gate       │              │ 🛑 QUARANTINE   │
+│  ───────────────       │              └─────────────────┘
+│  SQL or Python/Notebook│
+│  ✓ Aggregations        │
+│  ✓ ML Scoring          │
+│  ✓ Business KPIs       │
+└────────┬───────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  🟡 GOLD LAYER  (Business-Ready Analytics)              │
+│  Dashboards • ML Models • Data Products                 │
+└─────────────────────────────────────────────────────────┘
+
+✨ Key Features:
+  • 100% Reconciliation: source_count = good_count + bad_count
+  • Engine Agnostic: Same contract works on Polars, Spark, DuckDB, Pandas
+  • No Silent Failures: Failed rows quarantined with error reasons
+```
+
+[:octicons-arrow-right-24: See detailed architecture](architecture_diagram.md)
+
+---
+
 ## Meet the engines
 
 <div class="grid cards" markdown>

@@ -1,0 +1,149 @@
+name: Terraform Plan (Infrastructure)
+
+on:
+  push:
+    branches:
+      - dev
+      - stage
+      # - main
+    paths:
+      - 'infra/**'
+  pull_request:
+    branches:
+      - dev
+      - stage
+      - main
+    paths:
+      - 'infra/**'
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, test, prod]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write  # To comment on PRs
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    # Map branches to environments
+    environment: ${{ github.event.inputs.target_env || (github.ref == 'refs/heads/stage' && 'test') || (github.ref == 'refs/heads/main' && 'prod') || 'dev' }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+      TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+      TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+      TF_VAR_jumpbox_admin_password: ${{ secrets.JUMPBOX_ADMIN_PASSWORD }}
+      ENVIRONMENT_NAME: ${{ github.event.inputs.target_env || (github.ref == 'refs/heads/stage' && 'test') || (github.ref == 'refs/heads/main' && 'prod') || 'dev' }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: Terraform Init
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          # Passing the subscription ID explicitly helps the backend connect via OIDC
+          terraform init \
+            -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}"
+
+      - name: Terraform Validate
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          terraform plan -no-color -var-file="${{ env.ENVIRONMENT_NAME }}.tfvars" -out=tfplan.binary
+          terraform show -no-color tfplan.binary > tfplan.txt
+        continue-on-error: true
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ env.ENVIRONMENT_NAME }}-${{ github.sha }}
+          path: infra/environments/${{ env.ENVIRONMENT_NAME }}/tfplan.binary
+          retention-days: 5
+
+      - name: Upload Plan Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-output-${{ env.ENVIRONMENT_NAME }}-${{ github.sha }}
+          path: infra/environments/${{ env.ENVIRONMENT_NAME }}/tfplan.txt
+          retention-days: 5
+
+      - name: Comment Plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('infra/environments/${{ env.ENVIRONMENT_NAME }}/tfplan.txt', 'utf8');
+            const truncatedPlan = planOutput.length > 65000 ? planOutput.substring(0, 65000) + '\n\n... (truncated)' : planOutput;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan - \`${{ env.ENVIRONMENT_NAME }}\` environment\n\n\`\`\`hcl\n${truncatedPlan}\n\`\`\`\n\n---\n**Note:** This is a plan only. To apply, merge this PR and trigger the \`infra-apply\` workflow.`
+            });
+
+      - name: Plan Summary
+        run: |
+          echo "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ env.ENVIRONMENT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ steps.plan.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>View Plan Output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat infra/environments/${{ env.ENVIRONMENT_NAME }}/tfplan.txt >> $GITHUB_STEP_SUMMARY || echo "Plan output not available" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for Destructive Changes
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          echo "🔍 Checking for destructive changes..."
+          
+          if grep -q "must be replaced" tfplan.txt || grep -q "will be destroyed" tfplan.txt; then
+            echo "⚠️  WARNING: This plan contains DESTRUCTIVE changes!"
+            echo ""
+            echo "Resources to be REPLACED or DESTROYED:"
+            grep -E "(must be replaced|will be destroyed)" tfplan.txt || true
+            echo ""
+            echo "::warning::Destructive changes detected! Review carefully before applying."
+            exit 0  # Don't fail, just warn
+          else
+            echo "✅ No destructive changes detected"
+          fi
+
+      - name: Fail if Plan Failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

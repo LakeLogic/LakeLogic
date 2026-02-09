@@ -1,0 +1,133 @@
+name: Terraform Apply (Infrastructure)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, test, prod]
+      plan_run_id:
+        description: 'Plan Run ID (optional - leave empty to plan fresh)'
+        required: false
+        type: string
+      force_unlock_id:
+        description: 'Lock ID to force-unlock (DANGEROUS: use ONLY if a run crashed)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.target_env }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+      TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+      TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+      TF_VAR_jumpbox_admin_password: ${{ secrets.JUMPBOX_ADMIN_PASSWORD }}
+      ENVIRONMENT_NAME: ${{ github.event.inputs.target_env }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: Terraform Init
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          terraform init \
+            -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}"
+
+      - name: Terraform Force Unlock
+        if: github.event.inputs.force_unlock_id != ''
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: terraform force-unlock -force ${{ github.event.inputs.force_unlock_id }}
+
+      - name: Download Saved Plan (if provided)
+        if: github.event.inputs.plan_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ env.ENVIRONMENT_NAME }}-${{ github.sha }}
+          path: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        continue-on-error: true
+
+      - name: Terraform Plan (Fresh)
+        if: github.event.inputs.plan_run_id == ''
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          echo "📋 Running fresh plan before apply..."
+          terraform plan -var-file="${{ env.ENVIRONMENT_NAME }}.tfvars" -out=tfplan.binary
+          terraform show -no-color tfplan.binary > tfplan.txt
+          
+          echo "### Fresh Plan Output" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat tfplan.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for Destructive Changes (Safety Check)
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          if [ -f tfplan.txt ]; then
+            echo "🔍 Final safety check for destructive changes..."
+            
+            if grep -q "must be replaced" tfplan.txt || grep -q "will be destroyed" tfplan.txt; then
+              echo "::error::⛔ DESTRUCTIVE CHANGES DETECTED!"
+              echo ""
+              echo "Resources to be REPLACED or DESTROYED:"
+              grep -E "(must be replaced|will be destroyed)" tfplan.txt || true
+              echo ""
+              echo "If you're sure about these changes, review the plan and proceed."
+              # Don't fail - let user decide via environment protection rules
+            else
+              echo "✅ No destructive changes detected"
+            fi
+          fi
+
+      - name: Terraform Apply
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          if [ -f tfplan.binary ]; then
+            echo "🚀 Applying saved plan..."
+            terraform apply -auto-approve tfplan.binary
+          else
+            echo "🚀 Planning and applying..."
+            terraform apply -auto-approve -var-file="${{ env.ENVIRONMENT_NAME }}.tfvars"
+          fi
+
+      - name: Terraform Output
+        working-directory: infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          echo "### Terraform Outputs - ${{ env.ENVIRONMENT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          terraform output >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Deployment Summary
+        run: |
+          echo "## ✅ Infrastructure Deployed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ env.ENVIRONMENT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Applied at:** $(date -u)" >> $GITHUB_STEP_SUMMARY

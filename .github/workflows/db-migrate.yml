@@ -1,0 +1,37 @@
+name: 🗄️ Database Migration (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, test, prod]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  migrate:
+    name: Run Alembic Migration
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.target_env }}
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start Azure Container App Job
+        run: |
+          az containerapp job start \
+            --name ${{ vars.PROJECT_PREFIX }}-${{ github.event.inputs.target_env || 'dev' }}-migrate-job \
+            --resource-group ${{ vars.PROJECT_PREFIX }}-${{ github.event.inputs.target_env || 'dev' }}-rg

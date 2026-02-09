@@ -1,0 +1,62 @@
+name: 🏗️ Infrastructure Deployment
+
+on:
+  # Automatic deployment when infra changes are pushed
+  push:
+    branches:
+      - dev      # Auto-deploy infra to dev
+      - stage    # Auto-deploy infra to test
+      # - main   # Uncomment to auto-deploy infra to prod (use with caution!)
+    paths:
+      - 'infra/**'  # Only trigger if infra files change
+  
+  # Manual deployment for any environment
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, test, prod]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform Provisioning
+    runs-on: ubuntu-latest
+    # Map branches to environments: dev->dev, stage->test, main->prod
+    environment: ${{ github.event.inputs.target_env || (github.ref == 'refs/heads/stage' && 'test') || (github.ref == 'refs/heads/main' && 'prod') || 'dev' }}
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+      TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+      TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+      TF_VAR_jumpbox_ssh_public_key: ${{ secrets.JUMPBOX_SSH_PUBLIC_KEY }}
+      ENVIRONMENT_NAME: ${{ github.event.inputs.target_env || (github.ref == 'refs/heads/stage' && 'test') || (github.ref == 'refs/heads/main' && 'prod') || 'dev' }}
+      
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init & Apply
+        working-directory: ./infra/environments/${{ env.ENVIRONMENT_NAME }}
+        run: |
+          # Passing the subscription ID explicitly helps the backend connect via OIDC
+          terraform init -reconfigure -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          terraform apply -auto-approve
