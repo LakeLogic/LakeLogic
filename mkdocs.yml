@@ -30,7 +30,6 @@ theme:
     - content.code.annotate
     - content.tabs.link
 
-
 nav:
   - Home: index.md
   - Getting Started:
@@ -48,6 +47,7 @@ nav:
       - Late Arriving Reprocess: patterns/late_arriving_reprocess.md
       - External Python Logic: patterns/external_python_logic.md
   - Concepts:
+      - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md
       - Contract Organization: organization.md
       - Ingestion & Cloud: ingestion.md
@@ -94,7 +94,6 @@ markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
-
 
 extra_css:
   - stylesheets/extra.css
