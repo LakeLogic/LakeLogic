@@ -9,6 +9,7 @@ This module provides connectors for various streaming protocols:
 - Azure Service Bus - Queue and topic/subscription messaging
 - AWS SQS - Simple Queue Service
 - GCP Pub/Sub - Google Cloud messaging
+- Webhook - Receive HTTP POST requests in real-time
 """
 
 import json
@@ -751,3 +752,105 @@ class GCPPubSubConnector:
         if self._subscriber:
             self._subscriber.close()
         logger.info("Pub/Sub subscriber closed")
+
+
+class WebhookConnector:
+    """
+    Webhook connector (Receiver).
+    
+    Acts as an HTTP server that listens for POST requests.
+    Perfect for receiving push notifications from:
+    - GitHub (push, pr events)
+    - Stripe (payment events)
+    - Custom apps
+    
+    Example:
+        >>> connector = WebhookConnector(port=8080, path="/webhook")
+        >>> for event in connector.stream():
+        ...     print(event)
+    """
+    
+    def __init__(
+        self,
+        port: int = 8080,
+        path: str = "/webhook",
+        host: str = "0.0.0.0"
+    ):
+        """
+        Initialize Webhook receiver.
+        
+        Args:
+            port: Port to listen on
+            path: HTTP path to listen on
+            host: Host to bind to
+        """
+        self.port = port
+        self.path = path
+        self.host = host
+        self._server = None
+        self._queue = []
+    
+    def stream(self) -> Iterator[Dict[str, Any]]:
+        """
+        Stream events received via HTTP POST.
+        
+        Yields:
+            Parsed JSON payloads
+        """
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import threading
+        import time
+
+        queue = self._queue
+
+        class WebhookHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                if self.path != path_ref:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                
+                try:
+                    data = json.loads(body.decode('utf-8'))
+                    queue.append(data)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "received"}).encode())
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"Invalid JSON")
+
+            def log_message(self, format, *args):
+                # Silence standard logging to avoid cluttering terminal
+                pass
+
+        path_ref = self.path
+        self._server = HTTPServer((self.host, self.port), WebhookHandler)
+        
+        logger.info(f"🚀 Webhook server listening on http://{self.host}:{self.port}{self.path}")
+        
+        # Run server in a separate thread
+        server_thread = threading.Thread(target=self._server.serve_forever)
+        server_thread.daemon = True
+        server_thread.start()
+        
+        try:
+            while True:
+                if queue:
+                    yield queue.pop(0)
+                else:
+                    time.sleep(0.1)
+        except KeyboardInterrupt:
+            self.close()
+
+    def close(self):
+        """Stop the HTTP server."""
+        if self._server:
+            self._server.shutdown()
+            self._server.server_close()
+        logger.info("Webhook server stopped")

@@ -343,8 +343,27 @@ class StreamingDataProcessor:
                     yield event
             
             elif connector == "kafka":
-                # Kafka connector (TODO)
-                raise NotImplementedError("Kafka connector not yet implemented")
+                # Kafka connector
+                from lakelogic.engines.streaming_connectors import KafkaConnector
+                
+                brokers = source_config.get("brokers", ["localhost:9092"])
+                topic = source_config.get("topic")
+                group = source_config.get("consumer_group", "lakelogic")
+                
+                conn = KafkaConnector(brokers, topic, group)
+                for event in conn.stream():
+                    yield event
+
+            elif connector == "webhook":
+                # Webhook connector (Receiver)
+                from lakelogic.engines.streaming_connectors import WebhookConnector
+                
+                port = source_config.get("port", 8080)
+                path = source_config.get("path", "/webhook")
+                
+                conn = WebhookConnector(port=port, path=path)
+                for event in conn.stream():
+                    yield event
             
             else:
                 raise ValueError(f"Unknown connector: {connector}")

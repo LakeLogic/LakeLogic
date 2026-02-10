@@ -1,145 +1,148 @@
-/* Gemini API-inspired styling for LakeLogic documentation */
+/* LakeLogic Premium Documentation Styles */
 
 :root {
-  --md-primary-fg-color: #1a73e8;
-  --md-primary-fg-color--light: #4285f4;
-  --md-primary-fg-color--dark: #0d47a1;
-  --md-accent-fg-color: #00bfa5;
+  /* Color Palette - Vibrant Obsidian & Electric Blue */
+  --md-primary-fg-color: #3b82f6;           /* Electric Blue */
+  --md-primary-fg-color--light: #60a5fa;
+  --md-primary-fg-color--dark: #2563eb;
+  --md-accent-fg-color: #8b5cf6;            /* Violet Accent */
+  
+  /* Surface Colors */
+  --md-default-bg-color: #0d1117;           /* Github Dark Dimmed Style */
+  --md-default-bg-color--light: #161b22;
+  --md-code-bg-color: #010409;
+  
+  /* Text Colors */
+  --md-default-fg-color: #c9d1d9;
+  --md-default-fg-color--light: #8b949e;
+  --md-default-fg-color--lighter: #484f58;
 }
 
-/* Hero section styling */
-.md-typeset h1:first-of-type {
-  font-size: 3rem;
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0d1117;
+  --md-default-bg-color--light: #161b22;
+  --md-code-bg-color: #010409;
+}
+
+/* --- Global Adjustments --- */
+body {
+  font-family: 'Inter', 'Space Grotesk', sans-serif !important;
+}
+
+/* --- Header Section --- */
+.md-header {
+  background-color: rgba(13, 17, 23, 0.8) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.md-header__button.md-logo img {
+  filter: drop-shadow(0 0 8px var(--md-primary-fg-color));
+}
+
+/* --- Navigation & Sidebar --- */
+.md-nav__link {
   font-weight: 400;
+  transition: all 0.2s ease;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem !important;
+}
+
+.md-nav__link:hover {
+  color: var(--md-primary-fg-color) !important;
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+/* The "Vibrant Indicator" for active items */
+.md-nav__link--active {
+  color: var(--md-primary-fg-color) !important;
+  font-weight: 700 !important;
+  border-left: 2px solid var(--md-primary-fg-color);
+  background-color: rgba(59, 130, 246, 0.08);
+  border-radius: 0 6px 6px 0;
+}
+
+/* Sidebar Sections */
+.md-nav__title {
+  font-weight: 700 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.65rem !important;
+  color: var(--md-default-fg-color--light) !important;
+  margin-top: 1rem !important;
+}
+
+/* --- Typography Expansions --- */
+.md-typeset h1 {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #f0f6fc;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
   letter-spacing: -0.02em;
-  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 0.5rem;
 }
 
-.md-typeset h1:first-of-type + p {
-  font-size: 1.25rem;
-  color: var(--md-default-fg-color--light);
-  margin-bottom: 2rem;
-}
-
-/* Tabbed content styling */
-.tabbed-set {
-  margin: 2rem 0;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.tabbed-labels {
-  display: flex;
-  background: var(--md-code-bg-color);
-  border-bottom: 1px solid var(--md-default-fg-color--lightest);
-}
-
-.tabbed-labels > label {
-  padding: 1rem 1.5rem;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s;
-  border-bottom: 2px solid transparent;
-}
-
-.tabbed-labels > label:hover {
-  background: var(--md-default-bg-color);
-}
-
-.tabbed-set > input:checked + label {
-  border-bottom-color: var(--md-primary-fg-color);
-  color: var(--md-primary-fg-color);
-}
-
-/* Code block enhancements */
+/* --- Code Blocks --- */
 .md-typeset pre > code {
-  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.2);
 }
 
 .highlight {
-  border-radius: 8px;
+  background-color: var(--md-code-bg-color) !important;
 }
 
-/* Button styling */
-.md-button {
-  border-radius: 24px;
-  padding: 0.75rem 2rem;
-  font-weight: 500;
-  text-transform: none;
-  transition: all 0.2s;
-}
-
-.md-button--primary {
-  background-color: var(--md-primary-fg-color);
-  color: white;
-  box-shadow: 0 2px 4px rgba(26, 115, 232, 0.3);
-}
-
-.md-button--primary:hover {
-  background-color: var(--md-primary-fg-color--dark);
-  box-shadow: 0 4px 8px rgba(26, 115, 232, 0.4);
-  transform: translateY(-1px);
-}
-
-/* Card grid styling */
-.grid.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-  margin: 2rem 0;
-}
-
-.grid.cards > * {
-  background: var(--md-default-bg-color);
-  border: 1px solid var(--md-default-fg-color--lightest);
+/* --- Admonitions (Note/Tip) --- */
+.md-typeset .admonition {
   border-radius: 12px;
-  padding: 1.5rem;
-  transition: all 0.2s;
+  border-left-width: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* --- Search Bar --- */
+.md-search__inner {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-radius: 20px !important;
+}
+
+/* --- Cards Grid (Premium Look) --- */
+.grid.cards > * {
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: linear-gradient(135deg, #161b22 0%, #0d1117 100%) !important;
+  border-radius: 16px !important;
+  padding: 2rem !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 .grid.cards > *:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-  border-color: var(--md-primary-fg-color--light);
+  border-color: var(--md-primary-fg-color) !important;
+  transform: translateY(-4px) scale(1.02) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4) !important;
 }
 
-.grid.cards .lg.middle {
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
-  color: var(--md-primary-fg-color);
+/* --- Footer --- */
+.md-footer {
+  background-color: #0b0e14;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* Admonition enhancements */
-.md-typeset .admonition {
-  border-radius: 8px;
-  border-left-width: 4px;
+/* --- Custom Scrollbar --- */
+::-webkit-scrollbar {
+  width: 8px;
 }
-
-/* Table styling */
-.md-typeset table:not([class]) {
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+::-webkit-scrollbar-track {
+  background: var(--md-default-bg-color);
 }
-
-.md-typeset table:not([class]) th {
-  background: var(--md-code-bg-color);
-  font-weight: 600;
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 10px;
 }
-
-/* Navigation enhancements */
-.md-tabs {
-  background: var(--md-primary-fg-color);
-}
-
-/* Responsive adjustments */
-@media screen and (max-width: 76.1875em) {
-  .md-typeset h1:first-of-type {
-    font-size: 2rem;
-  }
-  
-  .grid.cards {
-    grid-template-columns: 1fr;
-  }
+::-webkit-scrollbar-thumb:hover {
+  background: #484f58;
 }

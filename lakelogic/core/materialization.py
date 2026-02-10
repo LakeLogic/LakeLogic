@@ -372,14 +372,31 @@ def _read_frame(path: Path, output_format: str):
     raise ValueError(f"Unsupported output format: {output_format}")
 
 
-def _merge_frames(existing, incoming, primary_key: List[str]):
+def _merge_frames(
+    existing, 
+    incoming, 
+    primary_key: List[str],
+    soft_delete_col: Optional[str] = None,
+    soft_delete_val: Any = True,
+    soft_delete_time_col: Optional[str] = None,
+    soft_delete_reason_col: Optional[str] = None,
+    cdc_op_field: Optional[str] = None,
+    cdc_delete_values: Optional[List[Any]] = None
+):
     """
     Merge incoming rows into existing rows using a primary key.
+    Supports CDC delete signals and soft-deletion with metadata.
 
     Args:
         existing: Existing dataframe.
-        incoming: Incoming dataframe.
+        incoming: Incoming dataframe (unfiltered).
         primary_key: Primary key columns.
+        soft_delete_col: Optional column to flag as deleted.
+        soft_delete_val: Value to set in soft_delete_col.
+        soft_delete_time_col: Optional column for deletion timestamp.
+        soft_delete_reason_col: Optional column for deletion reason.
+        cdc_op_field: Column indicating the CDC operation (U, I, D).
+        cdc_delete_values: List of values in cdc_op_field representing a delete.
 
     Returns:
         Merged dataframe.
@@ -387,22 +404,85 @@ def _merge_frames(existing, incoming, primary_key: List[str]):
     if not primary_key:
         raise ValueError("primary_key is required for merge strategy.")
     import pandas as pd
+    from datetime import datetime, timezone
 
     existing = existing.copy()
     incoming = incoming.copy()
 
+    # 1. Handle CDC Deletes
+    deletes = pd.DataFrame()
+    if cdc_op_field and cdc_delete_values and cdc_op_field in incoming.columns:
+        delete_mask = incoming[cdc_op_field].isin(cdc_delete_values)
+        deletes = incoming[delete_mask].copy()
+        incoming = incoming[~delete_mask].copy()
+
     all_cols = list(dict.fromkeys(list(existing.columns) + list(incoming.columns)))
+    
+    # Ensure metadata columns exist in schema
+    metadata_cols = []
+    if soft_delete_col: metadata_cols.append(soft_delete_col)
+    if soft_delete_time_col: metadata_cols.append(soft_delete_time_col)
+    if soft_delete_reason_col: metadata_cols.append(soft_delete_reason_col)
+
+    for col in metadata_cols:
+        if col not in all_cols:
+            all_cols.append(col)
+            existing[col] = None
+
     existing = existing.reindex(columns=all_cols)
     incoming = incoming.reindex(columns=all_cols)
 
+    # Prepare indices
     existing = existing.set_index(primary_key)
     incoming = incoming.set_index(primary_key)
 
+    # 2. Apply Updates/Inserts
     existing.update(incoming)
     new_rows = incoming.loc[~incoming.index.isin(existing.index)]
+    
+    # 3. Apply Soft Deletes
+    if not deletes.empty and soft_delete_col:
+        deletes = deletes.reindex(columns=all_cols)
+        
+        # Set metadata for the delete batch (Smart Fill)
+        deletes[soft_delete_col] = soft_delete_val
+        
+        if soft_delete_time_col:
+            # Fill only where source didn't provide a timestamp
+            now_ts = datetime.now(timezone.utc).isoformat()
+            if soft_delete_time_col in deletes.columns:
+                deletes[soft_delete_time_col] = deletes[soft_delete_time_col].fillna(now_ts)
+            else:
+                deletes[soft_delete_time_col] = now_ts
+                
+        if soft_delete_reason_col:
+            # Fill only where source didn't provide a reason
+            default_reason = "cdc_delete_signal"
+            if soft_delete_reason_col in deletes.columns:
+                deletes[soft_delete_reason_col] = deletes[soft_delete_reason_col].fillna(default_reason).astype(str)
+            else:
+                deletes[soft_delete_reason_col] = default_reason
+            
+        deletes = deletes.set_index(primary_key)
+        
+        # Update existing records with the delete flag and metadata
+        existing.update(deletes)
+        
+        # If deleted record didn't exist, we might still want to insert it as a "tombstone"
+        new_deletes = deletes.loc[~deletes.index.isin(existing.index)]
+        if not new_deletes.empty:
+            new_rows = pd.concat([new_rows, new_deletes])
+
+    # 4. Apply Hard Deletes (if no soft delete col)
+    elif not deletes.empty:
+        # Filter existing by removing matching keys from deletes
+        delete_keys = deletes.set_index(primary_key).index
+        existing = existing.loc[~existing.index.isin(delete_keys)]
+
     merged = existing.reset_index()
     if not new_rows.empty:
         merged = pd.concat([merged, new_rows.reset_index()], ignore_index=True)
+        
     return merged
 
 
@@ -978,7 +1058,26 @@ def materialize_dataframe(
     elif strategy == "merge":
         if target_file.exists():
             existing = _read_frame(target_file, resolved_format)
-            merged = _merge_frames(existing, pdf, primary_key)
+            
+            # Extract CDC and Soft Delete settings
+            cdc_op_field = getattr(contract.source, "cdc_op_field", None) if contract.source else None
+            cdc_delete_values = getattr(contract.source, "cdc_delete_values", None) if contract.source else None
+            soft_delete_col = getattr(mat, "soft_delete_column", None)
+            soft_delete_val = getattr(mat, "soft_delete_value", True)
+            soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
+            soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
+            
+            merged = _merge_frames(
+                existing, 
+                pdf, 
+                primary_key,
+                soft_delete_col=soft_delete_col,
+                soft_delete_val=soft_delete_val,
+                soft_delete_time_col=soft_delete_time_col,
+                soft_delete_reason_col=soft_delete_reason_col,
+                cdc_op_field=cdc_op_field,
+                cdc_delete_values=cdc_delete_values
+            )
         else:
             merged = pdf
         _write_frame(merged, target_file, resolved_format)

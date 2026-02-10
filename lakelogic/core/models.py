@@ -335,6 +335,10 @@ class Materialization(BaseModel):
     target_path: Optional[str] = None
     format: Optional[str] = None
     scd2: Optional[Dict[str, Any]] = None
+    soft_delete_column: Optional[str] = None # e.g. '_lakelogic_is_deleted'
+    soft_delete_value: Any = True # Value to set when deleted
+    soft_delete_time_column: Optional[str] = None # e.g. '_lakelogic_deleted_at'
+    soft_delete_reason_column: Optional[str] = None # e.g. '_lakelogic_delete_reason'
 
 class LineageConfig(BaseModel):
     """Lineage capture settings."""
