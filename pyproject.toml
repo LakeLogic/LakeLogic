@@ -17,10 +17,62 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+delta = [
+    "deltalake>=0.15.0",  # Delta Lake support without Spark
+    # Azure (Fabric LakeDB, Synapse Analytics, Unity Catalog on Azure)
+    "azure-identity>=1.15.0",  # Azure AD authentication
+    "azure-storage-blob>=12.19.0",  # Azure Blob Storage
+    # Databricks (Unity Catalog)
+    "databricks-sdk>=0.18.0",  # Unity Catalog metadata access
+    # AWS (Unity Catalog on AWS, S3)
+    "boto3>=1.28.0",  # AWS S3 access
+    # GCP (Unity Catalog on GCP, GCS)
+    "google-cloud-storage>=2.10.0",  # GCP GCS access
+]
 polars = ["polars>=0.20.0", "deltalake>=0.15.0"]
 pandas = ["pandas>=2.0.0", "duckdb>=0.9.0", "deltalake>=0.15.0"]
 duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=14.0.0", "deltalake>=0.15.0"]
 spark = ["pyspark>=3.3.0"]
+# Database CDC connectors
+databases = [
+    "pyodbc>=5.0.0",  # Azure SQL, SQL Server
+    "psycopg2-binary>=2.9.0",  # PostgreSQL
+    "pymysql>=1.1.0",  # MySQL
+    "pymongo>=4.6.0",  # MongoDB
+    "azure-identity>=1.15.0",  # Azure AD for Azure SQL/PostgreSQL
+]
+azuresql = ["pyodbc>=5.0.0", "azure-identity>=1.15.0"]
+postgresql = ["psycopg2-binary>=2.9.0", "azure-identity>=1.15.0"]
+mysql = ["pymysql>=1.1.0"]
+mongodb = ["pymongo>=4.6.0"]
+# Integration connectors (APIs, SFTP, Messaging)
+integrations = [
+    "requests>=2.31.0",  # REST APIs
+    "paramiko>=3.4.0",  # SFTP/SSH
+    "azure-servicebus>=7.11.0",  # Azure Service Bus
+    "azure-eventgrid>=4.17.0",  # Azure Event Grid
+    "azure-identity>=1.15.0",  # Azure AD for messaging
+    "boto3>=1.28.0",  # AWS SQS/SNS
+    "google-cloud-pubsub>=2.18.0",  # GCP Pub/Sub
+]
+api = ["requests>=2.31.0"]
+sftp = ["paramiko>=3.4.0"]
+azure_messaging = ["azure-servicebus>=7.11.0", "azure-eventgrid>=4.17.0", "azure-identity>=1.15.0"]
+aws_messaging = ["boto3>=1.28.0"]
+gcp_messaging = ["google-cloud-pubsub>=2.18.0"]
+# Streaming processing
+streaming = [
+    "bytewax>=0.19.0",  # Real-time stream processing (Rust-based)
+    "pathway>=0.7.0",   # Real-time SQL transformations
+    "kafka-python>=2.0.2",  # Apache Kafka
+    "sseclient-py>=1.8.0",  # Server-Sent Events (Wikimedia, etc.)
+    "websocket-client>=1.6.0",  # WebSocket (Coinbase, Binance, etc.)
+]
+bytewax = ["bytewax>=0.19.0"]
+pathway = ["pathway>=0.7.0"]
+kafka = ["kafka-python>=2.0.2"]
+sse = ["sseclient-py>=1.8.0"]
+websocket = ["websocket-client>=1.6.0"]
 snowflake = ["snowflake-connector-python>=3.5.0"]
 bigquery = ["google-cloud-bigquery>=3.11.0"]
 notebook = ["nbclient>=0.9.0", "nbformat>=5.9.0"]
@@ -59,10 +111,30 @@ all = [
     "presidio-analyzer>=2.2.0",
     "azure-identity>=1.15.0",
     "azure-keyvault-secrets>=4.7.0",
+    "azure-storage-blob>=12.19.0",
+    "databricks-sdk>=0.18.0",
     "boto3>=1.28.0",
+    "google-cloud-storage>=2.10.0",
     "google-cloud-secret-manager>=2.16.0",
     "hvac>=2.0.0",
     "cryptography>=41.0.0",
+    # Database CDC connectors
+    "pyodbc>=5.0.0",
+    "psycopg2-binary>=2.9.0",
+    "pymysql>=1.1.0",
+    "pymongo>=4.6.0",
+    # Integration connectors
+    "requests>=2.31.0",
+    "paramiko>=3.4.0",
+    "azure-servicebus>=7.11.0",
+    "azure-eventgrid>=4.17.0",
+    "google-cloud-pubsub>=2.18.0",
+    # Streaming processing
+    "bytewax>=0.19.0",
+    "pathway>=0.7.0",
+    "kafka-python>=2.0.2",
+    "sseclient-py>=1.8.0",
+    "websocket-client>=1.6.0",
 ]
 
 [project.scripts]

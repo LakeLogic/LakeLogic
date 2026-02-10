@@ -118,10 +118,43 @@ def run(
             return
 
         raise ValueError(f"Unsupported output format: {fmt}")
-    # Configure logging
+    
+    # Configure logging with multi-line splitting for long messages
     logger.remove()
     log_level = "DEBUG" if verbose else "INFO"
-    logger.add(sys.stderr, level=log_level, format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>")
+    max_line_length = 120  # Maximum characters per line
+    
+    def split_long_message(record):
+        """Split long log messages into multiple lines for readability."""
+        message = record["message"]
+        if len(message) <= max_line_length:
+            return True
+        
+        # Split at word boundaries
+        words = message.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            if len(current_line) + len(word) + 1 <= max_line_length:
+                current_line += (word + " ")
+            else:
+                if current_line:
+                    lines.append(current_line.rstrip())
+                current_line = "  " + word + " "  # Indent continuation lines
+        
+        if current_line:
+            lines.append(current_line.rstrip())
+        
+        record["message"] = "\n".join(lines)
+        return True
+    
+    logger.add(
+        sys.stderr, 
+        level=log_level, 
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
+        filter=split_long_message
+    )
 
     if engine not in ["snowflake", "bigquery"]:
         if not source.exists():

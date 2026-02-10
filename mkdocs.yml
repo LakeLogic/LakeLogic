@@ -5,20 +5,20 @@ site_url: https://lineagelogic.github.io/LakeLogic/
 theme:
   name: material
   font:
-    text: "Space Grotesk"
+    text: "Inter"
     code: "JetBrains Mono"
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: custom
-      accent: custom
+      primary: blue
+      accent: indigo
       toggle:
         icon: material/brightness-7
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: custom
-      accent: custom
+      primary: blue
+      accent: indigo
       toggle:
         icon: material/brightness-4
         name: Switch to dark mode

@@ -396,6 +396,15 @@ class DataProcessor:
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
         path = self._resolve_source_path(path_val)
+        
+        # Resolve catalog table names (Unity Catalog, Fabric LakeDB, Synapse) to storage paths
+        if self.engine_name != "spark":  # Spark handles catalogs natively
+            from lakelogic.engines.unity_catalog import resolve_catalog_path
+            original_path = path
+            path = resolve_catalog_path(path)
+            if path != original_path:
+                logger.info(f"Resolved catalog table: {original_path} -> {path}")
+        
         logger.info(f"Loading source: {path} via {self.engine_name}")
 
         source_files = self._expand_source_files(path)
@@ -419,53 +428,89 @@ class DataProcessor:
             import polars as pl
             if self.contract.server and self.contract.server.format:
                 fmt = self.contract.server.format.lower()
-                if fmt in ["delta", "iceberg"]:
-                    raise ValueError("Delta/Iceberg sources require Spark engine.")
-            if file_paths:
-                if len(file_paths) == 1:
-                    if path.endswith(".parquet"):
-                        df = pl.read_parquet(file_paths[0])
+                if fmt == "delta":
+                    # Use Delta-RS for Spark-free Delta Lake operations
+                    try:
+                        from lakelogic.engines.delta_adapter import DeltaAdapter
+                        adapter = DeltaAdapter()
+                        df = adapter.read(path, as_polars=True)
+                        logger.info(f"Loaded Delta table via Delta-RS: {path}")
+                    except ImportError:
+                        raise ValueError(
+                            "Delta Lake sources require Delta-RS. Install with: pip install 'lakelogic[delta]' or pip install deltalake"
+                        )
+                elif fmt == "iceberg":
+                    raise ValueError("Iceberg sources require Spark engine.")
+            if df is None:  # Not Delta, use standard Polars readers
+                if file_paths:
+                    if len(file_paths) == 1:
+                        if path.endswith(".parquet"):
+                            df = pl.read_parquet(file_paths[0])
+                        else:
+                            df = pl.read_csv(file_paths[0])
                     else:
-                        df = pl.read_csv(file_paths[0])
+                        if path.endswith(".parquet"):
+                            df = pl.concat([pl.read_parquet(p) for p in file_paths], how="vertical")
+                        else:
+                            df = pl.concat([pl.read_csv(p) for p in file_paths], how="vertical")
                 else:
-                    if path.endswith(".parquet"):
-                        df = pl.concat([pl.read_parquet(p) for p in file_paths], how="vertical")
-                    else:
-                        df = pl.concat([pl.read_csv(p) for p in file_paths], how="vertical")
-            else:
-                if path.endswith(".csv"): df = pl.read_csv(path)
-                elif path.endswith(".parquet"): df = pl.read_parquet(path)
-                else: df = pl.read_csv(path) # default
+                    if path.endswith(".csv"): df = pl.read_csv(path)
+                    elif path.endswith(".parquet"): df = pl.read_parquet(path)
+                    else: df = pl.read_csv(path) # default
         elif self.engine_name == "pandas":
             import pandas as pd
             if self.contract.server and self.contract.server.format:
                 fmt = self.contract.server.format.lower()
-                if fmt in ["delta", "iceberg"]:
-                    raise ValueError("Delta/Iceberg sources require Spark engine.")
-            if file_paths:
-                frames = []
-                for file in file_paths:
-                    if file.endswith(".parquet"):
-                        frames.append(pd.read_parquet(file))
-                    else:
-                        frames.append(pd.read_csv(file))
-                df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-            else:
-                if path.endswith(".csv"): df = pd.read_csv(path)
-                elif path.endswith(".parquet"): df = pd.read_parquet(path)
-                else: df = pd.read_csv(path)
+                if fmt == "delta":
+                    # Use Delta-RS for Spark-free Delta Lake operations
+                    try:
+                        from lakelogic.engines.delta_adapter import DeltaAdapter
+                        adapter = DeltaAdapter()
+                        df = adapter.read(path, as_polars=False)  # Returns Pandas
+                        logger.info(f"Loaded Delta table via Delta-RS: {path}")
+                    except ImportError:
+                        raise ValueError(
+                            "Delta Lake sources require Delta-RS. Install with: pip install 'lakelogic[delta]' or pip install deltalake"
+                        )
+                elif fmt == "iceberg":
+                    raise ValueError("Iceberg sources require Spark engine.")
+            if df is None:  # Not Delta, use standard Pandas readers
+                if file_paths:
+                    frames = []
+                    for file in file_paths:
+                        if file.endswith(".parquet"):
+                            frames.append(pd.read_parquet(file))
+                        else:
+                            frames.append(pd.read_csv(file))
+                    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+                else:
+                    if path.endswith(".csv"): df = pd.read_csv(path)
+                    elif path.endswith(".parquet"): df = pd.read_parquet(path)
+                    else: df = pd.read_csv(path)
         elif self.engine_name == "duckdb":
             import duckdb
             if self.contract.server and self.contract.server.format:
                 fmt = self.contract.server.format.lower()
-                if fmt in ["delta", "iceberg"]:
-                    raise ValueError("Delta/Iceberg sources require Spark engine.")
+                if fmt == "delta":
+                    # Use Delta-RS for Spark-free Delta Lake operations
+                    try:
+                        from lakelogic.engines.delta_adapter import DeltaAdapter
+                        adapter = DeltaAdapter()
+                        df = adapter.read(path, as_polars=False)  # Returns Pandas (DuckDB compatible)
+                        logger.info(f"Loaded Delta table via Delta-RS: {path}")
+                    except ImportError:
+                        raise ValueError(
+                            "Delta Lake sources require Delta-RS. Install with: pip install 'lakelogic[delta]' or pip install deltalake"
+                        )
+                elif fmt == "iceberg":
+                    raise ValueError("Iceberg sources require Spark engine.")
             # Convert to Pandas DF immediately to ensure connection-agnostic transfer
-            if file_paths:
-                rel = duckdb.read_parquet(file_paths) if path.endswith(".parquet") else duckdb.read_csv(file_paths)
-            else:
-                rel = duckdb.read_csv(path) if path.endswith(".csv") else duckdb.read_parquet(path)
-            df = rel.df()
+            if df is None:  # Not Delta, use standard DuckDB readers
+                if file_paths:
+                    rel = duckdb.read_parquet(file_paths) if path.endswith(".parquet") else duckdb.read_csv(file_paths)
+                else:
+                    rel = duckdb.read_csv(path) if path.endswith(".csv") else duckdb.read_parquet(path)
+                df = rel.df()
         elif self.engine_name == "spark":
             from pyspark.sql import SparkSession
             spark = SparkSession.builder.getOrCreate()

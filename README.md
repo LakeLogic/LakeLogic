@@ -1,6 +1,8 @@
 # LakeLogic
 
-**The Open-Source Runtime Engine for Data Contracts with Quarantine.**
+**Trust Your Data. Scale Your Logic.**
+
+*Write Once. Run Anywhere.* — The open-source runtime for data contracts with quarantine.
 
 LakeLogic is a SQL-first, infrastructure-agnostic quality gate that ensures your business decisions are based on data you can trust. It scales your validation logic from local Polars to petabyte-scale Spark without rewriting a single rule.
 
@@ -29,6 +31,8 @@ Stop paying the **"Infrastructure Lock-In Tax."** In a traditional stack, moving
 - **Referential Integrity**: Validate keys against dimensions using local reference tables.
 - **Notifications (Demo)**: Built-in adapters log alerts for quarantine and rule failures.
 - **External Logic Hooks**: Run dedicated Python modules or notebooks for advanced Gold processing.
+- **🆕 Delta Lake Support (Spark-Free)**: Read/write/merge Delta tables with Polars, DuckDB, or Pandas—no Spark required!
+- **🆕 Catalog Table Names**: Use Unity Catalog, Fabric LakeDB, and Synapse table names (`catalog.schema.table`) directly.
 
 ## Installation
 
@@ -38,6 +42,9 @@ uv pip install "lakelogic[all]"
 
 # Or just use Polars for local speed
 uv pip install "lakelogic[polars]"
+
+# Delta Lake support (Spark-free)
+uv pip install "lakelogic[delta]"
 
 # Profiling + PII detection (bootstrap)
 uv pip install "lakelogic[profiling]"
@@ -55,6 +62,39 @@ source_df, good_df, bad_df = processor.run_source("bronze_crm_customers.csv")
 # good_df -> Ready for Silver Layer
 # bad_df  -> Sent to Quarantine
 ```
+
+## 🆕 Delta Lake & Catalog Support (Spark-Free!)
+
+### **Unity Catalog (Databricks)**
+
+```python
+from lakelogic import DataProcessor
+
+# Use Unity Catalog table names directly (no Spark required!)
+processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
+good_df, bad_df = processor.run_source("main.default.customers")
+
+# LakeLogic automatically:
+# 1. Resolves table name to storage path
+# 2. Uses Delta-RS for fast, Spark-free operations
+# 3. Validates data with your contract rules
+```
+
+### **Fabric LakeDB (Microsoft)**
+
+```python
+# Use Fabric table names directly
+good_df, bad_df = processor.run_source("myworkspace.sales_lakehouse.customers")
+```
+
+### **Synapse Analytics (Azure)**
+
+```python
+# Use Synapse table names directly
+good_df, bad_df = processor.run_source("salesdb.dbo.customers")
+```
+
+**Learn more:** [Delta Lake Support](docs/delta_lake_support.md) | [Catalog Table Names](docs/catalog_table_names.md)
 
 ## Get Started
 

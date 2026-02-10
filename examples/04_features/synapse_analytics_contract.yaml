@@ -1,0 +1,131 @@
+# Synapse Analytics Contract Example
+# This contract demonstrates using Synapse table names with Delta Lake
+
+version: 1.0.0
+dataset: bronze_inventory
+description: "Bronze layer inventory data from Synapse Analytics (Spark-free with Delta-RS)"
+
+# Synapse Analytics table name (database.schema.table)
+# LakeLogic automatically resolves this to the ADLS Gen2 storage path
+# Requires SYNAPSE_STORAGE_ACCOUNT environment variable
+server:
+  type: delta
+  path: inventorydb.dbo.stock_levels  # Synapse table name
+  format: delta
+
+# Schema definition
+model:
+  fields:
+    - name: product_id
+      type: string
+      description: "Product SKU"
+    
+    - name: warehouse_id
+      type: string
+      description: "Warehouse identifier"
+    
+    - name: quantity_on_hand
+      type: integer
+      description: "Current stock quantity"
+    
+    - name: quantity_reserved
+      type: integer
+      description: "Reserved quantity (pending orders)"
+    
+    - name: quantity_available
+      type: integer
+      description: "Available quantity (on_hand - reserved)"
+    
+    - name: reorder_point
+      type: integer
+      description: "Minimum quantity before reorder"
+    
+    - name: last_updated
+      type: timestamp
+      description: "Last update timestamp"
+    
+    - name: location
+      type: string
+      description: "Warehouse location"
+
+# Transformations
+transformations:
+  - name: calculate_available
+    expression: "quantity_on_hand - quantity_reserved"
+    output_column: quantity_available_calculated
+  
+  - name: coalesce_available
+    expression: "COALESCE(quantity_available, quantity_available_calculated)"
+    output_column: quantity_available
+  
+  - name: needs_reorder
+    expression: "quantity_available <= reorder_point"
+    output_column: needs_reorder
+
+# Quality rules
+quality:
+  row_rules:
+    - name: product_id_not_null
+      rule: not_null
+      column: product_id
+      severity: error
+    
+    - name: warehouse_id_not_null
+      rule: not_null
+      column: warehouse_id
+      severity: error
+    
+    - name: quantity_on_hand_non_negative
+      rule: sql
+      expression: "quantity_on_hand >= 0"
+      severity: error
+    
+    - name: quantity_reserved_non_negative
+      rule: sql
+      expression: "quantity_reserved >= 0"
+      severity: error
+    
+    - name: quantity_available_matches
+      rule: sql
+      expression: "quantity_available = (quantity_on_hand - quantity_reserved)"
+      severity: warning
+    
+    - name: reserved_not_exceeds_on_hand
+      rule: sql
+      expression: "quantity_reserved <= quantity_on_hand"
+      severity: error
+  
+  dataset_rules:
+    - name: no_duplicate_stock_records
+      rule: unique
+      columns: [product_id, warehouse_id]
+      severity: error
+
+# Materialization (write to Synapse)
+materialization:
+  good:
+    enabled: true
+    path: inventorydb.dbo.stock_levels_validated  # Synapse table name
+    format: delta
+    mode: overwrite  # Full refresh for inventory
+  
+  quarantine:
+    enabled: true
+    path: inventorydb.dbo.stock_levels_quarantine  # Synapse table name
+    format: delta
+    mode: append
+
+# Lineage tracking
+lineage:
+  inject_source_path: true
+  inject_run_id: true
+  inject_processing_timestamp: true
+
+# Notifications
+notifications:
+  on_quarantine:
+    enabled: true
+    threshold: 0.01  # Alert if >1% of records are quarantined (strict for inventory)
+  
+  on_failure:
+    enabled: true

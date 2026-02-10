@@ -1,6 +1,8 @@
 # LakeLogic
 
-The fastest path from data ingestion to production-ready quality gates with Polars, Spark, DuckDB, Pandas, Snowflake, and more.
+**Trust Your Data. Scale Your Logic.**
+
+*Write Once. Run Anywhere.* — SQL-first quality gates from Polars to petabytes.
 
 === "Python"
 
