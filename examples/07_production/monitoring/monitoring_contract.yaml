@@ -1,0 +1,8 @@
+version: 1.0.0
+dataset: monitoring_example
+info:
+  title: Monitoring
+  description: Metrics and summaries configuration for pipeline runs
+monitoring:
+  summary_path: output/run_summary.json
+  metrics_path: output/metrics.json

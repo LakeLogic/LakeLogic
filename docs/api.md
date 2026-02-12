@@ -57,7 +57,7 @@ Use a YAML file or a dict. Key sections:
 - `quality.row_rules`: row-level checks
 - `quality.dataset_rules`: aggregate checks
 - `transformations`: SQL transformation steps (preferred) with optional `phase` (`pre` or `post`)
-- `transformations` structured helpers: rename, derive, lookup, filter, deduplicate, select, drop, cast, trim, lower, upper, coalesce, split, explode, map_values, join
+- `transformations` structured helpers: rename, derive, lookup, filter, deduplicate, select, drop, cast, trim, lower, upper, coalesce, split, explode, map_values, pivot, unpivot, join
 - `links`: reference datasets (file path or table name)
 - `links[].broadcast`: Spark-only hint to broadcast small lookup tables
 - `source`: ingestion metadata for pipelines (`type`, `path`, `load_mode`, `pattern`, `watermark_field`, `cdc_op_field`, `cdc_delete_values`)

@@ -1,0 +1,39 @@
+version: 1.0.0
+dataset: bronze_orders
+description: "Azure SQL extraction example"
+
+source:
+  type: database
+  connector: azuresql
+  server: myserver.database.windows.net
+  database: production_db
+  table: dbo.orders
+
+model:
+  fields:
+    - name: order_id
+      type: integer
+    - name: customer_id
+      type: integer
+    - name: order_date
+      type: date
+    - name: total_amount
+      type: decimal
+
+quality:
+  row_rules:
+    - name: order_id_not_null
+      rule: not_null
+      column: order_id
+      severity: error
+    - name: total_amount_positive
+      rule: sql
+      expression: "total_amount >= 0"
+      severity: warning
+
+materialization:
+  good:
+    enabled: true
+    path: s3://datalake/bronze/orders/
+    format: delta
+    mode: append

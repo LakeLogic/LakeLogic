@@ -1,0 +1,58 @@
+version: 1.0.0
+dataset: gcp_iot_telemetry
+
+source:
+  type: stream
+  connector: gcp_pubsub
+  config:
+    project_id: "${GCP_PROJECT_ID}"
+    subscription_id: "iot-telemetry-subscription"
+    max_messages: 10
+
+schema:
+  fields:
+    - name: deviceId
+      type: string
+      required: true
+    - name: temperature
+      type: float
+      required: true
+    - name: humidity
+      type: float
+      required: true
+    - name: pressure
+      type: float
+      required: false
+    - name: timestamp
+      type: timestamp
+      required: true
+    - name: location
+      type: object
+      required: false
+
+quality:
+  rules:
+    - name: valid_temperature
+      type: range
+      column: temperature
+      min: -50.0
+      max: 150.0
+      severity: error
+      
+    - name: valid_humidity
+      type: range
+      column: humidity
+      min: 0.0
+      max: 100.0
+      severity: error
+      
+    - name: recent_reading
+      type: custom
+      expression: "pl.col('timestamp') > pl.datetime(2024, 1, 1)"
+      severity: warning
+
+materialization:
+  strategy: append
+  path: "./data/bronze/gcp_iot/"
+  format: delta
+  partition_by: ["deviceId"]

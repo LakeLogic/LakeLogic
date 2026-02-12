@@ -49,13 +49,13 @@ Common helpers include:
 - **`select`**, **`drop`**, **`cast`**
 - **`trim`**, **`lower`**, **`upper`**
 - **`coalesce`**, **`split`**, **`explode`**
-- **`map_values`**
+- **`map_values`**, **`pivot`**, **`unpivot`**
 - **`join`** (post-processing)
 - **`derive`**, **`lookup`** (post-processing)
 
 ### Two Transformation Flavors
 You can express transformations in two ways:
-- **Structured (business-friendly)**: `rename`, `filter`, `deduplicate`, `select`, `drop`, `cast`, `trim`, `lower`, `upper`, `coalesce`, `split`, `explode`, `map_values`, `join`, `lookup`, `derive`.
+- **Structured (business-friendly)**: `rename`, `filter`, `deduplicate`, `select`, `drop`, `cast`, `trim`, `lower`, `upper`, `coalesce`, `split`, `explode`, `map_values`, `pivot`, `unpivot`, `join`, `lookup`, `derive`.
 - **SQL (power-user)**: full SQL with `phase: pre|post`.
 
 Both flavors can be mixed, but the SQL style is more expressive.

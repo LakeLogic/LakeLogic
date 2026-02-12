@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, AliasChoices, field_validator
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices, field_validator, model_validator
 from typing import List, Optional, Dict, Any, Union
 from enum import Enum
 from datetime import datetime
@@ -190,6 +190,51 @@ class TransformationJoin(BaseModel):
     prefix: Optional[str] = None
     defaults: Dict[str, Any] = Field(default_factory=dict)
 
+class TransformationPivot(BaseModel):
+    """Pivot rows into columns using conditional aggregation."""
+    model_config = ConfigDict(extra="allow")
+    id_vars: List[str] = Field(default_factory=list)
+    pivot_col: Optional[str] = None
+    pivot_cols: Optional[List[str]] = None
+    value_col: Optional[str] = None
+    value_cols: Optional[List[str]] = None
+    values: List[Any] = Field(default_factory=list)
+    pivot_values: Optional[List[Any]] = None
+    agg: str = "first"
+    aggs: Dict[str, str] = Field(default_factory=dict)
+    fill_value: Optional[Any] = None
+    separator: str = "_"
+    name_template: Optional[str] = None
+    value_aliases: Dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _normalize(self):
+        if not self.pivot_col and self.pivot_cols:
+            if len(self.pivot_cols) == 1:
+                self.pivot_col = self.pivot_cols[0]
+        if not self.value_cols and self.value_col:
+            self.value_cols = [self.value_col]
+        if not self.values and self.pivot_values:
+            self.values = list(self.pivot_values)
+        return self
+
+class TransformationUnpivot(BaseModel):
+    """Unpivot columns into rows."""
+    model_config = ConfigDict(extra="allow")
+    id_vars: List[str] = Field(default_factory=list)
+    value_vars: List[str] = Field(default_factory=list)
+    value_cols: Optional[List[str]] = None
+    key_field: str = "key"
+    value_field: str = "value"
+    include_nulls: bool = False
+    value_aliases: Dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _normalize(self):
+        if not self.value_vars and self.value_cols:
+            self.value_vars = list(self.value_cols)
+        return self
+
 class Transformation(BaseModel):
     """Transformation step (SQL or structured)."""
     model_config = ConfigDict(extra="allow")
@@ -210,6 +255,8 @@ class Transformation(BaseModel):
     map_values: Optional[TransformationMapValues] = None
     rollup: Optional[TransformationRollup] = None
     join: Optional[TransformationJoin] = None
+    pivot: Optional[TransformationPivot] = None
+    unpivot: Optional[TransformationUnpivot] = None
     sql: Optional[str] = None
     phase: str = "post"  # pre | post
 

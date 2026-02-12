@@ -976,8 +976,22 @@ class PipelineDriver:
 
         pack_data = yaml.safe_load(pack_path.read_text(encoding="utf-8")) or {}
         stage_key = f"{stage}_defaults"
-        defaults = pack_data.get("defaults", {})
-        stage_defaults = pack_data.get(stage_key, {})
+        defaults = pack_data.get("defaults", {}) or {}
+        stage_defaults = pack_data.get(stage_key, {}) or {}
+
+        # Extract transformations from defaults so list replacement doesn't clobber contract steps.
+        defaults_transforms = None
+        stage_transforms = None
+        if isinstance(defaults, dict):
+            defaults_transforms = defaults.pop("transformations", None)
+            defaults_mode = defaults.pop("transformations_mode", None)
+        else:
+            defaults_mode = None
+        if isinstance(stage_defaults, dict):
+            stage_transforms = stage_defaults.pop("transformations", None)
+            stage_mode = stage_defaults.pop("transformations_mode", None)
+        else:
+            stage_mode = None
 
         merged = contract.model_dump(by_alias=True)
         self._deep_merge(merged, defaults)
@@ -992,6 +1006,46 @@ class PipelineDriver:
             merged["quality"] = merged_quality
         if pack_data.get("service_levels"):
             merged["service_levels"] = pack_data.get("service_levels")
+
+        def _normalize_steps(raw: Any) -> List[Dict[str, Any]]:
+            return raw if isinstance(raw, list) else []
+
+        def _merge_steps(current: List[Dict[str, Any]], steps: Any, mode: Optional[str]) -> List[Dict[str, Any]]:
+            new_steps = _normalize_steps(steps)
+            if not new_steps:
+                return current
+            merge_mode = (mode or "prepend").lower()
+            if merge_mode == "replace":
+                return list(new_steps)
+            if merge_mode == "append":
+                return list(current) + list(new_steps)
+            # default/prepend
+            return list(new_steps) + list(current)
+
+        # Merge policy-pack transformations (root and stage-specific).
+        current_steps = merged.get("transformations")
+        current_steps = current_steps if isinstance(current_steps, list) else []
+
+        base_steps = (
+            pack_data.get("transformations")
+            if isinstance(pack_data.get("transformations"), list)
+            else defaults_transforms
+        )
+        base_mode = pack_data.get("transformations_mode") or defaults_mode
+
+        stage_steps_override = pack_data.get(f"{stage}_transformations")
+        stage_steps = (
+            stage_steps_override
+            if isinstance(stage_steps_override, list)
+            else stage_transforms
+        )
+        stage_mode = pack_data.get(f"{stage}_transformations_mode") or stage_mode or base_mode
+
+        current_steps = _merge_steps(current_steps, base_steps, base_mode)
+        current_steps = _merge_steps(current_steps, stage_steps, stage_mode)
+
+        if current_steps:
+            merged["transformations"] = current_steps
 
         new_contract = DataContract(**merged)
         new_contract._base_path = getattr(contract, "_base_path", None)

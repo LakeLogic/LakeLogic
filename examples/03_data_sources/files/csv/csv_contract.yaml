@@ -1,0 +1,22 @@
+version: 1.0.0
+dataset: csv_customers
+description: "CSV ingestion example"
+
+source:
+  type: file
+  path: ./data/sample.csv
+  format: csv
+
+model:
+  fields:
+    - name: id
+      type: integer
+    - name: email
+      type: string
+
+quality:
+  row_rules:
+    - name: email_not_null
+      rule: not_null
+      column: email
+      severity: warning

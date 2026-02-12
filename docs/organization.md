@@ -115,3 +115,21 @@ links:
     table: main.reference.dim_geography
     broadcast: true  # Spark-only hint for small lookup tables
 ```
+
+---
+
+## 6. Bulk Apply Shared Templates
+
+If you need to standardize 100s of contracts, use the bulk template script:
+
+```bash
+python scripts/apply_contract_template.py \
+  --base-template contracts/_shared/base_silver.yaml \
+  --registry contracts/finance/_registry.yaml \
+  --stage silver \
+  --list-merge-keys transformations,quality.row_rules,quality.dataset_rules \
+  --list-mode append
+```
+
+This deep-merges the base template into each contract, appending shared transformations
+and quality rules while preserving contract-specific settings.

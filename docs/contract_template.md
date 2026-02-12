@@ -469,6 +469,28 @@ transformations:
     phase: "post"
     # Business value: Aggregation with full lineage
 
+  # Pivot long metrics into wide columns
+  - pivot:
+      id_vars: ["customer_id"]
+      pivot_col: "metric"
+      value_cols: ["value"]
+      values: ["clicks", "impressions"]
+      # values list required for portable SQL pivot
+      agg: "sum"
+      name_template: "{pivot_alias}"
+    phase: "post"
+    # Business value: Wide analytics-ready metrics
+
+  # Unpivot wide columns back to long form
+  - unpivot:
+      id_vars: ["customer_id"]
+      value_vars: ["clicks", "impressions"]
+      key_field: "metric"
+      value_field: "value"
+      include_nulls: false
+    phase: "post"
+    # Business value: Normalize wide metrics to long rows
+
 # ============================================================
 # 10. QUALITY RULES
 # ============================================================

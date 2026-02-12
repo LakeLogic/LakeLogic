@@ -115,6 +115,29 @@ service_levels:
     threshold: 12h  # More strict than default 24h
 ```
 
+### 4. Shared Transformations (Optional)
+
+You can attach shared transformations via the policy pack. These steps are merged
+into each contract's `transformations` list.
+
+```yaml
+# policy_packs/standard_cleaning.yaml
+name: standard_cleaning
+transformations:
+  - trim:
+      fields: ["email", "status"]
+    phase: pre
+  - lower:
+      fields: ["email"]
+    phase: pre
+transformations_mode: prepend  # prepend | append | replace
+```
+
+Supported fields:
+- `transformations`: list of transformation steps
+- `transformations_mode`: `prepend` (default), `append`, or `replace`
+- `{stage}_transformations` and `{stage}_transformations_mode` (e.g. `silver_transformations`)
+
 ---
 
 ## Creating Custom Policy Packs

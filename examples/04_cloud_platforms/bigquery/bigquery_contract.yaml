@@ -1,0 +1,29 @@
+version: 1.0.0
+dataset: bigquery_orders
+description: "BigQuery extraction example"
+
+source:
+  type: database
+  connector: bigquery
+  connection:
+    project: "env:GCP_PROJECT"
+    dataset: "analytics"
+  table: orders
+
+model:
+  fields:
+    - name: order_id
+      type: integer
+    - name: customer_id
+      type: integer
+    - name: order_date
+      type: date
+    - name: total_amount
+      type: decimal
+
+quality:
+  row_rules:
+    - name: order_id_not_null
+      rule: not_null
+      column: order_id
+      severity: error

@@ -405,6 +405,7 @@ class DuckDBAdapter(EngineAdapter):
         dataset_name = self.contract.dataset or "source"
         
         for trans in self.contract.transformations:
+            trans_phase = (trans.phase or "post").lower()
             if trans.sql and (trans.phase or "post").lower() == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
                 view_name = f"pre_trans_{view_idx}"
@@ -419,6 +420,40 @@ class DuckDBAdapter(EngineAdapter):
                 
                 # Run the actual transformation
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS {trans.sql}")
+                current_tbl = view_name
+                view_idx += 1
+                continue
+
+            if trans.pivot and trans_phase == "pre":
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=dataset_name)
+                if not pivot_sql:
+                    continue
+                view_name = f"pre_trans_{view_idx}"
+
+                buffer_name = f"__pre_buffer_{uuid4().hex[:8]}"
+                con.execute(f"CREATE OR REPLACE TEMP TABLE {buffer_name} AS SELECT * FROM {current_tbl}")
+                con.execute(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM {buffer_name}")
+                if dataset_name != "source":
+                    con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
+
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS {pivot_sql}")
+                current_tbl = view_name
+                view_idx += 1
+                continue
+
+            if trans.unpivot and trans_phase == "pre":
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=dataset_name)
+                if not unpivot_sql:
+                    continue
+                view_name = f"pre_trans_{view_idx}"
+
+                buffer_name = f"__pre_buffer_{uuid4().hex[:8]}"
+                con.execute(f"CREATE OR REPLACE TEMP TABLE {buffer_name} AS SELECT * FROM {current_tbl}")
+                con.execute(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM {buffer_name}")
+                if dataset_name != "source":
+                    con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
+
+                con.execute(f"CREATE OR REPLACE VIEW {view_name} AS {unpivot_sql}")
                 current_tbl = view_name
                 view_idx += 1
                 continue
@@ -675,6 +710,42 @@ class DuckDBAdapter(EngineAdapter):
                     con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
 
                 current_rel = con.sql(rollup_sql)
+                continue
+
+            if trans.pivot and (trans.phase or "post").lower() != "pre":
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=dataset_name)
+                if not pivot_sql:
+                    continue
+                logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
+
+                view_name = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(view_name)
+                buffer_name = f"__post_buffer_{uuid4().hex[:8]}"
+                con.execute(f"CREATE OR REPLACE TEMP TABLE {buffer_name} AS SELECT * FROM {view_name}")
+
+                con.execute(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM {buffer_name}")
+                if dataset_name != "source":
+                    con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
+
+                current_rel = con.sql(pivot_sql)
+                continue
+
+            if trans.unpivot and (trans.phase or "post").lower() != "pre":
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=dataset_name)
+                if not unpivot_sql:
+                    continue
+                logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
+
+                view_name = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(view_name)
+                buffer_name = f"__post_buffer_{uuid4().hex[:8]}"
+                con.execute(f"CREATE OR REPLACE TEMP TABLE {buffer_name} AS SELECT * FROM {view_name}")
+
+                con.execute(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM {buffer_name}")
+                if dataset_name != "source":
+                    con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
+
+                current_rel = con.sql(unpivot_sql)
                 continue
 
             if trans.derive:

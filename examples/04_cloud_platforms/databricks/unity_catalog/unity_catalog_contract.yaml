@@ -1,0 +1,32 @@
+version: 1.0.0
+dataset: unity_catalog_orders
+description: "Unity Catalog Delta table validation"
+
+source:
+  type: delta
+  path: "main.sales.orders"
+
+model:
+  fields:
+    - name: order_id
+      type: integer
+    - name: customer_id
+      type: integer
+    - name: order_date
+      type: date
+    - name: total_amount
+      type: decimal
+
+quality:
+  row_rules:
+    - name: order_id_not_null
+      rule: not_null
+      column: order_id
+      severity: error
+
+materialization:
+  good:
+    enabled: true
+    path: s3://datalake/validated/unity_orders/
+    format: delta
+    mode: append

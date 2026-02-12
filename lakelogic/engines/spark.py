@@ -173,6 +173,7 @@ class SparkAdapter(EngineAdapter):
         current_df = df
         existing = set(current_df.columns)
         for trans in self.contract.transformations:
+            trans_phase = (trans.phase or "post").lower()
             if trans.sql and (trans.phase or "post").lower() == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
                 current_df.createOrReplaceTempView("source")
@@ -180,6 +181,28 @@ class SparkAdapter(EngineAdapter):
                     current_df.createOrReplaceTempView(self.contract.dataset)
                 current_df = current_df.sparkSession.sql(trans.sql)
                 existing = set(current_df.columns)
+                continue
+
+            if trans.pivot and trans_phase == "pre":
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
+                if pivot_sql:
+                    logger.debug(f"Pre-Transform [Pivot]: {pivot_sql}")
+                    current_df.createOrReplaceTempView("source")
+                    if self.contract.dataset:
+                        current_df.createOrReplaceTempView(self.contract.dataset)
+                    current_df = current_df.sparkSession.sql(pivot_sql)
+                    existing = set(current_df.columns)
+                continue
+
+            if trans.unpivot and trans_phase == "pre":
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self.contract.dataset or "source")
+                if unpivot_sql:
+                    logger.debug(f"Pre-Transform [Unpivot]: {unpivot_sql}")
+                    current_df.createOrReplaceTempView("source")
+                    if self.contract.dataset:
+                        current_df.createOrReplaceTempView(self.contract.dataset)
+                    current_df = current_df.sparkSession.sql(unpivot_sql)
+                    existing = set(current_df.columns)
                 continue
 
             if trans.rename:
@@ -321,6 +344,26 @@ class SparkAdapter(EngineAdapter):
                 if self.contract.dataset:
                     current_df.createOrReplaceTempView(self.contract.dataset)
                 current_df = current_df.sparkSession.sql(rollup_sql)
+                continue
+
+            if trans.pivot and (trans.phase or "post").lower() != "pre":
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
+                if pivot_sql:
+                    logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
+                    current_df.createOrReplaceTempView("source")
+                    if self.contract.dataset:
+                        current_df.createOrReplaceTempView(self.contract.dataset)
+                    current_df = current_df.sparkSession.sql(pivot_sql)
+                continue
+
+            if trans.unpivot and (trans.phase or "post").lower() != "pre":
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self.contract.dataset or "source")
+                if unpivot_sql:
+                    logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
+                    current_df.createOrReplaceTempView("source")
+                    if self.contract.dataset:
+                        current_df.createOrReplaceTempView(self.contract.dataset)
+                    current_df = current_df.sparkSession.sql(unpivot_sql)
                 continue
 
             if trans.derive:

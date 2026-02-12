@@ -166,6 +166,9 @@ You can also set `metadata.policy_pack` inside a contract.
 
 **Use case**: Enforce corporate quality baselines across all Silver datasets with one flag.
 
+Policy packs can also include shared `transformations` (with `transformations_mode` and
+`{stage}_transformations`), which are merged into each contract.
+
 ## Approval Gates
 
 Require explicit approval when schema drift or quarantine ratio breaches:

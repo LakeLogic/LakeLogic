@@ -1,0 +1,29 @@
+version: 1.0.0
+dataset: gold_daily_revenue
+primary_key: ["event_date"]
+
+info:
+  title: "Gold Daily Revenue Product"
+  description: "Self-healing business aggregates that react to Silver corrections."
+
+source:
+  type: table
+  path: "data/silver/sales"
+  # 🌊 THE MAGIC: Only picks up what was ADDED to Silver since the last Gold run
+  load_mode: incremental
+  watermark_field: "_lakelogic_processed_at"
+
+transformations:
+  - rollup:
+      dimensions: ["event_date", "store_id"]
+      metrics:
+        total_revenue: "sum(amount)"
+        event_count: "count(event_id)"
+
+materialization:
+  strategy: append
+  partition_by: ["event_date"]
+  # 🔄 HEALING: Replaces the specific day's summary if late data arrived for it
+  reprocess_policy: overwrite_partition_safe
+  target_path: "data/gold/revenue"
+  format: parquet

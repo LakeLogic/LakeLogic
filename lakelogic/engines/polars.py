@@ -390,6 +390,7 @@ class PolarsAdapter(EngineAdapter):
         current_lf = lf
         existing = set(current_lf.collect_schema().names())
         for trans in self.contract.transformations:
+            trans_phase = (trans.phase or "post").lower()
             if trans.sql and (trans.phase or "post").lower() == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
                 try:
@@ -397,6 +398,30 @@ class PolarsAdapter(EngineAdapter):
                     existing = set(current_lf.collect_schema().names())
                 except Exception as e:
                     logger.warning(f"Pre-Transform [SQL] failed: {e}")
+                continue
+
+            if trans.pivot and trans_phase == "pre":
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
+                if not pivot_sql:
+                    continue
+                logger.debug(f"Pre-Transform [Pivot]: {pivot_sql}")
+                try:
+                    current_lf = self._apply_sql_transformation(current_lf, pivot_sql)
+                    existing = set(current_lf.collect_schema().names())
+                except Exception as e:
+                    logger.warning(f"Pre-Transform [Pivot] failed: {e}")
+                continue
+
+            if trans.unpivot and trans_phase == "pre":
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self.contract.dataset or "source")
+                if not unpivot_sql:
+                    continue
+                logger.debug(f"Pre-Transform [Unpivot]: {unpivot_sql}")
+                try:
+                    current_lf = self._apply_sql_transformation(current_lf, unpivot_sql)
+                    existing = set(current_lf.collect_schema().names())
+                except Exception as e:
+                    logger.warning(f"Pre-Transform [Unpivot] failed: {e}")
                 continue
 
             if trans.rename:
@@ -540,6 +565,22 @@ class PolarsAdapter(EngineAdapter):
                 rollup_sql = self._build_rollup_sql(trans.rollup, source_table=tbl_name)
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
                 current_lf = self._apply_sql_transformation(current_lf, rollup_sql)
+                continue
+
+            if trans.pivot and (trans.phase or "post").lower() != "pre":
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=tbl_name)
+                if not pivot_sql:
+                    continue
+                logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
+                current_lf = self._apply_sql_transformation(current_lf, pivot_sql)
+                continue
+
+            if trans.unpivot and (trans.phase or "post").lower() != "pre":
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=tbl_name)
+                if not unpivot_sql:
+                    continue
+                logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
+                current_lf = self._apply_sql_transformation(current_lf, unpivot_sql)
                 continue
 
             if trans.derive:
