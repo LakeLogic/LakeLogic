@@ -133,3 +133,22 @@ python scripts/apply_contract_template.py \
 
 This deep-merges the base template into each contract, appending shared transformations
 and quality rules while preserving contract-specific settings.
+
+### Python API
+
+```python
+from pathlib import Path
+
+from lakelogic.tools.template_apply import apply_contract_template
+
+results = apply_contract_template(
+    base_template=Path("contracts/_shared/base_silver.yaml"),
+    registry=Path("contracts/finance/_registry.yaml"),
+    stage="silver",
+    list_merge_keys=["transformations", "quality.row_rules", "quality.dataset_rules"],
+    list_mode="append",
+    soft_delete=True,
+)
+
+print(f"Updated {len(results)} contracts")
+```

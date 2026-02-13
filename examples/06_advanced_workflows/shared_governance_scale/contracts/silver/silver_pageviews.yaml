@@ -1,0 +1,28 @@
+version: 1.0.0
+info:
+  title: Silver Pageviews
+  target_layer: silver
+dataset: silver_pageviews
+source:
+  type: landing
+  path: ../../data/pageviews.csv
+  load_mode: full
+metadata:
+  domain: growth
+  system: app_events
+model:
+  fields:
+  - name: pageview_id
+    type: string
+    required: true
+  - name: user_id
+    type: string
+    required: true
+  - name: url
+    type: string
+  - name: event_ts
+    type: timestamp
+materialization:
+  target_path: ../../output/silver/pageviews
+  format: parquet
+  strategy: append

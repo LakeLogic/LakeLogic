@@ -1,0 +1,66 @@
+entries:
+- entity: users
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_users.yaml
+    silver: silver/silver_users.yaml
+- entity: events
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_events.yaml
+    silver: silver/silver_events.yaml
+- entity: sessions
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_sessions.yaml
+    silver: silver/silver_sessions.yaml
+- entity: purchases
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_purchases.yaml
+    silver: silver/silver_purchases.yaml
+- entity: refunds
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_refunds.yaml
+    silver: silver/silver_refunds.yaml
+- entity: subscriptions
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_subscriptions.yaml
+    silver: silver/silver_subscriptions.yaml
+- entity: logins
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_logins.yaml
+    silver: silver/silver_logins.yaml
+- entity: pageviews
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_pageviews.yaml
+    silver: silver/silver_pageviews.yaml
+- entity: clicks
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_clicks.yaml
+    silver: silver/silver_clicks.yaml
+- entity: support_tickets
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_support_tickets.yaml
+    silver: silver/silver_support_tickets.yaml
+- entity: device_events
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_device_events.yaml
+    silver: silver/silver_device_events.yaml
+- entity: feature_flags
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_feature_flags.yaml
+    silver: silver/silver_feature_flags.yaml
+- entity: daily_metrics
+  enabled: true
+  contracts:
+    bronze: bronze/bronze_daily_metrics.yaml
+    silver: silver/silver_daily_metrics.yaml

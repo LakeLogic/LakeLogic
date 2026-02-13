@@ -1,0 +1,28 @@
+version: 1.0.0
+info:
+  title: Silver Support Tickets
+  target_layer: silver
+dataset: silver_support_tickets
+source:
+  type: landing
+  path: ../../data/support_tickets.csv
+  load_mode: full
+metadata:
+  domain: growth
+  system: app_events
+model:
+  fields:
+  - name: ticket_id
+    type: string
+    required: true
+  - name: user_id
+    type: string
+    required: true
+  - name: status
+    type: string
+  - name: created_at
+    type: timestamp
+materialization:
+  target_path: ../../output/silver/support_tickets
+  format: parquet
+  strategy: append

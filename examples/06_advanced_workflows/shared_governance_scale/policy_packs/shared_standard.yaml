@@ -1,0 +1,21 @@
+name: shared_standard
+defaults:
+  schema_policy:
+    evolution: strict
+    unknown_fields: quarantine
+  quarantine:
+    enabled: true
+    include_error_reason: true
+
+quality:
+  row_rules:
+    - not_null: user_id
+
+transformations:
+  - trim:
+      fields: ["user_id", "email", "status"]
+    phase: pre
+  - lower:
+      fields: ["email", "status"]
+    phase: pre
+transformations_mode: prepend
