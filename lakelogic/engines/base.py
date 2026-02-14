@@ -223,30 +223,30 @@ class EngineAdapter(ABC):
                 if len(key_cols) == 1:
                     key_expr = key_cols[0]
                 else:
-                    key_expr = f\"CONCAT_WS('||', {', '.join(key_cols)})\"
+                    key_expr = f"CONCAT_WS('||', {', '.join(key_cols)})"
 
         distinct_sql = "DISTINCT " if distinct else ""
 
         if key_expr and rollup_keys_col:
             select_parts.append(
-                f\"ARRAY_AGG({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_col)}\"
+                f"ARRAY_AGG({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_col)}"
             )
             if rollup_keys_count_col:
                 select_parts.append(
-                    f\"COUNT({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_count_col)}\"
+                    f"COUNT({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_count_col)}"
                 )
 
         if upstream_run_id_col and upstream_run_ids_col:
             select_parts.append(
-                f\"ARRAY_AGG({distinct_sql}{self._quote_ident(upstream_run_id_col)}) AS {self._quote_ident(upstream_run_ids_col)}\"
+                f"ARRAY_AGG({distinct_sql}{self._quote_ident(upstream_run_id_col)}) AS {self._quote_ident(upstream_run_ids_col)}"
             )
 
         if not select_parts:
             select_parts = ["*"]
 
-        sql = f\"SELECT {', '.join(select_parts)} FROM {source_table}\"
+        sql = f"SELECT {', '.join(select_parts)} FROM {source_table}"
         if group_exprs:
-            sql += f\" GROUP BY {', '.join(group_exprs)}\"
+            sql += f" GROUP BY {', '.join(group_exprs)}"
         return sql
 
     def _pivot_agg_expr(self, agg: str, expr: str) -> str:
