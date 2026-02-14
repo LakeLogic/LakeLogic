@@ -41,6 +41,14 @@ class DuckDBAdapter(EngineAdapter):
                 con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM read_csv_auto('{path_str}')")
             elif ext.endswith(".parquet"):
                 con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM read_parquet('{path_str}')")
+            elif ext.endswith(".xml"):
+                import pandas as pd
+                xml_df = pd.read_xml(path_str)
+                con.register(internal_input_name, xml_df)
+            elif ext.endswith((".xlsx", ".xls")):
+                import pandas as pd
+                excel_df = pd.read_excel(path_str)
+                con.register(internal_input_name, excel_df)
             elif "/_delta_log" in ext or "delta" in ext:
                 con.execute("INSTALL delta; LOAD delta;")
                 con.execute(f"CREATE OR REPLACE VIEW {internal_input_name} AS SELECT * FROM delta_scan('{path_str}')")

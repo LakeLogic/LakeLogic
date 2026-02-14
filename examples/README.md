@@ -11,6 +11,7 @@ Hands-on examples organized by learning stage and integration type.
 - 05_orchestration/ - Airflow, Prefect, Dagster, and more
 - 06_advanced_workflows/ - real-world scenarios
 - 07_production/ - CI/CD, secrets management, monitoring
+- 08_compliance_governance/ - HIPAA, PII masking, FSI audit packs
 
 ## Quick Start
 

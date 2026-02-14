@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<company>
+    <metadata>
+        <export_date>2024-02-14</export_date>
+        <system>HR_System_v2</system>
+    </metadata>
+    <employees>
+        <employee id="1">
+            <personal_info>
+                <name>
+                    <first>Alice</first>
+                    <last>Johnson</last>
+                </name>
+                <contact>
+                    <email>alice@company.com</email>
+                    <phone>555-0101</phone>
+                </contact>
+            </personal_info>
+            <employment>
+                <department>
+                    <name>Engineering</name>
+                    <location>Building A</location>
+                </department>
+                <compensation>
+                    <salary currency="USD">95000</salary>
+                    <bonus_eligible>true</bonus_eligible>
+                </compensation>
+                <dates>
+                    <hire_date>2023-01-15</hire_date>
+                    <last_review>2024-01-10</last_review>
+                </dates>
+                <status>active</status>
+            </employment>
+        </employee>
+        <employee id="2">
+            <personal_info>
+                <name>
+                    <first>Bob</first>
+                    <last>Smith</last>
+                </name>
+                <contact>
+                    <email>bob-invalid</email>
+                    <phone>555-0102</phone>
+                </contact>
+            </personal_info>
+            <employment>
+                <department>
+                    <name>Marketing</name>
+                    <location>Building B</location>
+                </department>
+                <compensation>
+                    <salary currency="USD">75000</salary>
+                    <bonus_eligible>false</bonus_eligible>
+                </compensation>
+                <dates>
+                    <hire_date>2023-03-20</hire_date>
+                    <last_review>2023-12-15</last_review>
+                </dates>
+                <status>active</status>
+            </employment>
+        </employee>
+        <employee id="3">
+            <personal_info>
+                <name>
+                    <first>Charlie</first>
+                    <last>Davis</last>
+                </name>
+                <contact>
+                    <email>charlie@company.com</email>
+                    <phone>555-0103</phone>
+                </contact>
+            </personal_info>
+            <employment>
+                <department>
+                    <name>Sales</name>
+                    <location>Building C</location>
+                </department>
+                <compensation>
+                    <salary currency="USD">-5000</salary>
+                    <bonus_eligible>true</bonus_eligible>
+                </compensation>
+                <dates>
+                    <hire_date>2023-05-10</hire_date>
+                    <last_review>2024-02-01</last_review>
+                </dates>
+                <status>inactive</status>
+            </employment>
+        </employee>
+        <employee id="4">
+            <personal_info>
+                <name>
+                    <first>Diana</first>
+                    <last>Prince</last>
+                </name>
+                <contact>
+                    <email>diana@company.com</email>
+                    <phone>555-0104</phone>
+                </contact>
+            </personal_info>
+            <employment>
+                <department>
+                    <name>Engineering</name>
+                    <location>Building A</location>
+                </department>
+                <compensation>
+                    <salary currency="USD">120000</salary>
+                    <bonus_eligible>true</bonus_eligible>
+                </compensation>
+                <dates>
+                    <hire_date>2022-11-01</hire_date>
+                    <last_review>2024-01-15</last_review>
+                </dates>
+                <status>active</status>
+            </employment>
+        </employee>
+        <employee id="5">
+            <personal_info>
+                <name>
+                    <first>Eve</first>
+                    <last>Martinez</last>
+                </name>
+                <contact>
+                    <email>eve@company.com</email>
+                    <phone>555-0105</phone>
+                </contact>
+            </personal_info>
+            <employment>
+                <department>
+                    <name>HR</name>
+                    <location>Building B</location>
+                </department>
+                <compensation>
+                    <salary currency="USD">80000</salary>
+                    <bonus_eligible>true</bonus_eligible>
+                </compensation>
+                <dates>
+                    <hire_date>2024-01-05</hire_date>
+                    <last_review>2024-01-20</last_review>
+                </dates>
+                <status>active</status>
+            </employment>
+        </employee>
+    </employees>
+</company>

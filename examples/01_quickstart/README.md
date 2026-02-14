@@ -1,31 +1,34 @@
-# Quickstart
+# 🚀 Quickstart Tutorials
 
-Your first LakeLogic experience. Start here.
+Choose your starting path to experience LakeLogic's governance-first data pipelines.
 
-## Examples
+## 🌟 Choose Your Path
 
-### basic_validation/
-Time: 5 minutes
+### 1. [Hello World (Remote Data)](01_hello_world.ipynb)
+**Time**: 1 minute
+**Goal**: Experience LakeLogic with zero setup. Pull data from a remote URL and see it validated instantly.
+- No local database required
+- Demonstrates in-memory contracts
+- Perfect for Google Colab/Kaggle
 
-The smallest end-to-end contract with quality rules and quarantine output.
+### 2. [Database Governance](02_database_governance.ipynb)
+**Time**: 5 minutes
+**Goal**: Learn how to protect your Lakehouse from "dirty" source databases.
+- Uses a local SQLite database
+- Demonstrates Quality Rules and Quarantining
+- Shows "Shift-Left" data governance in action
+
+## 🛠️ Running Locally (CLI)
+
+You can also run these examples directly from your terminal:
 
 ```bash
-cd basic_validation
-lakelogic run --contract contract.yaml --source data/sample_customers.csv
-```
-
-### database_extraction/
-Time: 10 minutes
-
-Extract data from a local SQLite database and write to Delta format.
-
-```bash
-cd database_extraction
+# Run the database governance example
 lakelogic run --contract users_contract.yaml
 ```
 
-## Next Steps
+## ⏭️ Next Steps
 
-- ../02_core_patterns/medallion_architecture/ - Bronze and Silver stages
-- ../02_core_patterns/reference_joins/ - Lookups and enrichment
-- ../03_data_sources/streaming/sse_wikimedia/ - Streaming quickstart
+- **[Core Patterns](../02_core_patterns/)**: Learn about Medallion Architecture and Reference Joins.
+- **[Data Sources](../03_data_sources/)**: Explore specialized connectors for XML, Excel, and Streaming.
+- **[Compliance](../08_compliance_governance/)**: Deep dive into PII masking and HIPAA patterns.
