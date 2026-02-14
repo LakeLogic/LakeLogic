@@ -54,16 +54,16 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: installation.md
-      - "Quickstart: Hello World": examples/01_hello_world.ipynb
-      - "Quickstart: Database Governance": examples/02_database_governance.ipynb
+      - "Quickstart: Hello World": examples/01_quickstart/01_hello_world.ipynb
+      - "Quickstart: Database Governance": examples/01_quickstart/02_database_governance.ipynb
   - Tutorials:
       - Basic Validation: tutorials/basic_validation.md
       - Medallion Architecture: tutorials/medallion_architecture.md
       - Notifications & Secrets: tutorials/notifications_secrets.md
   - Interactive Examples:
-      - "XML Data Ingestion": examples/xml_example.ipynb
-      - "Excel Data Ingestion": examples/excel_example.ipynb
-      - "HIPAA & PII Masking": examples/hipaa_compliance.ipynb
+      - "XML Data Ingestion": examples/03_data_sources/files/xml/xml_example.ipynb
+      - "Excel Data Ingestion": examples/03_data_sources/files/excel/excel_example.ipynb
+      - "HIPAA & PII Masking": examples/08_compliance_governance/hipaa_pii_masking/tutorial_hipaa_compliance.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md

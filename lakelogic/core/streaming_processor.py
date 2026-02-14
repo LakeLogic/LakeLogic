@@ -303,11 +303,48 @@ class StreamingDataProcessor:
         
         logger.info("Creating Pathway pipeline...")
         
-        # TODO: Implement Pathway pipeline
-        raise NotImplementedError(
-            "Pathway integration coming in next update. "
-            "Use Bytewax for now (framework='bytewax')"
+        # 1. Define input table from the contract source
+        # We pass the stream iterator directly to Pathway
+        table = pw.debug.table_from_iterable(self._create_input())
+        
+        # 2. Schema Validation (UDF)
+        @pw.udf
+        def validate_schema_udf(record: Dict[str, Any]) -> Dict[str, Any]:
+            return self._validate_schema(record)
+        
+        table = table.select(
+            data=validate_schema_udf(pw.this)
         )
+        
+        # 3. Transformations (UDF)
+        @pw.udf
+        def transform_udf(record: Dict[str, Any]) -> Dict[str, Any]:
+            return self._apply_transformations(record)
+        
+        table = table.select(
+            data=transform_udf(pw.this.data)
+        )
+        
+        # 4. Quality Validation (UDF)
+        @pw.udf
+        def validate_quality_udf(record: Dict[str, Any]) -> Dict[str, Any]:
+            return self._validate_quality(record)
+        
+        table = table.select(
+            data=validate_quality_udf(pw.this.data)
+        )
+        
+        # 5. Split Good/Bad and Sink
+        good_table = table.filter(pw.this.data["_quality_status"] == "good")
+        bad_table = table.filter(pw.this.data["_quality_status"] == "bad")
+        
+        # 6. Sinks (For now, print to console using debug sink)
+        pw.io.csv.write(good_table, "quarantine/good_stream.csv")
+        pw.io.csv.write(bad_table, "quarantine/bad_stream.csv")
+        
+        # Execution
+        logger.info("✅ Pathway pipeline created, starting execution...")
+        pw.run()
     
     def _create_input(self) -> Iterator[Dict[str, Any]]:
         """Create input stream from contract source."""
