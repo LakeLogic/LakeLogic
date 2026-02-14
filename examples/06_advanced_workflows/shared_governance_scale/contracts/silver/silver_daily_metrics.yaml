@@ -1,0 +1,40 @@
+version: 1.0.0
+info:
+  title: Silver Daily Metrics
+  target_layer: silver
+dataset: silver_daily_metrics
+source:
+  type: landing
+  path: ../../data/daily_metrics.csv
+  load_mode: full
+metadata:
+  domain: growth
+  system: app_events
+model:
+  fields:
+  - name: metric_date
+    type: string
+  - name: user_id
+    type: string
+    required: true
+  - name: metric
+    type: string
+  - name: value
+    type: double
+materialization:
+  target_path: ../../output/silver/daily_metrics
+  format: parquet
+  strategy: append
+transformations:
+- unpivot:
+    id_vars:
+    - metric_date
+    - user_id
+    value_vars:
+    - clicks
+    - impressions
+    - conversions
+    key_field: metric
+    value_field: value
+    include_nulls: false
+  phase: pre

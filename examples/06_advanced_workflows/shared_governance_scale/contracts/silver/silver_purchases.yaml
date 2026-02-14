@@ -1,0 +1,34 @@
+version: 1.0.0
+info:
+  title: Silver Purchases
+  target_layer: silver
+dataset: silver_purchases
+source:
+  type: landing
+  path: ../../data/purchases.csv
+  load_mode: full
+metadata:
+  domain: growth
+  system: app_events
+model:
+  fields:
+  - name: purchase_id
+    type: string
+    required: true
+  - name: user_id
+    type: string
+    required: true
+  - name: amount
+    type: double
+  - name: currency
+    type: string
+  - name: purchase_ts
+    type: timestamp
+materialization:
+  target_path: ../../output/silver/purchases
+  format: parquet
+  strategy: append
+transformations:
+- filter:
+    sql: amount IS NULL OR amount >= 0
+  phase: pre

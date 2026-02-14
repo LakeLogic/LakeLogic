@@ -1,0 +1,61 @@
+version: 1.0.0
+dataset: azure_notification_events
+
+source:
+  type: stream
+  connector: azure_service_bus
+  config:
+    namespace: "${AZURE_SERVICEBUS_NAMESPACE}"  # e.g., "my-namespace.servicebus.windows.net"
+    queue_name: "notification-queue"  # For queue mode
+    # topic_name: "notification-topic"  # For topic mode
+    # subscription_name: "my-subscription"  # Required for topic mode
+    max_wait_time: 60
+
+schema:
+  fields:
+    - name: notificationId
+      type: string
+      required: true
+    - name: userId
+      type: string
+      required: true
+    - name: type
+      type: string
+      required: true
+    - name: message
+      type: string
+      required: true
+    - name: priority
+      type: string
+      required: true
+    - name: timestamp
+      type: timestamp
+      required: true
+    - name: metadata
+      type: object
+      required: false
+
+quality:
+  rules:
+    - name: valid_notification_type
+      type: allowed_values
+      column: type
+      allowed: ["email", "sms", "push", "webhook"]
+      severity: error
+      
+    - name: valid_priority
+      type: allowed_values
+      column: priority
+      allowed: ["low", "medium", "high", "urgent"]
+      severity: error
+      
+    - name: recent_notification
+      type: custom
+      expression: "pl.col('timestamp') > pl.datetime(2024, 1, 1)"
+      severity: warning
+
+materialization:
+  strategy: append
+  path: "./data/bronze/azure_notifications/"
+  format: delta
+  partition_by: ["priority"]

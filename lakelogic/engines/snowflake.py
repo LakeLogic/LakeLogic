@@ -410,6 +410,12 @@ class SnowflakeAdapter(EngineAdapter):
                 extra_exprs = None
             return select_with_replacements(replacements, extra_exprs)
 
+        if trans.pivot:
+            return self._build_pivot_sql(trans.pivot, source_table="source")
+
+        if trans.unpivot:
+            return self._build_unpivot_sql(trans.unpivot, source_table="source")
+
         if trans.filter:
             return f"SELECT * FROM source WHERE {trans.filter.sql}"
 

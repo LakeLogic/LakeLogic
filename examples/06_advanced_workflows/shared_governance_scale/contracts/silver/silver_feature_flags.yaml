@@ -1,0 +1,42 @@
+version: 1.0.0
+info:
+  title: Silver Feature Flags
+  target_layer: silver
+dataset: silver_feature_flags
+source:
+  type: landing
+  path: ../../data/feature_flags.csv
+  load_mode: full
+metadata:
+  domain: growth
+  system: app_events
+model:
+  fields:
+  - name: user_id
+    type: string
+    required: true
+  - name: flag_new_checkout
+    type: boolean
+  - name: flag_beta_home
+    type: boolean
+  - name: flag_new_nav
+    type: boolean
+materialization:
+  target_path: ../../output/silver/feature_flags
+  format: parquet
+  strategy: append
+transformations:
+- pivot:
+    id_vars:
+    - user_id
+    pivot_col: flag_name
+    value_cols:
+    - enabled
+    values:
+    - new_checkout
+    - beta_home
+    - new_nav
+    agg: max
+    name_template: flag_{pivot_alias}
+    fill_value: false
+  phase: post

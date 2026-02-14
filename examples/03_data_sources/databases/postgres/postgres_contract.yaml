@@ -1,0 +1,39 @@
+version: 1.0.0
+dataset: bronze_postgres_orders
+description: "Postgres extraction example"
+
+source:
+  type: database
+  connector: postgresql
+  connection:
+    host: localhost
+    port: 5432
+    database: app_db
+    username: "env:POSTGRES_USER"
+    password: "env:POSTGRES_PASSWORD"
+  table: orders
+
+model:
+  fields:
+    - name: order_id
+      type: integer
+    - name: customer_id
+      type: integer
+    - name: order_date
+      type: date
+    - name: total_amount
+      type: decimal
+
+quality:
+  row_rules:
+    - name: order_id_not_null
+      rule: not_null
+      column: order_id
+      severity: error
+
+materialization:
+  good:
+    enabled: true
+    path: s3://datalake/bronze/postgres_orders/
+    format: delta
+    mode: append

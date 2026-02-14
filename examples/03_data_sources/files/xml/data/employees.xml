@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<employees>
+    <employee>
+        <id>1</id>
+        <name>Alice Johnson</name>
+        <email>alice@company.com</email>
+        <department>Engineering</department>
+        <salary>95000</salary>
+        <hire_date>2023-01-15</hire_date>
+        <status>active</status>
+    </employee>
+    <employee>
+        <id>2</id>
+        <name>Bob Smith</name>
+        <email>bob-invalid</email>
+        <department>Marketing</department>
+        <salary>75000</salary>
+        <hire_date>2023-03-20</hire_date>
+        <status>active</status>
+    </employee>
+    <employee>
+        <id>3</id>
+        <name>Charlie Davis</name>
+        <email>charlie@company.com</email>
+        <department>Sales</department>
+        <salary>-5000</salary>
+        <hire_date>2023-05-10</hire_date>
+        <status>inactive</status>
+    </employee>
+    <employee>
+        <id>4</id>
+        <name>Diana Prince</name>
+        <email>diana@company.com</email>
+        <department>Engineering</department>
+        <salary>120000</salary>
+        <hire_date>2022-11-01</hire_date>
+        <status>active</status>
+    </employee>
+    <employee>
+        <id>5</id>
+        <name>Eve Martinez</name>
+        <email>eve@company.com</email>
+        <department>HR</department>
+        <salary>80000</salary>
+        <hire_date>2024-01-05</hire_date>
+        <status>active</status>
+    </employee>
+</employees>

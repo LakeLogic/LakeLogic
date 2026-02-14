@@ -1,0 +1,35 @@
+version: 1.0.0
+dataset: silver_sales_events
+primary_key: ["event_id"]
+
+info:
+  title: "Silver Sales Truth"
+  description: "Standardized sales events with historical partitioning."
+
+lineage:
+  enabled: true # 💡 Crucial for Gold to 'see' when records arrived
+
+source:
+  type: landing
+  path: "data/raw_sales_*.csv"
+
+model:
+  fields:
+    - name: event_id
+      type: string
+      required: true
+    - name: event_date
+      type: date
+      required: true
+    - name: amount
+      type: float
+    - name: store_id
+      type: string
+
+materialization:
+  strategy: append
+  partition_by: ["event_date"]
+  # 🛡️ Overwrites ONLY the affected partitions when late data arrives
+  reprocess_policy: overwrite_partition_safe
+  target_path: "data/silver/sales"
+  format: parquet

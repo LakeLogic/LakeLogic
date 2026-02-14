@@ -1,60 +1,17 @@
 # LakeLogic Examples
 
-Learn LakeLogic through hands-on examples, organized by skill level.
+Hands-on examples organized by learning stage and integration type.
 
----
+## Structure
 
-## Learning Path
-
-### Level 1: First Contract (5 minutes)
-Start here. Run your first data quality check.
-
-```
-01_getting_started/basic_validation/
-```
-
-### Level 2: Core Concepts (30 minutes)
-Understand the medallion architecture and reference data.
-
-```
-02_tutorials/
-├── medallion_architecture/   # Bronze → Silver pipeline
-└── reference_joins/          # Link tables and enrichment
-```
-
-### Level 3: Real Patterns (pick what you need)
-Common data engineering recipes.
-
-```
-03_patterns/
-├── bronze_quality_gate/      # Quality checks at ingestion
-├── dedup_survivorship/       # Handle duplicate records
-├── scd2_dimension/           # Slowly changing dimensions
-├── late_arriving_reprocess/  # Safe partition backfill
-└── external_python_logic/    # Custom Python/notebook hooks
-```
-
-### Level 4: Production Ready
-Alerts, secrets, and complete examples.
-
-```
-04_features/
-└── notifications_and_secrets/   # Slack, Teams, email alerts
-
-05_production/
-├── contract_template/           # Full production-grade template
-└── insurance_elt/               # Complete multi-entity example
-```
-
-### Level 5: Integrate with Your Stack
-Connect LakeLogic to your orchestrator.
-
-```
-06_integrations/
-└── job_templates/               # Airflow, Dagster, Prefect, etc.
-```
-
----
+- 01_quickstart/ - 5-10 minute wins
+- 02_core_patterns/ - essential modeling patterns
+- 03_data_sources/ - databases, APIs, streaming, files
+- 04_cloud_platforms/ - Databricks, Fabric, Azure Synapse
+- 05_orchestration/ - Airflow, Prefect, Dagster, and more
+- 06_advanced_workflows/ - real-world scenarios
+- 07_production/ - CI/CD, secrets management, monitoring
+- 08_compliance_governance/ - HIPAA, PII masking, FSI audit packs
 
 ## Quick Start
 
@@ -63,31 +20,28 @@ Connect LakeLogic to your orchestrator.
 pip install lakelogic
 
 # 2. Run your first example
-cd examples/01_getting_started/basic_validation
+cd examples/01_quickstart/basic_validation
 lakelogic run --contract contract.yaml --source data/sample_customers.csv
-
-# 3. Explore the output
-# Good records pass, bad records go to quarantine with error reasons
 ```
-
----
 
 ## Example Structure
 
-Each example contains:
+Most examples follow this layout:
 
 ```
 example_name/
-├── README.md          # What this example teaches
-├── contract.yaml      # The data contract
-├── data/              # Sample input data
-└── run.py             # (optional) Python script to run
+- README.md          # What this example teaches
+- contract.yaml      # The data contract
+- data/              # Sample input data
+- run.py             # Optional runner
 ```
 
----
+## Where to Go Next
 
-## Need Help?
-
-- [Documentation](https://LineageLogic.github.io/LakeLogic)
-- [GitHub Issues](https://github.com/LineageLogic/LakeLogic/issues)
-- [GitHub Discussions](https://github.com/LineageLogic/LakeLogic/discussions)
+- Start with 01_quickstart/ if you are new to LakeLogic
+- Move to 02_core_patterns/ for core modeling patterns
+- Use 03_data_sources/ to connect to databases, APIs, and streaming
+- Explore 04_cloud_platforms/ for platform-specific integrations
+- Use 05_orchestration/ templates to schedule pipelines
+- See 06_advanced_workflows/ for end-to-end scenarios
+- Use 07_production/ for CI/CD and secrets

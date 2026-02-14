@@ -18,8 +18,8 @@ from loguru import logger
 class ValidationResult:
     """
     Richer result object for LakeLogic runs.
-    Unpacks as (good_df, bad_df) for backward compatibility, 
-    but provides .raw, .good, and .bad attributes.
+    Unpacks as (raw_df, good_df, bad_df) for flexible usage, 
+    but also provides .raw, .good, and .bad attributes for clarity.
     """
     def __init__(self, good, bad, raw):
         self.good = good
@@ -446,16 +446,26 @@ class DataProcessor:
                     if len(file_paths) == 1:
                         if path.endswith(".parquet"):
                             df = pl.read_parquet(file_paths[0])
+                        elif path.endswith(".xml"):
+                            df = pl.read_xml(file_paths[0])
+                        elif path.endswith((".xlsx", ".xls")):
+                            df = pl.read_excel(file_paths[0])
                         else:
                             df = pl.read_csv(file_paths[0])
                     else:
                         if path.endswith(".parquet"):
                             df = pl.concat([pl.read_parquet(p) for p in file_paths], how="vertical")
+                        elif path.endswith(".xml"):
+                            df = pl.concat([pl.read_xml(p) for p in file_paths], how="vertical")
+                        elif path.endswith((".xlsx", ".xls")):
+                            df = pl.concat([pl.read_excel(p) for p in file_paths], how="vertical")
                         else:
                             df = pl.concat([pl.read_csv(p) for p in file_paths], how="vertical")
                 else:
                     if path.endswith(".csv"): df = pl.read_csv(path)
                     elif path.endswith(".parquet"): df = pl.read_parquet(path)
+                    elif path.endswith(".xml"): df = pl.read_xml(path)
+                    elif path.endswith((".xlsx", ".xls")): df = pl.read_excel(path)
                     else: df = pl.read_csv(path) # default
         elif self.engine_name == "pandas":
             import pandas as pd
@@ -480,12 +490,18 @@ class DataProcessor:
                     for file in file_paths:
                         if file.endswith(".parquet"):
                             frames.append(pd.read_parquet(file))
+                        elif file.endswith(".xml"):
+                            frames.append(pd.read_xml(file))
+                        elif file.endswith((".xlsx", ".xls")):
+                            frames.append(pd.read_excel(file))
                         else:
                             frames.append(pd.read_csv(file))
                     df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
                 else:
                     if path.endswith(".csv"): df = pd.read_csv(path)
                     elif path.endswith(".parquet"): df = pd.read_parquet(path)
+                    elif path.endswith(".xml"): df = pd.read_xml(path)
+                    elif path.endswith((".xlsx", ".xls")): df = pd.read_excel(path)
                     else: df = pd.read_csv(path)
         elif self.engine_name == "duckdb":
             import duckdb
@@ -507,29 +523,90 @@ class DataProcessor:
             # Convert to Pandas DF immediately to ensure connection-agnostic transfer
             if df is None:  # Not Delta, use standard DuckDB readers
                 if file_paths:
-                    rel = duckdb.read_parquet(file_paths) if path.endswith(".parquet") else duckdb.read_csv(file_paths)
+                    if path.endswith(".parquet"):
+                        rel = duckdb.read_parquet(file_paths)
+                    elif path.endswith(".xml"):
+                        import pandas as pd
+                        df = pd.concat([pd.read_xml(f) for f in file_paths], ignore_index=True)
+                        rel = None
+                    elif path.endswith((".xlsx", ".xls")):
+                        import pandas as pd
+                        df = pd.concat([pd.read_excel(f) for f in file_paths], ignore_index=True)
+                        rel = None
+                    else:
+                        rel = duckdb.read_csv(file_paths)
                 else:
-                    rel = duckdb.read_csv(path) if path.endswith(".csv") else duckdb.read_parquet(path)
-                df = rel.df()
+                    if path.endswith(".csv"): rel = duckdb.read_csv(path)
+                    elif path.endswith(".parquet"): rel = duckdb.read_parquet(path)
+                    elif path.endswith(".xml"):
+                        import pandas as pd
+                        df = pd.read_xml(path)
+                        rel = None
+                    elif path.endswith((".xlsx", ".xls")):
+                        import pandas as pd
+                        df = pd.read_excel(path)
+                        rel = None
+                    else: rel = duckdb.read_csv(path)
+                
+                if rel is not None:
+                    df = rel.df()
         elif self.engine_name == "spark":
             from pyspark.sql import SparkSession
-            spark = SparkSession.builder.getOrCreate()
-            if path.startswith("table:"):
-                table_name = path[6:]
-                df = spark.table(table_name)
-                return self.run(df, source_path=table_name)
+            
+            # Determine format first to check if we need special packages
             fmt = None
             if path.endswith(".csv"):
                 fmt = "csv"
             elif path.endswith(".parquet"):
                 fmt = "parquet"
+            elif path.endswith(".xml"):
+                fmt = "xml"
+            elif path.endswith((".xlsx", ".xls")):
+                fmt = "excel"
             elif self.contract.server and self.contract.server.format:
                 fmt = self.contract.server.format.lower()
+            
+            # Auto-configure Spark packages for XML and Excel if needed
+            spark_builder = SparkSession.builder
+            if fmt == "xml":
+                # Check if spark-xml is already available, if not, add it
+                try:
+                    spark = SparkSession.getActiveSession()
+                    if spark is None:
+                        logger.info("Adding spark-xml package for XML support")
+                        spark_builder = spark_builder.config("spark.jars.packages", "com.databricks:spark-xml_2.12:0.18.0")
+                        spark = spark_builder.getOrCreate()
+                    else:
+                        spark = spark_builder.getOrCreate()
+                except Exception:
+                    spark = spark_builder.getOrCreate()
+            elif fmt == "excel":
+                # Check if spark-excel is already available, if not, add it
+                try:
+                    spark = SparkSession.getActiveSession()
+                    if spark is None:
+                        logger.info("Adding spark-excel package for Excel support")
+                        spark_builder = spark_builder.config("spark.jars.packages", "com.crealytics:spark-excel_2.12:3.4.0_0.20.2")
+                        spark = spark_builder.getOrCreate()
+                    else:
+                        spark = spark_builder.getOrCreate()
+                except Exception:
+                    spark = spark_builder.getOrCreate()
+            else:
+                spark = spark_builder.getOrCreate()
+            
+            if path.startswith("table:"):
+                table_name = path[6:]
+                df = spark.table(table_name)
+                return self.run(df, source_path=table_name)
 
             fmt = fmt or "parquet"
             reader = spark.read.format(fmt)
             if fmt == "csv":
                 reader = reader.option("header", "true")
+            elif fmt == "excel":
+                reader = reader.option("header", "true").option("inferSchema", "true")
+            
             load_path = path
             if not self._is_uri_path(path):
                 try:

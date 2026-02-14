@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Tuple, List, Dict, Optional
+from loguru import logger
 from lakelogic.core.models import (
     DataContract,
     QualityRule,
@@ -247,6 +248,161 @@ class EngineAdapter(ABC):
         if group_exprs:
             sql += f\" GROUP BY {', '.join(group_exprs)}\"
         return sql
+
+    def _pivot_agg_expr(self, agg: str, expr: str) -> str:
+        """
+        Build an aggregate expression for pivot operations.
+
+        Args:
+            agg: Aggregate function name.
+            expr: SQL expression to aggregate.
+
+        Returns:
+            SQL aggregate expression.
+        """
+        agg_norm = (agg or "first").lower().strip()
+        engine = self._normalize_engine()
+
+        if agg_norm in {"first", "any_value"}:
+            func = "ANY_VALUE" if engine in {"bigquery", "snowflake"} else "FIRST"
+            return f"{func}({expr})"
+        if agg_norm == "last":
+            func = "ANY_VALUE" if engine in {"bigquery", "snowflake"} else "LAST"
+            return f"{func}({expr})"
+        if agg_norm in {"count_distinct", "distinct_count"}:
+            return f"COUNT(DISTINCT {expr})"
+        if agg_norm == "count":
+            return f"COUNT({expr})"
+        if agg_norm == "sum":
+            return f"SUM({expr})"
+        if agg_norm in {"avg", "mean"}:
+            return f"AVG({expr})"
+        if agg_norm == "min":
+            return f"MIN({expr})"
+        if agg_norm == "max":
+            return f"MAX({expr})"
+
+        func = "ANY_VALUE" if engine in {"bigquery", "snowflake"} else "FIRST"
+        return f"{func}({expr})"
+
+    def _build_pivot_sql(self, pivot: Any, source_table: str = "source") -> Optional[str]:
+        """
+        Build SQL for a pivot transformation using conditional aggregation.
+
+        Args:
+            pivot: TransformationPivot config.
+            source_table: Source table/view name.
+
+        Returns:
+            SQL query string or None.
+        """
+        if not pivot:
+            return None
+
+        pivot_col = getattr(pivot, "pivot_col", None)
+        pivot_cols = getattr(pivot, "pivot_cols", None) or []
+        if not pivot_col and pivot_cols:
+            if len(pivot_cols) == 1:
+                pivot_col = pivot_cols[0]
+        if not pivot_col:
+            logger.warning("Pivot transformation skipped; pivot_col is required.")
+            return None
+
+        value_cols = getattr(pivot, "value_cols", None) or []
+        if not value_cols and getattr(pivot, "value_col", None):
+            value_cols = [pivot.value_col]
+        if not value_cols:
+            logger.warning("Pivot transformation skipped; value_cols is required.")
+            return None
+
+        values = list(getattr(pivot, "values", None) or [])
+        if not values and getattr(pivot, "pivot_values", None):
+            values = list(pivot.pivot_values)
+        if not values:
+            logger.warning("Pivot transformation skipped; values list is required for portable SQL pivot.")
+            return None
+
+        id_vars = list(getattr(pivot, "id_vars", None) or [])
+        value_aliases = dict(getattr(pivot, "value_aliases", None) or {})
+        aggs = dict(getattr(pivot, "aggs", None) or {})
+        default_agg = getattr(pivot, "agg", None) or "first"
+        separator = getattr(pivot, "separator", None) or "_"
+        name_template = getattr(pivot, "name_template", None)
+        fill_value = getattr(pivot, "fill_value", None)
+
+        pivot_qcol = self._quote_ident(pivot_col)
+        select_parts: List[str] = [self._quote_ident(col) for col in id_vars]
+
+        for value_col in value_cols:
+            agg_name = aggs.get(value_col, default_agg)
+            value_expr = self._quote_ident(value_col)
+            for value in values:
+                alias_key = value
+                alias = value_aliases.get(value) or value_aliases.get(str(value)) or value
+                case_expr = f"CASE WHEN {pivot_qcol} = {self._format_literal(value)} THEN {value_expr} END"
+                agg_expr = self._pivot_agg_expr(agg_name, case_expr)
+                if fill_value is not None:
+                    agg_expr = f"COALESCE({agg_expr}, {self._format_literal(fill_value)})"
+                if name_template:
+                    alias_text = str(name_template).format(
+                        value_col=value_col,
+                        pivot_value=alias_key,
+                        pivot_alias=alias,
+                    )
+                else:
+                    alias_text = f"{value_col}{separator}{alias}"
+                select_parts.append(f"{agg_expr} AS {self._quote_ident(alias_text)}")
+
+        if not select_parts:
+            return None
+
+        sql = f"SELECT {', '.join(select_parts)} FROM {source_table}"
+        if id_vars:
+            group_by = ", ".join(self._quote_ident(col) for col in id_vars)
+            sql += f" GROUP BY {group_by}"
+        return sql
+
+    def _build_unpivot_sql(self, unpivot: Any, source_table: str = "source") -> Optional[str]:
+        """
+        Build SQL for an unpivot transformation using UNION ALL.
+
+        Args:
+            unpivot: TransformationUnpivot config.
+            source_table: Source table/view name.
+
+        Returns:
+            SQL query string or None.
+        """
+        if not unpivot:
+            return None
+
+        id_vars = list(getattr(unpivot, "id_vars", None) or [])
+        value_vars = list(getattr(unpivot, "value_vars", None) or [])
+        if not value_vars and getattr(unpivot, "value_cols", None):
+            value_vars = list(unpivot.value_cols)
+        if not value_vars:
+            logger.warning("Unpivot transformation skipped; value_vars is required.")
+            return None
+
+        key_field = getattr(unpivot, "key_field", None) or "key"
+        value_field = getattr(unpivot, "value_field", None) or "value"
+        include_nulls = bool(getattr(unpivot, "include_nulls", False))
+        value_aliases = dict(getattr(unpivot, "value_aliases", None) or {})
+
+        select_rows: List[str] = []
+        for col in value_vars:
+            alias = value_aliases.get(col) or value_aliases.get(str(col)) or col
+            id_exprs = [self._quote_ident(c) for c in id_vars]
+            select_exprs = id_exprs + [
+                f"{self._format_literal(alias)} AS {self._quote_ident(key_field)}",
+                f"{self._quote_ident(col)} AS {self._quote_ident(value_field)}",
+            ]
+            sql = f"SELECT {', '.join(select_exprs)} FROM {source_table}"
+            if not include_nulls:
+                sql += f" WHERE {self._quote_ident(col)} IS NOT NULL"
+            select_rows.append(sql)
+
+        return " UNION ALL ".join(select_rows) if select_rows else None
 
     def _expand_row_rule(self, spec: Any) -> Optional[Any]:
         """
