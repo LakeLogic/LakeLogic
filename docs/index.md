@@ -1,69 +1,44 @@
-# LakeLogic
+<div class="hero-section" markdown>
 
-**Trust Your Data. Scale Your Logic.**
+# Trust Your Data. <span style="color: var(--md-accent-fg-color);">Scale Your Logic.</span>
 
-*Write Once. Run Anywhere.* — SQL-first quality gates from Polars to petabytes.
+<p class="hero-subtitle">
+Write Once. Run Anywhere. — SQL-first quality gates from Polars to petabytes.
+</p>
 
-=== "Python"
+<div class="hero-cta">
+<a href="examples/01_hello_world/" class="md-button md-button--primary">
+Try in 60 Seconds
+</a>
+<a href="installation/" class="md-button">
+Install LakeLogic
+</a>
+<a href="https://github.com/LineageLogic/LakeLogic" class="md-button">
+View on GitHub
+</a>
+</div>
+
+</div>
+
+---
+
+## One Contract. Four Engines. Zero Rewrites.
+
+=== "Polars"
 
     ```python
     from lakelogic import DataProcessor
     
+    # Blazing-fast local processing
     processor = DataProcessor(
         contract="contract.yaml",
-        engine="polars"  # or spark, duckdb, pandas
+        engine="polars"
     )
     
-    source_df, good_df, bad_df = processor.run_source("data.csv")
+    result = processor.run_source("data.csv")
     
-    print(f"📊 {len(source_df)} source records")
-    print(f"✓ {len(good_df)} validated records")
-    print(f"✗ {len(bad_df)} quarantined records")
-    ```
-
-=== "CLI"
-
-    ```bash
-    # Install LakeLogic
-    pip install "lakelogic[all]"
-    
-    # Run your first contract
-    lakelogic run \
-      --contract contract.yaml \
-      --source data.csv \
-      --output-good validated.csv \
-      --output-bad quarantine.csv
-    ```
-
-=== "YAML Contract"
-
-    ```yaml
-    version: "1.0.0"
-    dataset: customer_data
-    
-    model:
-      fields:
-        - name: email
-          type: string
-          required: true
-        - name: age
-          type: integer
-    
-    quality:
-      row_rules:
-        - not_null: email
-        - regex_match:
-            field: email
-            pattern: "^[^@]+@[^@]+\\.[^@]+$"
-        - range:
-            field: age
-            min: 18
-            max: 120
-    
-    materialization:
-      strategy: merge
-      target_path: output/customers
-      format: parquet
+    print(f"✅ {len(result.good)} validated")
+    print(f"❌ {len(result.bad)} quarantined")
     ```
 
 === "Spark"
@@ -71,17 +46,33 @@
     ```python
     from lakelogic import DataProcessor
     
-    # Auto-discovers Spark in Databricks/Synapse
+    # Petabyte-scale distributed processing
     processor = DataProcessor(
-        contract="contract.yaml"
+        contract="contract.yaml",
+        engine="spark"
     )
     
-    # Works with Delta Lake, Iceberg, Unity Catalog
-    source_df, good_df, bad_df = processor.run_source(
-        "catalog.schema.table"
+    # Works with Delta Lake, Unity Catalog
+    result = processor.run_source("catalog.schema.table")
+    
+    processor.materialize(result.good, result.bad)
+    ```
+
+=== "DuckDB"
+
+    ```python
+    from lakelogic import DataProcessor
+    
+    # Fast analytical SQL engine
+    processor = DataProcessor(
+        contract="contract.yaml",
+        engine="duckdb"
     )
     
-    processor.materialize(good_df, bad_df)
+    result = processor.run_source("data.parquet")
+    
+    # 100% Reconciliation guaranteed
+    assert len(result.raw) == len(result.good) + len(result.bad)
     ```
 
 === "Snowflake"
@@ -89,29 +80,87 @@
     ```python
     from lakelogic import DataProcessor
     
-    # Direct Snowflake execution (table-only)
+    # Direct warehouse execution
     processor = DataProcessor(
         engine="snowflake",
         contract="contract.yaml"
     )
     
-    source_df, good_df, bad_df = processor.run_source(
-        "ANALYTICS.SILVER.CUSTOMERS"
-    )
+    result = processor.run_source("ANALYTICS.SILVER.CUSTOMERS")
     ```
 
-[Start building](quickstart.md){ .md-button .md-button--primary }
-
-Follow our Quickstart guide to get started and make your first quality gate in minutes.
-
-!!! tip "Explore More Examples"
-    The [`examples/` directory](https://github.com/LineageLogic/LakeLogic/tree/main/examples) in the repo contains 90+ runnable examples organized by skill level:
+!!! tip "Interactive Examples"
+    Jump straight into **executable Jupyter notebooks** that demonstrate LakeLogic's capabilities:
     
-    - **Getting Started**: Your first contract in 5 minutes
-    - **Tutorials**: Medallion architecture, reference joins
-    - **Patterns**: Bronze quality gates, SCD2, deduplication
-    - **Production**: Complete insurance ELT pipeline
-    - **Integrations**: Airflow, Prefect, Dagster, Databricks templates
+    - [Hello World](examples/01_hello_world/01_hello_world/) - Remote data ingestion in 60 seconds
+    - [Database Governance](examples/02_database_governance/02_database_governance/) - Quarantine dirty data
+    - [XML Ingestion](examples/xml_example/xml_example/) - Native XML support with validation
+    - [Excel Ingestion](examples/excel_example/excel_example/) - Native Excel reading with quality checks
+
+---
+
+## Delta Lake & Catalog Support (Spark-Free!)
+
+LakeLogic automatically resolves catalog table names and uses **Delta-RS** for fast, Spark-free Delta Lake operations.
+
+=== "Unity Catalog (Databricks)"
+
+    ```python
+    from lakelogic import DataProcessor
+    
+    # Use Unity Catalog table names directly (no Spark required!)
+    processor = DataProcessor(
+        engine="polars", 
+        contract="contracts/customers.yaml"
+    )
+    
+    source_df, good_df, bad_df = processor.run_source(
+        "main.default.customers"
+    )
+    
+    # LakeLogic automatically:
+    # 1. Resolves table name to storage path
+    # 2. Uses Delta-RS for fast, Spark-free operations
+    # 3. Validates data with your contract rules
+    
+    print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
+    ```
+
+=== "Fabric LakeDB (Microsoft)"
+
+    ```python
+    from lakelogic import DataProcessor
+    
+    # Use Fabric table names directly
+    processor = DataProcessor(
+        engine="polars",
+        contract="contracts/sales.yaml"
+    )
+    
+    source_df, good_df, bad_df = processor.run_source(
+        "myworkspace.sales_lakehouse.customers"
+    )
+    
+    print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
+    ```
+
+=== "Synapse Analytics (Azure)"
+
+    ```python
+    from lakelogic import DataProcessor
+    
+    # Use Synapse table names directly
+    processor = DataProcessor(
+        engine="polars",
+        contract="contracts/sales.yaml"
+    )
+    
+    source_df, good_df, bad_df = processor.run_source(
+        "salesdb.dbo.customers"
+    )
+    
+    print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
+    ```
 
 ---
 

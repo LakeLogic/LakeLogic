@@ -72,26 +72,34 @@ from lakelogic import DataProcessor
 
 # Use Unity Catalog table names directly (no Spark required!)
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
-good_df, bad_df = processor.run_source("main.default.customers")
+source_df, good_df, bad_df = processor.run_source("main.default.customers")
 
 # LakeLogic automatically:
 # 1. Resolves table name to storage path
 # 2. Uses Delta-RS for fast, Spark-free operations
 # 3. Validates data with your contract rules
+
+print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
 ```
 
 ### **Fabric LakeDB (Microsoft)**
 
 ```python
 # Use Fabric table names directly
-good_df, bad_df = processor.run_source("myworkspace.sales_lakehouse.customers")
+processor = DataProcessor(engine="polars", contract="contracts/sales.yaml")
+source_df, good_df, bad_df = processor.run_source("myworkspace.sales_lakehouse.customers")
+
+print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
 ```
 
 ### **Synapse Analytics (Azure)**
 
 ```python
 # Use Synapse table names directly
-good_df, bad_df = processor.run_source("salesdb.dbo.customers")
+processor = DataProcessor(engine="polars", contract="contracts/sales.yaml")
+source_df, good_df, bad_df = processor.run_source("salesdb.dbo.customers")
+
+print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
 ```
 
 **Learn more:** [Delta Lake Support](docs/delta_lake_support.md) | [Catalog Table Names](docs/catalog_table_names.md)

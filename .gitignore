@@ -241,6 +241,7 @@ build/
 
 # Documentation build
 docs/_build/
+docs/examples/
 site/
 
 # Temporary test files
