@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "0.1.0b2"
+version = "0.1.0b3"
 description = "A Python-based data contract runtime for consistent quality across engines."
 readme = "README.md"
 requires-python = ">=3.9"

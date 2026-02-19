@@ -520,6 +520,21 @@ class DataProcessor:
                         )
                 elif fmt == "iceberg":
                     raise ValueError("Iceberg sources require Spark engine.")
+            def _duckdb_read_csv(paths):
+                try:
+                    return duckdb.read_csv(paths)
+                except Exception as exc:
+                    logger.warning(
+                        f"DuckDB CSV auto-detect failed for {paths}. Retrying with relaxed settings. Error: {exc}"
+                    )
+                    return duckdb.read_csv(
+                        paths,
+                        delim=",",
+                        quote='"',
+                        escape='"',
+                        header=True,
+                        strict_mode=False,
+                    )
             # Convert to Pandas DF immediately to ensure connection-agnostic transfer
             if df is None:  # Not Delta, use standard DuckDB readers
                 if file_paths:
@@ -534,9 +549,9 @@ class DataProcessor:
                         df = pd.concat([pd.read_excel(f) for f in file_paths], ignore_index=True)
                         rel = None
                     else:
-                        rel = duckdb.read_csv(file_paths)
+                        rel = _duckdb_read_csv(file_paths)
                 else:
-                    if path.endswith(".csv"): rel = duckdb.read_csv(path)
+                    if path.endswith(".csv"): rel = _duckdb_read_csv(path)
                     elif path.endswith(".parquet"): rel = duckdb.read_parquet(path)
                     elif path.endswith(".xml"):
                         import pandas as pd
@@ -546,7 +561,7 @@ class DataProcessor:
                         import pandas as pd
                         df = pd.read_excel(path)
                         rel = None
-                    else: rel = duckdb.read_csv(path)
+                    else: rel = _duckdb_read_csv(path)
                 
                 if rel is not None:
                     df = rel.df()

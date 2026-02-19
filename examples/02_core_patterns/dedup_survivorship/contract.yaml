@@ -1,6 +1,7 @@
 version: "1.0.0"
 info:
   title: Dedup & Survivorship
+  version: "1.0.0"
 
 dataset: silver_crm_customer_updates
 
@@ -34,7 +35,13 @@ transformations:
       WHERE rn = 1
     phase: pre
   - sql: |
-      SELECT *, status = 'active' AS is_active
+      SELECT
+        customer_id,
+        email,
+        status,
+        updated_at,
+        last_login,
+        status = 'active' AS is_active
       FROM source
     phase: post
 

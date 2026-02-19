@@ -1,6 +1,7 @@
 version: "1.0.0"
 info:
   title: Bronze Web Signups
+  version: "1.0.0"
   owner: marketing-data
 
 dataset: bronze_web_signups
