@@ -4,10 +4,11 @@ primary_key: ["event_id"]
 
 info:
   title: "Silver Sales Truth"
+  version: 1.0.0
   description: "Standardized sales events with historical partitioning."
 
 lineage:
-  enabled: true # 💡 Crucial for Gold to 'see' when records arrived
+  enabled: true #  Crucial for Gold to 'see' when records arrived
 
 source:
   type: landing
@@ -29,7 +30,7 @@ model:
 materialization:
   strategy: append
   partition_by: ["event_date"]
-  # 🛡️ Overwrites ONLY the affected partitions when late data arrives
+  #  Overwrites ONLY the affected partitions when late data arrives
   reprocess_policy: overwrite_partition_safe
   target_path: "data/silver/sales"
   format: parquet

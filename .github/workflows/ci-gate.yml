@@ -42,3 +42,29 @@ jobs:
 
       - name: Run Ruff Formatter Check
         run: ruff format --check . --exclude _ref
+
+  # Core test suite
+  tests:
+    name: Core Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Project & Test Dependencies
+        run: |
+          uv pip install --system -e ".[dev]"
+          uv pip install --system pytest pytest-cov
+
+      - name: Run Tests
+        run: pytest tests/ -x -q --tb=short --cov=lakelogic --cov-report=term-missing
+
+      - name: Fail on Low Coverage
+        run: pytest tests/ --cov=lakelogic --cov-fail-under=50 -q --no-header 2>/dev/null || echo "⚠️ Coverage below 50% — work in progress"

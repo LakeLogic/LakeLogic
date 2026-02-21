@@ -1,7 +1,6 @@
 version: 1.0.0
 dataset: bronze_oracle_orders
-description: "Oracle extraction example"
-
+description: Oracle extraction example
 source:
   type: database
   connector: oracle
@@ -9,28 +8,25 @@ source:
     host: localhost
     port: 1521
     service_name: ORCL
-    username: "env:ORACLE_USER"
-    password: "env:ORACLE_PASSWORD"
+    username: env:ORACLE_USER
+    password: env:ORACLE_PASSWORD
   table: ORDERS
-
 model:
   fields:
-    - name: ORDER_ID
-      type: integer
-    - name: CUSTOMER_ID
-      type: integer
-    - name: ORDER_DATE
-      type: date
-    - name: TOTAL_AMOUNT
-      type: decimal
-
+  - name: ORDER_ID
+    type: integer
+  - name: CUSTOMER_ID
+    type: integer
+  - name: ORDER_DATE
+    type: date
+  - name: TOTAL_AMOUNT
+    type: decimal
 quality:
   row_rules:
-    - name: order_id_not_null
-      rule: not_null
-      column: ORDER_ID
+  - not_null:
+      field: ORDER_ID
+      name: order_id_not_null
       severity: error
-
 materialization:
   good:
     enabled: true

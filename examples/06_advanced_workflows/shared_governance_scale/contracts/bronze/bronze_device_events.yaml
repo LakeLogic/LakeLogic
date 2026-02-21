@@ -1,6 +1,7 @@
 version: 1.0.0
 info:
   title: Bronze Device Events
+  version: 1.0.0
   target_layer: bronze
 dataset: bronze_device_events
 source:

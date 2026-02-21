@@ -1,7 +1,6 @@
 version: 1.0.0
 dataset: bronze_postgres_orders
-description: "Postgres extraction example"
-
+description: Postgres extraction example
 source:
   type: database
   connector: postgresql
@@ -9,28 +8,25 @@ source:
     host: localhost
     port: 5432
     database: app_db
-    username: "env:POSTGRES_USER"
-    password: "env:POSTGRES_PASSWORD"
+    username: env:POSTGRES_USER
+    password: env:POSTGRES_PASSWORD
   table: orders
-
 model:
   fields:
-    - name: order_id
-      type: integer
-    - name: customer_id
-      type: integer
-    - name: order_date
-      type: date
-    - name: total_amount
-      type: decimal
-
+  - name: order_id
+    type: integer
+  - name: customer_id
+    type: integer
+  - name: order_date
+    type: date
+  - name: total_amount
+    type: decimal
 quality:
   row_rules:
-    - name: order_id_not_null
-      rule: not_null
-      column: order_id
+  - not_null:
+      field: order_id
+      name: order_id_not_null
       severity: error
-
 materialization:
   good:
     enabled: true

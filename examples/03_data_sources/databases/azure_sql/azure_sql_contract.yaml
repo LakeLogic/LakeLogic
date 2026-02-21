@@ -1,36 +1,32 @@
 version: 1.0.0
 dataset: bronze_orders
-description: "Azure SQL extraction example"
-
+description: Azure SQL extraction example
 source:
   type: database
   connector: azuresql
   server: myserver.database.windows.net
   database: production_db
   table: dbo.orders
-
 model:
   fields:
-    - name: order_id
-      type: integer
-    - name: customer_id
-      type: integer
-    - name: order_date
-      type: date
-    - name: total_amount
-      type: decimal
-
+  - name: order_id
+    type: integer
+  - name: customer_id
+    type: integer
+  - name: order_date
+    type: date
+  - name: total_amount
+    type: decimal
 quality:
   row_rules:
-    - name: order_id_not_null
-      rule: not_null
-      column: order_id
+  - not_null:
+      field: order_id
+      name: order_id_not_null
       severity: error
-    - name: total_amount_positive
-      rule: sql
-      expression: "total_amount >= 0"
-      severity: warning
-
+  - name: total_amount_positive
+    sql: total_amount >= 0
+    category: correctness
+    severity: warning
 materialization:
   good:
     enabled: true

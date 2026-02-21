@@ -15,38 +15,41 @@ from lakelogic.core.materialization import materialize_dataframe, materialize_qu
 from lakelogic.core.observer import RemoteObserver
 from loguru import logger
 
+
 class ValidationResult:
     """
-    Richer result object for LakeLogic runs.
-    Unpacks as (raw_df, good_df, bad_df) for flexible usage, 
-    but also provides .raw, .good, and .bad attributes for clarity.
+    Result object for LakeLogic runs.
+
+    Unpacks as ``good_df, bad_df = processor.run(df)`` for the common
+    two-variable pattern.  The raw (pre-validation) frame and the
+    execution trace are available via ``.raw`` and ``.trace`` attributes.
     """
-    def __init__(self, good, bad, raw):
+    def __init__(self, good, bad, raw=None, trace=None):
         self.good = good
         self.bad = bad
         self.raw = raw
-    
+        self.trace = trace
+
     def __iter__(self):
-        yield self.raw
         yield self.good
         yield self.bad
-        
+
     def __getitem__(self, idx):
-        return [self.raw, self.good, self.bad][idx]
+        return [self.good, self.bad][idx]
 
     def __len__(self):
-        return 3
+        return 2
 
     def __repr__(self):
         def _count(obj):
             if obj is None: return 0
             if hasattr(obj, "height"): return obj.height
-            if hasattr(obj, "count"): 
+            if hasattr(obj, "count"):
                 try: return obj.count().fetchone()[0]
-                except: return "?"
+                except Exception: return "?"
             try: return len(obj)
-            except: return "?"
-        return f"ValidationResult(good={_count(self.good)}, bad={_count(self.bad)}, raw={_count(self.raw)})"
+            except Exception: return "?"
+        return f"ValidationResult(good={_count(self.good)}, bad={_count(self.bad)})"
 
 class DataProcessor:
     """
@@ -63,6 +66,7 @@ class DataProcessor:
         *,
         stage: Optional[str] = None,
         pipeline_run_id: Optional[str] = None,
+        trace: bool = False,
     ):
         """
         Initialize the DataProcessor.
@@ -72,13 +76,17 @@ class DataProcessor:
             engine: The execution engine to use. If None, it uses the auto-discovery logic.
             stage: Optional stage override (e.g., bronze/silver) applied from contract "stages".
             pipeline_run_id: Optional pipeline-level run id for correlation across contracts.
+            trace: Enable detailed execution tracing and row debugging.
         """
         self._configure_logging()
         self.engine_name = (engine or self._discover_engine()).lower()
         self.stage = stage
         self.contract = self._load_contract(contract)
+        # Support trace=True or trace="enabled"
+        self.trace_enabled = trace is True or str(trace).lower() == "enabled"
         self.adapter = self._get_adapter()
         self.adapter.engine_name = self.engine_name
+        self.adapter.trace_enabled = self.trace_enabled
         self.last_report: Optional[Dict[str, Any]] = None
         self.last_run_id: Optional[str] = None
         self.pipeline_run_id: Optional[str] = pipeline_run_id
@@ -193,6 +201,7 @@ class DataProcessor:
             contract = DataContract(**data)
             try:
                 contract._base_path = path.parent
+                contract._contract_path = path
             except Exception:
                 pass
             return self._apply_stage_overrides(contract)
@@ -237,6 +246,7 @@ class DataProcessor:
         new_contract = DataContract(**merged)
         try:
             new_contract._base_path = getattr(contract, "_base_path", None)
+            new_contract._contract_path = getattr(contract, "_contract_path", None)
         except Exception:
             pass
         return new_contract
@@ -259,6 +269,7 @@ class DataProcessor:
         source_path: Optional[Union[str, Path]] = None,
         materialize: bool = False,
         materialize_target: Optional[Union[str, Path]] = None,
+        reset_trace: bool = True,
     ) -> ValidationResult:
         """
         Runs the contract against the provided dataframe.
@@ -268,20 +279,39 @@ class DataProcessor:
             source_path: Optional source path for lineage/run reporting.
             materialize: Whether to write outputs to materialization targets.
             materialize_target: Optional override target for materialization.
+            reset_trace: Whether to clear the current trace before starting.
 
         Returns:
             ValidationResult object (unpacks to good_df, bad_df).
         """
+        if reset_trace or not hasattr(self, "_active_trace_steps"):
+            self._active_trace_steps = []
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
-        self.last_run_id = uuid.uuid4().hex
-        self.last_source_path = str(source_path) if source_path else None
-        logger.info(f"Starting LakeLogic run [Auto-Engine: {self.engine_name}, Contract: {contract_title}]")
+        import time
+        from lakelogic.core.models import ExecutionTrace, TraceStep
+        
+        start_time = time.perf_counter()
         
         # Execute via adapter
         good_df, bad_df = self.adapter.execute(df)
+        
+        # Merge adapter trace if present
+        if hasattr(self.adapter, "trace") and self.adapter.trace:
+            self._active_trace_steps.extend(self.adapter.trace)
 
         # Inject lineage metadata
-        good_df, bad_df = self._inject_lineage(good_df, bad_df, source_path)
+        step_start = time.perf_counter()
+        from lakelogic.core.lineage import inject_lineage
+        good_df, bad_df = inject_lineage(
+            good_df, bad_df, self.contract, self.engine_name,
+            self.last_run_id, self.pipeline_run_id, source_path,
+        )
+        self._active_trace_steps.append(TraceStep(
+            step="Lineage Injection",
+            timestamp=time.time(),
+            duration_ms=(time.perf_counter() - step_start)*1000,
+            status="ok"
+        ))
         
         # Summary logging
         counts = self._compute_counts(df, good_df, bad_df)
@@ -352,17 +382,50 @@ class DataProcessor:
                 raise ValueError(f"Quarantine disabled but {bad} records failed validation for '{contract_title}'.")
 
         # Build run report and optionally write a log
-        slos = self._compute_slos(good_df, counts)
+        from lakelogic.core.slo import compute_slos
+        slos = compute_slos(self.contract, good_df, counts, self.engine_name)
         row_rule_failures = self._extract_row_rule_failures(bad_df)
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
         write_run_log(self.last_report, self.contract, engine_name=self.engine_name)
 
         # Optional external logic hook (python/notebook)
-        good_df, external_handled = self._apply_external_logic(good_df)
+        from lakelogic.core.external_logic import apply_external_logic
+        if self.contract.external_logic:
+            pre_count = self.adapter._get_row_count(good_df)
+            step_start = time.perf_counter()
+            good_df, external_handled = apply_external_logic(
+                self.contract, good_df, self.engine_name,
+                self.last_run_id, self.last_source_path,
+                add_trace_fn=self._add_current_trace,
+                trace_step_fn=self.trace_step,
+            )
+            post_count = self.adapter._get_row_count(good_df)
+            
+            self._active_trace_steps.append(TraceStep(
+                step=f"External Logic ({self.contract.external_logic.type})",
+                timestamp=time.time(),
+                input_rows=pre_count,
+                output_rows=post_count,
+                duration_ms=(time.perf_counter() - step_start)*1000,
+                details={"path": self.contract.external_logic.path},
+                status="ok"
+            ))
+        else:
+            good_df, external_handled = apply_external_logic(
+                self.contract, good_df, self.engine_name,
+                self.last_run_id, self.last_source_path,
+            )
 
         # Materialize if requested
         if materialize and not external_handled:
+            step_start = time.perf_counter()
             self.materialize(good_df, bad_df, target_path=materialize_target)
+            self._active_trace_steps.append(TraceStep(
+                step="Materialization",
+                timestamp=time.time(),
+                duration_ms=(time.perf_counter() - step_start)*1000,
+                status="ok"
+            ))
 
         # Optional Remote Reporting (SaaS Bridge)
         try:
@@ -378,8 +441,67 @@ class DataProcessor:
             quarantined = 0
         if quarantined > 0 and os.getenv("LAKELOGIC_SHOW_TIPS", "false").lower() == "true":
             logger.info("🛡️  View deep quarantine analysis & historical drift on Lineage Logic: https://lineagelogic.com")
+        
+        trace = ExecutionTrace(
+            run_id=self.last_run_id,
+            steps=self._active_trace_steps,
+            total_duration_ms=(time.perf_counter() - start_time)*1000
+        )
+        # Clear active trace steps after run
+        self._active_trace_steps = []
+        
+        result = ValidationResult(good_df, bad_df, raw=df, trace=trace)
+        self.last_result = result
+        
+        if self.trace_enabled:
+            self.show_trace(trace)
+            self._log_row_samples(result)
 
-        return ValidationResult(good_df, bad_df, df)
+        return result
+
+    def show_trace(self, trace: Optional[Any] = None):
+        """Manually display the execution trace for the last run."""
+        from lakelogic.cli.main import _display_trace
+        if trace:
+            _display_trace(trace)
+        elif hasattr(self, "last_result") and self.last_result and self.last_result.trace:
+            _display_trace(self.last_result.trace)
+        elif hasattr(self, "_active_trace_steps") and self._active_trace_steps:
+             # Create a dummy trace if we are mid-run or finished without result
+             from lakelogic.core.models import ExecutionTrace
+             dummy = ExecutionTrace(run_id=self.last_run_id or "latest", steps=self._active_trace_steps)
+             _display_trace(dummy)
+
+    def _log_row_samples(self, result: ValidationResult):
+        """Log sample rows for debugging when tracing is enabled."""
+        try:
+            if result.good is not None:
+                count = self.adapter._get_row_count(result.good)
+                if count and count > 0:
+                    logger.debug(f"Row Sample (GOOD): {self._get_sample_text(result.good)}")
+            if result.bad is not None:
+                count = self.adapter._get_row_count(result.bad)
+                if count and count > 0:
+                    logger.debug(f"Row Sample (QUARANTINED): {self._get_sample_text(result.bad)}")
+        except Exception as e:
+            logger.debug(f"Could not log row samples: {e}")
+
+    def _get_sample_text(self, df: Any) -> str:
+        """Convert a slice of the dataframe to a readable string."""
+        if df is None: return "None"
+        try:
+            # Polars
+            if hasattr(df, "head"):
+                return "\n" + str(df.head(3))
+            # Pandas
+            if hasattr(df, "iloc"):
+                return "\n" + str(df.head(3))
+            # DuckDB
+            if hasattr(df, "limit"):
+                return "\n" + str(df.limit(3).df())
+            return str(df)
+        except Exception:
+            return "(sample conversion failed)"
 
     def run_source(self, source: Optional[Union[str, Path]] = None) -> ValidationResult:
         """
@@ -392,6 +514,7 @@ class DataProcessor:
         Returns:
             ValidationResult object (unpacks to good_df, bad_df).
         """
+        self._active_trace_steps = []
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
@@ -424,223 +547,111 @@ class DataProcessor:
 
         df = None
         file_paths = [f["path"] for f in source_files] if source_files else None
-        if self.engine_name == "polars":
-            import polars as pl
-            if self.contract.server and self.contract.server.format:
-                fmt = self.contract.server.format.lower()
-                if fmt == "delta":
-                    # Use Delta-RS for Spark-free Delta Lake operations
-                    try:
-                        from lakelogic.engines.delta_adapter import DeltaAdapter
-                        adapter = DeltaAdapter()
-                        df = adapter.read(path, as_polars=True)
-                        logger.info(f"Loaded Delta table via Delta-RS: {path}")
-                    except ImportError:
-                        raise ValueError(
-                            "Delta Lake sources require Delta-RS. Install with: pip install 'lakelogic[delta]' or pip install deltalake"
-                        )
-                elif fmt == "iceberg":
-                    raise ValueError("Iceberg sources require Spark engine.")
-            if df is None:  # Not Delta, use standard Polars readers
-                if file_paths:
-                    if len(file_paths) == 1:
-                        if path.endswith(".parquet"):
-                            df = pl.read_parquet(file_paths[0])
-                        elif path.endswith(".xml"):
-                            df = pl.read_xml(file_paths[0])
-                        elif path.endswith((".xlsx", ".xls")):
-                            df = pl.read_excel(file_paths[0])
-                        else:
-                            df = pl.read_csv(file_paths[0])
-                    else:
-                        if path.endswith(".parquet"):
-                            df = pl.concat([pl.read_parquet(p) for p in file_paths], how="vertical")
-                        elif path.endswith(".xml"):
-                            df = pl.concat([pl.read_xml(p) for p in file_paths], how="vertical")
-                        elif path.endswith((".xlsx", ".xls")):
-                            df = pl.concat([pl.read_excel(p) for p in file_paths], how="vertical")
-                        else:
-                            df = pl.concat([pl.read_csv(p) for p in file_paths], how="vertical")
-                else:
-                    if path.endswith(".csv"): df = pl.read_csv(path)
-                    elif path.endswith(".parquet"): df = pl.read_parquet(path)
-                    elif path.endswith(".xml"): df = pl.read_xml(path)
-                    elif path.endswith((".xlsx", ".xls")): df = pl.read_excel(path)
-                    else: df = pl.read_csv(path) # default
-        elif self.engine_name == "pandas":
-            import pandas as pd
-            if self.contract.server and self.contract.server.format:
-                fmt = self.contract.server.format.lower()
-                if fmt == "delta":
-                    # Use Delta-RS for Spark-free Delta Lake operations
-                    try:
-                        from lakelogic.engines.delta_adapter import DeltaAdapter
-                        adapter = DeltaAdapter()
-                        df = adapter.read(path, as_polars=False)  # Returns Pandas
-                        logger.info(f"Loaded Delta table via Delta-RS: {path}")
-                    except ImportError:
-                        raise ValueError(
-                            "Delta Lake sources require Delta-RS. Install with: pip install 'lakelogic[delta]' or pip install deltalake"
-                        )
-                elif fmt == "iceberg":
-                    raise ValueError("Iceberg sources require Spark engine.")
-            if df is None:  # Not Delta, use standard Pandas readers
-                if file_paths:
-                    frames = []
-                    for file in file_paths:
-                        if file.endswith(".parquet"):
-                            frames.append(pd.read_parquet(file))
-                        elif file.endswith(".xml"):
-                            frames.append(pd.read_xml(file))
-                        elif file.endswith((".xlsx", ".xls")):
-                            frames.append(pd.read_excel(file))
-                        else:
-                            frames.append(pd.read_csv(file))
-                    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-                else:
-                    if path.endswith(".csv"): df = pd.read_csv(path)
-                    elif path.endswith(".parquet"): df = pd.read_parquet(path)
-                    elif path.endswith(".xml"): df = pd.read_xml(path)
-                    elif path.endswith((".xlsx", ".xls")): df = pd.read_excel(path)
-                    else: df = pd.read_csv(path)
-        elif self.engine_name == "duckdb":
-            import duckdb
-            if self.contract.server and self.contract.server.format:
-                fmt = self.contract.server.format.lower()
-                if fmt == "delta":
-                    # Use Delta-RS for Spark-free Delta Lake operations
-                    try:
-                        from lakelogic.engines.delta_adapter import DeltaAdapter
-                        adapter = DeltaAdapter()
-                        df = adapter.read(path, as_polars=False)  # Returns Pandas (DuckDB compatible)
-                        logger.info(f"Loaded Delta table via Delta-RS: {path}")
-                    except ImportError:
-                        raise ValueError(
-                            "Delta Lake sources require Delta-RS. Install with: pip install 'lakelogic[delta]' or pip install deltalake"
-                        )
-                elif fmt == "iceberg":
-                    raise ValueError("Iceberg sources require Spark engine.")
-            def _duckdb_read_csv(paths):
-                try:
-                    return duckdb.read_csv(paths)
-                except Exception as exc:
-                    logger.warning(
-                        f"DuckDB CSV auto-detect failed for {paths}. Retrying with relaxed settings. Error: {exc}"
-                    )
-                    return duckdb.read_csv(
-                        paths,
-                        delim=",",
-                        quote='"',
-                        escape='"',
-                        header=True,
-                        strict_mode=False,
-                    )
-            # Convert to Pandas DF immediately to ensure connection-agnostic transfer
-            if df is None:  # Not Delta, use standard DuckDB readers
-                if file_paths:
-                    if path.endswith(".parquet"):
-                        rel = duckdb.read_parquet(file_paths)
-                    elif path.endswith(".xml"):
-                        import pandas as pd
-                        df = pd.concat([pd.read_xml(f) for f in file_paths], ignore_index=True)
-                        rel = None
-                    elif path.endswith((".xlsx", ".xls")):
-                        import pandas as pd
-                        df = pd.concat([pd.read_excel(f) for f in file_paths], ignore_index=True)
-                        rel = None
-                    else:
-                        rel = _duckdb_read_csv(file_paths)
-                else:
-                    if path.endswith(".csv"): rel = _duckdb_read_csv(path)
-                    elif path.endswith(".parquet"): rel = duckdb.read_parquet(path)
-                    elif path.endswith(".xml"):
-                        import pandas as pd
-                        df = pd.read_xml(path)
-                        rel = None
-                    elif path.endswith((".xlsx", ".xls")):
-                        import pandas as pd
-                        df = pd.read_excel(path)
-                        rel = None
-                    else: rel = _duckdb_read_csv(path)
-                
-                if rel is not None:
-                    df = rel.df()
-        elif self.engine_name == "spark":
-            from pyspark.sql import SparkSession
-            
-            # Determine format first to check if we need special packages
-            fmt = None
-            if path.endswith(".csv"):
-                fmt = "csv"
-            elif path.endswith(".parquet"):
-                fmt = "parquet"
-            elif path.endswith(".xml"):
-                fmt = "xml"
-            elif path.endswith((".xlsx", ".xls")):
-                fmt = "excel"
-            elif self.contract.server and self.contract.server.format:
-                fmt = self.contract.server.format.lower()
-            
-            # Auto-configure Spark packages for XML and Excel if needed
-            spark_builder = SparkSession.builder
-            if fmt == "xml":
-                # Check if spark-xml is already available, if not, add it
-                try:
-                    spark = SparkSession.getActiveSession()
-                    if spark is None:
-                        logger.info("Adding spark-xml package for XML support")
-                        spark_builder = spark_builder.config("spark.jars.packages", "com.databricks:spark-xml_2.12:0.18.0")
-                        spark = spark_builder.getOrCreate()
-                    else:
-                        spark = spark_builder.getOrCreate()
-                except Exception:
-                    spark = spark_builder.getOrCreate()
-            elif fmt == "excel":
-                # Check if spark-excel is already available, if not, add it
-                try:
-                    spark = SparkSession.getActiveSession()
-                    if spark is None:
-                        logger.info("Adding spark-excel package for Excel support")
-                        spark_builder = spark_builder.config("spark.jars.packages", "com.crealytics:spark-excel_2.12:3.4.0_0.20.2")
-                        spark = spark_builder.getOrCreate()
-                    else:
-                        spark = spark_builder.getOrCreate()
-                except Exception:
-                    spark = spark_builder.getOrCreate()
-            else:
-                spark = spark_builder.getOrCreate()
-            
-            if path.startswith("table:"):
-                table_name = path[6:]
-                df = spark.table(table_name)
-                return self.run(df, source_path=table_name)
+        
+        with self.trace_step("Load Source", path=str(path)):
+            if self.engine_name == "polars":
+                import polars as pl
+                if df is None:
+                    # Use scan_* (lazy) by default for formats that support it.
+                    # This enables predicate/projection pushdown and query
+                    # optimisation.  We .collect() before returning so the
+                    # user always receives a regular DataFrame.
+                    _scannable = path.endswith((".parquet", ".csv", ".ndjson", ".jsonl"))
 
-            fmt = fmt or "parquet"
-            reader = spark.read.format(fmt)
-            if fmt == "csv":
-                reader = reader.option("header", "true")
-            elif fmt == "excel":
-                reader = reader.option("header", "true").option("inferSchema", "true")
-            
-            load_path = path
-            if not self._is_uri_path(path):
-                try:
-                    load_path = Path(path).expanduser().resolve().as_posix()
-                except Exception:
-                    load_path = path
-            if file_paths:
-                df = reader.load(file_paths)
-            else:
-                df = reader.load(load_path)
-        elif self.engine_name in ["snowflake", "bigquery"]:
-            table_name = path[6:] if path.startswith("table:") else path
-            return self.run(table_name, source_path=table_name)
-            
-        # If the adapter can handle paths natively, pass the path string
-        # Otherwise, the engine-specific loading above will have populated 'df'
-        input_data = df if df is not None else path
-            
-        return self.run(input_data, source_path=path)
+                    if file_paths:
+                        if _scannable:
+                            # Lazy: scan each file and concat lazily
+                            if path.endswith(".parquet"):
+                                lf = pl.scan_parquet(file_paths if len(file_paths) > 1 else file_paths[0])
+                            elif path.endswith((".ndjson", ".jsonl")):
+                                lf = pl.concat([pl.scan_ndjson(p) for p in file_paths])
+                            else:  # CSV
+                                if len(file_paths) == 1:
+                                    lf = pl.scan_csv(file_paths[0])
+                                else:
+                                    lf = pl.concat([pl.scan_csv(p) for p in file_paths])
+                            df = lf.collect()
+                        else:
+                            # Eager fallback for XML / Excel (no scan_* support)
+                            if len(file_paths) == 1:
+                                if path.endswith(".xml"): df = pl.read_xml(file_paths[0])
+                                elif path.endswith((".xlsx", ".xls")): df = pl.read_excel(file_paths[0])
+                                else: df = pl.read_csv(file_paths[0])
+                            else:
+                                if path.endswith(".xml"): df = pl.concat([pl.read_xml(p) for p in file_paths], how="vertical")
+                                elif path.endswith((".xlsx", ".xls")): df = pl.concat([pl.read_excel(p) for p in file_paths], how="vertical")
+                                else: df = pl.concat([pl.read_csv(p) for p in file_paths], how="vertical")
+                    else:
+                        if _scannable:
+                            # Lazy: scan single file
+                            if path.endswith(".parquet"): lf = pl.scan_parquet(path)
+                            elif path.endswith((".ndjson", ".jsonl")): lf = pl.scan_ndjson(path)
+                            else: lf = pl.scan_csv(path)
+                            df = lf.collect()
+                        else:
+                            # Eager fallback
+                            if path.endswith(".xml"): df = pl.read_xml(path)
+                            elif path.endswith((".xlsx", ".xls")): df = pl.read_excel(path)
+                            else: df = pl.read_csv(path)
+
+            elif self.engine_name == "pandas":
+                import pandas as pd
+                if df is None:
+                    if file_paths:
+                        frames = []
+                        for file in file_paths:
+                            if file.endswith(".parquet"): frames.append(pd.read_parquet(file))
+                            elif file.endswith(".xml"): frames.append(pd.read_xml(file))
+                            elif file.endswith((".xlsx", ".xls")): frames.append(pd.read_excel(file))
+                            else: frames.append(pd.read_csv(file))
+                        df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+                    else:
+                        if path.endswith(".csv"): df = pd.read_csv(path)
+                        elif path.endswith(".parquet"): df = pd.read_parquet(path)
+                        elif path.endswith(".xml"): df = pd.read_xml(path)
+                        elif path.endswith((".xlsx", ".xls")): df = pd.read_excel(path)
+                        else: df = pd.read_csv(path)
+
+            elif self.engine_name == "duckdb":
+                import duckdb
+                def _duckdb_read_csv(paths):
+                    return duckdb.read_csv(paths, header=True, strict_mode=False)
+
+                rel = None
+                if df is None:
+                    if file_paths:
+                        if path.endswith(".parquet"): rel = duckdb.read_parquet(file_paths)
+                        else: rel = _duckdb_read_csv(file_paths)
+                    else:
+                        if path.endswith(".csv"): rel = _duckdb_read_csv(path)
+                        elif path.endswith(".parquet"): rel = duckdb.read_parquet(path)
+                        else: rel = _duckdb_read_csv(path)
+
+                    if rel is not None:
+                        df = rel.df()
+
+            elif self.engine_name == "spark":
+                from pyspark.sql import SparkSession
+                spark = SparkSession.builder.getOrCreate()
+                fmt = (self.contract.server.format.lower() if self.contract.server and self.contract.server.format 
+                       else ("csv" if path.endswith(".csv") else ("excel" if path.endswith((".xlsx", ".xls")) else "parquet")))
+                
+                if df is None:
+                    if path.startswith("table:"):
+                        df = spark.table(path[6:])
+                    else:
+                        reader = spark.read.format(fmt)
+                        if fmt == "csv": reader = reader.option("header", "true")
+                        df = reader.load(file_paths if file_paths else path)
+
+            elif self.engine_name in ["snowflake", "bigquery"]:
+                table_name = path[6:] if path.startswith("table:") else path
+                return self.run(table_name, source_path=table_name, reset_trace=False)
+
+        if df is None:
+            raise ValueError(f"Could not load data from {path} using engine {self.engine_name}")
+
+        return self.run(df, source_path=path, reset_trace=False)
 
     def _expand_source_files(self, path: str) -> Optional[List[Dict[str, Any]]]:
         """
@@ -965,657 +976,125 @@ class DataProcessor:
         bad_df: Any,
         source_path: Optional[Union[str, Path]] = None,
     ) -> Tuple[Any, Any]:
-        """
-        Inject lineage columns into good and bad dataframes.
-
-        Args:
-            good_df: Validated dataframe.
-            bad_df: Quarantined dataframe.
-            source_path: Optional source path for lineage.
-
-        Returns:
-            Tuple of (good_df, bad_df) with lineage columns injected.
-        """
-        lineage = self.contract.lineage
-        if not lineage or not getattr(lineage, "enabled", False):
-            return good_df, bad_df
-
-        preserve_cols = list(getattr(lineage, "preserve_upstream", []) or [])
-        if preserve_cols:
-            prefix = getattr(lineage, "upstream_prefix", "_upstream") or "_upstream"
-            good_df = self._preserve_upstream_lineage(good_df, preserve_cols, prefix)
-            bad_df = self._preserve_upstream_lineage(bad_df, preserve_cols, prefix)
-
-        source_value = str(source_path) if source_path else None
-        timestamp_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        run_id_value = self.last_run_id
-        if getattr(lineage, "run_id_source", "run_id") == "pipeline_run_id" and self.pipeline_run_id:
-            run_id_value = self.pipeline_run_id
-
-        # If any capture_* field is explicitly set, only honor those explicitly set fields.
-        capture_fields = {
-            "capture_source_path",
-            "capture_timestamp",
-            "capture_run_id",
-            "capture_domain",
-            "capture_system",
-        }
-        explicit_fields = set()
-        if hasattr(lineage, "model_fields_set"):
-            explicit_fields = set(getattr(lineage, "model_fields_set"))
-        elif hasattr(lineage, "__pydantic_fields_set__"):
-            explicit_fields = set(getattr(lineage, "__pydantic_fields_set__"))
-        explicit_capture = explicit_fields & capture_fields
-
-        metadata = getattr(self.contract, "metadata", {}) or {}
-        domain_value = metadata.get("domain")
-        system_value = metadata.get("system")
-        columns: Dict[str, Any] = {}
-        if (("capture_source_path" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_source_path", False):
-            columns[lineage.source_column_name] = source_value
-        if (("capture_timestamp" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_timestamp", False):
-            columns[lineage.timestamp_column_name] = timestamp_value
-        if (("capture_run_id" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_run_id", False):
-            columns[lineage.run_id_column_name] = run_id_value
-        if (("capture_domain" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_domain", False) and domain_value is not None:
-            columns[lineage.domain_column_name] = domain_value
-        if (("capture_system" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_system", False) and system_value is not None:
-            columns[lineage.system_column_name] = system_value
-
-        if not columns:
-            return good_df, bad_df
-
-        return self._add_columns(good_df, columns), self._add_columns(bad_df, columns)
+        """Delegate to lakelogic.core.lineage (kept for backward compat)."""
+        from lakelogic.core.lineage import inject_lineage
+        return inject_lineage(
+            good_df, bad_df, self.contract, self.engine_name,
+            self.last_run_id, self.pipeline_run_id, source_path,
+        )
 
     def _preserve_upstream_lineage(self, df: Any, columns: List[str], prefix: str) -> Any:
-        """
-        Rename existing lineage columns to preserve upstream lineage before injecting new lineage values.
-
-        Args:
-            df: Engine dataframe.
-            columns: Column names to preserve.
-            prefix: Prefix for preserved columns.
-
-        Returns:
-            Updated dataframe.
-        """
-        if df is None:
-            return df
-
-        def _new_name(col: str) -> str:
-            if col.startswith("_lakelogic_"):
-                return col.replace("_lakelogic", prefix, 1)
-            return f"{prefix}_{col.lstrip('_')}"
-
-        rename_map: Dict[str, str] = {col: _new_name(col) for col in columns}
-
-        try:
-            import polars as pl
-            if isinstance(df, pl.DataFrame):
-                existing = set(df.columns)
-                mapping = {src: dst for src, dst in rename_map.items() if src in existing and dst not in existing}
-                return df.rename(mapping) if mapping else df
-        except Exception:
-            pass
-
-        try:
-            import pandas as pd
-            if isinstance(df, pd.DataFrame):
-                existing = set(df.columns)
-                mapping = {src: dst for src, dst in rename_map.items() if src in existing and dst not in existing}
-                return df.rename(columns=mapping) if mapping else df
-        except Exception:
-            pass
-
-        if self.engine_name == "spark":
-            try:
-                existing = set(df.columns)
-                updated = df
-                for src, dst in rename_map.items():
-                    if src in existing and dst not in existing:
-                        updated = updated.withColumnRenamed(src, dst)
-                return updated
-            except Exception:
-                return df
-
-        try:
-            import duckdb
-            if isinstance(df, duckdb.DuckDBPyRelation):
-                cols = []
-                try:
-                    cols = list(df.columns)
-                except Exception:
-                    try:
-                        cols = [row[0] for row in df.connection.execute(f"DESCRIBE {df.sql_query()}").fetchall()]
-                    except Exception:
-                        cols = [row[0] for row in df.connection.execute(f"DESCRIBE SELECT * FROM ({df.sql_query()})").fetchall()]
-
-                existing = set(cols)
-                target_set = set(rename_map.values())
-                exprs = []
-                for col in cols:
-                    if col in rename_map and rename_map[col] not in existing:
-                        col_name = col.replace('"', '""')
-                        new_name = rename_map[col].replace('"', '""')
-                        exprs.append(f"\"{col_name}\" AS \"{new_name}\"")
-                    elif col in target_set:
-                        # Drop existing target columns to avoid duplicates.
-                        continue
-                    else:
-                        exprs.append(f"\"{col.replace('\"', '\"\"')}\"")
-                query = f"SELECT {', '.join(exprs)} FROM ({df.sql_query()})"
-                return df.connection.sql(query)
-        except Exception:
-            pass
-
-        return df
+        """Delegate to lakelogic.core.lineage (kept for backward compat)."""
+        from lakelogic.core.lineage import _preserve_upstream_lineage
+        return _preserve_upstream_lineage(df, columns, prefix, self.engine_name)
 
     def _add_columns(self, df: Any, columns: Dict[str, Any]) -> Any:
+        """Delegate to lakelogic.core.lineage (kept for backward compat)."""
+        from lakelogic.core.lineage import add_columns
+        return add_columns(df, columns, self.engine_name)
+
+    def _add_current_trace(self, step: str, **kwargs):
+        """Helper to add trace steps to the active run."""
+        if hasattr(self, "_active_trace_steps") and self._active_trace_steps is not None:
+            from lakelogic.core.models import TraceStep
+            import time
+            self._active_trace_steps.append(TraceStep(
+                step=step,
+                timestamp=time.time(),
+                **kwargs
+            ))
+
+    def trace_step(self, name: str, **details):
         """
-        Add constant columns to a dataframe across supported engines.
-
-        Args:
-            df: Engine dataframe.
-            columns: Mapping of column name to constant value.
-
-        Returns:
-            Updated dataframe.
+        Public context manager for custom Python tracing.
+        Usage:
+            with processor.trace_step("My Calculation", detail="foo"):
+                ...
         """
-        if df is None:
-            return df
-        try:
-            import polars as pl
-            if isinstance(df, pl.DataFrame):
-                return df.with_columns([pl.lit(value).alias(name) for name, value in columns.items()])
-        except Exception:
-            pass
-
-        try:
-            import pandas as pd
-            if isinstance(df, pd.DataFrame):
-                updated = df.copy()
-                for name, value in columns.items():
-                    updated[name] = value
-                return updated
-        except Exception:
-            pass
-
-        # DuckDB relation support
-        try:
-            import duckdb
-            if isinstance(df, duckdb.DuckDBPyRelation):
-                def _lit(val):
-                    if val is None:
-                        return "NULL"
-                    if isinstance(val, bool):
-                        return "TRUE" if val else "FALSE"
-                    if isinstance(val, (int, float)):
-                        return str(val)
-                    text = str(val).replace("'", "''")
-                    return f"'{text}'"
-
-                exprs = ["*"]
-                for name, value in columns.items():
-                    col_name = str(name).replace('"', '""')
-                    exprs.append(f"{_lit(value)} AS \"{col_name}\"")
-                query = f"SELECT {', '.join(exprs)} FROM ({df.sql_query()})"
-                return df.connection.sql(query)
-        except Exception:
-            pass
-
-        if self.engine_name == "spark":
+        from contextlib import contextmanager
+        
+        @contextmanager
+        def _trace():
+            import time
+            from lakelogic.core.models import TraceStep
+            start = time.perf_counter()
+            # Initial step without duration
+            step = TraceStep(step=name, timestamp=time.time(), details=details, status="running")
+            if hasattr(self, "_active_trace_steps"):
+                self._active_trace_steps.append(step)
+            
             try:
-                from pyspark.sql import functions as F
-                updated = df
-                for name, value in columns.items():
-                    updated = updated.withColumn(name, F.lit(value))
-                return updated
-            except Exception:
-                return df
-
-        return df
+                yield step
+                step.status = "ok"
+            except Exception as e:
+                step.status = "error"
+                step.details["error"] = str(e)
+                raise e
+            finally:
+                step.duration_ms = (time.perf_counter() - start) * 1000
+        
+        return _trace()
 
     def _apply_external_logic(self, good_df: Any) -> Tuple[Any, bool]:
-        """
-        Execute optional external logic hooks.
-
-        Args:
-            good_df: Validated dataframe.
-
-        Returns:
-            Tuple of (updated_good_df, external_handled_output).
-        """
-        logic = self.contract.external_logic
-        if not logic:
-            return good_df, False
-
-        logic_type = (logic.type or "").lower()
-        if not logic.path:
-            logger.warning("external_logic configured without path; skipping.")
-            return good_df, False
-
-        base_path = getattr(self.contract, "_base_path", None)
-        path = Path(logic.path)
-        if not path.is_absolute() and base_path:
-            path = Path(base_path) / path
-
-        if logic_type == "python":
-            return self._run_python_logic(path, logic, good_df)
-
-        if logic_type == "notebook":
-            return self._run_notebook_logic(path, logic, good_df)
-
-        logger.warning(f"Unsupported external_logic.type: {logic.type}")
-        return good_df, False
+        """Delegate to lakelogic.core.external_logic (kept for backward compat)."""
+        from lakelogic.core.external_logic import apply_external_logic
+        return apply_external_logic(
+            self.contract, good_df, self.engine_name,
+            self.last_run_id, self.last_source_path,
+            add_trace_fn=self._add_current_trace,
+            trace_step_fn=self.trace_step,
+        )
 
     def _run_python_logic(self, path: Path, logic, good_df: Any) -> Tuple[Any, bool]:
-        """
-        Execute an external python module and return updated dataframe if provided.
-
-        Args:
-            path: Path to python file.
-            logic: ExternalLogic config.
-            good_df: Validated dataframe.
-
-        Returns:
-            Tuple of (updated_good_df, external_handled_output).
-        """
-        import importlib.util
-        if not path.exists():
-            raise FileNotFoundError(f"External logic file not found: {path}")
-
-        spec = importlib.util.spec_from_file_location(f"lakelogic_external_{self.last_run_id}", path)
-        if spec is None or spec.loader is None:
-            raise ValueError(f"Could not load external logic module: {path}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)  # type: ignore[arg-type]
-
-        entrypoint = getattr(logic, "entrypoint", "run")
-        if not hasattr(module, entrypoint):
-            raise AttributeError(f"External logic entrypoint '{entrypoint}' not found in {path}")
-
-        fn = getattr(module, entrypoint)
-        args = logic.args or {}
-        result = fn(good_df, contract=self.contract, engine=self.engine_name, **args)
-
-        if result is None:
-            handled = bool(logic.handles_output)
-            return good_df, handled
-
-        # If a path is returned, load it as a dataframe
-        if isinstance(result, (str, Path)):
-            output_df = self._load_output_frame(Path(result), logic.output_format)
-            return output_df, False
-
-        # If tuple, take first element as the dataframe
-        if isinstance(result, tuple) and result:
-            return result[0], False
-
-        return result, False
+        """Delegate to lakelogic.core.external_logic (kept for backward compat)."""
+        from lakelogic.core.external_logic import _run_python_logic
+        return _run_python_logic(
+            path, logic, good_df, self.contract, self.engine_name,
+            self.last_run_id, self._add_current_trace, self.trace_step,
+        )
 
     def _run_notebook_logic(self, path: Path, logic, good_df: Any) -> Tuple[Any, bool]:
-        """
-        Execute an external notebook.
-
-        Args:
-            path: Path to notebook file.
-            logic: ExternalLogic config.
-            good_df: Validated dataframe.
-
-        Returns:
-            Tuple of (updated_good_df, external_handled_output).
-        """
-        if not path.exists():
-            raise FileNotFoundError(f"External notebook not found: {path}")
-
-        try:
-            import nbformat  # type: ignore
-            from nbclient import NotebookClient  # type: ignore
-        except Exception as exc:
-            raise ValueError("Notebook execution requires nbformat and nbclient. Install lakelogic[notebook].") from exc
-
-        params = dict(logic.args or {})
-        base_path = getattr(self.contract, "_base_path", None)
-        if base_path:
-            params.setdefault("lakelogic_contract_dir", str(Path(base_path)))
-        params.setdefault("lakelogic_engine", self.engine_name)
-        params.setdefault("lakelogic_run_id", self.last_run_id)
-        params.setdefault("lakelogic_source_path", self.last_source_path)
-
-        # Write validated input to a temp CSV for notebook access
-        tmp_dir = Path(base_path) / ".lakelogic" if base_path else (Path.cwd() / ".lakelogic")
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        input_path = tmp_dir / f"input_{self.last_run_id}.csv"
-        try:
-            import pandas as pd
-            if hasattr(good_df, "to_pandas"):
-                pdf = good_df.to_pandas()
-            elif hasattr(good_df, "toPandas"):
-                pdf = good_df.toPandas()
-            else:
-                pdf = good_df
-            if not isinstance(pdf, pd.DataFrame):
-                pdf = pd.DataFrame(pdf)
-            pdf.to_csv(input_path, index=False)
-            params.setdefault("lakelogic_input_path", str(input_path))
-            params.setdefault("lakelogic_input_format", "csv")
-        except Exception as exc:
-            logger.warning(f"Failed to write notebook input data: {exc}")
-
-        output_path = None
-        if logic.output_path:
-            output_path = Path(logic.output_path)
-            if not output_path.is_absolute() and getattr(self.contract, "_base_path", None):
-                output_path = Path(self.contract._base_path) / output_path
-            params.setdefault("lakelogic_output_path", str(output_path))
-
-        nb = nbformat.read(path, as_version=4)
-        inject_cell = nbformat.v4.new_code_cell(f"LAKELOGIC_PARAMS = {repr(params)}")
-        nb.cells.insert(0, inject_cell)
-
-        client = NotebookClient(nb, kernel_name=logic.kernel_name)
-        client.execute()
-
-        if output_path:
-            output_df = self._load_output_frame(output_path, logic.output_format)
-            return output_df, False
-
-        handled = True if logic.handles_output is None else bool(logic.handles_output)
-        return good_df, handled
+        """Delegate to lakelogic.core.external_logic (kept for backward compat)."""
+        from lakelogic.core.external_logic import _run_notebook_logic
+        return _run_notebook_logic(
+            path, logic, good_df, self.contract, self.engine_name,
+            self.last_run_id, self.last_source_path,
+        )
 
     def _load_output_frame(self, path: Path, fmt: Optional[str]) -> Any:
-        """
-        Load an output dataframe from disk.
-
-        Args:
-            path: Output path.
-            fmt: Optional format override.
-
-        Returns:
-            pandas.DataFrame
-        """
-        import pandas as pd
-        output_format = (fmt or path.suffix.lstrip(".") or "csv").lower()
-        if output_format == "parquet":
-            return pd.read_parquet(path)
-        return pd.read_csv(path)
+        """Delegate to lakelogic.core.external_logic (kept for backward compat)."""
+        from lakelogic.core.external_logic import _load_output_frame
+        return _load_output_frame(path, fmt)
 
     def _compute_slos(self, good_df: Any, counts: Dict[str, Optional[int]]) -> Dict[str, Any]:
-        """
-        Compute freshness and availability SLO metrics.
+        """Delegate to lakelogic.core.slo (kept for backward compat)."""
+        from lakelogic.core.slo import compute_slos
+        return compute_slos(self.contract, good_df, counts, self.engine_name)
 
-        Args:
-            good_df: Validated dataframe.
-            counts: Count metrics for the run.
-
-        Returns:
-            Dict containing SLO results.
-        """
-        slos: Dict[str, Any] = {}
-        svc = self.contract.service_levels
-        if not svc:
-            return slos
-
-        if svc.freshness:
-            slos["freshness"] = self._compute_freshness(good_df, svc.freshness)
-
-        if svc.availability is not None:
-            slos["availability"] = self._compute_availability(good_df, counts, svc.availability)
-
-        return slos
-
+    # ─── SLO helpers (delegated to lakelogic.core.slo) ────────────────────
     def _parse_duration_seconds(self, value: Any) -> Optional[float]:
-        """
-        Parse a duration string to seconds.
-
-        Args:
-            value: Duration (e.g., 24h, 30m) or numeric hours.
-
-        Returns:
-            Duration in seconds, if parseable.
-        """
-        if value is None:
-            return None
-        if isinstance(value, (int, float)):
-            # Interpret numeric freshness threshold as hours
-            return float(value) * 3600.0
-        if isinstance(value, str):
-            text = value.strip().lower()
-            if not text:
-                return None
-            try:
-                import re
-                match = re.match(r"^(\d+(?:\.\d+)?)([smhdw])$", text)
-                if not match:
-                    return None
-                amount = float(match.group(1))
-                unit = match.group(2)
-                multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
-                return amount * multipliers[unit]
-            except Exception:
-                return None
-        return None
+        from lakelogic.core.slo import _parse_duration_seconds
+        return _parse_duration_seconds(value)
 
     def _get_max_timestamp(self, df: Any, field: str) -> Optional[datetime]:
-        """
-        Get the max timestamp from a dataframe column.
-
-        Args:
-            df: Engine dataframe.
-            field: Column name to inspect.
-
-        Returns:
-            Max timestamp or None.
-        """
-        if not field:
-            return None
-        try:
-            import polars as pl
-            if isinstance(df, pl.DataFrame):
-                if field not in df.columns:
-                    return None
-                value = df.select(pl.col(field).max()).to_series()[0]
-                return self._coerce_datetime(value)
-        except Exception:
-            pass
-
-        try:
-            import pandas as pd
-            if isinstance(df, pd.DataFrame):
-                if field not in df.columns:
-                    return None
-                value = df[field].max()
-                return self._coerce_datetime(value)
-        except Exception:
-            pass
-
-        if self.engine_name == "spark":
-            try:
-                from pyspark.sql import functions as F
-                if field not in df.columns:
-                    return None
-                value = df.agg(F.max(field).alias("max_value")).collect()[0][0]
-                return self._coerce_datetime(value)
-            except Exception:
-                return None
-
-        return None
+        from lakelogic.core.slo import _get_max_timestamp
+        return _get_max_timestamp(df, field, self.engine_name)
 
     def _coerce_datetime(self, value: Any) -> Optional[datetime]:
-        """
-        Coerce a value to a timezone-aware datetime.
-
-        Args:
-            value: Input value (datetime/string).
-
-        Returns:
-            Datetime in UTC or None.
-        """
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        try:
-            import pandas as pd
-            ts = pd.to_datetime(value, utc=True, errors="coerce")
-            if ts is not None and ts is not pd.NaT:
-                return ts.to_pydatetime()
-        except Exception:
-            pass
-        if isinstance(value, str):
-            try:
-                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-            except Exception:
-                return None
-        return None
+        from lakelogic.core.slo import _coerce_datetime
+        return _coerce_datetime(value)
 
     def _compute_freshness(self, good_df: Any, freshness_obj: Any) -> Dict[str, Any]:
-        """
-        Compute freshness metrics from the newest record timestamp.
-
-        Args:
-            good_df: Validated dataframe.
-            freshness_obj: Service level definition.
-
-        Returns:
-            Dict containing freshness metrics.
-        """
-        result: Dict[str, Any] = {"passed": None}
-        field = None
-        threshold = None
-        if hasattr(freshness_obj, "field"):
-            field = getattr(freshness_obj, "field", None)
-            threshold = getattr(freshness_obj, "threshold", None)
-        elif isinstance(freshness_obj, dict):
-            field = freshness_obj.get("field")
-            threshold = freshness_obj.get("threshold")
-        elif isinstance(freshness_obj, str):
-            threshold = freshness_obj
-
-        threshold_seconds = self._parse_duration_seconds(threshold)
-        if threshold_seconds is not None:
-            result["threshold_seconds"] = threshold_seconds
-
-        max_ts = self._get_max_timestamp(good_df, field) if field else None
-        if max_ts is None:
-            return result
-
-        now = datetime.now(timezone.utc)
-        age_seconds = (now - max_ts).total_seconds()
-        result["max_timestamp"] = max_ts.isoformat()
-        result["age_seconds"] = age_seconds
-        if threshold_seconds is not None:
-            result["passed"] = age_seconds <= threshold_seconds
-        return result
+        from lakelogic.core.slo import _compute_freshness
+        return _compute_freshness(good_df, freshness_obj, self.engine_name)
 
     def _compute_availability(self, good_df: Any, counts: Dict[str, Optional[int]], availability_obj: Any) -> Dict[str, Any]:
-        """
-        Compute availability metrics based on non-null ratio or good/total.
-
-        Args:
-            good_df: Validated dataframe.
-            counts: Count metrics.
-            availability_obj: Service level definition.
-
-        Returns:
-            Dict containing availability metrics.
-        """
-        result: Dict[str, Any] = {"passed": None}
-        field = None
-        threshold = None
-
-        if hasattr(availability_obj, "field"):
-            field = getattr(availability_obj, "field", None)
-            threshold = getattr(availability_obj, "threshold", None)
-        elif isinstance(availability_obj, dict):
-            field = availability_obj.get("field")
-            threshold = availability_obj.get("threshold")
-        else:
-            threshold = availability_obj
-
-        ratio = None
-        if field:
-            ratio = self._non_null_ratio(good_df, field)
-        else:
-            total = counts.get("total")
-            good = counts.get("good")
-            if total and good is not None:
-                ratio = good / total
-
-        result["ratio"] = ratio
-
-        if threshold is not None:
-            try:
-                threshold_val = float(threshold)
-            except Exception:
-                threshold_val = None
-            if threshold_val is not None:
-                if threshold_val > 1:
-                    threshold_val = threshold_val / 100.0
-                result["threshold"] = threshold_val
-                if ratio is not None:
-                    result["passed"] = ratio >= threshold_val
-
-        return result
+        from lakelogic.core.slo import _compute_availability
+        return _compute_availability(good_df, counts, availability_obj, self.engine_name)
 
     def _non_null_ratio(self, df: Any, field: str) -> Optional[float]:
-        """
-        Calculate the non-null ratio for a given column.
-
-        Args:
-            df: Engine dataframe.
-            field: Column name.
-
-        Returns:
-            Ratio of non-null values.
-        """
-        try:
-            import polars as pl
-            if isinstance(df, pl.DataFrame):
-                if field not in df.columns:
-                    return None
-                total = df.height
-                if total == 0:
-                    return None
-                non_null = df.select(pl.col(field).is_not_null().sum()).to_series()[0]
-                return float(non_null) / float(total)
-        except Exception:
-            pass
-
-        try:
-            import pandas as pd
-            if isinstance(df, pd.DataFrame):
-                if field not in df.columns:
-                    return None
-                total = len(df)
-                if total == 0:
-                    return None
-                non_null = df[field].notna().sum()
-                return float(non_null) / float(total)
-        except Exception:
-            pass
-
-        if self.engine_name == "spark":
-            try:
-                from pyspark.sql import functions as F
-                if field not in df.columns:
-                    return None
-                # Single aggregation: compute total and non-null count together
-                # Avoids two separate .count() calls (each triggering full DAG)
-                result = df.agg(
-                    F.count("*").alias("total"),
-                    F.count(F.col(field)).alias("non_null")
-                ).first()
-                total = result["total"]
-                non_null = result["non_null"]
-                if total == 0:
-                    return None
-                return float(non_null) / float(total)
-            except Exception:
-                return None
-
-        return None
+        from lakelogic.core.slo import _non_null_ratio
+        return _non_null_ratio(df, field, self.engine_name)
 
     def _extract_row_rule_failures(self, bad_df: Any) -> list:
         """
@@ -1672,3 +1151,254 @@ class DataProcessor:
             else:
                 failures.append({"message": str(err)})
         return failures
+
+    # ── DDL Generation ───────────────────────────────────────────────────
+
+    def generate_ddl(
+        self,
+        backend: Optional[str] = None,
+        *,
+        table_name: Optional[str] = None,
+        if_not_exists: bool = True,
+    ) -> str:
+        """
+        Generate CREATE TABLE DDL from this contract's schema.
+
+        Args:
+            backend: Target backend (spark, duckdb, snowflake, etc.).
+                     Defaults to the processor's engine.
+            table_name: Override table name.
+            if_not_exists: Include IF NOT EXISTS clause.
+
+        Returns:
+            SQL DDL string.
+        """
+        from lakelogic.core.ddl import generate_ddl as _generate_ddl
+        return _generate_ddl(
+            self.contract,
+            backend or self.engine_name,
+            table_name=table_name,
+            if_not_exists=if_not_exists,
+        )
+
+    def create_table(
+        self,
+        backend: Optional[str] = None,
+        *,
+        table_name: Optional[str] = None,
+        db_path: Optional[str] = None,
+        connection: Any = None,
+        dry_run: bool = False,
+    ) -> str:
+        """
+        Generate and execute CREATE TABLE DDL from this contract's schema.
+
+        Args:
+            backend: Target backend. Defaults to the processor's engine.
+            table_name: Override table name.
+            db_path: Database file path (for DuckDB/SQLite).
+            connection: Existing database connection.
+            dry_run: If True, only return DDL without executing.
+
+        Returns:
+            The generated DDL string.
+        """
+        from lakelogic.core.ddl import create_table as _create_table
+        return _create_table(
+            self.contract,
+            backend or self.engine_name,
+            table_name=table_name,
+            db_path=db_path,
+            connection=connection,
+            dry_run=dry_run,
+        )
+
+    # ── GDPR Compliance ──────────────────────────────────────────────────
+
+    def forget(
+        self,
+        df: Any,
+        subject_column: str,
+        subject_ids: List,
+        *,
+        erasure_strategy: str = "nullify",
+        hash_salt: str = "",
+    ) -> Any:
+        """
+        GDPR Right-to-be-Forgotten: erase PII for specific data subjects.
+
+        Uses the contract's ``pii: true`` field annotations to identify
+        which columns contain personal data.
+
+        Args:
+            df: Input dataframe.
+            subject_column: Column identifying the data subject (e.g., "customer_id").
+            subject_ids: List of subject identifiers to erase.
+            erasure_strategy: "nullify" (default), "hash", or "redact".
+            hash_salt: Salt for hashing.
+
+        Returns:
+            DataFrame with PII erased for specified subjects.
+        """
+        from lakelogic.core.gdpr import forget_subjects
+        return forget_subjects(
+            df, self.contract, subject_column, subject_ids,
+            erasure_strategy=erasure_strategy,
+            hash_salt=hash_salt,
+        )
+
+    def mask_pii(
+        self,
+        df: Any,
+        *,
+        strategy: str = "nullify",
+        hash_salt: str = "",
+        columns: Optional[List[str]] = None,
+    ) -> Any:
+        """
+        Mask all PII columns across all rows.
+
+        Useful for creating anonymised copies for dev/test environments.
+
+        Args:
+            df: Input dataframe.
+            strategy: "nullify" (default), "hash", or "redact".
+            hash_salt: Salt for hashing.
+            columns: Override column list (defaults to contract PII fields).
+
+        Returns:
+            DataFrame with PII columns masked.
+        """
+        from lakelogic.core.gdpr import mask_pii_columns
+        return mask_pii_columns(
+            df, self.contract,
+            strategy=strategy,
+            hash_salt=hash_salt,
+            columns=columns,
+        )
+
+    # ── Polars Streaming ─────────────────────────────────────────────────
+
+    def run_source_streaming(
+        self,
+        source: Optional[Union[str, Path]] = None,
+        *,
+        output_path: Optional[str] = None,
+    ) -> Any:
+        """
+        Load and process data using Polars streaming (LazyFrame).
+
+        Uses ``scan_*`` instead of ``read_*`` to handle files larger
+        than available memory. The contract rules are applied lazily
+        and the result is either collected or sunk to a target file.
+
+        Args:
+            source: Source file path. Defaults to contract source.
+            output_path: Optional path to sink results directly to disk
+                         (avoids collecting into memory).
+
+        Returns:
+            ValidationResult with LazyFrame-backed good/bad frames,
+            or metadata dict if output_path is specified.
+
+        Raises:
+            ValueError: If engine is not Polars or source format is unsupported.
+        """
+        if self.engine_name != "polars":
+            raise ValueError(
+                f"Streaming mode requires the 'polars' engine, got '{self.engine_name}'."
+            )
+
+        import polars as pl
+
+        path_val = source or (self.contract.source.path if self.contract.source else None)
+        if not path_val:
+            raise ValueError("No source path provided and no path in contract.")
+        path = self._resolve_source_path(path_val)
+        path_str = str(path)
+
+        logger.info(f"Loading source in streaming mode: {path_str}")
+
+        # Use scan_* for lazy evaluation
+        if path_str.endswith(".parquet"):
+            lf = pl.scan_parquet(path_str)
+        elif path_str.endswith(".csv"):
+            lf = pl.scan_csv(path_str)
+        elif path_str.endswith(".ndjson") or path_str.endswith(".jsonl"):
+            lf = pl.scan_ndjson(path_str)
+        else:
+            raise ValueError(
+                f"Streaming mode supports .parquet, .csv, .ndjson/.jsonl files. "
+                f"Got: {path_str}"
+            )
+
+        # Run the contract using the adapter (which works with LazyFrames)
+        result = self.run(lf, source_path=path_str)
+
+        if output_path:
+            # Sink results directly to disk without collecting
+            good = result.good
+            if isinstance(good, pl.LazyFrame):
+                if output_path.endswith(".parquet"):
+                    good.sink_parquet(output_path)
+                elif output_path.endswith(".csv"):
+                    good.sink_csv(output_path)
+                else:
+                    good.collect().write_parquet(output_path)
+            elif isinstance(good, pl.DataFrame):
+                if output_path.endswith(".parquet"):
+                    good.write_parquet(output_path)
+                elif output_path.endswith(".csv"):
+                    good.write_csv(output_path)
+            logger.info(f"Streamed results to {output_path}")
+            return {"target": output_path, "format": output_path.rsplit(".", 1)[-1]}
+
+        return result
+
+    # ── Date Dimension Generator ─────────────────────────────────────────
+
+    @staticmethod
+    def generate_date_dimension(
+        start_date: str = "2020-01-01",
+        end_date: str = "2030-12-31",
+        *,
+        fiscal_year_start_month: int = 1,
+        holiday_calendar: str = "us",
+        custom_holidays: Optional[Dict[str, str]] = None,
+        include_relative_flags: bool = False,
+        engine: str = "polars",
+        table_name: Optional[str] = None,
+        db_path: Optional[str] = None,
+        connection: Any = None,
+    ) -> Any:
+        """
+        Generate a date dimension table for the lakehouse.
+
+        Args:
+            start_date: Start date (ISO format).
+            end_date: End date (ISO format).
+            fiscal_year_start_month: Month when fiscal year starts (1-12).
+            holiday_calendar: "us", "uk", or "none".
+            custom_holidays: Dict of "YYYY-MM-DD" → "Name".
+            include_relative_flags: Include is_today, is_current_month, etc.
+            engine: Output engine ("polars", "pandas", "duckdb").
+            table_name: For DuckDB, the table name to create.
+            db_path: For DuckDB, the database path.
+            connection: Existing database connection.
+
+        Returns:
+            DataFrame (Polars/Pandas) or table name (DuckDB).
+        """
+        from lakelogic.core.dim_date import generate_date_dimension as _gen
+        return _gen(
+            start_date=start_date,
+            end_date=end_date,
+            fiscal_year_start_month=fiscal_year_start_month,
+            holiday_calendar=holiday_calendar,
+            custom_holidays=custom_holidays,
+            include_relative_flags=include_relative_flags,
+            engine=engine,
+            table_name=table_name,
+            db_path=db_path,
+            connection=connection,
+        )

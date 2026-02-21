@@ -3,6 +3,7 @@ upstream: ["02_silver"]
 
 info:
   title: "Transaction Fact (Gold)"
+  version: 1.0.0
   description: "Official transaction source of truth joined with customer dimension."
   target_layer: "gold"
 

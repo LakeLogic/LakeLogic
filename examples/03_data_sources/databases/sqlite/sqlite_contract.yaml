@@ -1,30 +1,26 @@
 version: 1.0.0
 dataset: bronze_sqlite_users
-description: "SQLite extraction example"
-
+description: SQLite extraction example
 source:
   type: database
   connector: sqlite
   connection:
     database: example.db
   table: users
-
 model:
   fields:
-    - name: id
-      type: integer
-    - name: name
-      type: string
-    - name: email
-      type: string
-
+  - name: id
+    type: integer
+  - name: name
+    type: string
+  - name: email
+    type: string
 quality:
   row_rules:
-    - name: email_not_null
-      rule: not_null
-      column: email
+  - not_null:
+      field: email
+      name: email_not_null
       severity: warning
-
 materialization:
   good:
     enabled: true

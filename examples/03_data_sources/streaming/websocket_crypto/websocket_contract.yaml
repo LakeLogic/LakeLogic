@@ -1,35 +1,32 @@
 version: 1.0.0
 dataset: crypto_ticks
-description: "WebSocket crypto price feed"
-
+description: WebSocket crypto price feed
 source:
   type: streaming
   connector: websocket
-  url: "wss://ws-feed.exchange.coinbase.com"
+  url: wss://ws-feed.exchange.coinbase.com
   subscribe_message:
     type: subscribe
     channels:
-      - name: ticker
-        product_ids: ["BTC-USD"]
-
+    - name: ticker
+      product_ids:
+      - BTC-USD
 model:
   fields:
-    - name: type
-      type: string
-    - name: product_id
-      type: string
-    - name: price
-      type: decimal
-    - name: time
-      type: timestamp
-
+  - name: type
+    type: string
+  - name: product_id
+    type: string
+  - name: price
+    type: decimal
+  - name: time
+    type: timestamp
 quality:
   row_rules:
-    - name: price_not_null
-      rule: not_null
-      column: price
+  - not_null:
+      field: price
+      name: price_not_null
       severity: error
-
 materialization:
   good:
     enabled: true

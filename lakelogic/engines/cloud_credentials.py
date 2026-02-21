@@ -11,6 +11,7 @@ automatically resolved from environment variables, CLI tools, or IAM roles.
 """
 
 import os
+import threading
 from typing import Optional, Dict, Any
 from loguru import logger
 
@@ -36,6 +37,7 @@ class CloudCredentialResolver:
                 - AWS Secrets Manager
                 - GCP Secret Manager
         """
+        self._lock = threading.Lock()
         self._azure_token = None
         self._azure_token_expiry = None
         self.use_key_vault = use_key_vault
@@ -112,26 +114,28 @@ class CloudCredentialResolver:
             options["AZURE_STORAGE_ACCOUNT_KEY"] = account_key
             return options
         
-        # Try Azure AD (DefaultAzureCredential)
+        # Try Azure AD (DefaultAzureCredential) — protected by lock to avoid
+        # concurrent threads racing to refresh the cached token.
         try:
             from azure.identity import DefaultAzureCredential
             from datetime import datetime, timedelta
             
-            # Check if we have a cached token that's still valid
-            if self._azure_token and self._azure_token_expiry:
-                if datetime.now() < self._azure_token_expiry:
-                    logger.debug("Using cached Azure AD token")
-                    options["BEARER_TOKEN"] = self._azure_token
-                    return options
-            
-            # Get new token
-            logger.debug("Acquiring Azure AD token via DefaultAzureCredential")
-            credential = DefaultAzureCredential()
-            token = credential.get_token("https://storage.azure.com/.default")
-            
-            # Cache token (expires in 1 hour, refresh after 50 minutes)
-            self._azure_token = token.token
-            self._azure_token_expiry = datetime.now() + timedelta(minutes=50)
+            with self._lock:
+                # Check if we have a cached token that's still valid
+                if self._azure_token and self._azure_token_expiry:
+                    if datetime.now() < self._azure_token_expiry:
+                        logger.debug("Using cached Azure AD token")
+                        options["BEARER_TOKEN"] = self._azure_token
+                        return options
+                
+                # Get new token
+                logger.debug("Acquiring Azure AD token via DefaultAzureCredential")
+                credential = DefaultAzureCredential()
+                token = credential.get_token("https://storage.azure.com/.default")
+                
+                # Cache token (expires in 1 hour, refresh after 50 minutes)
+                self._azure_token = token.token
+                self._azure_token_expiry = datetime.now() + timedelta(minutes=50)
             
             options["BEARER_TOKEN"] = token.token
             logger.info("✅ Azure AD authentication successful")
@@ -299,9 +303,10 @@ class CloudCredentialResolver:
         
         # Check cache
         cache_key = f"{cloud_provider}:{vault_url}:{secret_name}"
-        if cache_key in self._secret_cache:
-            logger.debug(f"Using cached secret: {secret_name}")
-            return self._secret_cache[cache_key]
+        with self._lock:
+            if cache_key in self._secret_cache:
+                logger.debug(f"Using cached secret: {secret_name}")
+                return self._secret_cache[cache_key]
         
         # Auto-detect cloud provider if not specified
         if not cloud_provider:
@@ -326,7 +331,8 @@ class CloudCredentialResolver:
         
         # Cache secret
         if secret_value:
-            self._secret_cache[cache_key] = secret_value
+            with self._lock:
+                self._secret_cache[cache_key] = secret_value
         
         return secret_value
     
@@ -458,14 +464,16 @@ class CloudCredentialResolver:
     
     def clear_cache(self):
         """Clear cached credentials and secrets."""
-        self._azure_token = None
-        self._azure_token_expiry = None
-        self._secret_cache = {}
+        with self._lock:
+            self._azure_token = None
+            self._azure_token_expiry = None
+            self._secret_cache = {}
         logger.debug("Cleared credential and secret cache")
 
 
 # Global credential resolver instance
 _global_resolver: Optional[CloudCredentialResolver] = None
+_resolver_lock = threading.Lock()
 
 
 def get_credential_resolver() -> CloudCredentialResolver:
@@ -481,8 +489,12 @@ def get_credential_resolver() -> CloudCredentialResolver:
         >>> options = resolver.resolve_storage_options("abfss://...")
     """
     global _global_resolver
-    if _global_resolver is None:
-        _global_resolver = CloudCredentialResolver()
+    if _global_resolver is not None:
+        return _global_resolver
+    with _resolver_lock:
+        # Double-checked locking
+        if _global_resolver is None:
+            _global_resolver = CloudCredentialResolver()
     return _global_resolver
 
 

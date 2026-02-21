@@ -27,11 +27,13 @@ model:
       type: string
     - name: admission_date
       type: date
+    - name: updated_at
+      type: timestamp
 
 # Apply the PII Masking Hook
 external_logic:
   type: python
-  path: "../../../lakelogic/tools/hooks/pii_masking.py"
+  path: "../../../../lakelogic/tools/hooks/pii_masking.py"
   entrypoint: "mask_pii"
   args:
     entities: ["PERSON", "US_SSN", "EMAIL_ADDRESS"]

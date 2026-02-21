@@ -45,6 +45,7 @@ def run(
         None, "--materialize-target", help="Override materialization target path."
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+    trace: bool = typer.Option(False, "--trace", help="Display detailed execution trace."),
 ):
     """
     Run a data contract against a source file.
@@ -163,7 +164,11 @@ def run(
 
     try:
         processor = DataProcessor(engine=engine, contract=contract, stage=stage)
-        good_df, bad_df = processor.run_source(source)
+        result = processor.run_source(source)
+        good_df, bad_df = result.good, result.bad
+
+        if trace and result.trace:
+            _display_trace(result.trace)
 
         if materialize:
             processor.materialize(good_df, bad_df, target_path=materialize_target)
@@ -182,6 +187,48 @@ def run(
     except Exception as e:
         logger.exception(f"Fatal error during execution: {e}")
         raise typer.Exit(code=1)
+
+def _display_trace(trace: Any):
+    """Display execution trace in a formatted table."""
+    import typer
+    from datetime import datetime
+    
+    typer.echo("")
+    typer.echo(typer.style(" 🔍 EXECUTION TRACE", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style(f" Run ID: {trace.run_id}", dim=True))
+    typer.echo(" " + "─" * 110)
+    
+    header = f" {'STEP':<30} | {'STATUS':<8} | {'IN':>10} | {'OUT':>10} | {'DURATION':>12} | {'DETAILS'}"
+    typer.echo(typer.style(header, bold=True))
+    typer.echo(" " + "─" * 110)
+    
+    for step in trace.steps:
+        status_color = typer.colors.GREEN if step.status == "ok" else typer.colors.RED
+        status_text = typer.style(f"{step.status.upper():<8}", fg=status_color)
+        
+        in_rows = f"{step.input_rows:,}" if step.input_rows is not None else "-"
+        out_rows = f"{step.output_rows:,}" if step.output_rows is not None else "-"
+        duration = f"{step.duration_ms:,.2f}ms" if step.duration_ms is not None else "-"
+        
+        details = ""
+        if step.details:
+            if "sql" in step.details:
+                sql = step.details["sql"].strip().replace("\n", " ")
+                if len(sql) > 40:
+                    sql = sql[:37] + "..."
+                details = f"SQL: {sql}"
+            elif "errors" in step.details and step.details["errors"]:
+                details = f"Errors: {len(step.details['errors'])}"
+            elif "path" in step.details:
+                details = f"Path: {step.details['path']}"
+        
+        row = f" {step.step:<30} | {status_text} | {in_rows:>10} | {out_rows:>10} | {duration:>12} | {details}"
+        typer.echo(row)
+    
+    typer.echo(" " + "─" * 110)
+    total_dur = f"{trace.total_duration_ms:,.2f}ms" if trace.total_duration_ms else "n/a"
+    typer.echo(typer.style(f" TOTAL DURATION: {total_dur}", bold=True))
+    typer.echo("")
 
 
 @app.command("setup-oss")

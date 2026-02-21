@@ -1,6 +1,7 @@
 version: 1.0.0
 info:
   title: Sales Gold (Python External Logic)
+  version: 1.0.0
 
 dataset: silver_pos_sales
 
@@ -25,6 +26,7 @@ quality:
 external_logic:
   type: notebook
   path: ./gold/sales_gold.ipynb
+  kernel_name: python3
   entrypoint: build_sales_gold
 
 materialization:

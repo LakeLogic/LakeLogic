@@ -1,6 +1,7 @@
 version: "1.0.0"
 info:
   title: Customer Dimension (SCD2)
+  version: 1.0.0
 
 dataset: gold_dim_customers
 primary_key: ["customer_id"]

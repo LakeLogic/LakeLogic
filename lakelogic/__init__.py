@@ -3,7 +3,7 @@ from typing import Optional, Dict
 from lakelogic.core.processor import DataProcessor
 from lakelogic.core.models import DataContract, FieldDefinition, QualityRule, Transformation
 
-__version__ = "0.1.0"
+__version__ = "0.1.0b3"
 
 
 class HelpTopic:

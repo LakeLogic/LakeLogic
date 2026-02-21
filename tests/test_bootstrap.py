@@ -2,7 +2,8 @@ from pathlib import Path
 
 import yaml
 
-from lakelogic.cli import main
+from lakelogic.cli import main as cli_main_module  # noqa: F811 — avoid shadowed name
+from lakelogic.cli.main import bootstrap
 
 
 def test_bootstrap_generates_contracts(tmp_path: Path) -> None:
@@ -14,7 +15,7 @@ def test_bootstrap_generates_contracts(tmp_path: Path) -> None:
     output_dir = tmp_path / "contracts"
     registry_path = output_dir / "_registry.yaml"
 
-    main.bootstrap(
+    bootstrap(
         landing=landing,
         output_dir=output_dir,
         registry=registry_path,

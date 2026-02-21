@@ -1,6 +1,7 @@
 version: 1.0.0
 info:
   title: Bronze Sessions
+  version: 1.0.0
   target_layer: bronze
 dataset: bronze_sessions
 source:

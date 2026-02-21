@@ -3,6 +3,7 @@ upstream: ["01_bronze_payments"]
 
 info:
   title: "Standardized Payments (Silver)"
+  version: 1.0.0
   description: "Cleaned and normalized payment records."
   target_layer: "silver"
 
@@ -12,6 +13,9 @@ server:
   path: "data/bronze_payments.parquet"
 
 transformations:
+  - cast:
+      columns:
+        event_ts: timestamp
   - derive:
       field: "amount_usd"
       sql: "CAST(amount_str AS DOUBLE)"
@@ -20,13 +24,13 @@ transformations:
       sql: "CAST(event_ts AS TIMESTAMP)"
   - deduplicate:
       on: ["raw_id"]
-      sort_by: ["processed_at"]
+      sort_by: ["event_ts"]
       order: "desc"
 
 quality:
   row_rules:
     - name: "positive_amount"
-      sql: "amount_usd >= 0"
+      sql: "CAST(amount_str AS DOUBLE) >= 0"
 
 materialization:
   strategy: "overwrite"

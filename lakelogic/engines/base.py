@@ -23,17 +23,55 @@ class EngineAdapter(ABC):
     ERROR_COLUMN = "_lakelogic_errors"
     CATEGORY_COLUMN = "_lakelogic_categories"
 
-    def __init__(self, contract: DataContract):
+    def __init__(self, contract: DataContract, trace: Optional[List[Any]] = None):
         """
         Initialize adapter with a contract.
 
         Args:
             contract: DataContract instance.
+            trace: Optional list of trace steps to pre-populate.
         """
         self.contract = contract
         self.dataset_rule_results: List[Dict[str, Any]] = []
         self.schema_drift: Dict[str, List[str]] = {}
         self.engine_name: str = ""
+        self.trace: List[Any] = [] # Avoid circular import of TraceStep here if needed, or import at runtime
+
+    def _add_trace(self, step: str, input_rows: Optional[int] = None, output_rows: Optional[int] = None, duration_ms: Optional[float] = None, details: Optional[Dict[str, Any]] = None, status: str = "ok"):
+        import time
+        from lakelogic.core.models import TraceStep
+        self.trace.append(TraceStep(
+            step=step,
+            timestamp=time.time(),
+            input_rows=input_rows,
+            output_rows=output_rows,
+            duration_ms=duration_ms,
+            details=details or {},
+            status=status
+        ))
+
+    def _get_row_count(self, df: Any) -> Optional[int]:
+        """Helper to get row count safely across engines."""
+        if df is None: return 0
+        try:
+            # Polars LazyFrame — must collect to count
+            try:
+                import polars as pl
+                if isinstance(df, pl.LazyFrame):
+                    return df.select(pl.len()).collect().item()
+            except ImportError:
+                pass
+            if hasattr(df, "height"): return int(df.height)
+            if hasattr(df, "count"):
+                # DuckDB/Spark relation
+                try: 
+                    res = df.count()
+                    if hasattr(res, "fetchone"): return res.fetchone()[0]
+                    if isinstance(res, int): return res
+                except Exception: pass
+            return int(len(df))
+        except Exception:
+            return None
 
     @abstractmethod
     def execute(self, df: Any) -> Tuple[Any, Any]:
@@ -179,6 +217,8 @@ class EngineAdapter(ABC):
             cols.add(lineage.timestamp_column_name)
         if getattr(lineage, "capture_run_id", False):
             cols.add(lineage.run_id_column_name)
+        if getattr(lineage, "capture_contract_name", False):
+            cols.add(lineage.contract_name_column_name)
         if getattr(lineage, "capture_domain", False):
             cols.add(lineage.domain_column_name)
         if getattr(lineage, "capture_system", False):

@@ -1,0 +1,6 @@
+customer_id,email,full_name,phone,date_of_birth,shipping_address,loyalty_tier,total_spend,signup_date
+cust_001,alice@example.com,Alice Johnson,+1-555-0101,1985-03-15,"123 Main St, New York, NY",Gold,12500.00,2020-01-10
+cust_002,bob@example.com,Bob Smith,+1-555-0102,1990-07-22,"456 Oak Ave, Chicago, IL",Silver,4300.00,2021-03-05
+cust_003,carol@example.com,Carol Williams,+44-20-7946-0958,1978-11-30,"10 Downing St, London, UK",Gold,18900.00,2019-06-12
+cust_004,david@example.com,David Brown,+1-555-0104,1992-01-08,"789 Pine Rd, Austin, TX",Bronze,1200.00,2023-09-20
+cust_005,eve@example.com,Eve Davis,+1-555-0105,1988-05-19,"321 Elm Blvd, Seattle, WA",Silver,6700.00,2022-02-14

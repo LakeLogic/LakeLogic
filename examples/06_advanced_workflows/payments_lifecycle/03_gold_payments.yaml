@@ -3,6 +3,7 @@ upstream: ["02_silver_payments"]
 
 info:
   title: "Transaction Fact (Gold)"
+  version: 1.0.0
   description: "Official transaction source of truth joined with customer dimension."
   target_layer: "gold"
 
@@ -32,6 +33,6 @@ transformations:
 primary_key: ["raw_id"]
 
 materialization:
-  strategy: "merge"
-  format: "iceberg"
-  target_path: "data/gold_transactions"
+  strategy: "overwrite"
+  format: "parquet"
+  target_path: "data/gold_payments.parquet"

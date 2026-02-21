@@ -93,6 +93,7 @@ docs = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "hypothesis>=6.100.0",
     "ruff>=0.1.0",
     "black>=23.0.0",
 ]
@@ -154,6 +155,7 @@ managed = true
 dev-dependencies = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "hypothesis>=6.100.0",
     "ruff>=0.1.0",
     "black>=23.0.0",
     "mkdocs-material>=9.0.0",

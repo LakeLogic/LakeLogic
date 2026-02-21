@@ -1,38 +1,54 @@
 version: 1.0.0
+metadata:
+  owner: data-platform@company.com
+  policy_pack: shared_standard
+  domain: growth
+  system: app_events
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+quality:
+  enforce_required: !!bool 'true'
+  dataset_rules:
+  - row_count_between:
+      min: 1
+      max: 1000000000
+lineage:
+  enabled: !!bool 'true'
+  capture_domain: !!bool 'true'
+  capture_system: !!bool 'true'
+materialization:
+  strategy: append
+  format: parquet
+  target_path: ../../output/silver/subscriptions
 info:
   title: Silver Subscriptions
+  version: 1.0.0
   target_layer: silver
 dataset: silver_subscriptions
 source:
   type: landing
   path: ../../data/subscriptions.csv
   load_mode: full
-metadata:
-  domain: growth
-  system: app_events
 model:
   fields:
   - name: subscription_id
     type: string
-    required: true
+    required: !!bool 'true'
   - name: user_id
     type: string
-    required: true
+    required: !!bool 'true'
   - name: plan
     type: string
   - name: status
     type: string
   - name: updated_at
     type: timestamp
-materialization:
-  target_path: ../../output/silver/subscriptions
-  format: parquet
-  strategy: append
 transformations:
 - deduplicate:
-    'on':
-    - subscription_id
     sort_by:
     - updated_at
     order: desc
+    on:
+    - subscription_id
   phase: pre

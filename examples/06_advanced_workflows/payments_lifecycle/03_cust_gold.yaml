@@ -3,6 +3,7 @@ upstream: ["02_cust_silver"]
 
 info:
   title: "Customer Dimension (Gold)"
+  version: 1.0.0
   description: "SCD Type 2 Customer dimension table."
   target_layer: "gold"
 

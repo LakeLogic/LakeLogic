@@ -1,6 +1,7 @@
 version: "1.0.0"
 info:
   title: "Payments Landing (Bronze)"
+  version: 1.0.0
   description: "Raw ingestion contract for gateway payment logs."
   target_layer: "bronze"
 

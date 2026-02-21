@@ -1,26 +1,21 @@
 version: 1.0.0
 dataset: berlin_weather
-description: "Hourly weather forecast from Open-Meteo"
-
+description: Hourly weather forecast from Open-Meteo
 source:
   type: api
   connector: rest
-  endpoint: "https://api.open-meteo.com/v1/forecast"
+  endpoint: https://api.open-meteo.com/v1/forecast
   params:
     latitude: 52.52
     longitude: 13.41
-    hourly: "temperature_2m"
-
+    hourly: temperature_2m
 model:
   fields:
-    - name: time
-      type: string
-    - name: temperature_2m
-      type: float
-
+  - name: time
+    type: string
+  - name: temperature_2m
+    type: float
 materialization:
-  bronze:
-    enabled: true
-    path: "./data/bronze/weather/"
-    format: parquet
-    mode: overwrite
+  strategy: overwrite
+  target_path: ./data/bronze/weather/
+  format: parquet

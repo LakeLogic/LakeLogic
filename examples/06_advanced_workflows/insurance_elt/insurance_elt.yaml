@@ -2,6 +2,7 @@ version: 1.0.0
 dataset: insurance_elt
 info:
   title: Insurance ELT
+  version: 1.0.0
   description: Registry-driven end-to-end ELT workflow
 
 registries:

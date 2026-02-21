@@ -3,6 +3,7 @@ upstream: ["01_bronze"]
 
 info:
   title: "Standardized Payments (Silver)"
+  version: 1.0.0
   description: "Cleaned and normalized payment records."
   target_layer: "silver"
 

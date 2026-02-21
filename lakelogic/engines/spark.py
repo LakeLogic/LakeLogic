@@ -83,11 +83,16 @@ class SparkAdapter(EngineAdapter):
         category_array = F.array(*category_exprs) if category_exprs else F.array().cast("array<string>")
 
         # Ensure arrays are non-null to avoid NULL comparisons dropping all rows.
-        error_array = F.filter(error_array, lambda x: x.isNotNull())
-        category_array = F.filter(category_array, lambda x: x.isNotNull())
-
+        # Use SQL expression instead of Python lambda to avoid UDF worker crash on Windows.
         df_with_errors = df_eval.withColumn(self.ERROR_COLUMN, error_array) \
             .withColumn(self.CATEGORY_COLUMN, category_array)
+        df_with_errors = df_with_errors.withColumn(
+            self.ERROR_COLUMN,
+            F.expr(f"filter({self.ERROR_COLUMN}, x -> x IS NOT NULL)")
+        ).withColumn(
+            self.CATEGORY_COLUMN,
+            F.expr(f"filter({self.CATEGORY_COLUMN}, x -> x IS NOT NULL)")
+        )
 
         # 3. Split Good and Bad
         has_errors = F.size(F.col(self.ERROR_COLUMN)) > 0
@@ -330,14 +335,15 @@ class SparkAdapter(EngineAdapter):
         tbl_name = "current_transform"
         
         for trans in self.contract.transformations:
-            if trans.sql and (trans.phase or "post").lower() != "pre":
+            trans_phase = (trans.phase or "post").lower()
+            if trans.sql and trans_phase != "pre":
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
                 current_df.createOrReplaceTempView("source")
                 if self.contract.dataset:
                     current_df.createOrReplaceTempView(self.contract.dataset)
                 current_df = current_df.sparkSession.sql(trans.sql)
                 continue
-            if trans.rollup and (trans.phase or "post").lower() != "pre":
+            if trans.rollup and trans_phase != "pre":
                 rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self.contract.dataset or "source")
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
                 current_df.createOrReplaceTempView("source")
@@ -346,7 +352,7 @@ class SparkAdapter(EngineAdapter):
                 current_df = current_df.sparkSession.sql(rollup_sql)
                 continue
 
-            if trans.pivot and (trans.phase or "post").lower() != "pre":
+            if trans.pivot and trans_phase != "pre":
                 pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
                 if pivot_sql:
                     logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
@@ -356,7 +362,7 @@ class SparkAdapter(EngineAdapter):
                     current_df = current_df.sparkSession.sql(pivot_sql)
                 continue
 
-            if trans.unpivot and (trans.phase or "post").lower() != "pre":
+            if trans.unpivot and trans_phase != "pre":
                 unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self.contract.dataset or "source")
                 if unpivot_sql:
                     logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
@@ -391,7 +397,7 @@ class SparkAdapter(EngineAdapter):
                 current_df.createOrReplaceTempView("source")
                 query = self._build_join_sql(trans.join, broadcast=self._should_broadcast(trans.join.reference))
                 current_df = current_df.sparkSession.sql(query)
-            elif trans.filter:
+            elif trans.filter and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Filter]: {trans.filter.sql}")
                 current_df = current_df.filter(trans.filter.sql)
         return current_df

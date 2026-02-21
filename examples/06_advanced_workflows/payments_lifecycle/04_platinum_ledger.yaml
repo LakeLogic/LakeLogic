@@ -3,6 +3,7 @@ upstream: ["03_gold_payments"]
 
 info:
   title: "Monthly Ledger (Platinum)"
+  version: 1.0.0
   description: "Frozen monthly snapshot for compliance."
   target_layer: "platinum"
 

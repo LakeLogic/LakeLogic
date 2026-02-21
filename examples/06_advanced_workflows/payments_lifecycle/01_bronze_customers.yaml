@@ -1,6 +1,7 @@
 version: "1.0.0"
 info:
   title: "Customers Landing (Bronze)"
+  version: 1.0.0
   description: "Raw ingestion for customer master data."
   target_layer: "bronze"
 

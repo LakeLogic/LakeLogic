@@ -1,37 +1,33 @@
 version: 1.0.0
 dataset: wikimedia_recent_changes
-description: "Real-time Wikimedia edit stream"
-
+description: Real-time Wikimedia edit stream
 source:
   type: streaming
   connector: sse
-  url: "https://stream.wikimedia.org/v2/stream/recentchange"
-
+  url: https://stream.wikimedia.org/v2/stream/recentchange
 model:
   fields:
-    - name: id
-      type: long
-    - name: type
-      type: string
-    - name: title
-      type: string
-    - name: user
-      type: string
-    - name: bot
-      type: boolean
-    - name: timestamp
-      type: long
-
+  - name: id
+    type: long
+  - name: type
+    type: string
+  - name: title
+    type: string
+  - name: user
+    type: string
+  - name: bot
+    type: boolean
+  - name: timestamp
+    type: long
 quality:
   row_rules:
-    - name: title_not_null
-      rule: not_null
-      column: title
+  - not_null:
+      field: title
+      name: title_not_null
       severity: error
-
 materialization:
   bronze:
     enabled: true
-    path: "./data/bronze/wikimedia/"
+    path: ./data/bronze/wikimedia/
     format: delta
     mode: append

@@ -9,6 +9,10 @@ Complex end-to-end scenarios and real-world data engineering patterns.
 - payments_lifecycle/ - Multi-entity lifecycle and SCD2
 - insurance_elt/ - Full end-to-end industry scenario
 - shared_governance_scale/ - Shared transformations and validation at scale
+- gdpr_compliance/ - GDPR Right-to-Erasure and PII masking
+- date_dimension/ - Date dimension generator with fiscal calendars and holidays
+- partitioned_merge/ - Partition-aware merge materialization
+- polars_streaming/ - Process files larger than memory via Polars streaming
 
 ## When to Use Each Pattern
 
@@ -17,6 +21,10 @@ Complex end-to-end scenarios and real-world data engineering patterns.
 - Stateful event tracking: payments_lifecycle
 - Full industry template: insurance_elt
 - Shared governance at scale: shared_governance_scale
+- GDPR data subject erasure: gdpr_compliance
+- Build dim_date tables: date_dimension
+- Merge into partitioned tables: partitioned_merge
+- Large file processing: polars_streaming
 
 ## Prerequisites
 
@@ -26,4 +34,5 @@ Complex end-to-end scenarios and real-world data engineering patterns.
 ## Next Steps
 
 - 07_production/ for monitoring and deployment
+- 08_compliance_governance/ for broader governance patterns
 - docs/patterns/ for deeper theory

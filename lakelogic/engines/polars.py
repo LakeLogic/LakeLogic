@@ -1,8 +1,9 @@
 import polars as pl
-from typing import Tuple, Any, List, Dict
+from typing import Tuple, Any, List, Dict, Optional
 from lakelogic.engines.base import EngineAdapter
 from loguru import logger
 from pathlib import Path
+import time
 
 class PolarsAdapter(EngineAdapter):
     """
@@ -247,8 +248,11 @@ class PolarsAdapter(EngineAdapter):
         Returns:
             Tuple of (good_df, bad_df).
         """
+        start_time = time.perf_counter()
         self.dataset_rule_results = []
         self.schema_drift = {}
+        self.trace = []
+
         # 0. Load as LazyFrame
         if isinstance(df, pl.DataFrame):
             lf = df.lazy()
@@ -257,19 +261,31 @@ class PolarsAdapter(EngineAdapter):
         else:
             lf = pl.from_pandas(df).lazy() if hasattr(df, 'to_numpy') else pl.DataFrame(df).lazy()
 
+        raw_count = self._get_row_count(lf)
+        self._add_trace("Load Source", input_rows=None, output_rows=raw_count, duration_ms=(time.perf_counter() - start_time)*1000)
+
         # 0.25 Apply renames, filters, deduplication before schema enforcement
         # This handles the 'supersede' case where we want to clean data ASAP
         if self.contract.transformations:
+            step_start = time.perf_counter()
+            pre_input_count = raw_count
             lf = self._apply_pre_transformations(lf)
+            pre_output_count = self._get_row_count(lf)
+            self._add_trace("Pre-Transformations", input_rows=pre_input_count, output_rows=pre_output_count, duration_ms=(time.perf_counter() - step_start)*1000)
 
         # 0.5 Apply schema enforcement (casts, missing cols, unknowns)
+        step_start = time.perf_counter()
+        schema_input_count = self._get_row_count(lf)
         lf, schema_errors = self._apply_schema(lf)
+        schema_output_count = self._get_row_count(lf)
+        self._add_trace("Schema Enforcement", input_rows=schema_input_count, output_rows=schema_output_count, duration_ms=(time.perf_counter() - step_start)*1000, details={"errors": schema_errors})
 
         # 1. Evaluate Row-Level Rules
         row_rules = self.get_row_rules()
         ctx = self._get_context(lf)
         
         if row_rules:
+            step_start = time.perf_counter()
             rule_exprs = []
             for i, rule in enumerate(row_rules):
                 tbl_name = self.contract.dataset or "source"
@@ -278,6 +294,7 @@ class PolarsAdapter(EngineAdapter):
             # Run all rules in one pass
             eval_sql = f"SELECT *, {', '.join(rule_exprs)} FROM {self.contract.dataset or 'source'}"
             lf_eval = ctx.execute(eval_sql)
+            self._add_trace("Row Rules Evaluation", input_rows=schema_output_count, output_rows=schema_output_count, duration_ms=(time.perf_counter() - step_start)*1000, details={"sql": eval_sql, "rules_count": len(row_rules)})
 
             error_tracking_exprs = []
             category_tracking_exprs = []
@@ -325,7 +342,11 @@ class PolarsAdapter(EngineAdapter):
 
         # 4. Apply heavy Transformations to Good Data (Derive, Lookup)
         if self.contract.transformations:
+            step_start = time.perf_counter()
+            post_input_count = self._get_row_count(good_lf)
             good_lf = self._apply_post_transformations(good_lf, ctx)
+            post_output_count = self._get_row_count(good_lf)
+            self._add_trace("Post-Transformations", input_rows=post_input_count, output_rows=post_output_count, duration_ms=(time.perf_counter() - step_start)*1000)
 
         include_errors = True
         if self.contract.quarantine:
@@ -554,20 +575,21 @@ class PolarsAdapter(EngineAdapter):
         tbl_name = self.contract.dataset or "source"
         
         for trans in self.contract.transformations:
+            trans_phase = (trans.phase or "post").lower()
             # Re-register for each step
             ctx.register(tbl_name, current_lf)
             
-            if trans.sql and (trans.phase or "post").lower() != "pre":
+            if trans.sql and trans_phase != "pre":
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
                 current_lf = self._apply_sql_transformation(current_lf, trans.sql)
                 continue
-            if trans.rollup and (trans.phase or "post").lower() != "pre":
+            if trans.rollup and trans_phase != "pre":
                 rollup_sql = self._build_rollup_sql(trans.rollup, source_table=tbl_name)
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
                 current_lf = self._apply_sql_transformation(current_lf, rollup_sql)
                 continue
 
-            if trans.pivot and (trans.phase or "post").lower() != "pre":
+            if trans.pivot and trans_phase != "pre":
                 pivot_sql = self._build_pivot_sql(trans.pivot, source_table=tbl_name)
                 if not pivot_sql:
                     continue
@@ -575,7 +597,7 @@ class PolarsAdapter(EngineAdapter):
                 current_lf = self._apply_sql_transformation(current_lf, pivot_sql)
                 continue
 
-            if trans.unpivot and (trans.phase or "post").lower() != "pre":
+            if trans.unpivot and trans_phase != "pre":
                 unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=tbl_name)
                 if not unpivot_sql:
                     continue
@@ -603,7 +625,7 @@ class PolarsAdapter(EngineAdapter):
                 current_lf = ctx.execute(join_sql)
             else:
                 filter_cfg = getattr(trans, "filter", None)
-                if filter_cfg:
+                if filter_cfg and trans_phase != "pre":
                     logger.debug(f"Post-Transform [Filter]: {filter_cfg.sql}")
                     query = f"SELECT * FROM {tbl_name} WHERE {filter_cfg.sql}"
                     current_lf = ctx.execute(query)

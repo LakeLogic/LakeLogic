@@ -1,9 +1,6 @@
-# Azure SQL CDC Contract - Customers
-
 version: 1.0.0
 dataset: bronze_customers
-description: "Bronze layer customers from Azure SQL (CDC)"
-
+description: Bronze layer customers from Azure SQL (CDC)
 source:
   type: database
   connector: azuresql
@@ -14,31 +11,28 @@ source:
     enabled: true
     watermark_column: updated_at
     watermark_type: timestamp
-
 model:
   fields:
-    - name: customer_id
-      type: integer
-    - name: email
-      type: string
-    - name: status
-      type: string
-    - name: created_at
-      type: timestamp
-    - name: updated_at
-      type: timestamp
-
+  - name: customer_id
+    type: integer
+  - name: email
+    type: string
+  - name: status
+    type: string
+  - name: created_at
+    type: timestamp
+  - name: updated_at
+    type: timestamp
 quality:
   row_rules:
-    - name: customer_id_not_null
-      rule: not_null
-      column: customer_id
+  - not_null:
+      field: customer_id
+      name: customer_id_not_null
       severity: error
-    - name: email_not_null
-      rule: not_null
-      column: email
+  - not_null:
+      field: email
+      name: email_not_null
       severity: error
-
 materialization:
   good:
     enabled: true

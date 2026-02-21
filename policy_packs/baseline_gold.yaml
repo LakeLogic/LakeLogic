@@ -1,5 +1,8 @@
 name: baseline_gold
 defaults:
+  lineage:
+    enabled: true
+    capture_contract_name: true
   quarantine:
     enabled: true
     include_error_reason: true

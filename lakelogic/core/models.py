@@ -397,10 +397,58 @@ class LineageConfig(BaseModel):
     source_column_name: str = "_lakelogic_source"
     timestamp_column_name: str = "_lakelogic_processed_at"
     run_id_column_name: str = "_lakelogic_run_id"
+    capture_contract_name: bool = False
+    contract_name_column_name: str = "_lakelogic_contract_name"
     capture_domain: bool = True
     capture_system: bool = True
     domain_column_name: str = "_lakelogic_domain"
     system_column_name: str = "_lakelogic_system"
+    preserve_upstream: List[str] = Field(default_factory=list)
+    upstream_prefix: str = "_upstream"
+    run_id_source: str = "run_id"  # run_id | pipeline_run_id
+
+
+class ExternalLogic(BaseModel):
+    """External logic hook for advanced processing."""
+    type: str  # python | notebook
+    path: str
+    entrypoint: str = "run"
+    args: Dict[str, Any] = Field(default_factory=dict)
+    output_path: Optional[str] = None
+    output_format: Optional[str] = None  # csv | parquet
+    handles_output: Optional[bool] = None  # if True, skip built-in materialize
+    kernel_name: Optional[str] = None  # notebook kernel override
+
+class DataContract(BaseModel):
+    """
+    Finalized SQL-First Data Contract Model.
+    Supports ODCS-style metadata and consolidated 'sql' keywords.
+    """
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+    
+    version: str
+    info: Optional[Info] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict) # For generic tagging (status, classification)
+    server: Optional[Server] = None
+    source: Optional[SourceConfig] = None
+    environments: Dict[str, Environment] = Field(default_factory=dict)
+    links: List[Link] = Field(default_factory=list)
+    
+    dataset: Optional[str] = None
+    primary_key: List[str] = Field(default_factory=list)
+    
+    # LINEAGE & OBSERVABILITY
+    lineage: Optional[LineageConfig] = Field(default_factory=LineageConfig)
+    
+    # MATERIALIZATION LAYER (Gold/Silver)
+    materialization: Optional[Materialization] = Field(default_factory=Materialization)
+    logic: Optional[str] = None # Full SQL for materialization
+
+    # EXTERNAL LOGIC
+    external_logic: Optional[ExternalLogic] = None
+    
+    # ORCHESTRATION & DEPENDENCIES
+    upstream: List[str] = Field(default_factory=list)
     preserve_upstream: List[str] = Field(default_factory=list)
     upstream_prefix: str = "_upstream"
     run_id_source: str = "run_id"  # run_id | pipeline_run_id
@@ -455,3 +503,19 @@ class DataContract(BaseModel):
     transformations: List[Transformation] = Field(default_factory=list)
     service_levels: Optional[ServiceLevel] = None
     quarantine: Optional[Quarantine] = Field(default_factory=Quarantine)
+
+class TraceStep(BaseModel):
+    """Execution step metadata for debugging/visualization."""
+    step: str
+    timestamp: float
+    input_rows: Optional[int] = None
+    output_rows: Optional[int] = None
+    duration_ms: Optional[float] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "ok" # ok, warning, error
+
+class ExecutionTrace(BaseModel):
+    """Collection of execution steps for a single run."""
+    run_id: Optional[str] = None
+    steps: List[TraceStep] = Field(default_factory=list)
+    total_duration_ms: Optional[float] = None

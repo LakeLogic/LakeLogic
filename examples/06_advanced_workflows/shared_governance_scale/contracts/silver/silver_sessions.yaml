@@ -1,36 +1,52 @@
 version: 1.0.0
+metadata:
+  owner: data-platform@company.com
+  policy_pack: shared_standard
+  domain: growth
+  system: app_events
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+quality:
+  enforce_required: !!bool 'true'
+  dataset_rules:
+  - row_count_between:
+      min: 1
+      max: 1000000000
+lineage:
+  enabled: !!bool 'true'
+  capture_domain: !!bool 'true'
+  capture_system: !!bool 'true'
+materialization:
+  strategy: append
+  format: parquet
+  target_path: ../../output/silver/sessions
 info:
   title: Silver Sessions
+  version: 1.0.0
   target_layer: silver
 dataset: silver_sessions
 source:
   type: landing
   path: ../../data/sessions.csv
   load_mode: full
-metadata:
-  domain: growth
-  system: app_events
 model:
   fields:
   - name: session_id
     type: string
-    required: true
+    required: !!bool 'true'
   - name: user_id
     type: string
-    required: true
+    required: !!bool 'true'
   - name: device_type
     type: string
   - name: started_at
     type: timestamp
-materialization:
-  target_path: ../../output/silver/sessions
-  format: parquet
-  strategy: append
 transformations:
 - deduplicate:
-    'on':
-    - session_id
     sort_by:
     - started_at
     order: desc
+    on:
+    - session_id
   phase: pre
