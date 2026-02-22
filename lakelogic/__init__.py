@@ -2,8 +2,11 @@ from typing import Optional, Dict
 
 from lakelogic.core.processor import DataProcessor
 from lakelogic.core.models import DataContract, FieldDefinition, QualityRule, Transformation
+from lakelogic.core.generator import DataGenerator
+from lakelogic.core.incremental import IncrementalBoundary, Boundary
+from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
 
-__version__ = "0.1.0b3"
+__version__ = "0.1.0"
 
 
 class HelpTopic:
@@ -42,10 +45,12 @@ Topics:
   run         Run a contract against a source file.
   bootstrap   Generate contracts and a registry from a landing zone.
   driver      Registry-driven pipeline driver (Bronze -> Silver -> Gold).
+  import_dbt  Import dbt schema.yml / sources.yml as LakeLogic contracts.
 
 Examples:
   lakelogic.help()
   lakelogic.help("bootstrap")
+  lakelogic.help("import_dbt")
   lakelogic.driver.help()
 """
         if full:
@@ -124,13 +129,30 @@ Examples:
   lakelogic-driver --metrics-backend prometheus --metrics-host 0.0.0.0 --metrics-port 9100
 """
 
+_import_dbt_text = """LakeLogic import-dbt Help
+
+Import dbt schema.yml / sources.yml into LakeLogic contracts.
+
+Examples:
+  lakelogic import-dbt --schema models/schema.yml --model customers --output contracts/
+  lakelogic import-dbt --schema models/schema.yml --output contracts/          # all models
+  lakelogic import-dbt --schema models/sources.yml --source-name raw --source-table orders --output contracts/
+  lakelogic import-dbt --schema models/schema.yml --model customers --dry-run  # preview
+
+Python API:
+  from lakelogic import DataProcessor, DataGenerator
+  proc = DataProcessor.from_dbt("models/schema.yml", model="customers")
+  gen  = DataGenerator.from_dbt("models/schema.yml", model="customers")
+"""
+
 help = HelpIndex(
     {
-        "driver": HelpTopic("driver", _driver_text),
-        "bootstrap": HelpTopic("bootstrap", _bootstrap_text),
-        "run": HelpTopic("run", _run_text),
+        "driver":     HelpTopic("driver", _driver_text),
+        "bootstrap":  HelpTopic("bootstrap", _bootstrap_text),
+        "run":        HelpTopic("run", _run_text),
         "policy_packs": HelpTopic("policy_packs", _policy_pack_text),
         "observability": HelpTopic("observability", _observability_text),
+        "import_dbt": HelpTopic("import_dbt", _import_dbt_text),
     }
 )
 
@@ -144,10 +166,15 @@ observability = help.observability
 
 __all__ = [
     "DataProcessor",
+    "DataGenerator",
     "DataContract",
     "FieldDefinition",
     "QualityRule",
     "Transformation",
+    "IncrementalBoundary",
+    "Boundary",
+    "DbtAdapter",
+    "load_contract_from_dbt",
     "help",
     "driver",
     "bootstrap",

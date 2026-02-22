@@ -94,6 +94,67 @@ class DataProcessor:
         self._source_files: List[Dict[str, Any]] = []
         self._source_max_mtime: Optional[float] = None
 
+    # ------------------------------------------------------------------
+    # Alternative constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_dbt(
+        cls,
+        schema_path: Union[str, "Path"],
+        *,
+        model: Optional[str] = None,
+        source_name: Optional[str] = None,
+        source_table: Optional[str] = None,
+        engine: Optional[str] = None,
+        stage: Optional[str] = None,
+    ) -> "DataProcessor":
+        """
+        Create a ``DataProcessor`` from a dbt ``schema.yml`` or ``sources.yml``.
+
+        Reads the dbt file, converts the specified model/source to a
+        ``DataContract``, and returns a fully initialised ``DataProcessor``.
+        All downstream LakeLogic APIs (``run``, ``run_source``,
+        ``run_source_streaming``, GDPR tools, etc.) work identically.
+
+        Parameters
+        ----------
+        schema_path
+            Path to the dbt schema YAML file.
+        model
+            Name of the dbt model to import.  If the file contains exactly
+            one model, this may be omitted.
+        source_name
+            dbt source name (for ``sources.yml`` files).
+        source_table
+            dbt source table name (for ``sources.yml`` files).
+        engine
+            Execution engine override. Defaults to auto-discovery.
+        stage
+            Stage override (``bronze``/``silver``/``gold``).
+
+        Examples
+        --------
+        >>> proc = DataProcessor.from_dbt("models/schema.yml", model="customers")
+        >>> good, bad = proc.run(df)
+
+        >>> proc = DataProcessor.from_dbt(
+        ...     "models/sources.yml",
+        ...     source_name="raw",
+        ...     source_table="orders",
+        ... )
+        """
+        from lakelogic.adapters.dbt import load_contract_from_dbt
+        contract = load_contract_from_dbt(
+            schema_path,
+            model=model,
+            source_name=source_name,
+            source_table=source_table,
+        )
+        return cls(contract, engine, stage=stage)
+
+
+
     def _discover_engine(self) -> str:
         """
         Automatically discovers the best available engine.

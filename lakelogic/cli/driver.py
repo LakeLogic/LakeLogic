@@ -451,8 +451,10 @@ class PipelineDriver:
                 effective_window = Window(None, None, "full")
 
         if not source_cfg:
-            if contract.server and contract.server.path:
-                return [str(contract.server.path)], effective_window, window_reason
+            # Use environment-aware server path (respects LAKELOGIC_ENV / environments block)
+            eff_server = contract.effective_server()
+            if eff_server and eff_server.path:
+                return [str(eff_server.path)], effective_window, window_reason
             return [], effective_window, window_reason
 
         raw_path = source_cfg.path

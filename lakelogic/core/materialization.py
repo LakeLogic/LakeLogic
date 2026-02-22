@@ -89,7 +89,9 @@ def _resolve_target(contract, override_path: Optional[Path] = None) -> Tuple[Opt
         mat_path = None
         if mat is not None:
             mat_path = getattr(mat, "target_path", None) or getattr(mat, "path", None)
-        server_path = contract.server.path if contract and contract.server else None
+        # Resolve environment-aware server (respects LAKELOGIC_ENV / environments block)
+        eff_server = contract.effective_server() if contract else None
+        server_path = eff_server.path if eff_server else None
         target = mat_path or server_path
 
     if not target:
@@ -105,8 +107,11 @@ def _resolve_target(contract, override_path: Optional[Path] = None) -> Tuple[Opt
     output_format = None
     if contract and contract.materialization:
         output_format = getattr(contract.materialization, "format", None)
-    if not output_format and contract and contract.server and contract.server.format:
-        output_format = contract.server.format
+    if not output_format:
+        # Use environment-aware server format
+        eff_server = contract.effective_server() if contract else None
+        if eff_server and eff_server.format:
+            output_format = eff_server.format
     if not output_format:
         output_format = "parquet"
     output_format = output_format.lower()

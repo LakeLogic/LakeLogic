@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "0.1.0b3"
+version = "0.1.0"
 description = "A Python-based data contract runtime for consistent quality across engines."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -160,4 +160,28 @@ dev-dependencies = [
     "black>=23.0.0",
     "mkdocs-material>=9.0.0",
     "mkdocstrings[python]>=0.20.0",
+]
+
+# ---------------------------------------------------------------------------
+# commitizen — versioning + changelog
+# Docs: https://commitizen-tools.github.io/commitizen/
+#
+# Daily workflow:
+#   cz commit                  guided conventional commit prompt
+#   cz bump                    bump version + update CHANGELOG.md + git tag
+#   cz changelog               regenerate CHANGELOG.md without bumping
+# ---------------------------------------------------------------------------
+[tool.commitizen]
+name            = "cz_conventional_commits"
+version         = "0.1.0"
+version_scheme  = "pep440"
+tag_format      = "v$version"
+update_changelog_on_bump = true
+changelog_file  = "CHANGELOG.md"
+changelog_incremental = true
+
+# Files where `cz bump` will rewrite the version string
+version_files = [
+    "pyproject.toml:version",
+    "lakelogic/__init__.py:__version__",
 ]

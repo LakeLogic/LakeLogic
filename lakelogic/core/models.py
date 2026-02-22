@@ -67,6 +67,78 @@ class SourceConfig(BaseModel):
     cdc_op_field: Optional[str] = None
     cdc_delete_values: List[str] = Field(default_factory=list)
 
+    # ── Incremental processing strategy ──────────────────────────────────────
+    # Declares HOW the pipeline resolves the (from_dt, to_dt) window for
+    # incremental reads.  Consumed by IncrementalBoundary.from_contract().
+    #
+    # Strategies:
+    #   max_target    — MAX(watermark_field) on target Delta table (default)
+    #   pipeline_log  — last successful run in a pipeline audit log table
+    #   manifest      — JSON manifest file listing processed partition values
+    #   lookback      — sliding window back from NOW (e.g. "7 days", "3 hours")
+    #   date_range    — explicit from_date / to_date (useful for backfills)
+    #
+    # Example contract YAML:
+    #   source:
+    #     load_mode: incremental
+    #     watermark_field: _snapshot_date
+    #     watermark_strategy: max_target
+    #     target_path: abfss://silver@acct.dfs.core.windows.net/zoopla/listings
+    #
+    # OR (lookback):
+    #   source:
+    #     load_mode: incremental
+    #     watermark_field: _snapshot_date
+    #     watermark_strategy: lookback
+    #     lookback: "7 days"          # "3 hours" | "30 mins" | "1 month" etc.
+    #
+    # OR (pipeline log):
+    #   source:
+    #     load_mode: incremental
+    #     watermark_field: _snapshot_date
+    #     watermark_strategy: pipeline_log
+    #     pipeline_log_table: meta.pipeline_runs
+    #     pipeline_name: bronze_to_silver_zoopla_listings
+    #
+    # OR (manifest):
+    #   source:
+    #     load_mode: incremental
+    #     watermark_field: _snapshot_date
+    #     watermark_strategy: manifest
+    #     manifest_path: /dbfs/mnt/meta/manifests/bronze_to_silver_zoopla.json
+    watermark_strategy: str = "max_target"   # max_target | pipeline_log | manifest | lookback | date_range
+    target_path: Optional[str] = None        # required when strategy == max_target
+    lookback: Optional[str] = None           # e.g. "7 days", "3 hours" — strategy == lookback
+    from_date: Optional[str] = None          # ISO date — strategy == date_range
+    to_date: Optional[str] = None            # ISO date — strategy == date_range
+    pipeline_log_table: Optional[str] = None # Spark table name — strategy == pipeline_log
+    pipeline_name: Optional[str] = None      # pipeline identifier — strategy == pipeline_log
+    manifest_path: Optional[str] = None      # JSON file path — strategy == manifest
+
+    # ── Multi-column partition support ────────────────────────────────────────────
+    # watermark_date_parts: maps logical date roles to actual column names.
+    # Used when the temporal boundary is spread across multiple columns rather
+    # than a single date/timestamp field.
+    #
+    # YAML form (positional list — [year_col, month_col, day_col]):
+    #   watermark_date_parts: [year, month, day]
+    #
+    # YAML form (named dict — when column names differ from year/month/day):
+    #   watermark_date_parts:
+    #     year:  partition_year
+    #     month: partition_month
+    #     day:   partition_day
+    #
+    # partition_filters: static (non-temporal) partition values ANDed into
+    # every filter expression alongside the temporal range.
+    #
+    #   partition_filters:
+    #     country: GB
+    #     region:  south
+    watermark_date_parts: Optional[Union[List[str], Dict[str, str]]] = None
+    partition_filters: Dict[str, Any] = Field(default_factory=dict)
+
+
 class SchemaPolicy(BaseModel):
     """Schema enforcement rules for unknown and evolving fields."""
     evolution: str = "strict" # strict, compatible, allow
@@ -276,9 +348,52 @@ class RowRuleRange(BaseModel):
     """Business-friendly range rule."""
     range: Dict[str, Any]
 
+class ForeignKeyRef(BaseModel):
+    """
+    Declaration of a foreign-key relationship on a field.
+
+    Used in two places:
+      1. ``FieldDefinition.foreign_key`` — field-level documentation + generator hint.
+         The generator samples FK column values from the PK pool of the referenced contract.
+      2. ``RowRuleReferentialIntegrity.referential_integrity`` — quality-rule payload
+         that the DataProcessor evaluates at validation time.
+
+    Contract YAML example
+    ---------------------
+    # Field-level (documentation + generator hint)
+    schema:
+      columns:
+        - name: agent_id
+          type: BIGINT
+          foreign_key:
+            contract: silver_agents   # LakeLogic contract name
+            column:   agent_id        # PK column in that contract
+
+    # Quality rule (validation)
+    quality:
+      row_rules:
+        - referential_integrity:
+            field:    agent_id
+            contract: silver_agents
+            column:   agent_id
+            severity: critical
+
+    dbt equivalent
+    ---------------
+    - name: agent_id
+      tests:
+        - relationships:
+            to:    ref('agents')
+            field: agent_id
+    """
+    contract: str              # LakeLogic contract name (e.g. 'silver_agents')
+    column: str                # PK column in the referenced contract
+    severity: str = "error"   # error | warning | info
+
+
 class RowRuleReferentialIntegrity(BaseModel):
     """Business-friendly referential integrity rule."""
-    referential_integrity: Dict[str, Any]
+    referential_integrity: Dict[str, Any]   # keys: field, contract, column, severity
 
 class RowRuleLifecycleWindow(BaseModel):
     """Business-friendly lifecycle window rule."""
@@ -367,6 +482,15 @@ class FieldDefinition(BaseModel):
     classification: Optional[str] = None
     description: Optional[str] = None
     rules: List[QualityRule] = Field(default_factory=list)
+    # Generator hints — persisted so DataGenerator.from_dbt() round-trips correctly.
+    # accepted_values: generator picks from this list; validator checks the IN rule.
+    # min / max: generator stays within range; validator checks >=/<= expression rules.
+    accepted_values: Optional[List[Any]] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    # Foreign-key hint — generator samples from the PK pool of the referenced contract.
+    # At validation time, DataProcessor evaluates the corresponding referential_integrity rule.
+    foreign_key: Optional[ForeignKeyRef] = None
 
 class Model(BaseModel):
     """Schema model definition."""
@@ -503,6 +627,74 @@ class DataContract(BaseModel):
     transformations: List[Transformation] = Field(default_factory=list)
     service_levels: Optional[ServiceLevel] = None
     quarantine: Optional[Quarantine] = Field(default_factory=Quarantine)
+
+    # ── Environment resolution ─────────────────────────────────────────────────
+
+    @property
+    def active_env(self) -> Optional[str]:
+        """Return the active environment name from the LAKELOGIC_ENV env-var (if set)."""
+        import os
+        return os.environ.get("LAKELOGIC_ENV") or None
+
+    def effective_server(self, env: Optional[str] = None) -> Optional["Server"]:
+        """
+        Return a ``Server`` instance with environment-specific overrides applied.
+
+        Resolution order
+        ----------------
+        1. ``env`` argument (explicit)
+        2. ``LAKELOGIC_ENV`` environment variable
+        3. No override — returns ``self.server`` unchanged (may be ``None``)
+
+        Only ``path`` and ``format`` are overridable per environment.  All other
+        ``Server`` attributes (mode, schema_evolution, …) come from the base
+        ``server`` block.
+
+        Examples
+        --------
+        ::
+
+            # Contract YAML:
+            #   server:
+            #     type: adls
+            #     path: abfss://container@account.dfs.core.windows.net/prod/customers/
+            #     format: parquet
+            #   environments:
+            #     dev:
+            #       path: abfss://container@account.dfs.core.windows.net/dev/customers/
+            #     test:
+            #       path: abfss://container@account.dfs.core.windows.net/test/customers/
+
+            s = contract.effective_server(env="dev")
+            # s.path → "abfss://container@account.dfs.core.windows.net/dev/customers/"
+
+            # Or set LAKELOGIC_ENV=test before running and call with no arg:
+            import os; os.environ["LAKELOGIC_ENV"] = "test"
+            s = contract.effective_server()
+            # s.path → ".../test/customers/"
+        """
+        active = env or self.active_env
+        if not active or not self.environments:
+            return self.server
+
+        override = self.environments.get(active)
+        if override is None:
+            return self.server
+
+        if self.server is None:
+            # Build a minimal Server from the override alone
+            return Server(
+                type="local",
+                path=override.path,
+                format=override.format or "parquet",
+            )
+
+        # Shallow-copy server and apply overrides
+        data = self.server.model_dump()
+        data["path"] = override.path
+        if override.format is not None:
+            data["format"] = override.format
+        return Server(**data)
 
 class TraceStep(BaseModel):
     """Execution step metadata for debugging/visualization."""
