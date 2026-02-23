@@ -4,7 +4,21 @@ from lakelogic.core.processor import DataProcessor
 from lakelogic.core.models import DataContract, FieldDefinition, QualityRule, Transformation
 from lakelogic.core.generator import DataGenerator
 from lakelogic.core.incremental import IncrementalBoundary, Boundary
+from lakelogic.core.bootstrap import ContractInferrer, ContractDraft, infer_contract
+from lakelogic.core.schema_api import (
+    validate_contract,
+    contract_schema,
+    contract_schema_json,
+    ValidationResult,
+    ValidationError,
+)
 from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
+from lakelogic.engines.cloud_credentials import (
+    CloudCredentialResolver,
+    DatabricksSecretResolver,
+    from_databricks,
+    resolve_storage_options,
+)
 
 __version__ = "0.1.0"
 
@@ -175,6 +189,10 @@ __all__ = [
     "Boundary",
     "DbtAdapter",
     "load_contract_from_dbt",
+    # Contract inference
+    "infer_contract",
+    "ContractInferrer",
+    "ContractDraft",
     "help",
     "driver",
     "bootstrap",

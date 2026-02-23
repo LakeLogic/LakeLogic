@@ -532,50 +532,6 @@ class LineageConfig(BaseModel):
     run_id_source: str = "run_id"  # run_id | pipeline_run_id
 
 
-class ExternalLogic(BaseModel):
-    """External logic hook for advanced processing."""
-    type: str  # python | notebook
-    path: str
-    entrypoint: str = "run"
-    args: Dict[str, Any] = Field(default_factory=dict)
-    output_path: Optional[str] = None
-    output_format: Optional[str] = None  # csv | parquet
-    handles_output: Optional[bool] = None  # if True, skip built-in materialize
-    kernel_name: Optional[str] = None  # notebook kernel override
-
-class DataContract(BaseModel):
-    """
-    Finalized SQL-First Data Contract Model.
-    Supports ODCS-style metadata and consolidated 'sql' keywords.
-    """
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
-    
-    version: str
-    info: Optional[Info] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict) # For generic tagging (status, classification)
-    server: Optional[Server] = None
-    source: Optional[SourceConfig] = None
-    environments: Dict[str, Environment] = Field(default_factory=dict)
-    links: List[Link] = Field(default_factory=list)
-    
-    dataset: Optional[str] = None
-    primary_key: List[str] = Field(default_factory=list)
-    
-    # LINEAGE & OBSERVABILITY
-    lineage: Optional[LineageConfig] = Field(default_factory=LineageConfig)
-    
-    # MATERIALIZATION LAYER (Gold/Silver)
-    materialization: Optional[Materialization] = Field(default_factory=Materialization)
-    logic: Optional[str] = None # Full SQL for materialization
-
-    # EXTERNAL LOGIC
-    external_logic: Optional[ExternalLogic] = None
-    
-    # ORCHESTRATION & DEPENDENCIES
-    upstream: List[str] = Field(default_factory=list)
-    preserve_upstream: List[str] = Field(default_factory=list)
-    upstream_prefix: str = "_upstream"
-    run_id_source: str = "run_id"  # run_id | pipeline_run_id
 
 
 class ExternalLogic(BaseModel):

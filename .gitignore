@@ -304,6 +304,7 @@ __pycache__/
 
 
 .product_vision/
+.markdownlint.json
 
 # Reference/example files
 _ref/

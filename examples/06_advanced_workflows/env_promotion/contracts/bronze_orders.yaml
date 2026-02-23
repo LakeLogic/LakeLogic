@@ -1,0 +1,82 @@
+version: "1.0.0"
+
+info:
+  title: "Orders Landing (Bronze)"
+  version: "1.0.0"
+  description: "Raw orders from e-commerce platform landing zone. Validates schema and routes bad rows to quarantine."
+  owner: "Data Engineering"
+  target_layer: "bronze"
+  status: active
+
+# Production ADLS path (used when LAKELOGIC_ENV is unset)
+server:
+  type: adls
+  format: parquet
+  path: "abfss://bronze@myaccount.dfs.core.windows.net/prod/orders/"
+  mode: validate
+
+# Environment overrides — same contract, different paths
+environments:
+  dev:
+    path: "./data/orders_raw.csv"
+    format: csv                         # Local CSV avoids ADLS auth in dev
+  test:
+    path: "abfss://bronze@myaccount.dfs.core.windows.net/test/orders/"
+
+dataset: bronze_orders
+primary_key: ["order_id"]
+
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+
+model:
+  fields:
+    - name: order_id
+      type: string
+      description: Unique order identifier
+    - name: customer_id
+      type: string
+      description: Customer account ID
+    - name: product_id
+      type: string
+    - name: quantity
+      type: integer
+    - name: unit_price
+      type: double
+    - name: order_date
+      type: date
+    - name: status
+      type: string
+      description: "pending | confirmed | shipped | cancelled | returned"
+    - name: country
+      type: string
+
+quality:
+  row_rules:
+    - name: order_id_not_null
+      sql: "order_id IS NOT NULL"
+      category: completeness
+
+    - name: positive_quantity
+      sql: "quantity > 0"
+      category: validity
+
+    - name: positive_price
+      sql: "unit_price > 0"
+      category: validity
+
+    - name: valid_status
+      sql: "status IN ('pending','confirmed','shipped','cancelled','returned')"
+      category: validity
+
+  dataset_rules:
+    - name: no_duplicate_orders
+      sql: "SELECT COUNT(*) - COUNT(DISTINCT order_id) FROM bronze_orders"
+      must_be_less_than: 1
+      description: "Each order_id must appear exactly once"
+
+quarantine:
+  enabled: true
+  include_error_reason: true
+  target: "./data/quarantine/bronze_orders/"
