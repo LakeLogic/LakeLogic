@@ -237,8 +237,8 @@ def _write_frame(df, path: Path, output_format: str) -> None:
                 data = df.to_arrow_table()
             elif hasattr(df, "to_pandas"):
                 data = df.to_pandas()
-                
-            write_deltalake(path, data)
+
+            write_deltalake(path, data, mode="overwrite", schema_mode="overwrite")
         except ImportError:
             raise ValueError("Delta materialization requires 'deltalake' installed (pip install deltalake).")
         except Exception as e:
@@ -907,14 +907,18 @@ def _partition_aware_merge(
     """
     Perform merge or SCD2 within each affected partition independently.
 
-    Only partitions that have incoming data are loaded, merged, and written
-    back. Partitions not affected by the incoming batch are untouched.
+    For **delta** format, writes a single root-level Delta table with Hive-style
+    partition columns so that ``pl.read_delta(root)`` and
+    ``spark.read.format("delta").load(root)`` work correctly.
+
+    For all other formats, writes per-partition files under Hive-style
+    subdirectories (original behaviour).
 
     Args:
         df: Incoming dataframe.
         contract: DataContract.
         resolved_target: Base target directory.
-        resolved_format: Output format (csv, parquet, etc.).
+        resolved_format: Output format (csv, parquet, delta, …).
         strategy: "merge" or "scd2".
         partition_by: List of partition column names.
         primary_key: Primary key columns.
@@ -927,6 +931,18 @@ def _partition_aware_merge(
     import pandas as pd
 
     pdf = _to_pandas(df)
+
+    # ── Empty-frame guard ─────────────────────────────────────────────────────
+    # On an incremental run where the watermark filter matched 0 new rows the
+    # DataFrame has the correct schema but 0 rows.  There is nothing to write;
+    # return a zero-rows metadata dict so callers don't raise on missing columns.
+    if pdf.empty:
+        import logging as _log
+        _log.getLogger(__name__).info(
+            "materialize: empty DataFrame — no rows to write, skipping materialization."
+        )
+        return {"target": str(resolved_target), "rows_written": 0, "format": resolved_format}
+
     if not primary_key:
         raise ValueError("primary_key is required for merge/scd2 strategy.")
 
@@ -948,6 +964,116 @@ def _partition_aware_merge(
     soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
     soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
 
+    # ── Delta format: single root-level Delta table ───────────────────────────
+    # write_deltalake writes Hive-style partition dirs under a single _delta_log
+    # at the root so pl.read_delta(base_dir) works correctly.
+    #
+    # Strategy:
+    #   First write  → write_deltalake(mode="overwrite")  — creates the table
+    #   Subsequent   → DeltaTable.merge() MERGE INTO keyed on primary_key
+    #                  No partition_filters needed; stable across all versions.
+    if resolved_format == "delta":
+        try:
+            from deltalake import write_deltalake, DeltaTable
+            import pyarrow as pa
+        except ImportError:
+            raise ImportError(
+                "Writing partitioned Delta tables requires deltalake and pyarrow: "
+                "pip install deltalake pyarrow"
+            )
+
+        target_str = str(base_dir)
+        table_exists = base_dir.joinpath("_delta_log").exists()
+
+        # Pre-merge all incoming partitions into their final state first,
+        # then write in a single pass to minimise Delta log transactions.
+        merged_parts: list = []
+
+        for part_values, group in _partition_groups(pdf, partition_by):
+            if group.empty:
+                continue
+
+            if strategy in ("merge", "scd2") and table_exists:
+                existing = pd.DataFrame(columns=group.columns)
+                try:
+                    dt = DeltaTable(target_str)
+                    part_filter = [
+                        (col, "=", str(val)) for col, val in part_values.items()
+                    ]
+                    existing = dt.to_pandas(filters=part_filter)
+                except Exception:
+                    pass
+
+                if strategy == "merge":
+                    merged = _merge_frames(
+                        existing, group, primary_key,
+                        soft_delete_col=soft_delete_col,
+                        soft_delete_val=soft_delete_val,
+                        soft_delete_time_col=soft_delete_time_col,
+                        soft_delete_reason_col=soft_delete_reason_col,
+                        cdc_op_field=cdc_op_field,
+                        cdc_delete_values=cdc_delete_values,
+                    )
+                else:
+                    merged = _scd2_frames(existing, group, primary_key, scd2_cfg)
+            else:
+                merged = group  # first write or plain append — use as-is
+
+            if not merged.empty:
+                merged_parts.append(merged)
+
+        if not merged_parts:
+            logger.info(f"Partition-aware {strategy} (delta): no rows to write → {base_dir}")
+            return {"target": str(base_dir), "rows_written": 0, "format": resolved_format}
+
+        combined = pd.concat(merged_parts, ignore_index=True)
+        arrow_table = pa.Table.from_pandas(combined, preserve_index=False)
+        total_rows = len(combined)
+
+        if not table_exists:
+            # ── First write: create the root Delta table ──────────────────
+            write_deltalake(
+                target_str,
+                arrow_table,
+                partition_by=partition_by,
+                mode="overwrite",
+                schema_mode="merge",
+            )
+        elif primary_key:
+            # ── Subsequent writes: MERGE INTO via DeltaTable.merge() ─────
+            # Stable across all deltalake versions; no partition_filters API.
+            pk_predicate = " AND ".join(
+                f"source.{pk} = target.{pk}" for pk in primary_key
+            )
+            dt = DeltaTable(target_str)
+            (
+                dt.merge(
+                    source=arrow_table,
+                    predicate=pk_predicate,
+                    source_alias="source",
+                    target_alias="target",
+                )
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute()
+            )
+        else:
+            # No primary key defined → plain append
+            write_deltalake(
+                target_str,
+                arrow_table,
+                partition_by=partition_by,
+                mode="append",
+                schema_mode="merge",
+            )
+
+        logger.info(
+            f"Partition-aware {strategy} (delta): materialized {total_rows} rows "
+            f"→ {base_dir}"
+        )
+        return {"target": str(base_dir), "rows_written": total_rows, "format": resolved_format}
+
+    # ── Non-delta formats: per-partition file approach (original behaviour) ───
     for part_values, group in _partition_groups(pdf, partition_by):
         # Resolve the partition directory
         part_dir = base_dir
@@ -1091,6 +1217,11 @@ def materialize_dataframe(
 
     pdf = _to_pandas(df)
 
+    # Empty-frame guard — nothing to write, avoid partition-column validation errors
+    if pdf.empty:
+        logger.info("materialize: empty DataFrame — no rows to write, skipping materialization.")
+        return {"target": str(target_file), "rows_written": 0, "format": resolved_format}
+
     if partition_by:
         missing = [col for col in partition_by if col not in pdf.columns]
         if missing:
@@ -1101,6 +1232,48 @@ def materialize_dataframe(
         if missing_pk:
             raise ValueError(f"Primary key columns missing from data: {', '.join(missing_pk)}")
     rows_written = 0
+
+    # ── Delta: use write_deltalake natively (handles partitioning + schema evolution) ──
+    # The Hive-style file loop below is for parquet/csv only.
+    # Delta tables must be managed at the root path with partition_by passed
+    # to write_deltalake, not via directory-per-partition file writes.
+    if resolved_format == "delta":
+        try:
+            from deltalake import write_deltalake
+            import pyarrow as pa
+        except ImportError as exc:
+            raise ImportError(
+                "Delta materialization requires the deltalake package: "
+                "pip install deltalake"
+            ) from exc
+
+        # Resolve Arrow table from any engine frame
+        if _is_polars_frame(pdf):
+            # pdf may already be a Polars frame if we took the early path
+            arrow_data = (pdf.collect() if hasattr(pdf, "collect") else pdf).to_arrow()
+        elif hasattr(pdf, "to_arrow"):
+            arrow_data = pdf.to_arrow()
+        else:
+            arrow_data = pa.Table.from_pandas(pdf if hasattr(pdf, "columns") else _to_pandas(pdf))
+
+        # strategy → delta mode
+        delta_mode = "overwrite" if strategy == "overwrite" else "append"
+        delta_partition_by = partition_by if partition_by else None
+
+        resolved_target.mkdir(parents=True, exist_ok=True)
+        write_deltalake(
+            str(resolved_target),
+            arrow_data,
+            mode=delta_mode,
+            partition_by=delta_partition_by,
+            schema_mode="merge",   # schema evolution: new columns auto-added
+        )
+        rows_written = len(arrow_data)
+        logger.info(
+            f"Materialized {rows_written} rows to Delta table: {resolved_target} "
+            f"(mode={delta_mode}, partitions={delta_partition_by})"
+        )
+        return {"target": str(resolved_target), "rows_written": rows_written, "format": "delta"}
 
     if partition_by:
         base_dir = resolved_target

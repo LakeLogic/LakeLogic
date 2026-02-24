@@ -119,7 +119,7 @@ def _write_quarantine_table(
 
 def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Write quarantined records to a Spark table.
+    Write quarantined records to a Spark table with schema evolution enabled.
 
     Args:
         df: Spark DataFrame.
@@ -143,15 +143,26 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
     elif len(parts) >= 3:
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {parts[0]}.{parts[1]}")
 
-    df.write.mode(mode).format(table_format).saveAsTable(table_name)
+    writer = df.write.mode(mode).format(table_format)
+    # Enable schema evolution so new quarantine columns (from contract changes)
+    # are merged into the existing table rather than causing a schema mismatch.
+    if table_format == "delta":
+        writer = writer.option("mergeSchema", "true")
+    elif table_format == "iceberg":
+        writer = writer.option("merge-schema", "true")
+    writer.saveAsTable(table_name)
     rows_written = int(df.count())
-    logger.info(f"Wrote {rows_written} quarantined rows to Spark table {table_name}")
+    logger.info(f"Wrote {rows_written} quarantined rows to Spark table {table_name} (schema evolution enabled)")
     return {"target": table_name, "rows_written": rows_written, "format": table_format}
 
 
 def _write_quarantine_table_duckdb(df: Any, contract, table_name: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Write quarantined records to a DuckDB table.
+    Write quarantined records to a DuckDB table with schema evolution.
+
+    New columns present in the incoming frame but absent from the existing
+    table are added automatically via ``ALTER TABLE ADD COLUMN IF NOT EXISTS``
+    before inserting, so quarantine never fails as the contract schema grows.
 
     Args:
         df: Engine dataframe for quarantined data.
@@ -189,14 +200,49 @@ def _write_quarantine_table_duckdb(df: Any, contract, table_name: str, metadata:
     try:
         if schema_name:
             con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+
         con.register("incoming_quarantine", pdf)
-        con.execute(f"CREATE TABLE IF NOT EXISTS {full_table} AS SELECT * FROM incoming_quarantine WHERE 1=0")
+
+        # Create table from first batch if it doesn't exist yet.
+        con.execute(
+            f"CREATE TABLE IF NOT EXISTS {full_table} AS "
+            f"SELECT * FROM incoming_quarantine WHERE 1=0"
+        )
+
+        # ── Schema evolution: add any new columns from the incoming frame ──
+        # Query the existing column names, then ALTER TABLE for each new one.
+        existing_cols = {
+            row[0].lower()
+            for row in con.execute(
+                f"SELECT column_name FROM information_schema.columns "
+                f"WHERE table_name = '{full_table.split('.')[-1]}'"
+                + (f" AND table_schema = '{schema_name}'" if schema_name else "")
+            ).fetchall()
+        }
+        # Map pandas dtypes → DuckDB types for ALTER TABLE
+        _PD_TO_DUCK = {
+            "object": "VARCHAR", "string": "VARCHAR",
+            "int64": "BIGINT", "int32": "INTEGER",
+            "float64": "DOUBLE", "float32": "FLOAT",
+            "bool": "BOOLEAN", "boolean": "BOOLEAN",
+            "datetime64[ns]": "TIMESTAMP", "datetime64[ns, UTC]": "TIMESTAMPTZ",
+        }
+        for col in pdf.columns:
+            if col.lower() not in existing_cols:
+                dtype = str(pdf[col].dtype)
+                duck_type = _PD_TO_DUCK.get(dtype, "VARCHAR")
+                try:
+                    con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS \"{col}\" {duck_type}")
+                    logger.debug(f"Quarantine schema evolved: added column '{col}' ({duck_type}) to {full_table}")
+                except Exception as e:
+                    logger.warning(f"Could not add column '{col}' to quarantine table: {e}")
+
         con.execute(f"INSERT INTO {full_table} SELECT * FROM incoming_quarantine")
     finally:
         con.close()
 
     rows_written = len(pdf)
-    logger.info(f"Wrote {rows_written} quarantined rows to DuckDB table {full_table}")
+    logger.info(f"Wrote {rows_written} quarantined rows to DuckDB table {full_table} (schema evolution enabled)")
     return {"target": f"{db_path}:{full_table}", "rows_written": rows_written, "format": "duckdb"}
 
 
@@ -380,7 +426,7 @@ def materialize_quarantine(
     raw_target = str(target_path or contract.quarantine.target)
 
     if raw_target.startswith("table:"):
-        table_name = raw_target[len("table:") :]
+        table_name = raw_target[len("table:"):]
         return _write_quarantine_table(
             df,
             contract,
@@ -391,43 +437,100 @@ def materialize_quarantine(
     quarantine_target = _resolve_path(raw_target, base_path)
 
     metadata = contract.metadata or {}
+
+    # ── Format resolution (precedence: arg → quarantine.format → metadata → extension → default) ──
+    q = contract.quarantine
+    explicit_format = (
+        output_format
+        or getattr(q, "format", None)
+        or metadata.get("quarantine_format")
+    )
+    resolved_format = str(explicit_format).lower() if explicit_format else None
+
+    # ── Write-mode resolution (quarantine.write_mode → metadata → default append) ──
+    write_mode = (
+        getattr(q, "write_mode", None)
+        or metadata.get("quarantine_table_mode")
+        or "append"
+    ).lower()
+
+    # ── Resolve target path / extension ──────────────────────────────────────
     quarantine_target.parent.mkdir(parents=True, exist_ok=True)
     target_file = quarantine_target
-    explicit_format = output_format or metadata.get("quarantine_format")
-    resolved_format = str(explicit_format).lower() if explicit_format else None
     if target_file.suffix == "":
         resolved_format = resolved_format or "parquet"
-        target_file = target_file.with_suffix(f".{resolved_format}")
+        if resolved_format == "delta":
+            # Delta is a directory — keep path as-is (no suffix)
+            pass
+        else:
+            target_file = target_file.with_suffix(f".{resolved_format}")
     else:
         if resolved_format is None:
             resolved_format = target_file.suffix.lstrip(".").lower()
 
+    resolved_format = resolved_format or "parquet"
+
+    # ── Spark engine ──────────────────────────────────────────────────────────
     if engine_name == "spark" and hasattr(df, "write"):
         spark_formats = {"parquet", "csv", "json", "delta", "iceberg"}
         if resolved_format in spark_formats:
-            writer = df.write.format(resolved_format).mode("append")
+            spark_write_mode = metadata.get("quarantine_table_mode") or write_mode
+            writer = df.write.format(resolved_format).mode(spark_write_mode)
             if resolved_format in ["csv", "json"]:
                 writer = writer.option("header", "true")
             writer.save(str(target_file))
             rows_written = int(df.count())
-            logger.info(f"Wrote {rows_written} quarantined rows to {target_file} ({resolved_format})")
-            return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+            logger.info(f"Wrote {rows_written} quarantined rows to {target_file} ({resolved_format}, mode={spark_write_mode})")
+            return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format, "write_mode": spark_write_mode}
 
     if not _frame_has_columns(df):
         logger.info("Quarantine materialization skipped: dataframe has no columns.")
         return {"target": str(target_file), "rows_written": 0, "format": resolved_format}
 
+    # ── Delta format (Polars / DuckDB via deltalake) ──────────────────────────
+    if resolved_format == "delta":
+        try:
+            import deltalake
+            from deltalake.writer import write_deltalake
+        except ImportError as exc:
+            raise ImportError(
+                "Delta quarantine format requires the deltalake package: "
+                "pip install deltalake"
+            ) from exc
+
+        delta_path = str(target_file)
+        delta_write_mode = "overwrite" if write_mode == "overwrite" else "append"
+
+        if _is_polars_frame(df):
+            collected = df.collect() if hasattr(df, "collect") else df
+            # schema_mode="merge" enables schema evolution — new columns from
+            # evolving contracts are added to the Delta table automatically.
+            write_deltalake(delta_path, collected.to_arrow(), mode=delta_write_mode, schema_mode="merge")
+            rows_written = collected.height
+        elif hasattr(df, "write"):
+            # Spark DataFrame passed but engine_name not set — fall through to Spark
+            df.write.format("delta").mode(delta_write_mode).save(delta_path)
+            rows_written = int(df.count())
+        else:
+            pdf = _to_pandas(df)
+            import pyarrow as pa
+            write_deltalake(delta_path, pa.Table.from_pandas(pdf), mode=delta_write_mode)
+            rows_written = len(pdf)
+
+        logger.info(f"Wrote {rows_written} quarantined rows to Delta table {delta_path} (mode={delta_write_mode})")
+        return {"target": delta_path, "rows_written": rows_written, "format": "delta", "write_mode": delta_write_mode}
+
+    # ── File formats: csv / parquet ───────────────────────────────────────────
     if resolved_format not in ["csv", "parquet"]:
         raise ValueError(
-            f"Unsupported quarantine format '{resolved_format}'. Use csv/parquet, "
-            "or run Spark for delta/iceberg/json outputs."
+            f"Unsupported quarantine format '{resolved_format}'. "
+            "Supported: parquet, csv, delta (requires deltalake), "
+            "or use Spark for iceberg/json."
         )
 
-    # Prefer native Polars writes for csv/parquet to avoid pyarrow dependency.
-    if _is_polars_frame(df) and resolved_format in ["csv", "parquet"]:
-        if target_file.exists():
-            rows_written = _append_without_pandas(df, target_file, resolved_format)
-        else:
+    # Prefer native Polars writes to avoid pyarrow dependency.
+    if _is_polars_frame(df):
+        if write_mode == "overwrite" or not target_file.exists():
             _write_frame(df, target_file, resolved_format)
             rows_written = _row_count(df)
             if rows_written is None and hasattr(df, "collect"):
@@ -435,29 +538,30 @@ def materialize_quarantine(
                     rows_written = int(df.collect().height)
                 except Exception:
                     pass
-        logger.info(f"Wrote {rows_written if rows_written is not None else '?'} quarantined rows to {target_file}")
-        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+        else:
+            rows_written = _append_without_pandas(df, target_file, resolved_format)
+        logger.info(f"Wrote {rows_written if rows_written is not None else '?'} quarantined rows to {target_file} (mode={write_mode})")
+        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format, "write_mode": write_mode}
 
     if not _pandas_available():
-        if target_file.exists():
-            rows_written = _append_without_pandas(df, target_file, resolved_format)
-        else:
+        if write_mode == "overwrite" or not target_file.exists():
             _write_frame(df, target_file, resolved_format)
             rows_written = _row_count(df)
-        logger.info(f"Wrote {rows_written if rows_written is not None else '?'} quarantined rows to {target_file}")
-        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+        else:
+            rows_written = _append_without_pandas(df, target_file, resolved_format)
+        logger.info(f"Wrote {rows_written if rows_written is not None else '?'} quarantined rows to {target_file} (mode={write_mode})")
+        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format, "write_mode": write_mode}
 
+    import pandas as pd
     pdf = _to_pandas(df)
-
-    if target_file.exists():
-        import pandas as pd
+    if write_mode == "overwrite" or not target_file.exists():
+        _write_frame(pdf, target_file, resolved_format)
+        rows_written = len(pdf)
+    else:
         existing = _read_frame(target_file, resolved_format)
         combined = pd.concat([existing, pdf], ignore_index=True)
         _write_frame(combined, target_file, resolved_format)
         rows_written = len(combined)
-    else:
-        _write_frame(pdf, target_file, resolved_format)
-        rows_written = len(pdf)
 
-    logger.info(f"Wrote {rows_written} quarantined rows to {target_file}")
-    return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+    logger.info(f"Wrote {rows_written} quarantined rows to {target_file} (mode={write_mode})")
+    return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format, "write_mode": write_mode}

@@ -11,6 +11,8 @@ class PolarsAdapter(EngineAdapter):
     Supports row-level validation, aggregate metrics, and SQL-first transformations.
     """
     _link_cache: Dict[str, pl.LazyFrame] = {}
+    engine_name: str = "polars"
+
 
     def _get_context(self, source_lf: pl.LazyFrame) -> pl.SQLContext:
         """
@@ -92,6 +94,28 @@ class PolarsAdapter(EngineAdapter):
         Returns:
             The transformed LazyFrame.
         """
+        # ── Idempotency guard ─────────────────────────────────────────────────
+        # If the SQL adds new columns (e.g. `creation_date AS creation_date_raw`)
+        # and those columns ALREADY exist in the frame (e.g. from generated test
+        # data), Polars/DuckDB raise "duplicate output name".
+        # Detect such columns by parsing naked `... AS <alias>` expressions from
+        # the SELECT list that are NOT inside a REPLACE(...) clause, then drop any
+        # that already exist before executing.
+        import re as _re
+        existing_cols = set(lf.collect_schema().names())
+        # Extract aliases from top-level AS clauses (outside REPLACE parens)
+        # Simple heuristic: remove REPLACE(...) block then find remaining AS aliases
+        sql_no_replace = _re.sub(r'\bREPLACE\s*\([^)]*\)', '', sql, flags=_re.IGNORECASE | _re.DOTALL)
+        new_aliases = {
+            m.group(1)
+            for m in _re.finditer(r'\bAS\s+(["\w]+)', sql_no_replace, _re.IGNORECASE)
+        }
+        # Strip optional quotes
+        new_aliases = {a.strip('"').strip("'") for a in new_aliases}
+        cols_to_drop = new_aliases & existing_cols
+        if cols_to_drop:
+            lf = lf.drop(list(cols_to_drop))
+
         ctx = pl.SQLContext()
         ctx.register("source", lf)
         if self.contract.dataset:
@@ -609,6 +633,16 @@ class PolarsAdapter(EngineAdapter):
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 query = f"SELECT *, ({trans.derive.sql}) AS {trans.derive.field} FROM {tbl_name}"
                 current_lf = ctx.execute(query)
+            elif trans.bucket:
+                logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
+                sql = self._build_bucket_sql(trans.bucket, source_table=tbl_name)
+                if sql:
+                    current_lf = ctx.execute(sql)
+            elif trans.date_diff:
+                logger.debug(f"Post-Transform [DateDiff]: {trans.date_diff.field}")
+                sql = self._build_date_diff_sql(trans.date_diff, source_table=tbl_name)
+                if sql:
+                    current_lf = ctx.execute(sql)
             elif trans.lookup:
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field} from {trans.lookup.reference}")
                 query = f"""

@@ -8,6 +8,7 @@ class SparkAdapter(EngineAdapter):
     Spark execution engine for LakeLogic.
     Uses Spark SQL and Column Expressions for evaluation.
     """
+    engine_name: str = "spark"
 
     def _quote_ident(self, name: str) -> str:
         """
@@ -377,7 +378,20 @@ class SparkAdapter(EngineAdapter):
                 current_df.createOrReplaceTempView(tbl_name)
                 query = f"SELECT *, ({trans.derive.sql}) AS {trans.derive.field} FROM {tbl_name}"
                 current_df = current_df.sparkSession.sql(query)
+            elif trans.bucket:
+                logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
+                current_df.createOrReplaceTempView(tbl_name)
+                sql = self._build_bucket_sql(trans.bucket, source_table=tbl_name)
+                if sql:
+                    current_df = current_df.sparkSession.sql(sql)
+            elif trans.date_diff:
+                logger.debug(f"Post-Transform [DateDiff]: {trans.date_diff.field}")
+                current_df.createOrReplaceTempView(tbl_name)
+                sql = self._build_date_diff_sql(trans.date_diff, source_table=tbl_name)
+                if sql:
+                    current_df = current_df.sparkSession.sql(sql)
             elif trans.lookup:
+
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_df.createOrReplaceTempView("src")
                 hint = ""

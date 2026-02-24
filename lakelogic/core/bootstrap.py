@@ -109,7 +109,16 @@ def _format_contract_yaml(data: dict) -> str:
        - ``quality.dataset_rules``
        - ``transformations`` (any depth)
     """
-    raw = yaml.dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    # FieldList is a list subclass — tell PyYAML to represent it as a plain
+    # sequence so safe_load() can read it back without Python-tag errors.
+    # We use a local Dumper subclass to avoid mutating the global default Dumper.
+    class _Dumper(yaml.Dumper):
+        pass
+    _Dumper.add_representer(
+        FieldList,
+        lambda dumper, data: dumper.represent_sequence("tag:yaml.org,2002:seq", data),
+    )
+    raw = yaml.dump(data, Dumper=_Dumper, sort_keys=False, allow_unicode=True, default_flow_style=False)
     lines = raw.splitlines()
     out: list[str] = []
 
@@ -145,6 +154,34 @@ def _format_contract_yaml(data: dict) -> str:
 # ---------------------------------------------------------------------------
 # ContractDraft — the result object
 # ---------------------------------------------------------------------------
+
+
+class FieldList(list):
+    """
+    A list of field dicts that upserts by ``name`` on ``.append()``.
+
+    If a field with the same ``name`` already exists the new attributes are
+    **merged into** the existing entry (new keys win, existing keys not present
+    in the new dict are preserved).  If no field with that name exists the dict
+    is appended normally — identical to plain ``list.append``.
+
+    This means callers can safely do::
+
+        draft.fields.append({"name": "listing_id", "min": 10001, "max": 99999})
+
+    … and the inferred ``listing_id`` entry will be *updated* rather than
+    duplicated, even if it already exists from ``infer_contract``.
+    """
+
+    def append(self, item: Dict[str, Any]) -> None:  # type: ignore[override]
+        name = item.get("name") if isinstance(item, dict) else None
+        if name:
+            for existing in self:
+                if isinstance(existing, dict) and existing.get("name") == name:
+                    # Merge: new attributes overwrite, unmentioned keys kept
+                    existing.update(item)
+                    return
+        super().append(item)
 
 
 class ContractDraft:
@@ -187,9 +224,19 @@ class ContractDraft:
     # ------------------------------------------------------------------
 
     @property
-    def fields(self) -> List[Dict[str, Any]]:
-        """List of inferred field dicts: [{name, type, ...}, ...]."""
-        return (self._data.get("model") or {}).get("fields") or []
+    def fields(self) -> "FieldList":
+        """Upsert-by-name list of field dicts: [{name, type, ...}, ...].
+
+        ``.append({"name": "col", ...})`` merges into an existing field with
+        the same name rather than adding a duplicate.
+        """
+        model = self._data.setdefault("model", {})
+        raw = model.get("fields")
+        if not isinstance(raw, FieldList):
+            # Wrap the backing list in FieldList once (in-place replacement)
+            wrapped = FieldList(raw or [])
+            model["fields"] = wrapped
+        return model["fields"]
 
     @property
     def quality(self) -> Dict[str, Any]:
@@ -369,22 +416,32 @@ class ContractInferrer:
         version: str = "1.0.0",
         description: Optional[str] = None,
         layer: str = "bronze",
+        domain: Optional[str] = None,
+        system: Optional[str] = None,
         sample_rows: int = 10_000,
         suggest_rules: bool = True,
         detect_pii: bool = False,
         pii_sample_size: int = 50,
         extra: Optional[Dict[str, Any]] = None,
+        preserve_nested: Union[bool, List[str]] = False,
     ) -> None:
         self.source = source
         self.title = title
         self.version = version
         self.description = description
         self.layer = layer
+        self.domain = domain
+        self.system = system
         self.sample_rows = sample_rows
         self.suggest_rules = suggest_rules
         self.detect_pii = detect_pii
         self.pii_sample_size = pii_sample_size
         self.extra: Dict[str, Any] = extra or {}
+        # preserve_nested controls nested JSON flattening:
+        #   False (default) — explode all nested fields into parent_child columns
+        #   True            — keep all nested values as raw JSON strings (bronze)
+        #   ["col", ...]    — preserve only the listed columns; explode the rest
+        self.preserve_nested: Union[bool, List[str]] = preserve_nested
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -396,6 +453,9 @@ class ContractInferrer:
 
         # ── 1. Load into Polars ───────────────────────────────────────────
         df, source_path = self._load(pl)
+
+        # ── 1b. Flatten nested JSON columns (unless preserved) ────────────
+        df = self._flatten_df(df)
 
         # ── 2. Build title / description from source path ─────────────────
         if source_path:
@@ -419,15 +479,21 @@ class ContractInferrer:
             quality = self._suggest_rules(df)
 
         # ── 4. Assemble contract dict ─────────────────────────────────────
-        contract: Dict[str, Any] = {
-            "version": "1.0.0",
-            "info": {
+        info_block: Dict[str, Any] = {
                 "title": title,
                 "version": self.version,
                 "description": description,
                 "target_layer": self.layer,
                 "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            },
+            }
+        if self.domain is not None:
+            info_block["domain"] = self.domain
+        if self.system is not None:
+            info_block["system"] = self.system
+
+        contract: Dict[str, Any] = {
+            "version": "1.0.0",
+            "info": info_block,
             "model": {"fields": fields},
         }
         if source_path:
@@ -441,8 +507,24 @@ class ContractInferrer:
 
         # ── 5. Merge extra top-level sections ──────────────────────────────
         # Done last so callers can override auto-generated keys if needed.
+        # Deep-merge is used for "model" so that extra={"model": {}} or
+        # extra={"model": {"description": "..."}} does NOT wipe the inferred
+        # fields list.  The caller must supply extra["model"]["fields"] explicitly
+        # to fully replace the inferred fields.  All other top-level keys use
+        # plain replace semantics (same as before).
         if self.extra:
-            contract.update(self.extra)
+            for key, value in self.extra.items():
+                if key == "model" and isinstance(value, dict) and isinstance(contract.get("model"), dict):
+                    # Deep merge: keep inferred fields unless caller explicitly supplies them
+                    merged_model = dict(contract["model"])
+                    for mk, mv in value.items():
+                        if mk == "fields" and not mv:
+                            # Caller passed fields: [] or fields: None — skip, keep inferred
+                            continue
+                        merged_model[mk] = mv
+                    contract["model"] = merged_model
+                else:
+                    contract[key] = value
 
         return ContractDraft(contract)
 
@@ -496,6 +578,150 @@ class ContractInferrer:
             )
         return df, p
 
+    def _flatten_df(self, df) -> Any:
+        """
+        Recursively explode nested JSON columns into flat ``parent_child`` columns.
+
+        Controlled by ``self.preserve_nested``:
+
+        - ``False`` (default) — explode every column whose sampled values are
+          dicts or lists.  This also includes string columns that contain
+          serialised JSON objects/arrays (common when reading a bronze Delta
+          table where nested fields were stored as JSON strings).
+        - ``True``            — keep all nested values as raw JSON strings
+          (original bronze behaviour).  JSON-string columns are left as-is.
+        - ``list``            — preserve only the named columns; explode the rest.
+        """
+        import json as _json
+        import polars as pl
+
+        # preserve_nested=True → skip all flattening
+        if self.preserve_nested is True:
+            return df
+
+        preserved: set = set(self.preserve_nested) if isinstance(self.preserve_nested, list) else set()
+
+        # ── Pre-pass: parse JSON-string columns into Python dicts/lists ──────
+        # When a DataFrame comes from a Delta/Parquet/Parquet-on-bronze table,
+        # nested objects land as plain strings (e.g. '{"price": 1500, ...}').
+        # We sample each string column; if the majority of non-null values
+        # deserialise to a dict or list we replace the values in the row dict
+        # so the existing explode loop can handle them normally.
+        #
+        # This makes preserve_nested work for DataFrames, not just file reads.
+
+        def _try_parse_json(val: Any) -> Any:
+            """Return parsed JSON if val is a JSON object/array string, else val."""
+            if not isinstance(val, str):
+                return val
+            stripped = val.strip()
+            if not (stripped.startswith("{") or stripped.startswith("[")):
+                return val
+            try:
+                return _json.loads(stripped)
+            except Exception:
+                return val
+
+        def _is_json_col(rows: List[Dict], col: str, sample: int = 20) -> bool:
+            """Return True when ≥ 50% of sampled non-null values parse as dict/list."""
+            hits = 0
+            checked = 0
+            for row in rows[:sample]:
+                val = row.get(col)
+                if val is None:
+                    continue
+                checked += 1
+                parsed = _try_parse_json(val)
+                if isinstance(parsed, (dict, list)):
+                    hits += 1
+            return checked > 0 and (hits / checked) >= 0.5
+
+        # Convert DataFrame to plain Python dicts for easy manipulation
+        rows = df.to_dicts()
+
+        if rows:
+            # Identify string columns that are actually serialised JSON
+            json_string_cols = [
+                col for col in rows[0]
+                if col not in preserved
+                and isinstance(rows[0].get(col), str)  # quick type pre-filter
+                and _is_json_col(rows, col)
+            ]
+            # Deserialise in-place so the explode loop sees real dicts/lists
+            if json_string_cols:
+                parsed_rows = []
+                for row in rows:
+                    new_row = dict(row)
+                    for col in json_string_cols:
+                        new_row[col] = _try_parse_json(row.get(col))
+                    parsed_rows.append(new_row)
+                rows = parsed_rows
+
+        def _explode_col(rows: List[Dict], col: str, prefix: str) -> List[Dict]:
+            """Replace *col* in each row with flattened ``prefix_key`` entries."""
+            # Collect all child keys seen across all rows for this column
+            all_keys: dict = {}  # key → sample value (for type inference)
+            for row in rows:
+                val = row.get(col)
+                if isinstance(val, dict):
+                    all_keys.update({k: v for k, v in val.items() if k not in all_keys})
+                elif isinstance(val, list) and val and isinstance(val[0], dict):
+                    # List-of-dicts: explode first element's keys
+                    all_keys.update({k: v for k, v in val[0].items() if k not in all_keys})
+
+            if not all_keys:
+                return rows  # nothing to explode — leave as is
+
+            new_rows = []
+            for row in rows:
+                new_row = {k: v for k, v in row.items() if k != col}
+                val = row.get(col)
+                if isinstance(val, dict):
+                    for key in all_keys:
+                        child = val.get(key)
+                        new_row[f"{prefix}_{key}"] = (
+                            _json.dumps(child, ensure_ascii=False)
+                            if isinstance(child, (dict, list)) else child
+                        )
+                elif isinstance(val, list):
+                    # Represent list as JSON string for the column itself
+                    new_row[f"{prefix}_values"] = _json.dumps(val, ensure_ascii=False)
+                else:
+                    # null / scalar — fill all child cols with None
+                    for key in all_keys:
+                        new_row[f"{prefix}_{key}"] = None
+                new_rows.append(new_row)
+            return new_rows
+
+        changed = True
+        # Iterate until no more nested columns remain (handles deeply nested JSON)
+        max_depth = 5
+        depth = 0
+        while changed and depth < max_depth:
+            changed = False
+            depth += 1
+            # Detect columns with nested values
+            cols_to_explode = []
+            for col in list(rows[0].keys()) if rows else []:
+                if col in preserved:
+                    continue
+                for row in rows:
+                    val = row.get(col)
+                    if isinstance(val, (dict, list)):
+                        cols_to_explode.append(col)
+                        break
+            for col in cols_to_explode:
+                rows = _explode_col(rows, col, col)
+                changed = True
+
+        # Rebuild polars DataFrame from flattened rows
+        if not rows:
+            return df
+        try:
+            return pl.from_dicts(rows)
+        except Exception:
+            return df  # fallback: return original if reconstruction fails
+
     def _infer_fields(
         self,
         df,
@@ -522,22 +748,78 @@ class ContractInferrer:
                 field["pii"] = True
                 field["classification"] = pii_map[col_name].lower()
 
-            # accepted_values hint for low-cardinality string columns
-            if ctype == "string" and not series.is_empty():
-                n_unique = series.n_unique()
-                if 0 < n_unique <= 20:
-                    field["examples"] = sorted(series.unique().head(5).to_list())
+            # One representative example per column.
+            # Skipped entirely for PII-flagged columns to avoid leaking sensitive data.
+            if col_name not in pii_map and not series.is_empty():
+                if ctype == "string":
+                    # Only show an example if the column has low cardinality
+                    # (i.e. it's a useful, non-free-text field).
+                    if 0 < series.n_unique() <= 20:
+                        field["examples"] = [sorted(series.unique().to_list())[0]]
+                # For non-string types with examples-worthy cardinality, skip —
+                # the field type + range rule conveys enough information.
 
             fields.append(field)
         return fields
 
     def _suggest_rules(self, df) -> Dict[str, Any]:
-        """Suggest structured quality rules from observed data."""
+        """Suggest structured quality rules from observed data.
+
+        Rule selection heuristics
+        -------------------------
+        * ``not_null``       — every column with < 1% nulls.
+        * ``unique``         — dataset-level; columns where every value is distinct.
+        * ``accepted_values`` — string columns with ≤ 20 distinct values;
+                               also numeric columns whose name signals an enum
+                               (keywords: status, type, option, flag, category, mode).
+        * ``range``          — numeric columns, unless the column name signals
+                               an identifier or temporal value (keywords: id, key,
+                               date, ts, timestamp) or an enum (see above).
+
+        Columns whose name contains ``id``, ``key``, ``date``, ``ts``,
+        ``timestamp``, ``desc``, or ``description`` receive only a ``not_null``
+        rule — their values are too varied / too high-cardinality to be useful
+        as range or enum constraints.
+
+        Dual sql + business format
+        --------------------------
+        Row rules intentionally carry **both** a ``sql`` field and a structured
+        semantic block (``accepted_values`` / ``range``).  They serve different
+        consumers:
+
+        * ``sql`` — executed at runtime by the validation engine.
+        * ``accepted_values`` / ``range`` — machine-readable business semantics
+          consumed by contract registries, data catalogues, and documentation
+          generators.  The SQL can be re-derived from these blocks; having both
+          means each consumer takes what it needs without extra computation.
+        """
+        import re as _re
+
         row_rules: List[Dict[str, Any]] = []
         dataset_rules: List[Dict[str, Any]] = []
         total = len(df)
         if total == 0:
             return {}
+
+        # ── Keyword-based column classification ──────────────────────────────
+        # Columns matching these patterns get ONLY a not_null rule; the values
+        # are identifiers, timestamps, or free text — range/enum rules add noise.
+        _ID_LIKE = _re.compile(
+            r"(^|_)(id|key|uuid|guid|hash|token|date|dt|ts|timestamp|desc|description)($|_)",
+            _re.IGNORECASE,
+        )
+        # Numeric columns matching these patterns are treated as enums
+        # (accepted_values), not continuous ranges.
+        _ENUM_LIKE = _re.compile(
+            r"(^|_)(status|type|option|flag|category|mode|kind|class|tier|level|grade|code)($|_)",
+            _re.IGNORECASE,
+        )
+
+        def _is_id_like(col: str) -> bool:
+            return bool(_ID_LIKE.search(col))
+
+        def _is_enum_like(col: str) -> bool:
+            return bool(_ENUM_LIKE.search(col))
 
         for col_name in df.columns:
             series = df[col_name]
@@ -551,8 +833,10 @@ class ContractInferrer:
                 "uint8", "uint16", "uint32", "uint64",
                 "float32", "float64", "decimal",
             )
+            skip_domain_rules = _is_id_like(col_name)   # only not_null for id/date/desc cols
+            prefer_enum = _is_enum_like(col_name)        # status/type/option → accepted_values
 
-            # not_null rule
+            # ── not_null ───────────────────────────────────────────────────
             if null_ratio < 0.01:
                 row_rules.append({
                     "name": f"{col_name}_not_null",
@@ -560,7 +844,11 @@ class ContractInferrer:
                     "category": "completeness",
                 })
 
-            # unique rule (dataset-level)
+            if skip_domain_rules:
+                # id/date/desc columns: existence check is enough
+                continue
+
+            # ── unique (dataset-level) ─────────────────────────────────────
             if n_unique == total and total > 1:
                 dataset_rules.append({
                     "name": f"{col_name}_unique",
@@ -568,12 +856,57 @@ class ContractInferrer:
                     "category": "uniqueness",
                 })
 
-            # accepted_values for low-cardinality string columns
-            if is_string and 0 < n_unique <= 20:
+            # ── accepted_values ────────────────────────────────────────────
+            # String columns with low cardinality, OR numeric columns whose
+            # name signals an enumerated value (status, type, option, …).
+            #
+            # Cardinality guard: how many distinct values is "few" depends on
+            # how many rows we have.  With a tiny sample (e.g. 2-3 rows) nearly
+            # every column looks unique, so accepted_values would pin the rule
+            # to sample artefacts.  We use a two-tier threshold:
+            #   • tiny samples (total < 10): only emit if n_unique <= 5
+            #   • normal samples (total >= 10): standard ceiling of 20
+            #   In both cases n_unique must be < 50% of total so columns that
+            #   happen to be fully unique in the sample don't get pinned.
+            #
+            # JSON guard: skip if sampled values look like serialised dicts/arrays
+            # — those are structured data fields (coordinates, nested objects),
+            # not categorical enums.
+
+            def _is_json_values(series_nonnull) -> bool:
+                """True when the majority of sample values are JSON objects/arrays."""
+                sample = series_nonnull.head(10).to_list()
+                hits = sum(
+                    1 for v in sample
+                    if isinstance(v, str) and v.strip()[:1] in ("{", "[")
+                )
+                return len(sample) > 0 and hits / len(sample) >= 0.5
+
+            _cardinality_ceil = 5 if total < 10 else 20
+            _is_categorical = (
+                0 < n_unique <= _cardinality_ceil
+                and n_unique < max(1, total * 0.5)   # not unique within sample
+            )
+
+            if is_string and _is_categorical and not _is_json_values(non_null):
+                values = sorted(str(v) for v in non_null.unique().to_list())
+                # sql + structured block: sql is for the engine; accepted_values
+                # is the business-readable declaration (see docstring above).
+                row_rules.append({
+                    "name": f"valid_{col_name}",
+                    "sql": f"{col_name} IN ({', '.join(repr(v) for v in values)})",
+                    "category": "validity",
+                    "accepted_values": {
+                        "field": col_name,
+                        "values": values,
+                    },
+                })
+            elif is_numeric and prefer_enum and 0 < n_unique <= 20 and not non_null.is_empty():
+                # Treat enum-like numeric columns as accepted_values, not range
                 values = sorted(non_null.unique().to_list())
                 row_rules.append({
                     "name": f"valid_{col_name}",
-                    "sql": f"{col_name} IN ({', '.join(repr(str(v)) for v in values)})",
+                    "sql": f"{col_name} IN ({', '.join(str(v) for v in values)})",
                     "category": "validity",
                     "accepted_values": {
                         "field": col_name,
@@ -581,8 +914,9 @@ class ContractInferrer:
                     },
                 })
 
-            # range rule for numeric columns
-            if is_numeric and not non_null.is_empty():
+            # ── range ──────────────────────────────────────────────────────
+            # Continuous numeric columns only; skip if already handled as enum.
+            elif is_numeric and not prefer_enum and not non_null.is_empty():
                 col_min = non_null.min()
                 col_max = non_null.max()
                 if col_min is not None and col_max is not None:
@@ -643,11 +977,14 @@ def infer_contract(
     version: str = "1.0.0",
     description: Optional[str] = None,
     layer: str = "bronze",
+    domain: Optional[str] = None,
+    system: Optional[str] = None,
     sample_rows: int = 10_000,
     suggest_rules: bool = True,
     detect_pii: bool = False,
     pii_sample_size: int = 50,
     extra: Optional[Dict[str, Any]] = None,
+    preserve_nested: Union[bool, List[str]] = False,
 ) -> ContractDraft:
     """
     Infer a LakeLogic contract from an existing data file — no contract needed upfront.
@@ -743,9 +1080,12 @@ def infer_contract(
         version=version,
         description=description,
         layer=layer,
+        domain=domain,
+        system=system,
         sample_rows=sample_rows,
         suggest_rules=suggest_rules,
         detect_pii=detect_pii,
         pii_sample_size=pii_sample_size,
         extra=extra,
+        preserve_nested=preserve_nested,
     ).infer()

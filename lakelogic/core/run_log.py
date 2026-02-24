@@ -138,6 +138,23 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         merge_on_run_id = metadata.get("run_log_merge_on_run_id", True)
         table_format = metadata.get("run_log_table_format") or "delta"
 
+        # run_log_table_partition_by: list of column names to partition the table.
+        # Applied only on first-write (CREATE); existing tables inherit their
+        # existing partition spec and the MERGE / append writes honour it automatically.
+        # Useful columns: domain, system, data_layer, contract, stage
+        partition_by: list = metadata.get("run_log_table_partition_by") or []
+        if isinstance(partition_by, str):
+            partition_by = [c.strip() for c in partition_by.split(",") if c.strip()]
+
+        # Validate that requested partition columns exist in the record
+        unknown_parts = [c for c in partition_by if c not in record]
+        if unknown_parts:
+            logger.warning(
+                f"run_log_table_partition_by references unknown columns {unknown_parts}. "
+                f"Available: {sorted(record.keys())}"
+            )
+            partition_by = [c for c in partition_by if c in record]
+
         if spark.catalog.tableExists(table_name):
             try:
                 existing_cols = set(spark.table(table_name).columns)
@@ -180,9 +197,18 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     except Exception:
                         pass
             else:
+                # Table already exists — append without re-partitioning
                 df.write.mode("append").format(table_format).saveAsTable(table_name)
         else:
-            df.write.mode("overwrite").format(table_format).saveAsTable(table_name)
+            # First write: apply format + partition spec
+            writer = df.write.mode("overwrite").format(table_format)
+            if partition_by:
+                writer = writer.partitionBy(*partition_by)
+            writer.saveAsTable(table_name)
+            if partition_by:
+                logger.info(
+                    f"Created run log table {table_name} partitioned by {partition_by} (format={table_format})"
+                )
         logger.info(f"Wrote run log to Spark table {table_name}")
         return table_name
 

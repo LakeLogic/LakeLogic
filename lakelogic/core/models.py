@@ -39,6 +39,8 @@ class Info(BaseModel):
     target_layer: Optional[str] = None
     status: Optional[str] = None
     classification: Optional[str] = None
+    domain: Optional[str] = None    # e.g. "real-estate", "finance", "logistics"
+    system: Optional[str] = None    # e.g. "zoopla", "salesforce", "sap"
 
 class Server(BaseModel):
     """Storage and ingestion settings for a contract."""
@@ -138,6 +140,22 @@ class SourceConfig(BaseModel):
     watermark_date_parts: Optional[Union[List[str], Dict[str, str]]] = None
     partition_filters: Dict[str, Any] = Field(default_factory=dict)
 
+    # ── JSON flattening for silver/gold reading bronze tables ──────────────────
+    # When the upstream table stores nested objects as JSON strings (e.g. bronze
+    # written with preserve_nested=True), set flatten_nested to expand them into
+    # flat ``parent_child`` columns before schema validation runs.
+    #
+    # Values (same semantics as infer_contract's preserve_nested flag, inverted):
+    #   false (default) — no flattening; load as-is
+    #   true            — flatten ALL JSON-string columns automatically
+    #   [col, col, ...]  — flatten only the named columns
+    #
+    # Example (silver contract):
+    #   source:
+    #     type: table
+    #     path: .../bronze/bronze_zoopla_listing
+    #     flatten_nested: [derived, pricing, location]
+    flatten_nested: Union[bool, List[str]] = False
 
 class SchemaPolicy(BaseModel):
     """Schema enforcement rules for unknown and evolving fields."""
@@ -307,6 +325,65 @@ class TransformationUnpivot(BaseModel):
             self.value_vars = list(self.value_cols)
         return self
 
+class TransformationBucketBin(BaseModel):
+    """A single range/equality bin for TransformationBucket."""
+    label: str
+    lt: Optional[float] = None    # source < lt  → label
+    lte: Optional[float] = None   # source <= lte → label
+    gt: Optional[float] = None    # source > gt  → label
+    gte: Optional[float] = None   # source >= gte → label
+    eq: Optional[Any] = None      # source == eq  → label (exact match)
+
+
+class TransformationBucket(BaseModel):
+    """
+    Map a numeric (or string) column into labelled bands.
+
+    Compiles to a standard SQL CASE expression — identical across all engines.
+
+    YAML example::
+
+        - phase: post
+          bucket:
+            field: price_band
+            source: pricing_price
+            bins:
+              - lt: 250000
+                label: sub_250k
+              - lt: 500000
+                label: 250k_500k
+              - lt: 1000000
+                label: 500k_1m
+            default: 1m_plus
+    """
+    field: str             # output column name
+    source: str            # input column to evaluate
+    bins: List[TransformationBucketBin] = Field(default_factory=list)
+    default: Optional[Any] = None  # ELSE value; NULL when omitted
+
+
+class TransformationDateDiff(BaseModel):
+    """
+    Compute the integer difference between two date/timestamp columns.
+
+    The YAML spec is engine-agnostic; each adapter emits the dialect-correct
+    SQL (DATEDIFF, DATE_PART, etc.).
+
+    YAML example::
+
+        - phase: post
+          date_diff:
+            field: listing_age_days
+            from_col: creation_date
+            to_col: event_date
+            unit: days
+    """
+    field: str            # output column name
+    from_col: str         # earlier date column (start)
+    to_col: str           # later date column (end)
+    unit: str = "days"   # days | hours | months
+
+
 class Transformation(BaseModel):
     """Transformation step (SQL or structured)."""
     model_config = ConfigDict(extra="allow")
@@ -329,6 +406,8 @@ class Transformation(BaseModel):
     join: Optional[TransformationJoin] = None
     pivot: Optional[TransformationPivot] = None
     unpivot: Optional[TransformationUnpivot] = None
+    bucket: Optional[TransformationBucket] = None
+    date_diff: Optional[TransformationDateDiff] = None
     sql: Optional[str] = None
     phase: str = "post"  # pre | post
 
@@ -460,6 +539,15 @@ class Quarantine(BaseModel):
     enabled: bool = True
     include_error_reason: bool = True
     strict_notifications: bool = True
+    # Output format for file-based quarantine targets.
+    # Supported: parquet (default), csv, delta, json.
+    # delta requires the deltalake package for Polars/DuckDB engines;
+    # Spark accepts delta, iceberg, parquet, csv, json natively.
+    format: Optional[str] = None
+    # Write mode for the quarantine target.
+    # append (default) — adds new bad records to existing data.
+    # overwrite        — replaces the quarantine target on every run.
+    write_mode: str = "append"
     notifications: List[Notification] = Field(default_factory=list)
 
 class ServiceLevelObjective(BaseModel):
@@ -584,6 +672,126 @@ class DataContract(BaseModel):
     service_levels: Optional[ServiceLevel] = None
     quarantine: Optional[Quarantine] = Field(default_factory=Quarantine)
 
+    # ── Cross-field validation ─────────────────────────────────────────────────
+
+    @model_validator(mode="after")
+    def _validate_incremental_requires_run_log(self) -> "DataContract":
+        """
+        Raise a clear error when ``source.load_mode: incremental`` is set but
+        no run-log backend is configured.
+
+        Without a run log, ``get_last_run_watermark()`` always returns ``None``
+        and every ``run_source()`` call re-reads every file in the landing zone,
+        making the incremental setting a silent no-op.
+
+        Required: at least one of these ``metadata`` keys must be present:
+
+        ============================================================================
+        Key                  Storage                       Notes
+        ============================================================================
+        ``run_log_dir``      Per-run JSON files (dir)      Lightest; local/ADLS
+        ``run_log_path``     Single JSON file              Overwritten each run
+        ``run_log_table``    DuckDB / Spark / SQLite table Queryable history
+        ============================================================================
+        """
+        source = getattr(self, "source", None)
+        if source is None:
+            return self
+
+        load_mode = getattr(source, "load_mode", None)
+        if load_mode != "incremental":
+            return self
+
+        metadata = self.metadata or {}
+        has_run_log = any(
+            metadata.get(key)
+            for key in ("run_log_dir", "run_log_path", "run_log_table")
+        )
+        if not has_run_log:
+            import os as _os
+            if _os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK", "").strip() not in ("", "0"):
+                return self
+            raise ValueError(
+                "source.load_mode is 'incremental' but no run-log backend is "
+                "configured in metadata. Without a run log the watermark is never "
+                "persisted, so every run re-processes ALL files in the landing zone.\n\n"
+                "Add at least ONE of the following to your contract's metadata block:\n\n"
+                "  metadata:\n"
+                "    run_log_dir: logs/runs/           # lightweight — one JSON file per run\n"
+                "    # OR\n"
+                "    run_log_path: logs/run_log.json   # single overwritten JSON file\n"
+                "    # OR\n"
+                "    run_log_table: bronze.run_logs    # queryable DuckDB/Spark/SQLite table\n\n"
+                "To suppress this error while testing pass "
+                "LAKELOGIC_SKIP_INCREMENTAL_CHECK=1 as an environment variable."
+            )
+        return self
+
+    # ── Convenience constructors ───────────────────────────────────────────────
+
+    @classmethod
+    def from_yaml(cls, path: Union[str, "Path"]) -> "DataContract":
+        """
+        Load a ``DataContract`` directly from a YAML file.
+
+        This mirrors the loading logic in ``DataProcessor._load_contract`` —
+        ``on``/``off``/``yes``/``no`` are NOT treated as booleans, while
+        ``true``/``false`` are.  The contract's ``_base_path`` and
+        ``_contract_path`` attributes are set to the parent directory and
+        file path respectively, so relative paths in the contract (quarantine
+        target, watermark, etc.) resolve correctly.
+
+        Parameters
+        ----------
+        path : str or Path
+            Absolute or relative path to the contract YAML file.
+
+        Returns
+        -------
+        DataContract
+
+        Examples
+        --------
+        ::
+
+            contract = DataContract.from_yaml("contracts/bronze_zoopla.yaml")
+            contract.reset(dry_run=True)   # preview managed paths
+            contract.reset()               # wipe quarantine + output + watermark
+        """
+        import re as _re
+        import yaml as _yaml
+        from pathlib import Path as _P
+
+        _path = _P(path)
+        if not _path.exists():
+            raise FileNotFoundError(f"Contract file not found: {_path}")
+
+        class _Loader(_yaml.SafeLoader):
+            pass
+
+        # Strip 'on/off/yes/no' → not booleans; keep true/false.
+        for _key, _mappings in list(_Loader.yaml_implicit_resolvers.items()):
+            _Loader.yaml_implicit_resolvers[_key] = [
+                (tag, regex) for tag, regex in _mappings
+                if tag != "tag:yaml.org,2002:bool"
+            ]
+        _Loader.add_implicit_resolver(
+            "tag:yaml.org,2002:bool",
+            _re.compile(r"^(?:true|false)$", _re.IGNORECASE),
+            list("tTfF"),
+        )
+
+        with open(_path, "r") as _f:
+            data = _yaml.load(_f, Loader=_Loader)
+
+        instance = cls(**data)
+        try:
+            instance._base_path = _path.parent
+            instance._contract_path = _path
+        except Exception:
+            pass
+        return instance
+
     # ── Environment resolution ─────────────────────────────────────────────────
 
     @property
@@ -591,6 +799,199 @@ class DataContract(BaseModel):
         """Return the active environment name from the LAKELOGIC_ENV env-var (if set)."""
         import os
         return os.environ.get("LAKELOGIC_ENV") or None
+
+    # ── Reset / reload ─────────────────────────────────────────────────────────
+
+    def reset(
+        self,
+        *,
+        targets: Optional[List[str]] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Delete all data managed by this contract without touching the contract YAML.
+
+        Removes:
+        - ``materialization.target_path`` — the Good-records output (Delta/Parquet/CSV)
+        - ``quarantine.target``           — the quarantined bad-records store
+        - ``.lakelogic/watermark_*``      — incremental watermark file for this contract
+        - ``metadata.run_log_dir``        — JSON run-log files that hold the source mtime
+          watermark used by ``load_mode: incremental`` (also ``run_log_path`` /
+          ``run_log_database``).
+
+        Parameters
+        ----------
+        targets : list of str, optional
+            Subset of targets to reset. Any combination of:
+            ``"materialization"``, ``"quarantine"``, ``"watermark"``,
+            ``"run_log"``.
+            Defaults to all four.
+        dry_run : bool
+            When ``True`` nothing is deleted — returns a dict describing what
+            *would* be removed so you can inspect before committing.
+
+        Returns
+        -------
+        dict
+            ``{target_name: {"path": ..., "deleted": bool, "dry_run": bool}}``
+
+        Examples
+        --------
+        ::
+
+            contract = DataContract.from_yaml("contracts/bronze_zoopla.yaml")
+
+            # Preview everything that would be removed
+            contract.reset(dry_run=True)
+
+            # Delete everything (incl. run log so incremental sees all files)
+            contract.reset()
+
+            # Delete only the quarantine store
+            contract.reset(targets=["quarantine"])
+
+            # Full reload: clear outputs + run-log watermark then re-run
+            contract.reset()
+            DataProcessor(contract).run_source()
+        """
+        import shutil
+        import os as _os
+
+        _all = {"materialization", "quarantine", "watermark", "run_log"}
+        _targets = set(targets) if targets else _all
+        _base = getattr(self, "_base_path", None)
+
+        def _resolve(raw: str) -> "Path":
+            from pathlib import Path as _P
+            p = _P(raw)
+            if not p.is_absolute() and _base:
+                p = _P(_base) / p
+            return p
+
+        def _delete(p: "Path") -> bool:
+            """Delete file or directory tree. Returns True if something was removed."""
+            if not p.exists():
+                return False
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+            return True
+
+        report: Dict[str, Any] = {}
+
+        # ── 1. Materialization target ──────────────────────────────────────────
+        if "materialization" in _targets:
+            mat_path = (
+                self.materialization.target_path
+                if self.materialization
+                else None
+            )
+            if mat_path:
+                p = _resolve(mat_path)
+                if dry_run:
+                    report["materialization"] = {"path": str(p), "exists": p.exists(), "dry_run": True}
+                else:
+                    deleted = _delete(p)
+                    report["materialization"] = {"path": str(p), "deleted": deleted, "dry_run": False}
+            else:
+                report["materialization"] = {"path": None, "note": "no target_path configured"}
+
+        # ── 2. Quarantine target ───────────────────────────────────────────────
+        if "quarantine" in _targets:
+            q_target = self.quarantine.target if self.quarantine else None
+            if q_target and not q_target.startswith("table:"):
+                p = _resolve(q_target)
+                if dry_run:
+                    report["quarantine"] = {"path": str(p), "exists": p.exists(), "dry_run": True}
+                else:
+                    deleted = _delete(p)
+                    report["quarantine"] = {"path": str(p), "deleted": deleted, "dry_run": False}
+            elif q_target and q_target.startswith("table:"):
+                report["quarantine"] = {
+                    "path": q_target,
+                    "note": "table targets are not auto-deleted by reset(); drop the table manually",
+                }
+            else:
+                report["quarantine"] = {"path": None, "note": "no quarantine target configured"}
+
+        # ── 3. Incremental watermark ───────────────────────────────────────────
+        if "watermark" in _targets:
+            from pathlib import Path as _P
+            # Watermark lives at <base>/.lakelogic/watermark_<title_slug>.json
+            title_slug = ""
+            if self.info and self.info.title:
+                import re as _re
+                title_slug = _re.sub(r"[^\w]+", "_", self.info.title.lower()).strip("_")
+            base_dir = _P(_base) if _base else _P.cwd()
+            wm_dir = base_dir / ".lakelogic"
+            wm_candidates = (
+                list(wm_dir.glob(f"watermark_{title_slug}*.json"))
+                + list(wm_dir.glob("watermark*.json"))
+                if wm_dir.exists()
+                else []
+            )
+            # Deduplicate
+            wm_candidates = list(dict.fromkeys(wm_candidates))
+            if wm_candidates:
+                if dry_run:
+                    report["watermark"] = {"paths": [str(p) for p in wm_candidates], "dry_run": True}
+                else:
+                    deleted_paths = []
+                    for wp in wm_candidates:
+                        if wp.exists():
+                            wp.unlink()
+                            deleted_paths.append(str(wp))
+                    report["watermark"] = {"deleted": deleted_paths, "dry_run": False}
+            else:
+                report["watermark"] = {"paths": [], "note": "no watermark file found"}
+
+        # ── 4. Run log (source-mtime watermark for incremental loads) ──────────
+        if "run_log" in _targets:
+            from pathlib import Path as _P
+            metadata = self.metadata or {}
+            _base_p = _P(_base) if _base else _P.cwd()
+            run_log_targets = []
+
+            # run_log_dir  → directory of per-run JSON files
+            log_dir_val = metadata.get("run_log_dir")
+            if log_dir_val:
+                log_dir = _P(log_dir_val) if _P(log_dir_val).is_absolute() else _base_p / log_dir_val
+                run_log_targets.append(("dir", log_dir))
+
+            # run_log_path → single fixed JSON file
+            log_path_val = metadata.get("run_log_path")
+            if log_path_val:
+                log_path = _P(log_path_val) if _P(log_path_val).is_absolute() else _base_p / log_path_val
+                run_log_targets.append(("file", log_path))
+
+            # run_log_database → DuckDB/SQLite file
+            log_db_val = metadata.get("run_log_database")
+            if log_db_val:
+                log_db = _P(log_db_val) if _P(log_db_val).is_absolute() else _base_p / log_db_val
+                run_log_targets.append(("file", log_db))
+            elif not log_dir_val and not log_path_val:
+                # Default DuckDB path used when run_log_table is configured
+                # but run_log_database is not explicit
+                default_db = _base_p / "logs" / "lakelogic_run_logs.duckdb"
+                if default_db.exists():
+                    run_log_targets.append(("file", default_db))
+
+            if not run_log_targets:
+                report["run_log"] = {
+                    "note": "run log not configured in metadata (run_log_dir / run_log_path / run_log_table)"
+                }
+            else:
+                run_log_report = []
+                for kind, p in run_log_targets:
+                    if dry_run:
+                        run_log_report.append({"path": str(p), "exists": p.exists(), "dry_run": True})
+                    else:
+                        deleted = _delete(p)
+                        run_log_report.append({"path": str(p), "deleted": deleted, "dry_run": False})
+                report["run_log"] = run_log_report
+
+        return report
 
     def effective_server(self, env: Optional[str] = None) -> Optional["Server"]:
         """

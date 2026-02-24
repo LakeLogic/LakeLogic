@@ -777,7 +777,22 @@ class DuckDBAdapter(EngineAdapter):
                 current_rel.create_view(derive_view)
                 query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(trans.derive.field)} FROM {derive_view}"
                 current_rel = con.query(query)
+            elif trans.bucket and trans_phase != "pre":
+                logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
+                bucket_view = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(bucket_view)
+                sql = self._build_bucket_sql(trans.bucket, source_table=bucket_view)
+                if sql:
+                    current_rel = con.query(sql)
+            elif trans.date_diff and trans_phase != "pre":
+                logger.debug(f"Post-Transform [DateDiff]: {trans.date_diff.field}")
+                dd_view = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(dd_view)
+                sql = self._build_date_diff_sql(trans.date_diff, source_table=dd_view)
+                if sql:
+                    current_rel = con.query(sql)
             elif trans.lookup and trans_phase != "pre":
+
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_rel.create_view("src")
                 value_expr = f"ref.{self._quote_ident(trans.lookup.value)}"

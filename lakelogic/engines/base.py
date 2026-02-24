@@ -444,7 +444,81 @@ class EngineAdapter(ABC):
 
         return " UNION ALL ".join(select_rows) if select_rows else None
 
+    def _build_bucket_sql(self, bucket: Any, source_table: str = "source") -> Optional[str]:
+        """
+        Build a CASE expression for bucket/bin transformations.
+
+        Uses only CASE/WHEN/THEN/ELSE -- valid on Polars, DuckDB, Spark, Snowflake, BigQuery.
+        """
+        if not bucket:
+            return None
+        field = getattr(bucket, "field", None)
+        source = getattr(bucket, "source", None)
+        bins = list(getattr(bucket, "bins", None) or [])
+        default = getattr(bucket, "default", None)
+        if not field or not source:
+            logger.warning("bucket transform skipped: 'field' and 'source' are required.")
+            return None
+        qsource = self._quote_ident(source)
+        when_clauses: List[str] = []
+        for b in bins:
+            conditions: List[str] = []
+            if getattr(b, "eq", None) is not None:
+                conditions.append(f"{qsource} = {self._format_literal(b.eq)}")
+            if getattr(b, "gte", None) is not None:
+                conditions.append(f"{qsource} >= {self._format_literal(b.gte)}")
+            if getattr(b, "gt", None) is not None:
+                conditions.append(f"{qsource} > {self._format_literal(b.gt)}")
+            if getattr(b, "lte", None) is not None:
+                conditions.append(f"{qsource} <= {self._format_literal(b.lte)}")
+            if getattr(b, "lt", None) is not None:
+                conditions.append(f"{qsource} < {self._format_literal(b.lt)}")
+            if not conditions:
+                continue
+            when_clauses.append(f"WHEN {' AND '.join(conditions)} THEN {self._format_literal(b.label)}")
+        if not when_clauses:
+            logger.warning(f"bucket '{field}': no valid bins defined.")
+            return None
+        else_clause = f"ELSE {self._format_literal(default)}" if default is not None else "ELSE NULL"
+        case_expr = f"CASE {' '.join(when_clauses)} {else_clause} END"
+        return f"SELECT *, ({case_expr}) AS {self._quote_ident(field)} FROM {source_table}"
+
+    def _build_date_diff_sql(self, date_diff: Any, source_table: str = "source") -> Optional[str]:
+        """
+        Build an engine-specific date-difference expression.
+
+        Dispatches on self.engine_name:
+          polars    -> DATE_PART('day', STRPTIME(to) - STRPTIME(from))
+          spark     -> DATEDIFF(to, from)              (reversed args, days only)
+          duckdb / snowflake / bigquery -> DATEDIFF('day', from, to)
+        """
+        if not date_diff:
+            return None
+        field = getattr(date_diff, "field", None)
+        from_col = getattr(date_diff, "from_col", None)
+        to_col = getattr(date_diff, "to_col", None)
+        unit = (getattr(date_diff, "unit", None) or "days").lower().rstrip("s")
+        if not field or not from_col or not to_col:
+            logger.warning("date_diff transform skipped: 'field', 'from_col', and 'to_col' are required.")
+            return None
+        qfrom = self._quote_ident(from_col)
+        qto = self._quote_ident(to_col)
+        engine = self._normalize_engine()
+        if engine == "spark":
+            diff_expr = f"DATEDIFF({qto}, {qfrom})"
+        elif engine == "polars":
+            fmt = "%Y-%m-%d"
+            diff_expr = (
+                f"DATE_PART('{unit}', "
+                f"STRPTIME(SUBSTR({qto}, 1, 10), '{fmt}') "
+                f"- STRPTIME(SUBSTR({qfrom}, 1, 10), '{fmt}'))"
+            )
+        else:
+            diff_expr = f"DATEDIFF('{unit}', {qfrom}, {qto})"
+        return f"SELECT *, ({diff_expr}) AS {self._quote_ident(field)} FROM {source_table}"
+
     def _expand_row_rule(self, spec: Any) -> Optional[Any]:
+
         """
         Expand structured row rule specs into QualityRule objects.
 

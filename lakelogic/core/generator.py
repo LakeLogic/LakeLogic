@@ -880,10 +880,22 @@ class DataGenerator:
 
         *source* may be a file path (str / Path) or an existing polars / pandas
         DataFrame.  File format is inferred from the extension.
+
+        For JSON and NDJSON sources the file is parsed twice:
+        - once via Polars (for column-list discovery against the contract schema)
+        - once via stdlib ``json`` (for the raw pool values)
+
+        The second read is critical: Polars converts nested JSON objects (structs,
+        lists) to its own display strings like ``{["val"]}`` when it stores them
+        as ``String`` columns.  Reading with ``json.load`` returns proper Python
+        dicts/lists, so generated JSON output keeps the original nested structure.
         """
         import polars as pl
+        import json as _json
 
-        # ── Load into a Polars DataFrame ──────────────────────────────────────
+        raw_rows: Optional[List[Dict[str, Any]]] = None  # native Python rows
+
+        # ── Load into a Polars DataFrame for schema/column detection ──────────
         if isinstance(source, pl.DataFrame):
             df = source
         elif hasattr(source, "to_dict"):  # pandas DataFrame
@@ -896,9 +908,26 @@ class DataGenerator:
             elif ext == ".parquet":
                 df = pl.read_parquet(p)
             elif ext == ".json":
-                df = pl.read_json(p)
+                # ── raw read preserves nested dicts/lists ─────────────────
+                text = p.read_text(encoding="utf-8")
+                raw = _json.loads(text)
+                raw_rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+                # Polars for column names only
+                try:
+                    df = pl.read_json(p)
+                except Exception:
+                    df = pl.from_dicts(raw_rows) if raw_rows else pl.DataFrame()
             elif ext in (".ndjson", ".jsonl"):
-                df = pl.read_ndjson(p)
+                # ── raw read preserves nested dicts/lists ─────────────────
+                raw_rows = [
+                    _json.loads(line)
+                    for line in p.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                try:
+                    df = pl.read_ndjson(p)
+                except Exception:
+                    df = pl.from_dicts(raw_rows) if raw_rows else pl.DataFrame()
             elif ext in (".xlsx", ".xls"):
                 try:
                     import pandas as pd
@@ -921,18 +950,16 @@ class DataGenerator:
         if columns:
             target_cols = target_cols & set(columns)
 
+        # ── Resolve row source ────────────────────────────────────────────────
+        # For JSON/NDJSON: use raw_rows (native Python dicts, nested intact).
+        # For everything else: df.to_dicts() is fine since CSV/Parquet/Excel
+        # don't have nested JSON objects that Polars would stringify.
+        all_rows: List[Dict[str, Any]] = raw_rows if raw_rows is not None else df.to_dicts()
+
         # ── Build pools: unique non-null values per column ────────────────────
-        # We use df.to_dicts() rather than series.unique().to_list() so that
-        # Struct / List / nested columns come back as proper Python dicts/lists
-        # instead of Polars' internal display strings like {["val1"],["val2"]}.
-        # This preserves the original nested JSON structure in generated output.
-        import json as _json
-
-        all_rows = df.to_dicts()
         pools: Dict[str, List[Any]] = {}
-
         for col in target_cols:
-            seen: dict = {}  # json-key → original value
+            seen: dict = {}  # json-key → original value (preserves nested types)
             for row in all_rows:
                 val = row.get(col)
                 if val is None:
@@ -1061,6 +1088,11 @@ class DataGenerator:
         if ftype in ("integer", "int", "int32", "int64", "long"):
             lo = int(min_val) if min_val is not None else 1
             hi = int(max_val) if max_val is not None else 10_000
+            # Single-point range from a single-record source (min == max):
+            # spread ID fields so every generated row gets a distinct value.
+            # Non-ID integers (bathrooms=3, total_bedrooms=4) stay constant — correct.
+            if lo == hi and "id" in name.lower():
+                hi = lo + 10_000
             return self._rng.randint(lo, hi)
 
         if ftype in ("double", "float", "float32", "float64", "decimal", "number"):
@@ -1184,12 +1216,19 @@ class DataGenerator:
             if not fname:
                 continue
             entry = result.setdefault(fname, {})
-            if "accepted_values" in field:
-                entry.setdefault("accepted_values", field["accepted_values"])
+            has_range = "min" in field or "max" in field
+            av = field.get("accepted_values")
+            # accepted_values from a single-record infer_contract produces a
+            # degenerate one-item list (e.g. [10001]).  When the caller also
+            # sets min/max on the same field (via fields.append upsert), treat
+            # the range constraint as authoritative and ignore the single-value
+            # pool — otherwise accepted_values always wins and min/max is ignored.
+            if av is not None and not (has_range and isinstance(av, list) and len(av) == 1):
+                entry.setdefault("accepted_values", av)
             if "min" in field:
-                entry.setdefault("min", field["min"])
+                entry["min"] = field["min"]       # always write — range overrides
             if "max" in field:
-                entry.setdefault("max", field["max"])
+                entry["max"] = field["max"]       # always write — range overrides
 
             # ── FK hint — inject caller-supplied pool or a surrogate fallback ──
             fk = field.get("foreign_key")  # dict with keys: contract, column (+ severity)
@@ -1314,10 +1353,27 @@ class DataGenerator:
         return result
 
     def _to_frame(self, records: List[Dict[str, Any]], fmt: str):
+        import json as _json
+
+        # Serialise any nested dict/list values to JSON strings before converting
+        # to a DataFrame.  Without this, Polars tries to infer a Struct dtype and
+        # then stringify it in its own display format (e.g. {["val"]}) rather than
+        # proper JSON.  Fields with nested objects are typed as "string" in the
+        # contract (bronze layer), so storing them as JSON strings is correct.
+        def _normalise(val: Any) -> Any:
+            if isinstance(val, (dict, list)):
+                return _json.dumps(val, ensure_ascii=False)
+            return val
+
+        clean_records = [
+            {k: _normalise(v) for k, v in row.items()}
+            for row in records
+        ]
+
         if fmt == "polars":
             import polars as pl
 
-            df = pl.DataFrame(records)
+            df = pl.DataFrame(clean_records)
 
             # Cast every column to its contract-declared dtype so the processor
             # never sees Utf8View where it expects Boolean / Int64 / Float64.
@@ -1339,6 +1395,7 @@ class DataGenerator:
 
         elif fmt == "pandas":
             import pandas as pd
-            return pd.DataFrame(records)
+            return pd.DataFrame(clean_records)
         else:
             raise ValueError(f"output_format must be 'polars' or 'pandas', got: {fmt!r}")
+

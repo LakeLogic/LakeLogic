@@ -51,6 +51,11 @@ def inject_lineage(
     run_id_value = last_run_id
     if getattr(lineage, "run_id_source", "run_id") == "pipeline_run_id" and pipeline_run_id:
         run_id_value = pipeline_run_id
+    # If run_id is still None but capture_run_id is enabled, generate one here.
+    # This ensures _lakelogic_run_id is never null when the column is captured.
+    if run_id_value is None and getattr(lineage, "capture_run_id", True):
+        from uuid import uuid4
+        run_id_value = str(uuid4())
     contract_name_value = None
     try:
         contract_path = getattr(contract, "_contract_path", None)
@@ -118,8 +123,11 @@ def _preserve_upstream_lineage(
         return df
 
     def _new_name(col: str) -> str:
+        # Prepend prefix to the original name so the lakelogic token is preserved:
+        # "_lakelogic_source" → "_upstream_lakelogic_source"
+        # "_lakelogic_run_id" → "_upstream_lakelogic_run_id"
         if col.startswith("_lakelogic_"):
-            return col.replace("_lakelogic", prefix, 1)
+            return f"{prefix}{col}"  # e.g. _upstream + _lakelogic_source
         return f"{prefix}_{col.lstrip('_')}"
 
     rename_map: Dict[str, str] = {col: _new_name(col) for col in columns}
@@ -190,6 +198,10 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
     """
     Add constant columns to a dataframe across supported engines.
 
+    Internal LakeLogic metadata columns (names starting with ``_lakelogic_``)
+    are always placed at the **far right** of the resulting schema so that
+    business columns retain natural ordering across bronze / silver / gold.
+
     Args:
         df: Engine dataframe.
         columns: Mapping of column name to constant value.
@@ -200,10 +212,27 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
     """
     if df is None:
         return df
+
+    def _sorted_to_right(col_names: List[str]) -> List[str]:
+        """Return col_names with internal LakeLogic columns moved to the far right.
+
+        Order: business columns → _upstream_lakelogic_* → _lakelogic_*
+        This makes provenance auditing easy: upstream (bronze) stamp first,
+        then the current layer's (silver/gold) fresh stamp.
+        """
+        meta_current  = [c for c in col_names if c.startswith("_lakelogic_")]
+        meta_upstream = [c for c in col_names if c.startswith("_upstream_")]
+        rest = [
+            c for c in col_names
+            if not c.startswith("_lakelogic_") and not c.startswith("_upstream_")
+        ]
+        return rest + meta_upstream + meta_current
+
     try:
         import polars as pl
         if isinstance(df, pl.DataFrame):
-            return df.with_columns([pl.lit(value).alias(name) for name, value in columns.items()])
+            updated = df.with_columns([pl.lit(value).alias(name) for name, value in columns.items()])
+            return updated.select(_sorted_to_right(updated.columns))
     except Exception:
         pass
 
@@ -213,7 +242,7 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
             updated = df.copy()
             for name, value in columns.items():
                 updated[name] = value
-            return updated
+            return updated[_sorted_to_right(list(updated.columns))]
     except Exception:
         pass
 
@@ -231,11 +260,19 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
                 text = str(val).replace("'", "''")
                 return f"'{text}'"
 
-            exprs = ["*"]
-            for name, value in columns.items():
-                col_name = str(name).replace('"', '""')
-                exprs.append(f"{_lit(value)} AS \"{col_name}\"")
-            query = f"SELECT {', '.join(exprs)} FROM ({df.sql_query()})"
+            # Get existing columns from the relation
+            existing_cols = [c for c in df.columns if not c.startswith("_lakelogic_")]
+            meta_new = list(columns.keys())
+            ordered = existing_cols + meta_new
+            select_exprs: List[str] = []
+            for col in ordered:
+                if col in columns:
+                    col_name = str(col).replace('"', '""')
+                    select_exprs.append(f"{_lit(columns[col])} AS \"{col_name}\"")
+                else:
+                    col_name = str(col).replace('"', '""')
+                    select_exprs.append(f"\"{col_name}\"")
+            query = f"SELECT {', '.join(select_exprs)} FROM ({df.sql_query()})"
             return df.connection.sql(query)
     except Exception:
         pass
@@ -246,8 +283,12 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
             updated = df
             for name, value in columns.items():
                 updated = updated.withColumn(name, F.lit(value))
-            return updated
+            # Move _lakelogic_* to the end
+            all_cols = updated.columns
+            ordered = _sorted_to_right(all_cols)
+            return updated.select(ordered)
         except Exception:
             return df
 
     return df
+
