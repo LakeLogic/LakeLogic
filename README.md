@@ -6,8 +6,8 @@
 
 LakeLogic is a SQL-first, infrastructure-agnostic quality gate that ensures your business decisions are based on data you can trust. It scales your validation logic from local Polars to petabyte-scale Spark without rewriting a single rule.
 
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LineageLogic.github.io/LakeLogic)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-black?logo=github)](https://github.com/LineageLogic/LakeLogic)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://lakelogic.github.io/LakeLogic/)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-black?logo=github)](https://github.com/LakeLogic/LakeLogic)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python)](https://www.python.org)
 [![Version](https://img.shields.io/badge/version-0.1.0-orange)](CHANGELOG.md)

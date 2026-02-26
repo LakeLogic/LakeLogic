@@ -33,7 +33,6 @@ FLAGSHIP_EXAMPLES = [
         "dest_name": "excel_example.ipynb",
         "supporting_files": [
             ("_archive/03_data_sources/files/excel/excel_contract.yaml", "excel_contract.yaml"),
-            ("_archive/03_data_sources/files/excel/data/employees.xlsx", "data/employees.xlsx"),
         ],
     },
     {
@@ -56,11 +55,11 @@ def main():
         dest = DOCS_EXAMPLES / example["dest_name"]
         
         if not source.exists():
-            print(f"⚠️  Warning: Notebook not found: {source}")
+            print(f"!! Warning: Notebook not found at {source.absolute()}")
             continue
             
         shutil.copy2(source, dest)
-        print(f"✓ Copied notebook: {source.name}")
+        print(f"OK Copied notebook: {source.name}")
         copied_count += 1
         total_files += 1
         
@@ -70,20 +69,20 @@ def main():
             dst_path = DOCS_EXAMPLES / support_dest
             
             if not src_path.exists():
-                print(f"  ⚠️  Warning: Supporting file not found: {src_path}")
+                print(f"  !! Warning: Supporting file not found: {src_path}")
                 continue
             
             # Create parent directories if needed
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             
             shutil.copy2(src_path, dst_path)
-            print(f"  ✓ Copied supporting file: {support_dest}")
+            print(f"  OK Copied supporting file: {support_dest}")
             total_files += 1
     
-    print(f"\n✅ Synced {copied_count}/{len(FLAGSHIP_EXAMPLES)} notebooks ({total_files} total files) to docs/examples/")
+    print(f"\nDONE Synced {copied_count}/{len(FLAGSHIP_EXAMPLES)} notebooks ({total_files} total files) to docs/examples/")
     
     if copied_count < len(FLAGSHIP_EXAMPLES):
-        print("⚠️  Some notebooks were not found. Check the paths above.")
+        print("!! Some notebooks were not found. Check the paths above.")
         return 1
     
     return 0
