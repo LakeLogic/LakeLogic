@@ -1,0 +1,30 @@
+version: "1.0.0"
+info:
+  title: "Customers Landing (Bronze)"
+  version: 1.0.0
+  description: "Raw ingestion for customer master data."
+  target_layer: "bronze"
+
+server:
+  type: "local"
+  format: "csv"
+  path: "data/raw_customers_v1.csv"
+
+model:
+  fields:
+    - name: "customer_id"
+      type: "string"
+      required: true
+    - name: "name"
+      type: "string"
+    - name: "email"
+      type: "string"
+    - name: "plan"
+      type: "string"
+    - name: "updated_at"
+      type: "string"
+
+materialization:
+  strategy: "append"
+  format: "parquet"
+  target_path: "data/bronze_customers.parquet"

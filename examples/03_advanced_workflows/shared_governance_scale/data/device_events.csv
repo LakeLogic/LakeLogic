@@ -1,0 +1,4 @@
+device_event_id,user_id,device_id,event_ts
+de1,u1,dev1,2026-02-01T09:40:00Z
+de2,u2,dev2,2026-02-01T10:40:00Z
+de3,,dev3,2026-02-01T11:40:00Z

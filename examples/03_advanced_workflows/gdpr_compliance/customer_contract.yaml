@@ -1,0 +1,53 @@
+version: 1.0.0
+dataset: silver_customers
+primary_key: ["customer_id"]
+
+info:
+  title: "Silver Customer Profiles"
+  version: 1.0.0
+  description: "Customer data with PII annotations for GDPR compliance."
+
+source:
+  type: file
+  path: "data/customers.csv"
+
+model:
+  fields:
+    - name: customer_id
+      type: string
+      required: true
+      description: "Unique customer identifier"
+    - name: email
+      type: string
+      pii: true
+      description: "Customer email address"
+    - name: full_name
+      type: string
+      pii: true
+      description: "Full legal name"
+    - name: phone
+      type: string
+      pii: true
+      description: "Phone number"
+    - name: date_of_birth
+      type: date
+      pii: true
+      description: "Date of birth"
+    - name: shipping_address
+      type: string
+      pii: true
+      description: "Shipping address"
+    - name: loyalty_tier
+      type: string
+      description: "Gold, Silver, Bronze — not PII"
+    - name: total_spend
+      type: decimal(10,2)
+      description: "Lifetime spend — not PII"
+    - name: signup_date
+      type: date
+      description: "Account creation date"
+
+materialization:
+  strategy: merge
+  target_path: "data/silver/customers"
+  format: parquet

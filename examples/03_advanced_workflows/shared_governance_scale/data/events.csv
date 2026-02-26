@@ -1,0 +1,4 @@
+event_id,user_id,event_type,amount,event_ts,operation,deleted_at,is_deleted
+e1,u1,CLICK,12.5,2026-02-01T10:05:00Z,insert,,false
+e2,u2,PURCHASE,99.0,2026-02-01T11:10:00Z,update,,false
+e3,,REFUND,15.0,2026-02-01T11:12:00Z,delete,2026-02-01T12:00:00Z,true

@@ -1,0 +1,37 @@
+version: "1.0.0"
+info:
+  title: "Payments Landing (Bronze)"
+  version: 1.0.0
+  description: "Raw ingestion contract for gateway payment logs."
+  target_layer: "bronze"
+
+server:
+  type: "local"
+  format: "csv"
+  path: "data/raw_payments.csv"
+
+model:
+  fields:
+    - name: "raw_id"
+      type: "string"
+      required: true
+    - name: "customer_id"
+      type: "string"
+    - name: "gateway"
+      type: "string"
+    - name: "amount_str"
+      type: "string"
+    - name: "event_ts"
+      type: "string"
+
+quality:
+  row_rules:
+    - name: "has_id"
+      sql: "raw_id IS NOT NULL"
+    - name: "valid_gateway"
+      sql: "gateway IN ('stripe', 'paypal', 'square')"
+
+materialization:
+  strategy: "append"
+  format: "parquet"
+  target_path: "data/bronze_payments.parquet"
