@@ -66,43 +66,6 @@ cz changelog
 
 ---
 
-## [Unreleased]
-
----
-
-## [0.1.0] — 2026-02-22
-
-### Added
-
-- `test_duckdb_adapter.py` — 29-test module mirroring `test_engines.py` for the DuckDB engine, covering quality rules, transformations (rename, derive, trim, lower, select, filter), schema policy (drop/quarantine unknown), quality helper expansion (not_null, accepted_values, range), `run_source` file loading (CSV, Parquet, glob, explicit path), and `ValidationResult` correctness.
-- CLI `rich_help_panel` groupings for all six commands (`run`, `setup-oss`, `bootstrap`, `help`, `generate`, `import-dbt`), making `lakelogic --help` output clearly segmented.
-- `ValidationResult` now supports 2-tuple unpacking (`good, bad = proc.run(df)`), in addition to the existing 3-tuple.
-- `docs/cli.md` — comprehensive CLI reference covering all commands, options, examples, and Windows-specific notes.
-- `docs/installation.md` — Windows Developer Notes section (venv launcher caveat, PATH configuration, console encoding fix).
-- `test_core.py` — `TestRunSource` (6 tests), `TestTracing` (5 tests), `TestDuckDBAdapter` (3 tests), `TestPandasAdapter`, and SLO tests.
-- `test_engines.py` — `PolarsAdapter` unit tests covering quality splits, transformations, helper transforms (trim, lower, map_values, coalesce, select), schema policy, quality helper expansion, and Spark adapter coverage.
-- `test_driver_integration.py` — DuckDB pipeline E2E integration tests (bronze > silver > gold), summary table writes, metrics emission, `RunLogReader`, Prometheus formatting, CLI parser round-trips, backfill windows, entity/contract filtering, and resume functionality.
-- `test_driver_properties.py` — Hypothesis property-based tests for `parse_layers`, `parse_entities`, `parse_metrics_tags`, `parse_overrides`, `parse_window`, `flatten_summary`, `format_prometheus`, and `build_backfill_windows`.
-- `CHANGELOG.md` with commitizen workflow guide.
-- `commitizen` configured in `pyproject.toml` for automated versioning and changelog generation.
-
-### Fixed
-
-- DuckDB connection-lifetime gotcha: lazy `DuckDBPyRelation` objects returned by `DuckDBAdapter.execute()` become invalid when the `DataProcessor` instance is GC'd. All DuckDB tests now hold a named `proc` reference for the full assertion lifetime.
-- `ValidationResult.__iter__` bare `except` clause replaced with `except Exception` to prevent silently swallowing real errors.
-- Stray whitespace removed from `processor.py` (linting clean).
-- `rel = None` initialised before the DuckDB `run_source` branch to prevent `UnboundLocalError` on unsupported source types.
-- `main.py` — Windows console encoding fix: `sys.stdout`/`sys.stderr` reconfigured to UTF-8 with error replacement at import time, preventing `UnicodeEncodeError` on characters in Rich help output.
-- Unicode arrow replaced with ASCII `->` in `import-dbt` docstring for legacy Windows console compatibility.
-- Broken cp312 Python extensions (`numpy`, `pandas`, `duckdb`, `pyarrow`, `pydantic-core`) in `.venv_lakelogic` after Python 3.12 -> 3.13 upgrade, fixed by force-reinstalling each package.
-
-### Changed
-
-- Version promoted from `0.1.0b3` to `0.1.0` (first stable release).
-
----
-
-## [0.1.0b2] — 2026-01-17
 
 ### Added
 
@@ -123,3 +86,36 @@ cz changelog
 [Unreleased]: https://github.com/LineageLogic/LakeLogic/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/LineageLogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/LineageLogic/LakeLogic/releases/tag/v0.1.0b2
+
+## v0.2.0b0 (2026-02-26)
+
+### Feat
+
+- Implement initial LakeLogic framework with contract inference, multi-engine support, and Databricks deployment configuration.
+- Establish core data contract models and initial data processing infrastructure with engine support.
+- Implement contract inference from data files, add dbt adapter, schema API, and advanced workflow examples.
+
+## v0.1.0 (2026-02-22)
+
+### Feat
+
+- Add extensive examples for data sources, core patterns, and advanced workflows, along with new core engine and CLI components.
+- Add extensive examples for data sources, core patterns, and advanced workflows, along with new data engines and core utilities.
+- Introduce new quickstart examples for remote data ingestion and database governance, add notebook cleaning utilities, and expand installation documentation.
+- Implement comprehensive documentation site with custom styling and introduce a base engine adapter for data quality rule processing with updated quickstart examples.
+- Add final_cleanup.py script to remove specific example files and directories.
+- Introduce core data processing logic with engine auto-discovery, `ValidationResult`, and new DuckDB engine, alongside comprehensive examples for data sources and compliance.
+- Add contract templating tool and a comprehensive advanced workflow example for shared governance at scale.
+- Add comprehensive examples for quickstarts, core patterns, data sources, cloud platforms, orchestration, advanced workflows, and production scenarios.
+- Introduce core data materialization logic and initial streaming components.
+- Introduce comprehensive examples and tutorials for databases, streaming, APIs, and cloud platforms, along with new streaming implementation documentation.
+- Introduce extensive new features, examples, and documentation for data integration, streaming, and cataloging, including detailed logging configuration.
+- Add a comprehensive contract template reference documentation page and update mkdocs navigation.
+- Implement initial Azure infrastructure with Terraform modules for dev, test, and prod environments, including CI/CD workflows and documentation.
+- Establish initial project structure with core logic, CLI, multiple engines, comprehensive documentation, examples, and a test suite.
+- Introduce comprehensive documentation, examples, and support for multiple data engines, core logic, and CLI functionalities.
+- add PyPI publishing workflow and comprehensive MkDocs documentation site
+- Add GitHub Actions workflow for publishing to PyPI.
+- Add basic validation contract for the `silver_crm_customers` dataset example.
+- Introduce core Lakeguard framework with multiple data engines, comprehensive examples, and extensive documentation.
+- Add comprehensive examples, tutorials, documentation, and new engine implementations for various data platforms.

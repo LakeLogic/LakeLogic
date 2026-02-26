@@ -15,8 +15,8 @@ uv pip install "lakelogic[all]"
 ## 2. Run Your First Contract
 
 ```bash
-cd examples/01_getting_started/basic_validation
-lakelogic run --contract contract.yaml --source data/sample_customers.csv
+cd examples/01_quickstart
+lakelogic run --contract users_contract.yaml --source data/sample_customers.csv
 ```
 
 You should see output showing:
@@ -29,22 +29,21 @@ You should see output showing:
 Open the Jupyter notebook for a guided walkthrough:
 
 ```bash
-cd examples/01_getting_started/basic_validation
-jupyter notebook tutorial.ipynb
+cd examples/01_quickstart
+jupyter notebook 01_hello_world.ipynb
 ```
 
 ## 4. Explore More Examples
 
-The examples are organized by skill level:
+The examples are organized by topic:
 
 ```text
 examples/
-├── 01_getting_started/    # Start here (5 min)
-├── 02_tutorials/          # Core concepts (30 min)
-├── 03_patterns/           # Real-world recipes
-├── 04_features/           # Advanced capabilities
-├── 05_production/         # Production templates
-└── 06_integrations/       # Orchestrator templates
+├── 01_quickstart/         # Start here (5 min)
+├── 02_core_patterns/      # Essential patterns
+├── 03_advanced_workflows/  # Complex pipelines
+├── 04_compliance_governance/ # Regulatory checks
+└── _archive/              # Untested/legacy examples
 ```
 
 ## 5. Try Another Engine
@@ -53,8 +52,8 @@ LakeLogic supports multiple engines. Try DuckDB:
 
 ```bash
 lakelogic run --engine duckdb \
-  --contract examples/01_getting_started/basic_validation/contract.yaml \
-  --source examples/01_getting_started/basic_validation/data/sample_customers.csv
+  --contract examples/01_quickstart/users_contract.yaml \
+  --source examples/01_quickstart/data/sample_customers.csv
 ```
 
 ## 6. Bootstrap a Contract
@@ -63,7 +62,7 @@ Generate a contract from existing data:
 
 ```bash
 lakelogic bootstrap \
-  --landing examples/05_production/insurance_elt/data/bronze \
+  --landing examples/03_advanced_workflows/insurance_elt/data/bronze \
   --output-dir my_contracts \
   --registry my_contracts/_registry.yaml \
   --format csv \

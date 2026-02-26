@@ -133,7 +133,7 @@ lakelogic run --engine snowflake --contract contract.yaml --source ANALYTICS.SIL
 from lakelogic import DataProcessor
 
 processor = DataProcessor(engine="snowflake", contract="contract.yaml")
-source_df, good_df, bad_df = processor.run_source("ANALYTICS.SILVER.CRM_CUSTOMERS")
+good_df, bad_df = processor.run_source("ANALYTICS.SILVER.CRM_CUSTOMERS")
 ```
 
 ## BigQuery Usage
@@ -173,7 +173,7 @@ lakelogic run --engine bigquery --contract contract.yaml --source my-project-id.
 from lakelogic import DataProcessor
 
 processor = DataProcessor(engine="bigquery", contract="contract.yaml")
-source_df, good_df, bad_df = processor.run_source("my-project-id.silver.crm_customers")
+good_df, bad_df = processor.run_source("my-project-id.silver.crm_customers")
 ```
 
 ## Table Links (Lookups)

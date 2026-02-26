@@ -4,14 +4,11 @@ Hands-on examples organized by learning stage and integration type.
 
 ## Structure
 
-- 01_quickstart/ - 5-10 minute wins
-- 02_core_patterns/ - essential modeling patterns
-- 03_data_sources/ - databases, APIs, streaming, files
-- 04_cloud_platforms/ - Databricks, Fabric, Azure Synapse
-- 05_orchestration/ - Airflow, Prefect, Dagster, and more
-- 06_advanced_workflows/ - real-world scenarios
-- 07_production/ - CI/CD, secrets management, monitoring
-- 08_compliance_governance/ - HIPAA, PII masking, FSI audit packs
+- `01_quickstart/` — 5–10 minute wins
+- `02_core_patterns/` — essential modeling patterns
+- `03_advanced_workflows/` — real-world scenarios
+- `04_compliance_governance/` — HIPAA, PII masking
+- `_archive/` — untested examples (data sources, cloud platforms, orchestration, production)
 
 ## Quick Start
 
@@ -20,8 +17,8 @@ Hands-on examples organized by learning stage and integration type.
 pip install lakelogic
 
 # 2. Run your first example
-cd examples/01_quickstart/basic_validation
-lakelogic run --contract contract.yaml --source data/sample_customers.csv
+cd examples/01_quickstart
+lakelogic run --contract users_contract.yaml --source data/sample_customers.csv
 ```
 
 ## Example Structure
@@ -30,18 +27,17 @@ Most examples follow this layout:
 
 ```
 example_name/
-- README.md          # What this example teaches
-- contract.yaml      # The data contract
-- data/              # Sample input data
-- run.py             # Optional runner
+├── README.md          # What this example teaches
+├── contract.yaml      # The data contract
+├── data/              # Sample input data
+└── playbook.ipynb     # Interactive notebook
 ```
 
 ## Where to Go Next
 
-- Start with 01_quickstart/ if you are new to LakeLogic
-- Move to 02_core_patterns/ for core modeling patterns
-- Use 03_data_sources/ to connect to databases, APIs, and streaming
-- Explore 04_cloud_platforms/ for platform-specific integrations
-- Use 05_orchestration/ templates to schedule pipelines
-- See 06_advanced_workflows/ for end-to-end scenarios
-- Use 07_production/ for CI/CD and secrets
+1. Start with `01_quickstart/` if you are new to LakeLogic
+2. Move to `02_core_patterns/` for medallion architecture, SCD2, deduplication, and reference joins
+3. See `03_advanced_workflows/` for end-to-end scenarios (insurance ELT, GDPR, streaming, synthetic data)
+4. Use `04_compliance_governance/` for HIPAA and PII masking patterns
+
+> **Archived examples** in `_archive/` cover data sources, cloud platforms, orchestration, and production but have not been fully tested yet.

@@ -14,7 +14,7 @@ The simplest LakeLogic example. Perfect for your first run.
 The example files are located at:
 
 ```text
-examples/01_getting_started/basic_validation/
+examples/01_quickstart/
 ├── contract.yaml           # The data contract
 ├── data/
 │   └── sample_customers.csv  # Sample input data
@@ -26,7 +26,7 @@ examples/01_getting_started/basic_validation/
 ### Option 1: Command Line
 
 ```bash
-cd examples/01_getting_started/basic_validation
+cd examples/01_quickstart
 lakelogic run --contract contract.yaml --source data/sample_customers.csv
 ```
 
@@ -44,7 +44,7 @@ print(f"Quarantined: {len(bad_df)}")
 
 ### Option 3: Jupyter Notebook
 
-Open `examples/01_getting_started/basic_validation/tutorial.ipynb` for an interactive walkthrough.
+Open `examples/01_quickstart/tutorial.ipynb` for an interactive walkthrough.
 
 ## Contract Breakdown
 

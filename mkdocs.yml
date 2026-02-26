@@ -70,6 +70,7 @@ nav:
       - Return Values: return_values.md
       - Contract Organization: organization.md
       - Ingestion & Cloud: ingestion.md
+      - Real-Time Streaming: streaming.md
       - Reprocessing & Partitioning: reprocessing.md
       - Pipelines & Parallelism: pipelines.md
   - Patterns:
@@ -94,6 +95,7 @@ nav:
       - API: api.md
       - Capability Matrix: capabilities.md
       - Warehouse Adapters: warehouse_adapters.md
+      - Public Streaming Sources: streaming_sources.md
       - Release & Maintenance: maintenance.md
   - Why LakeLogic?: comparison.md
 

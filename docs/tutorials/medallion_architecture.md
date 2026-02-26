@@ -14,7 +14,7 @@ Learn the Bronze → Silver pipeline pattern used in modern lakehouses.
 The example files are located at:
 
 ```text
-examples/02_tutorials/medallion_architecture/
+examples/02_core_patterns/medallion_architecture/
 ├── contract.yaml              # Multi-stage contract
 ├── data/
 │   └── crm_export.csv         # Raw CRM data
@@ -81,7 +81,7 @@ silver_good, silver_bad = proc.run()
 
 ### Interactive Notebook
 
-Open `examples/02_tutorials/medallion_architecture/quickstart_tutorial.ipynb` for a guided walkthrough.
+Open `examples/02_core_patterns/medallion_architecture/quickstart_tutorial.ipynb` for a guided walkthrough.
 
 ## Key Concepts
 

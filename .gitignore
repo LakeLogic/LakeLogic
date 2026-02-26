@@ -167,14 +167,15 @@ $RECYCLE.BIN/
 
 # LakeGuard specific
 # Output directories from examples
+examples/_archive/
 examples/**/data/bronze/
 examples/**/data/silver/
 examples/**/data/gold/
 examples/**/data/quarantine/
 examples/**/data/output/
 examples/**/output/
-examples/06_advanced_workflows/**/data/*.parquet
-examples/06_advanced_workflows/**/data/**/*.parquet
+examples/03_advanced_workflows/**/data/*.parquet
+examples/03_advanced_workflows/**/data/**/*.parquet
 examples/**/data/landing/*.parquet
 examples/**/data/landing/*.delta
 examples/**/data/landing/*.db
