@@ -25,8 +25,7 @@ good_df, bad_df = processor.run(df)
 Executes the contract against a DataFrame.
 
 Returns:
-- `ValidationResult` object that unpacks to `(source_df, good_df, bad_df)`
-- `source_df`: original input dataframe
+- `ValidationResult` object that unpacks to `(good_df, bad_df)`
 - `good_df`: validated, transformed records
 - `bad_df`: quarantined records with error reasons
 
@@ -35,8 +34,7 @@ Returns:
 Loads data using the engine's native reader and runs the contract in one step.
 
 Returns:
-- `ValidationResult` object that unpacks to `(source_df, good_df, bad_df)`
-- `source_df`: original input dataframe
+- `ValidationResult` object that unpacks to `(good_df, bad_df)`
 - `good_df`: validated, transformed records
 - `bad_df`: quarantined records with error reasons
 

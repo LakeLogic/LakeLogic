@@ -1,6 +1,7 @@
 # CLI Reference
 
-The LakeLogic CLI is the high-efficiency entry point for enforcing your data contracts. It is designed for **Speed-to-Production** and **Engine Portability**.
+The LakeLogic CLI is the high-efficiency entry point for enforcing your data contracts.
+It is designed for **Speed-to-Production** and **Engine Portability**.
 
 ## Strategic Value
 
@@ -8,70 +9,305 @@ The LakeLogic CLI is the high-efficiency entry point for enforcing your data con
 - **Infrastructure Optionality:** Use the `--engine` flag to swap between Polars (local speed) and Spark (cluster scale) with zero code changes.
 - **Audit Readiness:** Every execution generates a run summary for instant reconciliation.
 
-## Commands
+---
 
-### 🟢 `lakelogic run`
+## Invoking the CLI
 
-Validates a source dataset against a contract.
-
-```bash
-lakelogic run --contract contract.yaml --source data.csv
-```
-
-### CLI Help
+Run `lakelogic` with no arguments to display the full help page:
 
 ```bash
-lakelogic help
-lakelogic help bootstrap
+lakelogic
 ```
 
-This prints short usage guidance and examples directly in the terminal.
+```
+ Usage: lakelogic [OPTIONS] COMMAND [ARGS]...
 
-Python helper:
+ LakeLogic — Consistent Data Contracts across engines.
+ ...
 
-```bash
-python -c "import lakelogic; lakelogic.help()"
-python -c "import lakelogic; lakelogic.driver.help()"
-python -c "import lakelogic; lakelogic.bootstrap.help()"
-python -c "import lakelogic; lakelogic.policy_packs.help()"
-python -c "import lakelogic; lakelogic.observability.help()"
+┌─ Contract Execution ──────────────────────────────────────────────────────┐
+│ run        Run a data contract against a source file.                     │
+│ bootstrap  Bootstrap contracts and registry from a landing zone.          │
+└───────────────────────────────────────────────────────────────────────────┘
+┌─ Data Tooling ────────────────────────────────────────────────────────────┐
+│ generate   Generate synthetic data from a contract definition.            │
+│ import-dbt Import dbt schema.yml / sources.yml -> LakeLogic contract YAML.│
+└───────────────────────────────────────────────────────────────────────────┘
+┌─ Environment Setup ───────────────────────────────────────────────────────┐
+│ setup-oss  Pre-install DuckDB extensions & check OSS dependencies.        │
+└───────────────────────────────────────────────────────────────────────────┘
+┌─ Help ────────────────────────────────────────────────────────────────────┐
+│ help       Show contextual help for LakeLogic commands.                   │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
-For warehouse engines, pass a table name:
+Commands are grouped into logical sections matching the Databricks CLI convention.
+Use `lakelogic [COMMAND] --help` for full option detail on any command.
 
-```bash
-lakelogic run --engine snowflake --contract contract.yaml --source table:ANALYTICS.SILVER.CUSTOMERS
-```
+---
 
-## Options
+## Command Groups
 
-- `--contract, -c`: Path to the YAML contract
-- `--source, -s`: Input file (CSV or Parquet; Delta/Iceberg with Spark + `server.format`) or a table name for Snowflake/BigQuery engines
-- `--engine, -e`: (Optional) Force an engine (`polars`, `pandas`, `duckdb`, `spark`, `snowflake`, `bigquery`). If omitted, LakeLogic discovery is used.
-- `--stage`: Apply contract stage overrides (e.g., `bronze`, `silver`) from a top-level `stages` block.
-- `--output-good`: Save good records to CSV/Parquet (or write to Delta/Iceberg via `--materialize`)
-- `--output-bad`: Save quarantined records to CSV/Parquet
-- `--output-format`: `csv` or `parquet` (defaults to CSV or inferred from file extension)
-- `--materialize`: Write good data to the contract materialization target
-- `--materialize-target`: Override the materialization target path
-- `--verbose, -v`: Enable debug logs
+### Contract Execution
 
-> Note: When using the Spark engine, `--output-good/--output-bad` are written with the Spark writer and may create a directory with part files (standard Spark behavior).
+#### `lakelogic run`
 
-## Example (Auto-Engine)
+Validates a source dataset against a contract and (optionally) materializes clean output.
 
 ```bash
 lakelogic run \
-  --contract examples/customer_onboarding/contract.yaml \
-  --source examples/customer_onboarding/data/customers.csv \
-  --output-good good.csv \
-  --output-bad bad.csv \
-  --materialize
+  --contract contract.yaml \
+  --source data.csv
 ```
+
+**Key options:**
+
+| Flag | Short | Description |
+|:-----|:------|:------------|
+| `--contract` | `-c` | Path to the YAML contract |
+| `--source` | `-s` | Input file (CSV / Parquet) or table name for warehouse engines |
+| `--engine` | `-e` | Engine: `polars`, `pandas`, `duckdb`, `spark`, `snowflake`, `bigquery` |
+| `--stage` | | Apply stage overrides from the contract's `stages` block (e.g., `bronze`, `silver`) |
+| `--output-good` | | Save good records to CSV / Parquet |
+| `--output-bad` | | Save quarantined records to CSV / Parquet |
+| `--output-format` | | `csv` or `parquet` (defaults to CSV or inferred from extension) |
+| `--materialize` / `--no-materialize` | | Write good data to the contract materialization target |
+| `--materialize-target` | | Override the materialization target path |
+| `--verbose` | `-v` | Enable debug logging |
+| `--trace` | | Display a step-by-step execution trace in the terminal |
+
+> **Spark note:** `--output-good/--output-bad` are written with the Spark writer and produce a directory of part files — standard Spark behaviour.
+
+**Examples:**
+
+```bash
+# Polars (default — fastest local)
+lakelogic run --contract orders.yaml --source data/orders.csv
+
+# DuckDB with quarantine output
+lakelogic run --engine duckdb --contract orders.yaml \
+  --source data/orders.parquet \
+  --output-good good.parquet --output-bad quarantine.parquet \
+  --output-format parquet
+
+# Snowflake (table-only)
+lakelogic run --engine snowflake --contract contract.yaml \
+  --source table:ANALYTICS.SILVER.CUSTOMERS
+
+# Materialise clean records and print a full trace
+lakelogic run --contract orders.yaml --source data/orders.csv \
+  --materialize --trace
+
+# Apply a stage override
+lakelogic run --contract pipeline.yaml --source data.csv --stage silver
+```
+
+---
+
+#### `lakelogic bootstrap`
+
+Scans a landing zone directory, infers schema from sample files, and generates:
+
+- A ready-to-use **contract YAML** per entity
+- A **`_registry.yaml`** that maps entities to their contracts
+
+This is the **Governance Accelerator** for Day 1 compliance.
+
+```bash
+lakelogic bootstrap \
+  --landing data/landing \
+  --output-dir contracts/ \
+  --registry contracts/_registry.yaml \
+  --format csv \
+  --pattern "*.csv"
+```
+
+**Key options:**
+
+| Flag | Description |
+|:-----|:------------|
+| `--landing` | Landing zone root path |
+| `--output-dir` | Directory to write generated contracts |
+| `--registry` | Output path for the registry YAML |
+| `--format` | Input file format: `csv`, `parquet`, `json` |
+| `--pattern` | File glob pattern (default `*.csv`) |
+| `--layer` | Layer prefix for dataset names (default `bronze`) |
+| `--sample-rows` | Rows to sample for schema inference (default 1000) |
+| `--sync` | Sync an existing registry with new landing data |
+| `--sync-update-schema` | Add new columns to existing contracts |
+| `--sync-overwrite` | Overwrite existing contracts entirely |
+| `--profile` | Generate a DataProfiler report per entity |
+| `--detect-pii` | Detect PII using Presidio and tag fields |
+| `--suggest-rules` | Auto-suggest quality rules from data profile |
+| `--profile-output-dir` | Directory for profile JSON reports |
+| `--pii-sample-size` | Sample values per column for PII detection (default 50) |
+
+**Sync mode** — align an existing registry as new data arrives:
+
+```bash
+lakelogic bootstrap \
+  --landing data/landing \
+  --output-dir contracts/ \
+  --registry contracts/_registry.yaml \
+  --sync --sync-update-schema
+```
+
+**PII + Profile + rule suggestion in one pass:**
+
+```bash
+lakelogic bootstrap \
+  --landing data/landing \
+  --output-dir contracts/ \
+  --registry contracts/_registry.yaml \
+  --profile --detect-pii --suggest-rules \
+  --profile-output-dir reports/
+```
+
+> Requires `lakelogic[profiling]` for `--profile` and `--detect-pii`.
+
+---
+
+### Data Tooling
+
+#### `lakelogic generate`
+
+Generates **synthetic test data** from a contract definition.
+Respects field types, nullability, `accepted_values`, and range constraints.
+Use `--invalid-ratio` to inject intentionally bad rows for validating your quarantine pipeline.
+
+```bash
+lakelogic generate --contract orders.yaml --rows 1000 --output sample.parquet
+```
+
+**Key options:**
+
+| Flag | Short | Description |
+|:-----|:------|:------------|
+| `--contract` | `-c` | Path to the contract YAML file |
+| `--rows` | `-n` | Number of rows to generate (default 100) |
+| `--output` | `-o` | Output file path (CSV / Parquet / JSON) |
+| `--format` | `-f` | Output format: `parquet`, `csv`, `json` (default `parquet`) |
+| `--engine` | `-e` | DataFrame engine: `polars`, `pandas` (default `polars`) |
+| `--invalid-ratio` | | Fraction of rows that intentionally break rules (0.0–1.0) |
+| `--seed` | | Random seed for reproducibility |
+| `--preview` | | Rows to print to console (default 5; `0` = silent) |
+
+**Examples:**
+
+```bash
+# Generate 1 000 clean rows as Parquet
+lakelogic generate --contract orders.yaml --rows 1000 --output sample.parquet
+
+# Inject 10 % bad rows to test quarantine logic
+lakelogic generate --contract orders.yaml --rows 500 \
+  --invalid-ratio 0.1 --format csv --output orders_with_errors.csv
+
+# 200 rows with Pandas, print 10 preview rows, reproducible
+lakelogic generate --contract orders.yaml \
+  --rows 200 --engine pandas --seed 42 --preview 10
+
+# Dry-run without saving — just print to console
+lakelogic generate --contract orders.yaml --rows 50 --preview 50
+```
+
+---
+
+#### `lakelogic import-dbt`
+
+Imports a **dbt `schema.yml` or `sources.yml`** file and converts its model definitions
+into LakeLogic contract YAMLs. Eliminates duplicate schema maintenance across dbt and LakeLogic.
+
+```bash
+lakelogic import-dbt \
+  --schema models/schema.yml \
+  --output contracts/
+```
+
+**Key options:**
+
+| Flag | Short | Description |
+|:-----|:------|:------------|
+| `--schema` | | Path to the dbt `schema.yml` or `sources.yml` file |
+| `--model` | `-m` | Import a single model by name; omit to import all models |
+| `--source-name` | | dbt source name (for `sources.yml` files) |
+| `--source-table` | | dbt source table name (for `sources.yml` files) |
+| `--output` | `-o` | Output path: a `.yaml` file for a single contract, or a directory for batch import |
+| `--overwrite` / `--no-overwrite` | | Overwrite existing contracts (default: skip) |
+| `--dry-run` | | Print generated YAML to console without writing files |
+| `--verbose` | `-v` | Verbose output |
+
+**Examples:**
+
+```bash
+# Import a single dbt model
+lakelogic import-dbt \
+  --schema models/schema.yml \
+  --model customers \
+  --output contracts/
+
+# Import all models in a schema file
+lakelogic import-dbt \
+  --schema models/schema.yml \
+  --output contracts/
+
+# Import a dbt source table
+lakelogic import-dbt \
+  --schema models/sources.yml \
+  --source-name raw --source-table orders \
+  --output contracts/
+
+# Dry-run — preview the generated YAML without writing
+lakelogic import-dbt \
+  --schema models/schema.yml \
+  --model customers \
+  --dry-run
+```
+
+---
+
+### Environment Setup
+
+#### `lakelogic setup-oss`
+
+Pre-installs DuckDB extensions (Iceberg, Delta, cloud drivers) and checks all OSS
+dependencies so they are available **offline and at job runtime** — critical for
+air-gapped or ephemeral compute environments.
+
+```bash
+lakelogic setup-oss
+```
+
+Run this once after installing `lakelogic[duckdb]` or `lakelogic[polars]`.
+It verifies `deltalake` is installed and warms DuckDB's extension cache.
+
+---
+
+### Help
+
+#### `lakelogic help`
+
+Prints short usage guidance and examples in the terminal.
+
+```bash
+lakelogic help
+lakelogic help driver
+lakelogic help bootstrap
+```
+
+For full option lists, use the `--help` flag on any command:
+
+```bash
+lakelogic run --help
+lakelogic generate --help
+lakelogic import-dbt --help
+```
+
+---
 
 ## Pipeline Driver
 
-The registry-driven driver is exposed as `lakelogic-driver` and orchestrates bronze/silver/gold layers.
+The registry-driven driver is exposed as the separate entry point `lakelogic-driver`.
+It orchestrates Bronze → Silver → Gold pipelines from a `_registry.yaml`.
 
 ```bash
 lakelogic-driver \
@@ -82,63 +318,35 @@ lakelogic-driver \
   --window last_success
 ```
 
-### 🛠️ `lakelogic bootstrap`
+See [Driver Reference](driver.md) for the full option list.
 
-Generate starter contracts and a registry from a landing zone. This is the **Governance Accelerator** for Day 1 compliance.
+---
 
-Generate starter contracts and a registry from a landing zone:
+## Windows Notes
 
-```bash
-lakelogic bootstrap \
-  --landing examples/insurance_elt/data/bronze \
-  --output-dir examples/insurance_elt/bootstrap_contracts \
-  --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
-  --format csv \
-  --pattern "*.csv"
+### Console Encoding
+
+LakeLogic automatically reconfigures `stdout` and `stderr` to **UTF-8** on Windows
+at startup. This means:
+
+- No need to set `PYTHONIOENCODING=utf-8` manually
+- Rich panel borders, Unicode arrows, and emoji in help text render correctly
+- Works in `cmd.exe`, PowerShell, and Windows Terminal alike
+
+This is handled inside the package and requires no external wrapper scripts.
+
+### Making `lakelogic` Available on PATH
+
+After `pip install lakelogic`, the `lakelogic.exe` script lands in Python's user scripts
+directory. If your shell cannot find it, add that directory to your `PATH` **once**:
+
+```cmd
+:: For Python 3.13 (adjust version as needed)
+setx PATH "%USERPROFILE%\AppData\Roaming\Python\Python313\Scripts;%PATH%"
 ```
 
-Use `--sync` to align an existing registry with new landing data:
+Open a **new** terminal and `lakelogic` will be available bare.
 
-```bash
-lakelogic bootstrap \
-  --landing examples/insurance_elt/data/bronze \
-  --output-dir examples/insurance_elt/bootstrap_contracts \
-  --registry examples/insurance_elt/bootstrap_contracts/_registry.yaml \
-  --format csv \
-  --pattern "*.csv" \
-  --sync
-```
-
-## Driver Options (Highlights)
-
-- `--summary-path`: Write a per-run summary JSON (metrics + per-contract status).
-- `--summary-table`: Write a pipeline summary row to a table backend.
-- `--summary-backend`: `spark`, `duckdb`, `sqlite`, `snowflake`, or `bigquery` for summary tables (Snowflake/BigQuery use environment credentials).
-- `--summary-database`: Database path for `duckdb/sqlite` summary tables.
-- `--summary-table-format`: Spark table format (default `delta`).
-- `--summary-merge-on-run-id` / `--no-summary-merge-on-run-id`: Control Spark summary upserts.
-- `--metrics-path`: Write a metrics JSON payload for monitoring.
-- `--metrics-backend`: `statsd` or `prometheus`.
-- `--metrics-host`: StatsD host or Prometheus bind host (default `127.0.0.1` for StatsD, `0.0.0.0` for Prometheus).
-- `--metrics-port`: StatsD port (default `8125`) or Prometheus port (default `9100`).
-- `--metrics-prefix`: StatsD metric prefix (default `lakelogic`).
-- `--metrics-tags`: Comma-separated tags, e.g. `env=prod,team=data`.
-- `--set`: Override contract fields at runtime (repeatable).
-- `--policy-pack`: Apply a policy pack by name.
-- `--policy-pack-dir`: Directory containing policy packs.
-- `--state-path`: State file for partial resume.
-- `--resume`: Resume from last successful state.
-- `--retries`: Retry count for transient failures.
-- `--retry-backoff`: Initial retry backoff in seconds.
-- `--retry-max-delay`: Max retry delay in seconds.
-- `--approval-required`: Require approvals on drift/quarantine thresholds.
-- `--approval-file`: Approval file path to bypass approval gates.
-- `--cache-references`: Cache reference datasets across runs.
-- `--backfill-start-date`: Backfill start date (YYYY-MM-DD).
-- `--backfill-end-date`: Backfill end date (YYYY-MM-DD).
-- `--backfill-granularity`: Backfill granularity (`day` or `week`).
-- `--continue-on-error`: Keep running other contracts even if one fails.
-- `--window range --window-start-date YYYY-MM-DD --window-end-date YYYY-MM-DD`: Explicit window.
-- `--reprocess-date` or `--reprocess-start-date/--reprocess-end-date`: Late-arriving data replay.
-- `--entities`: Run only specific entities without editing the registry.
-- `--contracts`: Run specific contract paths directly.
+> **Developer installs:** When working from a cloned repo with `pip install -e .`,
+> the same scripts directory is used. To isolate dependencies in a virtual environment
+> see the [Developer Installation](installation.md#developer-installation) guide.

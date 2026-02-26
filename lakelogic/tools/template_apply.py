@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import re
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -51,8 +52,36 @@ def load_yaml(path: Path) -> Dict[str, Any]:
     return yaml.load(path.read_text(encoding="utf-8"), Loader=loader) or {}
 
 
+class _QuotedString(str):
+    pass
+
+
+def _quote_boolish(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized: Dict[Any, Any] = {}
+        for key, val in value.items():
+            if isinstance(key, bool):
+                key = "true" if key else "false"
+            normalized[_quote_boolish(key)] = _quote_boolish(val)
+        return normalized
+    if isinstance(value, list):
+        return [_quote_boolish(item) for item in value]
+    if isinstance(value, str) and value.lower() in {"true", "false"}:
+        return _QuotedString(value)
+    return value
+
+
 def dump_yaml(data: Dict[str, Any], path: Path) -> None:
-    text = yaml.safe_dump(data, sort_keys=False)
+    data = _quote_boolish(data)
+
+    class _SafeDumper(yaml.SafeDumper):
+        pass
+
+    def _repr_quoted(dumper: yaml.Dumper, value: _QuotedString):
+        return dumper.represent_scalar("tag:yaml.org,2002:str", value, style="'")
+
+    _SafeDumper.add_representer(_QuotedString, _repr_quoted)
+    text = yaml.dump(data, sort_keys=False, Dumper=_SafeDumper)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
@@ -66,8 +95,34 @@ def _merge_list(base_list: List[Any], overlay_list: List[Any], mode: str) -> Lis
     if merge_mode == "replace":
         return list(overlay_list)
     if merge_mode == "prepend":
-        return list(overlay_list) + list(base_list)
-    return list(base_list) + list(overlay_list)
+        merged = list(overlay_list) + list(base_list)
+    else:
+        merged = list(base_list) + list(overlay_list)
+    return _dedupe_list(merged)
+
+
+def _dedupe_list(items: List[Any]) -> List[Any]:
+    if not items:
+        return []
+    seen: set[str] = set()
+    deduped: List[Any] = []
+    for item in items:
+        key = _fingerprint_item(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _fingerprint_item(item: Any) -> str:
+    try:
+        return json.dumps(item, sort_keys=True, default=str)
+    except Exception:
+        try:
+            return yaml.safe_dump(item, sort_keys=True)
+        except Exception:
+            return repr(item)
 
 
 def _deep_merge(
@@ -227,17 +282,12 @@ def _apply_soft_delete(
 
     if deleted_at_actual:
         pre_steps.append({
-            "derive": {
-                "field": "__deleted_at_flag",
-                "sql": f"CASE WHEN {deleted_at_actual} IS NOT NULL THEN TRUE ELSE FALSE END",
-            },
+            "sql": f"SELECT *, CASE WHEN {deleted_at_actual} IS NOT NULL THEN TRUE ELSE FALSE END AS __deleted_at_flag FROM source",
             "phase": "pre",
         })
 
     if flag_actual:
         mapping = {
-            True: True,
-            False: False,
             "true": True,
             "false": False,
             "t": True,

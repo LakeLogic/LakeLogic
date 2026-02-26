@@ -1,6 +1,7 @@
 version: 1.0.0
 info:
   title: Customer Onboarding
+  version: 1.0.0
 
 dataset: silver_crm_customers
 
@@ -44,26 +45,28 @@ model:
       type: string
 
 transformations:
-  - sql: |
-      SELECT * FROM (
-        SELECT
-          customer_id,
-          email_address AS email,
-          first_name,
-          last_name,
-          birth_date,
-          membership_level,
-          country_id,
-          created_at,
-          ROW_NUMBER() OVER (PARTITION BY email_address ORDER BY created_at DESC) AS rn
-        FROM source
-        WHERE email_address IS NOT NULL
-      ) AS t
-      WHERE rn = 1
+  - rename:
+      mappings:
+        email_address: email
+    phase: pre
+  - filter:
+      sql: "email IS NOT NULL"
+    phase: pre
+  - deduplicate:
+      on: ["email"]
+      sort_by: ["created_at"]
+      order: "desc"
     phase: pre
   - sql: |
       SELECT
-        src.*,
+        src.customer_id,
+        src.email,
+        src.first_name,
+        src.last_name,
+        src.birth_date,
+        src.membership_level,
+        src.country_id,
+        src.created_at,
         COALESCE(geo.region, 'Unknown') AS region,
         COALESCE(opt.opted_out, 'false') AS opted_out,
         src.first_name || ' ' || src.last_name AS full_name

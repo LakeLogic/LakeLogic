@@ -8,6 +8,7 @@ class SparkAdapter(EngineAdapter):
     Spark execution engine for LakeLogic.
     Uses Spark SQL and Column Expressions for evaluation.
     """
+    engine_name: str = "spark"
 
     def _quote_ident(self, name: str) -> str:
         """
@@ -36,8 +37,20 @@ class SparkAdapter(EngineAdapter):
         except ImportError:
             raise ImportError("pyspark is required for SparkAdapter")
 
-        if not isinstance(df, DataFrame):
+        # Databricks Serverless / Spark Connect returns a different DataFrame class.
+        # Build a tuple of all available DataFrame types so isinstance works on both
+        # classic and Serverless runtimes.
+        _df_types = [DataFrame]
+        try:
+            from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
+            _df_types.append(ConnectDataFrame)
+        except ImportError:
+            pass
+        _df_types = tuple(_df_types)
+
+        if not isinstance(df, _df_types):
             raise TypeError(f"Expected Spark DataFrame, got {type(df)}")
+
 
         # 1. Register Source and Links in Spark Session
         spark = df.sparkSession
@@ -83,11 +96,16 @@ class SparkAdapter(EngineAdapter):
         category_array = F.array(*category_exprs) if category_exprs else F.array().cast("array<string>")
 
         # Ensure arrays are non-null to avoid NULL comparisons dropping all rows.
-        error_array = F.filter(error_array, lambda x: x.isNotNull())
-        category_array = F.filter(category_array, lambda x: x.isNotNull())
-
+        # Use SQL expression instead of Python lambda to avoid UDF worker crash on Windows.
         df_with_errors = df_eval.withColumn(self.ERROR_COLUMN, error_array) \
             .withColumn(self.CATEGORY_COLUMN, category_array)
+        df_with_errors = df_with_errors.withColumn(
+            self.ERROR_COLUMN,
+            F.expr(f"filter({self.ERROR_COLUMN}, x -> x IS NOT NULL)")
+        ).withColumn(
+            self.CATEGORY_COLUMN,
+            F.expr(f"filter({self.CATEGORY_COLUMN}, x -> x IS NOT NULL)")
+        )
 
         # 3. Split Good and Bad
         has_errors = F.size(F.col(self.ERROR_COLUMN)) > 0
@@ -174,16 +192,20 @@ class SparkAdapter(EngineAdapter):
         existing = set(current_df.columns)
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
-            if trans.sql and (trans.phase or "post").lower() == "pre":
+            
+            # ── Execute Transformation ────────────────────────────────────────
+            if trans.sql and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
                 current_df.createOrReplaceTempView("source")
-                if self.contract.dataset:
-                    current_df.createOrReplaceTempView(self.contract.dataset)
                 current_df = current_df.sparkSession.sql(trans.sql)
                 existing = set(current_df.columns)
-                continue
 
-            if trans.pivot and trans_phase == "pre":
+            elif trans.derive and trans_phase == "pre":
+                logger.debug(f"Pre-Transform [Derive]: {trans.derive.field}")
+                current_df = current_df.withColumn(trans.derive.field, F.expr(trans.derive.sql))
+                existing = set(current_df.columns)
+
+            elif trans.pivot and trans_phase == "pre":
                 pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
                 if pivot_sql:
                     logger.debug(f"Pre-Transform [Pivot]: {pivot_sql}")
@@ -314,6 +336,14 @@ class SparkAdapter(EngineAdapter):
                                           .drop("_rn")
                 else:
                     current_df = current_df.dropDuplicates(trans.deduplicate.on)
+            
+            # ── Post-Step Sync ──────────────────────────────────────────────
+            # Re-register the updated DataFrame as 'source' so that the NEXT 
+            # transformation phase (especially SQL-based ones) sees the new columns.
+            current_df.createOrReplaceTempView("source")
+            if self.contract.dataset:
+                current_df.createOrReplaceTempView(self.contract.dataset)
+                
         return current_df
 
     def _apply_post_transformations(self, df: Any) -> Any:
@@ -330,14 +360,15 @@ class SparkAdapter(EngineAdapter):
         tbl_name = "current_transform"
         
         for trans in self.contract.transformations:
-            if trans.sql and (trans.phase or "post").lower() != "pre":
+            trans_phase = (trans.phase or "post").lower()
+            if trans.sql and trans_phase != "pre":
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
                 current_df.createOrReplaceTempView("source")
                 if self.contract.dataset:
                     current_df.createOrReplaceTempView(self.contract.dataset)
                 current_df = current_df.sparkSession.sql(trans.sql)
                 continue
-            if trans.rollup and (trans.phase or "post").lower() != "pre":
+            if trans.rollup and trans_phase != "pre":
                 rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self.contract.dataset or "source")
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
                 current_df.createOrReplaceTempView("source")
@@ -346,7 +377,7 @@ class SparkAdapter(EngineAdapter):
                 current_df = current_df.sparkSession.sql(rollup_sql)
                 continue
 
-            if trans.pivot and (trans.phase or "post").lower() != "pre":
+            if trans.pivot and trans_phase != "pre":
                 pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
                 if pivot_sql:
                     logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
@@ -356,7 +387,7 @@ class SparkAdapter(EngineAdapter):
                     current_df = current_df.sparkSession.sql(pivot_sql)
                 continue
 
-            if trans.unpivot and (trans.phase or "post").lower() != "pre":
+            if trans.unpivot and trans_phase != "pre":
                 unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self.contract.dataset or "source")
                 if unpivot_sql:
                     logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
@@ -368,10 +399,33 @@ class SparkAdapter(EngineAdapter):
 
             if trans.derive:
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
-                current_df.createOrReplaceTempView(tbl_name)
-                query = f"SELECT *, ({trans.derive.sql}) AS {trans.derive.field} FROM {tbl_name}"
-                current_df = current_df.sparkSession.sql(query)
+                from pyspark.sql import functions as F
+                current_df = current_df.withColumn(trans.derive.field, F.expr(trans.derive.sql))
+            elif trans.bucket:
+                logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
+                # For bucket, we use the existing _build_bucket_sql but extract the expression
+                # Or just use the SQL approach if it's simpler, but Spark SQL doesn't have EXCLUDE.
+                # Let's use withColumn + expr for safety.
+                sql = self._build_bucket_sql(trans.bucket, source_table="temp_src")
+                # Extract the CASE WHEN part from "SELECT *, (CASE...) AS field FROM temp_src"
+                import re
+                match = re.search(r"SELECT \*, \((.*)\) AS", sql, re.DOTALL)
+                if match:
+                    expr_str = match.group(1)
+                    from pyspark.sql import functions as F
+                    current_df = current_df.withColumn(trans.bucket.field, F.expr(expr_str))
+            elif trans.date_diff:
+                logger.debug(f"Post-Transform [DateDiff]: {trans.date_diff.field}")
+                # Spark's DATEDIFF function is already handled in _build_date_diff_sql
+                sql = self._build_date_diff_sql(trans.date_diff, source_table="temp_src")
+                import re
+                match = re.search(r"SELECT \*, \((.*)\) AS", sql, re.DOTALL)
+                if match:
+                    expr_str = match.group(1)
+                    from pyspark.sql import functions as F
+                    current_df = current_df.withColumn(trans.date_diff.field, F.expr(expr_str))
             elif trans.lookup:
+
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_df.createOrReplaceTempView("src")
                 hint = ""
@@ -391,7 +445,7 @@ class SparkAdapter(EngineAdapter):
                 current_df.createOrReplaceTempView("source")
                 query = self._build_join_sql(trans.join, broadcast=self._should_broadcast(trans.join.reference))
                 current_df = current_df.sparkSession.sql(query)
-            elif trans.filter:
+            elif trans.filter and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Filter]: {trans.filter.sql}")
                 current_df = current_df.filter(trans.filter.sql)
         return current_df
@@ -516,6 +570,12 @@ class SparkAdapter(EngineAdapter):
             "timestamp": "timestamp",
             "datetime": "timestamp",
         }
+        
+        # If the type looks like a complex DDL string (struct<...>, array<...>, etc.),
+        # return it as-is so Spark can parse it natively.
+        if type_name.startswith(("struct<", "array<", "map<")):
+            return type_name
+
         return mapping.get(type_name)
 
     def _apply_schema(self, df: Any) -> Tuple[Any, List[str]]:

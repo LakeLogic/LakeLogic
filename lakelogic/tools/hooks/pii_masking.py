@@ -13,17 +13,29 @@ except ImportError:
     AnalyzerEngine = None
     AnonymizerEngine = None
 
-def mask_pii(df: Any, args: Dict[str, Any]) -> Any:
+def mask_pii(
+    df: Any,
+    args: Optional[Dict[str, Any]] = None,
+    contract: Any = None,
+    engine: Optional[str] = None,
+    **kwargs: Any,
+) -> Any:
     """
     Analyzes and masks PII in a dataframe.
     
     Args:
         df: Input dataframe (Polars, Pandas, or PySpark).
-        args: Configuration for masking.
+        args: Configuration for masking (legacy).
+        contract: Optional contract passed by LakeLogic.
+        engine: Optional engine name passed by LakeLogic.
             - entities: List of entities to mask (e.g. ["PERSON", "EMAIL_ADDRESS"]).
             - mask_with: String to replace PII with (default: "<MASKED>").
             - columns: Specific columns to scan (optional).
     """
+    if args is None:
+        args = {}
+    if kwargs:
+        args = {**args, **kwargs}
     if AnalyzerEngine is None:
         logger.error("PII masking requires 'presidio-analyzer' and 'presidio-anonymizer'.")
         return df

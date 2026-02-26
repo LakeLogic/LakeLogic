@@ -21,6 +21,7 @@ Policy packs allow you to:
 - Strict schema evolution (no unexpected fields)
 - Unknown fields quarantined (not dropped)
 - Quarantine enabled with error reasons
+- Lineage columns enabled (includes contract filename)
 - Minimal quality rules (basic not_null checks)
 
 **Use Case**: Raw data ingestion from external sources where you want to capture everything but flag anomalies.
@@ -40,6 +41,7 @@ policy_pack: policy_packs/baseline_bronze.yaml
 - All Bronze features plus:
 - Dataset-level quality rules (null ratio checks)
 - Freshness SLAs (24-hour threshold)
+- Lineage columns enabled (includes contract filename)
 - More stringent validation
 
 **Use Case**: Business-ready data that's been cleansed and validated.
@@ -59,6 +61,7 @@ policy_pack: policy_packs/baseline_silver.yaml
 - Approval required for deployments
 - Quarantine ratio threshold (5% max)
 - Row count validation (must have at least 1 row)
+- Lineage columns enabled (includes contract filename)
 - Strictest governance controls
 
 **Use Case**: Production dashboards and executive reporting.

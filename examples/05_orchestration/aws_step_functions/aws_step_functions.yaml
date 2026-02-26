@@ -1,3 +1,0 @@
-version: 1.0.0
-platform: aws_step_functions
-state_machine: lakelogic_state_machine

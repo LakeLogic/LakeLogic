@@ -92,10 +92,10 @@ View on GitHub
 !!! tip "Interactive Examples"
     Jump straight into **executable Jupyter notebooks** that demonstrate LakeLogic's capabilities:
     
-    - [Hello World](examples/01_hello_world/01_hello_world/) - Remote data ingestion in 60 seconds
-    - [Database Governance](examples/02_database_governance/02_database_governance/) - Quarantine dirty data
-    - [XML Ingestion](examples/xml_example/xml_example/) - Native XML support with validation
-    - [Excel Ingestion](examples/excel_example/excel_example/) - Native Excel reading with quality checks
+    - [Hello World](examples/01_hello_world.ipynb) - Remote data ingestion in 60 seconds
+    - [Database Governance](examples/02_database_governance.ipynb) - Quarantine dirty data
+    - [XML Ingestion](examples/xml_example.ipynb) - Native XML support with validation
+    - [Excel Ingestion](examples/excel_example.ipynb) - Native Excel reading with quality checks
 
 ---
 
@@ -114,7 +114,7 @@ LakeLogic automatically resolves catalog table names and uses **Delta-RS** for f
         contract="contracts/customers.yaml"
     )
     
-    source_df, good_df, bad_df = processor.run_source(
+    good_df, bad_df = processor.run_source(
         "main.default.customers"
     )
     
@@ -123,7 +123,7 @@ LakeLogic automatically resolves catalog table names and uses **Delta-RS** for f
     # 2. Uses Delta-RS for fast, Spark-free operations
     # 3. Validates data with your contract rules
     
-    print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
+    print(f"Valid: {len(good_df)} | Invalid: {len(bad_df)}")
     ```
 
 === "Fabric LakeDB (Microsoft)"
@@ -137,11 +137,11 @@ LakeLogic automatically resolves catalog table names and uses **Delta-RS** for f
         contract="contracts/sales.yaml"
     )
     
-    source_df, good_df, bad_df = processor.run_source(
+    good_df, bad_df = processor.run_source(
         "myworkspace.sales_lakehouse.customers"
     )
     
-    print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
+    print(f"Valid: {len(good_df)} | Invalid: {len(bad_df)}")
     ```
 
 === "Synapse Analytics (Azure)"
@@ -155,11 +155,11 @@ LakeLogic automatically resolves catalog table names and uses **Delta-RS** for f
         contract="contracts/sales.yaml"
     )
     
-    source_df, good_df, bad_df = processor.run_source(
+    good_df, bad_df = processor.run_source(
         "salesdb.dbo.customers"
     )
     
-    print(f"Total: {len(source_df)} | Valid: {len(good_df)} | Invalid: {len(bad_df)}")
+    print(f"Valid: {len(good_df)} | Invalid: {len(bad_df)}")
     ```
 
 ---

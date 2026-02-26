@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LakeLogic — Contract Registry</title>
+  <meta name="description" content="LakeLogic Contract Registry — browse, search, and inspect your data contracts across all layers." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Design tokens ─────────────────────────────────────────────── */
+    :root {
+      --bg:          #0b0d12;
+      --surface:     #13161f;
+      --surface2:    #1a1e2b;
+      --border:      #232738;
+      --border-hi:   #2e3347;
+      --accent:      #6c8fff;
+      --accent-dim:  rgba(108,143,255,.15);
+      --accent2:     #a78bfa;
+      --green:       #34d399;
+      --yellow:      #fbbf24;
+      --red:         #f87171;
+      --blue:        #60a5fa;
+      --text:        #e2e8f0;
+      --text-muted:  #8892a4;
+      --text-dim:    #4b5568;
+      --radius:      10px;
+      --radius-sm:   6px;
+      --font:        'Inter', system-ui, sans-serif;
+      --mono:        'JetBrains Mono', monospace;
+      --shadow:      0 4px 24px rgba(0,0,0,.5);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 15px; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top nav ──────────────────────────────────────────────────── */
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 28px;
+      height: 56px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1.05rem;
+      letter-spacing: -.3px;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .nav-logo-icon {
+      width: 30px; height: 30px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+    }
+    .nav-badge {
+      font-size: .7rem;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-weight: 600;
+      letter-spacing: .3px;
+    }
+    .nav-spacer { flex: 1; }
+    .nav-stat {
+      font-size: .8rem;
+      color: var(--text-muted);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .nav-stat strong { color: var(--text); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+    /* ── Layout ────────────────────────────────────────────────────── */
+    .layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .sidebar {
+      width: 260px;
+      min-width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 20px 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* ── Sidebar ───────────────────────────────────────────────────── */
+    .sidebar-section {
+      padding: 0 16px;
+      margin-bottom: 6px;
+    }
+    .sidebar-label {
+      font-size: .7rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 8px 12px 4px;
+    }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: .88rem;
+      color: var(--text-muted);
+      transition: background .15s, color .15s;
+      margin: 0 4px;
+    }
+    .sidebar-item:hover { background: var(--surface2); color: var(--text); }
+    .sidebar-item.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-weight: 500;
+    }
+    .sidebar-count {
+      margin-left: auto;
+      font-size: .72rem;
+      background: var(--border-hi);
+      color: var(--text-muted);
+      border-radius: 999px;
+      padding: 1px 7px;
+    }
+    .sidebar-item.active .sidebar-count {
+      background: var(--accent);
+      color: #fff;
+    }
+    .sidebar-icon { font-size: 14px; width: 16px; text-align: center; }
+
+    /* ── Toolbar ───────────────────────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .search-box {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0 12px;
+      gap: 8px;
+      transition: border-color .2s;
+    }
+    .search-box:focus-within { border-color: var(--accent); }
+    .search-box input {
+      flex: 1;
+      background: none;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: .9rem;
+      padding: 9px 0;
+    }
+    .search-box input::placeholder { color: var(--text-dim); }
+    .search-icon { color: var(--text-dim); font-size: 14px; }
+
+    .filter-select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: var(--radius-sm);
+      padding: 8px 28px 8px 12px;
+      font-family: var(--font);
+      font-size: .85rem;
+      cursor: pointer;
+      outline: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238892a4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+
+    /* ── Stats row ─────────────────────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color .2s, transform .2s;
+    }
+    .stat-card:hover { border-color: var(--border-hi); transform: translateY(-1px); }
+    .stat-label { font-size: .75rem; color: var(--text-muted); font-weight: 500; }
+    .stat-value { font-size: 1.6rem; font-weight: 700; color: var(--text); line-height: 1; }
+    .stat-sub { font-size: .75rem; color: var(--text-dim); }
+    .stat-accent { color: var(--accent); }
+    .stat-green { color: var(--green); }
+    .stat-yellow { color: var(--yellow); }
+    .stat-red { color: var(--red); }
+
+    /* ── Contract table ─────────────────────────────────────────────── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .table-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .table-title {
+      font-weight: 600;
+      font-size: .95rem;
+    }
+    .table-subtitle { font-size: .8rem; color: var(--text-muted); margin-left: auto; }
+
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left;
+      padding: 10px 20px;
+      font-size: .73rem;
+      font-weight: 600;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    thead th:hover { color: var(--text-muted); }
+    thead th svg { margin-left: 4px; vertical-align: middle; opacity: .5; }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background .12s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td {
+      padding: 13px 20px;
+      font-size: .87rem;
+      vertical-align: middle;
+    }
+
+    .contract-name { font-weight: 600; color: var(--text); }
+    .contract-path {
+      font-size: .75rem;
+      color: var(--text-dim);
+      font-family: var(--mono);
+      margin-top: 2px;
+    }
+
+    /* Layer badge */
+    .layer {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: .73rem;
+      font-weight: 600;
+      letter-spacing: .03em;
+      border-radius: 999px;
+      padding: 3px 10px;
+    }
+    .layer-bronze { background: rgba(251,191,36,.12); color: #fbbf24; }
+    .layer-silver { background: rgba(148,163,184,.12); color: #94a3b8; }
+    .layer-gold   { background: rgba(251,191,36,.18); color: #f59e0b; }
+
+    /* Status badge */
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: .73rem;
+      font-weight: 600;
+      border-radius: 999px;
+      padding: 3px 10px;
+    }
+    .status-ok    { background: rgba(52,211,153,.12); color: var(--green); }
+    .status-warn  { background: rgba(251,191,36,.12); color: var(--yellow); }
+    .status-fail  { background: rgba(248,113,113,.12); color: var(--red); }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    /* PII indicator */
+    .pii-tag {
+      font-size: .7rem;
+      font-weight: 600;
+      background: rgba(167,139,250,.15);
+      color: var(--accent2);
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+
+    /* Source origin badge */
+    .origin {
+      font-size: .72rem;
+      background: var(--border-hi);
+      color: var(--text-muted);
+      border-radius: var(--radius-sm);
+      padding: 2px 7px;
+      font-family: var(--mono);
+    }
+    .origin-dbt { background: rgba(108,143,255,.12); color: var(--accent); }
+
+    /* Rule counts */
+    .rule-count {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: .8rem;
+      color: var(--text-muted);
+    }
+    .rule-count strong { color: var(--text); }
+
+    /* ── Detail panel ──────────────────────────────────────────────── */
+    #detail-panel {
+      position: fixed;
+      right: 0; top: 56px; bottom: 0;
+      width: 420px;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      transform: translateX(100%);
+      transition: transform .25s cubic-bezier(.4,0,.2,1);
+      z-index: 90;
+      box-shadow: -8px 0 32px rgba(0,0,0,.5);
+    }
+    #detail-panel.open { transform: translateX(0); }
+
+    .detail-head {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .detail-close {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 18px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color .15s;
+    }
+    .detail-close:hover { color: var(--text); }
+    .detail-title { font-size: 1.05rem; font-weight: 700; }
+    .detail-meta { font-size: .8rem; color: var(--text-muted); margin-top: 3px; }
+
+    .detail-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+
+    .detail-section-title {
+      font-size: .72rem;
+      font-weight: 600;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    .field-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      background: var(--surface2);
+      border-radius: var(--radius-sm);
+      margin-bottom: 4px;
+      font-size: .82rem;
+    }
+    .field-name { font-family: var(--mono); font-size: .8rem; color: var(--text); flex: 1; }
+    .field-type { color: var(--text-dim); font-size: .75rem; font-family: var(--mono); }
+    .req-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--red); }
+
+    .rule-row {
+      padding: 8px 12px;
+      background: var(--surface2);
+      border-radius: var(--radius-sm);
+      margin-bottom: 4px;
+      font-size: .82rem;
+    }
+    .rule-name { font-weight: 500; color: var(--text); margin-bottom: 3px; }
+    .rule-sql { font-family: var(--mono); font-size: .74rem; color: var(--text-dim); word-break: break-all; }
+
+    .detail-yaml {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      font-family: var(--mono);
+      font-size: .78rem;
+      color: #93c5fd;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: .82rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-muted);
+      transition: all .15s;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-accent {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-accent:hover { background: #7a9fff; }
+
+    /* ── Empty / loading states ────────────────────────────────────── */
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-dim);
+    }
+    .empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .empty-title { font-size: 1rem; color: var(--text-muted); margin-bottom: 6px; }
+
+    /* ── Scrollbar ─────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+    /* ── Responsive ────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      #detail-panel { width: 100%; }
+    }
+
+    /* ── Animations ─────────────────────────────────────────────────── */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeIn .2s ease forwards; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: .5; }
+    }
+    .pulse { animation: pulse 2s infinite; }
+  </style>
+</head>
+<body>
+
+<!-- ── Nav ──────────────────────────────────────────────────────────── -->
+<nav class="nav">
+  <a class="nav-logo" href="#" id="nav-logo">
+    <div class="nav-logo-icon">🏔</div>
+    LakeLogic
+  </a>
+  <span class="nav-badge">Contract Registry</span>
+  <div class="nav-spacer"></div>
+  <div class="nav-stat">
+    <div class="dot pulse"></div>
+    <span><strong id="live-count">0</strong> contracts</span>
+  </div>
+  <div class="nav-stat" style="margin-left:16px;">
+    <span>Last synced: <strong id="last-sync">just now</strong></span>
+  </div>
+</nav>
+
+<!-- ── Layout ───────────────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-label">Layer</div>
+    <div class="sidebar-item active" id="filter-all" data-layer="all" onclick="setLayerFilter('all')">
+      <span class="sidebar-icon">📋</span> All Contracts
+      <span class="sidebar-count" id="cnt-all">0</span>
+    </div>
+    <div class="sidebar-item" id="filter-bronze" data-layer="bronze" onclick="setLayerFilter('bronze')">
+      <span class="sidebar-icon">🥉</span> Bronze
+      <span class="sidebar-count" id="cnt-bronze">0</span>
+    </div>
+    <div class="sidebar-item" id="filter-silver" data-layer="silver" onclick="setLayerFilter('silver')">
+      <span class="sidebar-icon">🥈</span> Silver
+      <span class="sidebar-count" id="cnt-silver">0</span>
+    </div>
+    <div class="sidebar-item" id="filter-gold" data-layer="gold" onclick="setLayerFilter('gold')">
+      <span class="sidebar-icon">🥇</span> Gold
+      <span class="sidebar-count" id="cnt-gold">0</span>
+    </div>
+
+    <div class="sidebar-label" style="margin-top:12px;">Origin</div>
+    <div class="sidebar-item" id="filter-native" data-origin="native" onclick="setOriginFilter('native')">
+      <span class="sidebar-icon">📄</span> Native YAML
+      <span class="sidebar-count" id="cnt-native">0</span>
+    </div>
+    <div class="sidebar-item" id="filter-dbt" data-origin="dbt" onclick="setOriginFilter('dbt')">
+      <span class="sidebar-icon">⚙</span> Imported from dbt
+      <span class="sidebar-count" id="cnt-dbt">0</span>
+    </div>
+
+    <div class="sidebar-label" style="margin-top:12px;">Health</div>
+    <div class="sidebar-item" data-health="ok" onclick="setHealthFilter('ok')">
+      <span class="sidebar-icon">✅</span> Healthy
+      <span class="sidebar-count" id="cnt-ok">0</span>
+    </div>
+    <div class="sidebar-item" data-health="warn" onclick="setHealthFilter('warn')">
+      <span class="sidebar-icon">⚠️</span> Warning
+      <span class="sidebar-count" id="cnt-warn">0</span>
+    </div>
+    <div class="sidebar-item" data-health="fail" onclick="setHealthFilter('fail')">
+      <span class="sidebar-icon">🔴</span> Failing
+      <span class="sidebar-count" id="cnt-fail">0</span>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">Total Contracts</div>
+        <div class="stat-value stat-accent" id="stat-total">0</div>
+        <div class="stat-sub">across all layers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">PII Fields</div>
+        <div class="stat-value" id="stat-pii" style="color:var(--accent2)">0</div>
+        <div class="stat-sub">GDPR-annotated columns</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Quality Rules</div>
+        <div class="stat-value stat-green" id="stat-rules">0</div>
+        <div class="stat-sub">row + dataset checks</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">dbt Imported</div>
+        <div class="stat-value" id="stat-dbt" style="color:var(--accent)">0</div>
+        <div class="stat-sub">from schema.yml files</div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input
+          type="text"
+          id="search-input"
+          placeholder="Search contracts, fields, descriptions…"
+          oninput="applyFilters()"
+        />
+      </div>
+      <select class="filter-select" id="domain-filter" onchange="applyFilters()">
+        <option value="">All Domains</option>
+      </select>
+      <button class="btn btn-accent" onclick="showImportDialog()">⬇ Import dbt</button>
+      <button class="btn" onclick="exportContracts()">↑ Export CSV</button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap fade-in">
+      <div class="table-header">
+        <span class="table-title">Contracts</span>
+        <span class="table-subtitle" id="showing-label">Showing 0 contracts</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortBy('name')">Contract ↕</th>
+            <th onclick="sortBy('layer')">Layer ↕</th>
+            <th onclick="sortBy('domain')">Domain ↕</th>
+            <th onclick="sortBy('fields')">Fields ↕</th>
+            <th>Rules</th>
+            <th>PII</th>
+            <th>Origin</th>
+            <th onclick="sortBy('health')">Health ↕</th>
+          </tr>
+        </thead>
+        <tbody id="contract-table-body">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+      <div id="empty-state" class="empty" style="display:none;">
+        <div class="empty-icon">🔎</div>
+        <div class="empty-title">No contracts match your filters</div>
+        <div>Try adjusting the search or layer filter.</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Detail panel ──────────────────────────────────────────────────── -->
+<div id="detail-panel">
+  <div class="detail-head">
+    <div>
+      <div class="detail-title" id="detail-title">—</div>
+      <div class="detail-meta" id="detail-meta">—</div>
+    </div>
+    <button class="detail-close" onclick="closeDetail()">✕</button>
+  </div>
+  <div class="detail-body" id="detail-body"><!-- filled by JS --></div>
+</div>
+
+<script>
+// ── Sample data — in production this is fetched from the LakeLogic registry API ──
+const CONTRACTS = [
+  {
+    name:"customers", layer:"silver", domain:"crm", description:"Cleansed customer profiles",
+    path:"contracts/silver/customers.yaml", origin:"native",
+    fields:["customer_id","email","full_name","phone","date_of_birth","shipping_address","loyalty_tier","total_spend"],
+    piiFields:["email","full_name","phone","date_of_birth","shipping_address"],
+    required:["customer_id","email"],
+    rowRules:[
+      {name:"email_not_null", sql:"email IS NOT NULL"},
+      {name:"spend_positive", sql:"total_spend >= 0"},
+    ],
+    datasetRules:[{name:"customer_id_unique",sql:"COUNT(DISTINCT customer_id) = COUNT(customer_id)"}],
+    health:"ok", lastRun:"2026-02-21T09:12:00Z", goodRows:48203, badRows:17,
+  },
+  {
+    name:"orders", layer:"bronze", domain:"commerce", description:"Raw order events from Shopify webhook",
+    path:"contracts/bronze/orders.yaml", origin:"dbt",
+    fields:["order_id","customer_id","status","total_amount","currency","created_at","is_b2b"],
+    piiFields:[],
+    required:["order_id","customer_id","status"],
+    rowRules:[
+      {name:"amount_positive",sql:"total_amount > 0"},
+      {name:"status_valid",sql:"status IN ('pending','processing','shipped','delivered','cancelled')"},
+    ],
+    datasetRules:[],
+    health:"warn", lastRun:"2026-02-21T08:45:00Z", goodRows:102891, badRows:342,
+  },
+  {
+    name:"sessions", layer:"bronze", domain:"product", description:"Web session events from clickstream",
+    path:"contracts/bronze/sessions.yaml", origin:"dbt",
+    fields:["session_id","user_id","started_at","ended_at","page_views","device_type","country"],
+    piiFields:["user_id"],
+    required:["session_id","user_id","started_at"],
+    rowRules:[
+      {name:"page_views_positive",sql:"page_views >= 0"},
+    ],
+    datasetRules:[{name:"session_id_unique",sql:"COUNT(DISTINCT session_id) = COUNT(session_id)"}],
+    health:"ok", lastRun:"2026-02-21T09:00:00Z", goodRows:285100, badRows:3,
+  },
+  {
+    name:"silver_orders", layer:"silver", domain:"commerce", description:"Cleansed and enriched orders",
+    path:"contracts/silver/silver_orders.yaml", origin:"native",
+    fields:["order_id","customer_id","status","total_amount","currency","created_at","is_b2b","customer_tier","region"],
+    piiFields:[],
+    required:["order_id","customer_id"],
+    rowRules:[
+      {name:"amount_positive",sql:"total_amount > 0"},
+      {name:"currency_valid",sql:"currency IN ('USD','EUR','GBP')"},
+      {name:"region_not_null",sql:"region IS NOT NULL"},
+    ],
+    datasetRules:[{name:"order_id_unique",sql:"COUNT(DISTINCT order_id) = COUNT(order_id)"}],
+    health:"ok", lastRun:"2026-02-21T09:15:00Z", goodRows:102549, badRows:0,
+  },
+  {
+    name:"subscriptions", layer:"silver", domain:"billing", description:"Active and historical subscriptions",
+    path:"contracts/silver/subscriptions.yaml", origin:"native",
+    fields:["subscription_id","customer_id","plan","status","started_at","renewed_at","mrr","currency"],
+    piiFields:[],
+    required:["subscription_id","customer_id","plan"],
+    rowRules:[
+      {name:"mrr_positive",sql:"mrr >= 0"},
+      {name:"plan_valid",sql:"plan IN ('starter','growth','enterprise')"},
+    ],
+    datasetRules:[],
+    health:"fail", lastRun:"2026-02-21T07:30:00Z", goodRows:12480, badRows:891,
+  },
+  {
+    name:"feature_flags", layer:"bronze", domain:"product", description:"Feature flag states per account",
+    path:"contracts/bronze/feature_flags.yaml", origin:"dbt",
+    fields:["flag_id","account_id","flag_name","enabled","updated_at"],
+    piiFields:[],
+    required:["flag_id","account_id","flag_name"],
+    rowRules:[],
+    datasetRules:[],
+    health:"ok", lastRun:"2026-02-21T09:10:00Z", goodRows:9900, badRows:0,
+  },
+  {
+    name:"daily_metrics", layer:"gold", domain:"analytics", description:"Aggregated daily product metrics",
+    path:"contracts/gold/daily_metrics.yaml", origin:"native",
+    fields:["date","metric","value","segment","source"],
+    piiFields:[],
+    required:["date","metric","value"],
+    rowRules:[{name:"value_not_null",sql:"value IS NOT NULL"}],
+    datasetRules:[],
+    health:"ok", lastRun:"2026-02-21T06:00:00Z", goodRows:3650, badRows:0,
+  },
+];
+
+// ── State ─────────────────────────────────────────────────────────────
+let state = {
+  layerFilter: "all",
+  originFilter: null,
+  healthFilter: null,
+  search: "",
+  domain: "",
+  sortKey: "name",
+  sortDir: 1,
+};
+
+// ── Boot ─────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  populateDomainDropdown();
+  updateSidebar();
+  updateStats();
+  applyFilters();
+
+  // Simulated last-sync counter
+  let secs = 0;
+  setInterval(() => {
+    secs++;
+    const el = document.getElementById("last-sync");
+    if (el) el.textContent = secs < 60 ? `${secs}s ago` : `${Math.floor(secs/60)}m ago`;
+  }, 1000);
+});
+
+// ── Sidebar filters ──────────────────────────────────────────────────
+function setLayerFilter(layer) {
+  state.layerFilter = layer;
+  state.originFilter = null;
+  state.healthFilter = null;
+  document.querySelectorAll(".sidebar-item").forEach(el => el.classList.remove("active"));
+  document.getElementById("filter-" + layer)?.classList.add("active");
+  applyFilters();
+}
+function setOriginFilter(origin) {
+  state.originFilter = state.originFilter === origin ? null : origin;
+  state.layerFilter = "all";
+  state.healthFilter = null;
+  document.querySelectorAll(".sidebar-item").forEach(el => el.classList.remove("active"));
+  if (state.originFilter) document.getElementById("filter-" + origin)?.classList.add("active");
+  else document.getElementById("filter-all").classList.add("active");
+  applyFilters();
+}
+function setHealthFilter(health) {
+  state.healthFilter = state.healthFilter === health ? null : health;
+  state.originFilter = null;
+  applyFilters();
+}
+
+// ── Derived data ─────────────────────────────────────────────────────
+function filtered() {
+  return CONTRACTS.filter(c => {
+    if (state.layerFilter !== "all" && c.layer !== state.layerFilter) return false;
+    if (state.originFilter && c.origin !== state.originFilter) return false;
+    if (state.healthFilter && c.health !== state.healthFilter) return false;
+    if (state.domain && c.domain !== state.domain) return false;
+    if (state.search) {
+      const q = state.search.toLowerCase();
+      const haystack = [c.name, c.description, c.domain, ...c.fields].join(" ").toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    const k = state.sortKey;
+    let av = k === "fields" ? a.fields.length : (a[k] || "");
+    let bv = k === "fields" ? b.fields.length : (b[k] || "");
+    if (av < bv) return -state.sortDir;
+    if (av > bv) return  state.sortDir;
+    return 0;
+  });
+}
+
+// ── Counts ────────────────────────────────────────────────────────────
+function updateSidebar() {
+  const all = CONTRACTS;
+  document.getElementById("cnt-all").textContent    = all.length;
+  document.getElementById("cnt-bronze").textContent = all.filter(c=>c.layer==="bronze").length;
+  document.getElementById("cnt-silver").textContent = all.filter(c=>c.layer==="silver").length;
+  document.getElementById("cnt-gold").textContent   = all.filter(c=>c.layer==="gold").length;
+  document.getElementById("cnt-native").textContent = all.filter(c=>c.origin==="native").length;
+  document.getElementById("cnt-dbt").textContent    = all.filter(c=>c.origin==="dbt").length;
+  document.getElementById("cnt-ok").textContent     = all.filter(c=>c.health==="ok").length;
+  document.getElementById("cnt-warn").textContent   = all.filter(c=>c.health==="warn").length;
+  document.getElementById("cnt-fail").textContent   = all.filter(c=>c.health==="fail").length;
+  document.getElementById("live-count").textContent = all.length;
+}
+
+function updateStats() {
+  document.getElementById("stat-total").textContent = CONTRACTS.length;
+  document.getElementById("stat-pii").textContent   = CONTRACTS.reduce((s,c)=>s+c.piiFields.length, 0);
+  document.getElementById("stat-rules").textContent = CONTRACTS.reduce((s,c)=>s+c.rowRules.length+c.datasetRules.length, 0);
+  document.getElementById("stat-dbt").textContent   = CONTRACTS.filter(c=>c.origin==="dbt").length;
+}
+
+// ── Domain dropdown ──────────────────────────────────────────────────
+function populateDomainDropdown() {
+  const sel = document.getElementById("domain-filter");
+  const domains = [...new Set(CONTRACTS.map(c=>c.domain))].sort();
+  domains.forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d; opt.textContent = d.charAt(0).toUpperCase() + d.slice(1);
+    sel.appendChild(opt);
+  });
+}
+
+// ── Render table ──────────────────────────────────────────────────────
+function applyFilters() {
+  state.search = document.getElementById("search-input").value;
+  state.domain = document.getElementById("domain-filter").value;
+  const rows = filtered();
+  const tbody = document.getElementById("contract-table-body");
+  const empty = document.getElementById("empty-state");
+  const label = document.getElementById("showing-label");
+
+  label.textContent = `Showing ${rows.length} contract${rows.length !== 1 ? "s" : ""}`;
+
+  if (!rows.length) {
+    tbody.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+
+  tbody.innerHTML = rows.map(c => `
+    <tr onclick="openDetail('${c.name}')" id="row-${c.name}">
+      <td>
+        <div class="contract-name">${hl(c.name)}</div>
+        <div class="contract-path">${c.path}</div>
+      </td>
+      <td><span class="layer layer-${c.layer}">${layerIcon(c.layer)} ${c.layer}</span></td>
+      <td style="color:var(--text-muted);font-size:.83rem;">${c.domain}</td>
+      <td><span class="rule-count"><strong>${c.fields.length}</strong></span></td>
+      <td><span class="rule-count"><strong>${c.rowRules.length + c.datasetRules.length}</strong></span></td>
+      <td>${c.piiFields.length > 0 ? `<span class="pii-tag">🔒 ${c.piiFields.length}</span>` : '<span style="color:var(--text-dim);font-size:.8rem;">—</span>'}</td>
+      <td><span class="origin ${c.origin === 'dbt' ? 'origin-dbt' : ''}">${c.origin === 'dbt' ? '⚙ dbt' : '📄 native'}</span></td>
+      <td>${healthBadge(c.health, c.badRows)}</td>
+    </tr>
+  `).join("");
+}
+
+function hl(text) {
+  if (!state.search) return text;
+  const re = new RegExp(`(${escapeRe(state.search)})`, "gi");
+  return text.replace(re, '<mark style="background:rgba(108,143,255,.3);color:var(--accent);border-radius:2px;">$1</mark>');
+}
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function layerIcon(l) { return {bronze:"🥉",silver:"🥈",gold:"🥇"}[l] || "📄"; }
+function healthBadge(h, bad) {
+  if (h === "ok")   return `<span class="status status-ok"><span class="status-dot"></span> Healthy</span>`;
+  if (h === "warn") return `<span class="status status-warn"><span class="status-dot"></span> ${bad} bad</span>`;
+  if (h === "fail") return `<span class="status status-fail"><span class="status-dot"></span> ${bad} bad</span>`;
+  return "—";
+}
+
+// ── Sort ──────────────────────────────────────────────────────────────
+function sortBy(key) {
+  if (state.sortKey === key) state.sortDir *= -1;
+  else { state.sortKey = key; state.sortDir = 1; }
+  applyFilters();
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────
+function openDetail(name) {
+  const c = CONTRACTS.find(x => x.name === name);
+  if (!c) return;
+
+  document.getElementById("detail-title").textContent = c.name;
+  document.getElementById("detail-meta").innerHTML =
+    `<span class="layer layer-${c.layer}" style="margin-right:6px;">${layerIcon(c.layer)} ${c.layer}</span>` +
+    `<span class="origin ${c.origin==='dbt'?'origin-dbt':''}">${c.origin==='dbt'?'⚙ dbt':'📄 native'}</span>`;
+
+  const body = document.getElementById("detail-body");
+  const lastRun = new Date(c.lastRun).toLocaleTimeString();
+
+  body.innerHTML = `
+    <div>
+      <div class="detail-section-title">Overview</div>
+      <div style="font-size:.85rem;color:var(--text-muted);line-height:1.5;">${c.description}</div>
+      <div style="margin-top:8px;display:flex;gap:16px;font-size:.8rem;color:var(--text-dim);">
+        <span>Last run: <strong style="color:var(--text-muted)">${lastRun}</strong></span>
+        <span>Good: <strong style="color:var(--green)">${c.goodRows.toLocaleString()}</strong></span>
+        <span>Bad: <strong style="color:var(--red)">${c.badRows.toLocaleString()}</strong></span>
+      </div>
+    </div>
+
+    <div>
+      <div class="detail-section-title">Fields (${c.fields.length})</div>
+      ${c.fields.map(f => {
+        const isPii = c.piiFields.includes(f);
+        const isReq = c.required.includes(f);
+        return `<div class="field-row">
+          <span class="field-name">${f}</span>
+          ${isReq ? '<span class="req-dot" title="required"></span>' : ''}
+          ${isPii ? '<span class="pii-tag">🔒 pii</span>' : ''}
+        </div>`;
+      }).join("")}
+    </div>
+
+    ${(c.rowRules.length + c.datasetRules.length) > 0 ? `
+    <div>
+      <div class="detail-section-title">Quality Rules (${c.rowRules.length + c.datasetRules.length})</div>
+      ${[...c.rowRules.map(r=>({...r,type:"row"})), ...c.datasetRules.map(r=>({...r,type:"dataset"}))].map(r=>`
+        <div class="rule-row">
+          <div class="rule-name">${r.name} <span style="font-size:.7rem;color:var(--text-dim);font-weight:normal;">(${r.type})</span></div>
+          <div class="rule-sql">${r.sql}</div>
+        </div>
+      `).join("")}
+    </div>
+    ` : ""}
+
+    <div>
+      <div class="detail-section-title">Contract YAML (preview)</div>
+      <div class="detail-yaml">${buildYamlPreview(c)}</div>
+    </div>
+
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="alert('CLI: lakelogic run --contract ${c.path}')">▶ Run</button>
+      <button class="btn" onclick="copyPath('${c.path}')">📋 Copy path</button>
+      ${c.piiFields.length ? '<button class="btn" onclick="alert(\'Use proc.mask_pii() or forget_subjects() from lakelogic.core.gdpr\')">🔒 GDPR</button>' : ""}
+    </div>
+  `;
+
+  document.getElementById("detail-panel").classList.add("open");
+}
+
+function closeDetail() {
+  document.getElementById("detail-panel").classList.remove("open");
+}
+
+function buildYamlPreview(c) {
+  return `version: "1.0.0"\ndataset: ${c.name}\ninfo:\n  title: ${c.name}\n  target_layer: ${c.layer}\n  description: |\n    ${c.description}\nmodel:\n  fields:\n${c.fields.map(f=>`    - name: ${f}${c.piiFields.includes(f)?'\n      pii: true':''}${c.required.includes(f)?'\n      required: true':''}`).join("\n")}\n${c.rowRules.length?"quality:\n  row_rules:\n"+c.rowRules.map(r=>`    - name: ${r.name}\n      sql: "${r.sql}"`).join("\n"):""}`;
+}
+
+function copyPath(path) {
+  navigator.clipboard?.writeText(path);
+  alert(`Copied: ${path}`);
+}
+
+// ── Import dialog ─────────────────────────────────────────────────────
+function showImportDialog() {
+  const cmd = prompt(
+    "Import dbt schema.yml into LakeLogic contracts.\n\n" +
+    "CLI command:\n\n" +
+    "lakelogic import-dbt --schema models/schema.yml --output contracts/\n\n" +
+    "Python API:\n" +
+    "from lakelogic import DataProcessor\n" +
+    "proc = DataProcessor.from_dbt('models/schema.yml', model='customers')\n\n" +
+    "Enter schema path to preview:",
+    "models/schema.yml"
+  );
+  if (cmd) alert(`✔ Would run:\nlakelogic import-dbt --schema ${cmd} --output contracts/ --dry-run`);
+}
+
+// ── Export ────────────────────────────────────────────────────────────
+function exportContracts() {
+  const rows = filtered();
+  const header = ["name","layer","domain","fields","pii_fields","rules","health","origin","path"];
+  const csv = [header, ...rows.map(c=>[
+    c.name, c.layer, c.domain, c.fields.length, c.piiFields.length,
+    c.rowRules.length+c.datasetRules.length, c.health, c.origin, c.path
+  ])].map(r=>r.join(",")).join("\n");
+
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+  a.download = "lakelogic_registry.csv";
+  a.click();
+}
+
+// Close detail on Escape
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(); });
+</script>
+
+</body>
+</html>

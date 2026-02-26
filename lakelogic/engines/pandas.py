@@ -41,6 +41,7 @@ class PandasAdapter(EngineAdapter):
         if hasattr(bad_df, "df"):
             bad_df = bad_df.df()
         self.dataset_rule_results = duck_adapter.dataset_rule_results
+        self.trace = duck_adapter.trace
         
         # DuckDBAdapter already returns Pandas DataFrames if the input was registerable
         # or if .df() was called (which it is in our DuckDBAdapter).

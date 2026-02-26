@@ -1,19 +1,42 @@
+import sys
+
+# ── Windows console encoding fix ──────────────────────────────────────────────
+# cmd.exe and PowerShell default to cp1252 which cannot encode many Unicode
+# characters used in Rich help panels (arrows, box-drawing, emoji, etc.).
+# Reconfigure stdout/stderr to UTF-8 at import time so this package never
+# requires the caller to set PYTHONIOENCODING manually.
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass  # non-TextIOWrapper stream (e.g. redirect to file)
+# ──────────────────────────────────────────────────────────────────────────────
+
 import typer
 from pathlib import Path
 from typing import Optional, Any, Dict, List
 from loguru import logger
-import sys
 import yaml
 import json
 
 from lakelogic.core.processor import DataProcessor
 
 app = typer.Typer(
-    help="LakeLogic - Consistent Data Contracts across engines.",
+    name="lakelogic",
+    help=(
+        "LakeLogic — Consistent Data Contracts across engines.\n\n"
+        "A contract runtime for validating, materializing, and governing\n"
+        "data across Polars, Pandas, DuckDB, Spark, Snowflake, and BigQuery.\n\n"
+        "[dim]Use [bold]lakelogic [COMMAND] --help[/bold] for detailed usage on any command.[/dim]"
+    ),
     add_completion=False,
+    no_args_is_help=True,          # show help instead of "Missing command" error
+    rich_markup_mode="rich",       # enable Rich markup in help strings
+    pretty_exceptions_enable=False,
 )
 
-@app.command()
+@app.command(rich_help_panel="Contract Execution")
 def run(
     contract: Path = typer.Option(
         ..., "--contract", "-c", help="Path to the contract YAML file."
@@ -45,6 +68,7 @@ def run(
         None, "--materialize-target", help="Override materialization target path."
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+    trace: bool = typer.Option(False, "--trace", help="Display detailed execution trace."),
 ):
     """
     Run a data contract against a source file.
@@ -163,7 +187,11 @@ def run(
 
     try:
         processor = DataProcessor(engine=engine, contract=contract, stage=stage)
-        good_df, bad_df = processor.run_source(source)
+        result = processor.run_source(source)
+        good_df, bad_df = result.good, result.bad
+
+        if trace and result.trace:
+            _display_trace(result.trace)
 
         if materialize:
             processor.materialize(good_df, bad_df, target_path=materialize_target)
@@ -183,8 +211,50 @@ def run(
         logger.exception(f"Fatal error during execution: {e}")
         raise typer.Exit(code=1)
 
+def _display_trace(trace: Any):
+    """Display execution trace in a formatted table."""
+    import typer
+    from datetime import datetime
+    
+    typer.echo("")
+    typer.echo(typer.style(" 🔍 EXECUTION TRACE", fg=typer.colors.CYAN, bold=True))
+    typer.echo(typer.style(f" Run ID: {trace.run_id}", dim=True))
+    typer.echo(" " + "─" * 110)
+    
+    header = f" {'STEP':<30} | {'STATUS':<8} | {'IN':>10} | {'OUT':>10} | {'DURATION':>12} | {'DETAILS'}"
+    typer.echo(typer.style(header, bold=True))
+    typer.echo(" " + "─" * 110)
+    
+    for step in trace.steps:
+        status_color = typer.colors.GREEN if step.status == "ok" else typer.colors.RED
+        status_text = typer.style(f"{step.status.upper():<8}", fg=status_color)
+        
+        in_rows = f"{step.input_rows:,}" if step.input_rows is not None else "-"
+        out_rows = f"{step.output_rows:,}" if step.output_rows is not None else "-"
+        duration = f"{step.duration_ms:,.2f}ms" if step.duration_ms is not None else "-"
+        
+        details = ""
+        if step.details:
+            if "sql" in step.details:
+                sql = step.details["sql"].strip().replace("\n", " ")
+                if len(sql) > 40:
+                    sql = sql[:37] + "..."
+                details = f"SQL: {sql}"
+            elif "errors" in step.details and step.details["errors"]:
+                details = f"Errors: {len(step.details['errors'])}"
+            elif "path" in step.details:
+                details = f"Path: {step.details['path']}"
+        
+        row = f" {step.step:<30} | {status_text} | {in_rows:>10} | {out_rows:>10} | {duration:>12} | {details}"
+        typer.echo(row)
+    
+    typer.echo(" " + "─" * 110)
+    total_dur = f"{trace.total_duration_ms:,.2f}ms" if trace.total_duration_ms else "n/a"
+    typer.echo(typer.style(f" TOTAL DURATION: {total_dur}", bold=True))
+    typer.echo("")
 
-@app.command("setup-oss")
+
+@app.command("setup-oss", rich_help_panel="Environment Setup")
 def setup_oss():
     """
     Setup the OSS engine environment by pre-installing required extensions and checking dependencies.
@@ -209,7 +279,7 @@ def setup_oss():
     logger.info("OSS environment setup finished.")
 
 
-@app.command()
+@app.command(rich_help_panel="Contract Execution")
 def bootstrap(
     landing: Path = typer.Option(..., "--landing", help="Landing zone root path."),
     output_dir: Path = typer.Option(..., "--output-dir", help="Directory to write generated contracts."),
@@ -518,7 +588,7 @@ def bootstrap(
     logger.info(f"Registry written to {registry}")
 
 
-@app.command("help")
+@app.command("help", rich_help_panel="Help")
 def help_command(topic: Optional[str] = typer.Argument(None)):
     """
     Show contextual help for LakeLogic commands.
@@ -565,5 +635,237 @@ Sync mode:
         return
     typer.echo(base)
 
+
+@app.command(rich_help_panel="Data Tooling")
+def generate(
+    contract: Path = typer.Option(..., "--contract", "-c", help="Path to the contract YAML file."),
+    rows: int = typer.Option(100, "--rows", "-n", help="Number of rows to generate."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path (CSV/Parquet/JSON)."),
+    format: str = typer.Option("parquet", "--format", "-f", help="Output format: parquet | csv | json."),
+    engine: str = typer.Option("polars", "--engine", "-e", help="DataFrame engine: polars | pandas."),
+    invalid_ratio: float = typer.Option(
+        0.0,
+        "--invalid-ratio",
+        help="Fraction of rows that intentionally break quality rules (0.0–1.0). Useful for quarantine testing.",
+    ),
+    seed: Optional[int] = typer.Option(None, "--seed", help="Random seed for reproducibility."),
+    preview: int = typer.Option(5, "--preview", help="Number of rows to print to console (0 = silent)."),
+):
+    """
+    Generate synthetic data from a contract definition.
+
+    Respects field types, nullability, accepted_values, and range constraints.
+    Use --invalid-ratio to inject bad rows and verify your quarantine logic.
+
+    Examples:
+
+        lakelogic generate --contract orders.yaml --rows 1000 --output sample.parquet
+
+        lakelogic generate --contract orders.yaml --rows 500 --invalid-ratio 0.1 \\
+            --format csv --output orders_with_errors.csv
+
+        lakelogic generate --contract orders.yaml --rows 200 --engine pandas --preview 10
+    """
+    from lakelogic.core.generator import DataGenerator
+
+    if not contract.exists():
+        logger.error(f"Contract not found: {contract}")
+        raise typer.Exit(code=1)
+
+    if not (0.0 <= invalid_ratio <= 1.0):
+        logger.error("--invalid-ratio must be between 0.0 and 1.0")
+        raise typer.Exit(code=1)
+
+    valid_engines = ("polars", "pandas")
+    if engine not in valid_engines:
+        logger.error(f"--engine must be one of: {', '.join(valid_engines)}")
+        raise typer.Exit(code=1)
+
+    valid_formats = ("parquet", "csv", "json")
+    if format.lower() not in valid_formats:
+        logger.error(f"--format must be one of: {', '.join(valid_formats)}")
+        raise typer.Exit(code=1)
+
+    try:
+        gen = DataGenerator(contract, seed=seed)
+        df = gen.generate(rows=rows, invalid_ratio=invalid_ratio, output_format=engine)
+
+        n_invalid = int(rows * invalid_ratio)
+        n_valid = rows - n_invalid
+        typer.echo(
+            typer.style(f"✔  Generated {rows:,} rows", fg=typer.colors.GREEN, bold=True)
+            + f"  ({n_valid:,} valid"
+            + (f", {n_invalid:,} intentionally invalid" if n_invalid else "")
+            + ")"
+        )
+
+        if preview > 0:
+            typer.echo("")
+            if engine == "polars":
+                typer.echo(str(df.head(preview)))
+            else:
+                typer.echo(str(df.head(preview).to_string(index=False)))
+            typer.echo("")
+
+        if output:
+            saved = gen.save(df, output, format=format)
+            typer.echo(typer.style(f"✔  Saved → {saved}", fg=typer.colors.CYAN))
+        else:
+            typer.echo(typer.style("ℹ  No --output specified; use --output to save to disk.", dim=True))
+
+    except Exception as e:
+        logger.exception(f"Generation failed: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command("import-dbt", rich_help_panel="Data Tooling")
+def import_dbt(
+    schema: Path = typer.Option(
+        ..., "--schema", help="Path to the dbt schema.yml or sources.yml file."
+    ),
+    model: Optional[str] = typer.Option(
+        None, "--model", "-m",
+        help="Name of the dbt model to import. Omit to import all models in the file.",
+    ),
+    source_name: Optional[str] = typer.Option(
+        None, "--source-name", help="dbt source name (for sources.yml files)."
+    ),
+    source_table: Optional[str] = typer.Option(
+        None, "--source-table", help="dbt source table name (for sources.yml files)."
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o",
+        help=(
+            "Output path. If a .yaml file path, writes one contract there. "
+            "If a directory (or omitted), writes <model>.yaml into that directory."
+        ),
+    ),
+    overwrite: bool = typer.Option(
+        False, "--overwrite/--no-overwrite",
+        help="Overwrite existing contract files. Default: skip existing.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the generated contract YAML but do not write files.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output."),
+):
+    """
+    Import dbt schema.yml / sources.yml -> LakeLogic contract YAML.
+
+    Examples
+    --------
+    # Import a single model
+    lakelogic import-dbt --schema models/schema.yml --model customers --output contracts/
+
+    # Import all models in a file
+    lakelogic import-dbt --schema models/schema.yml --output contracts/
+
+    # Import a dbt source table
+    lakelogic import-dbt --schema models/sources.yml --source-name raw --source-table orders --output contracts/
+
+    # Dry-run preview
+    lakelogic import-dbt --schema models/schema.yml --model customers --dry-run
+    """
+    from lakelogic.adapters.dbt import DbtAdapter
+
+    try:
+        adapter = DbtAdapter(schema)
+    except FileNotFoundError as exc:
+        typer.echo(typer.style(f"✗  {exc}", fg=typer.colors.RED), err=True)
+        raise typer.Exit(code=1)
+
+    # Resolve output directory / file
+    out_dir: Optional[Path] = None
+    out_file: Optional[Path] = None
+    if output:
+        if str(output).endswith((".yaml", ".yml")):
+            out_file = output
+        else:
+            out_dir = output
+
+    imported: List[str] = []
+
+    try:
+        # --- Source import ---
+        if source_name or source_table:
+            contract = adapter.source_to_contract(source_name, source_table)
+            _write_or_print_contract(contract, out_file, out_dir, overwrite, dry_run, verbose)
+            imported.append(contract.dataset or "source")
+
+        # --- Single model ---
+        elif model:
+            contract = adapter.model_to_contract(model)
+            _write_or_print_contract(contract, out_file, out_dir, overwrite, dry_run, verbose)
+            imported.append(contract.dataset or model)
+
+        # --- All models ---
+        else:
+            models = adapter.list_models()
+            if not models:
+                typer.echo(typer.style("⚠  No models found in schema file.", fg=typer.colors.YELLOW))
+                raise typer.Exit(code=0)
+            for mname in models:
+                contract = adapter.model_to_contract(mname)
+                _write_or_print_contract(contract, None, out_dir, overwrite, dry_run, verbose)
+                imported.append(mname)
+
+    except Exception as exc:
+        typer.echo(typer.style(f"✗  {exc}", fg=typer.colors.RED), err=True)
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        raise typer.Exit(code=1)
+
+    if not dry_run:
+        typer.echo(
+            typer.style(
+                f"✔  Imported {len(imported)} contract(s): {', '.join(imported)}",
+                fg=typer.colors.GREEN,
+            )
+        )
+
+
+def _write_or_print_contract(
+    contract: Any,
+    out_file: Optional[Path],
+    out_dir: Optional[Path],
+    overwrite: bool,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """Write a DataContract to disk or print it."""
+    import yaml as _yaml
+
+    data = contract.model_dump(exclude_none=True, by_alias=True)
+    text = _yaml.dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
+
+    if dry_run:
+        typer.echo(f"# --- {contract.dataset} ---")
+        typer.echo(text)
+        return
+
+    dest: Optional[Path] = out_file
+    if dest is None and out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / f"{contract.dataset}.yaml"
+
+    if dest is None:
+        # No output path — print to stdout
+        typer.echo(text)
+        return
+
+    if dest.exists() and not overwrite:
+        typer.echo(
+            typer.style(f"  ↷  Skipped (already exists): {dest}", dim=True)
+        )
+        return
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(text, encoding="utf-8")
+    if verbose:
+        typer.echo(typer.style(f"  ✔  Written: {dest}", fg=typer.colors.CYAN))
+
+
 if __name__ == "__main__":
     app()
+

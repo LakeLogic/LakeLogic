@@ -23,17 +23,55 @@ class EngineAdapter(ABC):
     ERROR_COLUMN = "_lakelogic_errors"
     CATEGORY_COLUMN = "_lakelogic_categories"
 
-    def __init__(self, contract: DataContract):
+    def __init__(self, contract: DataContract, trace: Optional[List[Any]] = None):
         """
         Initialize adapter with a contract.
 
         Args:
             contract: DataContract instance.
+            trace: Optional list of trace steps to pre-populate.
         """
         self.contract = contract
         self.dataset_rule_results: List[Dict[str, Any]] = []
         self.schema_drift: Dict[str, List[str]] = {}
         self.engine_name: str = ""
+        self.trace: List[Any] = [] # Avoid circular import of TraceStep here if needed, or import at runtime
+
+    def _add_trace(self, step: str, input_rows: Optional[int] = None, output_rows: Optional[int] = None, duration_ms: Optional[float] = None, details: Optional[Dict[str, Any]] = None, status: str = "ok"):
+        import time
+        from lakelogic.core.models import TraceStep
+        self.trace.append(TraceStep(
+            step=step,
+            timestamp=time.time(),
+            input_rows=input_rows,
+            output_rows=output_rows,
+            duration_ms=duration_ms,
+            details=details or {},
+            status=status
+        ))
+
+    def _get_row_count(self, df: Any) -> Optional[int]:
+        """Helper to get row count safely across engines."""
+        if df is None: return 0
+        try:
+            # Polars LazyFrame — must collect to count
+            try:
+                import polars as pl
+                if isinstance(df, pl.LazyFrame):
+                    return df.select(pl.len()).collect().item()
+            except ImportError:
+                pass
+            if hasattr(df, "height"): return int(df.height)
+            if hasattr(df, "count"):
+                # DuckDB/Spark relation
+                try: 
+                    res = df.count()
+                    if hasattr(res, "fetchone"): return res.fetchone()[0]
+                    if isinstance(res, int): return res
+                except Exception: pass
+            return int(len(df))
+        except Exception:
+            return None
 
     @abstractmethod
     def execute(self, df: Any) -> Tuple[Any, Any]:
@@ -179,6 +217,8 @@ class EngineAdapter(ABC):
             cols.add(lineage.timestamp_column_name)
         if getattr(lineage, "capture_run_id", False):
             cols.add(lineage.run_id_column_name)
+        if getattr(lineage, "capture_contract_name", False):
+            cols.add(lineage.contract_name_column_name)
         if getattr(lineage, "capture_domain", False):
             cols.add(lineage.domain_column_name)
         if getattr(lineage, "capture_system", False):
@@ -404,7 +444,93 @@ class EngineAdapter(ABC):
 
         return " UNION ALL ".join(select_rows) if select_rows else None
 
+    def _build_bucket_sql(self, bucket: Any, source_table: str = "source") -> Optional[str]:
+        """
+        Build a CASE expression for bucket/bin transformations.
+
+        Uses only CASE/WHEN/THEN/ELSE -- valid on Polars, DuckDB, Spark, Snowflake, BigQuery.
+        """
+        if not bucket:
+            return None
+        field = getattr(bucket, "field", None)
+        source = getattr(bucket, "source", None)
+        bins = list(getattr(bucket, "bins", None) or [])
+        default = getattr(bucket, "default", None)
+        if not field or not source:
+            logger.warning("bucket transform skipped: 'field' and 'source' are required.")
+            return None
+        qsource = self._quote_ident(source)
+        when_clauses: List[str] = []
+        for b in bins:
+            conditions: List[str] = []
+            if getattr(b, "eq", None) is not None:
+                conditions.append(f"{qsource} = {self._format_literal(b.eq)}")
+            if getattr(b, "gte", None) is not None:
+                conditions.append(f"{qsource} >= {self._format_literal(b.gte)}")
+            if getattr(b, "gt", None) is not None:
+                conditions.append(f"{qsource} > {self._format_literal(b.gt)}")
+            if getattr(b, "lte", None) is not None:
+                conditions.append(f"{qsource} <= {self._format_literal(b.lte)}")
+            if getattr(b, "lt", None) is not None:
+                conditions.append(f"{qsource} < {self._format_literal(b.lt)}")
+            if not conditions:
+                continue
+            when_clauses.append(f"WHEN {' AND '.join(conditions)} THEN {self._format_literal(b.label)}")
+        if not when_clauses:
+            logger.warning(f"bucket '{field}': no valid bins defined.")
+            return None
+        else_clause = f"ELSE {self._format_literal(default)}" if default is not None else "ELSE NULL"
+        case_expr = f"CASE {' '.join(when_clauses)} {else_clause} END"
+        return f"SELECT *, ({case_expr}) AS {self._quote_ident(field)} FROM {source_table}"
+
+    def _build_date_diff_sql(self, date_diff: Any, source_table: str = "source") -> Optional[str]:
+        """
+        Build an engine-specific date-difference expression.
+
+        Dispatches on self.engine_name:
+          polars    -> integer division of duration (STRPTIME subtraction)
+          spark     -> DATEDIFF(to, from)              (reversed args, days only)
+          duckdb / snowflake / bigquery -> DATEDIFF('day', from, to)
+        """
+        if not date_diff:
+            return None
+        field = getattr(date_diff, "field", None)
+        from_col = getattr(date_diff, "from_col", None)
+        to_col = getattr(date_diff, "to_col", None)
+        unit = (getattr(date_diff, "unit", None) or "days").lower().rstrip("s")
+        if not field or not from_col or not to_col:
+            logger.warning("date_diff transform skipped: 'field', 'from_col', and 'to_col' are required.")
+            return None
+        qfrom = self._quote_ident(from_col)
+        qto = self._quote_ident(to_col)
+        engine = self._normalize_engine()
+        if engine == "spark":
+            diff_expr = f"DATEDIFF({qto}, {qfrom})"
+        elif engine == "polars":
+            # Polars SQL: subtracting two STRPTIME values yields duration[μs]
+            # but neither DATE_PART nor EXTRACT(EPOCH FROM ...) work on
+            # durations.  Instead, extract epoch seconds from each timestamp
+            # *individually* (which works) and subtract the two integers.
+            fmt = "%Y-%m-%d"
+            epoch_to   = f"EXTRACT(EPOCH FROM STRPTIME(SUBSTR({qto}, 1, 10), '{fmt}'))"
+            epoch_from = f"EXTRACT(EPOCH FROM STRPTIME(SUBSTR({qfrom}, 1, 10), '{fmt}'))"
+            seconds_expr = f"({epoch_to} - {epoch_from})"
+            if unit == "day":
+                diff_expr = f"CAST({seconds_expr} / 86400 AS INTEGER)"
+            elif unit == "hour":
+                diff_expr = f"CAST({seconds_expr} / 3600 AS INTEGER)"
+            elif unit == "minute":
+                diff_expr = f"CAST({seconds_expr} / 60 AS INTEGER)"
+            elif unit == "second":
+                diff_expr = f"CAST({seconds_expr} AS INTEGER)"
+            else:
+                diff_expr = f"CAST({seconds_expr} / 86400 AS INTEGER)"
+        else:
+            diff_expr = f"DATEDIFF('{unit}', {qfrom}, {qto})"
+        return f"SELECT *, ({diff_expr}) AS {self._quote_ident(field)} FROM {source_table}"
+
     def _expand_row_rule(self, spec: Any) -> Optional[Any]:
+
         """
         Expand structured row rule specs into QualityRule objects.
 

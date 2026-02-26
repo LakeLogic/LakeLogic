@@ -1,9 +1,6 @@
+
 version: 1.0.0
 dataset: users_silver
-
-author: LakeLogic
-
-description: "Soft delete pattern with standardized metadata columns"
 
 source:
   type: table
@@ -14,7 +11,7 @@ primary_key: ["user_id"]
 
 materialization:
   strategy: merge
-  path: "./data/users_silver/"
+  target_path: "./data/users_silver/"
   format: parquet
   soft_delete_column: "_lakelogic_is_deleted"
   soft_delete_value: true

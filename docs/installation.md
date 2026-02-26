@@ -108,3 +108,45 @@ pip install -e . --no-warn-script-location --no-deps
 
 * **Python**: 3.9 or higher.
 * **OS**: Windows, macOS, or Linux.
+
+---
+
+## Windows Developer Notes
+
+### Python 3.13 Venv Launcher
+
+On some Windows machines with Python 3.13, creating a virtual environment with
+`python -m venv` may log:
+
+```text
+Unable to copy 'C:\Program Files\Python313\Lib\venv\scripts\nt\venvlauncher.exe' to '.venv\Scripts\python.exe'
+```
+
+This can cause `pip` to install native extension wheels for the wrong Python
+ABI (e.g., `cp312` wheels into a `cp313` environment).
+
+**Recommended fix:** use the `py` launcher explicitly, which resolves the stub
+correctly:
+
+```cmd
+py -3.13 -m venv .venv_lakelogic
+.venv_lakelogic\Scripts\pip install -e .
+```
+
+### Making `lakelogic` Available Bare
+
+After `pip install lakelogic` (outside a venv), the CLI scripts land in the
+Python user scripts directory but that directory may not be on `PATH`. Add it
+once:
+
+```cmd
+setx PATH "%USERPROFILE%\AppData\Roaming\Python\Python313\Scripts;%PATH%"
+```
+
+Open a new terminal — `lakelogic` will then be available without a full path.
+
+### Console Encoding
+
+LakeLogic automatically reconfigures `stdout`/`stderr` to UTF-8 on Windows at
+import time. You do **not** need to set `PYTHONIOENCODING=utf-8` in your shell or
+CI scripts. This is handled inside the package itself.

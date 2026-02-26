@@ -63,207 +63,12 @@ class ContractLoader:
         data = yaml.load(path.read_text(encoding="utf-8"), Loader=self._loader)
         contract = DataContract(**data)
         contract._base_path = path.parent
+        contract._contract_path = path
         return contract
 
 
-class RunLogReader:
-    """Read last-success timestamps from configured run log tables."""
-
-    def __init__(self, engine: str) -> None:
-        self.engine = engine
-
-    def last_success(self, contract: DataContract) -> Optional[datetime]:
-        """
-        Return the last successful run timestamp for a contract from run log tables.
-
-        Args:
-            contract: DataContract instance.
-
-        Returns:
-            Timestamp of last run or None if not found.
-        """
-        timestamp, _ = self.last_success_info(contract)
-        return timestamp
-
-    def last_success_info(self, contract: DataContract) -> Tuple[Optional[datetime], Optional[str]]:
-        """
-        Return last-success timestamp with a reason code when missing.
-
-        Args:
-            contract: DataContract instance.
-
-        Returns:
-            Tuple of (timestamp, reason).
-        """
-        metadata = contract.metadata or {}
-        table_name = metadata.get("run_log_table")
-        if not table_name:
-            return None, "no_run_log_table"
-
-        backend = (metadata.get("run_log_backend") or ("spark" if self.engine == "spark" else "duckdb")).lower()
-
-        if backend == "spark":
-            return self._read_spark(table_name, contract)
-        if backend == "duckdb":
-            return self._read_duckdb(table_name, contract, metadata)
-        if backend == "sqlite":
-            return self._read_sqlite(table_name, contract, metadata)
-        return None, "unsupported_backend"
-
-    def _contract_key(self, contract: DataContract) -> str:
-        """
-        Resolve the run-log contract key.
-
-        Args:
-            contract: DataContract instance.
-
-        Returns:
-            Identifier used in run log tables.
-        """
-        if contract.info and contract.info.title:
-            return contract.info.title
-        if contract.dataset:
-            return contract.dataset
-        return "unknown"
-
-    def _read_spark(self, table_name: str, contract: DataContract) -> Tuple[Optional[datetime], Optional[str]]:
-        """
-        Read last-success timestamp from a Spark run log table.
-
-        Args:
-            table_name: Spark table name.
-            contract: DataContract instance.
-
-        Returns:
-            Timestamp or None.
-        """
-        try:
-            from pyspark.sql import SparkSession
-        except Exception:
-            return None, "spark_unavailable"
-        spark = SparkSession.builder.getOrCreate()
-        if not spark.catalog.tableExists(table_name):
-            return None, "run_log_table_missing"
-        key = self._contract_key(contract)
-        df = spark.sql(f"SELECT MAX(timestamp) AS last_ts FROM {table_name} WHERE contract = '{key}'")
-        rows = df.collect()
-        if not rows:
-            return None, "run_log_entry_missing"
-        value = rows[0]["last_ts"]
-        if not value:
-            return None, "run_log_entry_missing"
-        return self._parse_timestamp(value), None
-
-    def _read_duckdb(self, table_name: str, contract: DataContract, metadata: Dict[str, str]) -> Tuple[Optional[datetime], Optional[str]]:
-        """
-        Read last-success timestamp from a DuckDB run log table.
-
-        Args:
-            table_name: Table name.
-            contract: DataContract instance.
-            metadata: Contract metadata.
-
-        Returns:
-            Timestamp or None.
-        """
-        try:
-            import duckdb
-        except Exception:
-            return None, "duckdb_unavailable"
-
-        base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
-        db_path = self._resolve_path(db_path, base_path)
-        if not db_path.exists():
-            return None, "run_log_db_missing"
-
-        key = self._contract_key(contract)
-        con = duckdb.connect(database=str(db_path))
-        try:
-            try:
-                result = con.execute(
-                    f"SELECT MAX(timestamp) FROM {table_name} WHERE contract = ?",
-                    [key],
-                ).fetchone()
-            except Exception:
-                return None, "run_log_table_missing"
-        finally:
-            con.close()
-        if not result or not result[0]:
-            return None, "run_log_entry_missing"
-        return self._parse_timestamp(result[0]), None
-
-    def _read_sqlite(self, table_name: str, contract: DataContract, metadata: Dict[str, str]) -> Tuple[Optional[datetime], Optional[str]]:
-        """
-        Read last-success timestamp from a SQLite run log table.
-
-        Args:
-            table_name: Table name.
-            contract: DataContract instance.
-            metadata: Contract metadata.
-
-        Returns:
-            Timestamp or None.
-        """
-        import sqlite3
-
-        base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
-        db_path = self._resolve_path(db_path, base_path)
-        if not db_path.exists():
-            return None, "run_log_db_missing"
-
-        key = self._contract_key(contract)
-        conn = sqlite3.connect(str(db_path))
-        try:
-            try:
-                cur = conn.execute(
-                    f"SELECT MAX(timestamp) FROM {table_name} WHERE contract = ?",
-                    (key,),
-                )
-                result = cur.fetchone()
-            except Exception:
-                return None, "run_log_table_missing"
-        finally:
-            conn.close()
-        if not result or not result[0]:
-            return None, "run_log_entry_missing"
-        return self._parse_timestamp(result[0]), None
-
-    @staticmethod
-    def _parse_timestamp(value) -> Optional[datetime]:
-        """
-        Parse a timestamp value into a datetime.
-
-        Args:
-            value: Timestamp-like value.
-
-        Returns:
-            datetime or None.
-        """
-        if isinstance(value, datetime):
-            return value
-        try:
-            return datetime.fromisoformat(str(value))
-        except Exception:
-            return None
-
-    @staticmethod
-    def _resolve_path(raw: str, base: Optional[Path]) -> Path:
-        """
-        Resolve a raw path against a base directory.
-
-        Args:
-            raw: Raw path string.
-            base: Base directory.
-
-        Returns:
-            Resolved Path.
-        """
-        path = Path(raw)
-        if not path.is_absolute() and base:
-            path = base / path
-        return path
+# Backwards-compatible re-export: RunLogReader was extracted to its own module
+from lakelogic.cli.run_log_reader import RunLogReader  # noqa: F401
 
 
 class PipelineDriver:
@@ -646,8 +451,10 @@ class PipelineDriver:
                 effective_window = Window(None, None, "full")
 
         if not source_cfg:
-            if contract.server and contract.server.path:
-                return [str(contract.server.path)], effective_window, window_reason
+            # Use environment-aware server path (respects LAKELOGIC_ENV / environments block)
+            eff_server = contract.effective_server()
+            if eff_server and eff_server.path:
+                return [str(eff_server.path)], effective_window, window_reason
             return [], effective_window, window_reason
 
         raw_path = source_cfg.path
@@ -892,7 +699,8 @@ class PipelineDriver:
         delay = self.retry_backoff
         while True:
             try:
-                return processor.run_source(source)
+                result = processor.run_source(source)
+                return result.good, result.bad
             except Exception as exc:
                 attempt += 1
                 if attempt > self.retries:
@@ -1169,733 +977,70 @@ class PipelineDriver:
             metrics[name] = int(metrics.get(name, 0)) + value
 
     def _finalize_summary(self) -> None:
-        """
-        Finalize and optionally persist the run summary.
-        """
-        with self.summary_lock:
-            self.summary["finished_at"] = datetime.now(timezone.utc).isoformat()
-            try:
-                start_dt = datetime.fromisoformat(str(self.summary["started_at"]))
-                end_dt = datetime.fromisoformat(str(self.summary["finished_at"]))
-                self.summary["duration_seconds"] = max(0.0, (end_dt - start_dt).total_seconds())
-            except Exception:
-                self.summary["duration_seconds"] = None
-        if self.summary_path:
-            self.summary_path.parent.mkdir(parents=True, exist_ok=True)
-            self.summary_path.write_text(json.dumps(self.summary, indent=2), encoding="utf-8")
-            logger.info(f"Wrote run summary to {self.summary_path}")
+        """Finalize and optionally persist the run summary."""
+        from lakelogic.cli.observability import finalize_summary
+        finalize_summary(self.summary, self.summary_path)
         self._write_summary_table()
         self._emit_metrics()
         self._stop_prometheus_server()
 
     def _write_summary_table(self) -> None:
-        """
-        Write a pipeline summary row to a table backend.
-        """
-        if not self.summary_table:
-            return
-
-        backend = (self.summary_backend or ("spark" if self.engine == "spark" else "duckdb")).lower()
-        record = self._flatten_summary()
-
-        if backend == "spark":
-            try:
-                from pyspark.sql import SparkSession
-            except Exception as exc:
-                logger.warning(f"Summary table backend 'spark' unavailable: {exc}")
-                return
-
-            spark = SparkSession.builder.getOrCreate()
-            table_name = self.summary_table
-            parts = table_name.split(".")
-            if len(parts) == 2:
-                spark.sql(f"CREATE DATABASE IF NOT EXISTS {parts[0]}")
-            elif len(parts) >= 3:
-                schema = ".".join(parts[:-1])
-                spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-
-            df = spark.createDataFrame([record])
-            if spark.catalog.tableExists(table_name):
-                try:
-                    existing_cols = set(spark.table(table_name).columns)
-                    if "summary_json" not in existing_cols:
-                        spark.sql(f"ALTER TABLE {table_name} ADD COLUMNS (summary_json STRING)")
-                except Exception as exc:
-                    logger.warning(f"Failed to align summary table schema for {table_name}: {exc}")
-
-                if self.summary_merge_on_run_id:
-                    view_name = f"lakelogic_summary_updates_{uuid4().hex}"
-                    df.createOrReplaceTempView(view_name)
-                    try:
-                        spark.sql(f"""
-                            MERGE INTO {table_name} AS target
-                            USING {view_name} AS source
-                            ON target.run_id = source.run_id
-                            WHEN MATCHED THEN UPDATE SET *
-                            WHEN NOT MATCHED THEN INSERT *
-                        """)
-                    except Exception as exc:
-                        logger.warning(f"Summary table merge failed for {table_name}: {exc}")
-                        return
-                    finally:
-                        try:
-                            spark.catalog.dropTempView(view_name)
-                        except Exception:
-                            pass
-                else:
-                    fmt = self.summary_table_format or "delta"
-                    df.write.mode("append").format(fmt).saveAsTable(table_name)
-            else:
-                fmt = self.summary_table_format or "delta"
-                df.write.mode("overwrite").format(fmt).saveAsTable(table_name)
-            logger.info(f"Wrote pipeline summary to Spark table {table_name}")
-            return
-
-        if backend == "duckdb":
-            try:
-                import duckdb
-            except Exception as exc:
-                logger.warning(f"Summary table backend 'duckdb' unavailable: {exc}")
-                return
-
-            db_path = Path(self.summary_database or "logs/lakelogic_pipeline_runs.duckdb")
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            table_name = self.summary_table
-            con = duckdb.connect(database=str(db_path))
-            try:
-                con.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {table_name} (
-                        run_id VARCHAR,
-                        started_at VARCHAR,
-                        finished_at VARCHAR,
-                        duration_seconds DOUBLE,
-                        engine VARCHAR,
-                        total_contracts BIGINT,
-                        successful BIGINT,
-                        failed BIGINT,
-                        skipped_missing_upstream BIGINT,
-                        skipped_no_sources BIGINT,
-                        full_loads BIGINT,
-                        full_loads_due_to_missing_logs BIGINT,
-                        missing_upstreams BIGINT,
-                        summary_json VARCHAR
-                    )
-                """)
-                con.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS summary_json VARCHAR")
-                con.execute(
-                    f"""
-                    INSERT INTO {table_name} (
-                        run_id,
-                        started_at,
-                        finished_at,
-                        duration_seconds,
-                        engine,
-                        total_contracts,
-                        successful,
-                        failed,
-                        skipped_missing_upstream,
-                        skipped_no_sources,
-                        full_loads,
-                        full_loads_due_to_missing_logs,
-                        missing_upstreams,
-                        summary_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [
-                        record["run_id"],
-                        record["started_at"],
-                        record["finished_at"],
-                        record["duration_seconds"],
-                        record["engine"],
-                        record["total_contracts"],
-                        record["successful"],
-                        record["failed"],
-                        record["skipped_missing_upstream"],
-                        record["skipped_no_sources"],
-                        record["full_loads"],
-                        record["full_loads_due_to_missing_logs"],
-                        record["missing_upstreams"],
-                        record["summary_json"],
-                    ],
-                )
-            finally:
-                con.close()
-            logger.info(f"Wrote pipeline summary to DuckDB table {table_name} ({db_path})")
-            return
-
-        if backend == "sqlite":
-            import sqlite3
-
-            db_path = Path(self.summary_database or "logs/lakelogic_pipeline_runs.sqlite")
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            table_name = self.summary_table.replace(".", "_")
-            if table_name != self.summary_table:
-                logger.warning(f"SQLite does not support schemas. Using table name '{table_name}' instead of '{self.summary_table}'.")
-            con = sqlite3.connect(str(db_path))
-            try:
-                con.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {table_name} (
-                        run_id TEXT,
-                        started_at TEXT,
-                        finished_at TEXT,
-                        duration_seconds REAL,
-                        engine TEXT,
-                        total_contracts INTEGER,
-                        successful INTEGER,
-                        failed INTEGER,
-                        skipped_missing_upstream INTEGER,
-                        skipped_no_sources INTEGER,
-                        full_loads INTEGER,
-                        full_loads_due_to_missing_logs INTEGER,
-                        missing_upstreams INTEGER,
-                        summary_json TEXT
-                    )
-                """)
-                try:
-                    cols = [row[1] for row in con.execute(f"PRAGMA table_info({table_name})").fetchall()]
-                    if "summary_json" not in cols:
-                        con.execute(f"ALTER TABLE {table_name} ADD COLUMN summary_json TEXT")
-                except Exception:
-                    pass
-                con.execute(
-                    f"""
-                    INSERT INTO {table_name} (
-                        run_id,
-                        started_at,
-                        finished_at,
-                        duration_seconds,
-                        engine,
-                        total_contracts,
-                        successful,
-                        failed,
-                        skipped_missing_upstream,
-                        skipped_no_sources,
-                        full_loads,
-                        full_loads_due_to_missing_logs,
-                        missing_upstreams,
-                        summary_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [
-                        record["run_id"],
-                        record["started_at"],
-                        record["finished_at"],
-                        record["duration_seconds"],
-                        record["engine"],
-                        record["total_contracts"],
-                        record["successful"],
-                        record["failed"],
-                        record["skipped_missing_upstream"],
-                        record["skipped_no_sources"],
-                        record["full_loads"],
-                        record["full_loads_due_to_missing_logs"],
-                        record["missing_upstreams"],
-                        record["summary_json"],
-                    ],
-                )
-                con.commit()
-            finally:
-                con.close()
-            logger.info(f"Wrote pipeline summary to SQLite table {table_name} ({db_path})")
-            return
-
-        if backend == "snowflake":
-            try:
-                import snowflake.connector
-                from snowflake.connector.pandas_tools import write_pandas
-            except Exception as exc:
-                logger.warning(f"Summary table backend 'snowflake' unavailable: {exc}")
-                return
-
-            params = {
-                "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-                "user": os.getenv("SNOWFLAKE_USER"),
-                "password": os.getenv("SNOWFLAKE_PASSWORD"),
-                "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-                "database": os.getenv("SNOWFLAKE_DATABASE"),
-                "schema": os.getenv("SNOWFLAKE_SCHEMA"),
-                "role": os.getenv("SNOWFLAKE_ROLE"),
-            }
-            missing = [k for k, v in params.items() if k in ["account", "user", "password"] and not v]
-            if missing:
-                logger.warning(f"Snowflake summary write missing required fields: {', '.join(missing)}")
-                return
-
-            table_name = self.summary_table
-            parts = table_name.split(".")
-            if len(parts) >= 3:
-                params["database"] = parts[-3]
-                params["schema"] = parts[-2]
-                table_only = parts[-1]
-            elif len(parts) == 2:
-                params["schema"] = parts[-2]
-                table_only = parts[-1]
-            else:
-                table_only = table_name
-
-            try:
-                import pandas as pd
-            except Exception as exc:
-                logger.warning(f"Snowflake summary write requires pandas: {exc}")
-                return
-
-            pdf = pd.DataFrame([record])
-            conn = snowflake.connector.connect(**{k: v for k, v in params.items() if v})
-            try:
-                ddl_columns = [
-                    ("run_id", "STRING"),
-                    ("started_at", "STRING"),
-                    ("finished_at", "STRING"),
-                    ("duration_seconds", "FLOAT"),
-                    ("engine", "STRING"),
-                    ("total_contracts", "NUMBER"),
-                    ("successful", "NUMBER"),
-                    ("failed", "NUMBER"),
-                    ("skipped_missing_upstream", "NUMBER"),
-                    ("skipped_no_sources", "NUMBER"),
-                    ("full_loads", "NUMBER"),
-                    ("full_loads_due_to_missing_logs", "NUMBER"),
-                    ("missing_upstreams", "NUMBER"),
-                    ("summary_json", "VARIANT"),
-                ]
-                column_ddl = ", ".join(f"{name} {dtype}" for name, dtype in ddl_columns)
-                conn.cursor().execute(f"CREATE TABLE IF NOT EXISTS {table_only} ({column_ddl})")
-                for name, dtype in ddl_columns:
-                    conn.cursor().execute(f"ALTER TABLE {table_only} ADD COLUMN IF NOT EXISTS {name} {dtype}")
-                write_pandas(
-                    conn,
-                    pdf,
-                    table_name=table_only,
-                    database=params.get("database"),
-                    schema=params.get("schema"),
-                    auto_create_table=True,
-                    overwrite=False,
-                )
-            finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            logger.info(f"Wrote pipeline summary to Snowflake table {table_only}")
-            return
-
-        if backend == "bigquery":
-            try:
-                from google.cloud import bigquery  # type: ignore
-            except Exception as exc:
-                logger.warning(f"Summary table backend 'bigquery' unavailable: {exc}")
-                return
-
-            table_name = self.summary_table
-            parts = table_name.split(".")
-            project = os.getenv("BIGQUERY_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
-            if len(parts) == 3:
-                project = parts[0]
-                dataset = parts[1]
-                table_only = parts[2]
-            elif len(parts) == 2:
-                dataset = parts[0]
-                table_only = parts[1]
-            else:
-                logger.warning("BigQuery summary table name must be dataset.table or project.dataset.table")
-                return
-
-            if not project:
-                logger.warning("BigQuery summary write missing project (bigquery_project or GOOGLE_CLOUD_PROJECT).")
-                return
-
-            try:
-                import pandas as pd
-            except Exception as exc:
-                logger.warning(f"BigQuery summary write requires pandas: {exc}")
-                return
-
-            client = bigquery.Client(project=project)
-            pdf = pd.DataFrame([record])
-            table_id = f"{project}.{dataset}.{table_only}"
-            desired_schema = [
-                bigquery.SchemaField("run_id", "STRING"),
-                bigquery.SchemaField("started_at", "STRING"),
-                bigquery.SchemaField("finished_at", "STRING"),
-                bigquery.SchemaField("duration_seconds", "FLOAT"),
-                bigquery.SchemaField("engine", "STRING"),
-                bigquery.SchemaField("total_contracts", "INTEGER"),
-                bigquery.SchemaField("successful", "INTEGER"),
-                bigquery.SchemaField("failed", "INTEGER"),
-                bigquery.SchemaField("skipped_missing_upstream", "INTEGER"),
-                bigquery.SchemaField("skipped_no_sources", "INTEGER"),
-                bigquery.SchemaField("full_loads", "INTEGER"),
-                bigquery.SchemaField("full_loads_due_to_missing_logs", "INTEGER"),
-                bigquery.SchemaField("missing_upstreams", "INTEGER"),
-                bigquery.SchemaField("summary_json", "STRING"),
-            ]
-            try:
-                table = client.get_table(table_id)
-                existing = {field.name for field in table.schema}
-                updates = [field for field in desired_schema if field.name not in existing]
-                if updates:
-                    table.schema = list(table.schema) + updates
-                    client.update_table(table, ["schema"])
-            except Exception:
-                table = bigquery.Table(table_id, schema=desired_schema)
-                client.create_table(table, exists_ok=True)
-
-            job_config = bigquery.LoadJobConfig(
-                write_disposition="WRITE_APPEND",
-                create_disposition="CREATE_IF_NEEDED",
-                schema=desired_schema,
-            )
-            job = client.load_table_from_dataframe(pdf, table_id, job_config=job_config)
-            job.result()
-            logger.info(f"Wrote pipeline summary to BigQuery table {table_id}")
-            return
-
-        logger.warning(f"Unsupported summary backend: {backend}")
+        """Write a pipeline summary row to a table backend."""
+        from lakelogic.cli.observability import write_summary_table
+        write_summary_table(
+            self.summary, self.summary_table, self.summary_backend,
+            self.summary_database, self.summary_table_format,
+            self.summary_merge_on_run_id, self.engine,
+        )
 
     def _flatten_summary(self) -> Dict[str, object]:
-        """
-        Flatten summary data into a table-oriented record.
-        """
-        metrics = self.summary.get("metrics", {})
-        return {
-            "run_id": self.summary.get("run_id"),
-            "started_at": self.summary.get("started_at"),
-            "finished_at": self.summary.get("finished_at"),
-            "duration_seconds": self.summary.get("duration_seconds"),
-            "engine": self.summary.get("engine"),
-            "total_contracts": metrics.get("total_contracts"),
-            "successful": metrics.get("successful"),
-            "failed": metrics.get("failed"),
-            "skipped_missing_upstream": metrics.get("skipped_missing_upstream"),
-            "skipped_no_sources": metrics.get("skipped_no_sources"),
-            "full_loads": metrics.get("full_loads"),
-            "full_loads_due_to_missing_logs": metrics.get("full_loads_due_to_missing_logs"),
-            "missing_upstreams": metrics.get("missing_upstreams"),
-            "summary_json": json.dumps(self.summary, default=str),
-        }
+        """Flatten summary data into a table-oriented record."""
+        from lakelogic.cli.observability import flatten_summary
+        return flatten_summary(self.summary)
 
     def _emit_metrics(self) -> None:
-        """
-        Emit metrics to a JSON file or StatsD endpoint.
-        """
-        record = self._flatten_summary()
-        metrics = {
-            "run_id": record.get("run_id"),
-            "engine": record.get("engine"),
-            "duration_seconds": record.get("duration_seconds"),
-            "total_contracts": record.get("total_contracts"),
-            "successful": record.get("successful"),
-            "failed": record.get("failed"),
-            "skipped_missing_upstream": record.get("skipped_missing_upstream"),
-            "skipped_no_sources": record.get("skipped_no_sources"),
-            "full_loads": record.get("full_loads"),
-            "full_loads_due_to_missing_logs": record.get("full_loads_due_to_missing_logs"),
-            "missing_upstreams": record.get("missing_upstreams"),
-        }
-        self.metrics_snapshot = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "tags": self.metrics_tags,
-            "metrics": metrics,
-        }
-
-        if self.metrics_path:
-            self.metrics_path.parent.mkdir(parents=True, exist_ok=True)
-            self.metrics_path.write_text(json.dumps(self.metrics_snapshot, indent=2), encoding="utf-8")
-            logger.info(f"Wrote metrics payload to {self.metrics_path}")
-
-        backend = (self.metrics_backend or "").lower()
-        if backend == "prometheus":
-            return
-        if backend != "statsd":
-            return
-
-        host = self.metrics_host or "127.0.0.1"
-        port = int(self.metrics_port or 8125)
-        prefix = self.metrics_prefix or "lakelogic"
-
-        tag_str = ""
-        if self.metrics_tags:
-            tag_str = "|#" + ",".join(f"{k}:{v}" for k, v in self.metrics_tags.items())
-
-        lines = []
-        for name, value in metrics.items():
-            if value is None:
-                continue
-            metric_name = f"{prefix}.{name}"
-            lines.append(f"{metric_name}:{value}|g{tag_str}")
-        if not lines:
-            return
-
-        message = "\n".join(lines).encode("utf-8")
-        try:
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.sendto(message, (host, port))
-            sock.close()
-            logger.info(f"Emitted metrics to StatsD at {host}:{port}")
-        except Exception as exc:
-            logger.warning(f"Failed to emit metrics to StatsD: {exc}")
+        """Emit metrics to a JSON file or StatsD endpoint."""
+        from lakelogic.cli.observability import emit_metrics
+        self.metrics_snapshot = emit_metrics(
+            self.summary, self.metrics_path, self.metrics_backend,
+            self.metrics_host, self.metrics_port, self.metrics_prefix,
+            self.metrics_tags,
+        )
 
     def _format_prometheus(self) -> str:
-        """
-        Format metrics in Prometheus exposition format.
-        """
-        snapshot = self.metrics_snapshot or {}
-        metrics = snapshot.get("metrics") or {}
-        tags = snapshot.get("tags") or {}
-
-        def _labels(extra: Optional[Dict[str, str]] = None) -> str:
-            label_items = dict(tags)
-            if extra:
-                label_items.update(extra)
-            if not label_items:
-                return ""
-            pairs = ",".join(f'{k}="{v}"' for k, v in label_items.items())
-            return "{" + pairs + "}"
-
-        lines = []
-        for key, value in metrics.items():
-            if value is None:
-                continue
-            name = f"{self.metrics_prefix}_{key}"
-            lines.append(f"{name}{_labels() } {value}")
-        return "\n".join(lines) + "\n"
+        """Format metrics in Prometheus exposition format."""
+        from lakelogic.cli.observability import format_prometheus
+        return format_prometheus(self.metrics_snapshot, self.metrics_prefix or "lakelogic")
 
     def _start_prometheus_server(self) -> None:
-        """
-        Start a lightweight Prometheus /metrics HTTP server.
-        """
-        host = self.metrics_host or "0.0.0.0"
-        port = int(self.metrics_port or 9100)
-
-        driver_ref = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802
-                if self.path not in ["/metrics", "/metrics/"]:
-                    self.send_response(404)
-                    self.end_headers()
-                    return
-                payload = driver_ref._format_prometheus().encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; version=0.0.4")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-            def log_message(self, format, *args):  # noqa: A003
-                return
-
-        try:
-            server = HTTPServer((host, port), Handler)
-        except Exception as exc:
-            logger.warning(f"Failed to start Prometheus server on {host}:{port}: {exc}")
-            return
-
+        """Start a lightweight Prometheus /metrics HTTP server."""
+        from lakelogic.cli.observability import start_prometheus_server
+        server, thread = start_prometheus_server(
+            self.metrics_host, self.metrics_port,
+            lambda: self.metrics_snapshot, self.metrics_prefix or "lakelogic",
+        )
         self.prometheus_server = server
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
         self.prometheus_thread = thread
-        logger.info(f"Prometheus metrics server running at http://{host}:{port}/metrics")
 
     def _stop_prometheus_server(self) -> None:
-        """
-        Stop the Prometheus HTTP server if running.
-        """
-        if not self.prometheus_server:
-            return
-        try:
-            self.prometheus_server.shutdown()
-            self.prometheus_server.server_close()
-        except Exception:
-            pass
+        """Stop the Prometheus HTTP server if running."""
+        from lakelogic.cli.observability import stop_prometheus_server
+        stop_prometheus_server(self.prometheus_server, self.prometheus_thread)
         self.prometheus_server = None
         self.prometheus_thread = None
 
 
-def parse_layers(raw: str, strict: bool = False) -> List[str]:
-    """
-    Parse a comma-separated layer list.
+# Backwards-compatible re-exports: parser functions extracted to cli_parsers.py
+from lakelogic.cli.cli_parsers import (  # noqa: F401, E402
+    parse_layers,
+    parse_entities,
+    parse_contracts,
+    parse_metrics_tags,
+    parse_overrides,
+    build_backfill_windows,
+    parse_window,
+)
 
-    Args:
-        raw: Raw layer string.
-        strict: Whether to enforce a strict allowed ordering.
-
-    Returns:
-        List of layers.
-    """
-    if not raw:
-        return ["bronze", "silver", "gold"]
-    raw_layers = [layer.strip() for layer in raw.split(",") if layer.strip()]
-    alias_map = {
-        "ref": "reference",
-        "refs": "reference",
-    }
-    layers = [alias_map.get(layer, layer) for layer in raw_layers]
-    if strict:
-        valid_orders = {
-            ("bronze",),
-            ("bronze", "silver"),
-            ("silver", "gold"),
-            ("gold",),
-            ("reference", "bronze"),
-            ("reference", "bronze", "silver", "gold"),
-            ("reference",),
-        }
-        if tuple(layers) not in valid_orders:
-            raise ValueError(
-                "Invalid layer order. Valid orders are: "
-                "bronze | bronze,silver | silver,gold | gold | reference,bronze | "
-                "reference | reference,bronze,silver,gold."
-            )
-    return layers
-
-
-def parse_entities(raw: Optional[str]) -> Optional[set[str]]:
-    """
-    Parse comma-separated entity filters.
-
-    Args:
-        raw: Raw entity string.
-
-    Returns:
-        Set of entity names or None.
-    """
-    if not raw:
-        return None
-    return {item.strip() for item in raw.split(",") if item.strip()}
-
-
-def parse_contracts(raw: Optional[str]) -> Optional[set[Path]]:
-    """
-    Parse comma-separated contract paths into absolute paths.
-
-    Args:
-        raw: Raw contract path string.
-
-    Returns:
-        Set of resolved Paths or None.
-    """
-    if not raw:
-        return None
-    return {Path(item.strip()).resolve() for item in raw.split(",") if item.strip()}
-
-
-def parse_metrics_tags(raw: Optional[str]) -> Dict[str, str]:
-    """
-    Parse comma-separated key=value tags for metrics.
-
-    Args:
-        raw: Raw tag string.
-
-    Returns:
-        Dict of tag keys to values.
-    """
-    tags: Dict[str, str] = {}
-    if not raw:
-        return tags
-    items = [item.strip() for item in raw.split(",") if item.strip()]
-    for item in items:
-        if "=" in item:
-            key, value = item.split("=", 1)
-            tags[key.strip()] = value.strip()
-    return tags
-
-
-def parse_overrides(values: Optional[List[str]]) -> Dict[str, Any]:
-    """
-    Parse --set key=value overrides into a dict.
-    """
-    overrides: Dict[str, Any] = {}
-    if not values:
-        return overrides
-    for item in values:
-        if "=" not in item:
-            continue
-        key, value = item.split("=", 1)
-        key = key.strip()
-        raw = value.strip()
-        try:
-            parsed = yaml.safe_load(raw)
-        except Exception:
-            parsed = raw
-        overrides[key] = parsed
-    return overrides
-
-
-def build_backfill_windows(start: str, end: str, granularity: str) -> List[Window]:
-    """
-    Build a list of windows for backfill execution.
-    """
-    start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    if end_dt < start_dt:
-        raise ValueError("Backfill end date must be on or after start date.")
-
-    step = timedelta(days=1)
-    if granularity == "week":
-        step = timedelta(days=7)
-
-    windows: List[Window] = []
-    cursor = start_dt
-    while cursor <= end_dt:
-        window_end = cursor + step
-        windows.append(Window(cursor, window_end, "backfill"))
-        cursor = window_end
-    return windows
-
-
-def parse_window(
-    raw: str,
-    window_start_date: Optional[str],
-    window_end_date: Optional[str],
-    reprocess_date: Optional[str],
-    reprocess_start_date: Optional[str],
-    reprocess_end_date: Optional[str],
-) -> Tuple[Window, bool]:
-    """
-    Parse window and reprocess parameters.
-
-    Args:
-        raw: Window selector.
-        window_start_date: Optional start date string.
-        window_end_date: Optional end date string.
-        reprocess_date: Optional date string.
-        reprocess_start_date: Optional start date string.
-        reprocess_end_date: Optional end date string.
-
-    Returns:
-        Tuple of (Window, reprocess flag).
-    """
-    if reprocess_date or reprocess_start_date or reprocess_end_date:
-        if reprocess_date:
-            start = datetime.strptime(reprocess_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            end = start + timedelta(days=1)
-        else:
-            if not reprocess_start_date or not reprocess_end_date:
-                raise ValueError("Both --reprocess-start-date and --reprocess-end-date are required.")
-            start = datetime.strptime(reprocess_start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            end = datetime.strptime(reprocess_end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
-            if end <= start:
-                raise ValueError("Reprocess end date must be on or after start date.")
-        return Window(start, end, "reprocess"), True
-
-    if raw == "none":
-        return Window(None, None, "full"), False
-    if raw == "yesterday":
-        now = datetime.now(timezone.utc)
-        start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = start + timedelta(days=1)
-        return Window(start, end, "yesterday"), False
-    if raw == "range":
-        if not window_start_date or not window_end_date:
-            raise ValueError("Both --window-start-date and --window-end-date are required for window=range.")
-        start = datetime.strptime(window_start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        end = datetime.strptime(window_end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
-        if end <= start:
-            raise ValueError("Window end date must be on or after start date.")
-        return Window(start, end, "range"), False
-    return Window(None, None, "last_success"), False
 
 
 def main() -> None:

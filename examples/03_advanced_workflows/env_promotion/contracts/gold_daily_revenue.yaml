@@ -1,0 +1,84 @@
+version: "1.0.0"
+upstream: ["silver_orders"]
+
+info:
+  title: "Daily Revenue KPI (Gold)"
+  version: "1.0.0"
+  description: |
+    Aggregated daily revenue by country. Consumed by the executive dashboard
+    and finance reporting. Rebuilt on every run (overwrite strategy).
+  owner: "Analytics Engineering"
+  target_layer: "gold"
+  status: active
+
+# Production Gold sink
+server:
+  type: adls
+  format: parquet
+  path: "abfss://gold@myaccount.dfs.core.windows.net/prod/daily_revenue/"
+  mode: validate
+
+environments:
+  dev:
+    path: "./data/gold_daily_revenue.parquet"
+  test:
+    path: "abfss://gold@myaccount.dfs.core.windows.net/test/daily_revenue/"
+
+source:
+  type: landing
+  path: "./data/silver_orders.parquet"
+
+dataset: gold_daily_revenue
+primary_key: ["order_date", "country", "status"]
+
+model:
+  fields:
+    - name: order_date
+      type: date
+    - name: country
+      type: string
+    - name: status
+      type: string
+    - name: orders
+      type: integer
+      description: "Count of orders in this group"
+    - name: total_revenue
+      type: double
+      description: "Sum of revenue for this group"
+    - name: avg_order_value
+      type: double
+
+transformations:
+  - sql: |
+      SELECT
+        order_date,
+        country,
+        status,
+        COUNT(*)                              AS orders,
+        SUM(revenue)                          AS total_revenue,
+        ROUND(AVG(revenue), 2)                AS avg_order_value
+      FROM source
+      GROUP BY order_date, country, status
+
+quality:
+  row_rules:
+    - name: revenue_positive
+      sql: "total_revenue > 0"
+      category: accuracy
+
+  dataset_rules:
+    - name: min_rows
+      description: "Gold must have at least 1 row — empty Gold is a pipeline failure"
+      sql: "SELECT COUNT(*) FROM gold_daily_revenue"
+      must_be_greater_than: 0
+
+service_levels:
+  freshness:
+    description: "Daily revenue must be available by 07:00 UTC"
+    threshold: 24h
+    field: order_date
+
+materialization:
+  strategy: overwrite
+  format: parquet
+  target_path: "./data/gold_daily_revenue.parquet"

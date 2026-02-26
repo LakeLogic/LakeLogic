@@ -1,4 +1,5 @@
 import duckdb
+import time
 from typing import Tuple, Any, List
 from lakelogic.engines.base import EngineAdapter
 from loguru import logger
@@ -12,18 +13,11 @@ class DuckDBAdapter(EngineAdapter):
     """
 
     def execute(self, df: Any) -> Tuple[Any, Any]:
-        """
-        Executes the contract using DuckDB.
-        Works with DuckDB relations or existing DataFrames.
-
-        Args:
-            df: Input dataframe or DuckDB relation.
-
-        Returns:
-            Tuple of (good_df, bad_df).
-        """
+        start_time = time.perf_counter()
         self.dataset_rule_results = []
         self.schema_drift = {}
+        self.trace = []
+
         # Register the input and dependencies
         # Use a shared connection for all operations in this execution
         self.con = duckdb.connect(database=':memory:')
@@ -61,12 +55,24 @@ class DuckDBAdapter(EngineAdapter):
             con.register(internal_input_name, df)
             
         self._register_links(con)
+        
+        raw_count = self._get_row_count(con.table(internal_input_name))
+        self._add_trace("Load Source", input_rows=None, output_rows=raw_count, duration_ms=(time.perf_counter() - start_time)*1000)
+
 
         # 0. Apply pre-processing (renames, filters, deduplication)
+        step_start = time.perf_counter()
         processed_tbl = self._apply_pre_transformations(con, internal_input_name)
+        pre_output_count = self._get_row_count(con.table(processed_tbl))
+        self._add_trace("Pre-Transformations", input_rows=raw_count, output_rows=pre_output_count, duration_ms=(time.perf_counter() - step_start)*1000)
+
         
         # 0.5 Apply schema enforcement
+        step_start = time.perf_counter()
         schema_tbl, schema_errors = self._apply_schema(con, processed_tbl)
+        schema_output_count = self._get_row_count(con.table(schema_tbl))
+        self._add_trace("Schema Enforcement", input_rows=pre_output_count, output_rows=schema_output_count, duration_ms=(time.perf_counter() - step_start)*1000, details={"errors": schema_errors})
+
         
         # 1. Evaluate Row-Level Rules
         row_rules = self.get_row_rules()
@@ -75,7 +81,10 @@ class DuckDBAdapter(EngineAdapter):
             rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as _rule_{i}")
         
         eval_sql = f"SELECT *, {', '.join(rule_exprs) if rule_exprs else '1 as _dummy'} FROM {schema_tbl}"
+        step_start = time.perf_counter()
         con.execute(f"CREATE OR REPLACE VIEW eval_results AS {eval_sql}")
+        self._add_trace("Row Rules Evaluation", input_rows=schema_output_count, output_rows=schema_output_count, duration_ms=(time.perf_counter() - step_start)*1000, details={"sql": eval_sql, "rules_count": len(row_rules)})
+
         
         # 2. Accumulate errors into arrays
         error_clauses = []
@@ -141,15 +150,39 @@ class DuckDBAdapter(EngineAdapter):
         self._run_dataset_rules(good_rel, con)
 
         # 5. Apply heavy Transformations
+        step_start = time.perf_counter()
+        post_input_count = self._get_row_count(good_rel)
         good_out = self._apply_post_transformations(good_rel, con)
-            
-        # Result is natively a relation unless post-processing forced a DF
-        # We wrap in a simple property to allow .df() if needed later
-        
-        # Cleanup
-        # Note: Closing connection here might invalidate relations if they are lazy
-        # Keeping it open for the lifecycle of the result
-        return good_out, bad_rel
+        post_output_count = self._get_row_count(good_out)
+        self._add_trace("Post-Transformations", input_rows=post_input_count, output_rows=post_output_count, duration_ms=(time.perf_counter() - step_start)*1000)
+
+        # ── Materialise to Polars DataFrames before returning ─────────────
+        # The temporary views/tables (post_view_*, __bad_buffer_*, etc.)
+        # only live on this adapter's private in-memory connection.  If we
+        # return lazy DuckDB relations, downstream code (lineage injection,
+        # materialization) can't resolve those view names and fails with
+        # "Table does not exist".  Collecting into Polars here:
+        #   1. Executes the query while the connection is still alive
+        #   2. Lets lineage injection use the well-tested Polars code path
+        #   3. Gives materialization a concrete DataFrame to convert to Arrow
+        import polars as pl
+
+        def _rel_to_polars(rel):
+            """Convert a DuckDB relation to a Polars DataFrame safely."""
+            try:
+                return pl.from_arrow(rel.arrow())
+            except (ValueError, Exception):
+                # Empty relation → .arrow() has no batches/schema.
+                # Fall back to pandas which handles empty results.
+                pdf = rel.df()
+                return pl.from_pandas(pdf)
+
+        good_df_result = _rel_to_polars(good_out)
+        bad_df_result  = _rel_to_polars(bad_rel)
+
+        # Connection can now be closed — all data is materialised
+        con.close()
+        return good_df_result, bad_df_result
 
     @classmethod
     def setup_extensions(cls):
@@ -644,12 +677,12 @@ class DuckDBAdapter(EngineAdapter):
                     con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(exprs)} FROM {current_tbl}")
                     current_tbl = view_name
                     view_idx += 1
-            elif trans.filter:
+            elif trans.filter and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [Filter]: {trans.filter.sql}")
                 con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current_tbl} WHERE {trans.filter.sql}")
                 current_tbl = view_name
                 view_idx += 1
-            elif trans.deduplicate:
+            elif trans.deduplicate and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [Deduplicate]: {trans.deduplicate.on}")
                 on_cols = ", ".join(self._quote_ident(col) for col in trans.deduplicate.on)
                 order_clause = ""
@@ -682,13 +715,14 @@ class DuckDBAdapter(EngineAdapter):
             Pandas dataframe of transformed records.
         """
         if not self.contract.transformations:
-            return rel.df()
+            return rel
             
         current_rel = rel
         dataset_name = self.contract.dataset or "source"
         
         for trans in self.contract.transformations:
-            if trans.sql and (trans.phase or "post").lower() != "pre":
+            trans_phase = (trans.phase or "post").lower()
+            if trans.sql and trans_phase != "pre":
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
                 
                 # Create a physical view from relation so we can reference it by name in SQL
@@ -702,9 +736,10 @@ class DuckDBAdapter(EngineAdapter):
                 if dataset_name != "source":
                     con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
                 
-                current_rel = con.sql(trans.sql)
+                sql = trans.sql.replace("{dataset}", dataset_name).replace("{source}", "source")
+                current_rel = con.sql(sql)
                 continue
-            if trans.rollup and (trans.phase or "post").lower() != "pre":
+            if trans.rollup and trans_phase != "pre":
                 rollup_sql = self._build_rollup_sql(trans.rollup, source_table=dataset_name)
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
 
@@ -720,7 +755,7 @@ class DuckDBAdapter(EngineAdapter):
                 current_rel = con.sql(rollup_sql)
                 continue
 
-            if trans.pivot and (trans.phase or "post").lower() != "pre":
+            if trans.pivot and trans_phase != "pre":
                 pivot_sql = self._build_pivot_sql(trans.pivot, source_table=dataset_name)
                 if not pivot_sql:
                     continue
@@ -738,7 +773,7 @@ class DuckDBAdapter(EngineAdapter):
                 current_rel = con.sql(pivot_sql)
                 continue
 
-            if trans.unpivot and (trans.phase or "post").lower() != "pre":
+            if trans.unpivot and trans_phase != "pre":
                 unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=dataset_name)
                 if not unpivot_sql:
                     continue
@@ -756,12 +791,43 @@ class DuckDBAdapter(EngineAdapter):
                 current_rel = con.sql(unpivot_sql)
                 continue
 
-            if trans.derive:
+            if trans.derive and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
-                current_rel.create_view(tbl_alias)
-                query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(trans.derive.field)} FROM {tbl_alias}"
+                derive_view = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(derive_view)
+                
+                # Check if field exists to avoid DuplicateError
+                field_name = trans.derive.field
+                existing_cols = []
+                try:
+                    existing_cols = current_rel.columns
+                except:
+                    pass
+                
+                if field_name in existing_cols:
+                    # Replace existing column
+                    query = f"SELECT * EXCLUDE ({self._quote_ident(field_name)}), ({trans.derive.sql}) AS {self._quote_ident(field_name)} FROM {derive_view}"
+                else:
+                    # Add new column
+                    query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(field_name)} FROM {derive_view}"
+                
                 current_rel = con.query(query)
-            elif trans.lookup:
+            elif trans.bucket and trans_phase != "pre":
+                logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
+                bucket_view = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(bucket_view)
+                sql = self._build_bucket_sql(trans.bucket, source_table=bucket_view)
+                if sql:
+                    current_rel = con.query(sql)
+            elif trans.date_diff and trans_phase != "pre":
+                logger.debug(f"Post-Transform [DateDiff]: {trans.date_diff.field}")
+                dd_view = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(dd_view)
+                sql = self._build_date_diff_sql(trans.date_diff, source_table=dd_view)
+                if sql:
+                    current_rel = con.query(sql)
+            elif trans.lookup and trans_phase != "pre":
+
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_rel.create_view("src")
                 value_expr = f"ref.{self._quote_ident(trans.lookup.value)}"
@@ -773,16 +839,17 @@ class DuckDBAdapter(EngineAdapter):
                 LEFT JOIN {self._quote_qualified(trans.lookup.reference)} ref ON src.{self._quote_ident(trans.lookup.on)} = ref.{self._quote_ident(trans.lookup.key)}
                 """
                 current_rel = con.query(query)
-            elif trans.join:
+            elif trans.join and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Join]: {trans.join.reference}")
                 current_rel.create_view("source")
                 query = self._build_join_sql(trans.join)
                 current_rel = con.query(query)
-            elif trans.filter:
-                 # Also allow filters in post-transformation if needed
+            elif trans.filter and trans_phase != "pre":
+                # Also allow filters in post-transformation if needed
                 logger.debug(f"Post-Transform [Filter]: {trans.filter.sql}")
-                current_rel.create_view(tbl_alias)
-                query = f"SELECT * FROM {tbl_alias} WHERE {trans.filter.sql}"
+                filter_view = f"post_view_{uuid4().hex[:8]}"
+                current_rel.create_view(filter_view)
+                query = f"SELECT * FROM {filter_view} WHERE {trans.filter.sql}"
                 current_rel = con.query(query)
         
         return current_rel

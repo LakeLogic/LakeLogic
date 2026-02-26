@@ -1,0 +1,10 @@
+# LakeLogic Registry — Environment Promotion Example
+# Run with: LAKELOGIC_ENV=dev lakelogic-driver --registry _registry.yaml --layers bronze,silver,gold
+
+entries:
+  - entity: orders
+    enabled: true
+    contracts:
+      bronze: bronze_orders.yaml
+      silver: silver_orders.yaml
+      gold:   gold_daily_revenue.yaml

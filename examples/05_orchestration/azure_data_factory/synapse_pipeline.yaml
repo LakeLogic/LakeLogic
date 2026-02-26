@@ -1,3 +1,0 @@
-version: 1.0.0
-platform: azure_data_factory
-pipeline: lakelogic_synapse_pipeline
