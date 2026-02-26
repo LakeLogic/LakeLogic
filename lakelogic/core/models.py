@@ -362,6 +362,52 @@ class TransformationBucket(BaseModel):
     default: Optional[Any] = None  # ELSE value; NULL when omitted
 
 
+class TransformationJsonExtract(BaseModel):
+    """
+    Extract a scalar value from a JSON string column.
+
+    Engine-agnostic: Polars uses str.json_path_match, DuckDB uses ->> operator,
+    Spark uses get_json_object.
+
+    YAML example::
+
+        - phase: post
+          json_extract:
+            field: location_latitude
+            source: location_coordinates
+            path: "$.latitude"
+            cast: float
+    """
+    field: str            # output column name
+    source: str           # source JSON string column
+    path: str             # JSONPath expression, e.g. "$.latitude"
+    cast: Optional[str] = None  # optional type cast: float, integer, string
+
+
+class TransformationDateRangeExplode(BaseModel):
+    """
+    Explode each row into one row per calendar day in [start_col, end_col].
+
+    The output column receives successive date values. If end_col is omitted
+    or null the current date is used as the upper bound.
+
+    Engine-agnostic: Polars uses pl.date_range + explode,
+    DuckDB uses generate_series + unnest.
+
+    YAML example::
+
+        - phase: post
+          date_range_explode:
+            output: snapshot_date
+            start_col: creation_date
+            end_col: deleted_at       # nullable — defaults to today when null
+    """
+    output: str                      # name of the new date column
+    start_col: str                   # column holding range start date
+    end_col: Optional[str] = None    # column holding range end date (nullable)
+    interval: str = "1d"             # Polars duration string: '1d', '7d', etc.
+
+
 class TransformationDateDiff(BaseModel):
     """
     Compute the integer difference between two date/timestamp columns.
@@ -406,6 +452,8 @@ class Transformation(BaseModel):
     join: Optional[TransformationJoin] = None
     pivot: Optional[TransformationPivot] = None
     unpivot: Optional[TransformationUnpivot] = None
+    json_extract: Optional[TransformationJsonExtract] = None
+    date_range_explode: Optional[TransformationDateRangeExplode] = None
     bucket: Optional[TransformationBucket] = None
     date_diff: Optional[TransformationDateDiff] = None
     sql: Optional[str] = None

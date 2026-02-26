@@ -700,6 +700,27 @@ class ContractInferrer:
         while changed and depth < max_depth:
             changed = False
             depth += 1
+
+            # Re-run JSON-string detection each iteration: columns that were
+            # serialised back to a JSON string during a previous parent explosion
+            # (e.g. location_coordinates after location was flattened) need to
+            # be detected and deserialised before the next explode pass.
+            if rows:
+                json_string_cols_iter = [
+                    col for col in rows[0]
+                    if col not in preserved
+                    and isinstance(rows[0].get(col), str)
+                    and _is_json_col(rows, col)
+                ]
+                if json_string_cols_iter:
+                    parsed_rows = []
+                    for row in rows:
+                        new_row = dict(row)
+                        for col in json_string_cols_iter:
+                            new_row[col] = _try_parse_json(row.get(col))
+                        parsed_rows.append(new_row)
+                    rows = parsed_rows
+
             # Detect columns with nested values
             cols_to_explode = []
             for col in list(rows[0].keys()) if rows else []:

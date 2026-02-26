@@ -12,6 +12,36 @@ import shutil
 from loguru import logger
 
 
+def _sanitize_arrow_nulls(table):
+    """
+    Replace any Arrow ``null``-typed columns with ``utf8`` (string) nulls.
+
+    Delta Lake doesn't support the Arrow ``Null`` data type.  An all-NULL
+    column can end up with this type when:
+      - A Pandas DataFrame goes through ``pa.Table.from_pandas`` and the
+        column has dtype ``object`` with only ``None`` values.
+      - A DuckDB relation with ``CAST(NULL AS VARCHAR)`` is collected to
+        Pandas first, losing the SQL type information.
+
+    This is a lossless transformation: the values stay null, only the
+    schema type changes so Delta's writer accepts them.
+    """
+    import pyarrow as pa
+
+    new_fields = []
+    changed = False
+    for i, field in enumerate(table.schema):
+        if pa.types.is_null(field.type):
+            new_fields.append(field.with_type(pa.utf8()))
+            changed = True
+        else:
+            new_fields.append(field)
+    if not changed:
+        return table
+    new_schema = pa.schema(new_fields)
+    return table.cast(new_schema)
+
+
 def _safe_partition_value(value: Any) -> str:
     """
     Normalize partition values to safe filesystem-friendly strings.
@@ -237,6 +267,13 @@ def _write_frame(df, path: Path, output_format: str) -> None:
                 data = df.to_arrow_table()
             elif hasattr(df, "to_pandas"):
                 data = df.to_pandas()
+
+            # Ensure no Arrow Null-typed columns (Delta Lake rejects them)
+            import pyarrow as pa
+            if not isinstance(data, pa.Table):
+                data = pa.Table.from_pandas(data) if hasattr(data, "columns") else data
+            if isinstance(data, pa.Table):
+                data = _sanitize_arrow_nulls(data)
 
             write_deltalake(path, data, mode="overwrite", schema_mode="overwrite")
         except ImportError:
@@ -1028,6 +1065,7 @@ def _partition_aware_merge(
 
         combined = pd.concat(merged_parts, ignore_index=True)
         arrow_table = pa.Table.from_pandas(combined, preserve_index=False)
+        arrow_table = _sanitize_arrow_nulls(arrow_table)  # Delta rejects Arrow Null type
         total_rows = len(combined)
 
         if not table_exists:
@@ -1255,6 +1293,8 @@ def materialize_dataframe(
             arrow_data = pdf.to_arrow()
         else:
             arrow_data = pa.Table.from_pandas(pdf if hasattr(pdf, "columns") else _to_pandas(pdf))
+
+        arrow_data = _sanitize_arrow_nulls(arrow_data)  # Delta rejects Arrow Null type
 
         # strategy → delta mode
         delta_mode = "overwrite" if strategy == "overwrite" else "append"

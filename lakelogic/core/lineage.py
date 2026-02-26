@@ -47,7 +47,7 @@ def inject_lineage(
         bad_df = _preserve_upstream_lineage(bad_df, preserve_cols, prefix, engine_name)
 
     source_value = str(source_path) if source_path else None
-    timestamp_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    timestamp_value = datetime.now(timezone.utc).replace(microsecond=0)
     run_id_value = last_run_id
     if getattr(lineage, "run_id_source", "run_id") == "pipeline_run_id" and pipeline_run_id:
         run_id_value = pipeline_run_id
@@ -261,7 +261,11 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
                 return f"'{text}'"
 
             # Get existing columns from the relation
-            existing_cols = [c for c in df.columns if not c.startswith("_lakelogic_")]
+            try:
+                rel_cols = list(df.columns)
+            except Exception:
+                rel_cols = []
+            existing_cols = [c for c in rel_cols if not c.startswith("_lakelogic_")]
             meta_new = list(columns.keys())
             ordered = existing_cols + meta_new
             select_exprs: List[str] = []
@@ -272,10 +276,40 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
                 else:
                     col_name = str(col).replace('"', '""')
                     select_exprs.append(f"\"{col_name}\"")
-            query = f"SELECT {', '.join(select_exprs)} FROM ({df.sql_query()})"
-            return df.connection.sql(query)
-    except Exception:
+
+            # Build the source sub-query from the relation
+            try:
+                src_sql = df.sql_query()
+            except Exception:
+                # Fallback: materialise to a temp view first
+                _tmp = f"__lineage_src_{id(df) % 100000}"
+                df.create_view(_tmp)
+                src_sql = f"SELECT * FROM {_tmp}"
+
+            query = f"SELECT {', '.join(select_exprs)} FROM ({src_sql})"
+
+            # Get the connection — try .connection attribute, fall back to module-level
+            con = getattr(df, "connection", None)
+            if con is None:
+                con = duckdb
+            try:
+                return con.sql(query)
+            except Exception as exc:
+                logger.warning(f"DuckDB lineage injection SQL failed: {exc}")
+                # Last resort: materialise to pandas, add columns there, return
+                try:
+                    import pandas as pd
+                    pdf = df.df()
+                    for name, value in columns.items():
+                        pdf[name] = value
+                    return pdf[_sorted_to_right(list(pdf.columns))]
+                except Exception as fallback_exc:
+                    logger.error(f"DuckDB lineage fallback also failed: {fallback_exc}")
+                    return df
+    except ImportError:
         pass
+    except Exception as exc:
+        logger.warning(f"DuckDB lineage injection failed: {exc}")
 
     if engine_name == "spark":
         try:

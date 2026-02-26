@@ -488,7 +488,7 @@ class EngineAdapter(ABC):
         Build an engine-specific date-difference expression.
 
         Dispatches on self.engine_name:
-          polars    -> DATE_PART('day', STRPTIME(to) - STRPTIME(from))
+          polars    -> integer division of duration (STRPTIME subtraction)
           spark     -> DATEDIFF(to, from)              (reversed args, days only)
           duckdb / snowflake / bigquery -> DATEDIFF('day', from, to)
         """
@@ -507,12 +507,24 @@ class EngineAdapter(ABC):
         if engine == "spark":
             diff_expr = f"DATEDIFF({qto}, {qfrom})"
         elif engine == "polars":
+            # Polars SQL: subtracting two STRPTIME values yields duration[μs]
+            # but neither DATE_PART nor EXTRACT(EPOCH FROM ...) work on
+            # durations.  Instead, extract epoch seconds from each timestamp
+            # *individually* (which works) and subtract the two integers.
             fmt = "%Y-%m-%d"
-            diff_expr = (
-                f"DATE_PART('{unit}', "
-                f"STRPTIME(SUBSTR({qto}, 1, 10), '{fmt}') "
-                f"- STRPTIME(SUBSTR({qfrom}, 1, 10), '{fmt}'))"
-            )
+            epoch_to   = f"EXTRACT(EPOCH FROM STRPTIME(SUBSTR({qto}, 1, 10), '{fmt}'))"
+            epoch_from = f"EXTRACT(EPOCH FROM STRPTIME(SUBSTR({qfrom}, 1, 10), '{fmt}'))"
+            seconds_expr = f"({epoch_to} - {epoch_from})"
+            if unit == "day":
+                diff_expr = f"CAST({seconds_expr} / 86400 AS INTEGER)"
+            elif unit == "hour":
+                diff_expr = f"CAST({seconds_expr} / 3600 AS INTEGER)"
+            elif unit == "minute":
+                diff_expr = f"CAST({seconds_expr} / 60 AS INTEGER)"
+            elif unit == "second":
+                diff_expr = f"CAST({seconds_expr} AS INTEGER)"
+            else:
+                diff_expr = f"CAST({seconds_expr} / 86400 AS INTEGER)"
         else:
             diff_expr = f"DATEDIFF('{unit}', {qfrom}, {qto})"
         return f"SELECT *, ({diff_expr}) AS {self._quote_ident(field)} FROM {source_table}"

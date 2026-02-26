@@ -156,14 +156,33 @@ class DuckDBAdapter(EngineAdapter):
         post_output_count = self._get_row_count(good_out)
         self._add_trace("Post-Transformations", input_rows=post_input_count, output_rows=post_output_count, duration_ms=(time.perf_counter() - step_start)*1000)
 
-            
-        # Result is natively a relation unless post-processing forced a DF
-        # We wrap in a simple property to allow .df() if needed later
-        
-        # Cleanup
-        # Note: Closing connection here might invalidate relations if they are lazy
-        # Keeping it open for the lifecycle of the result
-        return good_out, bad_rel
+        # ── Materialise to Polars DataFrames before returning ─────────────
+        # The temporary views/tables (post_view_*, __bad_buffer_*, etc.)
+        # only live on this adapter's private in-memory connection.  If we
+        # return lazy DuckDB relations, downstream code (lineage injection,
+        # materialization) can't resolve those view names and fails with
+        # "Table does not exist".  Collecting into Polars here:
+        #   1. Executes the query while the connection is still alive
+        #   2. Lets lineage injection use the well-tested Polars code path
+        #   3. Gives materialization a concrete DataFrame to convert to Arrow
+        import polars as pl
+
+        def _rel_to_polars(rel):
+            """Convert a DuckDB relation to a Polars DataFrame safely."""
+            try:
+                return pl.from_arrow(rel.arrow())
+            except (ValueError, Exception):
+                # Empty relation → .arrow() has no batches/schema.
+                # Fall back to pandas which handles empty results.
+                pdf = rel.df()
+                return pl.from_pandas(pdf)
+
+        good_df_result = _rel_to_polars(good_out)
+        bad_df_result  = _rel_to_polars(bad_rel)
+
+        # Connection can now be closed — all data is materialised
+        con.close()
+        return good_df_result, bad_df_result
 
     @classmethod
     def setup_extensions(cls):
@@ -717,7 +736,8 @@ class DuckDBAdapter(EngineAdapter):
                 if dataset_name != "source":
                     con.execute(f"CREATE OR REPLACE VIEW source AS SELECT * FROM {buffer_name}")
                 
-                current_rel = con.sql(trans.sql)
+                sql = trans.sql.replace("{dataset}", dataset_name).replace("{source}", "source")
+                current_rel = con.sql(sql)
                 continue
             if trans.rollup and trans_phase != "pre":
                 rollup_sql = self._build_rollup_sql(trans.rollup, source_table=dataset_name)
@@ -775,7 +795,22 @@ class DuckDBAdapter(EngineAdapter):
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 derive_view = f"post_view_{uuid4().hex[:8]}"
                 current_rel.create_view(derive_view)
-                query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(trans.derive.field)} FROM {derive_view}"
+                
+                # Check if field exists to avoid DuplicateError
+                field_name = trans.derive.field
+                existing_cols = []
+                try:
+                    existing_cols = current_rel.columns
+                except:
+                    pass
+                
+                if field_name in existing_cols:
+                    # Replace existing column
+                    query = f"SELECT * EXCLUDE ({self._quote_ident(field_name)}), ({trans.derive.sql}) AS {self._quote_ident(field_name)} FROM {derive_view}"
+                else:
+                    # Add new column
+                    query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(field_name)} FROM {derive_view}"
+                
                 current_rel = con.query(query)
             elif trans.bucket and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")

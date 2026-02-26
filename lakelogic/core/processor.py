@@ -807,6 +807,22 @@ class DataProcessor:
 
             elif self.engine_name == "pandas":
                 import pandas as pd
+                import json as _json_pd
+
+                def _pandas_read_json_flat(filepath: str) -> "pd.DataFrame":
+                    """Read a .json file, serialise nested objects to JSON
+                    strings so columns stay flat — consistent with the Polars
+                    and DuckDB branches."""
+                    raw = _json_pd.loads(Path(filepath).read_text(encoding="utf-8"))
+                    rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+                    flat = [
+                        {k: (_json_pd.dumps(v, ensure_ascii=False)
+                             if isinstance(v, (dict, list)) else v)
+                         for k, v in row.items()}
+                        for row in rows
+                    ]
+                    return pd.DataFrame(flat)
+
                 if df is None:
                     if file_paths:
                         frames = []
@@ -814,10 +830,12 @@ class DataProcessor:
                             if file.endswith(".parquet"): frames.append(pd.read_parquet(file))
                             elif file.endswith(".xml"): frames.append(pd.read_xml(file))
                             elif file.endswith((".xlsx", ".xls")): frames.append(pd.read_excel(file))
+                            elif file.endswith(".json"): frames.append(_pandas_read_json_flat(file))
                             else: frames.append(pd.read_csv(file))
                         df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
                     else:
-                        if path.endswith(".csv"): df = pd.read_csv(path)
+                        if path.endswith(".json"): df = _pandas_read_json_flat(path)
+                        elif path.endswith(".csv"): df = pd.read_csv(path)
                         elif path.endswith(".parquet"): df = pd.read_parquet(path)
                         elif path.endswith(".xml"): df = pd.read_xml(path)
                         elif path.endswith((".xlsx", ".xls")): df = pd.read_excel(path)
@@ -825,18 +843,59 @@ class DataProcessor:
 
             elif self.engine_name == "duckdb":
                 import duckdb
+                import json as _json_duck
+
                 def _duckdb_read_csv(paths):
                     return duckdb.read_csv(paths, header=True, strict_mode=False)
+
+                def _duckdb_read_json(paths):
+                    """Read one or more .json files via DuckDB.
+
+                    Each file may contain a single JSON object or an array of
+                    objects.  We use Polars-style manual parsing (json.loads +
+                    DataFrame) so nested objects are serialised to JSON-strings
+                    exactly like the Polars branch's ``_read_json_flat``.
+                    This keeps bronze columns flat and matches the contract
+                    schema regardless of which engine is used.
+                    """
+                    import polars as pl
+
+                    if isinstance(paths, str):
+                        paths = [paths]
+                    frames = []
+                    for fp in paths:
+                        raw = _json_duck.loads(Path(fp).read_text(encoding="utf-8"))
+                        rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+                        flat = [
+                            {k: (_json_duck.dumps(v, ensure_ascii=False)
+                                 if isinstance(v, (dict, list)) else v)
+                             for k, v in row.items()}
+                            for row in rows
+                        ]
+                        if flat:
+                            frames.append(pl.DataFrame(flat))
+                    if frames:
+                        return pl.concat(frames, how="diagonal")
+                    return pl.DataFrame()
 
                 rel = None
                 if df is None:
                     if file_paths:
-                        if path.endswith(".parquet"): rel = duckdb.read_parquet(file_paths)
-                        else: rel = _duckdb_read_csv(file_paths)
+                        if path.endswith(".parquet"):
+                            rel = duckdb.read_parquet(file_paths)
+                        elif path.endswith(".json"):
+                            df = _duckdb_read_json(file_paths)
+                        else:
+                            rel = _duckdb_read_csv(file_paths)
                     else:
-                        if path.endswith(".csv"): rel = _duckdb_read_csv(path)
-                        elif path.endswith(".parquet"): rel = duckdb.read_parquet(path)
-                        else: rel = _duckdb_read_csv(path)
+                        if path.endswith(".json"):
+                            df = _duckdb_read_json(path)
+                        elif path.endswith(".csv"):
+                            rel = _duckdb_read_csv(path)
+                        elif path.endswith(".parquet"):
+                            rel = duckdb.read_parquet(path)
+                        else:
+                            rel = _duckdb_read_csv(path)
 
                     if rel is not None:
                         df = rel.df()
@@ -844,15 +903,31 @@ class DataProcessor:
             elif self.engine_name == "spark":
                 from pyspark.sql import SparkSession
                 spark = SparkSession.builder.getOrCreate()
-                fmt = (self.contract.server.format.lower() if self.contract.server and self.contract.server.format 
-                       else ("csv" if path.endswith(".csv") else ("excel" if path.endswith((".xlsx", ".xls")) else "parquet")))
+                # ── Format detection ──────────────────────────────────────────
+                # Explicit server.format wins; otherwise infer from file extension.
+                fmt = (
+                    self.contract.server.format.lower()
+                    if self.contract.server and self.contract.server.format
+                    else (
+                        "json" if path.endswith(".json")
+                        else "csv" if path.endswith(".csv")
+                        else "excel" if path.endswith((".xlsx", ".xls"))
+                        else "parquet"
+                    )
+                )
                 
                 if df is None:
                     if path.startswith("table:"):
                         df = spark.table(path[6:])
                     else:
                         reader = spark.read.format(fmt)
-                        if fmt == "csv": reader = reader.option("header", "true")
+                        if fmt == "csv":
+                            reader = reader.option("header", "true")
+                        elif fmt == "json":
+                            # Each .json file is a single JSON object (not NDJSON),
+                            # so multiLine=true is required for Spark to parse it
+                            # as one record rather than one-line-per-record.
+                            reader = reader.option("multiLine", "true")
                         df = reader.load(file_paths if file_paths else path)
 
             elif self.engine_name in ["snowflake", "bigquery"]:
@@ -1036,6 +1111,23 @@ class DataProcessor:
         while changed and depth < 5:
             changed = False
             depth += 1
+
+            # Re-detect JSON-string columns each iteration: child columns that
+            # were serialised back to JSON strings (e.g. location_coordinates
+            # after location was exploded) need another deserialise pass so the
+            # dict/list check below can catch and further explode them.
+            if rows:
+                json_cols_iter = [
+                    col for col in rows[0]
+                    if isinstance(rows[0].get(col), str) and _is_json_col(rows, col)
+                ]
+                if json_cols_iter:
+                    rows = [
+                        {**{k: v for k, v in row.items() if k not in json_cols_iter},
+                         **{c: _try_parse(row.get(c)) for c in json_cols_iter}}
+                        for row in rows
+                    ]
+
             to_explode = [
                 col for col in list(rows[0].keys())
                 if any(isinstance(row.get(col), (dict, list)) for row in rows)

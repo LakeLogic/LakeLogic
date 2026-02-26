@@ -133,7 +133,8 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
     if not hasattr(df, "write"):
         raise ValueError("Spark quarantine table requires a Spark DataFrame.")
 
-    table_format = (metadata.get("quarantine_table_format") or "iceberg").lower()
+    # Default to 'delta' on Spark if not specified (more robust for Databricks/Unity Catalog).
+    table_format = (metadata.get("quarantine_table_format") or "delta").lower()
     mode = (metadata.get("quarantine_table_mode") or "append").lower()
 
     spark = df.sparkSession
@@ -141,7 +142,9 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
     if len(parts) == 2:
         spark.sql(f"CREATE DATABASE IF NOT EXISTS {parts[0]}")
     elif len(parts) >= 3:
-        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {parts[0]}.{parts[1]}")
+        # Avoid issues with quoted catalog names by ensuring we don't double-quote or break the string
+        catalog_schema = ".".join(parts[:-1])
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog_schema}")
 
     writer = df.write.mode(mode).format(table_format)
     # Enable schema evolution so new quarantine columns (from contract changes)
@@ -150,9 +153,18 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
         writer = writer.option("mergeSchema", "true")
     elif table_format == "iceberg":
         writer = writer.option("merge-schema", "true")
+    
     writer.saveAsTable(table_name)
-    rows_written = int(df.count())
-    logger.info(f"Wrote {rows_written} quarantined rows to Spark table {table_name} (schema evolution enabled)")
+    
+    # Use spark.sql count to avoid df.count() which triggers RDD operations
+    # not permitted on Databricks Unity Catalog shared / serverless clusters.
+    try:
+        rows_written = spark.sql(f"SELECT COUNT(*) FROM {table_name}").collect()[0][0]
+    except Exception as e:
+        logger.warning(f"Failed to count quarantined rows in {table_name}: {e}")
+        rows_written = 0
+        
+    logger.info(f"Wrote {rows_written} quarantined rows to Spark table {table_name} (format={table_format}, mode={mode})")
     return {"target": table_name, "rows_written": rows_written, "format": table_format}
 
 

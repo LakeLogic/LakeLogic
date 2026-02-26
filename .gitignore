@@ -308,3 +308,5 @@ __pycache__/
 
 # Reference/example files
 _ref/
+
+.databricks
