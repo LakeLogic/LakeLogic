@@ -1,9 +1,9 @@
 site_name: LakeLogic
 site_description: Trust Your Data. Scale Your Logic. SQL-first quality gates from Polars to petabytes.
-site_url: https://lineagelogic.github.io/LakeLogic/
-site_author: LineageLogic
-repo_name: LineageLogic/LakeLogic
-repo_url: https://github.com/LineageLogic/LakeLogic
+site_url: https://lakelogic.github.io/LakeLogic/
+site_author: LakeLogic Team
+repo_name: lakelogic/LakeLogic
+repo_url: https://github.com/lakelogic/LakeLogic
 edit_uri: edit/main/docs/
 copyright: >
   Copyright &copy; 2026 <a href="https://lineagelogic.com" target="_blank">LineageLogic</a> · 
@@ -61,9 +61,9 @@ nav:
       - Medallion Architecture: tutorials/medallion_architecture.md
       - Notifications & Secrets: tutorials/notifications_secrets.md
   - Interactive Examples:
-      - "XML Data Ingestion": examples/03_data_sources/files/xml/xml_example.ipynb
-      - "Excel Data Ingestion": examples/03_data_sources/files/excel/excel_example.ipynb
-      - "HIPAA & PII Masking": examples/08_compliance_governance/hipaa_pii_masking/tutorial_hipaa_compliance.ipynb
+      - "XML Data Ingestion": examples/xml_example.ipynb
+      - "Excel Data Ingestion": examples/excel_example.ipynb
+      - "HIPAA & PII Masking": examples/hipaa_compliance.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md
