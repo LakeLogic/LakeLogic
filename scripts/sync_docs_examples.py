@@ -21,23 +21,23 @@ FLAGSHIP_EXAMPLES = [
         ],
     },
     {
-        "notebook": "03_data_sources/files/xml/xml_example.ipynb",
+        "notebook": "_archive/03_data_sources/files/xml/xml_example.ipynb",
         "dest_name": "xml_example.ipynb",
         "supporting_files": [
-            ("03_data_sources/files/xml/xml_contract.yaml", "xml_contract.yaml"),
-            ("03_data_sources/files/xml/data/employees.xml", "data/employees.xml"),
+            ("_archive/03_data_sources/files/xml/xml_contract.yaml", "xml_contract.yaml"),
+            ("_archive/03_data_sources/files/xml/data/employees.xml", "data/employees.xml"),
         ],
     },
     {
-        "notebook": "03_data_sources/files/excel/excel_example.ipynb",
+        "notebook": "_archive/03_data_sources/files/excel/excel_example.ipynb",
         "dest_name": "excel_example.ipynb",
         "supporting_files": [
-            ("03_data_sources/files/excel/excel_contract.yaml", "excel_contract.yaml"),
-            ("03_data_sources/files/excel/data/employees.xlsx", "data/employees.xlsx"),
+            ("_archive/03_data_sources/files/excel/excel_contract.yaml", "excel_contract.yaml"),
+            ("_archive/03_data_sources/files/excel/data/employees.xlsx", "data/employees.xlsx"),
         ],
     },
     {
-        "notebook": "08_compliance_governance/hipaa_pii_masking/tutorial_hipaa_compliance.ipynb",
+        "notebook": "04_compliance_governance/hipaa_pii_masking/tutorial_hipaa_compliance.ipynb",
         "dest_name": "hipaa_compliance.ipynb",
         "supporting_files": [],  # Uses inline data generation
     },

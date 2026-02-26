@@ -63,13 +63,13 @@ gcp_messaging = ["google-cloud-pubsub>=2.18.0"]
 # Streaming processing
 streaming = [
     "bytewax>=0.19.0",  # Real-time stream processing (Rust-based)
-    "pathway>=0.7.0",   # Real-time SQL transformations
+    "pathway>=0.7.0; python_version >= '3.10'",   # Real-time SQL transformations
     "kafka-python>=2.0.2",  # Apache Kafka
     "sseclient-py>=1.8.0",  # Server-Sent Events (Wikimedia, etc.)
     "websocket-client>=1.6.0",  # WebSocket (Coinbase, Binance, etc.)
 ]
 bytewax = ["bytewax>=0.19.0"]
-pathway = ["pathway>=0.7.0"]
+pathway = ["pathway>=0.7.0; python_version >= '3.10'"]
 kafka = ["kafka-python>=2.0.2"]
 sse = ["sseclient-py>=1.8.0"]
 websocket = ["websocket-client>=1.6.0"]
