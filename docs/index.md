@@ -94,8 +94,7 @@ View on GitHub
     
     - [Hello World](examples/01_hello_world.ipynb) - Remote data ingestion in 60 seconds
     - [Database Governance](examples/02_database_governance.ipynb) - Quarantine dirty data
-    - [XML Ingestion](examples/xml_example.ipynb) - Native XML support with validation
-    - [Excel Ingestion](examples/excel_example.ipynb) - Native Excel reading with quality checks
+    - [HIPAA & PII Masking](examples/hipaa_compliance.ipynb) - Compliance-ready data handling
 
 ---
 
