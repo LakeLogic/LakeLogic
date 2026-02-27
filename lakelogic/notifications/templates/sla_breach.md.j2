@@ -1,0 +1,20 @@
+{% extends "_base.md.j2" %}
+{% block content %}
+## 🕐 SLA Breach
+
+{{ message }}
+
+| Detail | Value |
+|:-------|:------|
+| Run ID | `{{ run_id }}` |
+| Pipeline Run | `{{ pipeline_run_id or 'N/A' }}` |
+| Engine | {{ engine }} |
+| Source | `{{ source_path or 'N/A' }}` |
+| Time (UTC) | {{ timestamp_utc }} |
+{% if contract.domain %}| Domain | {{ contract.domain }} |
+{% endif %}{% if contract.system %}| System | {{ contract.system }} |
+{% endif %}{% if contract.owner %}| Owner | {{ contract.owner }} |
+{% endif %}
+
+> This pipeline has breached its service-level objective. Investigate and escalate if required.
+{% endblock %}

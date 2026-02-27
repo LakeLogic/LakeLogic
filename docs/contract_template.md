@@ -648,6 +648,8 @@ quarantine:
     - type: "slack"
       target: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
       on_events: ["quarantine", "failure", "schema_drift"]
+      subject_template: "[{{ event | upper }}] {{ contract.title }}"
+      message_template: "Run={{ run_id }}\nMessage={{ message }}"
       # Events: quarantine, failure, schema_drift, dataset_rule_failed
       # Business value: Real-time alerting
     
@@ -659,6 +661,8 @@ quarantine:
     # Email notification
     - type: "email"
       to: "data-platform@company.com"
+      subject_template_file: "templates/alerts/failure_subject.j2"
+      message_template_file: "templates/alerts/failure_body.j2"
       on_events: ["failure", "dataset_rule_failed"]
       # Requires SMTP configuration
     
