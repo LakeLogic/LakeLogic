@@ -7,11 +7,11 @@ Write Once. Run Anywhere. — SQL-first quality gates from Polars to petabytes.
 </p>
 
 <div class="hero-cta">
-<a href="examples/01_hello_world/" class="md-button md-button--primary">
+<a href="installation/" class="md-button md-button--primary">
 Try in 60 Seconds
 </a>
-<a href="installation/" class="md-button">
-Install LakeLogic
+<a href="examples/01_hello_world/" class="md-button">
+Hello World Notebook
 </a>
 <a href="https://github.com/LakeLogic/LakeLogic" class="md-button">
 View on GitHub
