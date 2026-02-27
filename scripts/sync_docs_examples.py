@@ -21,21 +21,6 @@ FLAGSHIP_EXAMPLES = [
         ],
     },
     {
-        "notebook": "_archive/03_data_sources/files/xml/xml_example.ipynb",
-        "dest_name": "xml_example.ipynb",
-        "supporting_files": [
-            ("_archive/03_data_sources/files/xml/xml_contract.yaml", "xml_contract.yaml"),
-            ("_archive/03_data_sources/files/xml/data/employees.xml", "data/employees.xml"),
-        ],
-    },
-    {
-        "notebook": "_archive/03_data_sources/files/excel/excel_example.ipynb",
-        "dest_name": "excel_example.ipynb",
-        "supporting_files": [
-            ("_archive/03_data_sources/files/excel/excel_contract.yaml", "excel_contract.yaml"),
-        ],
-    },
-    {
         "notebook": "04_compliance_governance/hipaa_pii_masking/tutorial_hipaa_compliance.ipynb",
         "dest_name": "hipaa_compliance.ipynb",
         "supporting_files": [],  # Uses inline data generation

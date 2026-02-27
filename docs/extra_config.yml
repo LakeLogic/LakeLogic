@@ -1,12 +1,12 @@
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/LineageLogic/LakeLogic
+      link: https://github.com/LakeLogic/LakeLogic
       name: LakeLogic on GitHub
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lakelogic/
       name: LakeLogic on PyPI
     - icon: fontawesome/solid/globe
-      link: https://lineagelogic.com
-      name: LineageLogic Website
+      link: https://lakelogic.org
+      name: LakeLogic.org Website
   generator: false  # Remove "Made with Material for MkDocs"

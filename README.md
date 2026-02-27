@@ -141,13 +141,13 @@ good_df, bad_df = proc.run_source()
 
 ## Get Started
 
-**[📚 Read the Docs](https://LineageLogic.github.io/LakeLogic)** | **[🚀 Quickstart Guide](https://LineageLogic.github.io/LakeLogic/quickstart/)** | **[💬 Discussions](https://github.com/LineageLogic/LakeLogic/discussions)**
+**[📚 Read the Docs](https://LakeLogic.github.io/LakeLogic)** | **[🚀 Quickstart Guide](https://LakeLogic.github.io/LakeLogic/quickstart/)** | **[💬 Discussions](https://github.com/LakeLogic/LakeLogic/discussions)**
 
 ### Run Your First Contract (5 Minutes)
 
 ```bash
 # Clone the repo
-git clone https://github.com/LineageLogic/LakeLogic.git
+git clone https://github.com/LakeLogic/LakeLogic.git
 cd LakeLogic/examples/01_quickstart
 
 # Run the example
@@ -161,7 +161,7 @@ You'll see:
 
 ## Explore the Examples
 
-The [`examples/`](https://github.com/LineageLogic/LakeLogic/tree/main/examples) directory contains 24 runnable notebooks across 4 tested categories:
+The [`examples/`](https://github.com/LakeLogic/LakeLogic/tree/main/examples) directory contains 24 runnable notebooks across 4 tested categories:
 
 | Category | Directory | What You'll Learn |
 |---|---|---|
@@ -174,11 +174,11 @@ The [`examples/`](https://github.com/LineageLogic/LakeLogic/tree/main/examples) 
 
 ## Documentation
 
-- **[Full Documentation](https://LineageLogic.github.io/LakeLogic)** — Complete guides and API reference
-- **[How It Works](https://LineageLogic.github.io/LakeLogic/concepts/)** — Medallion architecture and core concepts
-- **[CLI Reference](https://LineageLogic.github.io/LakeLogic/cli/)** — Command-line usage
-- **[API Reference](https://LineageLogic.github.io/LakeLogic/api/)** — Python API documentation
-- **[Reprocessing Guide](https://LineageLogic.github.io/LakeLogic/reprocessing/)** — Handle late-arriving data
+- **[Full Documentation](https://LakeLogic.github.io/LakeLogic)** — Complete guides and API reference
+- **[How It Works](https://LakeLogic.github.io/LakeLogic/concepts/)** — Medallion architecture and core concepts
+- **[CLI Reference](https://LakeLogic.github.io/LakeLogic/cli/)** — Command-line usage
+- **[API Reference](https://LakeLogic.github.io/LakeLogic/api/)** — Python API documentation
+- **[Reprocessing Guide](https://LakeLogic.github.io/LakeLogic/reprocessing/)** — Handle late-arriving data
 - **[Contract Template](docs/contract_template.md)** — Full YAML reference for all contract fields
 - **[Streaming](docs/streaming_implementation_complete.md)** — Real-time ingestion guide
 

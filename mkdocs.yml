@@ -6,8 +6,8 @@ repo_name: lakelogic/LakeLogic
 repo_url: https://github.com/lakelogic/LakeLogic
 edit_uri: edit/main/docs/
 copyright: >
-  Copyright &copy; 2026 <a href="https://lineagelogic.com" target="_blank">LineageLogic</a> · 
-  Open Source by <a href="https://github.com/LineageLogic" target="_blank">LineageLogic Team</a>
+  Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · 
+  Open Source by <a href="https://github.com/LakeLogic" target="_blank">LakeLogic Team</a>
 
 theme:
   name: material
@@ -19,7 +19,7 @@ theme:
     text: "Inter"
     code: "JetBrains Mono"
   palette:
-    # Light mode (default - matching LineageLogic)
+    # Light mode (default - matching LakeLogic)
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: blue
@@ -132,12 +132,12 @@ extra_javascript:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/LineageLogic/LakeLogic
+      link: https://github.com/LakeLogic/LakeLogic
       name: LakeLogic on GitHub
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lakelogic/
       name: LakeLogic on PyPI
     - icon: fontawesome/solid/globe
-      link: https://lineagelogic.com
-      name: LineageLogic Website
+      link: https://lakelogic.org
+      name: LakeLogic.org Website
   generator: false

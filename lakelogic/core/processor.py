@@ -919,6 +919,53 @@ class DataProcessor:
                 if df is None:
                     if path.startswith("table:"):
                         df = spark.table(path[6:])
+
+                        # ── Incremental watermark for Spark table sources ─────
+                        _src_cfg = getattr(self.contract, "source", None)
+                        if (
+                            getattr(_src_cfg, "load_mode", None) == "incremental"
+                            and not os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK")
+                        ):
+                            _wm_field = getattr(_src_cfg, "watermark_field", None)
+                            _mat = getattr(self.contract, "materialization", None)
+                            _tgt = getattr(_mat, "target_path", None) if _mat else None
+                            if _wm_field and _tgt:
+                                # Resolve target column name (may be renamed by preserve_upstream)
+                                _lin = getattr(self.contract, "lineage", None)
+                                _pres = list(getattr(_lin, "preserve_upstream", []) or [])
+                                _pfx = getattr(_lin, "upstream_prefix", "_upstream") or "_upstream"
+                                if _wm_field in _pres:
+                                    _tgt_col = (
+                                        f"{_pfx}{_wm_field}"
+                                        if _wm_field.startswith("_lakelogic_")
+                                        else f"{_pfx}_{_wm_field.lstrip('_')}"
+                                    )
+                                else:
+                                    _tgt_col = _wm_field
+
+                                # Read max watermark from the target table
+                                _max_wm = None
+                                _tgt_name = _tgt[6:] if _tgt.startswith("table:") else _tgt
+                                try:
+                                    _wm_row = spark.sql(
+                                        f"SELECT MAX(`{_tgt_col}`) AS max_wm FROM {_tgt_name}"
+                                    ).collect()
+                                    if _wm_row and _wm_row[0]["max_wm"] is not None:
+                                        _max_wm = _wm_row[0]["max_wm"]
+                                except Exception as _wm_err:
+                                    logger.debug(f"Watermark read failed (full load): {_wm_err}")
+
+                                if _max_wm is not None:
+                                    from pyspark.sql import functions as F
+                                    logger.info(
+                                        f"Incremental load: filtering {_wm_field} > {_max_wm!r} "
+                                        f"(target column: '{_tgt_col}')"
+                                    )
+                                    df = df.filter(F.col(_wm_field) > F.lit(_max_wm))
+                                else:
+                                    logger.info(
+                                        "Incremental load: first run or target empty — loading all rows."
+                                    )
                     else:
                         reader = spark.read.format(fmt)
                         if fmt == "csv":

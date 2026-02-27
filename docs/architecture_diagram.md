@@ -534,4 +534,4 @@ except Exception as e:
 
 ---
 
-*For more details, see the [LakeLogic Documentation](https://lineagelogic.com)*
+*For more details, see the [LakeLogic Documentation](https://lakelogic.org)*

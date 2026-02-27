@@ -19,7 +19,7 @@ We welcome contributions from the community and are pleased to have you join us.
 
 ## 📜 Code of Conduct
 
-This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to conduct@lineagelogic.com.
+This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to conduct@lakelogic.org.
 
 ---
 
@@ -28,14 +28,14 @@ This project and everyone participating in it is governed by our [Code of Conduc
 There are many ways to contribute to LakeLogic:
 
 ### 🐛 Report Bugs
-Found a bug? Please [open an issue](https://github.com/LineageLogic/LakeLogic/issues/new?template=bug_report.md) with:
+Found a bug? Please [open an issue](https://github.com/LakeLogic/LakeLogic/issues/new?template=bug_report.md) with:
 - Clear description of the issue
 - Steps to reproduce
 - Expected vs actual behavior
 - Environment details (OS, Python version, engine)
 
 ### 💡 Suggest Features
-Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeLogic/discussions/new?category=ideas) or [open a feature request](https://github.com/LineageLogic/LakeLogic/issues/new?template=feature_request.md)
+Have an idea? [Start a discussion](https://github.com/LakeLogic/LakeLogic/discussions/new?category=ideas) or [open a feature request](https://github.com/LakeLogic/LakeLogic/issues/new?template=feature_request.md)
 
 ### 📝 Improve Documentation
 - Fix typos or unclear explanations
@@ -50,7 +50,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeLogic/dis
 - Improve performance
 
 ### 💬 Help Others
-- Answer questions in [Discussions](https://github.com/LineageLogic/LakeLogic/discussions)
+- Answer questions in [Discussions](https://github.com/LakeLogic/LakeLogic/discussions)
 - Help triage issues
 - Review pull requests
 
@@ -66,7 +66,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeLogic/dis
 ### Setup Steps
 
 1. **Fork the repository**
-   - Click "Fork" button on [GitHub](https://github.com/LineageLogic/LakeLogic)
+   - Click "Fork" button on [GitHub](https://github.com/LakeLogic/LakeLogic)
 
 2. **Clone your fork**
    ```bash
@@ -76,7 +76,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeLogic/dis
 
 3. **Add upstream remote**
    ```bash
-   git remote add upstream https://github.com/LineageLogic/LakeLogic.git
+   git remote add upstream https://github.com/LakeLogic/LakeLogic.git
    ```
 
 4. **Install dependencies** (using uv - recommended)
@@ -105,7 +105,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeLogic/dis
 ## 🔄 Pull Request Process
 
 ### Before You Start
-1. Check existing [issues](https://github.com/LineageLogic/LakeLogic/issues) and [PRs](https://github.com/LineageLogic/LakeLogic/pulls)
+1. Check existing [issues](https://github.com/LakeLogic/LakeLogic/issues) and [PRs](https://github.com/LakeLogic/LakeLogic/pulls)
 2. For major changes, open an issue first to discuss your approach
 3. Ensure your fork is up to date with upstream
 
@@ -169,7 +169,7 @@ Have an idea? [Start a discussion](https://github.com/LineageLogic/LakeLogic/dis
    ```
 
 7. **Create Pull Request**
-   - Go to [LakeLogic repository](https://github.com/LineageLogic/LakeLogic)
+   - Go to [LakeLogic repository](https://github.com/LakeLogic/LakeLogic)
    - Click "New Pull Request"
    - Select your fork and branch
    - Fill out the PR template
@@ -311,13 +311,13 @@ mkdocs serve
 ## 💬 Community
 
 ### Get Help
-- [GitHub Discussions](https://github.com/LineageLogic/LakeLogic/discussions) - Q&A and general discussions
+- [GitHub Discussions](https://github.com/LakeLogic/LakeLogic/discussions) - Q&A and general discussions
 - [Discord](https://discord.gg/lakelogic) - Real-time chat (coming soon)
-- [Documentation](https://LineageLogic.github.io/LakeLogic) - Comprehensive guides
+- [Documentation](https://LakeLogic.github.io/LakeLogic) - Comprehensive guides
 
 ### Stay Updated
-- Watch the [repository](https://github.com/LineageLogic/LakeLogic) for updates
-- Follow [@lineagelogic](https://twitter.com/lineagelogic) on Twitter
+- Watch the [repository](https://github.com/LakeLogic/LakeLogic) for updates
+- Follow [@lakelogic](https://twitter.com/lakelogic) on Twitter
 - Subscribe to release notifications
 
 ---
@@ -325,7 +325,7 @@ mkdocs serve
 ## 🏆 Recognition
 
 Contributors will be:
-- Listed in our [Contributors](https://github.com/LineageLogic/LakeLogic/graphs/contributors) page
+- Listed in our [Contributors](https://github.com/LakeLogic/LakeLogic/graphs/contributors) page
 - Mentioned in release notes for significant contributions
 - Eligible for contributor swag (coming soon!)
 
@@ -333,10 +333,10 @@ Contributors will be:
 
 ## 📞 Questions?
 
-- **Technical questions**: [GitHub Discussions](https://github.com/LineageLogic/LakeLogic/discussions)
-- **Security issues**: security@lineagelogic.com
-- **Code of Conduct**: conduct@lineagelogic.com
-- **General inquiries**: hello@lineagelogic.com
+- **Technical questions**: [GitHub Discussions](https://github.com/LakeLogic/LakeLogic/discussions)
+- **Security issues**: security@lakelogic.org
+- **Code of Conduct**: conduct@lakelogic.org
+- **General inquiries**: hello@lakelogic.org
 
 ---
 

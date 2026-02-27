@@ -74,4 +74,4 @@ LakeLogic is about **Runtime Reliability** and **Infrastructure Flexibility**. I
 
 ## Need More?
 
-LakeLogic is fully open source and works standalone. For enterprise teams looking for additional capabilities, [LineageLogic](https://lineagelogic.com) extends LakeLogic with AI-powered contract generation, visual lineage mapping, and collaborative governance workflows.
+LakeLogic is fully open source and works standalone. For enterprise teams looking for additional capabilities, [LakeLogic.org](https://lakelogic.org) extends LakeLogic with AI-powered contract generation, visual lineage mapping, and collaborative governance workflows.
