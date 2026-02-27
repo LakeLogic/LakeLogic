@@ -87,6 +87,15 @@ cz changelog
 [0.1.0]: https://github.com/LakeLogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/LakeLogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.2.0 (2026-02-27)
+
+### Feat
+
+- Add quickstart examples for data ingestion across various file formats using contracts and notebooks.
+- Add new documentation for notifications & secrets, playbooks, and a main index, and update mkdocs navigation.
+- Add extensive documentation including comparison, installation, and architecture guides, update project branding, and introduce core processor logic.
+- Introduce new examples covering advanced workflows and compliance/governance scenarios, including data, contracts, and notebooks.
+
 ## v0.2.0b0 (2026-02-26)
 
 ### Feat
