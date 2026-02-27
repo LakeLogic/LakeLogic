@@ -1,0 +1,6 @@
+id,name,email,department,salary,hire_date,status
+1,Frank Wilson,frank@company.com,Engineering,105000,2023-02-10,active
+2,Grace Lee,grace-no-at,Finance,88000,2023-04-15,active
+3,Henry Brown,henry@company.com,Marketing,-10000,2023-06-20,inactive
+4,Iris Taylor,iris@company.com,Sales,92000,2022-12-05,active
+5,Jack Anderson,jack@company.com,HR,79000,2024-02-14,active
