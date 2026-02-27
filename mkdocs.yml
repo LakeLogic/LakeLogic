@@ -1,9 +1,9 @@
 site_name: LakeLogic
 site_description: Trust Your Data. Scale Your Logic. SQL-first quality gates from Polars to petabytes.
-site_url: https://lakelogic.github.io/LakeLogic/
+site_url: https://LakeLogic.github.io/LakeLogic/
 site_author: LakeLogic Team
-repo_name: lakelogic/LakeLogic
-repo_url: https://github.com/lakelogic/LakeLogic
+repo_name: LakeLogic/LakeLogic
+repo_url: https://github.com/LakeLogic/LakeLogic
 edit_uri: edit/main/docs/
 copyright: >
   Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · 

@@ -7,11 +7,11 @@ Write Once. Run Anywhere. — SQL-first quality gates from Polars to petabytes.
 </p>
 
 <div class="hero-cta">
-<a href="examples/01_hello_world/" class="md-button md-button--primary">
+<a href="installation/" class="md-button md-button--primary">
 Try in 60 Seconds
 </a>
-<a href="installation/" class="md-button">
-Install LakeLogic
+<a href="examples/01_hello_world/" class="md-button">
+Hello World Notebook
 </a>
 <a href="https://github.com/LakeLogic/LakeLogic" class="md-button">
 View on GitHub
@@ -165,64 +165,69 @@ LakeLogic automatically resolves catalog table names and uses **Delta-RS** for f
 
 ## How It Works (In a Nutshell)
 
-LakeLogic enforces **Data Contracts as Quality Gates** across your medallion architecture:
+LakeLogic enforces **Data Contracts as Quality Gates** at every layer of your medallion architecture:
 
 ```text
-┌──────────────┐
-│  Raw Data    │  CSV, Parquet, Delta, APIs
-│  (Landing)   │
-└──────┬───────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────┐
-│  🟤 BRONZE LAYER  (Capture Everything)                  │
-│  contract.yaml: Minimal validation, catch obvious junk  │
-└──────┬───────────────────────────────────────────┬──────┘
-       │                                            │
-       │ ✅ PASSED                                   ✗ FAILED
-       │                                            │
-       ▼                                            ▼
-┌────────────────────────┐              ┌─────────────────┐
-│  🛡️ Quality Gate       │              │ 🛑 QUARANTINE   │
-│  ───────────────       │              │                 │
-│  Pre-Process           │              │ Bad data saved  │
-│  ✓ Deduplicate         │              │ with reasons    │
-│  ✓ Filter junk         │              │                 │
-│  Validate              │              │ ↻ Reprocess     │
-│  ✓ Schema checks       │              │   after fix     │
-│  ✓ Quality rules       │              └─────────────────┘
-│  Post-Process          │
-│  ✓ Enrich data         │
-└────────┬───────────────┘
+┌──────────────────────────────────────────────────┐
+│  📂 DATA SOURCE                                  │
+│  CSV · Parquet · Delta · JSON · XML · Excel      │
+│  APIs · URLs · Databases · Cloud Storage         │
+└───────────────────────┬──────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────┐
+│  📜 CONTRACT.YAML                                │
+│  Schema · Types · Nullability · Quality Rules    │
+└───────────────────────┬──────────────────────────┘
+                        │
+              ┌─────────┴─────────┐
+              │  DataProcessor    │
+              │  .run_source()    │
+              └─────────┬─────────┘
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+  ┌───────────┐ ┌───────────┐ ┌───────────┐
+  │  Polars   │ │  Spark    │ │  DuckDB   │  Same contract,
+  │  (local)  │ │  (cluster)│ │  (in-proc)│  any engine
+  └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
+        └──────────────┼──────────────┘
+                       │
+          ┌────────────┼────────────┐
+          ▼                         ▼
+┌──────────────────┐     ┌──────────────────┐
+│  ✅ good_df      │     │  ❌ bad_df       │
+│  ────────────    │     │  ────────────    │
+│  Schema valid    │     │  🛑 QUARANTINE   │
+│  Rules passed    │     │  Every failed    │
+│  Types correct   │     │  row saved with  │
+│  Ready for next  │     │  failure reason  │
+│  layer           │     │  ↻ Fix & replay  │
+└────────┬─────────┘     └──────────────────┘
          │
          ▼
-┌─────────────────────────────────────────────────────────┐
-│  ⚪ SILVER LAYER  (Validated & Clean)                   │
-│  contract.yaml: Full validation, business rules         │
-└──────┬───────────────────────────────────────────┬──────┘
-       │                                            │
-       │ ✅ PASSED                                   ✗ QUARANTINE
-       │                                            │
-       ▼                                            ▼
-┌────────────────────────┐              ┌─────────────────┐
-│  🛡️ Quality Gate       │              │ 🛑 QUARANTINE   │
-│  ───────────────       │              └─────────────────┘
-│  SQL or Python/Notebook│
-│  ✓ Aggregations        │
-│  ✓ ML Scoring          │
-│  ✓ Business KPIs       │
-└────────┬───────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  🟡 GOLD LAYER  (Business-Ready Analytics)              │
-│  Dashboards • ML Models • Data Products                 │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  📊 PIPELINE ENRICHMENT                          │
+│  ✓ Lineage injection (run_id, timestamps)        │
+│  ✓ SLO checks (freshness, completeness)          │
+│  ✓ Schema drift detection                        │
+│  ✓ External logic (Python scripts / notebooks)   │
+│  ✓ Materialization (Delta, Parquet, DB)           │
+│  ✓ Run log (DuckDB audit trail)                  │
+│  ✓ Notifications (alerts on quarantine/failure)   │
+└──────────────────────────────────────────────────┘
 
-✨ Key Features:
+Each layer in the medallion uses its own contract:
+
+  🟤 BRONZE → Capture everything, catch obvious junk
+  ⚪ SILVER → Full validation, business rules, dedup
+  🟡 GOLD   → Aggregations, KPIs, analytics-ready
+
+✨ Key Guarantees:
   • 100% Reconciliation: source_count = good_count + bad_count
-  • Engine Agnostic: Same contract works on Polars, Spark, DuckDB, Pandas
-  • No Silent Failures: Failed rows quarantined with error reasons
+  • Engine Agnostic: Same contract on Polars, Spark, DuckDB
+  • No Silent Failures: Every bad row quarantined with reasons
+  • Full Lineage: Source → Bronze → Silver → Gold, all traced
 ```
 
 [:octicons-arrow-right-24: See detailed architecture](architecture_diagram.md)
