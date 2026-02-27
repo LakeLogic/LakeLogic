@@ -274,6 +274,74 @@ Each layer in the medallion uses its own contract:
 
 ---
 
+## :material-microsoft-azure: Azure Reference Architecture
+
+Go from **zero to production Lakehouse in under an hour.** The open-source [Azure Reference Architecture](https://github.com/LakeLogic/reference-architecture-azure-ecommerce) provisions a fully governed **Databricks + ADLS Gen2** platform with a single `terraform apply`.
+
+<div class="grid cards" markdown>
+
+-   :material-database-outline:{ .lg .middle } **Unity Catalog Medallion**
+
+    ---
+
+    Automated **Bronze → Silver → Gold** schemas with per-layer permissions. Isolated catalog, external locations, and storage credentials — all wired to your ADLS containers.
+
+-   :material-harddisk:{ .lg .middle } **Volumes for Raw Data**
+
+    ---
+
+    **Non-Delta files** (CSV, JSON, XML, contracts) land in UC Volumes backed by ADLS. Stream raw data directly into Databricks without format conversion.
+
+-   :material-folder-network:{ .lg .middle } **Standardized Data Lake**
+
+    ---
+
+    Terraform creates a consistent ADLS directory structure — `bronze/`, `silver/`, `gold/`, `quarantine/`, `nondelta/` — with domain-scoped subfolders for every business unit.
+
+-   :material-shield-account:{ .lg .middle } **Auto Identity Sync**
+
+    ---
+
+    Account-level groups are automatically synced to workspaces with correct entitlements. Read-only, read-write, and owner permissions cascade from schemas to external locations.
+
+-   :material-connection:{ .lg .middle } **External Locations & Connections**
+
+    ---
+
+    Service principal credentials, storage credentials, and external locations are provisioned as code. No manual Databricks UI clicks — everything is auditable and repeatable.
+
+-   :material-bell-ring:{ .lg .middle } **Event-Driven Pipelines**
+
+    ---
+
+    **Event Grid** watches ADLS landing zones and triggers **Azure Functions** that run LakeLogic contracts automatically. Data arrives → pipeline fires → medallion layers populate.
+
+</div>
+
+```text
+┌──────────────────────────────────────────────────────┐
+│  terraform apply                                     │
+│  ─────────────────────────────────────────────       │
+│                                                      │
+│  ADLS Gen2                    Databricks + UC        │
+│  ─────────                    ───────────────        │
+│  📂 bronze/                   🏷️ Catalog (isolated)  │
+│  📂 silver/                   📋 Schemas per layer   │
+│  📂 gold/                     🔗 External Locations  │
+│  📂 quarantine/               🔑 Storage Credentials │
+│  📂 nondelta/                 📦 Volumes             │
+│     └─ _data/domain/system/   👥 Groups + ACLs       │
+│     └─ _domains/contracts/    🔒 Secret Scopes       │
+│  📂 uc-assets/catalog/        ⚡ UC Cluster          │
+│                                                      │
+│  + Key Vault · VNet · Private Endpoints · Event Grid │
+└──────────────────────────────────────────────────────┘
+```
+
+[:octicons-arrow-right-24: View the Reference Architecture](https://github.com/LakeLogic/reference-architecture-azure-ecommerce)
+
+---
+
 ## Why LakeLogic?
 
 ### Write Once. Run Anywhere.

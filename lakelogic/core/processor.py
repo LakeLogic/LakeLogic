@@ -10,7 +10,7 @@ import uuid
 
 from lakelogic.core.models import DataContract
 from lakelogic.engines.base import EngineAdapter
-from lakelogic.notifications.base import get_notification_adapter
+from lakelogic.notifications.base import get_notification_adapter, render_notification_content
 from lakelogic.core.materialization import materialize_dataframe, materialize_quarantine, write_run_log
 from lakelogic.core.observer import RemoteObserver
 from loguru import logger
@@ -745,18 +745,7 @@ class DataProcessor:
                                 _mat = getattr(self.contract, "materialization", None)
                                 _tgt = getattr(_mat, "target_path", None) if _mat else None
                                 if _wm_field and _tgt:
-                                    # Determine target column name (may be renamed by preserve_upstream)
-                                    _lin = getattr(self.contract, "lineage", None)
-                                    _pres = list(getattr(_lin, "preserve_upstream", []) or [])
-                                    _pfx = getattr(_lin, "upstream_prefix", "_upstream") or "_upstream"
-                                    if _wm_field in _pres:
-                                        _tgt_col = (
-                                            f"{_pfx}{_wm_field}"
-                                            if _wm_field.startswith("_lakelogic_")
-                                            else f"{_pfx}_{_wm_field.lstrip('_')}"
-                                        )
-                                    else:
-                                        _tgt_col = _wm_field
+                                    _src_col, _tgt_col = self._resolve_watermark_columns(_wm_field)
                                     _max_wm = None
                                     _tgt_delta = Path(_tgt)
                                     if (_tgt_delta / "_delta_log").exists():
@@ -768,10 +757,10 @@ class DataProcessor:
                                             logger.debug(f"Watermark read failed (full load): {_wm_err}")
                                     if _max_wm is not None:
                                         logger.info(
-                                            f"Incremental load: filtering {_wm_field} > {_max_wm!r} "
+                                            f"Incremental load: filtering {_src_col} > {_max_wm!r} "
                                             f"(target column: '{_tgt_col}')"
                                         )
-                                        _wm_filter_expr = pl.col(_wm_field) > _max_wm
+                                        _wm_filter_expr = pl.col(_src_col) > _max_wm
                                     else:
                                         logger.info(
                                             "Incremental load: first run or target empty — loading all rows."
@@ -930,18 +919,7 @@ class DataProcessor:
                             _mat = getattr(self.contract, "materialization", None)
                             _tgt = getattr(_mat, "target_path", None) if _mat else None
                             if _wm_field and _tgt:
-                                # Resolve target column name (may be renamed by preserve_upstream)
-                                _lin = getattr(self.contract, "lineage", None)
-                                _pres = list(getattr(_lin, "preserve_upstream", []) or [])
-                                _pfx = getattr(_lin, "upstream_prefix", "_upstream") or "_upstream"
-                                if _wm_field in _pres:
-                                    _tgt_col = (
-                                        f"{_pfx}{_wm_field}"
-                                        if _wm_field.startswith("_lakelogic_")
-                                        else f"{_pfx}_{_wm_field.lstrip('_')}"
-                                    )
-                                else:
-                                    _tgt_col = _wm_field
+                                _src_col, _tgt_col = self._resolve_watermark_columns(_wm_field)
 
                                 # Read max watermark from the target table
                                 _max_wm = None
@@ -958,10 +936,10 @@ class DataProcessor:
                                 if _max_wm is not None:
                                     from pyspark.sql import functions as F
                                     logger.info(
-                                        f"Incremental load: filtering {_wm_field} > {_max_wm!r} "
+                                        f"Incremental load: filtering {_src_col} > {_max_wm!r} "
                                         f"(target column: '{_tgt_col}')"
                                     )
-                                    df = df.filter(F.col(_wm_field) > F.lit(_max_wm))
+                                    df = df.filter(F.col(_src_col) > F.lit(_max_wm))
                                 else:
                                     logger.info(
                                         "Incremental load: first run or target empty — loading all rows."
@@ -1193,6 +1171,53 @@ class DataProcessor:
         except Exception:
             return df  # reconstruction failed — return original
 
+    def _resolve_watermark_columns(self, wm_field: str) -> tuple:
+        """
+        Resolve watermark column names for source filtering and target querying.
+
+        The watermark_field in a contract can be specified as either:
+          - the *source* column name (e.g. ``_lakelogic_processed_at``)
+          - the *target/renamed* column name (e.g. ``_upstream_lakelogic_processed_at``)
+
+        When ``lineage.preserve_upstream`` is configured, LakeLogic renames
+        source lineage columns (e.g. ``_lakelogic_processed_at`` →
+        ``_upstream_lakelogic_processed_at``).  The source DataFrame still has
+        the original name whereas the target table has the renamed name.
+
+        Returns:
+            (source_col, target_col) — the column name to use for filtering
+            the source DataFrame and the column name to query MAX() from the
+            target table.
+        """
+        _lin = getattr(self.contract, "lineage", None)
+        _pres = list(getattr(_lin, "preserve_upstream", []) or []) if _lin else []
+        _pfx = getattr(_lin, "upstream_prefix", "_upstream") or "_upstream" if _lin else "_upstream"
+
+        def _to_renamed(col: str) -> str:
+            """Compute the preserve_upstream renamed name for a source column."""
+            if col.startswith("_lakelogic_"):
+                return f"{_pfx}{col}"  # _upstream_lakelogic_processed_at
+            return f"{_pfx}_{col.lstrip('_')}"
+
+        def _to_original(renamed: str) -> str:
+            """Reverse a preserve_upstream rename back to the source column name."""
+            for src in _pres:
+                if _to_renamed(src) == renamed:
+                    return src
+            return renamed  # not a renamed column — return as-is
+
+        # Case 1: wm_field is a source column that will be renamed
+        if wm_field in _pres:
+            return wm_field, _to_renamed(wm_field)
+
+        # Case 2: wm_field is already the renamed (target) name
+        original = _to_original(wm_field)
+        if original != wm_field:
+            return original, wm_field
+
+        # Case 3: no preserve_upstream mapping — same column on both sides
+        return wm_field, wm_field
+
     def _expand_source_files(self, path: str) -> Optional[List[Dict[str, Any]]]:
         """
         Expand local file patterns into concrete file paths and mtimes.
@@ -1337,11 +1362,70 @@ class DataProcessor:
                     if hasattr(self.contract, "_base_path"):
                         config["_base_path"] = str(self.contract._base_path)
                     adapter = get_notification_adapter(notif.type, config)
-                    adapter.send(message, subject=f"LakeLogic {event.capitalize()} Alert")
+                    default_subject = f"LakeLogic {event.capitalize()} Alert"
+                    template_context = self._notification_template_context(
+                        event=event,
+                        message=message,
+                        subject=default_subject,
+                        notification_type=notif.type,
+                    )
+                    rendered_message, rendered_subject = render_notification_content(
+                        adapter.config,
+                        message=message,
+                        subject=default_subject,
+                        context=template_context,
+                    )
+                    adapter.send(rendered_message, subject=rendered_subject)
                 except Exception as e:
                     logger.error(f"Failed to send notification: {e}")
                     if getattr(q, "strict_notifications", True):
                         raise
+
+    def _notification_template_context(
+        self,
+        *,
+        event: str,
+        message: str,
+        subject: str,
+        notification_type: str,
+    ) -> Dict[str, Any]:
+        """
+        Build context values available to notification templates.
+
+        Args:
+            event: Triggering event name.
+            message: Default event message.
+            subject: Default event subject.
+            notification_type: Destination notification type.
+
+        Returns:
+            Context dictionary for template rendering.
+        """
+        info = getattr(self.contract, "info", None)
+        metadata = getattr(self.contract, "metadata", {}) or {}
+        title = getattr(info, "title", None) or getattr(self.contract, "dataset", None) or "unknown"
+
+        return {
+            "event": event,
+            "message": message,
+            "subject": subject,
+            "notification_type": notification_type,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "engine": self.engine_name,
+            "run_id": self.last_run_id,
+            "pipeline_run_id": self.pipeline_run_id,
+            "source_path": self.last_source_path,
+            "contract": {
+                "title": title,
+                "version": getattr(info, "version", None),
+                "owner": getattr(info, "owner", None),
+                "dataset": getattr(self.contract, "dataset", None),
+                "domain": metadata.get("domain"),
+                "system": metadata.get("system"),
+                "layer": metadata.get("data_layer"),
+            },
+            "metadata": metadata,
+        }
 
     def materialize(
         self,

@@ -575,11 +575,34 @@ class Quality(BaseModel):
     dataset_rules: List[Union[QualityRule, DatasetRuleUnique, DatasetRuleNullRatio, DatasetRuleRowCountBetween]] = Field(default_factory=list)
 
 class Notification(BaseModel):
-    """Notification channel configuration."""
+    """
+    Notification channel configuration.
+
+    Minimal usage — just ``target`` and ``on_events``::
+
+        notifications:
+          - target: "env:TEAMS_WEBHOOK"
+            on_events: [quarantine, failure]
+
+    The ``type`` field defaults to ``apprise`` which auto-detects the
+    channel from the target URL scheme (``mailto://``, ``slack://``,
+    ``msteams://``, etc.).  Set ``type`` explicitly only when using the
+    legacy built-in adapters (``smtp``, ``sendgrid``, ``slack``,
+    ``teams``, ``webhook``).
+    """
     model_config = ConfigDict(populate_by_name=True, extra="allow")
-    type: str # slack, teams, email, webhook
-    target: str = Field(alias=AliasChoices("target", "to", "channel", "url"))
+    type: str = "apprise"  # apprise (default) | slack | teams | email/smtp | sendgrid | webhook
+    target: Optional[str] = Field(default=None, alias=AliasChoices("target", "to", "channel", "url"))
+    targets: Optional[List[str]] = None  # Apprise multi-channel fan-out
     on_events: List[str] = Field(default_factory=lambda: ["quarantine", "failure"])
+    subject_template: Optional[str] = None
+    subject_template_file: Optional[str] = None
+    message_template: Optional[str] = None
+    message_template_file: Optional[str] = None
+    # Alias support for message template naming.
+    body_template: Optional[str] = None
+    body_template_file: Optional[str] = None
+    template_context: Dict[str, Any] = Field(default_factory=dict)
 
 class Quarantine(BaseModel):
     """Quarantine settings and notification routing."""

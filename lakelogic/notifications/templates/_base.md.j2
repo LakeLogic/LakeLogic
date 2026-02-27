@@ -1,0 +1,8 @@
+{% block header %}**LakeLogic** — {{ contract.title }} (v{{ contract.version }}){% endblock %}
+
+{% block content %}{% endblock %}
+
+{% block footer %}
+---
+Run ID: `{{ run_id }}` | Engine: {{ engine }} | {{ timestamp_utc }}
+{% endblock %}

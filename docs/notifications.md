@@ -65,6 +65,55 @@ quarantine:
       on_events: ["dataset_rule_failed"]
 ```
 
+### Template Your Alerts (All Channels)
+
+Notification channels support Jinja2 templates for subject and message:
+
+- `subject_template` or `subject_template_file`
+- `message_template` or `message_template_file`
+- `body_template` / `body_template_file` (aliases for message template)
+- `template_context` (static key/value map merged with runtime context)
+
+Runtime template context includes:
+
+- `event`, `message`, `subject`, `notification_type`
+- `timestamp_utc`, `engine`, `run_id`, `pipeline_run_id`, `source_path`
+- `contract.title`, `contract.version`, `contract.owner`, `contract.dataset`
+- `contract.domain`, `contract.system`, `contract.layer`
+
+Inline template example:
+
+```yaml
+quarantine:
+  notifications:
+    - type: slack
+      target: "env:SLACK_WEBHOOK"
+      on_events: ["quarantine", "failure"]
+      subject_template: "[{{ event | upper }}] {{ contract.title }}"
+      message_template: |
+        Run: {{ run_id }}
+        Engine: {{ engine }}
+        Message: {{ message }}
+      template_context:
+        team: "data-platform"
+```
+
+File template example:
+
+```yaml
+quarantine:
+  notifications:
+    - type: smtp
+      target: "alerts@company.com"
+      smtp_host: "smtp.company.com"
+      from_email: "lakelogic@company.com"
+      on_events: ["failure"]
+      subject_template_file: "templates/alerts/failure_subject.j2"
+      message_template_file: "templates/alerts/failure_body.j2"
+```
+
+Template file paths are resolved relative to the contract file directory.
+
 For lakehouse tables (Spark/Unity Catalog), you can use a table target:
 
 ```yaml

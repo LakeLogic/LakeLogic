@@ -483,6 +483,248 @@ def validate_notification_config(notif_type: str, config: Dict[str, Any]) -> Non
     else:
         raise ValueError(f"Unsupported notification type: {notif_type}")
 
+
+def _first_present(config: Dict[str, Any], keys: list[str]) -> Optional[str]:
+    """
+    Return the first non-empty string value from a list of keys.
+
+    Args:
+        config: Notification config.
+        keys: Candidate key names in priority order.
+
+    Returns:
+        The first non-empty string value, else None.
+    """
+    for key in keys:
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _resolve_template_path(path_value: str, config: Dict[str, Any]) -> Path:
+    """
+    Resolve a template file path using contract-relative base path when present.
+
+    Args:
+        path_value: Raw path from config.
+        config: Notification config.
+
+    Returns:
+        Absolute or relative Path resolved against _base_path when available.
+    """
+    path = Path(path_value)
+    base_path = config.get("_base_path")
+    if not path.is_absolute() and base_path:
+        path = Path(base_path) / path
+    return path
+
+
+def _render_jinja_template(template_text: str, context: Dict[str, Any], label: str) -> str:
+    """
+    Render a Jinja2 template with strict undefined handling.
+
+    When the template contains ``{% extends %}`` directives, a
+    ``FileSystemLoader`` is used with the built-in templates directory
+    so ``_base.md.j2`` (and other shared templates) can be resolved.
+
+    Args:
+        template_text: Template source string.
+        context: Rendering context.
+        label: Human-readable label for error messages.
+
+    Returns:
+        Rendered string.
+    """
+    try:
+        from jinja2 import Environment, FileSystemLoader, StrictUndefined
+    except Exception as e:
+        raise ValueError(
+            "Notification templates require 'jinja2'. Install with: pip install jinja2"
+        ) from e
+
+    templates_dir = Path(__file__).parent / "templates"
+
+    # Use FileSystemLoader when template uses {% extends %} so _base.md.j2
+    # can be resolved.  Otherwise use a simple from_string approach.
+    if "{% extends" in template_text and templates_dir.is_dir():
+        env = Environment(
+            loader=FileSystemLoader(str(templates_dir)),
+            autoescape=False,
+            undefined=StrictUndefined,
+        )
+        try:
+            tmpl = env.from_string(template_text)
+            return tmpl.render(**context)
+        except Exception as e:
+            raise ValueError(f"Failed to render notification {label}: {e}") from e
+    else:
+        env = Environment(autoescape=False, undefined=StrictUndefined)
+        try:
+            return env.from_string(template_text).render(**context)
+        except Exception as e:
+            raise ValueError(f"Failed to render notification {label}: {e}") from e
+
+
+def _load_builtin_template(event: str) -> Optional[str]:
+    """
+    Load a built-in default Jinja2 template for a given event.
+
+    Templates are shipped inside ``lakelogic/notifications/templates/``
+    and named ``{event}.md.j2``.  Returns ``None`` when no built-in
+    template exists for the event.
+
+    Args:
+        event: Event name (e.g. ``quarantine``, ``failure``, ``schema_drift``).
+
+    Returns:
+        Template source string, or None.
+    """
+    templates_dir = Path(__file__).parent / "templates"
+    # Normalise event name — convert spaces/hyphens to underscores, lowercase
+    safe_name = event.strip().lower().replace("-", "_").replace(" ", "_")
+    template_path = templates_dir / f"{safe_name}.md.j2"
+    if template_path.is_file():
+        return template_path.read_text(encoding="utf-8")
+    return None
+
+
+def render_notification_content(
+    config: Dict[str, Any],
+    message: str,
+    subject: str = "LakeLogic Alert",
+    context: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """
+    Render optional subject/message templates for any notification channel.
+
+    Template resolution priority (highest wins):
+
+    1. ``message_template_file`` / ``subject_template_file`` — user file
+    2. ``message_template`` / ``subject_template`` — inline Jinja2 string
+    3. Built-in default — ``notifications/templates/{event}.md.j2``
+    4. Raw ``message`` / ``subject`` — plain string fallback
+
+    Supported keys:
+    - subject_template / subject_template_file
+    - message_template / message_template_file
+    - body_template / body_template_file (aliases for message templates)
+    - template_context (dict merged into render context)
+
+    Args:
+        config: Notification configuration.
+        message: Default message body.
+        subject: Default subject.
+        context: Optional runtime context values.
+
+    Returns:
+        Tuple of (rendered_message, rendered_subject).
+    """
+    merged_context: Dict[str, Any] = {"message": message, "subject": subject}
+    if context:
+        merged_context.update(context)
+
+    template_context = config.get("template_context")
+    if template_context is not None:
+        if not isinstance(template_context, dict):
+            raise ValueError("template_context must be an object/map.")
+        merged_context.update(template_context)
+
+    rendered_subject = subject
+    rendered_message = message
+
+    subject_template = _first_present(config, ["subject_template"])
+    subject_template_file = _first_present(config, ["subject_template_file"])
+    message_template = _first_present(config, ["message_template", "body_template"])
+    message_template_file = _first_present(config, ["message_template_file", "body_template_file"])
+
+    if subject_template_file:
+        subject_path = _resolve_template_path(subject_template_file, config)
+        if not subject_path.exists():
+            raise ValueError(f"subject_template_file not found: {subject_path}")
+        subject_template = subject_path.read_text(encoding="utf-8")
+
+    if subject_template:
+        rendered_subject = _render_jinja_template(subject_template, merged_context, "subject template")
+        merged_context["subject"] = rendered_subject
+
+    if message_template_file:
+        message_path = _resolve_template_path(message_template_file, config)
+        if not message_path.exists():
+            raise ValueError(f"message_template_file not found: {message_path}")
+        message_template = message_path.read_text(encoding="utf-8")
+
+    # Fall back to built-in default template when no custom template is provided
+    if not message_template:
+        event = merged_context.get("event", "")
+        if event:
+            builtin = _load_builtin_template(event)
+            if builtin:
+                message_template = builtin
+                logger.debug(f"Using built-in template for event '{event}'")
+
+    if message_template:
+        try:
+            rendered_message = _render_jinja_template(message_template, merged_context, "message template")
+        except Exception as e:
+            # If built-in template uses {% extends %} and Jinja2 FileSystemLoader
+            # isn't configured, fall back to a non-extending render.
+            logger.debug(f"Template render with extends failed, trying standalone: {e}")
+            rendered_message = _render_jinja_standalone(merged_context)
+
+    return rendered_message, rendered_subject
+
+
+def _render_jinja_standalone(context: Dict[str, Any]) -> str:
+    """
+    Render a simple standalone notification when {% extends %} isn't available.
+
+    This produces a clean markdown message without needing the Jinja2
+    FileSystemLoader, which the built-in templates normally require.
+    """
+    event = context.get("event", "alert")
+    message = context.get("message", "")
+    contract = context.get("contract", {})
+    title = contract.get("title", "Unknown")
+    version = contract.get("version", "?")
+
+    _ICONS = {
+        "quarantine": "⚠️",
+        "failure": "🔴",
+        "schema_drift": "🟡",
+        "success": "✅",
+        "sla_breach": "🕐",
+    }
+    icon = _ICONS.get(event, "ℹ️")
+
+    lines = [
+        f"**LakeLogic** — {title} (v{version})",
+        "",
+        f"## {icon} {event.replace('_', ' ').title()}",
+        "",
+        message,
+        "",
+        "| Detail | Value |",
+        "|:-------|:------|",
+        f"| Run ID | `{context.get('run_id', 'N/A')}` |",
+        f"| Pipeline Run | `{context.get('pipeline_run_id') or 'N/A'}` |",
+        f"| Engine | {context.get('engine', 'N/A')} |",
+        f"| Source | `{context.get('source_path') or 'N/A'}` |",
+        f"| Time (UTC) | {context.get('timestamp_utc', 'N/A')} |",
+    ]
+
+    if contract.get("domain"):
+        lines.append(f"| Domain | {contract['domain']} |")
+    if contract.get("system"):
+        lines.append(f"| System | {contract['system']} |")
+    if contract.get("owner"):
+        lines.append(f"| Owner | {contract['owner']} |")
+
+    lines.extend(["", "---", f"Run ID: `{context.get('run_id', 'N/A')}` | Engine: {context.get('engine', 'N/A')} | {context.get('timestamp_utc', '')}"])
+
+    return "\n".join(lines)
+
+
 class SMTPAdapter(NotificationAdapter):
     """SMTP-based notification adapter."""
     def send(self, message: str, subject: str = "LakeLogic Alert"):
@@ -620,17 +862,23 @@ def get_notification_adapter(notif_type: str, config: Dict[str, Any]) -> Notific
     Returns:
         Initialized NotificationAdapter.
     """
+    # Lazy-import Apprise adapter to avoid hard dependency
+    from lakelogic.notifications.apprise_adapter import AppriseAdapter
+
     adapters = {
         "smtp": SMTPAdapter,
         "sendgrid": SendGridAdapter,
         "slack": SlackAdapter,
         "teams": TeamsAdapter,
         "email": SMTPAdapter,  # fallback
-        "webhook": WebhookAdapter
+        "webhook": WebhookAdapter,
+        "apprise": AppriseAdapter,
     }
     adapter_class = adapters.get(notif_type.lower())
     if not adapter_class:
         raise ValueError(f"Unsupported notification type: {notif_type}")
     resolved_config = resolve_config_secrets(config)
-    validate_notification_config(notif_type, resolved_config)
+    # Apprise handles its own validation (URL-based)
+    if notif_type.lower() != "apprise":
+        validate_notification_config(notif_type, resolved_config)
     return adapter_class(resolved_config)
