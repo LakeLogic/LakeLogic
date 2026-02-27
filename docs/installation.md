@@ -73,7 +73,7 @@ If you want to contribute to LakeLogic:
 
    ```bash
 
-   git clone https://github.com/LineageLogic/LakeLogic.git
+   git clone https://github.com/LakeLogic/LakeLogic.git
    cd lakelogic
 
    ```

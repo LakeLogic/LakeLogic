@@ -13,7 +13,7 @@ Try in 60 Seconds
 <a href="installation/" class="md-button">
 Install LakeLogic
 </a>
-<a href="https://github.com/LineageLogic/LakeLogic" class="md-button">
+<a href="https://github.com/LakeLogic/LakeLogic" class="md-button">
 View on GitHub
 </a>
 </div>
@@ -320,9 +320,9 @@ lakelogic run --contract my_contract.yaml --source raw_data.parquet
 
 ---
 
-## Scale with LineageLogic
+## Scale with LakeLogic.org
 
-LakeLogic is the open-source engine that enforces your rules. For enterprise-scale management, **[LineageLogic](https://lineagelogic.com)** provides:
+LakeLogic is the open-source engine that enforces your rules. For enterprise-scale management, **[LakeLogic.org](https://lakelogic.org)** provides:
 
 - **AI-Powered Contract Generation:** Don't write YAML by hand; generate it from your data in seconds.
 - **Visual Governance:** See your real-time data health and lineage across your entire mesh.

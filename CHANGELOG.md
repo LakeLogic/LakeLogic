@@ -83,9 +83,9 @@ cz changelog
 ---
 
 <!-- link definitions (updated by cz bump) -->
-[Unreleased]: https://github.com/LineageLogic/LakeLogic/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/LineageLogic/LakeLogic/compare/v0.1.0b2...v0.1.0
-[0.1.0b2]: https://github.com/LineageLogic/LakeLogic/releases/tag/v0.1.0b2
+[Unreleased]: https://github.com/LakeLogic/LakeLogic/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/LakeLogic/LakeLogic/compare/v0.1.0b2...v0.1.0
+[0.1.0b2]: https://github.com/LakeLogic/LakeLogic/releases/tag/v0.1.0b2
 
 ## v0.2.0b0 (2026-02-26)
 

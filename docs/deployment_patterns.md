@@ -129,4 +129,4 @@ Most companies start with **Pattern B** for their first project and grow into **
 
 ---
 
-**Scaling Up-** [LineageLogic](https://lineagelogic.com) provides visual lineage, and AI-powered contract generation on top of LakeLogic.
+**Scaling Up-** [LakeLogic.org](https://lakelogic.org) provides visual lineage, and AI-powered contract generation on top of LakeLogic.

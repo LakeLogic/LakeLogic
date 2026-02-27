@@ -1,22 +1,15 @@
 <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- LakeLogic Logo: Three-tier medallion representing Bronze/Silver/Gold with quality checkmark -->
-  
-  <!-- Shield/Badge Background -->
-  <path d="M24 4L40 12V22C40 32 34 40 24 44C14 40 8 32 8 22V12L24 4Z" fill="url(#gradient1)" stroke="#00BCD4" stroke-width="2"/>
-  
-  <!-- Three Tiers (Medallion Architecture) -->
-  <rect x="14" y="14" width="20" height="4" rx="2" fill="#CD7F32" opacity="0.7"/>
-  <rect x="14" y="20" width="20" height="4" rx="2" fill="#C0C0C0" opacity="0.7"/>
-  <rect x="14" y="26" width="20" height="4" rx="2" fill="#FFD700" opacity="0.7"/>
-  
-  <!-- Quality Checkmark -->
-  <path d="M19 34L23 38L31 30" stroke="#00BCD4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  
-  <!-- Gradient Definition -->
-  <defs>
-    <linearGradient id="gradient1" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#00BCD4" stop-opacity="0.1"/>
-      <stop offset="100%" stop-color="#009688" stop-opacity="0.2"/>
-    </linearGradient>
-  </defs>
+  <!-- LakeLogic Logo: Wave mark matching lakelogic.org branding -->
+
+  <!-- Background circle -->
+  <circle cx="24" cy="24" r="22" fill="#0EA5E9" />
+
+  <!-- Upper wave -->
+  <path d="M8 28 Q24 12 40 28" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" />
+
+  <!-- Lower wave (lighter) -->
+  <path d="M8 36 Q24 20 40 36" stroke="rgba(255,255,255,0.5)" stroke-width="3" stroke-linecap="round" fill="none" />
+
+  <!-- Dot -->
+  <circle cx="24" cy="16" r="4" fill="white" />
 </svg>
