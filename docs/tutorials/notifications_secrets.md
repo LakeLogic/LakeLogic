@@ -117,4 +117,4 @@ Open `examples/04_features/notifications_and_secrets/notifications_secrets.ipynb
 ## Next Steps
 
 - [Patterns Overview](../playbooks.md) - Common data engineering recipes
-- [Production Examples](../examples/insurance_elt.md) - Complete end-to-end pipeline
+- [Production Examples](https://github.com/LakeLogic/LakeLogic/tree/main/examples) - Complete end-to-end pipeline
