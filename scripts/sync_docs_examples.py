@@ -21,9 +21,41 @@ FLAGSHIP_EXAMPLES = [
         ],
     },
     {
-        "notebook": "04_compliance_governance/hipaa_pii_masking/tutorial_hipaa_compliance.ipynb",
-        "dest_name": "hipaa_compliance.ipynb",
+        "notebook": "04_compliance_governance/hipaa_pii_masking/tutorial_hipaa_gdpr_compliance.ipynb",
+        "dest_name": "hipaa_gdpr_compliance.ipynb",
         "supporting_files": [],  # Uses inline data generation
+    },
+    {
+        "notebook": "03_advanced_workflows/ai_contract_enrichment/ai_enrich_demo.ipynb",
+        "dest_name": "ai_enrich_demo.ipynb",
+        "supporting_files": [],
+    },
+    {
+        "notebook": "03_advanced_workflows/ai_contract_enrichment/ai_edge_cases_demo.ipynb",
+        "dest_name": "ai_edge_cases_demo.ipynb",
+        "supporting_files": [],
+    },
+    {
+        "notebook": "03_advanced_workflows/synthetic_data_generation/synthetic_data_generation.ipynb",
+        "dest_name": "synthetic_data_generation.ipynb",
+        "supporting_files": [
+            ("03_advanced_workflows/synthetic_data_generation/contract_orders.yaml", "contract_orders.yaml"),
+        ],
+    },
+    {
+        "notebook": "02_core_patterns/medallion_architecture/quickstart_tutorial.ipynb",
+        "dest_name": "medallion_architecture.ipynb",
+        "supporting_files": [],
+    },
+    {
+        "notebook": "03_advanced_workflows/late_arriving_reprocess/demo_self_healing.ipynb",
+        "dest_name": "late_arriving_reprocess.ipynb",
+        "supporting_files": [],
+    },
+    {
+        "notebook": "03_advanced_workflows/payments_lifecycle/payments_lifecycle.ipynb",
+        "dest_name": "payments_lifecycle.ipynb",
+        "supporting_files": [],
     },
 ]
 

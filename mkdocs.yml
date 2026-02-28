@@ -64,8 +64,10 @@ nav:
       - "HIPAA & GDPR Compliance": examples/hipaa_gdpr_compliance.ipynb
       - "AI Contract Enrichment": examples/ai_enrich_demo.ipynb
       - "AI Edge-Case Testing": examples/ai_edge_cases_demo.ipynb
-      - "Excel Source": examples/excel_example.ipynb
-      - "XML Source": examples/xml_example.ipynb
+      - "Synthetic Data Generation": examples/synthetic_data_generation.ipynb
+      - "Medallion Architecture": examples/medallion_architecture.ipynb
+      - "Late-Arriving Reprocess": examples/late_arriving_reprocess.ipynb
+      - "Payments Lifecycle": examples/payments_lifecycle.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md
