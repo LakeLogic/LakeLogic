@@ -866,6 +866,146 @@ def _write_or_print_contract(
         typer.echo(typer.style(f"  ✔  Written: {dest}", fg=typer.colors.CYAN))
 
 
+@app.command(rich_help_panel="Environment Setup")
+def doctor():
+    """
+    Check your LakeLogic environment and report installed engines & extras.
+
+    Run this to diagnose missing dependencies, verify engine availability,
+    and confirm your LakeLogic version.
+
+    Example:
+
+        lakelogic doctor
+    """
+    import platform
+
+    try:
+        import lakelogic
+        ll_version = getattr(lakelogic, "__version__", "unknown")
+    except Exception:
+        ll_version = "unknown"
+
+    py_version = platform.python_version()
+    os_info = f"{platform.system()} {platform.release()}"
+
+    # ── Header ──────────────────────────────────────────────
+    typer.echo("")
+    typer.echo(typer.style("  LakeLogic Doctor", fg=typer.colors.CYAN, bold=True))
+    typer.echo("  " + "═" * 45)
+    typer.echo(f"  Version     : {ll_version}")
+    typer.echo(f"  Python      : {py_version}")
+    typer.echo(f"  OS          : {os_info}")
+    typer.echo("")
+
+    def _check_package(name: str, import_name: str = "") -> str:
+        """Try to import a package and return its version or 'not installed'."""
+        mod_name = import_name or name
+        try:
+            mod = __import__(mod_name)
+            ver = (
+                getattr(mod, "__version__", None)
+                or getattr(mod, "version", None)
+                or getattr(mod, "VERSION", None)
+            )
+            if callable(ver):
+                ver = ver()
+            return str(ver) if ver else "installed"
+        except ImportError:
+            return ""
+
+    # ── Engines ─────────────────────────────────────────────
+    engines = [
+        ("polars", "polars"),
+        ("duckdb", "duckdb"),
+        ("pandas", "pandas"),
+        ("pyspark", "pyspark"),
+    ]
+
+    typer.echo("  Engines")
+    typer.echo("  " + "─" * 45)
+    for label, pkg in engines:
+        ver = _check_package(label, pkg)
+        if ver:
+            mark = typer.style("✅", fg=typer.colors.GREEN)
+            typer.echo(f"  {mark} {label:<14} {ver}")
+        else:
+            mark = typer.style("⬚ ", dim=True)
+            typer.echo(f"  {mark} {label:<14} not installed")
+
+    typer.echo("")
+
+    # ── Extras ──────────────────────────────────────────────
+    extras = [
+        ("deltalake", "deltalake"),
+        ("pyarrow", "pyarrow"),
+        ("jinja2", "jinja2"),
+        ("apprise", "apprise"),
+        ("dataprofiler", "dataprofiler"),
+        ("presidio", "presidio_analyzer"),
+        ("httpx", "httpx"),
+        ("sqlglot", "sqlglot"),
+        ("pydantic", "pydantic"),
+        ("cryptography", "cryptography"),
+        ("nbclient", "nbclient"),
+    ]
+
+    typer.echo("  Extras")
+    typer.echo("  " + "─" * 45)
+    for label, pkg in extras:
+        ver = _check_package(label, pkg)
+        if ver:
+            mark = typer.style("✅", fg=typer.colors.GREEN)
+            typer.echo(f"  {mark} {label:<14} {ver}")
+        else:
+            mark = typer.style("⬚ ", dim=True)
+            typer.echo(f"  {mark} {label:<14} not installed")
+
+    typer.echo("")
+
+    # ── Database Connectors ─────────────────────────────────
+    db_connectors = [
+        ("pyodbc", "pyodbc"),
+        ("psycopg2", "psycopg2"),
+        ("pymysql", "pymysql"),
+        ("pymongo", "pymongo"),
+    ]
+
+    typer.echo("  Database Connectors")
+    typer.echo("  " + "─" * 45)
+    for label, pkg in db_connectors:
+        ver = _check_package(label, pkg)
+        if ver:
+            mark = typer.style("✅", fg=typer.colors.GREEN)
+            typer.echo(f"  {mark} {label:<14} {ver}")
+        else:
+            mark = typer.style("⬚ ", dim=True)
+            typer.echo(f"  {mark} {label:<14} not installed")
+
+    typer.echo("")
+
+    # ── Streaming ───────────────────────────────────────────
+    streaming_pkgs = [
+        ("kafka-python", "kafka"),
+        ("bytewax", "bytewax"),
+        ("websocket", "websocket"),
+    ]
+
+    typer.echo("  Streaming")
+    typer.echo("  " + "─" * 45)
+    for label, pkg in streaming_pkgs:
+        ver = _check_package(label, pkg)
+        if ver:
+            mark = typer.style("✅", fg=typer.colors.GREEN)
+            typer.echo(f"  {mark} {label:<14} {ver}")
+        else:
+            mark = typer.style("⬚ ", dim=True)
+            typer.echo(f"  {mark} {label:<14} not installed")
+
+    typer.echo("  " + "═" * 45)
+    typer.echo("")
+
+
 if __name__ == "__main__":
     app()
 
