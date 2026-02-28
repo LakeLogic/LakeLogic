@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "0.3.0"
+version = "0.4.0"
 description = "A Python-based data contract runtime for consistent quality across engines."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -214,7 +214,7 @@ dev-dependencies = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "0.3.0"
+version         = "0.4.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = true

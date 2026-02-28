@@ -87,6 +87,12 @@ cz changelog
 [0.1.0]: https://github.com/LakeLogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/LakeLogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.4.0 (2026-02-28)
+
+### Feat
+
+- Add AI-powered contract enrichment functionality with LLM provider abstraction.
+
 ## v0.3.0 (2026-02-28)
 
 ### Feat
