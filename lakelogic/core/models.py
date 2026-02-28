@@ -662,6 +662,7 @@ class Materialization(BaseModel):
     partition_by: List[str] = Field(default_factory=list)
     cluster_by: List[str] = Field(default_factory=list)
     reprocess_policy: str = "overwrite_partition" # how to handle re-runs
+    reprocess_date_column: Optional[str] = None  # column for date-range reprocessing (defaults to first partition_by)
     target_path: Optional[str] = None
     format: Optional[str] = None
     scd2: Optional[Dict[str, Any]] = None

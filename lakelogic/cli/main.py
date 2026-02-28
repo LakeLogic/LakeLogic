@@ -296,6 +296,9 @@ def bootstrap(
     suggest_rules: bool = typer.Option(False, "--suggest-rules", help="Suggest quality rules from profile."),
     profile_output_dir: Optional[Path] = typer.Option(None, "--profile-output-dir", help="Directory for profile reports."),
     pii_sample_size: int = typer.Option(50, "--pii-sample-size", help="Number of sample values per column for PII detection."),
+    ai: bool = typer.Option(False, "--ai", help="Enrich contracts with LLM-generated descriptions, PII flags, and SQL rules."),
+    ai_provider: Optional[str] = typer.Option(None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama."),
+    ai_model: Optional[str] = typer.Option(None, "--ai-model", help="AI model name (e.g. gpt-4o-mini, claude-sonnet-4-20250514)."),
 ):
     """
     Bootstrap contracts and registry from a landing zone.
@@ -464,7 +467,7 @@ def bootstrap(
         df = None
         profile_data = None
         pii_map: Dict[str, str] = {}
-        if profile or detect_pii or suggest_rules:
+        if profile or detect_pii or suggest_rules or ai:
             df = _load_dataframe(sample_file)
         if profile:
             profile_data = _profile_dataframe(df)
@@ -551,6 +554,19 @@ def bootstrap(
             profile_dir.mkdir(parents=True, exist_ok=True)
             profile_path = profile_dir / f"{entity}_profile.json"
             profile_path.write_text(json.dumps(profile_data, indent=2, default=str), encoding="utf-8")
+
+        # ── AI enrichment (opt-in) ────────────────────────────────
+        if ai:
+            try:
+                from lakelogic.ai.contract_enricher import enrich_contract
+                contract = enrich_contract(
+                    contract,
+                    sample_df=df,
+                    provider=ai_provider,
+                    model=ai_model,
+                )
+            except Exception as ai_err:
+                logger.warning(f"AI enrichment failed for {entity}: {ai_err}")
 
         contract_path.write_text(
             yaml.safe_dump(contract, sort_keys=False),
@@ -650,6 +666,9 @@ def generate(
     ),
     seed: Optional[int] = typer.Option(None, "--seed", help="Random seed for reproducibility."),
     preview: int = typer.Option(5, "--preview", help="Number of rows to print to console (0 = silent)."),
+    ai: bool = typer.Option(False, "--ai", help="Use LLM to generate realistic edge cases for invalid rows."),
+    ai_provider: Optional[str] = typer.Option(None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama."),
+    ai_model: Optional[str] = typer.Option(None, "--ai-model", help="AI model name."),
 ):
     """
     Generate synthetic data from a contract definition.
@@ -688,7 +707,14 @@ def generate(
 
     try:
         gen = DataGenerator(contract, seed=seed)
-        df = gen.generate(rows=rows, invalid_ratio=invalid_ratio, output_format=engine)
+        df = gen.generate(
+            rows=rows,
+            invalid_ratio=invalid_ratio,
+            output_format=engine,
+            ai=ai,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+        )
 
         n_invalid = int(rows * invalid_ratio)
         n_valid = rows - n_invalid
