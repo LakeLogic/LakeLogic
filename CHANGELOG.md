@@ -87,6 +87,12 @@ cz changelog
 [0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.6.0 (2026-02-28)
+
+### Feat
+
+- Add CI quality gate and PyPI publish workflows, and update documentation examples via a new sync script.
+
 ## v0.5.0 (2026-02-28)
 
 ### Feat
