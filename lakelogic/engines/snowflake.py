@@ -94,10 +94,8 @@ class SnowflakeAdapter(EngineAdapter):
         Returns:
             Snowflake connection.
         """
-        try:
-            import snowflake.connector  # type: ignore
-        except Exception as exc:
-            raise ValueError("Snowflake adapter requires snowflake-connector-python.") from exc
+        from lakelogic.core.deps import require
+        require("snowflake.connector", extra="cloud")
 
         metadata = self.contract.metadata or {}
         params = {
