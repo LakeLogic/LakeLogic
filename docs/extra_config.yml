@@ -1,7 +1,7 @@
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/LakeLogic/LakeLogic
+      link: https://github.com/lakelogic/LakeLogic
       name: LakeLogic on GitHub
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lakelogic/

@@ -229,7 +229,7 @@ adapter = DeltaAdapter(storage_options={
 
 ## 📚 **Learn More**
 
-- **[Cloud Authentication Guide](cloud_authentication.md)** - Detailed setup for each platform
+- **[Ingestion & Cloud Setup](ingestion.md)** - Detailed setup for each platform
 - **[Delta Lake Support](delta_lake_support.md)** - Complete Delta-RS guide
 - **[Catalog Table Names](catalog_table_names.md)** - Unity Catalog, Fabric, Synapse
 

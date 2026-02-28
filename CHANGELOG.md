@@ -83,9 +83,15 @@ cz changelog
 ---
 
 <!-- link definitions (updated by cz bump) -->
-[Unreleased]: https://github.com/LakeLogic/LakeLogic/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/LakeLogic/LakeLogic/compare/v0.1.0b2...v0.1.0
-[0.1.0b2]: https://github.com/LakeLogic/LakeLogic/releases/tag/v0.1.0b2
+[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
+[0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
+
+## v0.5.0 (2026-02-28)
+
+### Feat
+
+- Add extensive examples for quickstart, core patterns, advanced workflows, and compliance, alongside new documentation and a schema API.
 
 ## v0.4.0 (2026-02-28)
 
