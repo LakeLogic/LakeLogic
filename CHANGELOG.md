@@ -87,6 +87,13 @@ cz changelog
 [0.1.0]: https://github.com/LakeLogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/LakeLogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.3.0 (2026-02-28)
+
+### Feat
+
+- Implement the initial command-line interface for contract execution, output management, and environment setup.
+- Implement a universal notification system using Apprise with new Jinja2 templates and a base adapter.
+
 ## v0.2.0 (2026-02-27)
 
 ### Feat
