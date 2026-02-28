@@ -87,6 +87,12 @@ cz changelog
 [0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.7.0 (2026-02-28)
+
+### Feat
+
+- Add Polars engine, new examples for HIPAA/GDPR compliance and AI contract enrichment, and installation documentation.
+
 ## v0.6.0 (2026-02-28)
 
 ### Feat
