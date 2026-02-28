@@ -98,27 +98,123 @@ def _try_faker():
 # ---------------------------------------------------------------------------
 
 _SEMANTIC_HINTS: Dict[str, str] = {
+    # Identity & People
     "email": "email",
     "name": "name",
+    "full_name": "name",
     "first_name": "first_name",
     "last_name": "last_name",
+    "surname": "last_name",
+    "username": "user_name",
     "phone": "phone_number",
+    "mobile": "phone_number",
+    "telephone": "phone_number",
+    # Address
     "address": "address",
+    "street": "street_address",
+    "street_address": "street_address",
     "city": "city",
+    "town": "city",
+    "state": "state",
+    "county": "city",
+    "postcode": "postcode",
+    "postal_code": "postcode",
+    "zip": "zipcode",
+    "zipcode": "zipcode",
+    "latitude": "latitude",
+    "lat": "latitude",
+    "longitude": "longitude",
+    "lng": "longitude",
+    "lon": "longitude",
+    # Business
+    "company": "company",
+    "company_name": "company",
+    "organisation": "company",
+    "organization": "company",
+    "job": "job",
+    "job_title": "job",
+    "title": "sentence",
+    # Internet
+    "url": "url",
+    "website": "url",
+    "link": "url",
+    "ip": "ipv4",
+    "ip_address": "ipv4",
+    "ipv4": "ipv4",
+    "mac_address": "mac_address",
+    "user_agent": "user_agent",
+    "uuid": "uuid4",
+    # Text
+    "description": "sentence",
+    "summary": "sentence",
+    "notes": "text",
+    "comment": "sentence",
+    "bio": "text",
+    "paragraph": "paragraph",
+    # Financial
+    "iban": "iban",
+    "credit_card": "credit_card_number",
+    "card_number": "credit_card_number",
     # NOTE: 'country' intentionally omitted — Faker returns full names ('United Kingdom')
     # but most dbt accepted_values tests list ISO codes ('GB').  When an accepted_values
     # constraint is present, _make_valid_value picks from it first (before Faker), so
     # removing the hint here means the no-constraint path also uses ISO-safe random strings.
-    "postcode": "postcode",
-    "zip": "zipcode",
-    "company": "company",
-    "url": "url",
-    "ip": "ipv4",
-    "uuid": "uuid4",
-    "description": "sentence",
-    "notes": "text",
-    "comment": "sentence",
 }
+
+# ---------------------------------------------------------------------------
+# Realistic fallback pools — used when Faker is NOT installed.
+# These produce human-readable values instead of garbage like 'kd83jf2n'.
+# Keys are substring patterns matched against field names (lowercase).
+# ---------------------------------------------------------------------------
+
+_REALISTIC_POOLS: Dict[str, List[str]] = {
+    "city": ["London", "Manchester", "Birmingham", "Leeds", "Bristol",
+             "Glasgow", "Edinburgh", "Liverpool", "Sheffield", "Cardiff",
+             "Belfast", "Oxford", "Cambridge", "Bath", "York"],
+    "country": ["GB", "US", "DE", "FR", "ES", "IT", "NL", "AU", "CA", "JP",
+                "BR", "IN", "CN", "KR", "SE", "NO", "DK", "FI", "IE", "NZ"],
+    "state": ["California", "Texas", "New York", "Florida", "Illinois",
+              "Pennsylvania", "Ohio", "Georgia", "Michigan", "North Carolina"],
+    "county": ["Surrey", "Kent", "Essex", "Hampshire", "Devon",
+               "Somerset", "Norfolk", "Suffolk", "Dorset", "Wiltshire"],
+    "currency": ["GBP", "USD", "EUR", "JPY", "AUD", "CAD", "CHF", "CNY"],
+    "color": ["Red", "Blue", "Green", "Black", "White", "Grey", "Navy",
+              "Burgundy", "Teal", "Ivory", "Charcoal", "Silver"],
+    "colour": ["Red", "Blue", "Green", "Black", "White", "Grey", "Navy",
+               "Burgundy", "Teal", "Ivory", "Charcoal", "Silver"],
+    "status": ["active", "inactive", "pending", "completed", "cancelled",
+               "expired", "suspended", "archived"],
+    "priority": ["low", "medium", "high", "critical", "urgent"],
+    "category": ["Electronics", "Clothing", "Home", "Sports", "Books",
+                 "Automotive", "Health", "Food", "Travel", "Finance"],
+    "type": ["standard", "premium", "enterprise", "basic", "pro"],
+    "tier": ["free", "starter", "professional", "enterprise"],
+    "plan": ["free", "basic", "standard", "premium", "enterprise"],
+    "gender": ["Male", "Female", "Non-binary", "Prefer not to say"],
+    "language": ["English", "Spanish", "French", "German", "Portuguese",
+                 "Chinese", "Japanese", "Korean", "Arabic", "Hindi"],
+    "region": ["North", "South", "East", "West", "Central",
+               "Northeast", "Southeast", "Northwest", "Southwest"],
+    "department": ["Engineering", "Sales", "Marketing", "Finance", "HR",
+                   "Operations", "Legal", "Support", "Product", "Design"],
+    "role": ["Admin", "User", "Moderator", "Editor", "Viewer", "Manager"],
+    "industry": ["Technology", "Healthcare", "Finance", "Retail",
+                 "Manufacturing", "Education", "Energy", "Real Estate"],
+    "payment_method": ["credit_card", "debit_card", "bank_transfer",
+                       "paypal", "apple_pay", "google_pay"],
+    "property_type": ["detached", "semi-detached", "terraced", "flat",
+                      "bungalow", "maisonette", "cottage", "townhouse"],
+    "listing_status": ["for_sale", "sold", "under_offer", "withdrawn",
+                       "sale_agreed", "reduced"],
+    "tenure": ["freehold", "leasehold", "share_of_freehold"],
+    "condition": ["new", "excellent", "good", "fair", "poor", "refurbished"],
+    "size": ["XS", "S", "M", "L", "XL", "XXL"],
+    "day_of_week": ["Monday", "Tuesday", "Wednesday", "Thursday",
+                    "Friday", "Saturday", "Sunday"],
+    "month": ["January", "February", "March", "April", "May", "June",
+              "July", "August", "September", "October", "November", "December"],
+}
+
 
 
 class DataGenerator:
@@ -1191,9 +1287,39 @@ class DataGenerator:
             slug = "".join(self._rng.choices(string.ascii_lowercase, k=self._rng.randint(4, 10)))
             return f"https://www.{slug}.com"
 
-        # Generic random alphanumeric fallback
-        length = self._rng.randint(5, 12)
-        return "".join(self._rng.choices(string.ascii_lowercase + string.digits, k=length))
+        # Realistic name fallback (no Faker required)
+        _FIRST_NAMES = [
+            "James", "Emma", "Oliver", "Sophia", "William", "Ava",
+            "Alexander", "Isabella", "Henry", "Mia", "Thomas", "Amelia",
+            "Benjamin", "Charlotte", "Lucas", "Harper", "Daniel", "Evelyn",
+            "Matthew", "Abigail", "David", "Emily", "Jack", "Rose",
+        ]
+        _LAST_NAMES = [
+            "Smith", "Johnson", "Williams", "Brown", "Jones", "Davis",
+            "Miller", "Wilson", "Moore", "Taylor", "Anderson", "Thomas",
+            "Jackson", "White", "Harris", "Martin", "Thompson", "Garcia",
+            "Martinez", "Robinson", "Clark", "Rodriguez", "Lewis", "Lee",
+        ]
+        if name_lower in ("first_name", "firstname", "given_name"):
+            return self._rng.choice(_FIRST_NAMES)
+        if name_lower in ("last_name", "lastname", "surname", "family_name"):
+            return self._rng.choice(_LAST_NAMES)
+        if "name" in name_lower:
+            return f"{self._rng.choice(_FIRST_NAMES)} {self._rng.choice(_LAST_NAMES)}"
+
+        # Check realistic fallback pools — produces real-world values
+        # Exact match first, then substring match
+        if name_lower in _REALISTIC_POOLS:
+            return self._rng.choice(_REALISTIC_POOLS[name_lower])
+        for hint, pool in _REALISTIC_POOLS.items():
+            if hint in name_lower:
+                return self._rng.choice(pool)
+
+        # Generic readable fallback — produces a code-like reference instead of
+        # meaningless alphanumeric noise (e.g. "CUS-4821" instead of "kd83jf2n")
+        prefix = name_lower[:3].upper() if len(name_lower) >= 3 else name_lower.upper()
+        num = self._rng.randint(1000, 9999)
+        return f"{prefix}-{num}"
 
     def _build_field_rules(self, fk_pools: Optional[Dict[str, List[Any]]] = None) -> Dict[str, Dict[str, Any]]:
         """
