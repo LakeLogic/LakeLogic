@@ -370,6 +370,7 @@ class PolarsAdapter(EngineAdapter):
         # The good/bad split still happens below — post-transforms just run on
         # all rows so the enriched values are ready for validation.
         ctx = self._get_context(lf)
+        post_output_count = self._get_row_count(lf)  # default if no transforms
         if self.contract.transformations:
             step_start = time.perf_counter()
             post_input_count = self._get_row_count(lf)

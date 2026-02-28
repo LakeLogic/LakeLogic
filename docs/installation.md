@@ -25,18 +25,31 @@ pip install "lakelogic[all]"
 
 ## Installation Options (Extras)
 
+### Recommended
+
 | Extra | What it includes | Use case |
 | :--- | :--- | :--- |
-| `[polars]` | Polars engine | High-speed local processing. |
+| `[all]` | Engines + Delta + notifications + databases + streaming | **Most users start here** — fast, conflict-free. |
+| `[polars]` | Polars engine + Delta | High-speed local processing. |
 | `[pandas]` | Pandas + DuckDB | For data science teams. |
-| `[spark]` | PySpark | Large-scale Lakehouse jobs. |
 | `[duckdb]` | DuckDB native | Fast analytical SQL in-memory. |
-| `[snowflake]` | Snowflake connector | Run contracts directly in Snowflake (table-only). |
-| `[bigquery]` | BigQuery client | Run contracts directly in BigQuery (table-only). |
-| `[notebook]` | nbclient + nbformat | Run external notebook logic hooks. |
-| `[profiling]` | DataProfiler + Presidio | Schema profiling + PII detection (bootstrap). |
-| `[notifications]` | Secret manager clients (Azure/AWS/GCP/Vault) + cryptography | Enable optional notification secret providers. |
-| `[all]` | **Every engine** | When you want total flexibility. |
+
+### Platform-Specific
+
+| Extra | What it includes | Use case |
+| :--- | :--- | :--- |
+| `[spark]` | PySpark | Large-scale Lakehouse jobs. |
+| `[snowflake]` | Snowflake connector | Run contracts directly in Snowflake. |
+| `[bigquery]` | BigQuery client | Run contracts directly in BigQuery. |
+| `[cloud]` | All GCP + Azure messaging + Snowflake + BigQuery | Multi-cloud deployments. |
+
+### Specialist
+
+| Extra | What it includes | Use case |
+| :--- | :--- | :--- |
+| `[notifications]` | Apprise + vault clients | Alerts via Slack, Teams, Email, etc. |
+| `[profiling]` | DataProfiler + Presidio | Schema profiling + PII detection. |
+| `[enterprise]` | Spark + profiling + Bytewax + notebook | Everything (may have numpy conflicts). |
 
 ## Engine Selection Tips
 
