@@ -13,7 +13,7 @@ Try in 60 Seconds
 <a href="examples/01_hello_world/" class="md-button">
 Hello World Notebook
 </a>
-<a href="https://github.com/LakeLogic/LakeLogic" class="md-button">
+<a href="https://github.com/lakelogic/LakeLogic" class="md-button">
 View on GitHub
 </a>
 </div>
@@ -404,4 +404,4 @@ LakeLogic is the open-source engine that enforces your data contracts. Here's ho
 
 ---
 
-[Quickstart](quickstart.md) | [How It Works](concepts.md) | [Patterns](deployment_patterns.md) | [CLI Usage](cli.md)
+[Quickstart](examples/01_hello_world.ipynb) | [How It Works](concepts.md) | [Patterns](deployment_patterns.md) | [CLI Usage](cli.md)

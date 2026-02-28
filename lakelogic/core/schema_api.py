@@ -563,7 +563,7 @@ def _augment_schema(schema: Dict[str, Any]) -> None:
     schema["description"] = (
         "A LakeLogic contract defines the schema, quality rules, transformation "
         "pipeline, and operational settings for a data entity. "
-        "See https://github.com/LineageLogic/LakeLogic for full documentation."
+        "See https://github.com/lakelogic/LakeLogic for full documentation."
     )
     schema["x-lakelogic-version"] = "1"
 

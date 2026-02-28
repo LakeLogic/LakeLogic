@@ -2,8 +2,8 @@ site_name: LakeLogic
 site_description: Trust Your Data. Scale Your Logic. SQL-first quality gates from Polars to petabytes.
 site_url: https://LakeLogic.github.io/LakeLogic/
 site_author: LakeLogic Team
-repo_name: LakeLogic/LakeLogic
-repo_url: https://github.com/LakeLogic/LakeLogic
+repo_name: lakelogic/LakeLogic
+repo_url: https://github.com/lakelogic/LakeLogic
 edit_uri: edit/main/docs/
 copyright: >
   Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · 
@@ -64,6 +64,8 @@ nav:
       - "HIPAA & GDPR Compliance": examples/hipaa_gdpr_compliance.ipynb
       - "AI Contract Enrichment": examples/ai_enrich_demo.ipynb
       - "AI Edge-Case Testing": examples/ai_edge_cases_demo.ipynb
+      - "Excel Source": examples/excel_example.ipynb
+      - "XML Source": examples/xml_example.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md
@@ -73,6 +75,9 @@ nav:
       - Real-Time Streaming: streaming.md
       - Reprocessing & Partitioning: reprocessing.md
       - Pipelines & Parallelism: pipelines.md
+      - Automatic Credentials: automatic_credentials.md
+      - Catalog Table Names: catalog_table_names.md
+      - Delta Lake (Spark-Free): delta_lake_support.md
   - Patterns:
       - Overview: playbooks.md
       - Bronze Quality Gate: patterns/bronze_quality_gate.md
@@ -96,6 +101,8 @@ nav:
       - Capability Matrix: capabilities.md
       - Warehouse Adapters: warehouse_adapters.md
       - Public Streaming Sources: streaming_sources.md
+      - Logging Configuration: logging_configuration.md
+      - Validation Result: validation_result.md
       - Release & Maintenance: maintenance.md
   - Why LakeLogic?: comparison.md
 
@@ -132,7 +139,7 @@ extra_javascript:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/LakeLogic/LakeLogic
+      link: https://github.com/lakelogic/LakeLogic
       name: LakeLogic on GitHub
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/lakelogic/

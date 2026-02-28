@@ -1053,4 +1053,4 @@ materialization:
 
 ---
 
-*For more examples, see the [LakeLogic Examples](../examples/) directory.*
+*For more examples, see the [LakeLogic Examples](https://github.com/lakelogic/LakeLogic/tree/main/examples) directory.*
