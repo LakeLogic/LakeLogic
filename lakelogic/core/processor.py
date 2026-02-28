@@ -600,18 +600,37 @@ class DataProcessor:
         except Exception:
             return "(sample conversion failed)"
 
-    def run_source(self, source: Optional[Union[str, Path]] = None) -> ValidationResult:
+    def run_source(
+        self,
+        source: Optional[Union[str, Path]] = None,
+        *,
+        reprocess_from: Optional[str] = None,
+        reprocess_to: Optional[str] = None,
+    ) -> ValidationResult:
         """
         Loads data from a source file and runs the contract in one step.
         The data is loaded using the engine's optimized reader.
 
         Args:
             source: Optional file path to load. If None, uses path from contract.
+            reprocess_from: Optional start date (YYYY-MM-DD) for date-range
+                reprocessing.  When set, the incremental watermark is bypassed
+                and only rows where the reprocess date column >= this value
+                are kept.  The column is resolved from
+                ``materialization.reprocess_date_column``; if not set, the
+                first ``partition_by`` column is used.
+            reprocess_to: Optional end date (YYYY-MM-DD) for date-range
+                reprocessing.  Rows where the date column <= this value are
+                kept.  Can be used alone or with ``reprocess_from``.
 
         Returns:
             ValidationResult object (unpacks to good_df, bad_df).
         """
         self._active_trace_steps = []
+
+        # Store reprocess range for downstream use by materialize
+        self._reprocess_from = reprocess_from
+        self._reprocess_to = reprocess_to
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
@@ -627,9 +646,17 @@ class DataProcessor:
         
         logger.info(f"Loading source: {path} via {self.engine_name}")
 
+        # ── Reprocessing mode: bypass incremental watermark ───────────────────
+        _is_reprocess = bool(reprocess_from or reprocess_to)
+        if _is_reprocess:
+            logger.info(
+                f"Reprocessing mode: date range [{reprocess_from or '*'} .. "
+                f"{reprocess_to or '*'}] — incremental watermark bypassed"
+            )
+
         source_files = self._expand_source_files(path)
         load_mode = getattr(self.contract.source, "load_mode", "full") if self.contract.source else "full"
-        if load_mode == "incremental" and source_files:
+        if load_mode == "incremental" and source_files and not _is_reprocess:
             watermark = self._get_last_source_watermark()
             if watermark is not None:
                 source_files = [f for f in source_files if f.get("mtime", 0) > watermark]
@@ -970,6 +997,14 @@ class DataProcessor:
         if flatten_nested:
             df = self._flatten_json_df(df, flatten_nested)
 
+        # ── Date-range reprocessing filter ────────────────────────────────────
+        # When reprocess_from / reprocess_to are set, filter the loaded DataFrame
+        # to only include rows within the requested date range.  The date column
+        # is resolved from materialization.reprocess_date_column (explicit) or
+        # the first partition_by column (implicit fallback).
+        if _is_reprocess:
+            df = self._apply_reprocess_date_filter(df, reprocess_from, reprocess_to)
+
         # ── Pre-validation upstream rename (lineage.preserve_upstream) ────────
         # Schema validation runs inside self.run() BEFORE inject_lineage is
         # called.  If the contract declares preserve_upstream, the upstream
@@ -988,6 +1023,120 @@ class DataProcessor:
                 df = _preserve_upstream_lineage(df, preserve_cols, prefix, self.engine_name)
 
         return self.run(df, source_path=path, reset_trace=False)
+
+    def _resolve_reprocess_date_column(self) -> str:
+        """Resolve which column to use for date-range reprocessing.
+
+        Resolution order:
+          1. ``materialization.reprocess_date_column`` (explicit)
+          2. First entry in ``materialization.partition_by``
+          3. Raise ValueError with guidance
+        """
+        mat = getattr(self.contract, "materialization", None)
+        if mat:
+            explicit = getattr(mat, "reprocess_date_column", None)
+            if explicit:
+                return explicit
+            partition_by = getattr(mat, "partition_by", []) or []
+            if partition_by:
+                col = partition_by[0]
+                logger.info(
+                    f"reprocess_date_column not set — using first partition_by "
+                    f"column '{col}' for date-range filtering"
+                )
+                return col
+        raise ValueError(
+            "Cannot apply date-range reprocessing: no reprocess_date_column "
+            "configured in materialization and partition_by is empty.  Add "
+            "one of:\n"
+            "  materialization:\n"
+            "    reprocess_date_column: event_date\n"
+            "  # OR\n"
+            "  materialization:\n"
+            "    partition_by: [event_date]\n"
+        )
+
+    def _apply_reprocess_date_filter(self, df, reprocess_from, reprocess_to):
+        """Filter *df* to rows within [reprocess_from, reprocess_to].
+
+        Supports Polars, Pandas, and Spark DataFrames.  Dates are compared
+        as strings (YYYY-MM-DD) for string columns, or cast to date for
+        typed columns.
+        """
+        date_col = self._resolve_reprocess_date_column()
+
+        # ── Polars ────────────────────────────────────────────────────────────
+        try:
+            import polars as pl
+            if isinstance(df, pl.DataFrame):
+                if date_col not in df.columns:
+                    raise ValueError(
+                        f"Reprocess date column '{date_col}' not found in "
+                        f"DataFrame.  Available: {df.columns}"
+                    )
+                col_expr = pl.col(date_col)
+                # Cast to string for comparison if column is Date/Datetime
+                dtype = df.schema[date_col]
+                if dtype in (pl.Date, pl.Datetime):
+                    col_expr_cmp = col_expr.cast(pl.Utf8)
+                else:
+                    col_expr_cmp = col_expr
+                pre_count = len(df)
+                if reprocess_from:
+                    df = df.filter(col_expr_cmp >= pl.lit(reprocess_from))
+                if reprocess_to:
+                    df = df.filter(col_expr_cmp <= pl.lit(reprocess_to + "T23:59:59" if "T" not in reprocess_to else reprocess_to))
+                post_count = len(df)
+                logger.info(
+                    f"Reprocess filter ({date_col}): {pre_count} → {post_count} rows "
+                    f"[{reprocess_from or '*'} .. {reprocess_to or '*'}]"
+                )
+                return df
+        except ImportError:
+            pass
+
+        # ── Pandas ────────────────────────────────────────────────────────────
+        try:
+            import pandas as pd
+            if isinstance(df, pd.DataFrame):
+                if date_col not in df.columns:
+                    raise ValueError(
+                        f"Reprocess date column '{date_col}' not found in "
+                        f"DataFrame.  Available: {list(df.columns)}"
+                    )
+                pre_count = len(df)
+                col_vals = df[date_col].astype(str)
+                if reprocess_from:
+                    df = df[col_vals >= reprocess_from]
+                    col_vals = col_vals.loc[df.index]
+                if reprocess_to:
+                    df = df[col_vals <= (reprocess_to + "T23:59:59" if "T" not in reprocess_to else reprocess_to)]
+                post_count = len(df)
+                logger.info(
+                    f"Reprocess filter ({date_col}): {pre_count} → {post_count} rows "
+                    f"[{reprocess_from or '*'} .. {reprocess_to or '*'}]"
+                )
+                return df
+        except ImportError:
+            pass
+
+        # ── Spark ─────────────────────────────────────────────────────────────
+        if hasattr(df, "sparkSession"):
+            from pyspark.sql import functions as F
+            pre_count = df.count()
+            if reprocess_from:
+                df = df.filter(F.col(date_col) >= F.lit(reprocess_from))
+            if reprocess_to:
+                df = df.filter(F.col(date_col) <= F.lit(reprocess_to))
+            post_count = df.count()
+            logger.info(
+                f"Reprocess filter ({date_col}): {pre_count} → {post_count} rows "
+                f"[{reprocess_from or '*'} .. {reprocess_to or '*'}]"
+            )
+            return df
+
+        logger.warning("Reprocess date filter: unsupported DataFrame type — skipping filter")
+        return df
 
     def _flatten_json_df(self, df, flatten_nested):
         """

@@ -534,6 +534,10 @@ class DataGenerator:
         invalid_ratio: float = 0.0,
         output_format: str = "polars",
         reference_data: Optional[Dict[str, List[Any]]] = None,
+        ai_edge_cases: Optional[Dict[str, List[Any]]] = None,
+        ai: bool = False,
+        ai_provider: Optional[str] = None,
+        ai_model: Optional[str] = None,
     ):
         """
         Generate ``rows`` synthetic rows from the contract schema.
@@ -568,6 +572,19 @@ class DataGenerator:
                 )
                 # Every orders_df["agent_id"] value exists in agents_df["agent_id"]
 
+        ai_edge_cases : dict, optional
+            Pre-computed edge-case pools from ``generate_edge_cases()``.
+            Maps field name → list of edge-case values.  When provided,
+            invalid rows will preferentially use these instead of heuristic
+            strategies.
+        ai : bool
+            If True and ``invalid_ratio > 0``, call an LLM to generate
+            edge-case values for invalid rows.
+        ai_provider : str, optional
+            LLM provider (openai, azure, anthropic, ollama).
+        ai_model : str, optional
+            Model name override.
+
         Returns
         -------
         DataFrame (Polars or Pandas depending on output_format)
@@ -586,12 +603,32 @@ class DataGenerator:
         n_invalid = int(rows * invalid_ratio)
         n_valid   = rows - n_invalid
 
+        # AI edge-case generation (opt-in)
+        edge_pools: Optional[Dict[str, List[Any]]] = ai_edge_cases
+        if ai and n_invalid > 0 and not edge_pools:
+            try:
+                from lakelogic.ai.edge_case_generator import generate_edge_cases
+                dataset_name = ""
+                info = self._contract_raw.get("info") or {}
+                dataset_name = info.get("title") or self._contract_raw.get("dataset") or ""
+                edge_pools = generate_edge_cases(
+                    self._fields,
+                    self._quality,
+                    dataset_name=dataset_name,
+                    provider=ai_provider,
+                    model=ai_model,
+                )
+            except Exception as e:
+                from loguru import logger
+                logger.warning(f"AI edge case generation failed: {e}")
+                edge_pools = None
+
         # from_file() stores auto-pools; pass them so generate() mirrors the source file
         # without the caller needing to specify the file path a second time.
         auto_pools = getattr(self, "_auto_sample_pools", None) or None
 
         valid_records   = [self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_valid)]
-        invalid_records = [self._make_row(invalid=True,  fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_invalid)]
+        invalid_records = [self._make_row(invalid=True,  fk_pools=fk_pools, sample_pools=auto_pools, edge_case_pools=edge_pools) for _ in range(n_invalid)]
 
         # Shuffle so bad rows aren't all at the end
         all_records = valid_records + invalid_records
@@ -1110,6 +1147,7 @@ class DataGenerator:
         invalid: bool,
         fk_pools: Optional[Dict[str, List[Any]]] = None,
         sample_pools: Optional[Dict[str, List[Any]]] = None,
+        edge_case_pools: Optional[Dict[str, List[Any]]] = None,
     ) -> Dict[str, Any]:
         row: Dict[str, Any] = {}
         field_rules = self._build_field_rules(fk_pools=fk_pools)
@@ -1124,7 +1162,10 @@ class DataGenerator:
 
             if invalid and self._rng.random() < 0.4:
                 # 40% chance each field is broken in an invalid row
-                row[name] = self._make_invalid_value(name, ftype, rules, nullable)
+                row[name] = self._make_invalid_value(
+                    name, ftype, rules, nullable,
+                    edge_case_pools=edge_case_pools,
+                )
             else:
                 row[name] = self._make_valid_value(
                     name, ftype, rules, nullable, sample_pools=sample_pools
@@ -1216,7 +1257,14 @@ class DataGenerator:
         ftype: str,
         rules: Dict[str, Any],
         nullable: bool,
+        edge_case_pools: Optional[Dict[str, List[Any]]] = None,
     ) -> Any:
+        # AI edge cases get priority — 60% of the time when available
+        if edge_case_pools and name in edge_case_pools:
+            pool = edge_case_pools[name]
+            if pool and self._rng.random() < 0.6:
+                return self._rng.choice(pool)
+
         strategies = []
 
         # Null on required field — always a valid "bad" strategy

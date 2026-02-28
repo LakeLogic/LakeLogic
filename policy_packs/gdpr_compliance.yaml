@@ -1,0 +1,62 @@
+name: gdpr_compliance
+description: "Industry template for GDPR (General Data Protection Regulation) compliance validation. Enforces data minimisation, lawful basis tracking, consent management, and right-to-erasure readiness."
+
+defaults:
+  schema_policy:
+    evolution: strict
+    unknown_fields: quarantine
+
+  quality:
+    enforce_required: true
+    row_rules:
+      # Email validation (required for all EU customer data)
+      - name: email_format_check
+        category: validity
+        sql: "email REGEXP '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'"
+        description: "Email must follow a valid format (GDPR Art. 5 - Accuracy)."
+
+      # Consent must be explicitly recorded (GDPR Art. 6/7)
+      - name: consent_recorded
+        category: completeness
+        sql: "consent_given IS NOT NULL"
+        description: "Consent status must be explicitly recorded for every data subject (GDPR Art. 7)."
+        severity: error
+
+      # Lawful basis must be documented (GDPR Art. 6)
+      - name: lawful_basis_required
+        category: completeness
+        sql: "lawful_basis IS NOT NULL AND lawful_basis != ''"
+        description: "A lawful basis for processing must be recorded (GDPR Art. 6)."
+        severity: error
+
+      # Data retention period must be defined (GDPR Art. 5(1)(e))
+      - name: retention_period_defined
+        category: completeness
+        sql: "retention_expires_at IS NOT NULL"
+        description: "Storage limitation: retention expiry must be set (GDPR Art. 5(1)(e))."
+
+      # Country code for jurisdiction tracking
+      - name: valid_country_code
+        category: validity
+        sql: "LENGTH(country_code) = 2"
+        description: "Country code must be ISO 3166-1 alpha-2 (2 characters)."
+
+  metadata:
+    compliance_framework: "GDPR"
+    data_sensitivity: "PII"
+    pii_policy: "pseudonymise_or_delete"
+    applicable_regions: ["EU", "EEA", "UK"]
+
+lineage:
+  enabled: true
+  capture_domain: true
+  capture_system: true
+
+quarantine:
+  enabled: true
+  notifications:
+    - type: slack
+      target: "env:DPO_ALERTS_WEBHOOK"
+      on_events: ["failure"]
+
+# This template can be imported into standard contracts

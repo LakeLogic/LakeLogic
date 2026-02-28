@@ -94,7 +94,8 @@ View on GitHub
     
     - [Hello World](examples/01_hello_world.ipynb) - Remote data ingestion in 60 seconds
     - [Database Governance](examples/02_database_governance.ipynb) - Quarantine dirty data
-    - [HIPAA & PII Masking](examples/hipaa_compliance.ipynb) - Compliance-ready data handling
+    - [HIPAA & GDPR Compliance](examples/hipaa_gdpr_compliance.ipynb) - PII masking, consent tracking, and multi-regulation governance
+    - [AI Contract Enrichment](examples/ai_enrich_demo.ipynb) - Generate field descriptions, PII flags, and quality rules with AI
 
 ---
 
@@ -392,13 +393,14 @@ lakelogic run --contract my_contract.yaml --source raw_data.parquet
 
 ---
 
-## Scale with LakeLogic.org
+## Go Further with LakeLogic
 
-LakeLogic is the open-source engine that enforces your rules. For enterprise-scale management, **[LakeLogic.org](https://lakelogic.org)** provides:
+LakeLogic is the open-source engine that enforces your data contracts. Here's how to get the most out of it:
 
-- **AI-Powered Contract Generation:** Don't write YAML by hand; generate it from your data in seconds.
-- **Visual Governance:** See your real-time data health and lineage across your entire mesh.
-- **Collaborative Approvals:** Manage contract lifecycle and versioning across decentralized teams.
+- :material-robot-outline: **AI-Powered Contract Generation:** Bootstrap contracts from raw data with `--ai` — field descriptions, PII detection, and SQL quality rules generated in seconds. Works with OpenAI, Anthropic, Azure OpenAI, or local Ollama.
+- :material-microsoft-azure: **Azure Reference Architecture:** Go from zero to production Lakehouse in under an hour with the open-source [Databricks + ADLS Gen2 blueprint](https://github.com/LakeLogic/reference-architecture-azure-ecommerce).
+- :material-test-tube: **Synthetic Test Data:** Generate realistic edge-case data from your contracts to stress-test quarantine rules before production.
+- :material-web: **Project Hub:** Visit **[lakelogic.org](https://lakelogic.org)** for the latest guides, blog posts, and community resources.
 
 ---
 

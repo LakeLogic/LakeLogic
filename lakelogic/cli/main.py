@@ -666,6 +666,9 @@ def generate(
     ),
     seed: Optional[int] = typer.Option(None, "--seed", help="Random seed for reproducibility."),
     preview: int = typer.Option(5, "--preview", help="Number of rows to print to console (0 = silent)."),
+    ai: bool = typer.Option(False, "--ai", help="Use LLM to generate realistic edge cases for invalid rows."),
+    ai_provider: Optional[str] = typer.Option(None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama."),
+    ai_model: Optional[str] = typer.Option(None, "--ai-model", help="AI model name."),
 ):
     """
     Generate synthetic data from a contract definition.
@@ -704,7 +707,14 @@ def generate(
 
     try:
         gen = DataGenerator(contract, seed=seed)
-        df = gen.generate(rows=rows, invalid_ratio=invalid_ratio, output_format=engine)
+        df = gen.generate(
+            rows=rows,
+            invalid_ratio=invalid_ratio,
+            output_format=engine,
+            ai=ai,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+        )
 
         n_invalid = int(rows * invalid_ratio)
         n_valid = rows - n_invalid

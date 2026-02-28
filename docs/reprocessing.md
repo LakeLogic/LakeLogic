@@ -114,3 +114,69 @@ UPDATE main.silver.quarantine_pos_sales_events
 SET quarantine_reprocessed = true
 WHERE _lakelogic_run_id = '<run_id_from_reprocess>';
 ```
+
+## 5. Date-Range Reprocessing (Backfill)
+
+Sometimes you need to reprocess a specific date window — for example, after fixing a bug in a transformation that affected 2 weeks of data.
+
+### Contract Config
+
+Tell LakeLogic which column to filter on:
+
+```yaml
+materialization:
+  strategy: append
+  partition_by: ["event_date"]
+  reprocess_policy: overwrite_partition
+  reprocess_date_column: event_date   # optional — defaults to first partition_by
+  target_path: output/silver_pos_sales_events
+  format: parquet
+```
+
+If `reprocess_date_column` is not set, LakeLogic automatically uses the first `partition_by` column.
+
+### Python API
+
+```python
+from lakelogic import DataProcessor
+
+processor = DataProcessor(
+    contract="contracts/silver_pos_sales_events.yaml",
+    engine="polars",
+)
+
+# Reprocess a specific date range
+result = processor.run_source(
+    reprocess_from="2026-01-15",
+    reprocess_to="2026-02-01",
+)
+
+# What happens under the hood:
+# 1. Loads ALL source data (incremental watermark is bypassed)
+# 2. Filters to rows where event_date is between 2026-01-15 and 2026-02-01
+# 3. Validates against the contract
+# 4. Materializes with overwrite_partition for affected dates only
+```
+
+### Databricks Pipeline Driver
+
+The reference architecture pipeline driver exposes reprocessing as job widgets:
+
+```
+reprocess_from:  2026-01-15
+reprocess_to:    2026-02-01
+```
+
+When these are left blank, the pipeline runs in normal incremental mode.
+
+### Key Behaviours
+
+| Scenario | What happens |
+|---|---|
+| `reprocess_from` only | Filters rows >= that date (open-ended) |
+| `reprocess_to` only | Filters rows <= that date (open-ended) |
+| Both set | Filters rows within the closed range |
+| Neither set | Normal run (incremental or full) |
+| `partition_by` configured | Only affected partitions are overwritten |
+| `strategy: merge` | Upserts by primary key within the date range |
+

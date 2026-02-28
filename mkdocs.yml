@@ -61,7 +61,9 @@ nav:
       - Medallion Architecture: tutorials/medallion_architecture.md
       - Notifications & Secrets: tutorials/notifications_secrets.md
   - Interactive Examples:
-      - "HIPAA & PII Masking": examples/hipaa_compliance.ipynb
+      - "HIPAA & GDPR Compliance": examples/hipaa_gdpr_compliance.ipynb
+      - "AI Contract Enrichment": examples/ai_enrich_demo.ipynb
+      - "AI Edge-Case Testing": examples/ai_edge_cases_demo.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md

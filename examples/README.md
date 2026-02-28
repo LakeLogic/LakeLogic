@@ -37,7 +37,7 @@ example_name/
 
 1. Start with `01_quickstart/` if you are new to LakeLogic
 2. Move to `02_core_patterns/` for medallion architecture, SCD2, deduplication, and reference joins
-3. See `03_advanced_workflows/` for end-to-end scenarios (insurance ELT, GDPR, streaming, synthetic data)
+3. See `03_advanced_workflows/` for end-to-end scenarios (insurance ELT, GDPR, streaming, synthetic data, **AI contract enrichment**)
 4. Use `04_compliance_governance/` for HIPAA and PII masking patterns
 
 > **Archived examples** in `_archive/` cover data sources, cloud platforms, orchestration, and production but have not been fully tested yet.
