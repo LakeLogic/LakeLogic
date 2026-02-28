@@ -89,7 +89,9 @@ class BigQueryAdapter(EngineAdapter):
             google.cloud.bigquery.Client
         """
         try:
-            from google.cloud import bigquery  # type: ignore
+            from lakelogic.core.deps import require
+            require("google.cloud.bigquery", extra="cloud")
+            from google.cloud import bigquery
         except Exception as exc:
             raise ValueError("BigQuery adapter requires google-cloud-bigquery.") from exc
 
