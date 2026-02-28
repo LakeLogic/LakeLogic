@@ -277,7 +277,7 @@ Each layer in the medallion uses its own contract:
 
 ## :material-microsoft-azure: Azure Reference Architecture
 
-Go from **zero to production Lakehouse in under an hour.** The open-source [Azure Reference Architecture](https://github.com/LakeLogic/reference-architecture-azure-ecommerce) provisions a fully governed **Databricks + ADLS Gen2** platform with a single `terraform apply`.
+Go from **zero to production Lakehouse in under an hour.** The [Azure Reference Architecture](https://lakelogic.org/#waitlist) provisions a fully governed **Databricks + ADLS Gen2** platform with a single `terraform apply`.
 
 <div class="grid cards" markdown>
 
@@ -339,7 +339,7 @@ Go from **zero to production Lakehouse in under an hour.** The open-source [Azur
 └──────────────────────────────────────────────────────┘
 ```
 
-[:octicons-arrow-right-24: View the Reference Architecture](https://github.com/LakeLogic/reference-architecture-azure-ecommerce)
+[:octicons-arrow-right-24: Get access to the Reference Architecture](https://lakelogic.org/#waitlist)
 
 ---
 
@@ -398,7 +398,7 @@ lakelogic run --contract my_contract.yaml --source raw_data.parquet
 LakeLogic is the open-source engine that enforces your data contracts. Here's how to get the most out of it:
 
 - :material-robot-outline: **AI-Powered Contract Generation:** Bootstrap contracts from raw data with `--ai` — field descriptions, PII detection, and SQL quality rules generated in seconds. Works with OpenAI, Anthropic, Azure OpenAI, or local Ollama.
-- :material-microsoft-azure: **Azure Reference Architecture:** Go from zero to production Lakehouse in under an hour with the open-source [Databricks + ADLS Gen2 blueprint](https://github.com/LakeLogic/reference-architecture-azure-ecommerce).
+- :material-microsoft-azure: **Azure Reference Architecture:** Go from zero to production Lakehouse in under an hour with the [Databricks + ADLS Gen2 blueprint](https://lakelogic.org/#waitlist).
 - :material-test-tube: **Synthetic Test Data:** Generate realistic edge-case data from your contracts to stress-test quarantine rules before production.
 - :material-web: **Project Hub:** Visit **[lakelogic.org](https://lakelogic.org)** for the latest guides, blog posts, and community resources.
 
