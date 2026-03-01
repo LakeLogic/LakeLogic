@@ -10,6 +10,7 @@ Security:
       subprocess.run, shutil.rmtree, open-for-write) to reduce blast radius
       when running user-supplied scripts.
 """
+
 import threading
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
@@ -61,14 +62,25 @@ def apply_external_logic(
 
     if logic_type == "python":
         return _run_python_logic(
-            path, logic, good_df, contract, engine_name,
-            last_run_id, add_trace_fn, trace_step_fn,
+            path,
+            logic,
+            good_df,
+            contract,
+            engine_name,
+            last_run_id,
+            add_trace_fn,
+            trace_step_fn,
         )
 
     if logic_type == "notebook":
         return _run_notebook_logic(
-            path, logic, good_df, contract, engine_name,
-            last_run_id, last_source_path,
+            path,
+            logic,
+            good_df,
+            contract,
+            engine_name,
+            last_run_id,
+            last_source_path,
         )
 
     logger.warning(f"Unsupported external_logic.type: {logic.type}")
@@ -111,6 +123,7 @@ def _run_python_logic(
         TimeoutError: If the script exceeds the timeout.
     """
     import importlib.util
+
     if not path.exists():
         raise FileNotFoundError(f"External logic file not found: {path}")
 
@@ -138,8 +151,8 @@ def _run_python_logic(
     # Build a restricted builtins dict: keep everything except the most
     # dangerous callables and replace __import__.
     import builtins as _builtins_mod
-    safe_builtins = {k: v for k, v in vars(_builtins_mod).items()
-                     if k not in ("exec", "eval", "compile")}
+
+    safe_builtins = {k: v for k, v in vars(_builtins_mod).items() if k not in ("exec", "eval", "compile")}
     safe_builtins["__import__"] = _restricted_import
     module.__builtins__ = safe_builtins
     # -----------------------------------------------
@@ -161,9 +174,14 @@ def _run_python_logic(
         try:
             # Inject tracing callback if the user is interested
             try:
-                r = fn(good_df, contract=contract, engine=engine_name,
-                       add_trace=add_trace_fn,
-                       trace_step=trace_step_fn, **args)
+                r = fn(
+                    good_df,
+                    contract=contract,
+                    engine=engine_name,
+                    add_trace=add_trace_fn,
+                    trace_step=trace_step_fn,
+                    **args,
+                )
             except TypeError as exc:
                 if "trace_step" in str(exc) or "add_trace" in str(exc):
                     r = fn(good_df, contract=contract, engine=engine_name, **args)
@@ -179,9 +197,7 @@ def _run_python_logic(
 
     if worker.is_alive():
         logger.error(f"External logic script timed out after {timeout_seconds}s: {path}")
-        raise TimeoutError(
-            f"External logic script '{path}' exceeded timeout of {timeout_seconds} seconds."
-        )
+        raise TimeoutError(f"External logic script '{path}' exceeded timeout of {timeout_seconds} seconds.")
 
     if error_container:
         raise error_container[0]
@@ -252,6 +268,7 @@ def _run_notebook_logic(
     input_path = tmp_dir / f"input_{last_run_id}.csv"
     try:
         import pandas as pd
+
         if hasattr(good_df, "to_pandas"):
             pdf = good_df.to_pandas()
         elif hasattr(good_df, "toPandas"):
@@ -300,6 +317,7 @@ def _load_output_frame(path: Path, fmt: Optional[str]) -> Any:
         pandas.DataFrame
     """
     import pandas as pd
+
     output_format = (fmt or path.suffix.lstrip(".") or "csv").lower()
     if output_format == "parquet":
         return pd.read_parquet(path)

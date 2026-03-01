@@ -1,18 +1,21 @@
-import polars as pl
-from typing import Tuple, Any, List, Dict, Optional
-from lakelogic.engines.base import EngineAdapter
-from loguru import logger
-from pathlib import Path
 import time
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+import polars as pl
+from loguru import logger
+
+from lakelogic.engines.base import EngineAdapter
+
 
 class PolarsAdapter(EngineAdapter):
     """
     Polars execution engine for LakeLogic.
     Supports row-level validation, aggregate metrics, and SQL-first transformations.
     """
+
     _link_cache: Dict[str, pl.LazyFrame] = {}
     engine_name: str = "polars"
-
 
     def _get_context(self, source_lf: pl.LazyFrame) -> pl.SQLContext:
         """
@@ -27,7 +30,7 @@ class PolarsAdapter(EngineAdapter):
         ctx = pl.SQLContext()
         ctx.register(self.contract.dataset or "source", source_lf)
         self._register_links(ctx)
-        
+
         return ctx
 
     def _register_links(self, ctx: pl.SQLContext) -> None:
@@ -42,14 +45,19 @@ class PolarsAdapter(EngineAdapter):
                 table_path = link.path[6:] if link.path and link.path.startswith("table:") else None
                 if link.table or (link.type and link.type.lower() == "table") or table_path:
                     table_name = link.table or table_path or link.path
-                    logger.warning(f"Link '{link.name}' references table '{table_name}'. Table links are supported in Spark only for OSS.")
+                    logger.warning(
+                        f"Link '{link.name}' references table '{table_name}'."
+                        " Table links are supported in Spark only for OSS."
+                    )
                     continue
 
                 if not link.path:
                     continue
 
                 if link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://")):
-                    logger.warning(f"Link '{link.name}' uses remote path '{link.path}'. Local-only loading supported in OSS demo.")
+                    logger.warning(
+                        f"Link '{link.name}' uses remote path '{link.path}'. Local-only loading supported in OSS demo."
+                    )
                     continue
 
                 path = Path(link.path)
@@ -103,20 +111,35 @@ class PolarsAdapter(EngineAdapter):
         # (col) — that syntax already handles overwrite.  Pre-dropping the column
         # first causes the subsequent engine to fail with "column not found to EXCLUDE".
         import re as _re
+
         _SQL_TYPE_KEYWORDS = {
-            'DATE', 'TIME', 'TIMESTAMP', 'DATETIME', 'INTEGER', 'INT', 'BIGINT',
-            'SMALLINT', 'TINYINT', 'FLOAT', 'DOUBLE', 'DECIMAL', 'NUMERIC',
-            'VARCHAR', 'STRING', 'TEXT', 'BOOLEAN', 'BOOL', 'BLOB', 'BINARY',
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
+            "DATETIME",
+            "INTEGER",
+            "INT",
+            "BIGINT",
+            "SMALLINT",
+            "TINYINT",
+            "FLOAT",
+            "DOUBLE",
+            "DECIMAL",
+            "NUMERIC",
+            "VARCHAR",
+            "STRING",
+            "TEXT",
+            "BOOLEAN",
+            "BOOL",
+            "BLOB",
+            "BINARY",
         }
-        uses_exclude = bool(_re.search(r'\bEXCLUDE\b', sql, _re.IGNORECASE))
+        uses_exclude = bool(_re.search(r"\bEXCLUDE\b", sql, _re.IGNORECASE))
         if not uses_exclude:
             existing_cols = set(lf.collect_schema().names())
             # Remove REPLACE(...) blocks then find remaining AS aliases
-            sql_no_replace = _re.sub(r'\bREPLACE\s*\([^)]*\)', '', sql, flags=_re.IGNORECASE | _re.DOTALL)
-            new_aliases = {
-                m.group(1)
-                for m in _re.finditer(r'\bAS\s+(["\\w]+)', sql_no_replace, _re.IGNORECASE)
-            }
+            sql_no_replace = _re.sub(r"\bREPLACE\s*\([^)]*\)", "", sql, flags=_re.IGNORECASE | _re.DOTALL)
+            new_aliases = {m.group(1) for m in _re.finditer(r'\bAS\s+(["\\w]+)', sql_no_replace, _re.IGNORECASE)}
             # Strip optional quotes, exclude SQL type keywords (e.g. CAST(x AS DATE))
             new_aliases = {
                 a.strip('"').strip("'")
@@ -159,9 +182,13 @@ class PolarsAdapter(EngineAdapter):
                     if not path.exists():
                         continue
                     if path.suffix.lower() == ".parquet":
-                        con.execute(f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_parquet('{path.as_posix()}')")
+                        con.execute(
+                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_parquet('{path.as_posix()}')"
+                        )
                     elif path.suffix.lower() == ".csv":
-                        con.execute(f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_csv_auto('{path.as_posix()}')")
+                        con.execute(
+                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_csv_auto('{path.as_posix()}')"
+                        )
                 except Exception:
                     continue
             rel = con.query(sql)
@@ -185,15 +212,19 @@ class PolarsAdapter(EngineAdapter):
 
         now = _dt.datetime.utcnow()
         today_str = now.strftime("%Y-%m-%d")
-        now_str   = now.strftime("%Y-%m-%d %H:%M:%S")
-        time_str  = now.strftime("%H:%M:%S")
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        time_str = now.strftime("%H:%M:%S")
 
-        sql = _re.sub(r"\bNOW\s*\(\s*\)", f"TIMESTAMP '{now_str}'",    sql, flags=_re.IGNORECASE)
-        sql = _re.sub(r"\bCURRENT_TIMESTAMP\b", f"TIMESTAMP '{now_str}'", sql, flags=_re.IGNORECASE)
-        sql = _re.sub(r"\bCURRENT_DATE\b",      f"DATE '{today_str}'",    sql, flags=_re.IGNORECASE)
-        sql = _re.sub(r"\bCURRENT_TIME\b",      f"TIME '{time_str}'",     sql, flags=_re.IGNORECASE)
+        sql = _re.sub(r"\bNOW\s*\(\s*\)", f"TIMESTAMP '{now_str}'", sql, flags=_re.IGNORECASE)
+        sql = _re.sub(
+            r"\bCURRENT_TIMESTAMP\b",
+            f"TIMESTAMP '{now_str}'",
+            sql,
+            flags=_re.IGNORECASE,
+        )
+        sql = _re.sub(r"\bCURRENT_DATE\b", f"DATE '{today_str}'", sql, flags=_re.IGNORECASE)
+        sql = _re.sub(r"\bCURRENT_TIME\b", f"TIME '{time_str}'", sql, flags=_re.IGNORECASE)
         return sql
-
 
     def _to_polars_dtype(self, type_name: str):
         """
@@ -248,7 +279,7 @@ class PolarsAdapter(EngineAdapter):
 
         missing = expected - existing
         unknown = existing - expected
-        
+
         # Exclude transient and lineage columns from unknown field assessment
         transient_cols = {"rn", "__index_level_0__", "_row_number"}
         unknown = unknown - transient_cols - self._lineage_columns()
@@ -286,6 +317,7 @@ class PolarsAdapter(EngineAdapter):
                 # List[*] → String: serialise to JSON string first, then cast
                 if isinstance(current_dtype, pl.List) and dtype == pl.Utf8:
                     import json as _json
+
                     lf = lf.with_columns(
                         pl.col(field.name)
                         .map_elements(
@@ -294,7 +326,8 @@ class PolarsAdapter(EngineAdapter):
                                     v.to_list() if hasattr(v, "to_list") else v,
                                     ensure_ascii=False,
                                 )
-                                if v is not None else None
+                                if v is not None
+                                else None
                             ),
                             return_dtype=pl.Utf8,
                         )
@@ -343,10 +376,15 @@ class PolarsAdapter(EngineAdapter):
         elif isinstance(df, pl.LazyFrame):
             lf = df
         else:
-            lf = pl.from_pandas(df).lazy() if hasattr(df, 'to_numpy') else pl.DataFrame(df).lazy()
+            lf = pl.from_pandas(df).lazy() if hasattr(df, "to_numpy") else pl.DataFrame(df).lazy()
 
         raw_count = self._get_row_count(lf)
-        self._add_trace("Load Source", input_rows=None, output_rows=raw_count, duration_ms=(time.perf_counter() - start_time)*1000)
+        self._add_trace(
+            "Load Source",
+            input_rows=None,
+            output_rows=raw_count,
+            duration_ms=(time.perf_counter() - start_time) * 1000,
+        )
 
         # 0.25 Apply renames, filters, deduplication before schema enforcement
         # This handles the 'supersede' case where we want to clean data ASAP
@@ -355,14 +393,25 @@ class PolarsAdapter(EngineAdapter):
             pre_input_count = raw_count
             lf = self._apply_pre_transformations(lf)
             pre_output_count = self._get_row_count(lf)
-            self._add_trace("Pre-Transformations", input_rows=pre_input_count, output_rows=pre_output_count, duration_ms=(time.perf_counter() - step_start)*1000)
+            self._add_trace(
+                "Pre-Transformations",
+                input_rows=pre_input_count,
+                output_rows=pre_output_count,
+                duration_ms=(time.perf_counter() - step_start) * 1000,
+            )
 
         # 0.5 Apply schema enforcement (casts, missing cols, unknowns)
         step_start = time.perf_counter()
         schema_input_count = self._get_row_count(lf)
         lf, schema_errors = self._apply_schema(lf)
         schema_output_count = self._get_row_count(lf)
-        self._add_trace("Schema Enforcement", input_rows=schema_input_count, output_rows=schema_output_count, duration_ms=(time.perf_counter() - step_start)*1000, details={"errors": schema_errors})
+        self._add_trace(
+            "Schema Enforcement",
+            input_rows=schema_input_count,
+            output_rows=schema_output_count,
+            duration_ms=(time.perf_counter() - step_start) * 1000,
+            details={"errors": schema_errors},
+        )
 
         # 0.75 Apply Post-Transformations BEFORE quality rules so that derived
         # columns (snapshot_year, gold_processed_at, postcode_area, etc.) are
@@ -376,7 +425,12 @@ class PolarsAdapter(EngineAdapter):
             post_input_count = self._get_row_count(lf)
             lf = self._apply_post_transformations(lf, ctx)
             post_output_count = self._get_row_count(lf)
-            self._add_trace("Post-Transformations", input_rows=post_input_count, output_rows=post_output_count, duration_ms=(time.perf_counter() - step_start)*1000)
+            self._add_trace(
+                "Post-Transformations",
+                input_rows=post_input_count,
+                output_rows=post_output_count,
+                duration_ms=(time.perf_counter() - step_start) * 1000,
+            )
 
         # 1. Evaluate Row-Level Rules
         row_rules = self.get_row_rules()
@@ -391,7 +445,13 @@ class PolarsAdapter(EngineAdapter):
             # Run all rules in one pass
             eval_sql = f"SELECT *, {', '.join(rule_exprs)} FROM {self.contract.dataset or 'source'}"
             lf_eval = ctx.execute(eval_sql)
-            self._add_trace("Row Rules Evaluation", input_rows=post_output_count, output_rows=post_output_count, duration_ms=(time.perf_counter() - step_start)*1000, details={"sql": eval_sql, "rules_count": len(row_rules)})
+            self._add_trace(
+                "Row Rules Evaluation",
+                input_rows=post_output_count,
+                output_rows=post_output_count,
+                duration_ms=(time.perf_counter() - step_start) * 1000,
+                details={"sql": eval_sql, "rules_count": len(row_rules)},
+            )
 
             error_tracking_exprs = []
             category_tracking_exprs = []
@@ -403,32 +463,40 @@ class PolarsAdapter(EngineAdapter):
             for i, rule in enumerate(row_rules):
                 col_name = f"_rule_{i}"
                 error_msg = f"Rule failed: {rule.name} ({rule.sql})"
-                condition = pl.col(col_name).is_null() | (pl.col(col_name) == False)
+                condition = pl.col(col_name).is_null() | pl.col(col_name).not_()
 
                 error_tracking_exprs.append(pl.when(condition).then(pl.lit(error_msg)).otherwise(None))
                 category_tracking_exprs.append(pl.when(condition).then(pl.lit(rule.category)).otherwise(None))
 
-            lf_with_errors = lf_eval.with_columns([
-                pl.concat_list(error_tracking_exprs).list.drop_nulls().alias(self.ERROR_COLUMN),
-                pl.concat_list(category_tracking_exprs).list.drop_nulls().alias(self.CATEGORY_COLUMN)
-            ])
+            lf_with_errors = lf_eval.with_columns(
+                [
+                    pl.concat_list(error_tracking_exprs).list.drop_nulls().alias(self.ERROR_COLUMN),
+                    pl.concat_list(category_tracking_exprs).list.drop_nulls().alias(self.CATEGORY_COLUMN),
+                ]
+            )
         else:
             schema_error_exprs = [pl.lit(err) for err in schema_errors] if schema_errors else []
             schema_category_exprs = [pl.lit("schema") for _ in schema_errors] if schema_errors else []
-            lf_with_errors = lf.with_columns([
-                pl.concat_list(schema_error_exprs).list.drop_nulls().alias(self.ERROR_COLUMN)
-                if schema_error_exprs else pl.lit([]).cast(pl.List(pl.String)).alias(self.ERROR_COLUMN),
-                pl.concat_list(schema_category_exprs).list.drop_nulls().alias(self.CATEGORY_COLUMN)
-                if schema_category_exprs else pl.lit([]).cast(pl.List(pl.String)).alias(self.CATEGORY_COLUMN)
-            ])
+            lf_with_errors = lf.with_columns(
+                [
+                    pl.concat_list(schema_error_exprs).list.drop_nulls().alias(self.ERROR_COLUMN)
+                    if schema_error_exprs
+                    else pl.lit([]).cast(pl.List(pl.String)).alias(self.ERROR_COLUMN),
+                    pl.concat_list(schema_category_exprs).list.drop_nulls().alias(self.CATEGORY_COLUMN)
+                    if schema_category_exprs
+                    else pl.lit([]).cast(pl.List(pl.String)).alias(self.CATEGORY_COLUMN),
+                ]
+            )
 
         # 2. Split Good and Bad
         has_errors = pl.col(self.ERROR_COLUMN).list.len() > 0
 
-        bad_lf = lf_with_errors.filter(has_errors).with_columns([
-            pl.lit("active").alias("quarantine_state"),
-            pl.lit(False).alias("quarantine_reprocessed"),
-        ])
+        bad_lf = lf_with_errors.filter(has_errors).with_columns(
+            [
+                pl.lit("active").alias("quarantine_state"),
+                pl.lit(False).alias("quarantine_reprocessed"),
+            ]
+        )
 
         # Clean up internal columns
         internal_cols = [f"_rule_{i}" for i in range(len(row_rules))]
@@ -468,7 +536,7 @@ class PolarsAdapter(EngineAdapter):
                 sql = rule.sql.replace("{dataset}", tbl_name)
                 res = ctx.execute(sql).collect()
                 val = res.row(0)[0]
-                
+
                 passed = True
                 if val is None:
                     passed = False
@@ -478,15 +546,17 @@ class PolarsAdapter(EngineAdapter):
                     passed = val < rule.must_be_less_than
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
-                
+
                 status = "PASS" if passed else "FAIL"
                 logger.info(f"Quality Check: {rule.name} | Result: {val} | Status: {status}")
-                self.dataset_rule_results.append({
-                    "name": rule.name,
-                    "value": val,
-                    "passed": passed,
-                    "description": rule.description
-                })
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": val,
+                        "passed": passed,
+                        "description": rule.description,
+                    }
+                )
             except Exception as e:
                 logger.error(f"Error executing dataset rule '{rule.name}': {e}")
 
@@ -546,8 +616,10 @@ class PolarsAdapter(EngineAdapter):
                     current_lf = _ctx.execute(query)
                     existing = set(current_lf.collect_schema().names())
                 except Exception as e:
-                    logger.warning(f"Pre-Transform [Derive] '{field_name}' SQL failed ({e}); "
-                                   f"falling back to post-transform handling.")
+                    logger.warning(
+                        f"Pre-Transform [Derive] '{field_name}' SQL failed ({e}); "
+                        f"falling back to post-transform handling."
+                    )
                 continue
 
             if trans.pivot and trans_phase == "pre":
@@ -664,7 +736,9 @@ class PolarsAdapter(EngineAdapter):
                     expr = None
                     for key, value in trans.map_values.mapping.items():
                         cond = pl.col(field) == pl.lit(key)
-                        expr = pl.when(cond).then(pl.lit(value)) if expr is None else expr.when(cond).then(pl.lit(value))
+                        expr = (
+                            pl.when(cond).then(pl.lit(value)) if expr is None else expr.when(cond).then(pl.lit(value))
+                        )
                     if expr is not None:
                         default_val = trans.map_values.default
                         expr = expr.otherwise(pl.lit(default_val) if default_val is not None else pl.col(field))
@@ -779,34 +853,55 @@ class PolarsAdapter(EngineAdapter):
                         _resolved = True
                     except Exception as e2:
                         current_lf = _pre_derive_lf
-                        logger.warning(f"Post-Transform [Derive] '{field_name}' DuckDB failed ({e2}); trying Polars expr")
+                        logger.warning(
+                            f"Post-Transform [Derive] '{field_name}' DuckDB failed ({e2}); trying Polars expr"
+                        )
 
                 if not _resolved:
-                    import re as _re2, warnings
+                    import re as _re2
+                    import warnings
+
                     _expr_sql = derive_sql.strip()
-                    _cm = _re2.match(r"CAST\s*\(\s*([a-zA-Z_]\w*)\s+AS\s+([A-Z]+)\s*\)$", _expr_sql, _re2.IGNORECASE)
+                    _cm = _re2.match(
+                        r"CAST\s*\(\s*([a-zA-Z_]\w*)\s+AS\s+([A-Z]+)\s*\)$",
+                        _expr_sql,
+                        _re2.IGNORECASE,
+                    )
                     if _cm:
                         _dt = self._to_polars_dtype(_cm.group(2).lower())
                         if _dt is not None and _cm.group(1) in existing_cols:
                             try:
-                                current_lf = current_lf.with_columns(pl.col(_cm.group(1)).cast(_dt, strict=False).alias(field_name))
+                                current_lf = current_lf.with_columns(
+                                    pl.col(_cm.group(1)).cast(_dt, strict=False).alias(field_name)
+                                )
                                 existing_cols = set(current_lf.collect_schema().names())
                                 _resolved = True
                             except Exception as e3:
                                 logger.debug(f"Polars cast fallback: {e3}")
                     if not _resolved:
-                        _em = _re2.match(r"EXTRACT\s*\(\s*(YEAR|MONTH|DAY)\s+FROM\s+CAST\s*\(\s*([a-zA-Z_]\w*)\s+AS\s+\w+\s*\)\s*\)$", _expr_sql, _re2.IGNORECASE)
+                        _em = _re2.match(
+                            r"EXTRACT\s*\(\s*(YEAR|MONTH|DAY)\s+FROM\s+CAST\s*\(\s*([a-zA-Z_]\w*)\s+AS\s+\w+\s*\)\s*\)$",
+                            _expr_sql,
+                            _re2.IGNORECASE,
+                        )
                         if _em and _em.group(2) in existing_cols:
                             try:
                                 _de = pl.col(_em.group(2)).cast(pl.Date, strict=False)
-                                _pe = {"YEAR": _de.dt.year(), "MONTH": _de.dt.month(), "DAY": _de.dt.day()}[_em.group(1).upper()]
+                                _pe = {
+                                    "YEAR": _de.dt.year(),
+                                    "MONTH": _de.dt.month(),
+                                    "DAY": _de.dt.day(),
+                                }[_em.group(1).upper()]
                                 current_lf = current_lf.with_columns(_pe.alias(field_name))
                                 existing_cols = set(current_lf.collect_schema().names())
                                 _resolved = True
                             except Exception as e4:
                                 logger.debug(f"Polars extract fallback: {e4}")
                     if not _resolved:
-                        warnings.warn(f"[LakeLogic] Post-Transform Derive '{field_name}' FAILED all engines. SQL: {derive_sql}", stacklevel=2)
+                        warnings.warn(
+                            f"[LakeLogic] Post-Transform Derive '{field_name}' FAILED all engines. SQL: {derive_sql}",
+                            stacklevel=2,
+                        )
                         logger.error(f"Post-Transform [Derive] '{field_name}' all engines failed")
             elif trans.bucket:
                 logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
@@ -870,26 +965,18 @@ class PolarsAdapter(EngineAdapter):
 
                 end_col = cfg.end_col
                 if end_col and end_col in df.columns:
-                    date_series = [
-                        _make_dates(r[cfg.start_col], r[end_col])
-                        for r in df.iter_rows(named=True)
-                    ]
+                    date_series = [_make_dates(r[cfg.start_col], r[end_col]) for r in df.iter_rows(named=True)]
                 else:
-                    date_series = [
-                        _make_dates(r[cfg.start_col], None)
-                        for r in df.iter_rows(named=True)
-                    ]
+                    date_series = [_make_dates(r[cfg.start_col], None) for r in df.iter_rows(named=True)]
 
-                df = df.with_columns(
-                    pl.Series(name=cfg.output, values=date_series)
-                ).explode(cfg.output)
+                df = df.with_columns(pl.Series(name=cfg.output, values=date_series)).explode(cfg.output)
                 current_lf = df.lazy()
                 # Re-register in ctx after structural change
                 ctx.register(tbl_name, current_lf)
             elif trans.lookup:
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field} from {trans.lookup.reference}")
                 query = f"""
-                SELECT 
+                SELECT
                     src.*,
                     ref.{trans.lookup.value} AS {trans.lookup.field}
                 FROM {tbl_name} src
@@ -906,7 +993,7 @@ class PolarsAdapter(EngineAdapter):
                     logger.debug(f"Post-Transform [Filter]: {filter_cfg.sql}")
                     query = f"SELECT * FROM {tbl_name} WHERE {filter_cfg.sql}"
                     current_lf = ctx.execute(query)
-                
+
         return current_lf
 
     def _format_sql_literal(self, value: Any) -> str:
@@ -953,7 +1040,7 @@ class PolarsAdapter(EngineAdapter):
             select_fields.append(expr)
 
         return f"""
-        SELECT {', '.join(select_fields)}
+        SELECT {", ".join(select_fields)}
         FROM {tbl_name} src
         {join_type} JOIN {join_cfg.reference} ref ON src.{join_cfg.on} = ref.{join_cfg.key}
         """

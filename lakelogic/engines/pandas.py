@@ -1,7 +1,10 @@
+from typing import Tuple
+
 import pandas as pd
-from typing import Tuple, Any
-from lakelogic.engines.base import EngineAdapter
 from loguru import logger
+
+from lakelogic.engines.base import EngineAdapter
+
 
 class PandasAdapter(EngineAdapter):
     """
@@ -36,13 +39,15 @@ class PandasAdapter(EngineAdapter):
 
         duck_adapter = DuckDBAdapter(self.contract)
         good_df, bad_df = duck_adapter.execute(df)
-        if hasattr(good_df, "df"):
-            good_df = good_df.df()
-        if hasattr(bad_df, "df"):
-            bad_df = bad_df.df()
         self.dataset_rule_results = duck_adapter.dataset_rule_results
         self.trace = duck_adapter.trace
-        
-        # DuckDBAdapter already returns Pandas DataFrames if the input was registerable
-        # or if .df() was called (which it is in our DuckDBAdapter).
+
+        # DuckDBAdapter materialises to Polars internally — convert back to pandas.
+        import polars as pl
+
+        if isinstance(good_df, pl.DataFrame):
+            good_df = good_df.to_pandas()
+        if isinstance(bad_df, pl.DataFrame):
+            bad_df = bad_df.to_pandas()
+
         return good_df, bad_df

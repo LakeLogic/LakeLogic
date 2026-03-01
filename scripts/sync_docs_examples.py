@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Copy flagship examples to docs for MkDocs rendering."""
+
 import shutil
 from pathlib import Path
 
@@ -59,50 +60,54 @@ FLAGSHIP_EXAMPLES = [
     },
 ]
 
+
 def main():
     # Create docs/examples if it doesn't exist
     DOCS_EXAMPLES.mkdir(parents=True, exist_ok=True)
-    
+
     copied_count = 0
     total_files = 0
-    
+
     for example in FLAGSHIP_EXAMPLES:
         # Copy the notebook
         source = EXAMPLES_ROOT / example["notebook"]
         dest = DOCS_EXAMPLES / example["dest_name"]
-        
+
         if not source.exists():
             print(f"!! Warning: Notebook not found at {source.absolute()}")
             continue
-            
+
         shutil.copy2(source, dest)
         print(f"OK Copied notebook: {source.name}")
         copied_count += 1
         total_files += 1
-        
+
         # Copy supporting files (YAML contracts, data files)
         for support_src, support_dest in example["supporting_files"]:
             src_path = EXAMPLES_ROOT / support_src
             dst_path = DOCS_EXAMPLES / support_dest
-            
+
             if not src_path.exists():
                 print(f"  !! Warning: Supporting file not found: {src_path}")
                 continue
-            
+
             # Create parent directories if needed
             dst_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             shutil.copy2(src_path, dst_path)
             print(f"  OK Copied supporting file: {support_dest}")
             total_files += 1
-    
-    print(f"\nDONE Synced {copied_count}/{len(FLAGSHIP_EXAMPLES)} notebooks ({total_files} total files) to docs/examples/")
-    
+
+    print(
+        f"\nDONE Synced {copied_count}/{len(FLAGSHIP_EXAMPLES)} notebooks ({total_files} total files) to docs/examples/"
+    )
+
     if copied_count < len(FLAGSHIP_EXAMPLES):
         print("!! Some notebooks were not found. Check the paths above.")
         return 1
-    
+
     return 0
+
 
 if __name__ == "__main__":
     exit(main())

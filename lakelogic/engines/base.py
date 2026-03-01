@@ -1,25 +1,28 @@
 from abc import ABC, abstractmethod
-from typing import Any, Tuple, List, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
 from loguru import logger
+
 from lakelogic.core.models import (
     DataContract,
-    QualityRule,
-    RowRuleNotNull,
-    RowRuleAcceptedValues,
-    RowRuleRegexMatch,
-    RowRuleRange,
-    RowRuleReferentialIntegrity,
-    RowRuleLifecycleWindow,
-    DatasetRuleUnique,
     DatasetRuleNullRatio,
     DatasetRuleRowCountBetween,
+    DatasetRuleUnique,
+    QualityRule,
+    RowRuleAcceptedValues,
+    RowRuleLifecycleWindow,
+    RowRuleNotNull,
+    RowRuleRange,
+    RowRuleReferentialIntegrity,
+    RowRuleRegexMatch,
 )
+
 
 class EngineAdapter(ABC):
     """
     Abstract Base Class for all execution engines.
     """
-    
+
     ERROR_COLUMN = "_lakelogic_errors"
     CATEGORY_COLUMN = "_lakelogic_categories"
 
@@ -35,40 +38,58 @@ class EngineAdapter(ABC):
         self.dataset_rule_results: List[Dict[str, Any]] = []
         self.schema_drift: Dict[str, List[str]] = {}
         self.engine_name: str = ""
-        self.trace: List[Any] = [] # Avoid circular import of TraceStep here if needed, or import at runtime
+        self.trace: List[Any] = []  # Avoid circular import of TraceStep here if needed, or import at runtime
 
-    def _add_trace(self, step: str, input_rows: Optional[int] = None, output_rows: Optional[int] = None, duration_ms: Optional[float] = None, details: Optional[Dict[str, Any]] = None, status: str = "ok"):
+    def _add_trace(
+        self,
+        step: str,
+        input_rows: Optional[int] = None,
+        output_rows: Optional[int] = None,
+        duration_ms: Optional[float] = None,
+        details: Optional[Dict[str, Any]] = None,
+        status: str = "ok",
+    ):
         import time
+
         from lakelogic.core.models import TraceStep
-        self.trace.append(TraceStep(
-            step=step,
-            timestamp=time.time(),
-            input_rows=input_rows,
-            output_rows=output_rows,
-            duration_ms=duration_ms,
-            details=details or {},
-            status=status
-        ))
+
+        self.trace.append(
+            TraceStep(
+                step=step,
+                timestamp=time.time(),
+                input_rows=input_rows,
+                output_rows=output_rows,
+                duration_ms=duration_ms,
+                details=details or {},
+                status=status,
+            )
+        )
 
     def _get_row_count(self, df: Any) -> Optional[int]:
         """Helper to get row count safely across engines."""
-        if df is None: return 0
+        if df is None:
+            return 0
         try:
             # Polars LazyFrame — must collect to count
             try:
                 import polars as pl
+
                 if isinstance(df, pl.LazyFrame):
                     return df.select(pl.len()).collect().item()
             except ImportError:
                 pass
-            if hasattr(df, "height"): return int(df.height)
+            if hasattr(df, "height"):
+                return int(df.height)
             if hasattr(df, "count"):
                 # DuckDB/Spark relation
-                try: 
+                try:
                     res = df.count()
-                    if hasattr(res, "fetchone"): return res.fetchone()[0]
-                    if isinstance(res, int): return res
-                except Exception: pass
+                    if hasattr(res, "fetchone"):
+                        return res.fetchone()[0]
+                    if isinstance(res, int):
+                        return res
+                except Exception:
+                    pass
             return int(len(df))
         except Exception:
             return None
@@ -104,7 +125,7 @@ class EngineAdapter(ABC):
                             name=f"{field.name}_required",
                             sql=f"{self._quote_ident(field.name)} IS NOT NULL",
                             category="completeness",
-                            description=f"{field.name} is required"
+                            description=f"{field.name} is required",
                         )
                     )
                 if field.rules:
@@ -268,17 +289,15 @@ class EngineAdapter(ABC):
         distinct_sql = "DISTINCT " if distinct else ""
 
         if key_expr and rollup_keys_col:
-            select_parts.append(
-                f"ARRAY_AGG({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_col)}"
-            )
+            select_parts.append(f"ARRAY_AGG({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_col)}")
             if rollup_keys_count_col:
-                select_parts.append(
-                    f"COUNT({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_count_col)}"
-                )
+                select_parts.append(f"COUNT({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_count_col)}")
 
         if upstream_run_id_col and upstream_run_ids_col:
+            uid_q = self._quote_ident(upstream_run_id_col)
+            uids_q = self._quote_ident(upstream_run_ids_col)
             select_parts.append(
-                f"ARRAY_AGG({distinct_sql}{self._quote_ident(upstream_run_id_col)}) AS {self._quote_ident(upstream_run_ids_col)}"
+                f"ARRAY_AGG({distinct_sql}{uid_q}) AS {uids_q}"
             )
 
         if not select_parts:
@@ -512,7 +531,7 @@ class EngineAdapter(ABC):
             # durations.  Instead, extract epoch seconds from each timestamp
             # *individually* (which works) and subtract the two integers.
             fmt = "%Y-%m-%d"
-            epoch_to   = f"EXTRACT(EPOCH FROM STRPTIME(SUBSTR({qto}, 1, 10), '{fmt}'))"
+            epoch_to = f"EXTRACT(EPOCH FROM STRPTIME(SUBSTR({qto}, 1, 10), '{fmt}'))"
             epoch_from = f"EXTRACT(EPOCH FROM STRPTIME(SUBSTR({qfrom}, 1, 10), '{fmt}'))"
             seconds_expr = f"({epoch_to} - {epoch_from})"
             if unit == "day":
@@ -530,7 +549,6 @@ class EngineAdapter(ABC):
         return f"SELECT *, ({diff_expr}) AS {self._quote_ident(field)} FROM {source_table}"
 
     def _expand_row_rule(self, spec: Any) -> Optional[Any]:
-
         """
         Expand structured row rule specs into QualityRule objects.
 
@@ -749,10 +767,7 @@ class EngineAdapter(ABC):
                 threshold_val = threshold_val / 100.0
             name = cfg.get("name") or f"{field}_null_ratio"
             qfield = self._quote_ident(field)
-            sql = (
-                f"SELECT SUM(CASE WHEN {qfield} IS NULL THEN 1 ELSE 0 END) "
-                f"/ NULLIF(COUNT(*), 0) FROM {dataset}"
-            )
+            sql = f"SELECT SUM(CASE WHEN {qfield} IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) FROM {dataset}"
             return QualityRule(
                 name=name,
                 sql=sql,

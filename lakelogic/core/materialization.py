@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from datetime import datetime, timezone
 from uuid import uuid4
-import json
 import os
 import re
 import shutil
@@ -275,6 +274,7 @@ def _write_frame(df, path: Path, output_format: str) -> None:
                     pass
                 try:
                     import polars as pl
+
                     pl.from_pandas(df).write_parquet(path)
                 except Exception:
                     raise ValueError(
@@ -285,8 +285,9 @@ def _write_frame(df, path: Path, output_format: str) -> None:
     elif output_format == "iceberg":
         try:
             import duckdb
+
             # Create a localized connection or use existing if it's a relation
-            if hasattr(df, "connection") and hasattr(df, "sql_query"): 
+            if hasattr(df, "connection") and hasattr(df, "sql_query"):
                 con = df.connection
                 con.execute("INSTALL iceberg; LOAD iceberg;")
                 con.execute("INSTALL httpfs; LOAD httpfs;")
@@ -304,6 +305,7 @@ def _write_frame(df, path: Path, output_format: str) -> None:
     elif output_format == "delta":
         try:
             from deltalake import write_deltalake
+
             # If it's a DuckDB relation, we need to bring it to memory (Arrow preferred)
             data = df
             if hasattr(df, "to_arrow_table"):
@@ -313,6 +315,7 @@ def _write_frame(df, path: Path, output_format: str) -> None:
 
             # Ensure no Arrow Null-typed columns (Delta Lake rejects them)
             import pyarrow as pa
+
             if not isinstance(data, pa.Table):
                 data = pa.Table.from_pandas(data) if hasattr(data, "columns") else data
             if isinstance(data, pa.Table):
@@ -427,6 +430,7 @@ def _read_frame(path: Path, output_format: str):
         pandas.DataFrame
     """
     import pandas as pd
+
     if output_format == "csv":
         return pd.read_csv(path)
     if output_format == "parquet":
@@ -435,25 +439,28 @@ def _read_frame(path: Path, output_format: str):
         except Exception as exc:
             try:
                 import duckdb
+
                 return duckdb.read_parquet(str(path)).df()
             except Exception:
                 pass
             try:
                 import polars as pl
+
                 return pl.read_parquet(path).to_pandas()
             except Exception:
-                raise ValueError(
-                    "Parquet reads require pyarrow/fastparquet, duckdb, or polars as a fallback."
-                ) from exc
+                raise ValueError("Parquet reads require pyarrow/fastparquet, duckdb, or polars as a fallback.") from exc
     if output_format == "delta":
         try:
             import polars as pl
+
             return pl.read_delta(str(path)).to_pandas()
         except (ImportError, Exception):
             from deltalake import DeltaTable
+
             return DeltaTable(path).to_pandas()
     if output_format == "iceberg":
         import duckdb
+
         con = duckdb.connect()
         con.execute("INSTALL iceberg; LOAD iceberg; INSTALL httpfs; LOAD httpfs;")
         return con.execute(f"SELECT * FROM iceberg_scan('{path}')").to_df()
@@ -461,15 +468,15 @@ def _read_frame(path: Path, output_format: str):
 
 
 def _merge_frames(
-    existing, 
-    incoming, 
+    existing,
+    incoming,
     primary_key: List[str],
     soft_delete_col: Optional[str] = None,
     soft_delete_val: Any = True,
     soft_delete_time_col: Optional[str] = None,
     soft_delete_reason_col: Optional[str] = None,
     cdc_op_field: Optional[str] = None,
-    cdc_delete_values: Optional[List[Any]] = None
+    cdc_delete_values: Optional[List[Any]] = None,
 ):
     """
     Merge incoming rows into existing rows using a primary key.
@@ -505,12 +512,15 @@ def _merge_frames(
         incoming = incoming[~delete_mask].copy()
 
     all_cols = list(dict.fromkeys(list(existing.columns) + list(incoming.columns)))
-    
+
     # Ensure metadata columns exist in schema
     metadata_cols = []
-    if soft_delete_col: metadata_cols.append(soft_delete_col)
-    if soft_delete_time_col: metadata_cols.append(soft_delete_time_col)
-    if soft_delete_reason_col: metadata_cols.append(soft_delete_reason_col)
+    if soft_delete_col:
+        metadata_cols.append(soft_delete_col)
+    if soft_delete_time_col:
+        metadata_cols.append(soft_delete_time_col)
+    if soft_delete_reason_col:
+        metadata_cols.append(soft_delete_reason_col)
 
     for col in metadata_cols:
         if col not in all_cols:
@@ -527,14 +537,14 @@ def _merge_frames(
     # 2. Apply Updates/Inserts
     existing.update(incoming)
     new_rows = incoming.loc[~incoming.index.isin(existing.index)]
-    
+
     # 3. Apply Soft Deletes
     if not deletes.empty and soft_delete_col:
         deletes = deletes.reindex(columns=all_cols)
-        
+
         # Set metadata for the delete batch (Smart Fill)
         deletes[soft_delete_col] = soft_delete_val
-        
+
         if soft_delete_time_col:
             # Fill only where source didn't provide a timestamp
             now_ts = datetime.now(timezone.utc).isoformat()
@@ -542,7 +552,7 @@ def _merge_frames(
                 deletes[soft_delete_time_col] = deletes[soft_delete_time_col].fillna(now_ts)
             else:
                 deletes[soft_delete_time_col] = now_ts
-                
+
         if soft_delete_reason_col:
             # Fill only where source didn't provide a reason
             default_reason = "cdc_delete_signal"
@@ -550,12 +560,12 @@ def _merge_frames(
                 deletes[soft_delete_reason_col] = deletes[soft_delete_reason_col].fillna(default_reason).astype(str)
             else:
                 deletes[soft_delete_reason_col] = default_reason
-            
+
         deletes = deletes.set_index(primary_key)
-        
+
         # Update existing records with the delete flag and metadata
         existing.update(deletes)
-        
+
         # If deleted record didn't exist, we might still want to insert it as a "tombstone"
         new_deletes = deletes.loc[~deletes.index.isin(existing.index)]
         if not new_deletes.empty:
@@ -607,8 +617,8 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         raise ValueError("primary_key is required for scd2 strategy.")
 
     effective_from = scd2_cfg.get("effective_from_field", "effective_from")  # destination column name
-    effective_to   = scd2_cfg.get("effective_to_field",   "effective_to")
-    current_flag   = scd2_cfg.get("current_flag_field",   "is_current")
+    effective_to = scd2_cfg.get("effective_to_field", "effective_to")
+    current_flag = scd2_cfg.get("current_flag_field", "is_current")
     track_columns: Optional[List[str]] = scd2_cfg.get("track_columns")
     # change_date_field: which SOURCE column holds the actual change-event date.
     # Defaults to effective_from for backwards compat (old pattern: effective_from_field: updated_at).
@@ -632,7 +642,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     if effective_from not in incoming.columns:
         incoming[effective_from] = now_value
     if effective_to not in incoming.columns:
-        incoming[effective_to] = effective_to_default # New versions are current
+        incoming[effective_to] = effective_to_default  # New versions are current
     if current_flag not in incoming.columns:
         incoming[current_flag] = True
 
@@ -646,17 +656,19 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
 
     # Ensure SCD2 control columns exist on existing
     if effective_from not in existing.columns:
-        existing[effective_from] = effective_from_default # Assume existing records started from default if not specified
+        existing[effective_from] = (
+            effective_from_default  # Assume existing records started from default if not specified
+        )
     if effective_to not in existing.columns:
-        existing[effective_to] = effective_to_default # Assume existing current records end at default if not specified
+        existing[effective_to] = effective_to_default  # Assume existing current records end at default if not specified
     if current_flag not in existing.columns:
-        existing[current_flag] = (existing[effective_to] == effective_to_default) # Infer current based on effective_to
+        existing[current_flag] = existing[effective_to] == effective_to_default  # Infer current based on effective_to
 
     # Cast SCD2 control columns so pandas can accept mixed-type writes
     merged = existing.copy()
     # Ensure these columns are of object type to handle mixed string/None/datetime values
-    merged[effective_to]  = merged[effective_to].astype(object)
-    merged[current_flag]  = merged[current_flag].astype(object)
+    merged[effective_to] = merged[effective_to].astype(object)
+    merged[current_flag] = merged[current_flag].astype(object)
 
     # Columns to compare when track_columns is set; fall back to all
     # non-key, non-SCD2 data columns present in both frames.
@@ -672,6 +684,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
 
     # Rows from incoming that will actually open a new version
     import pandas as pd
+
     new_versions = []
 
     for _, key_row in incoming_keys.iterrows():
@@ -691,21 +704,18 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         if inc_rows.empty:
             continue
 
-        inc_row = inc_rows.iloc[0]   # single canonical incoming row per key
-        
+        inc_row = inc_rows.iloc[0]  # single canonical incoming row per key
+
         # Find the currently active record for this key in the merged dataframe
-        current_mask = key_filter & (merged[current_flag] == True)
+        current_mask = key_filter & merged[current_flag]
 
         # Decide whether a change actually happened
-        changed = True # Assume change if no track_columns or no existing current record
+        changed = True  # Assume change if no track_columns or no existing current record
         if current_mask.any():
             existing_current_row = merged[current_mask].iloc[0]
-            if compare_cols: # Only compare if track_columns are specified
-                changed = any(
-                    str(existing_current_row.get(c)) != str(inc_row.get(c))
-                    for c in compare_cols
-                )
-            else: # If no track_columns, any incoming record for an existing key is a change
+            if compare_cols:  # Only compare if track_columns are specified
+                changed = any(str(existing_current_row.get(c)) != str(inc_row.get(c)) for c in compare_cols)
+            else:  # If no track_columns, any incoming record for an existing key is a change
                 changed = True
         else:
             # No current record exists for this key, so the incoming record is new
@@ -723,8 +733,8 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
             if current_mask.any():
                 # Close the existing current record: set its effective_to to the
                 # new version's start date (the real change-event date from source)
-                merged.loc[current_mask, effective_to]  = change_date
-                merged.loc[current_mask, current_flag]  = False
+                merged.loc[current_mask, effective_to] = change_date
+                merged.loc[current_mask, current_flag] = False
 
             # Prepare the new version row
             new_version_row = inc_row.copy()
@@ -734,8 +744,8 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
             else:
                 # Real change event — use the source change-event date
                 new_version_row[effective_from] = change_date
-            new_version_row[effective_to]  = effective_to_default
-            new_version_row[current_flag]  = True
+            new_version_row[effective_to] = effective_to_default
+            new_version_row[current_flag] = True
 
             new_versions.append(new_version_row.to_dict())
         # else: no tracked columns changed → skip (no new version, no close)
@@ -803,20 +813,26 @@ def _spark_merge_dataframe(
     if output_format == "delta" and is_table:
         try:
             from delta.tables import DeltaTable
+
             if DeltaTable.isDeltaTable(spark, table_or_path) or spark.catalog.tableExists(table_or_path):
-                delta_table = DeltaTable.forName(spark, table_or_path) if is_table else DeltaTable.forPath(spark, table_or_path)
+                delta_table = (
+                    DeltaTable.forName(spark, table_or_path) if is_table else DeltaTable.forPath(spark, table_or_path)
+                )
                 merge_condition = " AND ".join([f"target.{col} = source.{col}" for col in primary_key])
                 update_cols = {col: f"source.{col}" for col in incoming_df.columns if col not in primary_key}
                 insert_cols = {col: f"source.{col}" for col in incoming_df.columns}
 
-                delta_table.alias("target").merge(
-                    incoming_df.alias("source"),
-                    merge_condition
-                ).whenMatchedUpdate(set=update_cols).whenNotMatchedInsert(values=insert_cols).execute()
+                delta_table.alias("target").merge(incoming_df.alias("source"), merge_condition).whenMatchedUpdate(
+                    set=update_cols
+                ).whenNotMatchedInsert(values=insert_cols).execute()
 
                 rows_written = incoming_df.count()
                 logger.info(f"Merged {rows_written} rows into Delta table {table_or_path}")
-                return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+                return {
+                    "target": table_or_path,
+                    "rows_written": rows_written,
+                    "format": output_format,
+                }
         except ImportError:
             logger.debug("Delta Lake not available, falling back to DataFrame merge")
         except Exception as e:
@@ -837,7 +853,11 @@ def _spark_merge_dataframe(
                 writer.mode("overwrite").save(table_or_path)
             rows_written = incoming_df.count()
             logger.info(f"Wrote {rows_written} rows to {table_or_path} (no existing data)")
-            return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+            return {
+                "target": table_or_path,
+                "rows_written": rows_written,
+                "format": output_format,
+            }
     except Exception:
         # Target doesn't exist yet
         writer = incoming_df.write.format(output_format)
@@ -847,18 +867,24 @@ def _spark_merge_dataframe(
             writer.mode("overwrite").save(table_or_path)
         rows_written = incoming_df.count()
         logger.info(f"Wrote {rows_written} rows to {table_or_path} (new target)")
-        return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+        return {
+            "target": table_or_path,
+            "rows_written": rows_written,
+            "format": output_format,
+        }
 
     # Perform merge via anti-join + union
     # 1. Find rows in existing that DON'T match incoming (to keep unchanged)
     # 2. Union with all incoming rows (which are updates or inserts)
-    join_condition = [existing_df[col] == incoming_df[col] for col in primary_key]
+    _join_condition = [existing_df[col] == incoming_df[col] for col in primary_key]
 
     # Get non-matching existing rows (rows not being updated)
     unchanged = existing_df.join(incoming_df, on=primary_key, how="left_anti")
 
     # Align columns
-    all_columns = list(dict.fromkeys(existing_df.columns + [c for c in incoming_df.columns if c not in existing_df.columns]))
+    all_columns = list(
+        dict.fromkeys(existing_df.columns + [c for c in incoming_df.columns if c not in existing_df.columns])
+    )
     for col in all_columns:
         if col not in unchanged.columns:
             unchanged = unchanged.withColumn(col, F.lit(None))
@@ -878,7 +904,11 @@ def _spark_merge_dataframe(
 
     rows_written = merged.count()
     logger.info(f"Merged {rows_written} rows to {table_or_path}")
-    return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+    return {
+        "target": table_or_path,
+        "rows_written": rows_written,
+        "format": output_format,
+    }
 
 
 def _spark_scd2_dataframe(
@@ -946,7 +976,11 @@ def _spark_scd2_dataframe(
             writer.mode("overwrite").save(table_or_path)
         rows_written = incoming_df.count()
         logger.info(f"Wrote {rows_written} SCD2 rows to {table_or_path} (initial load)")
-        return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+        return {
+            "target": table_or_path,
+            "rows_written": rows_written,
+            "format": output_format,
+        }
 
     # Ensure existing has SCD2 columns
     if effective_from not in existing_df.columns:
@@ -961,9 +995,7 @@ def _spark_scd2_dataframe(
     track_columns = scd2_cfg.get("track_columns")  # optional list of columns to watch
 
     # Candidate matches: existing current rows whose key appears in incoming
-    candidates = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
-        F.col(current_flag) == True
-    )
+    candidates = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(F.col(current_flag))
 
     if track_columns:
         # Join candidates with full incoming rows so we can compare field values
@@ -983,9 +1015,7 @@ def _spark_scd2_dataframe(
             any_changed = change_conditions[0]
             for cond in change_conditions[1:]:
                 any_changed = any_changed | cond
-            records_to_close = candidates_with_inc.filter(any_changed).drop(
-                *[f"_inc_{c}" for c in track_columns]
-            )
+            records_to_close = candidates_with_inc.filter(any_changed).drop(*[f"_inc_{c}" for c in track_columns])
             # Incoming rows that actually triggered a change (used for new versions below)
             changed_keys = records_to_close.select(*primary_key).distinct()
             incoming_df = incoming_df.join(changed_keys, on=primary_key, how="inner")
@@ -997,21 +1027,17 @@ def _spark_scd2_dataframe(
 
     # Records to keep unchanged: not matching incoming keys OR already closed
     unchanged = existing_df.join(incoming_keys, on=primary_key, how="left_anti")
-    already_closed = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
-        F.col(current_flag) == False
-    )
+    already_closed = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(~F.col(current_flag))
 
     # Stamp effective_to on records being closed
-    incoming_effective = incoming_df.select(
-        *primary_key,
-        F.col(effective_from).alias("_new_effective_from")
-    ).distinct()
+    incoming_effective = incoming_df.select(*primary_key, F.col(effective_from).alias("_new_effective_from")).distinct()
 
-    closed_records = records_to_close.join(incoming_effective, on=primary_key, how="left").withColumn(
-        effective_to, F.col("_new_effective_from")
-    ).withColumn(
-        current_flag, F.lit(False)
-    ).drop("_new_effective_from")
+    closed_records = (
+        records_to_close.join(incoming_effective, on=primary_key, how="left")
+        .withColumn(effective_to, F.col("_new_effective_from"))
+        .withColumn(current_flag, F.lit(False))
+        .drop("_new_effective_from")
+    )
 
     # Align all columns
     all_columns = list(existing_df.columns)
@@ -1041,7 +1067,11 @@ def _spark_scd2_dataframe(
 
     rows_written = result.count()
     logger.info(f"Applied SCD2 with {rows_written} total rows to {table_or_path}")
-    return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
+    return {
+        "target": table_or_path,
+        "rows_written": rows_written,
+        "format": output_format,
+    }
 
 
 def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format: str) -> Dict[str, Any]:
@@ -1087,7 +1117,15 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     if strategy == "scd2":
         if not primary_key:
             raise ValueError("primary_key is required for scd2 strategy.")
-        return _spark_scd2_dataframe(spark, df, target_str, primary_key, scd2_cfg, output_format, location=location)
+        return _spark_scd2_dataframe(
+            spark,
+            df,
+            target_str,
+            primary_key,
+            scd2_cfg,
+            output_format,
+            location=location,
+        )
 
     # Standard append/overwrite
     writer = df.write.format(output_format)
@@ -1095,7 +1133,10 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
         writer = writer.partitionBy(*partition_by)
 
     mode = "append" if strategy == "append" else "overwrite"
-    if strategy == "append" and reprocess_policy in ["overwrite_partition", "overwrite_partition_safe"]:
+    if strategy == "append" and reprocess_policy in [
+        "overwrite_partition",
+        "overwrite_partition_safe",
+    ]:
         try:
             spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
         except Exception:
@@ -1103,10 +1144,14 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
         mode = "overwrite"
 
     if target_str.startswith("table:"):
-        table_name = target_str[len("table:"):]
+        table_name = target_str[len("table:") :]
         _spark_save_as_table(writer, table_name, mode, location)
         logger.info(f"Materialized Spark dataframe to table {table_name} ({output_format})")
-        return {"target": table_name, "rows_written": df.count(), "format": output_format}
+        return {
+            "target": table_name,
+            "rows_written": df.count(),
+            "format": output_format,
+        }
 
     writer.mode(mode).save(target_str)
     logger.info(f"Materialized Spark dataframe to {target_str} ({output_format})")
@@ -1158,10 +1203,13 @@ def _partition_aware_merge(
     # return a zero-rows metadata dict so callers don't raise on missing columns.
     if pdf.empty:
         import logging as _log
-        _log.getLogger(__name__).info(
-            "materialize: empty DataFrame — no rows to write, skipping materialization."
-        )
-        return {"target": str(resolved_target), "rows_written": 0, "format": resolved_format}
+
+        _log.getLogger(__name__).info("materialize: empty DataFrame — no rows to write, skipping materialization.")
+        return {
+            "target": str(resolved_target),
+            "rows_written": 0,
+            "format": resolved_format,
+        }
 
     if not primary_key:
         raise ValueError("primary_key is required for merge/scd2 strategy.")
@@ -1198,8 +1246,7 @@ def _partition_aware_merge(
             import pyarrow as pa
         except ImportError:
             raise ImportError(
-                "Writing partitioned Delta tables requires deltalake and pyarrow: "
-                "pip install deltalake pyarrow"
+                "Writing partitioned Delta tables requires deltalake and pyarrow: pip install deltalake pyarrow"
             )
 
         target_str = str(base_dir)
@@ -1217,16 +1264,16 @@ def _partition_aware_merge(
                 existing = pd.DataFrame(columns=group.columns)
                 try:
                     dt = DeltaTable(target_str)
-                    part_filter = [
-                        (col, "=", str(val)) for col, val in part_values.items()
-                    ]
+                    part_filter = [(col, "=", str(val)) for col, val in part_values.items()]
                     existing = dt.to_pandas(filters=part_filter)
                 except Exception:
                     pass
 
                 if strategy == "merge":
                     merged = _merge_frames(
-                        existing, group, primary_key,
+                        existing,
+                        group,
+                        primary_key,
                         soft_delete_col=soft_delete_col,
                         soft_delete_val=soft_delete_val,
                         soft_delete_time_col=soft_delete_time_col,
@@ -1244,7 +1291,11 @@ def _partition_aware_merge(
 
         if not merged_parts:
             logger.info(f"Partition-aware {strategy} (delta): no rows to write → {base_dir}")
-            return {"target": str(base_dir), "rows_written": 0, "format": resolved_format}
+            return {
+                "target": str(base_dir),
+                "rows_written": 0,
+                "format": resolved_format,
+            }
 
         combined = pd.concat(merged_parts, ignore_index=True)
         arrow_table = pa.Table.from_pandas(combined, preserve_index=False)
@@ -1263,9 +1314,7 @@ def _partition_aware_merge(
         elif primary_key:
             # ── Subsequent writes: MERGE INTO via DeltaTable.merge() ─────
             # Stable across all deltalake versions; no partition_filters API.
-            pk_predicate = " AND ".join(
-                f"source.{pk} = target.{pk}" for pk in primary_key
-            )
+            pk_predicate = " AND ".join(f"source.{pk} = target.{pk}" for pk in primary_key)
             dt = DeltaTable(target_str)
             (
                 dt.merge(
@@ -1288,11 +1337,12 @@ def _partition_aware_merge(
                 schema_mode="merge",
             )
 
-        logger.info(
-            f"Partition-aware {strategy} (delta): materialized {total_rows} rows "
-            f"→ {base_dir}"
-        )
-        return {"target": str(base_dir), "rows_written": total_rows, "format": resolved_format}
+        logger.info(f"Partition-aware {strategy} (delta): materialized {total_rows} rows → {base_dir}")
+        return {
+            "target": str(base_dir),
+            "rows_written": total_rows,
+            "format": resolved_format,
+        }
 
     # ── Non-delta formats: per-partition file approach (original behaviour) ───
     for part_values, group in _partition_groups(pdf, partition_by):
@@ -1313,7 +1363,9 @@ def _partition_aware_merge(
         # Perform merge or SCD2 within this partition
         if strategy == "merge":
             merged = _merge_frames(
-                existing, group, primary_key,
+                existing,
+                group,
+                primary_key,
                 soft_delete_col=soft_delete_col,
                 soft_delete_val=soft_delete_val,
                 soft_delete_time_col=soft_delete_time_col,
@@ -1330,7 +1382,11 @@ def _partition_aware_merge(
         total_rows += len(merged)
 
     logger.info(f"Partition-aware {strategy}: materialized {total_rows} rows across affected partitions → {base_dir}")
-    return {"target": str(base_dir), "rows_written": total_rows, "format": resolved_format}
+    return {
+        "target": str(base_dir),
+        "rows_written": total_rows,
+        "format": resolved_format,
+    }
 
 
 def materialize_dataframe(
@@ -1392,8 +1448,15 @@ def materialize_dataframe(
     if partition_by and strategy in ["merge", "scd2"]:
         # Partition-aware merge: merge/scd2 within each affected partition
         return _partition_aware_merge(
-            df, contract, resolved_target, resolved_format,
-            strategy, partition_by, primary_key, mat, scd2_cfg,
+            df,
+            contract,
+            resolved_target,
+            resolved_format,
+            strategy,
+            partition_by,
+            primary_key,
+            mat,
+            scd2_cfg,
         )
 
     is_dir_target = bool(partition_by) or resolved_target.suffix == ""
@@ -1411,23 +1474,38 @@ def materialize_dataframe(
 
     if not _frame_has_columns(df):
         logger.info("Materialization skipped: dataframe has no columns (empty incremental batch).")
-        return {"target": str(target_file), "rows_written": 0, "format": resolved_format}
+        return {
+            "target": str(target_file),
+            "rows_written": 0,
+            "format": resolved_format,
+        }
 
     if not _pandas_available():
         if partition_by:
             raise ValueError("Partitioned materialization requires pandas (or Spark). Install pandas to proceed.")
         if strategy not in ["overwrite", "append"]:
-            raise ValueError(f"Materialization strategy '{strategy}' requires pandas (or Spark). Install pandas to proceed.")
+            raise ValueError(
+                f"Materialization strategy '{strategy}' requires pandas (or Spark). Install pandas to proceed."
+            )
         if strategy == "append" and target_file.exists():
             rows_written = _append_without_pandas(df, target_file, resolved_format)
         else:
             _write_frame(df, target_file, resolved_format)
             rows_written = _row_count(df)
         logger.info(f"Materialized {rows_written if rows_written is not None else '?'} rows to {target_file}")
-        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+        return {
+            "target": str(target_file),
+            "rows_written": rows_written,
+            "format": resolved_format,
+        }
 
     # Prefer native Polars writes for csv/parquet to avoid pyarrow dependency.
-    if _is_polars_frame(df) and resolved_format in ["csv", "parquet"] and not partition_by and strategy in ["overwrite", "append"]:
+    if (
+        _is_polars_frame(df)
+        and resolved_format in ["csv", "parquet"]
+        and not partition_by
+        and strategy in ["overwrite", "append"]
+    ):
         if strategy == "append" and target_file.exists():
             rows_written = _append_without_pandas(df, target_file, resolved_format)
         else:
@@ -1439,14 +1517,22 @@ def materialize_dataframe(
                 except Exception:
                     pass
         logger.info(f"Materialized {rows_written if rows_written is not None else '?'} rows to {target_file}")
-        return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
+        return {
+            "target": str(target_file),
+            "rows_written": rows_written,
+            "format": resolved_format,
+        }
 
     pdf = _to_pandas(df)
 
     # Empty-frame guard — nothing to write, avoid partition-column validation errors
     if pdf.empty:
         logger.info("materialize: empty DataFrame — no rows to write, skipping materialization.")
-        return {"target": str(target_file), "rows_written": 0, "format": resolved_format}
+        return {
+            "target": str(target_file),
+            "rows_written": 0,
+            "format": resolved_format,
+        }
 
     if partition_by:
         missing = [col for col in partition_by if col not in pdf.columns]
@@ -1468,10 +1554,7 @@ def materialize_dataframe(
             from deltalake import write_deltalake
             import pyarrow as pa
         except ImportError as exc:
-            raise ImportError(
-                "Delta materialization requires the deltalake package: "
-                "pip install deltalake"
-            ) from exc
+            raise ImportError("Delta materialization requires the deltalake package: pip install deltalake") from exc
 
         # Resolve Arrow table from any engine frame
         if _is_polars_frame(pdf):
@@ -1494,14 +1577,18 @@ def materialize_dataframe(
             arrow_data,
             mode=delta_mode,
             partition_by=delta_partition_by,
-            schema_mode="merge",   # schema evolution: new columns auto-added
+            schema_mode="merge",  # schema evolution: new columns auto-added
         )
         rows_written = len(arrow_data)
         logger.info(
             f"Materialized {rows_written} rows to Delta table: {resolved_target} "
             f"(mode={delta_mode}, partitions={delta_partition_by})"
         )
-        return {"target": str(resolved_target), "rows_written": rows_written, "format": "delta"}
+        return {
+            "target": str(resolved_target),
+            "rows_written": rows_written,
+            "format": "delta",
+        }
 
     if partition_by:
         base_dir = resolved_target
@@ -1546,7 +1633,11 @@ def materialize_dataframe(
             rows_written += len(group)
 
         logger.info(f"Materialized {rows_written} rows to partitioned path: {base_dir}")
-        return {"target": str(base_dir), "rows_written": rows_written, "format": resolved_format}
+        return {
+            "target": str(base_dir),
+            "rows_written": rows_written,
+            "format": resolved_format,
+        }
 
     if strategy == "overwrite":
         _write_frame(pdf, target_file, resolved_format)
@@ -1554,6 +1645,7 @@ def materialize_dataframe(
     elif strategy == "append":
         if target_file.exists():
             import pandas as pd
+
             existing = _read_frame(target_file, resolved_format)
             combined = pd.concat([existing, pdf], ignore_index=True)
             _write_frame(combined, target_file, resolved_format)
@@ -1564,7 +1656,7 @@ def materialize_dataframe(
     elif strategy == "merge":
         if target_file.exists():
             existing = _read_frame(target_file, resolved_format)
-            
+
             # Extract CDC and Soft Delete settings
             cdc_op_field = getattr(contract.source, "cdc_op_field", None) if contract.source else None
             cdc_delete_values = getattr(contract.source, "cdc_delete_values", None) if contract.source else None
@@ -1572,17 +1664,17 @@ def materialize_dataframe(
             soft_delete_val = getattr(mat, "soft_delete_value", True)
             soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
             soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
-            
+
             merged = _merge_frames(
-                existing, 
-                pdf, 
+                existing,
+                pdf,
                 primary_key,
                 soft_delete_col=soft_delete_col,
                 soft_delete_val=soft_delete_val,
                 soft_delete_time_col=soft_delete_time_col,
                 soft_delete_reason_col=soft_delete_reason_col,
                 cdc_op_field=cdc_op_field,
-                cdc_delete_values=cdc_delete_values
+                cdc_delete_values=cdc_delete_values,
             )
         else:
             merged = pdf
@@ -1600,8 +1692,11 @@ def materialize_dataframe(
         raise ValueError(f"Unsupported materialization strategy: {strategy}")
 
     logger.info(f"Materialized {rows_written} rows to {target_file}")
-    return {"target": str(target_file), "rows_written": rows_written, "format": resolved_format}
-
+    return {
+        "target": str(target_file),
+        "rows_written": rows_written,
+        "format": resolved_format,
+    }
 
 
 # ── Re-exports for backwards compatibility ──────────────────────────────────

@@ -13,6 +13,7 @@ if sys.platform == "win32":
             pass  # non-TextIOWrapper stream (e.g. redirect to file)
 # ──────────────────────────────────────────────────────────────────────────────
 
+import importlib.util
 import typer
 from pathlib import Path
 from typing import Optional, Any, Dict, List
@@ -31,28 +32,31 @@ app = typer.Typer(
         "[dim]Use [bold]lakelogic [COMMAND] --help[/bold] for detailed usage on any command.[/dim]"
     ),
     add_completion=False,
-    no_args_is_help=True,          # show help instead of "Missing command" error
-    rich_markup_mode="rich",       # enable Rich markup in help strings
+    no_args_is_help=True,  # show help instead of "Missing command" error
+    rich_markup_mode="rich",  # enable Rich markup in help strings
     pretty_exceptions_enable=False,
 )
 
+
 @app.command(rich_help_panel="Contract Execution")
 def run(
-    contract: Path = typer.Option(
-        ..., "--contract", "-c", help="Path to the contract YAML file."
-    ),
+    contract: Path = typer.Option(..., "--contract", "-c", help="Path to the contract YAML file."),
     source: Path = typer.Option(
-        ..., "--source", "-s", help="Path to the source data file (CSV/Parquet) or table name for warehouse engines."
+        ...,
+        "--source",
+        "-s",
+        help="Path to the source data file (CSV/Parquet) or table name for warehouse engines.",
     ),
     engine: str = typer.Option(
-        "polars", "--engine", "-e", help="Execution engine (polars, pandas, duckdb, spark, snowflake, bigquery)."
+        "polars",
+        "--engine",
+        "-e",
+        help="Execution engine (polars, pandas, duckdb, spark, snowflake, bigquery).",
     ),
     stage: Optional[str] = typer.Option(
         None, "--stage", help="Apply contract stage overrides (e.g., bronze or silver)."
     ),
-    output_good: Optional[Path] = typer.Option(
-        None, "--output-good", help="Path to save good records (CSV/Parquet)."
-    ),
+    output_good: Optional[Path] = typer.Option(None, "--output-good", help="Path to save good records (CSV/Parquet)."),
     output_bad: Optional[Path] = typer.Option(
         None, "--output-bad", help="Path to save quarantined records (CSV/Parquet)."
     ),
@@ -62,7 +66,9 @@ def run(
         help="Format for --output-good/--output-bad (csv|parquet). Defaults to CSV or inferred from file extension.",
     ),
     materialize: bool = typer.Option(
-        False, "--materialize/--no-materialize", help="Write good data to the contract materialization target."
+        False,
+        "--materialize/--no-materialize",
+        help="Write good data to the contract materialization target.",
     ),
     materialize_target: Optional[Path] = typer.Option(
         None, "--materialize-target", help="Override materialization target path."
@@ -84,6 +90,7 @@ def run(
         materialize_target: Optional override materialization target path.
         verbose: Enable debug logging.
     """
+
     def _resolve_output_format(path: Path, fmt: Optional[str]) -> str:
         """
         Resolve the output format based on CLI option or file extension.
@@ -142,42 +149,42 @@ def run(
             return
 
         raise ValueError(f"Unsupported output format: {fmt}")
-    
+
     # Configure logging with multi-line splitting for long messages
     logger.remove()
     log_level = "DEBUG" if verbose else "INFO"
     max_line_length = 120  # Maximum characters per line
-    
+
     def split_long_message(record):
         """Split long log messages into multiple lines for readability."""
         message = record["message"]
         if len(message) <= max_line_length:
             return True
-        
+
         # Split at word boundaries
         words = message.split()
         lines = []
         current_line = ""
-        
+
         for word in words:
             if len(current_line) + len(word) + 1 <= max_line_length:
-                current_line += (word + " ")
+                current_line += word + " "
             else:
                 if current_line:
                     lines.append(current_line.rstrip())
                 current_line = "  " + word + " "  # Indent continuation lines
-        
+
         if current_line:
             lines.append(current_line.rstrip())
-        
+
         record["message"] = "\n".join(lines)
         return True
-    
+
     logger.add(
-        sys.stderr, 
-        level=log_level, 
+        sys.stderr,
+        level=log_level,
         format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
-        filter=split_long_message
+        filter=split_long_message,
     )
 
     if engine not in ["snowflake", "bigquery"]:
@@ -195,44 +202,44 @@ def run(
 
         if materialize:
             processor.materialize(good_df, bad_df, target_path=materialize_target)
-        
+
         # Save results
         if output_good:
             out_fmt = _resolve_output_format(output_good, output_format)
             _write_output(good_df, output_good, out_fmt, engine)
             logger.info(f"Saved good records to {output_good}")
-        
+
         if output_bad:
             out_fmt = _resolve_output_format(output_bad, output_format)
             _write_output(bad_df, output_bad, out_fmt, engine)
             logger.info(f"Saved quarantined records to {output_bad}")
-            
+
     except Exception as e:
         logger.exception(f"Fatal error during execution: {e}")
         raise typer.Exit(code=1)
 
+
 def _display_trace(trace: Any):
     """Display execution trace in a formatted table."""
     import typer
-    from datetime import datetime
-    
+
     typer.echo("")
     typer.echo(typer.style(" 🔍 EXECUTION TRACE", fg=typer.colors.CYAN, bold=True))
     typer.echo(typer.style(f" Run ID: {trace.run_id}", dim=True))
     typer.echo(" " + "─" * 110)
-    
+
     header = f" {'STEP':<30} | {'STATUS':<8} | {'IN':>10} | {'OUT':>10} | {'DURATION':>12} | {'DETAILS'}"
     typer.echo(typer.style(header, bold=True))
     typer.echo(" " + "─" * 110)
-    
+
     for step in trace.steps:
         status_color = typer.colors.GREEN if step.status == "ok" else typer.colors.RED
         status_text = typer.style(f"{step.status.upper():<8}", fg=status_color)
-        
+
         in_rows = f"{step.input_rows:,}" if step.input_rows is not None else "-"
         out_rows = f"{step.output_rows:,}" if step.output_rows is not None else "-"
         duration = f"{step.duration_ms:,.2f}ms" if step.duration_ms is not None else "-"
-        
+
         details = ""
         if step.details:
             if "sql" in step.details:
@@ -244,10 +251,10 @@ def _display_trace(trace: Any):
                 details = f"Errors: {len(step.details['errors'])}"
             elif "path" in step.details:
                 details = f"Path: {step.details['path']}"
-        
+
         row = f" {step.step:<30} | {status_text} | {in_rows:>10} | {out_rows:>10} | {duration:>12} | {details}"
         typer.echo(row)
-    
+
     typer.echo(" " + "─" * 110)
     total_dur = f"{trace.total_duration_ms:,.2f}ms" if trace.total_duration_ms else "n/a"
     typer.echo(typer.style(f" TOTAL DURATION: {total_dur}", bold=True))
@@ -260,22 +267,22 @@ def setup_oss():
     Setup the OSS engine environment by pre-installing required extensions and checking dependencies.
     """
     logger.info("Setting up LakeLogic OSS environment...")
-    
+
     # Check deltalake
-    try:
-        import deltalake
+    if importlib.util.find_spec("deltalake") is not None:
         logger.info("✅ deltalake is installed.")
-    except ImportError:
-        logger.warning("❌ deltalake is NOT installed. Run: pip install \"lakelogic[duckdb]\" or pip install deltalake")
+    else:
+        logger.warning('❌ deltalake is NOT installed. Run: pip install "lakelogic[duckdb]" or pip install deltalake')
 
     # Setup DuckDB extensions
     try:
         from lakelogic.engines.duckdb import DuckDBAdapter
+
         DuckDBAdapter.setup_extensions()
         logger.info("✅ DuckDB extensions setup complete.")
     except Exception as e:
         logger.error(f"❌ Failed to setup DuckDB extensions: {e}")
-        
+
     logger.info("OSS environment setup finished.")
 
 
@@ -289,16 +296,34 @@ def bootstrap(
     layer: str = typer.Option("bronze", "--layer", help="Layer name prefix for datasets."),
     sample_rows: int = typer.Option(1000, "--sample-rows", help="Rows to sample for schema inference."),
     sync: bool = typer.Option(False, "--sync", help="Sync registry/contracts with landing zone."),
-    sync_update_schema: bool = typer.Option(False, "--sync-update-schema", help="Update schema for existing contracts."),
+    sync_update_schema: bool = typer.Option(
+        False, "--sync-update-schema", help="Update schema for existing contracts."
+    ),
     sync_overwrite: bool = typer.Option(False, "--sync-overwrite", help="Overwrite existing contracts."),
     profile: bool = typer.Option(False, "--profile", help="Generate a data profile for each entity."),
     detect_pii: bool = typer.Option(False, "--detect-pii", help="Detect PII using Presidio."),
     suggest_rules: bool = typer.Option(False, "--suggest-rules", help="Suggest quality rules from profile."),
-    profile_output_dir: Optional[Path] = typer.Option(None, "--profile-output-dir", help="Directory for profile reports."),
-    pii_sample_size: int = typer.Option(50, "--pii-sample-size", help="Number of sample values per column for PII detection."),
-    ai: bool = typer.Option(False, "--ai", help="Enrich contracts with LLM-generated descriptions, PII flags, and SQL rules."),
-    ai_provider: Optional[str] = typer.Option(None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama."),
-    ai_model: Optional[str] = typer.Option(None, "--ai-model", help="AI model name (e.g. gpt-4o-mini, claude-sonnet-4-20250514)."),
+    profile_output_dir: Optional[Path] = typer.Option(
+        None, "--profile-output-dir", help="Directory for profile reports."
+    ),
+    pii_sample_size: int = typer.Option(
+        50,
+        "--pii-sample-size",
+        help="Number of sample values per column for PII detection.",
+    ),
+    ai: bool = typer.Option(
+        False,
+        "--ai",
+        help="Enrich contracts with LLM-generated descriptions, PII flags, and SQL rules.",
+    ),
+    ai_provider: Optional[str] = typer.Option(
+        None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama."
+    ),
+    ai_model: Optional[str] = typer.Option(
+        None,
+        "--ai-model",
+        help="AI model name (e.g. gpt-4o-mini, claude-sonnet-4-20250514).",
+    ),
 ):
     """
     Bootstrap contracts and registry from a landing zone.
@@ -312,6 +337,7 @@ def bootstrap(
         layer: Dataset layer prefix.
         sample_rows: Rows to sample for schema inference.
     """
+
     def _flag(value: Any) -> bool:
         return True if value is True else False
 
@@ -377,7 +403,7 @@ def bootstrap(
             from dataprofiler import Profiler
         except Exception as exc:
             raise typer.BadParameter(
-                "DataProfiler not installed. Install with: pip install \"lakelogic[profiling]\""
+                'DataProfiler not installed. Install with: pip install "lakelogic[profiling]"'
             ) from exc
         profiler = Profiler(df)
         return profiler.profile
@@ -387,7 +413,7 @@ def bootstrap(
             from presidio_analyzer import AnalyzerEngine
         except Exception as exc:
             raise typer.BadParameter(
-                "Presidio not installed. Install with: pip install \"lakelogic[profiling]\""
+                'Presidio not installed. Install with: pip install "lakelogic[profiling]"'
             ) from exc
 
         analyzer = AnalyzerEngine()
@@ -559,6 +585,7 @@ def bootstrap(
         if ai:
             try:
                 from lakelogic.ai.contract_enricher import enrich_contract
+
                 contract = enrich_contract(
                     contract,
                     sample_df=df,
@@ -667,7 +694,9 @@ def generate(
     seed: Optional[int] = typer.Option(None, "--seed", help="Random seed for reproducibility."),
     preview: int = typer.Option(5, "--preview", help="Number of rows to print to console (0 = silent)."),
     ai: bool = typer.Option(False, "--ai", help="Use LLM to generate realistic edge cases for invalid rows."),
-    ai_provider: Optional[str] = typer.Option(None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama."),
+    ai_provider: Optional[str] = typer.Option(
+        None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama."
+    ),
     ai_model: Optional[str] = typer.Option(None, "--ai-model", help="AI model name."),
 ):
     """
@@ -746,32 +775,35 @@ def generate(
 
 @app.command("import-dbt", rich_help_panel="Data Tooling")
 def import_dbt(
-    schema: Path = typer.Option(
-        ..., "--schema", help="Path to the dbt schema.yml or sources.yml file."
-    ),
+    schema: Path = typer.Option(..., "--schema", help="Path to the dbt schema.yml or sources.yml file."),
     model: Optional[str] = typer.Option(
-        None, "--model", "-m",
+        None,
+        "--model",
+        "-m",
         help="Name of the dbt model to import. Omit to import all models in the file.",
     ),
-    source_name: Optional[str] = typer.Option(
-        None, "--source-name", help="dbt source name (for sources.yml files)."
-    ),
+    source_name: Optional[str] = typer.Option(None, "--source-name", help="dbt source name (for sources.yml files)."),
     source_table: Optional[str] = typer.Option(
         None, "--source-table", help="dbt source table name (for sources.yml files)."
     ),
     output: Optional[Path] = typer.Option(
-        None, "--output", "-o",
+        None,
+        "--output",
+        "-o",
         help=(
             "Output path. If a .yaml file path, writes one contract there. "
             "If a directory (or omitted), writes <model>.yaml into that directory."
         ),
     ),
     overwrite: bool = typer.Option(
-        False, "--overwrite/--no-overwrite",
+        False,
+        "--overwrite/--no-overwrite",
         help="Overwrite existing contract files. Default: skip existing.",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="Print the generated contract YAML but do not write files.",
+        False,
+        "--dry-run",
+        help="Print the generated contract YAML but do not write files.",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output."),
 ):
@@ -839,6 +871,7 @@ def import_dbt(
         typer.echo(typer.style(f"✗  {exc}", fg=typer.colors.RED), err=True)
         if verbose:
             import traceback
+
             traceback.print_exc()
         raise typer.Exit(code=1)
 
@@ -881,9 +914,7 @@ def _write_or_print_contract(
         return
 
     if dest.exists() and not overwrite:
-        typer.echo(
-            typer.style(f"  ↷  Skipped (already exists): {dest}", dim=True)
-        )
+        typer.echo(typer.style(f"  ↷  Skipped (already exists): {dest}", dim=True))
         return
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -908,6 +939,7 @@ def doctor():
 
     try:
         import lakelogic
+
         ll_version = getattr(lakelogic, "__version__", "unknown")
     except Exception:
         ll_version = "unknown"
@@ -929,11 +961,7 @@ def doctor():
         mod_name = import_name or name
         try:
             mod = __import__(mod_name)
-            ver = (
-                getattr(mod, "__version__", None)
-                or getattr(mod, "version", None)
-                or getattr(mod, "VERSION", None)
-            )
+            ver = getattr(mod, "__version__", None) or getattr(mod, "version", None) or getattr(mod, "VERSION", None)
             if callable(ver):
                 ver = ver()
             return str(ver) if ver else "installed"
@@ -1034,4 +1062,3 @@ def doctor():
 
 if __name__ == "__main__":
     app()
-

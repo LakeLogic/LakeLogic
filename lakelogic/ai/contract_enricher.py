@@ -11,6 +11,7 @@ Usage::
 
 The enricher sends **schema + sample values only** — never raw data at scale.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,7 +37,8 @@ Your job is to return a JSON object with the following structure:
       "description": "<1-2 sentence human-readable description of what this field represents>",
       "pii": true | false,
       "pii_type": "<PII category if pii=true, e.g. 'email', 'phone', 'national_id', 'address', 'name', null otherwise>",
-      "pii_remediation": "<suggested masking strategy if pii=true, e.g. 'hash', 'redact', 'mask_partial', null otherwise>"
+      "pii_remediation": "<suggested masking strategy if pii=true,
+        e.g. 'hash', 'redact', 'mask_partial', null otherwise>"
     }
   ],
   "suggested_rules": [
@@ -62,7 +64,8 @@ Rules for suggested_rules:
 Rules for PII detection:
 - Consider field NAMES, not just values (e.g. "national_insurance_number" is PII regardless of sample values)
 - Common PII: email, phone, name, address, date_of_birth, SSN, IP address, credit card, passport
-- Mark geographic data (city, postcode, country) as PII only if it could identify an individual when combined with other fields
+- Mark geographic data (city, postcode, country) as PII only if it could identify an individual
+  when combined with other fields
 
 Return ONLY valid JSON. No markdown, no explanation, no preamble.
 """
@@ -71,6 +74,7 @@ Return ONLY valid JSON. No markdown, no explanation, no preamble.
 # ---------------------------------------------------------------------------
 # Enricher
 # ---------------------------------------------------------------------------
+
 
 def _build_user_prompt(
     fields: List[Dict[str, Any]],

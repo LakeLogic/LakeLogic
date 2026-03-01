@@ -8,6 +8,7 @@ Current adapters
 ~~~~~~~~~~~~~~~~
 - dbt      — reads ``schema.yml`` / ``sources.yml`` (dbt Core)
 """
+
 from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
 
 __all__ = ["DbtAdapter", "load_contract_from_dbt"]

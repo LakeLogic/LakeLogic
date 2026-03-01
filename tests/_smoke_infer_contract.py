@@ -1,5 +1,8 @@
 """Smoke test for infer_contract / ContractInferrer / ContractDraft."""
-import sys, pathlib
+
+import sys
+import pathlib
+
 sys.path.insert(0, ".")
 
 from lakelogic import infer_contract, ContractInferrer, ContractDraft, DataGenerator
@@ -8,14 +11,8 @@ ZOOPLA_JSON = (
     r"D:\Github\_SaaS\SaaS_lineagelogic_RA-azure-ecommerce"
     r"\RA-azure-ecommerce\src\data\10001.json"
 )
-ORDERS_CSV = (
-    "examples/06_advanced_workflows/synthetic_data_generation"
-    "/data/orders_sample.csv"
-)
-ORDERS_PARQUET = (
-    "examples/06_advanced_workflows/synthetic_data_generation"
-    "/data/orders_sample.parquet"
-)
+ORDERS_CSV = "examples/06_advanced_workflows/synthetic_data_generation/data/orders_sample.csv"
+ORDERS_PARQUET = "examples/06_advanced_workflows/synthetic_data_generation/data/orders_sample.parquet"
 
 # ── Test 1: single JSON record (Zoopla-style) ────────────────────────────────
 draft1 = infer_contract(ZOOPLA_JSON, title="Zoopla Listing", layer="bronze")
@@ -40,16 +37,17 @@ yml = draft2.to_yaml()
 assert "model:" in yml and "fields:" in yml
 d = draft2.to_dict()
 assert "model" in d and "info" in d
-print(f"[4] Serialisation OK")
+print("[4] Serialisation OK")
 
 # ── Test 5: save to disk ─────────────────────────────────────────────────────
-import tempfile, pathlib
+import tempfile
+
 with tempfile.TemporaryDirectory() as tmp:
     p = draft2.save(pathlib.Path(tmp) / "test_contract.yaml")
     assert p.exists()
     txt = p.read_text(encoding="utf-8")
     assert "fields:" in txt
-print(f"[5] save() OK")
+print("[5] save() OK")
 
 # ── Test 6: to_generator() chain ─────────────────────────────────────────────
 gen = draft2.to_generator(seed=0)
@@ -66,24 +64,28 @@ print(f"[7] Zoopla chain OK -> shape={df2.shape}, cols={df2.columns[:5]}")
 
 # ── Test 8: in-memory DataFrame ──────────────────────────────────────────────
 import polars as pl
+
 mem_df = pl.read_csv(ORDERS_CSV)
 draft4 = infer_contract(mem_df, title="Orders DF")
 assert len(draft4.fields) == 10
 print(f"[8] DataFrame input OK -> {draft4}")
 
 # ── Test 9: show() prints something ──────────────────────────────────────────
-import io, contextlib
+import io
+import contextlib
+
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     draft2.show()
 assert "fields:" in buf.getvalue()
-print(f"[9] show() OK")
+print("[9] show() OK")
 
 # ── Test 10: import symbol check ─────────────────────────────────────────────
 from lakelogic import infer_contract as ic, ContractDraft as CD, ContractInferrer as CI
+
 assert ic is infer_contract
 assert CD is ContractDraft
 assert CI is ContractInferrer
-print(f"[10] Import symbols OK")
+print("[10] Import symbols OK")
 
 print("\nALL infer_contract TESTS PASSED")

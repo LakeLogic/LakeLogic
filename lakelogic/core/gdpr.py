@@ -19,11 +19,12 @@ Usage via DataProcessor:
     cleaned = proc.forget(subject_column="customer_id", subject_ids=["cust_123"])
     masked = proc.mask_pii(strategy="hash")
 """
+
 from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -68,6 +69,7 @@ def _redact_value(value: Any, replacement: str = "***REDACTED***") -> Optional[s
 
 # ── Polars implementations ───────────────────────────────────────────────────
 
+
 def _forget_polars(
     df,
     pii_columns: List[str],
@@ -101,15 +103,15 @@ def _forget_polars(
             continue
 
         if erasure_strategy == "nullify":
-            df = df.with_columns(
-                pl.when(mask).then(pl.lit(None)).otherwise(pl.col(col)).alias(col)
-            )
+            df = df.with_columns(pl.when(mask).then(pl.lit(None)).otherwise(pl.col(col)).alias(col))
         elif erasure_strategy == "hash":
             # Hash values for matching subjects
             df = df.with_columns(
                 pl.when(mask)
                 .then(
-                    pl.col(col).cast(pl.Utf8).map_elements(
+                    pl.col(col)
+                    .cast(pl.Utf8)
+                    .map_elements(
                         lambda v, _salt=hash_salt: _hash_value(v, _salt),
                         return_dtype=pl.Utf8,
                     )
@@ -118,12 +120,7 @@ def _forget_polars(
                 .alias(col)
             )
         elif erasure_strategy == "redact":
-            df = df.with_columns(
-                pl.when(mask)
-                .then(pl.lit("***REDACTED***"))
-                .otherwise(pl.col(col))
-                .alias(col)
-            )
+            df = df.with_columns(pl.when(mask).then(pl.lit("***REDACTED***")).otherwise(pl.col(col)).alias(col))
 
     return df
 
@@ -137,7 +134,6 @@ def _forget_pandas(
     hash_salt: str,
 ):
     """Erase/mask PII for specific subjects in a Pandas DataFrame."""
-    import pandas as pd
 
     present_pii = [c for c in pii_columns if c in df.columns]
     if not present_pii:
@@ -159,9 +155,7 @@ def _forget_pandas(
         if erasure_strategy == "nullify":
             df.loc[mask, col] = None
         elif erasure_strategy == "hash":
-            df.loc[mask, col] = df.loc[mask, col].apply(
-                lambda v: _hash_value(v, hash_salt)
-            )
+            df.loc[mask, col] = df.loc[mask, col].apply(lambda v: _hash_value(v, hash_salt))
         elif erasure_strategy == "redact":
             df.loc[mask, col] = "***REDACTED***"
 
@@ -186,10 +180,13 @@ def _mask_polars(df, pii_columns: List[str], strategy: str, hash_salt: str):
             df = df.with_columns(pl.lit(None).alias(col))
         elif strategy == "hash":
             df = df.with_columns(
-                pl.col(col).cast(pl.Utf8).map_elements(
+                pl.col(col)
+                .cast(pl.Utf8)
+                .map_elements(
                     lambda v, _salt=hash_salt: _hash_value(v, _salt),
                     return_dtype=pl.Utf8,
-                ).alias(col)
+                )
+                .alias(col)
             )
         elif strategy == "redact":
             df = df.with_columns(pl.lit("***REDACTED***").alias(col))
@@ -219,6 +216,7 @@ def _mask_pandas(df, pii_columns: List[str], strategy: str, hash_salt: str):
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+
 
 def forget_subjects(
     df: Any,
@@ -276,24 +274,42 @@ def forget_subjects(
     # Detect frame type and dispatch
     try:
         import polars as pl
+
         if isinstance(df, (pl.DataFrame, pl.LazyFrame)):
-            return _forget_polars(df, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt)
+            return _forget_polars(
+                df,
+                pii_columns,
+                subject_column,
+                subject_ids,
+                erasure_strategy,
+                hash_salt,
+            )
     except ImportError:
         pass
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
-            return _forget_pandas(df, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt)
+            return _forget_pandas(
+                df,
+                pii_columns,
+                subject_column,
+                subject_ids,
+                erasure_strategy,
+                hash_salt,
+            )
     except ImportError:
         pass
 
     # DuckDB relation → convert to pandas, process, convert back
     if hasattr(df, "fetchdf"):
         import pandas as pd
+
         pdf = df.fetchdf()
         result = _forget_pandas(pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt)
         import duckdb
+
         return duckdb.from_df(result)
 
     raise TypeError(f"Unsupported dataframe type: {type(df)}")
@@ -339,6 +355,7 @@ def mask_pii_columns(
 
     try:
         import polars as pl
+
         if isinstance(df, (pl.DataFrame, pl.LazyFrame)):
             return _mask_polars(df, pii_columns, strategy, hash_salt)
     except ImportError:
@@ -346,6 +363,7 @@ def mask_pii_columns(
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
             return _mask_pandas(df, pii_columns, strategy, hash_salt)
     except ImportError:
@@ -353,9 +371,11 @@ def mask_pii_columns(
 
     if hasattr(df, "fetchdf"):
         import pandas as pd
+
         pdf = df.fetchdf()
         result = _mask_pandas(pdf, pii_columns, strategy, hash_salt)
         import duckdb
+
         return duckdb.from_df(result)
 
     raise TypeError(f"Unsupported dataframe type: {type(df)}")

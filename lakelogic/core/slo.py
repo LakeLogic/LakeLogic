@@ -4,11 +4,10 @@ SLO (Service Level Objective) computation for LakeLogic.
 Provides freshness and availability metrics that can be evaluated
 against contract-defined thresholds.
 """
+
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-
-from loguru import logger
 
 
 def compute_slos(
@@ -91,6 +90,7 @@ def _get_max_timestamp(df: Any, field: str, engine_name: str) -> Optional[dateti
         return None
     try:
         import polars as pl
+
         if isinstance(df, pl.DataFrame):
             if field not in df.columns:
                 return None
@@ -101,6 +101,7 @@ def _get_max_timestamp(df: Any, field: str, engine_name: str) -> Optional[dateti
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
             if field not in df.columns:
                 return None
@@ -112,6 +113,7 @@ def _get_max_timestamp(df: Any, field: str, engine_name: str) -> Optional[dateti
     if engine_name == "spark":
         try:
             from pyspark.sql import functions as F
+
             if field not in df.columns:
                 return None
             value = df.agg(F.max(field).alias("max_value")).collect()[0][0]
@@ -138,6 +140,7 @@ def _coerce_datetime(value: Any) -> Optional[datetime]:
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     try:
         import pandas as pd
+
         ts = pd.to_datetime(value, utc=True, errors="coerce")
         if ts is not None and ts is not pd.NaT:
             return ts.to_pydatetime()
@@ -264,6 +267,7 @@ def _non_null_ratio(df: Any, field: str, engine_name: str) -> Optional[float]:
     """
     try:
         import polars as pl
+
         if isinstance(df, pl.DataFrame):
             if field not in df.columns:
                 return None
@@ -277,6 +281,7 @@ def _non_null_ratio(df: Any, field: str, engine_name: str) -> Optional[float]:
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
             if field not in df.columns:
                 return None
@@ -291,14 +296,12 @@ def _non_null_ratio(df: Any, field: str, engine_name: str) -> Optional[float]:
     if engine_name == "spark":
         try:
             from pyspark.sql import functions as F
+
             if field not in df.columns:
                 return None
             # Single aggregation: compute total and non-null count together
             # Avoids two separate .count() calls (each triggering full DAG)
-            result = df.agg(
-                F.count("*").alias("total"),
-                F.count(F.col(field)).alias("non_null")
-            ).first()
+            result = df.agg(F.count("*").alias("total"), F.count(F.col(field)).alias("non_null")).first()
             total = result["total"]
             non_null = result["non_null"]
             if total == 0:

@@ -32,7 +32,6 @@ Python API
 
 from __future__ import annotations
 
-import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,39 +45,39 @@ import yaml
 
 _POLARS_DTYPE_MAP: Dict[str, str] = {
     # String / text
-    "utf8":    "string",
-    "string":  "string",
+    "utf8": "string",
+    "string": "string",
     "large_utf8": "string",
     "categorical": "string",
-    "enum":    "string",
+    "enum": "string",
     # Integers
-    "int8":    "integer",
-    "int16":   "integer",
-    "int32":   "integer",
-    "int64":   "integer",
-    "uint8":   "integer",
-    "uint16":  "integer",
-    "uint32":  "integer",
-    "uint64":  "integer",
+    "int8": "integer",
+    "int16": "integer",
+    "int32": "integer",
+    "int64": "integer",
+    "uint8": "integer",
+    "uint16": "integer",
+    "uint32": "integer",
+    "uint64": "integer",
     # Floats
     "float32": "double",
     "float64": "double",
     "decimal": "double",
     # Temporal
-    "date":      "date",
-    "time":      "string",
-    "datetime":  "timestamp",
-    "duration":  "string",
+    "date": "date",
+    "time": "string",
+    "datetime": "timestamp",
+    "duration": "string",
     # Boolean
     "boolean": "boolean",
-    "bool":    "boolean",
+    "bool": "boolean",
     # Structural — stored as string at bronze
-    "list":    "string",
-    "array":   "string",
-    "struct":  "string",
-    "object":  "string",
+    "list": "string",
+    "array": "string",
+    "struct": "string",
+    "object": "string",
     # Null / unknown
-    "null":    "string",
+    "null": "string",
     "unknown": "string",
 }
 
@@ -109,16 +108,24 @@ def _format_contract_yaml(data: dict) -> str:
        - ``quality.dataset_rules``
        - ``transformations`` (any depth)
     """
+
     # FieldList is a list subclass — tell PyYAML to represent it as a plain
     # sequence so safe_load() can read it back without Python-tag errors.
     # We use a local Dumper subclass to avoid mutating the global default Dumper.
     class _Dumper(yaml.Dumper):
         pass
+
     _Dumper.add_representer(
         FieldList,
         lambda dumper, data: dumper.represent_sequence("tag:yaml.org,2002:seq", data),
     )
-    raw = yaml.dump(data, Dumper=_Dumper, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    raw = yaml.dump(
+        data,
+        Dumper=_Dumper,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
     lines = raw.splitlines()
     out: list[str] = []
 
@@ -250,6 +257,7 @@ class ContractDraft:
     def to_dict(self) -> Dict[str, Any]:
         """Return the full contract as a plain Python dict."""
         import copy
+
         return copy.deepcopy(self._data)
 
     def to_yaml(self) -> str:
@@ -282,10 +290,7 @@ class ContractDraft:
         """
         out = Path(path)
         if out.exists() and not overwrite:
-            raise FileExistsError(
-                f"Contract file already exists: {out}. "
-                "Pass overwrite=True to replace it."
-            )
+            raise FileExistsError(f"Contract file already exists: {out}. Pass overwrite=True to replace it.")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(_format_contract_yaml(self._data), encoding="utf-8")
         return out
@@ -298,7 +303,7 @@ class ContractDraft:
         self,
         seed: Optional[int] = None,
         use_faker: bool = True,
-    ) -> "DataGenerator":  # type: ignore[return]
+    ) -> "DataGenerator":  # type: ignore[return]  # noqa: F821
         """
         Return a :class:`DataGenerator` backed by this inferred contract.
 
@@ -325,9 +330,7 @@ class ContractDraft:
         """
         from lakelogic.core.generator import DataGenerator
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as tmp:
             tmp.write(_format_contract_yaml(self._data))
             tmp_path = tmp.name
 
@@ -480,12 +483,12 @@ class ContractInferrer:
 
         # ── 4. Assemble contract dict ─────────────────────────────────────
         info_block: Dict[str, Any] = {
-                "title": title,
-                "version": self.version,
-                "description": description,
-                "target_layer": self.layer,
-                "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            }
+            "title": title,
+            "version": self.version,
+            "description": description,
+            "target_layer": self.layer,
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
         if self.domain is not None:
             info_block["domain"] = self.domain
         if self.system is not None:
@@ -555,6 +558,7 @@ class ContractInferrer:
             except Exception:
                 # Fallback: single-record JSON (not an array) → wrap in list
                 import json
+
                 raw = json.loads(p.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     raw = [raw]
@@ -565,12 +569,10 @@ class ContractInferrer:
         elif ext in (".xlsx", ".xls"):
             try:
                 import pandas as pd
+
                 df = pl.from_pandas(pd.read_excel(p, nrows=self.sample_rows))
             except ImportError as exc:
-                raise ImportError(
-                    "Excel support requires pandas and openpyxl: "
-                    "pip install pandas openpyxl"
-                ) from exc
+                raise ImportError("Excel support requires pandas and openpyxl: pip install pandas openpyxl") from exc
         else:
             raise ValueError(
                 f"Cannot infer file format from extension {ext!r}. "
@@ -642,7 +644,8 @@ class ContractInferrer:
         if rows:
             # Identify string columns that are actually serialised JSON
             json_string_cols = [
-                col for col in rows[0]
+                col
+                for col in rows[0]
                 if col not in preserved
                 and isinstance(rows[0].get(col), str)  # quick type pre-filter
                 and _is_json_col(rows, col)
@@ -680,8 +683,7 @@ class ContractInferrer:
                     for key in all_keys:
                         child = val.get(key)
                         new_row[f"{prefix}_{key}"] = (
-                            _json.dumps(child, ensure_ascii=False)
-                            if isinstance(child, (dict, list)) else child
+                            _json.dumps(child, ensure_ascii=False) if isinstance(child, (dict, list)) else child
                         )
                 elif isinstance(val, list):
                     # Represent list as JSON string for the column itself
@@ -707,10 +709,9 @@ class ContractInferrer:
             # be detected and deserialised before the next explode pass.
             if rows:
                 json_string_cols_iter = [
-                    col for col in rows[0]
-                    if col not in preserved
-                    and isinstance(rows[0].get(col), str)
-                    and _is_json_col(rows, col)
+                    col
+                    for col in rows[0]
+                    if col not in preserved and isinstance(rows[0].get(col), str) and _is_json_col(rows, col)
                 ]
                 if json_string_cols_iter:
                     parsed_rows = []
@@ -848,22 +849,38 @@ class ContractInferrer:
             null_ratio = 1.0 - len(non_null) / total
             n_unique = non_null.n_unique() if not non_null.is_empty() else 0
             dtype_name = series.dtype.__class__.__name__.lower()
-            is_string = dtype_name in ("utf8", "string", "categorical", "large_utf8", "enum")
-            is_numeric = dtype_name in (
-                "int8", "int16", "int32", "int64",
-                "uint8", "uint16", "uint32", "uint64",
-                "float32", "float64", "decimal",
+            is_string = dtype_name in (
+                "utf8",
+                "string",
+                "categorical",
+                "large_utf8",
+                "enum",
             )
-            skip_domain_rules = _is_id_like(col_name)   # only not_null for id/date/desc cols
-            prefer_enum = _is_enum_like(col_name)        # status/type/option → accepted_values
+            is_numeric = dtype_name in (
+                "int8",
+                "int16",
+                "int32",
+                "int64",
+                "uint8",
+                "uint16",
+                "uint32",
+                "uint64",
+                "float32",
+                "float64",
+                "decimal",
+            )
+            skip_domain_rules = _is_id_like(col_name)  # only not_null for id/date/desc cols
+            prefer_enum = _is_enum_like(col_name)  # status/type/option → accepted_values
 
             # ── not_null ───────────────────────────────────────────────────
             if null_ratio < 0.01:
-                row_rules.append({
-                    "name": f"{col_name}_not_null",
-                    "sql": f"{col_name} IS NOT NULL",
-                    "category": "completeness",
-                })
+                row_rules.append(
+                    {
+                        "name": f"{col_name}_not_null",
+                        "sql": f"{col_name} IS NOT NULL",
+                        "category": "completeness",
+                    }
+                )
 
             if skip_domain_rules:
                 # id/date/desc columns: existence check is enough
@@ -871,11 +888,13 @@ class ContractInferrer:
 
             # ── unique (dataset-level) ─────────────────────────────────────
             if n_unique == total and total > 1:
-                dataset_rules.append({
-                    "name": f"{col_name}_unique",
-                    "sql": f"{col_name}",
-                    "category": "uniqueness",
-                })
+                dataset_rules.append(
+                    {
+                        "name": f"{col_name}_unique",
+                        "sql": f"{col_name}",
+                        "category": "uniqueness",
+                    }
+                )
 
             # ── accepted_values ────────────────────────────────────────────
             # String columns with low cardinality, OR numeric columns whose
@@ -897,43 +916,43 @@ class ContractInferrer:
             def _is_json_values(series_nonnull) -> bool:
                 """True when the majority of sample values are JSON objects/arrays."""
                 sample = series_nonnull.head(10).to_list()
-                hits = sum(
-                    1 for v in sample
-                    if isinstance(v, str) and v.strip()[:1] in ("{", "[")
-                )
+                hits = sum(1 for v in sample if isinstance(v, str) and v.strip()[:1] in ("{", "["))
                 return len(sample) > 0 and hits / len(sample) >= 0.5
 
             _cardinality_ceil = 5 if total < 10 else 20
             _is_categorical = (
-                0 < n_unique <= _cardinality_ceil
-                and n_unique < max(1, total * 0.5)   # not unique within sample
+                0 < n_unique <= _cardinality_ceil and n_unique < max(1, total * 0.5)  # not unique within sample
             )
 
             if is_string and _is_categorical and not _is_json_values(non_null):
                 values = sorted(str(v) for v in non_null.unique().to_list())
                 # sql + structured block: sql is for the engine; accepted_values
                 # is the business-readable declaration (see docstring above).
-                row_rules.append({
-                    "name": f"valid_{col_name}",
-                    "sql": f"{col_name} IN ({', '.join(repr(v) for v in values)})",
-                    "category": "validity",
-                    "accepted_values": {
-                        "field": col_name,
-                        "values": values,
-                    },
-                })
+                row_rules.append(
+                    {
+                        "name": f"valid_{col_name}",
+                        "sql": f"{col_name} IN ({', '.join(repr(v) for v in values)})",
+                        "category": "validity",
+                        "accepted_values": {
+                            "field": col_name,
+                            "values": values,
+                        },
+                    }
+                )
             elif is_numeric and prefer_enum and 0 < n_unique <= 20 and not non_null.is_empty():
                 # Treat enum-like numeric columns as accepted_values, not range
                 values = sorted(non_null.unique().to_list())
-                row_rules.append({
-                    "name": f"valid_{col_name}",
-                    "sql": f"{col_name} IN ({', '.join(str(v) for v in values)})",
-                    "category": "validity",
-                    "accepted_values": {
-                        "field": col_name,
-                        "values": values,
-                    },
-                })
+                row_rules.append(
+                    {
+                        "name": f"valid_{col_name}",
+                        "sql": f"{col_name} IN ({', '.join(str(v) for v in values)})",
+                        "category": "validity",
+                        "accepted_values": {
+                            "field": col_name,
+                            "values": values,
+                        },
+                    }
+                )
 
             # ── range ──────────────────────────────────────────────────────
             # Continuous numeric columns only; skip if already handled as enum.
@@ -941,16 +960,18 @@ class ContractInferrer:
                 col_min = non_null.min()
                 col_max = non_null.max()
                 if col_min is not None and col_max is not None:
-                    row_rules.append({
-                        "name": f"valid_{col_name}_range",
-                        "sql": f"{col_name} BETWEEN {col_min} AND {col_max}",
-                        "category": "validity",
-                        "range": {
-                            "field": col_name,
-                            "min": col_min,
-                            "max": col_max,
-                        },
-                    })
+                    row_rules.append(
+                        {
+                            "name": f"valid_{col_name}_range",
+                            "sql": f"{col_name} BETWEEN {col_min} AND {col_max}",
+                            "category": "validity",
+                            "range": {
+                                "field": col_name,
+                                "min": col_min,
+                                "max": col_max,
+                            },
+                        }
+                    )
 
         result: Dict[str, Any] = {}
         if row_rules:
@@ -964,10 +985,7 @@ class ContractInferrer:
         try:
             from presidio_analyzer import AnalyzerEngine
         except ImportError as exc:
-            raise ImportError(
-                "PII detection requires presidio-analyzer: "
-                "pip install lakelogic[profiling]"
-            ) from exc
+            raise ImportError("PII detection requires presidio-analyzer: pip install lakelogic[profiling]") from exc
 
         analyzer = AnalyzerEngine()
         pii_map: Dict[str, str] = {}

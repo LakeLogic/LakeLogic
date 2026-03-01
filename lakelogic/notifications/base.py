@@ -1,20 +1,22 @@
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Tuple
-from loguru import logger
 import base64
 import json
 import os
 import re
 import smtplib
-from pathlib import Path
+from abc import ABC, abstractmethod
 from email.mime.text import MIMEText
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 from urllib.request import Request, urlopen
+
+from loguru import logger
 
 
 class NotificationAdapter(ABC):
     """
     Base class for all notification adapters.
     """
+
     def __init__(self, config: Dict[str, Any]):
         """
         Initialize an adapter with resolved configuration.
@@ -52,6 +54,7 @@ def _post_json(url: str, payload: Dict[str, Any], headers: Optional[Dict[str, st
     req = Request(url, data=body, headers=req_headers, method="POST")
     with urlopen(req, timeout=10) as resp:
         _ = resp.read()
+
 
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
 _KEYVAULT_PATTERN = re.compile(r"^\${AZURE_KEY_VAULT:([A-Za-z0-9_\-]+)}$")
@@ -112,7 +115,9 @@ def _resolve_keyvault_secret(secret_name: str, config: Dict[str, Any]) -> Option
         from azure.identity import DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
     except Exception:
-        raise ValueError("Azure Key Vault dependencies not installed. Install azure-identity and azure-keyvault-secrets.")
+        raise ValueError(
+            "Azure Key Vault dependencies not installed. Install azure-identity and azure-keyvault-secrets."
+        )
 
     try:
         client = SecretClient(vault_url=vault_url, credential=DefaultAzureCredential())
@@ -385,7 +390,7 @@ def _resolve_value(value: Any, config: Dict[str, Any]) -> Any:
 
     # keyvault:secret-name or ${AZURE_KEY_VAULT:secret-name}
     if value.startswith("keyvault:"):
-        secret_name = value[len("keyvault:"):].strip()
+        secret_name = value[len("keyvault:") :].strip()
         return _resolve_keyvault_secret(secret_name, config)
 
     match = _KEYVAULT_PATTERN.match(value)
@@ -395,7 +400,7 @@ def _resolve_value(value: Any, config: Dict[str, Any]) -> Any:
 
     # aws secrets manager
     if value.startswith("aws:"):
-        secret_name = value[len("aws:"):].strip()
+        secret_name = value[len("aws:") :].strip()
         return _resolve_aws_secret(secret_name, config)
     match = _AWS_SM_PATTERN.match(value)
     if match:
@@ -404,7 +409,7 @@ def _resolve_value(value: Any, config: Dict[str, Any]) -> Any:
 
     # gcp secret manager
     if value.startswith("gcp:"):
-        secret_name = value[len("gcp:"):].strip()
+        secret_name = value[len("gcp:") :].strip()
         return _resolve_gcp_secret(secret_name, config)
     match = _GCP_SM_PATTERN.match(value)
     if match:
@@ -413,7 +418,7 @@ def _resolve_value(value: Any, config: Dict[str, Any]) -> Any:
 
     # hashicorp vault
     if value.startswith("vault:"):
-        secret_ref = value[len("vault:"):].strip()
+        secret_ref = value[len("vault:") :].strip()
         return _resolve_vault_secret(secret_ref, config)
     match = _VAULT_PATTERN.match(value)
     if match:
@@ -422,7 +427,7 @@ def _resolve_value(value: Any, config: Dict[str, Any]) -> Any:
 
     # local encrypted secrets file
     if value.startswith("local:"):
-        secret_name = value[len("local:"):].strip()
+        secret_name = value[len("local:") :].strip()
         return _resolve_local_secret(secret_name, config)
     match = _LOCAL_PATTERN.match(value)
     if match:
@@ -539,9 +544,7 @@ def _render_jinja_template(template_text: str, context: Dict[str, Any], label: s
     try:
         from jinja2 import Environment, FileSystemLoader, StrictUndefined
     except Exception as e:
-        raise ValueError(
-            "Notification templates require 'jinja2'. Install with: pip install jinja2"
-        ) from e
+        raise ValueError("Notification templates require 'jinja2'. Install with: pip install jinja2") from e
 
     templates_dir = Path(__file__).parent / "templates"
 
@@ -720,13 +723,23 @@ def _render_jinja_standalone(context: Dict[str, Any]) -> str:
     if contract.get("owner"):
         lines.append(f"| Owner | {contract['owner']} |")
 
-    lines.extend(["", "---", f"Run ID: `{context.get('run_id', 'N/A')}` | Engine: {context.get('engine', 'N/A')} | {context.get('timestamp_utc', '')}"])
+    run_id = context.get("run_id", "N/A")
+    engine = context.get("engine", "N/A")
+    ts = context.get("timestamp_utc", "")
+    lines.extend(
+        [
+            "",
+            "---",
+            f"Run ID: `{run_id}` | Engine: {engine} | {ts}",
+        ]
+    )
 
     return "\n".join(lines)
 
 
 class SMTPAdapter(NotificationAdapter):
     """SMTP-based notification adapter."""
+
     def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send an SMTP email message.
@@ -763,6 +776,7 @@ class SMTPAdapter(NotificationAdapter):
 
 class SendGridAdapter(NotificationAdapter):
     """SendGrid-based notification adapter."""
+
     def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a SendGrid email message.
@@ -790,12 +804,13 @@ class SendGridAdapter(NotificationAdapter):
         _post_json(
             "https://api.sendgrid.com/v3/mail/send",
             payload,
-            headers={"Authorization": f"Bearer {api_key}"}
+            headers={"Authorization": f"Bearer {api_key}"},
         )
 
 
 class SlackAdapter(NotificationAdapter):
     """Slack webhook notification adapter."""
+
     def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a Slack webhook message.
@@ -815,6 +830,7 @@ class SlackAdapter(NotificationAdapter):
 
 class TeamsAdapter(NotificationAdapter):
     """Microsoft Teams webhook notification adapter."""
+
     def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a Microsoft Teams webhook message.
@@ -834,6 +850,7 @@ class TeamsAdapter(NotificationAdapter):
 
 class WebhookAdapter(NotificationAdapter):
     """Generic webhook notification adapter."""
+
     def send(self, message: str, subject: str = "LakeLogic Alert"):
         """
         Send a generic webhook message.

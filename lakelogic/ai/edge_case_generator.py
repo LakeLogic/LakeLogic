@@ -21,6 +21,7 @@ Usage::
     edge_pools = generate_edge_cases(fields, quality_rules, provider="openai")
     # → {"email": ["user+tag@domain.com", "", ...], "revenue": [0, -1, ...]}
 """
+
 from __future__ import annotations
 
 import json
@@ -97,6 +98,7 @@ Return ONLY valid JSON. No markdown, no explanation.
 # ---------------------------------------------------------------------------
 # Edge case generator
 # ---------------------------------------------------------------------------
+
 
 def _build_user_prompt(
     fields: List[Dict[str, Any]],

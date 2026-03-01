@@ -5,6 +5,7 @@ Stamps validated and quarantined DataFrames with provenance metadata
 (source path, run ID, timestamp, contract name, domain, system) across
 all supported engines (Polars, Pandas, DuckDB, Spark).
 """
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -55,6 +56,7 @@ def inject_lineage(
     # This ensures _lakelogic_run_id is never null when the column is captured.
     if run_id_value is None and getattr(lineage, "capture_run_id", True):
         from uuid import uuid4
+
         run_id_value = str(uuid4())
     contract_name_value = None
     try:
@@ -84,17 +86,35 @@ def inject_lineage(
     domain_value = metadata.get("domain")
     system_value = metadata.get("system")
     columns: Dict[str, Any] = {}
-    if (("capture_source_path" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_source_path", False):
+    if (("capture_source_path" in explicit_capture) if explicit_capture else True) and getattr(
+        lineage, "capture_source_path", False
+    ):
         columns[lineage.source_column_name] = source_value
-    if (("capture_timestamp" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_timestamp", False):
+    if (("capture_timestamp" in explicit_capture) if explicit_capture else True) and getattr(
+        lineage, "capture_timestamp", False
+    ):
         columns[lineage.timestamp_column_name] = timestamp_value
-    if (("capture_run_id" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_run_id", False):
+    if (("capture_run_id" in explicit_capture) if explicit_capture else True) and getattr(
+        lineage, "capture_run_id", False
+    ):
         columns[lineage.run_id_column_name] = run_id_value
-    if (("capture_contract_name" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_contract_name", False) and contract_name_value is not None:
+    if (
+        (("capture_contract_name" in explicit_capture) if explicit_capture else True)
+        and getattr(lineage, "capture_contract_name", False)
+        and contract_name_value is not None
+    ):
         columns[lineage.contract_name_column_name] = contract_name_value
-    if (("capture_domain" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_domain", False) and domain_value is not None:
+    if (
+        (("capture_domain" in explicit_capture) if explicit_capture else True)
+        and getattr(lineage, "capture_domain", False)
+        and domain_value is not None
+    ):
         columns[lineage.domain_column_name] = domain_value
-    if (("capture_system" in explicit_capture) if explicit_capture else True) and getattr(lineage, "capture_system", False) and system_value is not None:
+    if (
+        (("capture_system" in explicit_capture) if explicit_capture else True)
+        and getattr(lineage, "capture_system", False)
+        and system_value is not None
+    ):
         columns[lineage.system_column_name] = system_value
 
     if not columns:
@@ -103,9 +123,7 @@ def inject_lineage(
     return add_columns(good_df, columns, engine_name), add_columns(bad_df, columns, engine_name)
 
 
-def _preserve_upstream_lineage(
-    df: Any, columns: List[str], prefix: str, engine_name: str
-) -> Any:
+def _preserve_upstream_lineage(df: Any, columns: List[str], prefix: str, engine_name: str) -> Any:
     """
     Rename existing lineage columns to preserve upstream lineage
     before injecting new lineage values.
@@ -134,6 +152,7 @@ def _preserve_upstream_lineage(
 
     try:
         import polars as pl
+
         if isinstance(df, pl.DataFrame):
             existing = set(df.columns)
             mapping = {src: dst for src, dst in rename_map.items() if src in existing and dst not in existing}
@@ -143,6 +162,7 @@ def _preserve_upstream_lineage(
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
             existing = set(df.columns)
             mapping = {src: dst for src, dst in rename_map.items() if src in existing and dst not in existing}
@@ -163,6 +183,7 @@ def _preserve_upstream_lineage(
 
     try:
         import duckdb
+
         if isinstance(df, duckdb.DuckDBPyRelation):
             cols = []
             try:
@@ -171,7 +192,9 @@ def _preserve_upstream_lineage(
                 try:
                     cols = [row[0] for row in df.connection.execute(f"DESCRIBE {df.sql_query()}").fetchall()]
                 except Exception:
-                    cols = [row[0] for row in df.connection.execute(f"DESCRIBE SELECT * FROM ({df.sql_query()})").fetchall()]
+                    cols = [
+                        row[0] for row in df.connection.execute(f"DESCRIBE SELECT * FROM ({df.sql_query()})").fetchall()
+                    ]
 
             existing = set(cols)
             target_set = set(rename_map.values())
@@ -220,16 +243,14 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
         This makes provenance auditing easy: upstream (bronze) stamp first,
         then the current layer's (silver/gold) fresh stamp.
         """
-        meta_current  = [c for c in col_names if c.startswith("_lakelogic_")]
+        meta_current = [c for c in col_names if c.startswith("_lakelogic_")]
         meta_upstream = [c for c in col_names if c.startswith("_upstream_")]
-        rest = [
-            c for c in col_names
-            if not c.startswith("_lakelogic_") and not c.startswith("_upstream_")
-        ]
+        rest = [c for c in col_names if not c.startswith("_lakelogic_") and not c.startswith("_upstream_")]
         return rest + meta_upstream + meta_current
 
     try:
         import polars as pl
+
         if isinstance(df, pl.DataFrame):
             updated = df.with_columns([pl.lit(value).alias(name) for name, value in columns.items()])
             return updated.select(_sorted_to_right(updated.columns))
@@ -238,6 +259,7 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
             updated = df.copy()
             for name, value in columns.items():
@@ -249,7 +271,9 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
     # DuckDB relation support
     try:
         import duckdb
+
         if isinstance(df, duckdb.DuckDBPyRelation):
+
             def _lit(val):
                 if val is None:
                     return "NULL"
@@ -272,10 +296,10 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
             for col in ordered:
                 if col in columns:
                     col_name = str(col).replace('"', '""')
-                    select_exprs.append(f"{_lit(columns[col])} AS \"{col_name}\"")
+                    select_exprs.append(f'{_lit(columns[col])} AS "{col_name}"')
                 else:
                     col_name = str(col).replace('"', '""')
-                    select_exprs.append(f"\"{col_name}\"")
+                    select_exprs.append(f'"{col_name}"')
 
             # Build the source sub-query from the relation
             try:
@@ -299,6 +323,7 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
                 # Last resort: materialise to pandas, add columns there, return
                 try:
                     import pandas as pd
+
                     pdf = df.df()
                     for name, value in columns.items():
                         pdf[name] = value
@@ -314,6 +339,7 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
     if engine_name == "spark":
         try:
             from pyspark.sql import functions as F
+
             updated = df
             for name, value in columns.items():
                 updated = updated.withColumn(name, F.lit(value))
@@ -325,4 +351,3 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
             return df
 
     return df
-

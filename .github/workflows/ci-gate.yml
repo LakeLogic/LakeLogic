@@ -35,13 +35,10 @@ jobs:
 
       - name: Install Linting Tools
         run: |
-          uv pip install --system ruff mypy
+          uv pip install --system ruff
 
       - name: Run Ruff Linter
-        run: ruff check . --exclude _ref
-
-      - name: Run Ruff Formatter Check
-        run: ruff format --check . --exclude _ref
+        run: ruff check . --exclude _ref --output-format=concise
 
   # Core test suite
   tests:

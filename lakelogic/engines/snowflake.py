@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
 import os
 import re
 import uuid
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter
-
 
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
 
@@ -95,6 +94,7 @@ class SnowflakeAdapter(EngineAdapter):
             Snowflake connection.
         """
         from lakelogic.core.deps import require
+
         require("snowflake.connector", extra="cloud")
 
         metadata = self.contract.metadata or {}
@@ -112,6 +112,7 @@ class SnowflakeAdapter(EngineAdapter):
         if missing:
             raise ValueError(f"Snowflake connection missing required fields: {', '.join(missing)}")
 
+        import snowflake.connector
         return snowflake.connector.connect(**{k: v for k, v in params.items() if v})
 
     def _resolve_source_table(self, df: Any) -> Optional[str]:
@@ -196,7 +197,8 @@ class SnowflakeAdapter(EngineAdapter):
         text = str(name)
         if text.startswith('"') and text.endswith('"'):
             return text
-        return f"\"{text.replace('\"', '\"\"')}\""
+        escaped = text.replace('"', '""')
+        return '"' + escaped + '"'
 
     def _quote_qualified(self, name: str) -> str:
         """
@@ -221,7 +223,10 @@ class SnowflakeAdapter(EngineAdapter):
         """
         self._execute(conn, f"CREATE OR REPLACE TEMP VIEW source AS SELECT * FROM {table_name}")
         if self.contract.dataset:
-            self._execute(conn, f"CREATE OR REPLACE TEMP VIEW {self.contract.dataset} AS SELECT * FROM {table_name}")
+            self._execute(
+                conn,
+                f"CREATE OR REPLACE TEMP VIEW {self.contract.dataset} AS SELECT * FROM {table_name}",
+            )
 
     def _apply_transformations(self, conn, table_name: str, phase: str) -> str:
         """
@@ -356,7 +361,11 @@ class SnowflakeAdapter(EngineAdapter):
             sources = trans.coalesce.sources or []
             if not sources:
                 sources = [trans.coalesce.field]
-            expr = f"COALESCE({', '.join(self._quote_ident(part) for part in sources) + (', ' + self._format_literal(trans.coalesce.default) if trans.coalesce.default is not None else '')})"
+            parts = ", ".join(self._quote_ident(part) for part in sources)
+            default_part = ""
+            if trans.coalesce.default is not None:
+                default_part = ", " + self._format_literal(trans.coalesce.default)
+            expr = f"COALESCE({parts}{default_part})"
             output = trans.coalesce.output or trans.coalesce.field
             extra_exprs = [f"{expr} AS {self._quote_ident(output)}"]
             replacements: Dict[str, str] = {}
@@ -398,7 +407,9 @@ class SnowflakeAdapter(EngineAdapter):
             cases = []
             for key, value in mapping.items():
                 cases.append(f"WHEN {qfield} = {self._format_literal(key)} THEN {self._format_literal(value)}")
-            default_expr = self._format_literal(trans.map_values.default) if trans.map_values.default is not None else qfield
+            default_expr = (
+                self._format_literal(trans.map_values.default) if trans.map_values.default is not None else qfield
+            )
             case_expr = f"CASE {' '.join(cases)} ELSE {default_expr} END"
             output = trans.map_values.output or field
             replacements = {}
@@ -438,10 +449,13 @@ class SnowflakeAdapter(EngineAdapter):
             if trans.lookup.default_value is not None:
                 default_val = self._format_literal(trans.lookup.default_value)
                 value_expr = f"COALESCE(ref.{self._quote_ident(trans.lookup.value)}, {default_val})"
+            ref_q = self._quote_qualified(trans.lookup.reference)
+            on_q = self._quote_ident(trans.lookup.on)
+            key_q = self._quote_ident(trans.lookup.key)
             return f"""
             SELECT src.*, {value_expr} AS {self._quote_ident(trans.lookup.field)}
             FROM source src
-            LEFT JOIN {self._quote_qualified(trans.lookup.reference)} ref ON src.{self._quote_ident(trans.lookup.on)} = ref.{self._quote_ident(trans.lookup.key)}
+            LEFT JOIN {ref_q} ref ON src.{on_q} = ref.{key_q}
             """
 
         if trans.join:
@@ -453,14 +467,21 @@ class SnowflakeAdapter(EngineAdapter):
                 alias = f"{trans.join.prefix}{field}" if trans.join.prefix else field
                 default = trans.join.defaults.get(field) if trans.join.defaults else None
                 if default is not None:
-                    expr = f"COALESCE(ref.{self._quote_ident(field)}, {self._format_literal(default)}) AS {self._quote_ident(alias)}"
+                    coalesce_val = self._format_literal(default)
+                    expr = (
+                        f"COALESCE(ref.{self._quote_ident(field)}, {coalesce_val})"
+                        f" AS {self._quote_ident(alias)}"
+                    )
                 else:
                     expr = f"ref.{self._quote_ident(field)} AS {self._quote_ident(alias)}"
                 select_fields.append(expr)
+            ref_q = self._quote_qualified(trans.join.reference)
+            on_q = self._quote_ident(trans.join.on)
+            key_q = self._quote_ident(trans.join.key)
             return f"""
-            SELECT {', '.join(select_fields)}
+            SELECT {", ".join(select_fields)}
             FROM source src
-            {join_type} JOIN {self._quote_qualified(trans.join.reference)} ref ON src.{self._quote_ident(trans.join.on)} = ref.{self._quote_ident(trans.join.key)}
+            {join_type} JOIN {ref_q} ref ON src.{on_q} = ref.{key_q}
             """
 
         return None
@@ -562,12 +583,20 @@ class SnowflakeAdapter(EngineAdapter):
 
         if policy in ["allow", "quarantine"] and unknown:
             if cast_to_string:
-                select_exprs.extend([f"TRY_CAST({self._quote_ident(col)} AS VARCHAR) AS {self._quote_ident(col)}" for col in sorted(unknown)])
+                select_exprs.extend(
+                    [
+                        f"TRY_CAST({self._quote_ident(col)} AS VARCHAR) AS {self._quote_ident(col)}"
+                        for col in sorted(unknown)
+                    ]
+                )
             else:
                 select_exprs.extend([self._quote_ident(col) for col in sorted(unknown)])
 
         schema_table = self._temp_name("schema")
-        self._execute(conn, f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {table_name}")
+        self._execute(
+            conn,
+            f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {table_name}",
+        )
 
         schema_errors = []
         if evolution == "strict" and missing:
@@ -614,7 +643,9 @@ class SnowflakeAdapter(EngineAdapter):
             category_exprs.append(f"IFF({cond}, '{cat}', NULL)")
 
         error_expr = "ARRAY_CONSTRUCT_COMPACT(" + ", ".join(error_exprs) + ")" if error_exprs else "ARRAY_CONSTRUCT()"
-        category_expr = "ARRAY_CONSTRUCT_COMPACT(" + ", ".join(category_exprs) + ")" if category_exprs else "ARRAY_CONSTRUCT()"
+        category_expr = (
+            "ARRAY_CONSTRUCT_COMPACT(" + ", ".join(category_exprs) + ")" if category_exprs else "ARRAY_CONSTRUCT()"
+        )
 
         eval_table = self._temp_name("eval")
         self._execute(
@@ -673,7 +704,10 @@ class SnowflakeAdapter(EngineAdapter):
         if not rules:
             return
 
-        self._execute(conn, f"CREATE OR REPLACE TEMP VIEW {self.contract.dataset or 'source'} AS SELECT * FROM {table_name}")
+        self._execute(
+            conn,
+            f"CREATE OR REPLACE TEMP VIEW {self.contract.dataset or 'source'} AS SELECT * FROM {table_name}",
+        )
         cursor = conn.cursor()
         try:
             for rule in rules:
@@ -688,12 +722,14 @@ class SnowflakeAdapter(EngineAdapter):
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
 
-                self.dataset_rule_results.append({
-                    "name": rule.name,
-                    "value": val,
-                    "passed": passed,
-                    "description": rule.description
-                })
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": val,
+                        "passed": passed,
+                        "description": rule.description,
+                    }
+                )
         finally:
             cursor.close()
 

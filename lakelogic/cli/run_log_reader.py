@@ -7,10 +7,9 @@ orchestration logic.
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from lakelogic.core.models import DataContract
-from loguru import logger
 
 
 class RunLogReader:
@@ -101,7 +100,9 @@ class RunLogReader:
             return None, "run_log_entry_missing"
         return self._parse_timestamp(value), None
 
-    def _read_duckdb(self, table_name: str, contract: DataContract, metadata: Dict[str, str]) -> Tuple[Optional[datetime], Optional[str]]:
+    def _read_duckdb(
+        self, table_name: str, contract: DataContract, metadata: Dict[str, str]
+    ) -> Tuple[Optional[datetime], Optional[str]]:
         """
         Read last-success timestamp from a DuckDB run log table.
 
@@ -140,7 +141,9 @@ class RunLogReader:
             return None, "run_log_entry_missing"
         return self._parse_timestamp(result[0]), None
 
-    def _read_sqlite(self, table_name: str, contract: DataContract, metadata: Dict[str, str]) -> Tuple[Optional[datetime], Optional[str]]:
+    def _read_sqlite(
+        self, table_name: str, contract: DataContract, metadata: Dict[str, str]
+    ) -> Tuple[Optional[datetime], Optional[str]]:
         """
         Read last-success timestamp from a SQLite run log table.
 

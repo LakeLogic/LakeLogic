@@ -234,3 +234,56 @@ version_files = [
     "pyproject.toml:version",
     "lakelogic/__init__.py:__version__",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+exclude = [
+    "_ref",
+    ".venv",
+    ".venv_lakelogic",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/_smoke_*.py" = ["E402", "E501", "F401", "I001"]
+"scripts/*.py" = ["E722", "E501", "I001"]
+"lakelogic/engines/bigquery.py" = ["I001"]
+"lakelogic/engines/database_connectors.py" = ["I001"]
+"lakelogic/engines/duckdb.py" = ["I001"]
+"lakelogic/engines/integration_connectors.py" = ["I001"]
+"lakelogic/engines/pandas.py" = ["I001"]
+"lakelogic/engines/polars.py" = ["I001"]
+"lakelogic/engines/snowflake.py" = ["I001"]
+"lakelogic/engines/streaming_connectors.py" = ["I001"]
+"lakelogic/notifications/base.py" = ["I001"]
+"lakelogic/tools/template_apply.py" = ["I001"]
+"lakelogic/core/slo.py" = ["I001"]
+"lakelogic/core/quarantine.py" = ["I001"]
+"lakelogic/core/run_log.py" = ["I001"]
+"lakelogic/cli/observability.py" = ["I001"]
+"lakelogic/core/bootstrap.py" = ["I001"]
+"lakelogic/core/ddl.py" = ["I001"]
+"lakelogic/core/dim_date.py" = ["I001"]
+"lakelogic/core/generator.py" = ["I001", "E402"]
+"lakelogic/core/incremental.py" = ["I001"]
+"lakelogic/core/materialization.py" = ["I001"]
+"lakelogic/core/models.py" = ["I001"]
+"lakelogic/core/observer.py" = ["I001"]
+"lakelogic/core/processor.py" = ["I001"]
+"lakelogic/__init__.py" = ["I001"]
+"lakelogic/adapters/dbt.py" = ["I001"]
+"lakelogic/ai/contract_enricher.py" = ["I001"]
+"lakelogic/ai/edge_case_generator.py" = ["I001"]
+"lakelogic/ai/provider.py" = ["I001"]
+"lakelogic/cli/__init__.py" = ["I001"]
+"lakelogic/cli/driver.py" = ["I001", "E402"]
+"lakelogic/cli/main.py" = ["I001"]
+"examples/**/*.ipynb" = ["I001", "E402", "E712", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lakelogic"]

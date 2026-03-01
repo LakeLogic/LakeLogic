@@ -19,13 +19,13 @@ Features:
 
 Example:
     >>> from lakelogic.engines.database_connectors import AzureSQLConnector
-    >>> 
+    >>>
     >>> # Automatic Azure AD authentication
     >>> connector = AzureSQLConnector(
     ...     server="myserver.database.windows.net",
     ...     database="mydb"
     ... )
-    >>> 
+    >>>
     >>> # Incremental CDC extraction
     >>> df = connector.extract_incremental(
     ...     table="customers",
@@ -34,10 +34,12 @@ Example:
     ... )
 """
 
-from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
-import polars as pl
+from typing import Dict, List, Optional, Union
+
 import pandas as pd
+import polars as pl
+
 from loguru import logger
 
 
@@ -45,15 +47,15 @@ class DatabaseConnector:
     """
     Base class for database connectors with automatic credential resolution.
     """
-    
+
     def __init__(
         self,
         connection_string: Optional[str] = None,
-        auto_resolve_credentials: bool = True
+        auto_resolve_credentials: bool = True,
     ):
         """
         Initialize database connector.
-        
+
         Args:
             connection_string: Optional manual connection string
             auto_resolve_credentials: Automatically resolve credentials (default: True)
@@ -61,63 +63,63 @@ class DatabaseConnector:
         self.connection_string = connection_string
         self.auto_resolve_credentials = auto_resolve_credentials
         self._connection = None
-    
+
     def extract_full(
         self,
         table: str,
         columns: Optional[List[str]] = None,
         where: Optional[str] = None,
-        as_polars: bool = True
+        as_polars: bool = True,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """
         Extract full table data.
-        
+
         Args:
             table: Table name
             columns: Optional list of columns to extract
             where: Optional WHERE clause
             as_polars: Return Polars DataFrame (True) or Pandas (False)
-        
+
         Returns:
             DataFrame with extracted data
         """
         raise NotImplementedError("Subclass must implement extract_full")
-    
+
     def extract_incremental(
         self,
         table: str,
         watermark_column: str,
         last_watermark: Optional[Union[str, datetime]] = None,
         columns: Optional[List[str]] = None,
-        as_polars: bool = True
+        as_polars: bool = True,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """
         Extract incremental data based on watermark column.
-        
+
         Args:
             table: Table name
             watermark_column: Column to use for incremental extraction (e.g., updated_at)
             last_watermark: Last extracted watermark value
             columns: Optional list of columns to extract
             as_polars: Return Polars DataFrame (True) or Pandas (False)
-        
+
         Returns:
             DataFrame with incremental data
         """
         raise NotImplementedError("Subclass must implement extract_incremental")
-    
+
     def get_schema(self, table: str) -> Dict[str, str]:
         """
         Get table schema.
-        
+
         Args:
             table: Table name
-        
+
         Returns:
             Dictionary mapping column names to data types
         """
         raise NotImplementedError("Subclass must implement get_schema")
-    
+
     def close(self):
         """Close database connection."""
         if self._connection:
@@ -128,20 +130,20 @@ class DatabaseConnector:
 class AzureSQLConnector(DatabaseConnector):
     """
     Azure SQL Database connector with automatic Azure AD authentication.
-    
+
     Features:
     - Automatic Azure AD authentication (DefaultAzureCredential)
     - Fallback to SQL authentication
     - Connection pooling
     - Incremental CDC extraction
-    
+
     Example:
         >>> # Azure AD authentication (automatic)
         >>> connector = AzureSQLConnector(
         ...     server="myserver.database.windows.net",
         ...     database="mydb"
         ... )
-        >>> 
+        >>>
         >>> # SQL authentication (manual)
         >>> connector = AzureSQLConnector(
         ...     server="myserver.database.windows.net",
@@ -150,7 +152,7 @@ class AzureSQLConnector(DatabaseConnector):
         ...     password="...",
         ...     auto_resolve_credentials=False
         ... )
-        >>> 
+        >>>
         >>> # Incremental extraction
         >>> df = connector.extract_incremental(
         ...     table="customers",
@@ -158,7 +160,7 @@ class AzureSQLConnector(DatabaseConnector):
         ...     last_watermark="2026-02-08T00:00:00Z"
         ... )
     """
-    
+
     def __init__(
         self,
         server: str,
@@ -166,11 +168,11 @@ class AzureSQLConnector(DatabaseConnector):
         username: Optional[str] = None,
         password: Optional[str] = None,
         connection_string: Optional[str] = None,
-        auto_resolve_credentials: bool = True
+        auto_resolve_credentials: bool = True,
     ):
         """
         Initialize Azure SQL connector.
-        
+
         Args:
             server: Azure SQL server (e.g., myserver.database.windows.net)
             database: Database name
@@ -184,12 +186,12 @@ class AzureSQLConnector(DatabaseConnector):
         self.database = database
         self.username = username
         self.password = password
-    
+
     def _get_connection(self):
         """Get or create database connection."""
         if self._connection:
             return self._connection
-        
+
         try:
             import pyodbc
         except ImportError:
@@ -198,22 +200,22 @@ class AzureSQLConnector(DatabaseConnector):
                 "Note: You may also need to install the ODBC driver: "
                 "https://docs.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server"
             )
-        
+
         # Use manual connection string if provided
         if self.connection_string:
             logger.debug("Using manual connection string")
             self._connection = pyodbc.connect(self.connection_string)
             return self._connection
-        
+
         # Try Azure AD authentication
         if self.auto_resolve_credentials and not (self.username and self.password):
             try:
                 from azure.identity import DefaultAzureCredential
-                
+
                 logger.debug("Acquiring Azure AD token for SQL Database")
                 credential = DefaultAzureCredential()
                 token = credential.get_token("https://database.windows.net/.default")
-                
+
                 # Build connection string with Azure AD token
                 conn_str = (
                     f"Driver={{ODBC Driver 18 for SQL Server}};"
@@ -223,16 +225,13 @@ class AzureSQLConnector(DatabaseConnector):
                     f"TrustServerCertificate=no;"
                     f"Connection Timeout=30;"
                 )
-                
+
                 # Connect with token
-                self._connection = pyodbc.connect(
-                    conn_str,
-                    attrs_before={"AccessToken": token.token}
-                )
-                
+                self._connection = pyodbc.connect(conn_str, attrs_before={"AccessToken": token.token})
+
                 logger.info(f"✅ Connected to Azure SQL Database: {self.database} (Azure AD)")
                 return self._connection
-            
+
             except ImportError:
                 logger.warning(
                     "Azure Identity not installed. Install with: pip install azure-identity\n"
@@ -240,7 +239,7 @@ class AzureSQLConnector(DatabaseConnector):
                 )
             except Exception as e:
                 logger.warning(f"Azure AD authentication failed: {e}\nFalling back to SQL authentication.")
-        
+
         # Fallback to SQL authentication
         if self.username and self.password:
             logger.debug("Using SQL authentication")
@@ -254,85 +253,85 @@ class AzureSQLConnector(DatabaseConnector):
                 f"TrustServerCertificate=no;"
                 f"Connection Timeout=30;"
             )
-            
+
             self._connection = pyodbc.connect(conn_str)
             logger.info(f"✅ Connected to Azure SQL Database: {self.database} (SQL auth)")
             return self._connection
-        
+
         raise ValueError(
             "No credentials provided. Either:\n"
             "1. Use Azure AD (az login) with auto_resolve_credentials=True, or\n"
             "2. Provide username and password for SQL authentication"
         )
-    
+
     def extract_full(
         self,
         table: str,
         columns: Optional[List[str]] = None,
         where: Optional[str] = None,
-        as_polars: bool = True
+        as_polars: bool = True,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """
         Extract full table data.
-        
+
         Args:
             table: Table name (e.g., "dbo.customers" or "customers")
             columns: Optional list of columns to extract
             where: Optional WHERE clause (without WHERE keyword)
             as_polars: Return Polars DataFrame (True) or Pandas (False)
-        
+
         Returns:
             DataFrame with extracted data
-        
+
         Example:
             >>> df = connector.extract_full("dbo.customers")
             >>> df = connector.extract_full("customers", columns=["id", "name"])
             >>> df = connector.extract_full("customers", where="status = 'active'")
         """
         conn = self._get_connection()
-        
+
         # Build query
         cols = ", ".join(columns) if columns else "*"
         query = f"SELECT {cols} FROM {table}"
         if where:
             query += f" WHERE {where}"
-        
+
         logger.debug(f"Executing query: {query}")
-        
+
         # Execute query
         df = pd.read_sql(query, conn)
-        
+
         logger.info(f"✅ Extracted {len(df)} rows from {table}")
-        
+
         if as_polars:
             return pl.from_pandas(df)
         return df
-    
+
     def extract_incremental(
         self,
         table: str,
         watermark_column: str,
         last_watermark: Optional[Union[str, datetime]] = None,
         columns: Optional[List[str]] = None,
-        as_polars: bool = True
+        as_polars: bool = True,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """
         Extract incremental data based on watermark column.
-        
+
         Args:
             table: Table name
             watermark_column: Column to use for incremental extraction
             last_watermark: Last extracted watermark value
             columns: Optional list of columns to extract
             as_polars: Return Polars DataFrame (True) or Pandas (False)
-        
+
         Returns:
             DataFrame with incremental data
-        
+
         Example:
             >>> # First run (full extract)
             >>> df = connector.extract_incremental("customers", "updated_at")
-            >>> 
+            >>>
             >>> # Subsequent runs (incremental)
             >>> df = connector.extract_incremental(
             ...     "customers",
@@ -341,59 +340,59 @@ class AzureSQLConnector(DatabaseConnector):
             ... )
         """
         conn = self._get_connection()
-        
+
         # Build query
         cols = ", ".join(columns) if columns else "*"
         query = f"SELECT {cols} FROM {table}"
-        
+
         if last_watermark:
             # Format watermark value
             if isinstance(last_watermark, datetime):
                 watermark_str = last_watermark.isoformat()
             else:
                 watermark_str = last_watermark
-            
+
             query += f" WHERE {watermark_column} > '{watermark_str}'"
-        
+
         query += f" ORDER BY {watermark_column}"
-        
+
         logger.debug(f"Executing incremental query: {query}")
-        
+
         # Execute query
         df = pd.read_sql(query, conn)
-        
+
         logger.info(f"✅ Extracted {len(df)} incremental rows from {table}")
-        
+
         if as_polars:
             return pl.from_pandas(df)
         return df
-    
+
     def get_schema(self, table: str) -> Dict[str, str]:
         """
         Get table schema.
-        
+
         Args:
             table: Table name
-        
+
         Returns:
             Dictionary mapping column names to data types
-        
+
         Example:
             >>> schema = connector.get_schema("dbo.customers")
             >>> print(schema)
             {'id': 'int', 'name': 'nvarchar', 'created_at': 'datetime2'}
         """
         conn = self._get_connection()
-        
+
         # Parse schema and table name
         if "." in table:
             schema, table_name = table.split(".", 1)
         else:
             schema = "dbo"
             table_name = table
-        
+
         query = f"""
-        SELECT 
+        SELECT
             COLUMN_NAME,
             DATA_TYPE
         FROM INFORMATION_SCHEMA.COLUMNS
@@ -401,28 +400,28 @@ class AzureSQLConnector(DatabaseConnector):
           AND TABLE_NAME = '{table_name}'
         ORDER BY ORDINAL_POSITION
         """
-        
+
         df = pd.read_sql(query, conn)
-        
+
         return dict(zip(df["COLUMN_NAME"], df["DATA_TYPE"]))
 
 
 class PostgreSQLConnector(DatabaseConnector):
     """
     PostgreSQL connector (Azure, AWS RDS, GCP Cloud SQL).
-    
+
     Features:
     - Automatic credential resolution (Azure AD for Azure PostgreSQL)
     - Connection pooling
     - Incremental CDC extraction
-    
+
     Example:
         >>> # Azure PostgreSQL with Azure AD
         >>> connector = PostgreSQLConnector(
         ...     host="myserver.postgres.database.azure.com",
         ...     database="mydb"
         ... )
-        >>> 
+        >>>
         >>> # AWS RDS PostgreSQL
         >>> connector = PostgreSQLConnector(
         ...     host="mydb.abc123.us-west-2.rds.amazonaws.com",
@@ -431,7 +430,7 @@ class PostgreSQLConnector(DatabaseConnector):
         ...     password="..."
         ... )
     """
-    
+
     def __init__(
         self,
         host: str,
@@ -440,11 +439,11 @@ class PostgreSQLConnector(DatabaseConnector):
         username: Optional[str] = None,
         password: Optional[str] = None,
         connection_string: Optional[str] = None,
-        auto_resolve_credentials: bool = True
+        auto_resolve_credentials: bool = True,
     ):
         """
         Initialize PostgreSQL connector.
-        
+
         Args:
             host: PostgreSQL host
             database: Database name
@@ -460,34 +459,32 @@ class PostgreSQLConnector(DatabaseConnector):
         self.port = port
         self.username = username
         self.password = password
-    
+
     def _get_connection(self):
         """Get or create database connection."""
         if self._connection:
             return self._connection
-        
+
         try:
             import psycopg2
         except ImportError:
-            raise ImportError(
-                "psycopg2 is not installed. Install with: pip install psycopg2-binary"
-            )
-        
+            raise ImportError("psycopg2 is not installed. Install with: pip install psycopg2-binary")
+
         # Use manual connection string if provided
         if self.connection_string:
             logger.debug("Using manual connection string")
             self._connection = psycopg2.connect(self.connection_string)
             return self._connection
-        
+
         # Try Azure AD authentication for Azure PostgreSQL
         if self.auto_resolve_credentials and "postgres.database.azure.com" in self.host:
             try:
                 from azure.identity import DefaultAzureCredential
-                
+
                 logger.debug("Acquiring Azure AD token for PostgreSQL")
                 credential = DefaultAzureCredential()
                 token = credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
-                
+
                 # Connect with Azure AD token as password
                 self._connection = psycopg2.connect(
                     host=self.host,
@@ -495,17 +492,17 @@ class PostgreSQLConnector(DatabaseConnector):
                     port=self.port,
                     user=self.username or "azure_ad_user",
                     password=token.token,
-                    sslmode="require"
+                    sslmode="require",
                 )
-                
+
                 logger.info(f"✅ Connected to Azure PostgreSQL: {self.database} (Azure AD)")
                 return self._connection
-            
+
             except ImportError:
                 logger.warning("Azure Identity not installed. Falling back to password authentication.")
             except Exception as e:
                 logger.warning(f"Azure AD authentication failed: {e}\nFalling back to password authentication.")
-        
+
         # Fallback to username/password authentication
         if self.username and self.password:
             logger.debug("Using password authentication")
@@ -514,82 +511,82 @@ class PostgreSQLConnector(DatabaseConnector):
                 database=self.database,
                 port=self.port,
                 user=self.username,
-                password=self.password
+                password=self.password,
             )
-            
+
             logger.info(f"✅ Connected to PostgreSQL: {self.database}")
             return self._connection
-        
+
         raise ValueError("No credentials provided. Provide username and password.")
-    
+
     def extract_full(
         self,
         table: str,
         columns: Optional[List[str]] = None,
         where: Optional[str] = None,
-        as_polars: bool = True
+        as_polars: bool = True,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Extract full table data."""
         conn = self._get_connection()
-        
+
         cols = ", ".join(columns) if columns else "*"
         query = f"SELECT {cols} FROM {table}"
         if where:
             query += f" WHERE {where}"
-        
+
         logger.debug(f"Executing query: {query}")
         df = pd.read_sql(query, conn)
         logger.info(f"✅ Extracted {len(df)} rows from {table}")
-        
+
         if as_polars:
             return pl.from_pandas(df)
         return df
-    
+
     def extract_incremental(
         self,
         table: str,
         watermark_column: str,
         last_watermark: Optional[Union[str, datetime]] = None,
         columns: Optional[List[str]] = None,
-        as_polars: bool = True
+        as_polars: bool = True,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Extract incremental data."""
         conn = self._get_connection()
-        
+
         cols = ", ".join(columns) if columns else "*"
         query = f"SELECT {cols} FROM {table}"
-        
+
         if last_watermark:
             if isinstance(last_watermark, datetime):
                 watermark_str = last_watermark.isoformat()
             else:
                 watermark_str = last_watermark
-            
+
             query += f" WHERE {watermark_column} > '{watermark_str}'"
-        
+
         query += f" ORDER BY {watermark_column}"
-        
+
         logger.debug(f"Executing incremental query: {query}")
         df = pd.read_sql(query, conn)
         logger.info(f"✅ Extracted {len(df)} incremental rows from {table}")
-        
+
         if as_polars:
             return pl.from_pandas(df)
         return df
-    
+
     def get_schema(self, table: str) -> Dict[str, str]:
         """Get table schema."""
         conn = self._get_connection()
-        
+
         # Parse schema and table name
         if "." in table:
             schema, table_name = table.split(".", 1)
         else:
             schema = "public"
             table_name = table
-        
+
         query = f"""
-        SELECT 
+        SELECT
             column_name,
             data_type
         FROM information_schema.columns
@@ -597,7 +594,7 @@ class PostgreSQLConnector(DatabaseConnector):
           AND table_name = '{table_name}'
         ORDER BY ordinal_position
         """
-        
+
         df = pd.read_sql(query, conn)
         return dict(zip(df["column_name"], df["data_type"]))
 

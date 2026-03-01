@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -161,7 +161,7 @@ def _normalize_entity_name(value: str) -> str:
     text = (value or "").strip()
     for prefix in ("bronze_", "silver_", "gold_", "platinum_", "reference_"):
         if text.startswith(prefix):
-            return text[len(prefix):]
+            return text[len(prefix) :]
     return text
 
 
@@ -223,7 +223,11 @@ def _soft_delete_already_applied(contract: Dict[str, Any]) -> bool:
         if not isinstance(step, dict):
             continue
         if "map_values" in step and isinstance(step["map_values"], dict):
-            if step["map_values"].get("output") in {"__op_delete", "__deleted_at_flag", "__is_deleted_flag"}:
+            if step["map_values"].get("output") in {
+                "__op_delete",
+                "__deleted_at_flag",
+                "__is_deleted_flag",
+            }:
                 return True
         if "derive" in step and isinstance(step["derive"], dict):
             if step["derive"].get("field") in {"__deleted_at_flag"}:
@@ -263,28 +267,36 @@ def _apply_soft_delete(
 
     if op_actual:
         pre_steps.append({"lower": {"fields": [op_actual]}, "phase": "pre"})
-        pre_steps.append({
-            "map_values": {
-                "field": op_actual,
-                "mapping": {val: True for val in operation_values},
-                "default": False,
-                "output": "__op_delete",
-            },
-            "phase": "pre",
-        })
-        if exclude_hard_deletes:
-            pre_steps.append({
-                "filter": {
-                    "sql": "__op_delete IS NOT TRUE"
+        pre_steps.append(
+            {
+                "map_values": {
+                    "field": op_actual,
+                    "mapping": {val: True for val in operation_values},
+                    "default": False,
+                    "output": "__op_delete",
                 },
                 "phase": "pre",
-            })
+            }
+        )
+        if exclude_hard_deletes:
+            pre_steps.append(
+                {
+                    "filter": {"sql": "__op_delete IS NOT TRUE"},
+                    "phase": "pre",
+                }
+            )
 
     if deleted_at_actual:
-        pre_steps.append({
-            "sql": f"SELECT *, CASE WHEN {deleted_at_actual} IS NOT NULL THEN TRUE ELSE FALSE END AS __deleted_at_flag FROM source",
-            "phase": "pre",
-        })
+        flag_sql = (
+            f"SELECT *, CASE WHEN {deleted_at_actual} IS NOT NULL "
+            "THEN TRUE ELSE FALSE END AS __deleted_at_flag FROM source"
+        )
+        pre_steps.append(
+            {
+                "sql": flag_sql,
+                "phase": "pre",
+            }
+        )
 
     if flag_actual:
         mapping = {
@@ -301,15 +313,17 @@ def _apply_soft_delete(
             "deleted": True,
             "delete": True,
         }
-        pre_steps.append({
-            "map_values": {
-                "field": flag_actual,
-                "mapping": mapping,
-                "default": False,
-                "output": "__is_deleted_flag",
-            },
-            "phase": "pre",
-        })
+        pre_steps.append(
+            {
+                "map_values": {
+                    "field": flag_actual,
+                    "mapping": mapping,
+                    "default": False,
+                    "output": "__is_deleted_flag",
+                },
+                "phase": "pre",
+            }
+        )
 
     sources: List[str] = []
     if flag_actual:
@@ -320,21 +334,32 @@ def _apply_soft_delete(
         sources.append("__op_delete")
 
     if sources:
-        pre_steps.append({
-            "coalesce": {
-                "field": output_col,
-                "sources": sources,
-                "default": False,
-                "output": output_col,
-            },
-            "phase": "pre",
-        })
-        pre_steps.append({
-            "drop": {
-                "columns": [col for col in ["__op_delete", "__deleted_at_flag", "__is_deleted_flag"]]
-            },
-            "phase": "pre",
-        })
+        pre_steps.append(
+            {
+                "coalesce": {
+                    "field": output_col,
+                    "sources": sources,
+                    "default": False,
+                    "output": output_col,
+                },
+                "phase": "pre",
+            }
+        )
+        pre_steps.append(
+            {
+                "drop": {
+                    "columns": [
+                        col
+                        for col in [
+                            "__op_delete",
+                            "__deleted_at_flag",
+                            "__is_deleted_flag",
+                        ]
+                    ]
+                },
+                "phase": "pre",
+            }
+        )
 
     transformations = pre_steps + transformations
     contract["transformations"] = transformations
@@ -347,12 +372,14 @@ def _apply_soft_delete(
         row_rules = []
 
     if op_actual:
-        row_rules.append({
-            "accepted_values": {
-                "field": op_actual,
-                "values": operation_values,
+        row_rules.append(
+            {
+                "accepted_values": {
+                    "field": op_actual,
+                    "values": operation_values,
+                }
             }
-        })
+        )
     quality["row_rules"] = row_rules
     contract["quality"] = quality
 
@@ -362,10 +389,12 @@ def _apply_soft_delete(
         if isinstance(fields, list):
             existing = {f.get("name", "").lower() for f in fields if isinstance(f, dict)}
             if output_col.lower() not in existing:
-                fields.append({
-                    "name": output_col,
-                    "type": "boolean",
-                })
+                fields.append(
+                    {
+                        "name": output_col,
+                        "type": "boolean",
+                    }
+                )
         model["fields"] = fields
         contract["model"] = model
 
