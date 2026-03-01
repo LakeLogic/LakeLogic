@@ -1,4 +1,0 @@
-click_id,user_id,campaign,click_ts,operation,deleted_at,is_deleted
-c1,u1,brand,2026-02-01T10:25:00Z,insert,,false
-c2,u2,retarget,2026-02-01T11:25:00Z,update,,false
-c3,,promo,2026-02-01T11:30:00Z,delete,2026-02-01T12:30:00Z,true
