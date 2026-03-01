@@ -87,6 +87,14 @@ cz changelog
 [0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.9.0 (2026-03-01)
+
+### Feat
+
+- Add new core materialization module, comprehensive examples, and initial documentation, while updating the main README.
+- Add 01_hello_world.ipynb quickstart example for remote data ingestion.
+- Add quickstart examples for remote data ingestion, database governance, and dbt PII quality, supported by new core materialization and models.
+
 ## v0.8.0 (2026-02-28)
 
 ### Feat
