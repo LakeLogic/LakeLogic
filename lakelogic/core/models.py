@@ -665,6 +665,7 @@ class Materialization(BaseModel):
     reprocess_date_column: Optional[str] = None  # column for date-range reprocessing (defaults to first partition_by)
     target_path: Optional[str] = None
     format: Optional[str] = None
+    location: Optional[str] = None  # External storage location for UC tables (e.g. abfss://container@account.dfs.core.windows.net/path/)
     scd2: Optional[Dict[str, Any]] = None
     soft_delete_column: Optional[str] = None # e.g. '_lakelogic_is_deleted'
     soft_delete_value: Any = True # Value to set when deleted

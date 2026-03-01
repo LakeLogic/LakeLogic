@@ -1,4 +1,4 @@
-dataset: remote_employees
+dataset: users
 quality:
   row_rules:
   - name: Valid Email

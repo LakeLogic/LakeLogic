@@ -12,6 +12,49 @@ import shutil
 from loguru import logger
 
 
+def _resolve_external_location(location: Optional[str]) -> Optional[str]:
+    """
+    Resolve an external location value, expanding env-var placeholders.
+
+    Args:
+        location: Raw location string, may use ``env:VAR`` or ``${ENV:VAR}`` syntax.
+
+    Returns:
+        Resolved location string, or None.
+    """
+    if not location:
+        return None
+    resolved = _resolve_env_value(location)
+    return resolved if resolved else location
+
+
+def _spark_save_as_table(
+    writer,
+    table_name: str,
+    mode: str,
+    location: Optional[str] = None,
+) -> None:
+    """
+    Write a Spark DataFrame to a Unity Catalog table, optionally at an external location.
+
+    When ``location`` is provided, the writer uses ``.option("path", location)``
+    so Spark registers the table in Unity Catalog while storing the data at the
+    specified external storage path (ADLS, S3, GCS, etc.).
+
+    Args:
+        writer: Spark DataFrameWriter (already configured with format, partitionBy, etc.)
+        table_name: Fully qualified UC table name (catalog.schema.table).
+        mode: Spark write mode ('append', 'overwrite').
+        location: Optional external storage URI.
+    """
+    if location:
+        resolved_loc = _resolve_external_location(location)
+        logger.info(f"Using external location for table {table_name}: {resolved_loc}")
+        writer.option("path", resolved_loc).mode(mode).saveAsTable(table_name)
+    else:
+        writer.mode(mode).saveAsTable(table_name)
+
+
 def _sanitize_arrow_nulls(table):
     """
     Replace any Arrow ``null``-typed columns with ``utf8`` (string) nulls.
@@ -630,6 +673,7 @@ def _spark_merge_dataframe(
     target: str,
     primary_key: List[str],
     output_format: str,
+    location: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Perform a native Spark merge (upsert) without collecting to pandas.
@@ -683,21 +727,21 @@ def _spark_merge_dataframe(
             existing_df = spark.read.format(output_format).load(table_or_path)
         else:
             # No existing data, just write
-            writer = incoming_df.write.format(output_format).mode("overwrite")
+            writer = incoming_df.write.format(output_format)
             if is_table:
-                writer.saveAsTable(table_or_path)
+                _spark_save_as_table(writer, table_or_path, "overwrite", location)
             else:
-                writer.save(table_or_path)
+                writer.mode("overwrite").save(table_or_path)
             rows_written = incoming_df.count()
             logger.info(f"Wrote {rows_written} rows to {table_or_path} (no existing data)")
             return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
     except Exception:
         # Target doesn't exist yet
-        writer = incoming_df.write.format(output_format).mode("overwrite")
+        writer = incoming_df.write.format(output_format)
         if is_table:
-            writer.saveAsTable(table_or_path)
+            _spark_save_as_table(writer, table_or_path, "overwrite", location)
         else:
-            writer.save(table_or_path)
+            writer.mode("overwrite").save(table_or_path)
         rows_written = incoming_df.count()
         logger.info(f"Wrote {rows_written} rows to {table_or_path} (new target)")
         return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
@@ -723,11 +767,11 @@ def _spark_merge_dataframe(
 
     merged = unchanged.union(incoming_df)
 
-    writer = merged.write.format(output_format).mode("overwrite")
+    writer = merged.write.format(output_format)
     if is_table:
-        writer.saveAsTable(table_or_path)
+        _spark_save_as_table(writer, table_or_path, "overwrite", location)
     else:
-        writer.save(table_or_path)
+        writer.mode("overwrite").save(table_or_path)
 
     rows_written = merged.count()
     logger.info(f"Merged {rows_written} rows to {table_or_path}")
@@ -741,6 +785,7 @@ def _spark_scd2_dataframe(
     primary_key: List[str],
     scd2_cfg: Dict[str, Any],
     output_format: str,
+    location: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Perform native Spark SCD2 (Slowly Changing Dimension Type 2) without collecting to pandas.
@@ -791,11 +836,11 @@ def _spark_scd2_dataframe(
 
     if existing_df is None or existing_df.count() == 0:
         # No existing data, just write incoming
-        writer = incoming_df.write.format(output_format).mode("overwrite")
+        writer = incoming_df.write.format(output_format)
         if is_table:
-            writer.saveAsTable(table_or_path)
+            _spark_save_as_table(writer, table_or_path, "overwrite", location)
         else:
-            writer.save(table_or_path)
+            writer.mode("overwrite").save(table_or_path)
         rows_written = incoming_df.count()
         logger.info(f"Wrote {rows_written} SCD2 rows to {table_or_path} (initial load)")
         return {"target": table_or_path, "rows_written": rows_written, "format": output_format}
@@ -856,11 +901,11 @@ def _spark_scd2_dataframe(
     # Union all: unchanged + already closed + newly closed + incoming
     result = unchanged.union(already_closed).union(closed_records).union(incoming_df)
 
-    writer = result.write.format(output_format).mode("overwrite")
+    writer = result.write.format(output_format)
     if is_table:
-        writer.saveAsTable(table_or_path)
+        _spark_save_as_table(writer, table_or_path, "overwrite", location)
     else:
-        writer.save(table_or_path)
+        writer.mode("overwrite").save(table_or_path)
 
     rows_written = result.count()
     logger.info(f"Applied SCD2 with {rows_written} total rows to {table_or_path}")
@@ -890,6 +935,7 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     primary_key = list(contract.primary_key or [])
     scd2_cfg = getattr(mat, "scd2", None)
     scd2_cfg = scd2_cfg if isinstance(scd2_cfg, dict) else {}
+    location = _resolve_external_location(getattr(mat, "location", None))
 
     spark = df.sparkSession
     target_str = str(target)
@@ -898,13 +944,13 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     if strategy == "merge":
         if not primary_key:
             raise ValueError("primary_key is required for merge strategy.")
-        return _spark_merge_dataframe(spark, df, target_str, primary_key, output_format)
+        return _spark_merge_dataframe(spark, df, target_str, primary_key, output_format, location=location)
 
     # Handle SCD2 strategy natively
     if strategy == "scd2":
         if not primary_key:
             raise ValueError("primary_key is required for scd2 strategy.")
-        return _spark_scd2_dataframe(spark, df, target_str, primary_key, scd2_cfg, output_format)
+        return _spark_scd2_dataframe(spark, df, target_str, primary_key, scd2_cfg, output_format, location=location)
 
     # Standard append/overwrite
     writer = df.write.format(output_format)
@@ -921,7 +967,7 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
 
     if target_str.startswith("table:"):
         table_name = target_str[len("table:"):]
-        writer.mode(mode).saveAsTable(table_name)
+        _spark_save_as_table(writer, table_name, mode, location)
         logger.info(f"Materialized Spark dataframe to table {table_name} ({output_format})")
         return {"target": table_name, "rows_written": df.count(), "format": output_format}
 
