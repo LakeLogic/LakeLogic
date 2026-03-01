@@ -87,6 +87,14 @@ cz changelog
 [0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.10.0 (2026-03-01)
+
+### Feat
+
+- Introduce the foundational LakeLogic data processing framework, including core modules, engine integrations, AI, and CLI.
+- add script to synchronize flagship examples to the documentation directory.
+- Add a script to synchronize flagship examples to the documentation and update MkDocs navigation to feature new interactive examples.
+
 ## v0.9.0 (2026-03-01)
 
 ### Feat

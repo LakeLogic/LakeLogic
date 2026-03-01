@@ -143,6 +143,17 @@ def test_driver_end_to_end_pipeline(tmp_path: Path) -> None:
 
 
 def test_driver_incremental_window_selection(tmp_path: Path) -> None:
+    import os
+    # The incremental validator requires a run-log backend in production.
+    # This test exercises file-window selection only — bypass the check.
+    os.environ["LAKELOGIC_SKIP_INCREMENTAL_CHECK"] = "1"
+    try:
+        _run_incremental_window_selection(tmp_path)
+    finally:
+        os.environ.pop("LAKELOGIC_SKIP_INCREMENTAL_CHECK", None)
+
+
+def _run_incremental_window_selection(tmp_path: Path) -> None:
     data_dir = tmp_path / "landing"
     out_dir = tmp_path / "out"
     data_dir.mkdir()

@@ -1,13 +1,17 @@
-from typing import Tuple, Any, List
-from lakelogic.engines.base import EngineAdapter
-from loguru import logger
 from pathlib import Path
+from typing import Any, List, Tuple
+
+from loguru import logger
+
+from lakelogic.engines.base import EngineAdapter
+
 
 class SparkAdapter(EngineAdapter):
     """
     Spark execution engine for LakeLogic.
     Uses Spark SQL and Column Expressions for evaluation.
     """
+
     engine_name: str = "spark"
 
     def _quote_ident(self, name: str) -> str:
@@ -32,8 +36,8 @@ class SparkAdapter(EngineAdapter):
         self.dataset_rule_results = []
         self.schema_drift = {}
         try:
-            from pyspark.sql import functions as F
             from pyspark.sql import DataFrame
+            from pyspark.sql import functions as F
         except ImportError:
             raise ImportError("pyspark is required for SparkAdapter")
 
@@ -43,6 +47,7 @@ class SparkAdapter(EngineAdapter):
         _df_types = [DataFrame]
         try:
             from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
+
             _df_types.append(ConnectDataFrame)
         except ImportError:
             pass
@@ -50,7 +55,6 @@ class SparkAdapter(EngineAdapter):
 
         if not isinstance(df, _df_types):
             raise TypeError(f"Expected Spark DataFrame, got {type(df)}")
-
 
         # 1. Register Source and Links in Spark Session
         spark = df.sparkSession
@@ -60,11 +64,11 @@ class SparkAdapter(EngineAdapter):
 
         # 0. Apply pre-processing (renames, filters, deduplication)
         df = self._apply_pre_transformations(df)
-        
+
         # 0.5 Apply schema enforcement
         df, schema_errors = self._apply_schema(df)
         df.createOrReplaceTempView(tbl_name)
-        
+
         # 2. Evaluate Row-Level Rules
         row_rules = self.get_row_rules()
         error_exprs = []
@@ -88,7 +92,7 @@ class SparkAdapter(EngineAdapter):
             for i, rule in enumerate(row_rules):
                 col_name = f"_rule_{i}"
                 error_msg = f"Rule failed: {rule.name} ({rule.sql})"
-                cond = F.col(col_name).isNull() | (F.col(col_name) == False)
+                cond = F.col(col_name).isNull() | F.col(col_name).isFalse()
                 error_exprs.append(F.when(cond, F.lit(error_msg)).otherwise(None))
                 category_exprs.append(F.when(cond, F.lit(rule.category)).otherwise(None))
 
@@ -97,23 +101,26 @@ class SparkAdapter(EngineAdapter):
 
         # Ensure arrays are non-null to avoid NULL comparisons dropping all rows.
         # Use SQL expression instead of Python lambda to avoid UDF worker crash on Windows.
-        df_with_errors = df_eval.withColumn(self.ERROR_COLUMN, error_array) \
-            .withColumn(self.CATEGORY_COLUMN, category_array)
+        df_with_errors = df_eval.withColumn(self.ERROR_COLUMN, error_array).withColumn(
+            self.CATEGORY_COLUMN, category_array
+        )
         df_with_errors = df_with_errors.withColumn(
             self.ERROR_COLUMN,
-            F.expr(f"filter({self.ERROR_COLUMN}, x -> x IS NOT NULL)")
+            F.expr(f"filter({self.ERROR_COLUMN}, x -> x IS NOT NULL)"),
         ).withColumn(
             self.CATEGORY_COLUMN,
-            F.expr(f"filter({self.CATEGORY_COLUMN}, x -> x IS NOT NULL)")
+            F.expr(f"filter({self.CATEGORY_COLUMN}, x -> x IS NOT NULL)"),
         )
 
         # 3. Split Good and Bad
         has_errors = F.size(F.col(self.ERROR_COLUMN)) > 0
-        
-        bad_df = df_with_errors.filter(has_errors) \
-            .withColumn("quarantine_state", F.lit("active")) \
+
+        bad_df = (
+            df_with_errors.filter(has_errors)
+            .withColumn("quarantine_state", F.lit("active"))
             .withColumn("quarantine_reprocessed", F.lit(False))
-        
+        )
+
         drop_cols = [self.ERROR_COLUMN, self.CATEGORY_COLUMN] + internal_cols
         good_df = df_with_errors.filter(~has_errors).drop(*drop_cols)
         bad_df = bad_df.drop(*internal_cols)
@@ -144,7 +151,7 @@ class SparkAdapter(EngineAdapter):
         rules = self.get_dataset_rules()
         if not rules:
             return
-        
+
         tbl_name = self.contract.dataset or "source"
         df.createOrReplaceTempView(tbl_name)
         spark = df.sparkSession
@@ -153,7 +160,7 @@ class SparkAdapter(EngineAdapter):
             try:
                 res = spark.sql(rule.sql).collect()
                 val = res[0][0]
-                
+
                 passed = True
                 if val is None:
                     passed = False
@@ -163,15 +170,17 @@ class SparkAdapter(EngineAdapter):
                     passed = val < rule.must_be_less_than
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
-                
+
                 status = "PASS" if passed else "FAIL"
                 logger.info(f"Quality Check (Spark): {rule.name} | Result: {val} | Status: {status}")
-                self.dataset_rule_results.append({
-                    "name": rule.name,
-                    "value": val,
-                    "passed": passed,
-                    "description": rule.description
-                })
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": val,
+                        "passed": passed,
+                        "description": rule.description,
+                    }
+                )
             except Exception as e:
                 logger.error(f"Error executing dataset rule '{rule.name}': {e}")
 
@@ -185,14 +194,14 @@ class SparkAdapter(EngineAdapter):
         Returns:
             Transformed Spark DataFrame.
         """
-        from pyspark.sql import functions as F
         from pyspark.sql import Window
-        
+        from pyspark.sql import functions as F
+
         current_df = df
         existing = set(current_df.columns)
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
-            
+
             # ── Execute Transformation ────────────────────────────────────────
             if trans.sql and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
@@ -329,21 +338,21 @@ class SparkAdapter(EngineAdapter):
                     w = Window.partitionBy(*trans.deduplicate.on)
                     order_cols = []
                     for col in trans.deduplicate.sort_by:
-                         order_cols.append(F.col(col).desc() if trans.deduplicate.order == "desc" else F.col(col).asc())
+                        order_cols.append(F.col(col).desc() if trans.deduplicate.order == "desc" else F.col(col).asc())
                     w = w.orderBy(*order_cols)
-                    current_df = current_df.withColumn("_rn", F.row_number().over(w)) \
-                                          .filter(F.col("_rn") == 1) \
-                                          .drop("_rn")
+                    current_df = (
+                        current_df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
+                    )
                 else:
                     current_df = current_df.dropDuplicates(trans.deduplicate.on)
-            
+
             # ── Post-Step Sync ──────────────────────────────────────────────
-            # Re-register the updated DataFrame as 'source' so that the NEXT 
+            # Re-register the updated DataFrame as 'source' so that the NEXT
             # transformation phase (especially SQL-based ones) sees the new columns.
             current_df.createOrReplaceTempView("source")
             if self.contract.dataset:
                 current_df.createOrReplaceTempView(self.contract.dataset)
-                
+
         return current_df
 
     def _apply_post_transformations(self, df: Any) -> Any:
@@ -357,8 +366,7 @@ class SparkAdapter(EngineAdapter):
             Transformed Spark DataFrame.
         """
         current_df = df
-        tbl_name = "current_transform"
-        
+
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
             if trans.sql and trans_phase != "pre":
@@ -400,6 +408,7 @@ class SparkAdapter(EngineAdapter):
             if trans.derive:
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 from pyspark.sql import functions as F
+
                 current_df = current_df.withColumn(trans.derive.field, F.expr(trans.derive.sql))
             elif trans.bucket:
                 logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
@@ -409,23 +418,26 @@ class SparkAdapter(EngineAdapter):
                 sql = self._build_bucket_sql(trans.bucket, source_table="temp_src")
                 # Extract the CASE WHEN part from "SELECT *, (CASE...) AS field FROM temp_src"
                 import re
+
                 match = re.search(r"SELECT \*, \((.*)\) AS", sql, re.DOTALL)
                 if match:
                     expr_str = match.group(1)
                     from pyspark.sql import functions as F
+
                     current_df = current_df.withColumn(trans.bucket.field, F.expr(expr_str))
             elif trans.date_diff:
                 logger.debug(f"Post-Transform [DateDiff]: {trans.date_diff.field}")
                 # Spark's DATEDIFF function is already handled in _build_date_diff_sql
                 sql = self._build_date_diff_sql(trans.date_diff, source_table="temp_src")
                 import re
+
                 match = re.search(r"SELECT \*, \((.*)\) AS", sql, re.DOTALL)
                 if match:
                     expr_str = match.group(1)
                     from pyspark.sql import functions as F
+
                     current_df = current_df.withColumn(trans.date_diff.field, F.expr(expr_str))
             elif trans.lookup:
-
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
                 current_df.createOrReplaceTempView("src")
                 hint = ""
@@ -433,7 +445,9 @@ class SparkAdapter(EngineAdapter):
                     hint = "/*+ BROADCAST(ref) */ "
                 value_expr = f"ref.{trans.lookup.value}"
                 if trans.lookup.default_value is not None:
-                    value_expr = f"COALESCE(ref.{trans.lookup.value}, {self._format_literal(trans.lookup.default_value)})"
+                    value_expr = (
+                        f"COALESCE(ref.{trans.lookup.value}, {self._format_literal(trans.lookup.default_value)})"
+                    )
                 query = f"""
                 SELECT {hint}src.*, {value_expr} AS {trans.lookup.field}
                 FROM src
@@ -478,7 +492,7 @@ class SparkAdapter(EngineAdapter):
 
         hint = "/*+ BROADCAST(ref) */ " if broadcast else ""
         return f"""
-        SELECT {hint}{', '.join(select_fields)}
+        SELECT {hint}{", ".join(select_fields)}
         FROM {source_table} src
         {join_type} JOIN {join_cfg.reference} ref ON src.{join_cfg.on} = ref.{join_cfg.key}
         """
@@ -508,7 +522,9 @@ class SparkAdapter(EngineAdapter):
         for link in self.contract.links:
             try:
                 if link.table or (link.type and link.type.lower() == "table"):
-                    table_name = link.table or (link.path[6:] if link.path and link.path.startswith("table:") else link.path)
+                    table_name = link.table or (
+                        link.path[6:] if link.path and link.path.startswith("table:") else link.path
+                    )
                     if not table_name:
                         logger.warning(f"Link '{link.name}' missing table name.")
                         continue
@@ -520,7 +536,9 @@ class SparkAdapter(EngineAdapter):
                     continue
 
                 if link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://")):
-                    logger.warning(f"Link '{link.name}' uses remote path '{link.path}'. Local-only loading supported in OSS demo.")
+                    logger.warning(
+                        f"Link '{link.name}' uses remote path '{link.path}'. Local-only loading supported in OSS demo."
+                    )
                     continue
 
                 path = Path(link.path)
@@ -570,7 +588,7 @@ class SparkAdapter(EngineAdapter):
             "timestamp": "timestamp",
             "datetime": "timestamp",
         }
-        
+
         # If the type looks like a complex DDL string (struct<...>, array<...>, etc.),
         # return it as-is so Spark can parse it natively.
         if type_name.startswith(("struct<", "array<", "map<")):

@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import HTTPServer
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,6 +29,7 @@ from loguru import logger
 @dataclass
 class Window:
     """Window boundaries used for incremental and reprocessing runs."""
+
     start: Optional[datetime]
     end: Optional[datetime]
     label: str
@@ -281,15 +282,17 @@ class PipelineDriver:
                     in_progress[name] = True
                     path = next(p for p, c in contracts if c.dataset == name)
                     contract = next(c for p, c in contracts if c.dataset == name)
-                    futures[pool.submit(
-                        self._run_contract,
-                        path,
-                        contract,
-                        stage,
-                        window,
-                        reprocess,
-                        registry_index
-                    )] = name
+                    futures[
+                        pool.submit(
+                            self._run_contract,
+                            path,
+                            contract,
+                            stage,
+                            window,
+                            reprocess,
+                            registry_index,
+                        )
+                    ] = name
 
                 for future in as_completed(futures):
                     name = futures[future]
@@ -335,9 +338,7 @@ class PipelineDriver:
 
         upstream_ok, upstream_details = self._upstreams_fresh(contract, upstreams, registry_index, window)
         if not upstream_ok:
-            detail_str = ", ".join(
-                f"{item['upstream']}({item['reason']})" for item in upstream_details
-            )
+            detail_str = ", ".join(f"{item['upstream']}({item['reason']})" for item in upstream_details)
             logger.warning(f"Skipping {dataset}: upstream not fresh. {detail_str}")
             run_record["status"] = "skipped"
             run_record["reason"] = "missing_upstream"
@@ -374,7 +375,12 @@ class PipelineDriver:
 
         try:
             for source in sources:
-                processor = DataProcessor(engine=self.engine, contract=contract, stage=stage, pipeline_run_id=self.pipeline_run_id)
+                processor = DataProcessor(
+                    engine=self.engine,
+                    contract=contract,
+                    stage=stage,
+                    pipeline_run_id=self.pipeline_run_id,
+                )
                 good_df, bad_df = self._execute_with_retries(processor, source)
                 processor.materialize(good_df, bad_df)
                 self._evaluate_approvals(processor.last_report, contract, dataset)
@@ -440,12 +446,18 @@ class PipelineDriver:
                 effective_window = Window(last_success, None, "incremental")
             else:
                 window_reason = reason
-                if reason in ["run_log_table_missing", "run_log_entry_missing", "run_log_db_missing"]:
+                if reason in [
+                    "run_log_table_missing",
+                    "run_log_entry_missing",
+                    "run_log_db_missing",
+                ]:
                     logger.warning(f"{contract.dataset or contract.info.title}: {reason}; forcing full load.")
                 elif reason == "no_run_log_table":
                     logger.warning(f"{contract.dataset or contract.info.title}: no run_log_table; forcing full load.")
                 else:
-                    logger.warning(f"{contract.dataset or contract.info.title}: {reason or 'no_last_success'}; forcing full load.")
+                    logger.warning(
+                        f"{contract.dataset or contract.info.title}: {reason or 'no_last_success'}; forcing full load."
+                    )
                 if reason:
                     self._increment_metric("full_loads_due_to_missing_logs", 1)
                 effective_window = Window(None, None, "full")
@@ -482,7 +494,11 @@ class PipelineDriver:
                     if filtered:
                         files = filtered
                     else:
-                        return [str(p) for p in files], Window(None, None, "full"), window_reason
+                        return (
+                            [str(p) for p in files],
+                            Window(None, None, "full"),
+                            window_reason,
+                        )
 
             return [str(p) for p in files], effective_window, window_reason
 
@@ -493,7 +509,7 @@ class PipelineDriver:
         contract: DataContract,
         upstreams: List[str],
         registry_index: Dict[str, Path],
-        window: Window
+        window: Window,
     ) -> Tuple[bool, List[Dict[str, str]]]:
         """
         Check whether all upstream datasets are fresh enough.
@@ -842,11 +858,7 @@ class PipelineDriver:
         base_mode = pack_data.get("transformations_mode") or defaults_mode
 
         stage_steps_override = pack_data.get(f"{stage}_transformations")
-        stage_steps = (
-            stage_steps_override
-            if isinstance(stage_steps_override, list)
-            else stage_transforms
-        )
+        stage_steps = stage_steps_override if isinstance(stage_steps_override, list) else stage_transforms
         stage_mode = pack_data.get(f"{stage}_transformations_mode") or stage_mode or base_mode
 
         current_steps = _merge_steps(current_steps, base_steps, base_mode)
@@ -979,6 +991,7 @@ class PipelineDriver:
     def _finalize_summary(self) -> None:
         """Finalize and optionally persist the run summary."""
         from lakelogic.cli.observability import finalize_summary
+
         finalize_summary(self.summary, self.summary_path)
         self._write_summary_table()
         self._emit_metrics()
@@ -987,37 +1000,52 @@ class PipelineDriver:
     def _write_summary_table(self) -> None:
         """Write a pipeline summary row to a table backend."""
         from lakelogic.cli.observability import write_summary_table
+
         write_summary_table(
-            self.summary, self.summary_table, self.summary_backend,
-            self.summary_database, self.summary_table_format,
-            self.summary_merge_on_run_id, self.engine,
+            self.summary,
+            self.summary_table,
+            self.summary_backend,
+            self.summary_database,
+            self.summary_table_format,
+            self.summary_merge_on_run_id,
+            self.engine,
         )
 
     def _flatten_summary(self) -> Dict[str, object]:
         """Flatten summary data into a table-oriented record."""
         from lakelogic.cli.observability import flatten_summary
+
         return flatten_summary(self.summary)
 
     def _emit_metrics(self) -> None:
         """Emit metrics to a JSON file or StatsD endpoint."""
         from lakelogic.cli.observability import emit_metrics
+
         self.metrics_snapshot = emit_metrics(
-            self.summary, self.metrics_path, self.metrics_backend,
-            self.metrics_host, self.metrics_port, self.metrics_prefix,
+            self.summary,
+            self.metrics_path,
+            self.metrics_backend,
+            self.metrics_host,
+            self.metrics_port,
+            self.metrics_prefix,
             self.metrics_tags,
         )
 
     def _format_prometheus(self) -> str:
         """Format metrics in Prometheus exposition format."""
         from lakelogic.cli.observability import format_prometheus
+
         return format_prometheus(self.metrics_snapshot, self.metrics_prefix or "lakelogic")
 
     def _start_prometheus_server(self) -> None:
         """Start a lightweight Prometheus /metrics HTTP server."""
         from lakelogic.cli.observability import start_prometheus_server
+
         server, thread = start_prometheus_server(
-            self.metrics_host, self.metrics_port,
-            lambda: self.metrics_snapshot, self.metrics_prefix or "lakelogic",
+            self.metrics_host,
+            self.metrics_port,
+            lambda: self.metrics_snapshot,
+            self.metrics_prefix or "lakelogic",
         )
         self.prometheus_server = server
         self.prometheus_thread = thread
@@ -1025,6 +1053,7 @@ class PipelineDriver:
     def _stop_prometheus_server(self) -> None:
         """Stop the Prometheus HTTP server if running."""
         from lakelogic.cli.observability import stop_prometheus_server
+
         stop_prometheus_server(self.prometheus_server, self.prometheus_thread)
         self.prometheus_server = None
         self.prometheus_thread = None
@@ -1042,18 +1071,36 @@ from lakelogic.cli.cli_parsers import (  # noqa: F401, E402
 )
 
 
-
 def main() -> None:
     """CLI entrypoint for the registry-driven pipeline driver."""
     parser = argparse.ArgumentParser(description="LakeLogic pipeline driver (registry-based).")
-    parser.add_argument("--registry", required=True, help="Path to system registry (bronze/silver contracts).")
+    parser.add_argument(
+        "--registry",
+        required=True,
+        help="Path to system registry (bronze/silver contracts).",
+    )
     parser.add_argument("--reference-registry", help="Path to reference registry (optional).")
     parser.add_argument("--gold-registry", help="Path to gold registry (optional).")
-    parser.add_argument("--layers", default="bronze,silver,gold", help="Layers to run (comma-separated).")
+    parser.add_argument(
+        "--layers",
+        default="bronze,silver,gold",
+        help="Layers to run (comma-separated).",
+    )
     parser.add_argument("--entities", help="Limit execution to specific entities (comma-separated).")
-    parser.add_argument("--contracts", help="Limit execution to specific contract paths (comma-separated).")
-    parser.add_argument("--strict-layer-order", action="store_true", help="Validate the order of layers strictly.")
-    parser.add_argument("--window", default="last_success", help="Window: last_success | yesterday | none | range")
+    parser.add_argument(
+        "--contracts",
+        help="Limit execution to specific contract paths (comma-separated).",
+    )
+    parser.add_argument(
+        "--strict-layer-order",
+        action="store_true",
+        help="Validate the order of layers strictly.",
+    )
+    parser.add_argument(
+        "--window",
+        default="last_success",
+        help="Window: last_success | yesterday | none | range",
+    )
     parser.add_argument("--window-start-date", help="Window start date (YYYY-MM-DD) for --window range.")
     parser.add_argument("--window-end-date", help="Window end date (YYYY-MM-DD) for --window range.")
     parser.add_argument("--reprocess-date", help="Reprocess a specific date (YYYY-MM-DD).")
@@ -1065,7 +1112,10 @@ def main() -> None:
     parser.add_argument("--summary-table", help="Write a pipeline summary row to a table backend.")
     parser.add_argument("--summary-backend", help="Summary backend: spark | duckdb | sqlite.")
     parser.add_argument("--summary-database", help="Database path for duckdb/sqlite summary tables.")
-    parser.add_argument("--summary-table-format", help="Table format for Spark summary tables (default delta).")
+    parser.add_argument(
+        "--summary-table-format",
+        help="Table format for Spark summary tables (default delta).",
+    )
     parser.add_argument(
         "--summary-merge-on-run-id",
         default=True,
@@ -1078,21 +1128,52 @@ def main() -> None:
     parser.add_argument("--metrics-port", type=int, help="StatsD port (default 8125).")
     parser.add_argument("--metrics-prefix", help="StatsD metric prefix (default lakelogic).")
     parser.add_argument("--metrics-tags", help="Comma-separated tags (key=value) for metrics.")
-    parser.add_argument("--set", dest="overrides", action="append", help="Override contract fields (key=value).")
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        help="Override contract fields (key=value).",
+    )
     parser.add_argument("--policy-pack", help="Apply a policy pack by name.")
     parser.add_argument("--policy-pack-dir", help="Directory containing policy packs.")
     parser.add_argument("--state-path", help="State file for partial resume.")
     parser.add_argument("--resume", action="store_true", help="Resume from last successful state.")
     parser.add_argument("--retries", type=int, default=0, help="Retry count for transient failures.")
-    parser.add_argument("--retry-backoff", type=float, default=1.0, help="Initial retry backoff in seconds.")
-    parser.add_argument("--retry-max-delay", type=float, default=60.0, help="Max retry delay in seconds.")
-    parser.add_argument("--approval-required", action="store_true", help="Require approvals on drift/quarantine thresholds.")
+    parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=1.0,
+        help="Initial retry backoff in seconds.",
+    )
+    parser.add_argument(
+        "--retry-max-delay",
+        type=float,
+        default=60.0,
+        help="Max retry delay in seconds.",
+    )
+    parser.add_argument(
+        "--approval-required",
+        action="store_true",
+        help="Require approvals on drift/quarantine thresholds.",
+    )
     parser.add_argument("--approval-file", help="Approval file path to bypass approval gates.")
-    parser.add_argument("--cache-references", action="store_true", help="Cache reference datasets across runs.")
+    parser.add_argument(
+        "--cache-references",
+        action="store_true",
+        help="Cache reference datasets across runs.",
+    )
     parser.add_argument("--backfill-start-date", help="Backfill start date (YYYY-MM-DD).")
     parser.add_argument("--backfill-end-date", help="Backfill end date (YYYY-MM-DD).")
-    parser.add_argument("--backfill-granularity", default="day", help="Backfill granularity: day | week.")
-    parser.add_argument("--continue-on-error", action="store_true", help="Continue running after a contract failure.")
+    parser.add_argument(
+        "--backfill-granularity",
+        default="day",
+        help="Backfill granularity: day | week.",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue running after a contract failure.",
+    )
     args = parser.parse_args()
 
     layers = parse_layers(args.layers, strict=args.strict_layer_order)

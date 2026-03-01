@@ -14,6 +14,7 @@ Configuration is resolved from:
 2. Environment variables (``LAKELOGIC_AI_PROVIDER``, ``LAKELOGIC_AI_MODEL``)
 3. Sensible defaults (OpenAI / gpt-4o-mini)
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ from loguru import logger
 # ---------------------------------------------------------------------------
 # Unified response type
 # ---------------------------------------------------------------------------
+
 
 class LLMResponse:
     """Wrapper around an LLM completion result."""
@@ -50,6 +52,7 @@ class LLMResponse:
 # Provider clients
 # ---------------------------------------------------------------------------
 
+
 class _OpenAIClient:
     """OpenAI / Azure OpenAI chat client."""
 
@@ -66,8 +69,7 @@ class _OpenAIClient:
             import openai
         except ImportError as exc:
             raise ImportError(
-                "OpenAI provider requires the 'openai' package. "
-                "Install with: pip install openai"
+                "OpenAI provider requires the 'openai' package. Install with: pip install openai"
             ) from exc
 
         if azure_endpoint:
@@ -113,8 +115,7 @@ class _AnthropicClient:
             import anthropic
         except ImportError as exc:
             raise ImportError(
-                "Anthropic provider requires the 'anthropic' package. "
-                "Install with: pip install anthropic"
+                "Anthropic provider requires the 'anthropic' package. Install with: pip install anthropic"
             ) from exc
 
         self._client = anthropic.Anthropic(
@@ -188,6 +189,7 @@ class _OllamaClient:
 # Factory
 # ---------------------------------------------------------------------------
 
+
 def get_llm_client(
     provider: Optional[str] = None,
     model: Optional[str] = None,
@@ -208,11 +210,7 @@ def get_llm_client(
     Returns:
         Client instance with a ``.chat(messages)`` method.
     """
-    provider = (
-        provider
-        or os.getenv("LAKELOGIC_AI_PROVIDER", "")
-        or "openai"
-    ).lower().strip()
+    provider = (provider or os.getenv("LAKELOGIC_AI_PROVIDER", "") or "openai").lower().strip()
 
     model = model or os.getenv("LAKELOGIC_AI_MODEL", "")
 
@@ -245,7 +243,4 @@ def get_llm_client(
             base_url=kwargs.get("base_url") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         )
 
-    raise ValueError(
-        f"Unknown AI provider: {provider!r}. "
-        f"Supported: openai, azure, anthropic, ollama"
-    )
+    raise ValueError(f"Unknown AI provider: {provider!r}. Supported: openai, azure, anthropic, ollama")

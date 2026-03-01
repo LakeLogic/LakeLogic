@@ -70,7 +70,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -78,6 +78,7 @@ from typing import Any, Dict, List, Optional, Union
 # ---------------------------------------------------------------------------
 # Boundary dataclass — unified output of all strategies
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Boundary:
@@ -98,6 +99,7 @@ class Boundary:
     metadata : dict
         Strategy-specific metadata (watermark value found, manifest entries, etc.)
     """
+
     from_dt: datetime
     to_dt: datetime
     strategy: str
@@ -194,7 +196,11 @@ class Boundary:
             # Normalise to dict
             if isinstance(date_parts, list):
                 if len(date_parts) == 3:
-                    dp = {"year": date_parts[0], "month": date_parts[1], "day": date_parts[2]}
+                    dp = {
+                        "year": date_parts[0],
+                        "month": date_parts[1],
+                        "day": date_parts[2],
+                    }
                 elif len(date_parts) == 2:
                     dp = {"year": date_parts[0], "month": date_parts[1]}
                 else:
@@ -224,9 +230,7 @@ class Boundary:
                 raise ValueError("date_parts must include at least 'year' and 'month' keys")
 
         else:
-            raise ValueError(
-                "Provide either field='col_name' or date_parts=['year','month','day']"
-            )
+            raise ValueError("Provide either field='col_name' or date_parts=['year','month','day']")
 
         return " AND ".join(parts)
 
@@ -275,7 +279,11 @@ class Boundary:
         elif date_parts is not None:
             if isinstance(date_parts, list):
                 if len(date_parts) == 3:
-                    dp = {"year": date_parts[0], "month": date_parts[1], "day": date_parts[2]}
+                    dp = {
+                        "year": date_parts[0],
+                        "month": date_parts[1],
+                        "day": date_parts[2],
+                    }
                 elif len(date_parts) == 2:
                     dp = {"year": date_parts[0], "month": date_parts[1]}
                 else:
@@ -290,32 +298,25 @@ class Boundary:
                 # Integer key: YYYYMMDD — faithful date ordering without MAKE_DATE
                 date_key = y * 10_000 + m * 100 + d
                 from_key = self.from_date.year * 10_000 + self.from_date.month * 100 + self.from_date.day
-                to_key   = self.to_date.year   * 10_000 + self.to_date.month   * 100 + self.to_date.day
+                to_key = self.to_date.year * 10_000 + self.to_date.month * 100 + self.to_date.day
                 expr = expr & (date_key >= from_key) & (date_key <= to_key)
             elif "month" in dp:
                 y_col, m_col = pl.col(dp["year"]), pl.col(dp["month"])
-                ym_key    = y_col * 100 + m_col
-                from_ym   = self.from_date.year * 100 + self.from_date.month
-                to_ym     = self.to_date.year   * 100 + self.to_date.month
+                ym_key = y_col * 100 + m_col
+                from_ym = self.from_date.year * 100 + self.from_date.month
+                to_ym = self.to_date.year * 100 + self.to_date.month
                 expr = expr & (ym_key >= from_ym) & (ym_key <= to_ym)
             else:
                 raise ValueError("date_parts must include at least 'year' and 'month' keys")
 
         else:
-            raise ValueError(
-                "Provide either field='col_name' or date_parts=['year','month','day']"
-            )
+            raise ValueError("Provide either field='col_name' or date_parts=['year','month','day']")
 
         return expr
 
     def __repr__(self) -> str:
         pf = f", partition_filters={self.partition_filters}" if self.partition_filters else ""
-        return (
-            f"Boundary(strategy={self.strategy!r}, "
-            f"from={self.from_date}, to={self.to_date}{pf})"
-        )
-
-
+        return f"Boundary(strategy={self.strategy!r}, from={self.from_date}, to={self.to_date}{pf})"
 
 
 # ---------------------------------------------------------------------------
@@ -323,15 +324,29 @@ class Boundary:
 # ---------------------------------------------------------------------------
 
 _LOOKBACK_UNITS = {
-    "second": 1, "seconds": 1, "sec": 1, "secs": 1,
-    "minute": 60, "minutes": 60, "min": 60, "mins": 60,
-    "hour": 3600, "hours": 3600, "hr": 3600, "hrs": 3600,
-    "day": 86400, "days": 86400,
-    "week": 604800, "weeks": 604800,
+    "second": 1,
+    "seconds": 1,
+    "sec": 1,
+    "secs": 1,
+    "minute": 60,
+    "minutes": 60,
+    "min": 60,
+    "mins": 60,
+    "hour": 3600,
+    "hours": 3600,
+    "hr": 3600,
+    "hrs": 3600,
+    "day": 86400,
+    "days": 86400,
+    "week": 604800,
+    "weeks": 604800,
     # Months and years are approximate
-    "month": 86400 * 30, "months": 86400 * 30,
-    "year": 86400 * 365, "years": 86400 * 365,
+    "month": 86400 * 30,
+    "months": 86400 * 30,
+    "year": 86400 * 365,
+    "years": 86400 * 365,
 }
+
 
 def _parse_lookback(lookback: str) -> timedelta:
     """
@@ -360,16 +375,14 @@ def _parse_lookback(lookback: str) -> timedelta:
     m = re.match(r"^(\d+(?:\.\d+)?)\s*([a-z]+)$", lookback)
     if not m:
         raise ValueError(
-            f"Cannot parse lookback string: {lookback!r}. "
-            f"Expected e.g. '7 days', '3 hours', '30 mins', '1 month'."
+            f"Cannot parse lookback string: {lookback!r}. Expected e.g. '7 days', '3 hours', '30 mins', '1 month'."
         )
     amount = float(m.group(1))
-    unit   = m.group(2)
+    unit = m.group(2)
 
     if unit not in _LOOKBACK_UNITS:
         raise ValueError(
-            f"Unknown time unit {unit!r} in lookback {lookback!r}. "
-            f"Supported: {sorted(set(_LOOKBACK_UNITS.values()))}."
+            f"Unknown time unit {unit!r} in lookback {lookback!r}. Supported: {sorted(set(_LOOKBACK_UNITS.values()))}."
         )
     return timedelta(seconds=amount * _LOOKBACK_UNITS[unit])
 
@@ -377,6 +390,7 @@ def _parse_lookback(lookback: str) -> timedelta:
 # ---------------------------------------------------------------------------
 # IncrementalBoundary — factory class for all 4 strategies
 # ---------------------------------------------------------------------------
+
 
 class IncrementalBoundary:
     """
@@ -446,7 +460,7 @@ class IncrementalBoundary:
             if spark is None:
                 raise RuntimeError("No active Spark session")
 
-            df      = spark.read.format("delta").load(target_path)
+            df = spark.read.format("delta").load(target_path)
             max_val = df.agg(F.max(watermark_field)).collect()[0][0]
 
             if max_val is None:
@@ -465,17 +479,13 @@ class IncrementalBoundary:
         except Exception as exc:
             # Target missing / empty — use default_from
             if default_from is not None:
-                from_dt = (
-                    datetime.fromisoformat(default_from)
-                    if isinstance(default_from, str) else default_from
-                )
+                from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
                 from_dt = datetime.utcnow() - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "target_path": target_path}
 
         _to = to_dt or datetime.utcnow()
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="max_target", metadata=meta)
-
 
     # ── Strategy 2: Pipeline log / audit table ────────────────────────────────
 
@@ -533,12 +543,9 @@ class IncrementalBoundary:
 
             row = (
                 spark.table(log_table)
-                     .filter(
-                         (F.col("pipeline_name") == pipeline_name)
-                         & (F.col("status") == "success")
-                     )
-                     .agg(F.max("processed_through").alias("last_success"))
-                     .collect()[0]
+                .filter((F.col("pipeline_name") == pipeline_name) & (F.col("status") == "success"))
+                .agg(F.max("processed_through").alias("last_success"))
+                .collect()[0]
             )
             last_success = row["last_success"]
             if last_success is None:
@@ -553,17 +560,13 @@ class IncrementalBoundary:
 
         except Exception as exc:
             if default_from is not None:
-                from_dt = (
-                    datetime.fromisoformat(default_from)
-                    if isinstance(default_from, str) else default_from
-                )
+                from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
                 from_dt = datetime.utcnow() - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "pipeline_name": pipeline_name}
 
         _to = to_dt or datetime.utcnow()
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="pipeline_log", metadata=meta)
-
 
     # ── Strategy 3: Manifest file ─────────────────────────────────────────────
 
@@ -632,8 +635,11 @@ class IncrementalBoundary:
                 raise ValueError("Manifest has no processed_partitions")
 
             last_partition = max(partitions)  # ISO string comparison works for dates
-            last_dt = datetime.fromisoformat(last_partition) if "T" in last_partition \
-                      else datetime.strptime(last_partition, "%Y-%m-%d")
+            last_dt = (
+                datetime.fromisoformat(last_partition)
+                if "T" in last_partition
+                else datetime.strptime(last_partition, "%Y-%m-%d")
+            )
             from_dt = last_dt + timedelta(days=1)
             meta = {
                 "manifest_path": manifest_path,
@@ -643,10 +649,7 @@ class IncrementalBoundary:
 
         except Exception as exc:
             if default_from is not None:
-                from_dt = (
-                    datetime.fromisoformat(default_from)
-                    if isinstance(default_from, str) else default_from
-                )
+                from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
                 from_dt = datetime.utcnow() - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "manifest_path": manifest_path}
@@ -690,7 +693,6 @@ class IncrementalBoundary:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-
     # ── Strategy 4a: Explicit date range ─────────────────────────────────────
 
     @classmethod
@@ -733,6 +735,7 @@ class IncrementalBoundary:
             df.filter(boundary.spark_filter(date_parts=["year", "month", "day"]))
             # → "country = 'GB' AND MAKE_DATE(year,month,day) BETWEEN ..."
         """
+
         def _to_dt(v) -> datetime:
             if isinstance(v, datetime):
                 return v
@@ -741,15 +744,14 @@ class IncrementalBoundary:
             return datetime.fromisoformat(str(v))
 
         from_dt = _to_dt(from_date)
-        to_dt   = _to_dt(to_date) if to_date is not None else datetime.utcnow()
+        to_dt = _to_dt(to_date) if to_date is not None else datetime.utcnow()
         return Boundary(
-            from_dt=from_dt, to_dt=to_dt,
+            from_dt=from_dt,
+            to_dt=to_dt,
             strategy="date_range",
             partition_filters=partition_filters or {},
             metadata={"from_date": str(from_date), "to_date": str(to_date or "now")},
         )
-
-
 
     # ── Strategy 4b: Lookback string ─────────────────────────────────────────
 
@@ -804,17 +806,16 @@ class IncrementalBoundary:
             # Near-real-time micro-batch
             boundary = IncrementalBoundary.from_lookback("30 mins")
         """
-        delta   = _parse_lookback(lookback)
-        to_dt   = reference_dt or datetime.utcnow()
+        delta = _parse_lookback(lookback)
+        to_dt = reference_dt or datetime.utcnow()
         from_dt = to_dt - delta
         return Boundary(
-            from_dt=from_dt, to_dt=to_dt,
+            from_dt=from_dt,
+            to_dt=to_dt,
             strategy="lookback",
             partition_filters=partition_filters or {},
             metadata={"lookback": lookback, "delta_seconds": delta.total_seconds()},
         )
-
-
 
     # ── Convenience: resolve from contract SourceConfig ────────────────────────
 
@@ -824,8 +825,8 @@ class IncrementalBoundary:
         contract_path: str,
         *,
         from_date: Optional[str] = None,
-        to_date:   Optional[str] = None,
-        lookback:  Optional[str] = None,
+        to_date: Optional[str] = None,
+        lookback: Optional[str] = None,
         target_path: Optional[str] = None,
         pipeline_name: Optional[str] = None,
         manifest_path: Optional[str] = None,
@@ -879,10 +880,10 @@ class IncrementalBoundary:
         import yaml as _yaml
 
         data = _yaml.safe_load(Path(contract_path).read_text(encoding="utf-8"))
-        src  = data.get("source") or {}
+        src = data.get("source") or {}
 
-        strategy          = src.get("watermark_strategy", "max_target")
-        wm_field          = src.get("watermark_field", "_snapshot_date")
+        strategy = src.get("watermark_strategy", "max_target")
+        wm_field = src.get("watermark_field", "_snapshot_date")
         contract_lookback = src.get("lookback")
 
         # Merge: contract is base, runtime partition_filters wins on conflicts
@@ -902,27 +903,26 @@ class IncrementalBoundary:
 
         if strategy == "pipeline_log":
             log_table = src.get("pipeline_log_table", "pipeline_runs")
-            p_name    = pipeline_name or src.get("pipeline_name", Path(contract_path).stem)
+            p_name = pipeline_name or src.get("pipeline_name", Path(contract_path).stem)
             b = cls.from_pipeline_log(p_name, log_table=log_table)
             b.partition_filters = merged_pf
             return b
 
         if strategy == "manifest":
             mp = manifest_path or src.get("manifest_path", "")
-            b  = cls.from_manifest(mp, partition_field=wm_field)
+            b = cls.from_manifest(mp, partition_field=wm_field)
             b.partition_filters = merged_pf
             return b
 
         if strategy == "date_range":
             fd = from_date or src.get("from_date")
-            td = to_date   or src.get("to_date")
+            td = to_date or src.get("to_date")
             return cls.from_date_range(fd, td, partition_filters=merged_pf or None)
 
         tp = target_path or src.get("target_path", "")
-        b  = cls.from_max_target(tp, watermark_field=wm_field)
+        b = cls.from_max_target(tp, watermark_field=wm_field)
         b.partition_filters = merged_pf
         return b
-
 
     # ── Convenience: resolve from SourceConfig model ────────────────────────
 
@@ -961,11 +961,11 @@ class IncrementalBoundary:
         merged_pf: Dict[str, Any] = {**cfg.get("partition_filters", {})}
         merged_pf.update(runtime_pf)
 
-        lookback  = cfg.get("lookback")
+        lookback = cfg.get("lookback")
         from_date = cfg.get("from_date")
-        to_date   = cfg.get("to_date")
-        strategy  = cfg.get("watermark_strategy", "max_target")
-        wm_field  = cfg.get("watermark_field", "_snapshot_date")
+        to_date = cfg.get("to_date")
+        strategy = cfg.get("watermark_strategy", "max_target")
+        wm_field = cfg.get("watermark_field", "_snapshot_date")
 
         if lookback:
             return cls.from_lookback(lookback, partition_filters=merged_pf or None)
@@ -989,7 +989,8 @@ class IncrementalBoundary:
             return b
         if strategy == "date_range":
             return cls.from_date_range(
-                cfg.get("from_date"), cfg.get("to_date"),
+                cfg.get("from_date"),
+                cfg.get("to_date"),
                 partition_filters=merged_pf or None,
             )
         b = cls.from_max_target(cfg.get("target_path", ""), watermark_field=wm_field)

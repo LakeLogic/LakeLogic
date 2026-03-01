@@ -29,19 +29,51 @@ def main() -> None:
         choices=["append", "prepend", "replace"],
         help="How to merge list keys: append=template+contract, prepend=contract+template, replace=contract only.",
     )
-    parser.add_argument("--infer-columns", action="store_true", help="Infer columns from local source path if model missing.")
-    parser.add_argument("--soft-delete", action="store_true", help="Inject soft-delete handling for operation/deleted_at/is_deleted columns.")
-    parser.add_argument("--soft-delete-operation-column", default="operation", help="Operation column name.")
-    parser.add_argument("--soft-delete-deleted-at-column", default="deleted_at", help="Deleted-at column name.")
-    parser.add_argument("--soft-delete-flag-column", default="is_deleted", help="Existing delete flag column name.")
-    parser.add_argument("--soft-delete-output-column", default="is_deleted", help="Output delete flag column name.")
-    parser.add_argument("--soft-delete-keep-hard-deletes", action="store_true", help="Keep hard deletes instead of filtering them out.")
+    parser.add_argument(
+        "--infer-columns",
+        action="store_true",
+        help="Infer columns from local source path if model missing.",
+    )
+    parser.add_argument(
+        "--soft-delete",
+        action="store_true",
+        help="Inject soft-delete handling for operation/deleted_at/is_deleted columns.",
+    )
+    parser.add_argument(
+        "--soft-delete-operation-column",
+        default="operation",
+        help="Operation column name.",
+    )
+    parser.add_argument(
+        "--soft-delete-deleted-at-column",
+        default="deleted_at",
+        help="Deleted-at column name.",
+    )
+    parser.add_argument(
+        "--soft-delete-flag-column",
+        default="is_deleted",
+        help="Existing delete flag column name.",
+    )
+    parser.add_argument(
+        "--soft-delete-output-column",
+        default="is_deleted",
+        help="Output delete flag column name.",
+    )
+    parser.add_argument(
+        "--soft-delete-keep-hard-deletes",
+        action="store_true",
+        help="Keep hard deletes instead of filtering them out.",
+    )
     parser.add_argument(
         "--soft-delete-operation-values",
         default="i,u,d,insert,update,delete,upsert,merge",
         help="Comma-separated operation values considered valid (lowercase).",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Print planned updates without writing files.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned updates without writing files.",
+    )
     args = parser.parse_args()
 
     registry_path = Path(args.registry).resolve() if args.registry else None

@@ -67,6 +67,7 @@ from lakelogic.core.models import (
 # Public helpers
 # ---------------------------------------------------------------------------
 
+
 def load_contract_from_dbt(
     schema_path: Union[str, Path],
     *,
@@ -104,6 +105,7 @@ def load_contract_from_dbt(
 # ---------------------------------------------------------------------------
 # Main adapter class
 # ---------------------------------------------------------------------------
+
 
 class DbtAdapter:
     """
@@ -143,8 +145,7 @@ class DbtAdapter:
         models = self._raw.get("models", [])
         if not models:
             raise ValueError(
-                f"No 'models:' block found in {self.schema_path}. "
-                "Use source_to_contract() for sources.yml files."
+                f"No 'models:' block found in {self.schema_path}. Use source_to_contract() for sources.yml files."
             )
 
         if model_name is None:
@@ -153,17 +154,13 @@ class DbtAdapter:
             else:
                 names = [m.get("name") for m in models]
                 raise ValueError(
-                    f"Multiple models found in {self.schema_path}: {names}. "
-                    "Specify model=<name> to select one."
+                    f"Multiple models found in {self.schema_path}: {names}. Specify model=<name> to select one."
                 )
         else:
             node = next((m for m in models if m.get("name") == model_name), None)
             if node is None:
                 available = [m.get("name") for m in models]
-                raise ValueError(
-                    f"Model '{model_name}' not found in {self.schema_path}. "
-                    f"Available: {available}"
-                )
+                raise ValueError(f"Model '{model_name}' not found in {self.schema_path}. Available: {available}")
 
         return self._node_to_contract(node, layer="silver")
 
@@ -209,10 +206,7 @@ class DbtAdapter:
             tbl_node = next((t for t in tables if t.get("name") == table_name), None)
             if tbl_node is None:
                 available = [t.get("name") for t in tables]
-                raise ValueError(
-                    f"Table '{table_name}' not in source '{src_node.get('name')}'. "
-                    f"Available: {available}"
-                )
+                raise ValueError(f"Table '{table_name}' not in source '{src_node.get('name')}'. Available: {available}")
         elif len(tables) == 1:
             tbl_node = tables[0]
         else:
@@ -230,33 +224,31 @@ class DbtAdapter:
 
     def _node_to_contract(self, node: Dict[str, Any], layer: str) -> DataContract:
         """Convert a raw dbt model/table node dict into a DataContract."""
-        name        = node.get("name", "unnamed")
+        name = node.get("name", "unnamed")
         description = node.get("description", "")
-        columns     = node.get("columns", [])
-        node_tests  = node.get("tests", [])   # model-level tests (rare)
+        columns = node.get("columns", [])
+        node_tests = node.get("tests", [])  # model-level tests (rare)
 
         fields: List[FieldDefinition] = []
-        row_rules: List[QualityRule]  = []
+        row_rules: List[QualityRule] = []
         dataset_rules: List[QualityRule] = []
         primary_key: List[str] = []
 
         tbl = name  # table alias used in SELECT … FROM <table>
 
         for col in columns:
-            col_name  = col.get("name", "col")
-            col_desc  = col.get("description", "")
+            col_name = col.get("name", "col")
+            col_desc = col.get("description", "")
             col_tests = col.get("tests", [])
-            col_meta  = col.get("meta", {}) or {}
-            col_tags  = col.get("tags", []) or []
-            col_type  = col.get("data_type") or col_meta.get("type") or "string"
+            col_meta = col.get("meta", {}) or {}
+            col_tags = col.get("tags", []) or []
+            col_type = col.get("data_type") or col_meta.get("type") or "string"
 
             required = False
             pii = _is_pii(col_name, col_meta, col_tags)
 
             for test in col_tests:
-                parsed_rules, is_required, is_unique = _parse_column_test(
-                    col_name, test, tbl
-                )
+                parsed_rules, is_required, is_unique = _parse_column_test(col_name, test, tbl)
                 if is_required:
                     required = True
                 if is_unique:
@@ -266,10 +258,7 @@ class DbtAdapter:
                     dataset_rules.append(
                         QualityRule(
                             name=f"{col_name}_unique",
-                            sql=(
-                                f"SELECT COUNT(*) - COUNT(DISTINCT {col_name}) "
-                                f"FROM {tbl}"
-                            ),
+                            sql=(f"SELECT COUNT(*) - COUNT(DISTINCT {col_name}) FROM {tbl}"),
                             must_be_less_than=1,
                             description=f"{col_name} must be unique",
                         )
@@ -354,6 +343,7 @@ class DbtAdapter:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+
 def _is_pii(col_name: str, meta: Dict[str, Any], tags: List[str]) -> bool:
     """Detect PII from dbt meta block or tags."""
     if meta.get("pii") or meta.get("is_pii"):
@@ -374,21 +364,39 @@ def _normalise_type(dbt_type: str) -> str:
     """Map dbt / SQL type names to LakeLogic field types."""
     t = dbt_type.lower().strip()
     _MAP = {
-        "varchar": "string", "nvarchar": "string", "char": "string",
-        "text": "string", "string": "string",
-        "int": "integer", "integer": "integer", "int4": "integer",
-        "int8": "integer", "bigint": "integer", "smallint": "integer",
-        "tinyint": "integer", "number": "double",
-        "float": "double", "float4": "double", "float8": "double",
-        "double": "double", "numeric": "double", "decimal": "double",
+        "varchar": "string",
+        "nvarchar": "string",
+        "char": "string",
+        "text": "string",
+        "string": "string",
+        "int": "integer",
+        "integer": "integer",
+        "int4": "integer",
+        "int8": "integer",
+        "bigint": "integer",
+        "smallint": "integer",
+        "tinyint": "integer",
+        "number": "double",
+        "float": "double",
+        "float4": "double",
+        "float8": "double",
+        "double": "double",
+        "numeric": "double",
+        "decimal": "double",
         "real": "double",
-        "bool": "boolean", "boolean": "boolean",
+        "bool": "boolean",
+        "boolean": "boolean",
         "date": "date",
-        "timestamp": "timestamp", "datetime": "timestamp",
-        "timestamp_ntz": "timestamp", "timestamp_tz": "timestamp",
+        "timestamp": "timestamp",
+        "datetime": "timestamp",
+        "timestamp_ntz": "timestamp",
+        "timestamp_tz": "timestamp",
         "timestamptz": "timestamp",
-        "json": "string", "jsonb": "string", "variant": "string",
-        "array": "string", "object": "string",
+        "json": "string",
+        "jsonb": "string",
+        "variant": "string",
+        "array": "string",
+        "object": "string",
     }
     # Strip precision/scale e.g. numeric(18,2) → numeric
     base = re.split(r"[\(\s]", t)[0]
@@ -416,7 +424,7 @@ def _parse_column_test(
     """
     rules: List[QualityRule] = []
     is_required = False
-    is_unique   = False
+    is_unique = False
 
     # Simple string test: "not_null", "unique"
     if isinstance(test, str):
@@ -444,10 +452,7 @@ def _parse_column_test(
         if values and col_name != "__model__":
             # Row rules use bare expressions — the engine wraps these in its
             # own SELECT … WHERE NOT (<expr>) evaluation.
-            quoted = ", ".join(
-                f"'{v}'" if not str(v).lstrip("-").isdigit() else str(v)
-                for v in values
-            )
+            quoted = ", ".join(f"'{v}'" if not str(v).lstrip("-").isdigit() else str(v) for v in values)
             rules.append(
                 QualityRule(
                     name=f"{col_name}_accepted_values",

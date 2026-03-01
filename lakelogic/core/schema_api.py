@@ -38,7 +38,6 @@ Integration flow
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -49,44 +48,87 @@ import yaml
 
 _KNOWN_TYPES = {
     # Primitive
-    "string", "str",
-    "integer", "int",
-    "bigint", "long",
-    "float", "double", "decimal", "numeric",
-    "boolean", "bool",
+    "string",
+    "str",
+    "integer",
+    "int",
+    "bigint",
+    "long",
+    "float",
+    "double",
+    "decimal",
+    "numeric",
+    "boolean",
+    "bool",
     # Date / time
-    "date", "datetime", "timestamp", "time",
+    "date",
+    "datetime",
+    "timestamp",
+    "time",
     # Complex
-    "list", "array",
-    "map", "dict", "object",
+    "list",
+    "array",
+    "map",
+    "dict",
+    "object",
     "struct",
     # Binary
-    "bytes", "binary",
+    "bytes",
+    "binary",
     # Nullable shorthand (e.g. "string?")
 }
 
 _KNOWN_LAYERS = {"bronze", "silver", "gold", "landing", "raw"}
-_KNOWN_FORMATS = {"parquet", "delta", "csv", "json", "ndjson", "iceberg", "avro", "orc", "excel"}
-_KNOWN_SERVER_TYPES = {"s3", "gcs", "adls", "azure", "local", "glue", "databricks", "bigquery"}
+_KNOWN_FORMATS = {
+    "parquet",
+    "delta",
+    "csv",
+    "json",
+    "ndjson",
+    "iceberg",
+    "avro",
+    "orc",
+    "excel",
+}
+_KNOWN_SERVER_TYPES = {
+    "s3",
+    "gcs",
+    "adls",
+    "azure",
+    "local",
+    "glue",
+    "databricks",
+    "bigquery",
+}
 _KNOWN_MODES = {"validate", "ingest"}
 _KNOWN_EVOLUTION = {"strict", "append", "merge", "overwrite", "compatible", "allow"}
 _KNOWN_STRATEGIES = {"append", "merge", "scd2", "overwrite"}
 _KNOWN_LOAD_MODES = {"full", "incremental", "cdc"}
 _KNOWN_SEVERITY = {"error", "warning", "info"}
 _KNOWN_CATEGORIES = {
-    "correctness", "completeness", "consistency", "validity",
-    "accuracy", "timeliness", "uniqueness", "integrity", "schema", "rule",
+    "correctness",
+    "completeness",
+    "consistency",
+    "validity",
+    "accuracy",
+    "timeliness",
+    "uniqueness",
+    "integrity",
+    "schema",
+    "rule",
 }
 
 
 # ── Result types ──────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ValidationError:
     """A single contract validation error with field path and message."""
-    field: str          # e.g. "model.fields[2].type"
-    message: str        # human-readable error message
-    severity: str = "error"   # "error" | "warning"
+
+    field: str  # e.g. "model.fields[2].type"
+    message: str  # human-readable error message
+    severity: str = "error"  # "error" | "warning"
 
     def to_dict(self) -> Dict[str, str]:
         return {"field": self.field, "message": self.message, "severity": self.severity}
@@ -108,6 +150,7 @@ class ValidationResult:
     contract : dict | None
         The parsed contract dict (None if parsing failed entirely).
     """
+
     valid: bool
     errors: List[ValidationError] = field(default_factory=list)
     contract: Optional[Dict[str, Any]] = None
@@ -135,6 +178,7 @@ class ValidationResult:
 
 
 # ── Validator ─────────────────────────────────────────────────────────────────
+
 
 class _ContractValidator:
     """Internal validator — walks a contract dict and collects issues."""
@@ -169,7 +213,10 @@ class _ContractValidator:
         if "version" not in d:
             self._err("version", "Required field 'version' is missing")
         elif not isinstance(d["version"], str):
-            self._err("version", f"'version' must be a string, got {type(d['version']).__name__}")
+            self._err(
+                "version",
+                f"'version' must be a string, got {type(d['version']).__name__}",
+            )
 
     # ── Info ──────────────────────────────────────────────────────────────────
 
@@ -180,7 +227,10 @@ class _ContractValidator:
             self._err(path, "'info' must be a mapping")
             return
         if "title" not in info:
-            self._warn(f"{path}.title", "'info.title' is missing — recommended for discoverability")
+            self._warn(
+                f"{path}.title",
+                "'info.title' is missing — recommended for discoverability",
+            )
         if "version" not in info:
             self._warn(f"{path}.version", "'info.version' is missing")
 
@@ -196,17 +246,25 @@ class _ContractValidator:
             if req not in server:
                 self._err(f"{path}.{req}", f"'server.{req}' is required")
         if "type" in server and server["type"] not in _KNOWN_SERVER_TYPES:
-            self._warn(f"{path}.type", f"Unknown server type '{server['type']}'. "
-                       f"Known: {sorted(_KNOWN_SERVER_TYPES)}")
+            self._warn(
+                f"{path}.type",
+                f"Unknown server type '{server['type']}'. Known: {sorted(_KNOWN_SERVER_TYPES)}",
+            )
         if "format" in server and server["format"] not in _KNOWN_FORMATS:
-            self._warn(f"{path}.format", f"Unknown format '{server['format']}'. "
-                       f"Known: {sorted(_KNOWN_FORMATS)}")
+            self._warn(
+                f"{path}.format",
+                f"Unknown format '{server['format']}'. Known: {sorted(_KNOWN_FORMATS)}",
+            )
         if "mode" in server and server["mode"] not in _KNOWN_MODES:
-            self._err(f"{path}.mode", f"'server.mode' must be one of {sorted(_KNOWN_MODES)}, "
-                      f"got '{server['mode']}'")
+            self._err(
+                f"{path}.mode",
+                f"'server.mode' must be one of {sorted(_KNOWN_MODES)}, got '{server['mode']}'",
+            )
         if "schema_evolution" in server and server["schema_evolution"] not in _KNOWN_EVOLUTION:
-            self._warn(f"{path}.schema_evolution",
-                       f"Unknown schema_evolution value '{server['schema_evolution']}'")
+            self._warn(
+                f"{path}.schema_evolution",
+                f"Unknown schema_evolution value '{server['schema_evolution']}'",
+            )
 
     # ── Source ────────────────────────────────────────────────────────────────
 
@@ -220,10 +278,15 @@ class _ContractValidator:
             self._err(f"{path}.type", "'source.type' is required (landing | stream | table)")
         lm = source.get("load_mode", "full")
         if lm not in _KNOWN_LOAD_MODES:
-            self._err(f"{path}.load_mode", f"'load_mode' must be one of {sorted(_KNOWN_LOAD_MODES)}, got '{lm}'")
+            self._err(
+                f"{path}.load_mode",
+                f"'load_mode' must be one of {sorted(_KNOWN_LOAD_MODES)}, got '{lm}'",
+            )
         if lm == "incremental" and not source.get("watermark_field"):
-            self._warn(f"{path}.watermark_field",
-                       "Incremental load mode without 'watermark_field' — boundary detection may fail")
+            self._warn(
+                f"{path}.watermark_field",
+                "Incremental load mode without 'watermark_field' — boundary detection may fail",
+            )
 
     # ── Model ─────────────────────────────────────────────────────────────────
 
@@ -238,7 +301,10 @@ class _ContractValidator:
             self._err(f"{path}.fields", "'model.fields' must be a list")
             return
         if not fields:
-            self._warn(f"{path}.fields", "'model.fields' is empty — contract has no schema definition")
+            self._warn(
+                f"{path}.fields",
+                "'model.fields' is empty — contract has no schema definition",
+            )
         seen_names: set[str] = set()
         for i, f in enumerate(fields):
             fp = f"{path}.fields[{i}]"
@@ -269,12 +335,17 @@ class _ContractValidator:
 
     def _check_field_type(self, type_val: Any, path: str, name: str) -> None:
         if not isinstance(type_val, str):
-            self._err(path, f"Field '{name}': 'type' must be a string, got {type(type_val).__name__}")
+            self._err(
+                path,
+                f"Field '{name}': 'type' must be a string, got {type(type_val).__name__}",
+            )
             return
         cleaned = type_val.rstrip("?").lower()
         if cleaned not in _KNOWN_TYPES:
-            self._warn(path, f"Field '{name}': unknown type '{type_val}'. "
-                       f"Known types: {sorted(_KNOWN_TYPES)}")
+            self._warn(
+                path,
+                f"Field '{name}': unknown type '{type_val}'. Known types: {sorted(_KNOWN_TYPES)}",
+            )
 
     # ── Quality ───────────────────────────────────────────────────────────────
 
@@ -297,9 +368,17 @@ class _ContractValidator:
                 self._err(rp, "Each rule must be a mapping")
                 continue
             # Business-friendly shorthand rules (not_null, accepted_values, etc.)
-            shorthand_keys = {"not_null", "accepted_values", "regex_match", "range",
-                              "referential_integrity", "lifecycle_window", "unique",
-                              "null_ratio", "row_count_between"}
+            shorthand_keys = {
+                "not_null",
+                "accepted_values",
+                "regex_match",
+                "range",
+                "referential_integrity",
+                "lifecycle_window",
+                "unique",
+                "null_ratio",
+                "row_count_between",
+            }
             if any(k in rule for k in shorthand_keys):
                 continue  # shorthand forms — validated at runtime by DataProcessor
             # SQL-form rule
@@ -309,8 +388,10 @@ class _ContractValidator:
                 self._err(f"{rp}.sql", f"Rule '{rule.get('name', i)}' is missing 'sql'")
             sev = rule.get("severity", "error")
             if sev not in _KNOWN_SEVERITY:
-                self._warn(f"{rp}.severity", f"Unknown severity '{sev}'. "
-                           f"Expected: {sorted(_KNOWN_SEVERITY)}")
+                self._warn(
+                    f"{rp}.severity",
+                    f"Unknown severity '{sev}'. Expected: {sorted(_KNOWN_SEVERITY)}",
+                )
             cat = rule.get("category", "correctness")
             if cat not in _KNOWN_CATEGORIES:
                 self._warn(f"{rp}.category", f"Unknown category '{cat}'")
@@ -322,9 +403,26 @@ class _ContractValidator:
             self._err(path, "'transformations' must be a list")
             return
         _known_tx = {
-            "rename", "derive", "lookup", "filter", "deduplicate", "select",
-            "drop", "cast", "trim", "lower", "upper", "coalesce", "split",
-            "explode", "map_values", "rollup", "join", "pivot", "unpivot", "sql",
+            "rename",
+            "derive",
+            "lookup",
+            "filter",
+            "deduplicate",
+            "select",
+            "drop",
+            "cast",
+            "trim",
+            "lower",
+            "upper",
+            "coalesce",
+            "split",
+            "explode",
+            "map_values",
+            "rollup",
+            "join",
+            "pivot",
+            "unpivot",
+            "sql",
         }
         for i, tx in enumerate(txs):
             tp = f"{path}[{i}]"
@@ -333,8 +431,10 @@ class _ContractValidator:
                 continue
             known = {k for k in tx if k in _known_tx}
             if not known:
-                self._warn(tp, f"Transformation has no recognised operation key. "
-                           f"Known: {sorted(_known_tx)}")
+                self._warn(
+                    tp,
+                    f"Transformation has no recognised operation key. Known: {sorted(_known_tx)}",
+                )
             phase = tx.get("phase", "post")
             if phase not in ("pre", "post"):
                 self._err(f"{tp}.phase", f"'phase' must be 'pre' or 'post', got '{phase}'")
@@ -349,8 +449,10 @@ class _ContractValidator:
             return
         strategy = mat.get("strategy", "append")
         if strategy not in _KNOWN_STRATEGIES:
-            self._warn(f"{path}.strategy", f"Unknown materialization strategy '{strategy}'. "
-                       f"Known: {sorted(_KNOWN_STRATEGIES)}")
+            self._warn(
+                f"{path}.strategy",
+                f"Unknown materialization strategy '{strategy}'. Known: {sorted(_KNOWN_STRATEGIES)}",
+            )
 
     # ── Service Levels ────────────────────────────────────────────────────────
 
@@ -365,11 +467,15 @@ class _ContractValidator:
             if isinstance(avail, dict):
                 threshold = avail.get("threshold")
                 if threshold is not None and not isinstance(threshold, (int, float, str)):
-                    self._warn(f"{path}.availability.threshold",
-                               "'availability.threshold' should be a number or percentage string")
+                    self._warn(
+                        f"{path}.availability.threshold",
+                        "'availability.threshold' should be a number or percentage string",
+                    )
             elif not isinstance(avail, (int, float)):
-                self._warn(f"{path}.availability",
-                           "'availability' should be a number (e.g. 99.9) or an SLO object")
+                self._warn(
+                    f"{path}.availability",
+                    "'availability' should be a number (e.g. 99.9) or an SLO object",
+                )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -381,6 +487,7 @@ class _ContractValidator:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
 
 def validate_contract(
     source: Union[str, Path, Dict[str, Any]],
@@ -483,6 +590,7 @@ def contract_schema() -> Dict[str, Any]:
     """
     try:
         from lakelogic.core.models import DataContract
+
         base = DataContract.model_json_schema()
     except Exception:
         base = {}
@@ -522,41 +630,68 @@ def _augment_schema(schema: Dict[str, Any]) -> None:
         props["version"]["description"] = "Semantic version of the contract (e.g. '1.0.0')"
 
     # server.type enum
-    _set_nested_enum(schema, ["$defs", "Server", "properties", "type"],
-                     sorted(_KNOWN_SERVER_TYPES),
-                     "Storage backend type")
-    _set_nested_enum(schema, ["$defs", "Server", "properties", "format"],
-                     sorted(_KNOWN_FORMATS),
-                     "File/table format")
-    _set_nested_enum(schema, ["$defs", "Server", "properties", "mode"],
-                     sorted(_KNOWN_MODES),
-                     "Pipeline mode: 'validate' for quality gate, 'ingest' for raw→bronze")
-    _set_nested_enum(schema, ["$defs", "Server", "properties", "schema_evolution"],
-                     sorted(_KNOWN_EVOLUTION),
-                     "Schema evolution policy")
+    _set_nested_enum(
+        schema,
+        ["$defs", "Server", "properties", "type"],
+        sorted(_KNOWN_SERVER_TYPES),
+        "Storage backend type",
+    )
+    _set_nested_enum(
+        schema,
+        ["$defs", "Server", "properties", "format"],
+        sorted(_KNOWN_FORMATS),
+        "File/table format",
+    )
+    _set_nested_enum(
+        schema,
+        ["$defs", "Server", "properties", "mode"],
+        sorted(_KNOWN_MODES),
+        "Pipeline mode: 'validate' for quality gate, 'ingest' for raw→bronze",
+    )
+    _set_nested_enum(
+        schema,
+        ["$defs", "Server", "properties", "schema_evolution"],
+        sorted(_KNOWN_EVOLUTION),
+        "Schema evolution policy",
+    )
 
     # source.load_mode
-    _set_nested_enum(schema, ["$defs", "SourceConfig", "properties", "load_mode"],
-                     sorted(_KNOWN_LOAD_MODES),
-                     "Load strategy: full reload or incremental/CDC")
+    _set_nested_enum(
+        schema,
+        ["$defs", "SourceConfig", "properties", "load_mode"],
+        sorted(_KNOWN_LOAD_MODES),
+        "Load strategy: full reload or incremental/CDC",
+    )
 
     # quality category
-    _set_nested_enum(schema, ["$defs", "QualityRule", "properties", "category"],
-                     sorted(_KNOWN_CATEGORIES),
-                     "Quality dimension this rule measures")
-    _set_nested_enum(schema, ["$defs", "QualityRule", "properties", "severity"],
-                     sorted(_KNOWN_SEVERITY),
-                     "Severity: error quarantines the row, warning logs only")
+    _set_nested_enum(
+        schema,
+        ["$defs", "QualityRule", "properties", "category"],
+        sorted(_KNOWN_CATEGORIES),
+        "Quality dimension this rule measures",
+    )
+    _set_nested_enum(
+        schema,
+        ["$defs", "QualityRule", "properties", "severity"],
+        sorted(_KNOWN_SEVERITY),
+        "Severity: error quarantines the row, warning logs only",
+    )
 
     # field type hint
-    _set_nested_enum(schema, ["$defs", "FieldDefinition", "properties", "type"],
-                     sorted(_KNOWN_TYPES),
-                     "Column data type")
+    _set_nested_enum(
+        schema,
+        ["$defs", "FieldDefinition", "properties", "type"],
+        sorted(_KNOWN_TYPES),
+        "Column data type",
+    )
 
     # materialization strategy
-    _set_nested_enum(schema, ["$defs", "Materialization", "properties", "strategy"],
-                     sorted(_KNOWN_STRATEGIES),
-                     "Write strategy for Silver/Gold outputs")
+    _set_nested_enum(
+        schema,
+        ["$defs", "Materialization", "properties", "strategy"],
+        sorted(_KNOWN_STRATEGIES),
+        "Write strategy for Silver/Gold outputs",
+    )
 
     # Add UI-friendly metadata
     schema["title"] = "LakeLogic Data Contract"

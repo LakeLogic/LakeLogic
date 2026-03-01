@@ -16,10 +16,11 @@ Usage (CLI):
     lakelogic init-tables ./contracts/ --backend spark --dry-run
     lakelogic init-tables ./contracts/orders.yaml --backend duckdb
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -246,6 +247,7 @@ def _resolve_type(contract_type: str, backend: str) -> str:
 
     # Handle parameterised types: decimal(10,2), numeric(p,s), varchar(n)
     import re
+
     param_match = re.match(r"^(\w+)\((.+)\)$", lower)
     if param_match:
         base_type = param_match.group(1)
@@ -321,6 +323,7 @@ def _resolve_table_name(contract: DataContract) -> Optional[str]:
     if contract.info and contract.info.title:
         # Sanitize title for table name
         import re
+
         return re.sub(r"[^a-zA-Z0-9_]", "_", contract.info.title).lower()
 
     return None
@@ -334,6 +337,7 @@ def _get_fields(contract: DataContract) -> List[FieldDefinition]:
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+
 
 def generate_ddl(
     contract: DataContract,
@@ -388,7 +392,11 @@ def generate_ddl(
 
         # Column comment
         comment = ""
-        if include_comments and field.description and backend in ("spark", "databricks", "snowflake", "bigquery", "postgresql"):
+        if (
+            include_comments
+            and field.description
+            and backend in ("spark", "databricks", "snowflake", "bigquery", "postgresql")
+        ):
             escaped = field.description.replace("'", "''")
             if backend in ("spark", "databricks"):
                 comment = f" COMMENT '{escaped}'"
@@ -408,7 +416,6 @@ def generate_ddl(
         col_defs.append(col_def)
 
     # Primary key constraint
-    pk_clause = ""
     if primary_key:
         if backend in ("duckdb", "postgresql", "sqlite"):
             pk_name = f"pk_{resolved_table.replace('.', '_')}"
@@ -542,22 +549,17 @@ def generate_alter_ddl(
         if field.name.lower() not in existing_set:
             sql_type = _resolve_type(field.type, backend)
             if backend in ("duckdb",):
-                statements.append(
-                    f"ALTER TABLE {resolved_table} ADD COLUMN IF NOT EXISTS {field.name} {sql_type};"
-                )
+                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN IF NOT EXISTS {field.name} {sql_type};")
             elif backend == "bigquery":
-                statements.append(
-                    f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};"
-                )
+                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};")
             else:
-                statements.append(
-                    f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};"
-                )
+                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};")
 
     return statements
 
 
 # ── Execution helpers ────────────────────────────────────────────────────────
+
 
 def create_table(
     contract: DataContract,
@@ -592,6 +594,7 @@ def create_table(
 
     if backend in ("duckdb",):
         import duckdb
+
         con = connection or duckdb.connect(database=str(db_path or ":memory:"))
         try:
             for statement in ddl.split(";"):
@@ -605,6 +608,7 @@ def create_table(
 
     elif backend == "sqlite":
         import sqlite3
+
         con = connection or sqlite3.connect(str(db_path or ":memory:"))
         try:
             for statement in ddl.split(";"):
@@ -620,6 +624,7 @@ def create_table(
     elif backend in ("spark", "databricks"):
         try:
             from pyspark.sql import SparkSession
+
             spark = SparkSession.builder.getOrCreate()
             for statement in ddl.split(";"):
                 statement = statement.strip()

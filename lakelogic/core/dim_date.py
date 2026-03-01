@@ -37,10 +37,11 @@ Usage via DataProcessor:
     proc = DataProcessor("contract.yaml")
     df = proc.generate_date_dimension(start_date="2020-01-01", end_date="2030-12-31")
 """
+
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import date, timedelta
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -49,13 +50,29 @@ from loguru import logger
 # These are approximations for common holidays. Users can override with custom lists.
 
 _MONTH_NAMES = [
-    "", "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
+    "",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
 ]
 
 _DAY_NAMES = [
-    "Monday", "Tuesday", "Wednesday", "Thursday",
-    "Friday", "Saturday", "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
 ]
 
 _DAY_ABBREVS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -181,6 +198,7 @@ def get_uk_bank_holidays(year: int) -> Dict[date, str]:
 
 # ── Core Generator ───────────────────────────────────────────────────────────
 
+
 def _generate_date_records(
     start_date: date,
     end_date: date,
@@ -304,10 +322,8 @@ def _generate_date_records(
 
         if include_relative_flags:
             record["is_today"] = current == today
-            record["is_current_month"] = (year == today.year and month == today.month)
-            record["is_current_quarter"] = (
-                year == today.year and quarter == ((today.month - 1) // 3 + 1)
-            )
+            record["is_current_month"] = year == today.year and month == today.month
+            record["is_current_quarter"] = year == today.year and quarter == ((today.month - 1) // 3 + 1)
             record["is_current_year"] = year == today.year
             record["days_from_today"] = (current - today).days
 
@@ -376,7 +392,8 @@ def generate_date_dimension(
             holidays[date.fromisoformat(date_str)] = name
 
     records = _generate_date_records(
-        start, end,
+        start,
+        end,
         fiscal_year_start_month=fiscal_year_start_month,
         holidays=holidays,
         include_relative_flags=include_relative_flags,
@@ -394,31 +411,37 @@ def generate_date_dimension(
 
     if engine == "polars":
         import polars as pl
+
         df = pl.DataFrame(records)
         # Cast types for better storage
-        df = df.with_columns([
-            pl.col("full_date").str.to_date().alias("full_date"),
-            pl.col("is_weekend").cast(pl.Boolean),
-            pl.col("is_business_day").cast(pl.Boolean),
-            pl.col("is_holiday").cast(pl.Boolean),
-            pl.col("is_month_start").cast(pl.Boolean),
-            pl.col("is_month_end").cast(pl.Boolean),
-            pl.col("is_quarter_start").cast(pl.Boolean),
-            pl.col("is_quarter_end").cast(pl.Boolean),
-            pl.col("is_year_start").cast(pl.Boolean),
-            pl.col("is_year_end").cast(pl.Boolean),
-        ])
+        df = df.with_columns(
+            [
+                pl.col("full_date").str.to_date().alias("full_date"),
+                pl.col("is_weekend").cast(pl.Boolean),
+                pl.col("is_business_day").cast(pl.Boolean),
+                pl.col("is_holiday").cast(pl.Boolean),
+                pl.col("is_month_start").cast(pl.Boolean),
+                pl.col("is_month_end").cast(pl.Boolean),
+                pl.col("is_quarter_start").cast(pl.Boolean),
+                pl.col("is_quarter_end").cast(pl.Boolean),
+                pl.col("is_year_start").cast(pl.Boolean),
+                pl.col("is_year_end").cast(pl.Boolean),
+            ]
+        )
         if include_relative_flags:
-            df = df.with_columns([
-                pl.col("is_today").cast(pl.Boolean),
-                pl.col("is_current_month").cast(pl.Boolean),
-                pl.col("is_current_quarter").cast(pl.Boolean),
-                pl.col("is_current_year").cast(pl.Boolean),
-            ])
+            df = df.with_columns(
+                [
+                    pl.col("is_today").cast(pl.Boolean),
+                    pl.col("is_current_month").cast(pl.Boolean),
+                    pl.col("is_current_quarter").cast(pl.Boolean),
+                    pl.col("is_current_year").cast(pl.Boolean),
+                ]
+            )
         return df
 
     elif engine == "pandas":
         import pandas as pd
+
         df = pd.DataFrame(records)
         df["full_date"] = pd.to_datetime(df["full_date"]).dt.date
         return df

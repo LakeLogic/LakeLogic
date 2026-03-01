@@ -5,7 +5,6 @@ Extracted from ``driver.py`` to keep the pipeline driver module focused on
 orchestration logic.
 """
 
-import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple

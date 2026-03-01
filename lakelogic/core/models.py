@@ -1,7 +1,13 @@
-from pydantic import BaseModel, Field, ConfigDict, AliasChoices, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ConfigDict,
+    AliasChoices,
+    field_validator,
+    model_validator,
+)
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
-from enum import Enum
-from datetime import datetime
 import warnings
 
 _QUALITY_CATEGORIES = {
@@ -29,8 +35,10 @@ _QUALITY_CATEGORY_SYNONYMS = {
     "referential": "integrity",
 }
 
+
 class Info(BaseModel):
     """Contract metadata such as title, version, and ownership."""
+
     title: str
     version: str
     description: Optional[str] = None
@@ -39,28 +47,34 @@ class Info(BaseModel):
     target_layer: Optional[str] = None
     status: Optional[str] = None
     classification: Optional[str] = None
-    domain: Optional[str] = None    # e.g. "real-estate", "finance", "logistics"
-    system: Optional[str] = None    # e.g. "zoopla", "salesforce", "sap"
+    domain: Optional[str] = None  # e.g. "real-estate", "finance", "logistics"
+    system: Optional[str] = None  # e.g. "zoopla", "salesforce", "sap"
+
 
 class Server(BaseModel):
     """Storage and ingestion settings for a contract."""
-    type: str # s3, gcs, adls, azure, local, glue
-    format: str = "parquet" # parquet, delta, iceberg, csv, json
-    path: str # e.g. s3://bucket/path, gs://bucket/path, abfss://container@account...
-    
+
+    type: str  # s3, gcs, adls, azure, local, glue
+    format: str = "parquet"  # parquet, delta, iceberg, csv, json
+    path: str  # e.g. s3://bucket/path, gs://bucket/path, abfss://container@account...
+
     # Ingestion Controls
-    mode: str = "validate" # 'validate' for Quality Gate, 'ingest' for Raw-to-Bronze movement
-    schema_evolution: str = "strict" # strict, append, merge, overwrite
+    mode: str = "validate"  # 'validate' for Quality Gate, 'ingest' for Raw-to-Bronze movement
+    schema_evolution: str = "strict"  # strict, append, merge, overwrite
     allow_schema_drift: bool = False
     cast_to_string: bool = False
 
+
 class Environment(BaseModel):
     """Environment-specific path/format overrides."""
+
     path: str
     format: Optional[str] = None
 
+
 class SourceConfig(BaseModel):
     """Source acquisition settings for landing/stream/table inputs."""
+
     type: str  # landing | stream | table
     path: Optional[str] = None
     load_mode: str = "full"  # full | incremental | cdc
@@ -108,14 +122,14 @@ class SourceConfig(BaseModel):
     #     watermark_field: _snapshot_date
     #     watermark_strategy: manifest
     #     manifest_path: /dbfs/mnt/meta/manifests/bronze_to_silver_zoopla.json
-    watermark_strategy: str = "max_target"   # max_target | pipeline_log | manifest | lookback | date_range
-    target_path: Optional[str] = None        # required when strategy == max_target
-    lookback: Optional[str] = None           # e.g. "7 days", "3 hours" — strategy == lookback
-    from_date: Optional[str] = None          # ISO date — strategy == date_range
-    to_date: Optional[str] = None            # ISO date — strategy == date_range
-    pipeline_log_table: Optional[str] = None # Spark table name — strategy == pipeline_log
-    pipeline_name: Optional[str] = None      # pipeline identifier — strategy == pipeline_log
-    manifest_path: Optional[str] = None      # JSON file path — strategy == manifest
+    watermark_strategy: str = "max_target"  # max_target | pipeline_log | manifest | lookback | date_range
+    target_path: Optional[str] = None  # required when strategy == max_target
+    lookback: Optional[str] = None  # e.g. "7 days", "3 hours" — strategy == lookback
+    from_date: Optional[str] = None  # ISO date — strategy == date_range
+    to_date: Optional[str] = None  # ISO date — strategy == date_range
+    pipeline_log_table: Optional[str] = None  # Spark table name — strategy == pipeline_log
+    pipeline_name: Optional[str] = None  # pipeline identifier — strategy == pipeline_log
+    manifest_path: Optional[str] = None  # JSON file path — strategy == manifest
 
     # ── Multi-column partition support ────────────────────────────────────────────
     # watermark_date_parts: maps logical date roles to actual column names.
@@ -157,21 +171,27 @@ class SourceConfig(BaseModel):
     #     flatten_nested: [derived, pricing, location]
     flatten_nested: Union[bool, List[str]] = False
 
+
 class SchemaPolicy(BaseModel):
     """Schema enforcement rules for unknown and evolving fields."""
-    evolution: str = "strict" # strict, compatible, allow
-    unknown_fields: str = "quarantine" # quarantine, drop, allow
+
+    evolution: str = "strict"  # strict, compatible, allow
+    unknown_fields: str = "quarantine"  # quarantine, drop, allow
+
 
 class Link(BaseModel):
     """Reference dataset link (file path or table name)."""
+
     name: str
     path: Optional[str] = None
     type: str = "parquet"  # parquet, csv, table
     table: Optional[str] = None
     broadcast: bool = False
 
+
 class TransformationRename(BaseModel):
     """Rename a column prior to validation."""
+
     model_config = ConfigDict(populate_by_name=True, extra="allow")
     from_name: Optional[str] = Field(default=None, alias="from")
     to_name: Optional[str] = Field(default=None, alias="to")
@@ -184,82 +204,112 @@ class TransformationRename(BaseModel):
             return [(self.from_name, self.to_name)]
         return []
 
+
 class TransformationDerive(BaseModel):
     """Derive a new field from a SQL expression."""
+
     field: str
     sql: str
 
+
 class TransformationLookup(BaseModel):
     """Lookup/join enrichment configuration."""
+
     field: str
     reference: str
     on: str
     key: str
     value: str
-    default_value: Optional[Any] = None # Handles orphaned keys (-1, 'Unknown')
+    default_value: Optional[Any] = None  # Handles orphaned keys (-1, 'Unknown')
+
 
 class TransformationFilter(BaseModel):
     """Row-level filter expressed in SQL."""
+
     sql: str
+
 
 class TransformationDeduplicate(BaseModel):
     """Deduplication rule configuration."""
+
     on: List[str]
     sort_by: Optional[List[str]] = None
     order: str = "desc"
 
+
 class TransformationSelect(BaseModel):
     """Select a subset of columns."""
+
     columns: List[str]
+
 
 class TransformationDrop(BaseModel):
     """Drop columns by name."""
+
     columns: List[str]
+
 
 class TransformationCast(BaseModel):
     """Cast columns to specific types."""
+
     columns: Dict[str, str]
+
 
 class TransformationTrim(BaseModel):
     """Trim whitespace from fields."""
+
     fields: List[str]
     side: str = "both"  # both | left | right
 
+
 class TransformationLower(BaseModel):
     """Lower-case string fields."""
+
     fields: List[str]
+
 
 class TransformationUpper(BaseModel):
     """Upper-case string fields."""
+
     fields: List[str]
+
 
 class TransformationCoalesce(BaseModel):
     """Coalesce multiple fields into a single output."""
+
     field: str
     sources: List[str] = Field(default_factory=list)
     default: Optional[Any] = None
     output: Optional[str] = None
 
+
 class TransformationSplit(BaseModel):
     """Split a string field into an array."""
+
     field: str
     delimiter: str = ","
     output: Optional[str] = None
 
+
 class TransformationExplode(BaseModel):
     """Explode an array field into multiple rows."""
+
     field: str
     output: Optional[str] = None
 
+
 class TransformationMapValues(BaseModel):
     """Map input values to output values."""
+
     field: str
     mapping: Dict[str, Any]
     default: Optional[Any] = None
     output: Optional[str] = None
 
+
 class TransformationRollup(BaseModel):
     """Aggregate data and retain rollup lineage keys."""
+
     group_by: List[str] = Field(default_factory=list)
     aggregations: Dict[str, str] = Field(default_factory=dict)  # output_name -> SQL expression
     keys: Optional[Union[str, List[str]]] = None
@@ -270,8 +320,10 @@ class TransformationRollup(BaseModel):
     upstream_run_ids_column: Optional[str] = "_upstream_lakelogic_run_ids"
     distinct: bool = True
 
+
 class TransformationJoin(BaseModel):
     """Join a reference table to enrich multiple fields."""
+
     reference: str
     on: str
     key: str
@@ -280,8 +332,10 @@ class TransformationJoin(BaseModel):
     prefix: Optional[str] = None
     defaults: Dict[str, Any] = Field(default_factory=dict)
 
+
 class TransformationPivot(BaseModel):
     """Pivot rows into columns using conditional aggregation."""
+
     model_config = ConfigDict(extra="allow")
     id_vars: List[str] = Field(default_factory=list)
     pivot_col: Optional[str] = None
@@ -308,8 +362,10 @@ class TransformationPivot(BaseModel):
             self.values = list(self.pivot_values)
         return self
 
+
 class TransformationUnpivot(BaseModel):
     """Unpivot columns into rows."""
+
     model_config = ConfigDict(extra="allow")
     id_vars: List[str] = Field(default_factory=list)
     value_vars: List[str] = Field(default_factory=list)
@@ -325,14 +381,16 @@ class TransformationUnpivot(BaseModel):
             self.value_vars = list(self.value_cols)
         return self
 
+
 class TransformationBucketBin(BaseModel):
     """A single range/equality bin for TransformationBucket."""
+
     label: str
-    lt: Optional[float] = None    # source < lt  → label
-    lte: Optional[float] = None   # source <= lte → label
-    gt: Optional[float] = None    # source > gt  → label
-    gte: Optional[float] = None   # source >= gte → label
-    eq: Optional[Any] = None      # source == eq  → label (exact match)
+    lt: Optional[float] = None  # source < lt  → label
+    lte: Optional[float] = None  # source <= lte → label
+    gt: Optional[float] = None  # source > gt  → label
+    gte: Optional[float] = None  # source >= gte → label
+    eq: Optional[Any] = None  # source == eq  → label (exact match)
 
 
 class TransformationBucket(BaseModel):
@@ -356,8 +414,9 @@ class TransformationBucket(BaseModel):
                 label: 500k_1m
             default: 1m_plus
     """
-    field: str             # output column name
-    source: str            # input column to evaluate
+
+    field: str  # output column name
+    source: str  # input column to evaluate
     bins: List[TransformationBucketBin] = Field(default_factory=list)
     default: Optional[Any] = None  # ELSE value; NULL when omitted
 
@@ -378,9 +437,10 @@ class TransformationJsonExtract(BaseModel):
             path: "$.latitude"
             cast: float
     """
-    field: str            # output column name
-    source: str           # source JSON string column
-    path: str             # JSONPath expression, e.g. "$.latitude"
+
+    field: str  # output column name
+    source: str  # source JSON string column
+    path: str  # JSONPath expression, e.g. "$.latitude"
     cast: Optional[str] = None  # optional type cast: float, integer, string
 
 
@@ -402,10 +462,11 @@ class TransformationDateRangeExplode(BaseModel):
             start_col: creation_date
             end_col: deleted_at       # nullable — defaults to today when null
     """
-    output: str                      # name of the new date column
-    start_col: str                   # column holding range start date
-    end_col: Optional[str] = None    # column holding range end date (nullable)
-    interval: str = "1d"             # Polars duration string: '1d', '7d', etc.
+
+    output: str  # name of the new date column
+    start_col: str  # column holding range start date
+    end_col: Optional[str] = None  # column holding range end date (nullable)
+    interval: str = "1d"  # Polars duration string: '1d', '7d', etc.
 
 
 class TransformationDateDiff(BaseModel):
@@ -424,14 +485,16 @@ class TransformationDateDiff(BaseModel):
             to_col: event_date
             unit: days
     """
-    field: str            # output column name
-    from_col: str         # earlier date column (start)
-    to_col: str           # later date column (end)
-    unit: str = "days"   # days | hours | months
+
+    field: str  # output column name
+    from_col: str  # earlier date column (start)
+    to_col: str  # later date column (end)
+    unit: str = "days"  # days | hours | months
 
 
 class Transformation(BaseModel):
     """Transformation step (SQL or structured)."""
+
     model_config = ConfigDict(extra="allow")
     rename: Optional[TransformationRename] = None
     derive: Optional[TransformationDerive] = None
@@ -459,21 +522,30 @@ class Transformation(BaseModel):
     sql: Optional[str] = None
     phase: str = "post"  # pre | post
 
+
 class RowRuleNotNull(BaseModel):
     """Business-friendly not-null rule."""
+
     not_null: Union[str, Dict[str, Any], List[Union[str, Dict[str, Any]]]]
+
 
 class RowRuleAcceptedValues(BaseModel):
     """Business-friendly accepted values rule."""
+
     accepted_values: Dict[str, Any]
+
 
 class RowRuleRegexMatch(BaseModel):
     """Business-friendly regex match rule."""
+
     regex_match: Dict[str, Any]
+
 
 class RowRuleRange(BaseModel):
     """Business-friendly range rule."""
+
     range: Dict[str, Any]
+
 
 class ForeignKeyRef(BaseModel):
     """
@@ -513,39 +585,51 @@ class ForeignKeyRef(BaseModel):
             to:    ref('agents')
             field: agent_id
     """
-    contract: str              # LakeLogic contract name (e.g. 'silver_agents')
-    column: str                # PK column in the referenced contract
-    severity: str = "error"   # error | warning | info
+
+    contract: str  # LakeLogic contract name (e.g. 'silver_agents')
+    column: str  # PK column in the referenced contract
+    severity: str = "error"  # error | warning | info
 
 
 class RowRuleReferentialIntegrity(BaseModel):
     """Business-friendly referential integrity rule."""
-    referential_integrity: Dict[str, Any]   # keys: field, contract, column, severity
+
+    referential_integrity: Dict[str, Any]  # keys: field, contract, column, severity
+
 
 class RowRuleLifecycleWindow(BaseModel):
     """Business-friendly lifecycle window rule."""
+
     lifecycle_window: Dict[str, Any]
+
 
 class DatasetRuleUnique(BaseModel):
     """Business-friendly unique rule."""
+
     unique: Union[str, Dict[str, Any]]
+
 
 class DatasetRuleNullRatio(BaseModel):
     """Business-friendly null ratio rule."""
+
     null_ratio: Dict[str, Any]
+
 
 class DatasetRuleRowCountBetween(BaseModel):
     """Business-friendly row count rule."""
+
     row_count_between: Dict[str, Any]
+
 
 class QualityRule(BaseModel):
     """Row-level or dataset-level quality rule."""
+
     name: str
     sql: str
     category: str = "correctness"
     description: Optional[str] = None
-    severity: str = "error" # error, warning, info
-    
+    severity: str = "error"  # error, warning, info
+
     # Thresholds for dataset-level rules
     must_be_between: Optional[List[float]] = None
     must_be_less_than: Optional[float] = None
@@ -562,17 +646,36 @@ class QualityRule(BaseModel):
         text = _QUALITY_CATEGORY_SYNONYMS.get(text, text)
         if text not in _QUALITY_CATEGORIES:
             warnings.warn(
-                f"Unknown quality rule category '{value}'. "
-                f"Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}.",
+                f"Unknown quality rule category '{value}'. Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}.",
                 UserWarning,
             )
         return text
 
+
 class Quality(BaseModel):
     """Quality rule groups for row and dataset checks."""
+
     enforce_required: bool = True
-    row_rules: List[Union[QualityRule, RowRuleNotNull, RowRuleAcceptedValues, RowRuleRegexMatch, RowRuleRange, RowRuleReferentialIntegrity, RowRuleLifecycleWindow]] = Field(default_factory=list)
-    dataset_rules: List[Union[QualityRule, DatasetRuleUnique, DatasetRuleNullRatio, DatasetRuleRowCountBetween]] = Field(default_factory=list)
+    row_rules: List[
+        Union[
+            QualityRule,
+            RowRuleNotNull,
+            RowRuleAcceptedValues,
+            RowRuleRegexMatch,
+            RowRuleRange,
+            RowRuleReferentialIntegrity,
+            RowRuleLifecycleWindow,
+        ]
+    ] = Field(default_factory=list)
+    dataset_rules: List[
+        Union[
+            QualityRule,
+            DatasetRuleUnique,
+            DatasetRuleNullRatio,
+            DatasetRuleRowCountBetween,
+        ]
+    ] = Field(default_factory=list)
+
 
 class Notification(BaseModel):
     """
@@ -590,6 +693,7 @@ class Notification(BaseModel):
     legacy built-in adapters (``smtp``, ``sendgrid``, ``slack``,
     ``teams``, ``webhook``).
     """
+
     model_config = ConfigDict(populate_by_name=True, extra="allow")
     type: str = "apprise"  # apprise (default) | slack | teams | email/smtp | sendgrid | webhook
     target: Optional[str] = Field(default=None, alias=AliasChoices("target", "to", "channel", "url"))
@@ -604,8 +708,10 @@ class Notification(BaseModel):
     body_template_file: Optional[str] = None
     template_context: Dict[str, Any] = Field(default_factory=dict)
 
+
 class Quarantine(BaseModel):
     """Quarantine settings and notification routing."""
+
     target: Optional[str] = None
     enabled: bool = True
     include_error_reason: bool = True
@@ -621,19 +727,25 @@ class Quarantine(BaseModel):
     write_mode: str = "append"
     notifications: List[Notification] = Field(default_factory=list)
 
+
 class ServiceLevelObjective(BaseModel):
     """Service-level objective definition."""
+
     description: Optional[str] = None
     threshold: Optional[Union[str, float]] = None
     field: Optional[str] = None
 
+
 class ServiceLevel(BaseModel):
     """Service-level settings for freshness and availability."""
+
     freshness: Optional[Union[str, ServiceLevelObjective]] = None
-    availability: Optional[Union[float, ServiceLevelObjective]] = None # percentage e.g. 99.9
+    availability: Optional[Union[float, ServiceLevelObjective]] = None  # percentage e.g. 99.9
+
 
 class FieldDefinition(BaseModel):
     """Schema field definition."""
+
     name: str
     type: str
     required: bool = False
@@ -651,29 +763,37 @@ class FieldDefinition(BaseModel):
     # At validation time, DataProcessor evaluates the corresponding referential_integrity rule.
     foreign_key: Optional[ForeignKeyRef] = None
 
+
 class Model(BaseModel):
     """Schema model definition."""
+
     fields: List[FieldDefinition] = Field(default_factory=list)
+
 
 class Materialization(BaseModel):
     """Materialization settings for writing outputs."""
+
     model_config = ConfigDict(extra="allow")
-    strategy: str = "append" # append, merge, scd2, overwrite
+    strategy: str = "append"  # append, merge, scd2, overwrite
     partition_by: List[str] = Field(default_factory=list)
     cluster_by: List[str] = Field(default_factory=list)
-    reprocess_policy: str = "overwrite_partition" # how to handle re-runs
+    reprocess_policy: str = "overwrite_partition"  # how to handle re-runs
     reprocess_date_column: Optional[str] = None  # column for date-range reprocessing (defaults to first partition_by)
     target_path: Optional[str] = None
     format: Optional[str] = None
-    location: Optional[str] = None  # External storage location for UC tables (e.g. abfss://container@account.dfs.core.windows.net/path/)
+    location: Optional[str] = (
+        None  # External storage location for UC tables (e.g. abfss://container@account.dfs.core.windows.net/path/)
+    )
     scd2: Optional[Dict[str, Any]] = None
-    soft_delete_column: Optional[str] = None # e.g. '_lakelogic_is_deleted'
-    soft_delete_value: Any = True # Value to set when deleted
-    soft_delete_time_column: Optional[str] = None # e.g. '_lakelogic_deleted_at'
-    soft_delete_reason_column: Optional[str] = None # e.g. '_lakelogic_delete_reason'
+    soft_delete_column: Optional[str] = None  # e.g. '_lakelogic_is_deleted'
+    soft_delete_value: Any = True  # Value to set when deleted
+    soft_delete_time_column: Optional[str] = None  # e.g. '_lakelogic_deleted_at'
+    soft_delete_reason_column: Optional[str] = None  # e.g. '_lakelogic_delete_reason'
+
 
 class LineageConfig(BaseModel):
     """Lineage capture settings."""
+
     model_config = ConfigDict(extra="allow")
     enabled: bool = False
     capture_source_path: bool = True
@@ -693,10 +813,9 @@ class LineageConfig(BaseModel):
     run_id_source: str = "run_id"  # run_id | pipeline_run_id
 
 
-
-
 class ExternalLogic(BaseModel):
     """External logic hook for advanced processing."""
+
     type: str  # python | notebook
     path: str
     entrypoint: str = "run"
@@ -706,38 +825,40 @@ class ExternalLogic(BaseModel):
     handles_output: Optional[bool] = None  # if True, skip built-in materialize
     kernel_name: Optional[str] = None  # notebook kernel override
 
+
 class DataContract(BaseModel):
     """
     Finalized SQL-First Data Contract Model.
     Supports ODCS-style metadata and consolidated 'sql' keywords.
     """
+
     model_config = ConfigDict(populate_by_name=True, extra="allow")
-    
+
     version: str
     info: Optional[Info] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict) # For generic tagging (status, classification)
+    metadata: Dict[str, Any] = Field(default_factory=dict)  # For generic tagging (status, classification)
     server: Optional[Server] = None
     source: Optional[SourceConfig] = None
     environments: Dict[str, Environment] = Field(default_factory=dict)
     links: List[Link] = Field(default_factory=list)
-    
+
     dataset: Optional[str] = None
     primary_key: List[str] = Field(default_factory=list)
-    
+
     # LINEAGE & OBSERVABILITY
     lineage: Optional[LineageConfig] = Field(default_factory=LineageConfig)
-    
+
     # MATERIALIZATION LAYER (Gold/Silver)
     materialization: Optional[Materialization] = Field(default_factory=Materialization)
-    logic: Optional[str] = None # Full SQL for materialization
+    logic: Optional[str] = None  # Full SQL for materialization
 
     # EXTERNAL LOGIC
     external_logic: Optional[ExternalLogic] = None
-    
+
     # ORCHESTRATION & DEPENDENCIES
     upstream: List[str] = Field(default_factory=list)
     schedule: Optional[str] = None
-    
+
     schema_policy: Optional[SchemaPolicy] = None
     model: Optional[Model] = None
     quality: Optional[Quality] = Field(default_factory=Quality)
@@ -776,13 +897,14 @@ class DataContract(BaseModel):
             return self
 
         metadata = self.metadata or {}
-        has_run_log = any(
-            metadata.get(key)
-            for key in ("run_log_dir", "run_log_path", "run_log_table")
-        )
+        has_run_log = any(metadata.get(key) for key in ("run_log_dir", "run_log_path", "run_log_table"))
         if not has_run_log:
             import os as _os
-            if _os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK", "").strip() not in ("", "0"):
+
+            if _os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK", "").strip() not in (
+                "",
+                "0",
+            ):
                 return self
             raise ValueError(
                 "source.load_mode is 'incremental' but no run-log backend is "
@@ -845,8 +967,7 @@ class DataContract(BaseModel):
         # Strip 'on/off/yes/no' → not booleans; keep true/false.
         for _key, _mappings in list(_Loader.yaml_implicit_resolvers.items()):
             _Loader.yaml_implicit_resolvers[_key] = [
-                (tag, regex) for tag, regex in _mappings
-                if tag != "tag:yaml.org,2002:bool"
+                (tag, regex) for tag, regex in _mappings if tag != "tag:yaml.org,2002:bool"
             ]
         _Loader.add_implicit_resolver(
             "tag:yaml.org,2002:bool",
@@ -871,6 +992,7 @@ class DataContract(BaseModel):
     def active_env(self) -> Optional[str]:
         """Return the active environment name from the LAKELOGIC_ENV env-var (if set)."""
         import os
+
         return os.environ.get("LAKELOGIC_ENV") or None
 
     # ── Reset / reload ─────────────────────────────────────────────────────────
@@ -928,7 +1050,6 @@ class DataContract(BaseModel):
             DataProcessor(contract).run_source()
         """
         import shutil
-        import os as _os
 
         _all = {"materialization", "quarantine", "watermark", "run_log"}
         _targets = set(targets) if targets else _all
@@ -936,6 +1057,7 @@ class DataContract(BaseModel):
 
         def _resolve(raw: str) -> "Path":
             from pathlib import Path as _P
+
             p = _P(raw)
             if not p.is_absolute() and _base:
                 p = _P(_base) / p
@@ -955,20 +1077,27 @@ class DataContract(BaseModel):
 
         # ── 1. Materialization target ──────────────────────────────────────────
         if "materialization" in _targets:
-            mat_path = (
-                self.materialization.target_path
-                if self.materialization
-                else None
-            )
+            mat_path = self.materialization.target_path if self.materialization else None
             if mat_path:
                 p = _resolve(mat_path)
                 if dry_run:
-                    report["materialization"] = {"path": str(p), "exists": p.exists(), "dry_run": True}
+                    report["materialization"] = {
+                        "path": str(p),
+                        "exists": p.exists(),
+                        "dry_run": True,
+                    }
                 else:
                     deleted = _delete(p)
-                    report["materialization"] = {"path": str(p), "deleted": deleted, "dry_run": False}
+                    report["materialization"] = {
+                        "path": str(p),
+                        "deleted": deleted,
+                        "dry_run": False,
+                    }
             else:
-                report["materialization"] = {"path": None, "note": "no target_path configured"}
+                report["materialization"] = {
+                    "path": None,
+                    "note": "no target_path configured",
+                }
 
         # ── 2. Quarantine target ───────────────────────────────────────────────
         if "quarantine" in _targets:
@@ -976,31 +1105,43 @@ class DataContract(BaseModel):
             if q_target and not q_target.startswith("table:"):
                 p = _resolve(q_target)
                 if dry_run:
-                    report["quarantine"] = {"path": str(p), "exists": p.exists(), "dry_run": True}
+                    report["quarantine"] = {
+                        "path": str(p),
+                        "exists": p.exists(),
+                        "dry_run": True,
+                    }
                 else:
                     deleted = _delete(p)
-                    report["quarantine"] = {"path": str(p), "deleted": deleted, "dry_run": False}
+                    report["quarantine"] = {
+                        "path": str(p),
+                        "deleted": deleted,
+                        "dry_run": False,
+                    }
             elif q_target and q_target.startswith("table:"):
                 report["quarantine"] = {
                     "path": q_target,
                     "note": "table targets are not auto-deleted by reset(); drop the table manually",
                 }
             else:
-                report["quarantine"] = {"path": None, "note": "no quarantine target configured"}
+                report["quarantine"] = {
+                    "path": None,
+                    "note": "no quarantine target configured",
+                }
 
         # ── 3. Incremental watermark ───────────────────────────────────────────
         if "watermark" in _targets:
             from pathlib import Path as _P
+
             # Watermark lives at <base>/.lakelogic/watermark_<title_slug>.json
             title_slug = ""
             if self.info and self.info.title:
                 import re as _re
+
                 title_slug = _re.sub(r"[^\w]+", "_", self.info.title.lower()).strip("_")
             base_dir = _P(_base) if _base else _P.cwd()
             wm_dir = base_dir / ".lakelogic"
             wm_candidates = (
-                list(wm_dir.glob(f"watermark_{title_slug}*.json"))
-                + list(wm_dir.glob("watermark*.json"))
+                list(wm_dir.glob(f"watermark_{title_slug}*.json")) + list(wm_dir.glob("watermark*.json"))
                 if wm_dir.exists()
                 else []
             )
@@ -1008,7 +1149,10 @@ class DataContract(BaseModel):
             wm_candidates = list(dict.fromkeys(wm_candidates))
             if wm_candidates:
                 if dry_run:
-                    report["watermark"] = {"paths": [str(p) for p in wm_candidates], "dry_run": True}
+                    report["watermark"] = {
+                        "paths": [str(p) for p in wm_candidates],
+                        "dry_run": True,
+                    }
                 else:
                     deleted_paths = []
                     for wp in wm_candidates:
@@ -1022,6 +1166,7 @@ class DataContract(BaseModel):
         # ── 4. Run log (source-mtime watermark for incremental loads) ──────────
         if "run_log" in _targets:
             from pathlib import Path as _P
+
             metadata = self.metadata or {}
             _base_p = _P(_base) if _base else _P.cwd()
             run_log_targets = []
@@ -1126,18 +1271,22 @@ class DataContract(BaseModel):
             data["format"] = override.format
         return Server(**data)
 
+
 class TraceStep(BaseModel):
     """Execution step metadata for debugging/visualization."""
+
     step: str
     timestamp: float
     input_rows: Optional[int] = None
     output_rows: Optional[int] = None
     duration_ms: Optional[float] = None
     details: Dict[str, Any] = Field(default_factory=dict)
-    status: str = "ok" # ok, warning, error
+    status: str = "ok"  # ok, warning, error
+
 
 class ExecutionTrace(BaseModel):
     """Collection of execution steps for a single run."""
+
     run_id: Optional[str] = None
     steps: List[TraceStep] = Field(default_factory=list)
     total_duration_ms: Optional[float] = None

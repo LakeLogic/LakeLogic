@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
 import os
 import re
 import uuid
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
@@ -90,13 +90,16 @@ class BigQueryAdapter(EngineAdapter):
         """
         try:
             from lakelogic.core.deps import require
+
             require("google.cloud.bigquery", extra="cloud")
             from google.cloud import bigquery
         except Exception as exc:
             raise ValueError("BigQuery adapter requires google-cloud-bigquery.") from exc
 
         metadata = self.contract.metadata or {}
-        project = _resolve_env_value(metadata.get("bigquery_project") or os.getenv("BIGQUERY_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT"))
+        project = _resolve_env_value(
+            metadata.get("bigquery_project") or os.getenv("BIGQUERY_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
+        )
         return bigquery.Client(project=project)
 
     def _resolve_source_table(self, df: Any) -> Optional[str]:
@@ -175,7 +178,8 @@ class BigQueryAdapter(EngineAdapter):
         text = str(name)
         if text.startswith("`") and text.endswith("`"):
             return text
-        return f"`{text.replace('`', '\\\\`')}`"
+        escaped = text.replace("`", "\\`")
+        return f"`{escaped}`"
 
     def _qualify(self, alias: str, name: str) -> str:
         """Build a qualified identifier (alias + column)."""
@@ -191,7 +195,10 @@ class BigQueryAdapter(EngineAdapter):
         """
         self._execute(client, f"CREATE OR REPLACE TEMP TABLE source AS SELECT * FROM {table_name}")
         if self.contract.dataset:
-            self._execute(client, f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset} AS SELECT * FROM {table_name}")
+            self._execute(
+                client,
+                f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset} AS SELECT * FROM {table_name}",
+            )
 
     def _apply_transformations(self, client, table_name: str, phase: str) -> str:
         """
@@ -329,7 +336,13 @@ class BigQueryAdapter(EngineAdapter):
             parts = sources[:]
             if trans.coalesce.default is not None:
                 parts.append(self._format_literal(trans.coalesce.default))
-            expr = f"COALESCE({', '.join(self._quote_ident(part) for part in sources) + (', ' + self._format_literal(trans.coalesce.default) if trans.coalesce.default is not None else '')})"
+            sources_q = ", ".join(self._quote_ident(part) for part in sources)
+            default_part = (
+                ", " + self._format_literal(trans.coalesce.default)
+                if trans.coalesce.default is not None
+                else ""
+            )
+            expr = f"COALESCE({sources_q}{default_part})"
             output = trans.coalesce.output or trans.coalesce.field
             extra_exprs = [f"{expr} AS {self._quote_ident(output)}"]
             replacements: Dict[str, str] = {}
@@ -371,7 +384,9 @@ class BigQueryAdapter(EngineAdapter):
             cases = []
             for key, value in mapping.items():
                 cases.append(f"WHEN {qfield} = {self._format_literal(key)} THEN {self._format_literal(value)}")
-            default_expr = self._format_literal(trans.map_values.default) if trans.map_values.default is not None else qfield
+            default_expr = (
+                self._format_literal(trans.map_values.default) if trans.map_values.default is not None else qfield
+            )
             case_expr = f"CASE {' '.join(cases)} ELSE {default_expr} END"
             output = trans.map_values.output or field
             replacements = {}
@@ -411,10 +426,13 @@ class BigQueryAdapter(EngineAdapter):
             if trans.lookup.default_value is not None:
                 default_val = self._format_literal(trans.lookup.default_value)
                 value_expr = f"COALESCE(ref.{self._quote_ident(trans.lookup.value)}, {default_val})"
+            ref_q = self._quote_ident(trans.lookup.reference)
+            on_q = self._quote_ident(trans.lookup.on)
+            key_q = self._quote_ident(trans.lookup.key)
             return f"""
             SELECT src.*, {value_expr} AS {self._quote_ident(trans.lookup.field)}
             FROM source src
-            LEFT JOIN {self._quote_ident(trans.lookup.reference)} ref ON src.{self._quote_ident(trans.lookup.on)} = ref.{self._quote_ident(trans.lookup.key)}
+            LEFT JOIN {ref_q} ref ON src.{on_q} = ref.{key_q}
             """
 
         if trans.join:
@@ -426,14 +444,21 @@ class BigQueryAdapter(EngineAdapter):
                 alias = f"{trans.join.prefix}{field}" if trans.join.prefix else field
                 default = trans.join.defaults.get(field) if trans.join.defaults else None
                 if default is not None:
-                    expr = f"COALESCE(ref.{self._quote_ident(field)}, {self._format_literal(default)}) AS {self._quote_ident(alias)}"
+                    coalesce_val = self._format_literal(default)
+                    expr = (
+                        f"COALESCE(ref.{self._quote_ident(field)},"
+                        f" {coalesce_val}) AS {self._quote_ident(alias)}"
+                    )
                 else:
                     expr = f"ref.{self._quote_ident(field)} AS {self._quote_ident(alias)}"
                 select_fields.append(expr)
+            ref_q2 = self._quote_ident(trans.join.reference)
+            on_q2 = self._quote_ident(trans.join.on)
+            key_q2 = self._quote_ident(trans.join.key)
             return f"""
-            SELECT {', '.join(select_fields)}
+            SELECT {", ".join(select_fields)}
             FROM source src
-            {join_type} JOIN {self._quote_ident(trans.join.reference)} ref ON src.{self._quote_ident(trans.join.on)} = ref.{self._quote_ident(trans.join.key)}
+            {join_type} JOIN {ref_q2} ref ON src.{on_q2} = ref.{key_q2}
             """
 
         return None
@@ -532,12 +557,20 @@ class BigQueryAdapter(EngineAdapter):
 
         if policy in ["allow", "quarantine"] and unknown:
             if cast_to_string:
-                select_exprs.extend([f"SAFE_CAST({self._quote_ident(col)} AS STRING) AS {self._quote_ident(col)}" for col in sorted(unknown)])
+                select_exprs.extend(
+                    [
+                        f"SAFE_CAST({self._quote_ident(col)} AS STRING) AS {self._quote_ident(col)}"
+                        for col in sorted(unknown)
+                    ]
+                )
             else:
                 select_exprs.extend([self._quote_ident(col) for col in sorted(unknown)])
 
         schema_table = self._temp_name("schema")
-        self._execute(client, f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {table_name}")
+        self._execute(
+            client,
+            f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {table_name}",
+        )
 
         schema_errors = []
         if evolution == "strict" and missing:
@@ -583,8 +616,16 @@ class BigQueryAdapter(EngineAdapter):
             cat = (rule.category or "rule").replace("'", "''")
             category_exprs.append(f"IF({cond}, '{cat}', NULL)")
 
-        error_array = "ARRAY(SELECT err FROM UNNEST([" + ", ".join(error_exprs) + "]) AS err WHERE err IS NOT NULL)" if error_exprs else "[]"
-        category_array = "ARRAY(SELECT err FROM UNNEST([" + ", ".join(category_exprs) + "]) AS err WHERE err IS NOT NULL)" if category_exprs else "[]"
+        error_array = (
+            "ARRAY(SELECT err FROM UNNEST([" + ", ".join(error_exprs) + "]) AS err WHERE err IS NOT NULL)"
+            if error_exprs
+            else "[]"
+        )
+        category_array = (
+            "ARRAY(SELECT err FROM UNNEST([" + ", ".join(category_exprs) + "]) AS err WHERE err IS NOT NULL)"
+            if category_exprs
+            else "[]"
+        )
 
         eval_table = self._temp_name("eval")
         self._execute(
@@ -643,7 +684,10 @@ class BigQueryAdapter(EngineAdapter):
         if not rules:
             return
 
-        self._execute(client, f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset or 'source'} AS SELECT * FROM {table_name}")
+        self._execute(
+            client,
+            f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset or 'source'} AS SELECT * FROM {table_name}",
+        )
 
         for rule in rules:
             job = client.query(rule.sql)
@@ -658,12 +702,14 @@ class BigQueryAdapter(EngineAdapter):
             elif rule.must_be_greater_than is not None:
                 passed = val > rule.must_be_greater_than
 
-            self.dataset_rule_results.append({
-                "name": rule.name,
-                "value": val,
-                "passed": passed,
-                "description": rule.description
-            })
+            self.dataset_rule_results.append(
+                {
+                    "name": rule.name,
+                    "value": val,
+                    "passed": passed,
+                    "description": rule.description,
+                }
+            )
 
     def _fetch_dataframe(self, client, table_name: str):
         """

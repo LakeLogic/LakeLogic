@@ -19,22 +19,22 @@ from typing import Optional
 # Maps import names → (pip package, extra group)
 _PACKAGE_EXTRAS: dict[str, tuple[str, str]] = {
     # cloud
-    "snowflake.connector":      ("snowflake-connector-python", "cloud"),
-    "google.cloud.bigquery":    ("google-cloud-bigquery",      "cloud"),
-    "google.cloud.storage":     ("google-cloud-storage",       "cloud"),
+    "snowflake.connector": ("snowflake-connector-python", "cloud"),
+    "google.cloud.bigquery": ("google-cloud-bigquery", "cloud"),
+    "google.cloud.storage": ("google-cloud-storage", "cloud"),
     "google.cloud.secretmanager": ("google-cloud-secret-manager", "cloud"),
-    "google.cloud.pubsub_v1":   ("google-cloud-pubsub",        "cloud"),
-    "azure.servicebus":         ("azure-servicebus",            "cloud"),
-    "azure.eventgrid":          ("azure-eventgrid",             "cloud"),
+    "google.cloud.pubsub_v1": ("google-cloud-pubsub", "cloud"),
+    "azure.servicebus": ("azure-servicebus", "cloud"),
+    "azure.eventgrid": ("azure-eventgrid", "cloud"),
     # enterprise
-    "pyspark":                  ("pyspark",                     "enterprise"),
-    "dataprofiler":             ("dataprofiler",                "enterprise"),
-    "presidio_analyzer":        ("presidio-analyzer",           "enterprise"),
-    "bytewax":                  ("bytewax",                     "enterprise"),
-    "nbclient":                 ("nbclient",                    "enterprise"),
-    "nbformat":                 ("nbformat",                    "enterprise"),
+    "pyspark": ("pyspark", "enterprise"),
+    "dataprofiler": ("dataprofiler", "enterprise"),
+    "presidio_analyzer": ("presidio-analyzer", "enterprise"),
+    "bytewax": ("bytewax", "enterprise"),
+    "nbclient": ("nbclient", "enterprise"),
+    "nbformat": ("nbformat", "enterprise"),
     # individual extras (for users who want precise installs)
-    "pathway":                  ("pathway",                     "pathway"),
+    "pathway": ("pathway", "pathway"),
 }
 
 
@@ -81,14 +81,11 @@ def require(
 
         if extra:
             hint = (
-                f"\n\n  pip install \"lakelogic[{extra}]\"\n\n"
+                f'\n\n  pip install "lakelogic[{extra}]"\n\n'
                 f"or install the package directly:\n\n"
                 f"  pip install {pip_name}\n"
             )
         else:
             hint = f"\n\n  pip install {pip_name}\n"
 
-        raise MissingExtra(
-            f"'{module}' is required but not installed. "
-            f"Install it with:{hint}"
-        ) from None
+        raise MissingExtra(f"'{module}' is required but not installed. Install it with:{hint}") from None

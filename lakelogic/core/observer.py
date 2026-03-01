@@ -1,11 +1,11 @@
 import httpx
 import os
-import json
 from typing import Dict, Any, Optional
 from loguru import logger
 
 # Avoid circular import by defining version here
 __version__ = "0.1.0"
+
 
 class RemoteObserver:
     """
@@ -18,6 +18,7 @@ class RemoteObserver:
 
     LineageLogic SaaS users: This enables Weekly Trust Reports and quality dashboards.
     """
+
     def __init__(self, api_url: Optional[str] = None):
         self.enabled = os.getenv("LAKELOGIC_REMOTE_OBSERVER", "false").lower() == "true"
         self.api_url = os.getenv("LINEAGELOGIC_REPORT_URL", api_url)
@@ -49,7 +50,7 @@ class RemoteObserver:
                 "total": report.get("counts", {}).get("total"),
                 "quarantined": report.get("counts", {}).get("quarantined"),
                 "ratio": report.get("counts", {}).get("quarantine_ratio"),
-            }
+            },
         }
 
         try:
@@ -58,7 +59,7 @@ class RemoteObserver:
                 response = client.post(
                     self.api_url,
                     json=payload,
-                    headers={"X-LakeLogic-Version": __version__}
+                    headers={"X-LakeLogic-Version": __version__},
                 )
                 if response.status_code == 200:
                     logger.debug("Successfully reported metrics to LineageLogic")

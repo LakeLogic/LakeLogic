@@ -12,13 +12,14 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from loguru import logger
 
 
 # ── Summary ──────────────────────────────────────────────────────────────────
+
 
 def flatten_summary(summary: Dict[str, Any]) -> Dict[str, object]:
     """Flatten summary data into a table-oriented record."""
@@ -51,9 +52,7 @@ def finalize_summary(
     if started:
         try:
             started_dt = datetime.fromisoformat(started)
-            summary["duration_seconds"] = round(
-                (datetime.now(timezone.utc) - started_dt).total_seconds(), 2
-            )
+            summary["duration_seconds"] = round((datetime.now(timezone.utc) - started_dt).total_seconds(), 2)
         except Exception:
             pass
 
@@ -64,6 +63,7 @@ def finalize_summary(
 
 
 # ── Summary Table Writers ────────────────────────────────────────────────────
+
 
 def write_summary_table(
     summary: Dict[str, Any],
@@ -153,10 +153,20 @@ def _write_summary_spark(
 
 
 _SUMMARY_COLUMNS = [
-    "run_id", "started_at", "finished_at", "duration_seconds", "engine",
-    "total_contracts", "successful", "failed", "skipped_missing_upstream",
-    "skipped_no_sources", "full_loads", "full_loads_due_to_missing_logs",
-    "missing_upstreams", "summary_json",
+    "run_id",
+    "started_at",
+    "finished_at",
+    "duration_seconds",
+    "engine",
+    "total_contracts",
+    "successful",
+    "failed",
+    "skipped_missing_upstream",
+    "skipped_no_sources",
+    "full_loads",
+    "full_loads_due_to_missing_logs",
+    "missing_upstreams",
+    "summary_json",
 ]
 
 
@@ -274,21 +284,33 @@ def _write_summary_snowflake(record: Dict[str, object], table_name: str) -> None
     conn = snowflake.connector.connect(**{k: v for k, v in params.items() if v})
     try:
         ddl_columns = [
-            ("run_id", "STRING"), ("started_at", "STRING"), ("finished_at", "STRING"),
-            ("duration_seconds", "FLOAT"), ("engine", "STRING"),
-            ("total_contracts", "NUMBER"), ("successful", "NUMBER"), ("failed", "NUMBER"),
-            ("skipped_missing_upstream", "NUMBER"), ("skipped_no_sources", "NUMBER"),
-            ("full_loads", "NUMBER"), ("full_loads_due_to_missing_logs", "NUMBER"),
-            ("missing_upstreams", "NUMBER"), ("summary_json", "VARIANT"),
+            ("run_id", "STRING"),
+            ("started_at", "STRING"),
+            ("finished_at", "STRING"),
+            ("duration_seconds", "FLOAT"),
+            ("engine", "STRING"),
+            ("total_contracts", "NUMBER"),
+            ("successful", "NUMBER"),
+            ("failed", "NUMBER"),
+            ("skipped_missing_upstream", "NUMBER"),
+            ("skipped_no_sources", "NUMBER"),
+            ("full_loads", "NUMBER"),
+            ("full_loads_due_to_missing_logs", "NUMBER"),
+            ("missing_upstreams", "NUMBER"),
+            ("summary_json", "VARIANT"),
         ]
         column_ddl = ", ".join(f"{name} {dtype}" for name, dtype in ddl_columns)
         conn.cursor().execute(f"CREATE TABLE IF NOT EXISTS {table_only} ({column_ddl})")
         for name, dtype in ddl_columns:
             conn.cursor().execute(f"ALTER TABLE {table_only} ADD COLUMN IF NOT EXISTS {name} {dtype}")
         write_pandas(
-            conn, pdf, table_name=table_only,
-            database=params.get("database"), schema=params.get("schema"),
-            auto_create_table=True, overwrite=False,
+            conn,
+            pdf,
+            table_name=table_only,
+            database=params.get("database"),
+            schema=params.get("schema"),
+            auto_create_table=True,
+            overwrite=False,
         )
     finally:
         try:
@@ -367,6 +389,7 @@ def _write_summary_bigquery(record: Dict[str, object], table_name: str) -> None:
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
 
+
 def emit_metrics(
     summary: Dict[str, Any],
     metrics_path: Optional[Path],
@@ -437,6 +460,7 @@ def _emit_statsd(
     message = "\n".join(lines).encode("utf-8")
     try:
         import socket
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(message, (host, port))
         sock.close()
@@ -446,6 +470,7 @@ def _emit_statsd(
 
 
 # ── Prometheus ───────────────────────────────────────────────────────────────
+
 
 def format_prometheus(
     snapshot: Optional[Dict[str, Any]],

@@ -6,18 +6,17 @@ Handles writing run reports to JSON files and multi-backend table targets
 
 Extracted from materialization.py to keep concerns focused.
 """
-from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
 import json
-import os
+from pathlib import Path
+from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from loguru import logger
 
 
 # ── Shared helpers (duplicated intentionally to keep run_log self-contained) ──
+
 
 def _resolve_path(raw_path: str, base_path: Optional[Path]) -> Path:
     """Resolve a path, honoring the contract base path for relative values."""
@@ -38,6 +37,7 @@ def _prepare_table_name(name: str, backend: str) -> str:
 
 
 # ── Report flattening ──
+
 
 def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -95,6 +95,7 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ── Table write ──
+
 
 def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional[str] = None) -> Optional[str]:
     """
@@ -206,9 +207,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 writer = writer.partitionBy(*partition_by)
             writer.saveAsTable(table_name)
             if partition_by:
-                logger.info(
-                    f"Created run log table {table_name} partitioned by {partition_by} (format={table_format})"
-                )
+                logger.info(f"Created run log table {table_name} partitioned by {partition_by} (format={table_format})")
         logger.info(f"Wrote run log to Spark table {table_name}")
         return table_name
 
@@ -231,7 +230,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         if len(parts) >= 2:
             schema_name = parts[-2]
             table_only = parts[-1]
-            logger.warning(f"DuckDB backend uses schema '{schema_name}' and table '{table_only}' (ignoring catalog parts if provided).")
+            logger.warning(
+                f"DuckDB backend uses schema '{schema_name}' and table "
+                f"'{table_only}' (ignoring catalog parts if provided)."
+            )
         con = duckdb.connect(database=str(db_path))
         if schema_name:
             con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
@@ -444,6 +446,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
 # ── Public API ──
 
+
 def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] = None) -> Optional[str]:
     """
     Write run logs to JSON and/or table backends.
@@ -486,7 +489,9 @@ def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] =
     return str(log_path) if log_path else None
 
 
-def get_last_run_watermark(contract, contract_title: str, stage: str, engine_name: Optional[str] = None) -> Optional[float]:
+def get_last_run_watermark(
+    contract, contract_title: str, stage: str, engine_name: Optional[str] = None
+) -> Optional[float]:
     """
     Fetch the last max_source_mtime for a contract/stage from run logs.
     """
@@ -543,6 +548,7 @@ def get_last_run_watermark(contract, contract_title: str, stage: str, engine_nam
 
     if table_value and backend == "sqlite":
         import sqlite3
+
         base_path = getattr(contract, "_base_path", None)
         db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
         db_path = _resolve_path(str(db_path), base_path)
@@ -588,7 +594,11 @@ def get_last_run_watermark(contract, contract_title: str, stage: str, engine_nam
         if not log_dir.exists():
             return None
         try:
-            candidates = sorted(log_dir.glob("run_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            candidates = sorted(
+                log_dir.glob("run_*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
             for path in candidates:
                 try:
                     with open(path, "r", encoding="utf-8") as handle:

@@ -1,18 +1,23 @@
 from typing import Optional, Dict
 
-from lakelogic.core.processor import DataProcessor
-from lakelogic.core.models import DataContract, FieldDefinition, QualityRule, Transformation
+from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
+from lakelogic.core.bootstrap import ContractDraft, ContractInferrer, infer_contract
 from lakelogic.core.generator import DataGenerator
-from lakelogic.core.incremental import IncrementalBoundary, Boundary
-from lakelogic.core.bootstrap import ContractInferrer, ContractDraft, infer_contract
+from lakelogic.core.incremental import Boundary, IncrementalBoundary
+from lakelogic.core.models import (
+    DataContract,
+    FieldDefinition,
+    QualityRule,
+    Transformation,
+)
+from lakelogic.core.processor import DataProcessor
 from lakelogic.core.schema_api import (
-    validate_contract,
+    ValidationError,
+    ValidationResult,
     contract_schema,
     contract_schema_json,
-    ValidationResult,
-    ValidationError,
+    validate_contract,
 )
-from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
 from lakelogic.engines.cloud_credentials import (
     CloudCredentialResolver,
     DatabricksSecretResolver,
@@ -20,7 +25,7 @@ from lakelogic.engines.cloud_credentials import (
     resolve_storage_options,
 )
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 
 class HelpTopic:
@@ -112,9 +117,12 @@ Example:
   lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml
 
 Sync mode:
-  lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync
-  lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync --sync-update-schema
-  lakelogic bootstrap --landing data/landing --output-dir contracts/new --registry contracts/new/_registry.yaml --sync --sync-overwrite
+  lakelogic bootstrap --landing data/landing --output-dir contracts/new \
+    --registry contracts/new/_registry.yaml --sync
+  lakelogic bootstrap --landing data/landing --output-dir contracts/new \
+    --registry contracts/new/_registry.yaml --sync --sync-update-schema
+  lakelogic bootstrap --landing data/landing --output-dir contracts/new \
+    --registry contracts/new/_registry.yaml --sync --sync-overwrite
 
 Flags:
   --sync               Add new entities to the registry without changing existing contracts.
@@ -161,9 +169,9 @@ Python API:
 
 help = HelpIndex(
     {
-        "driver":     HelpTopic("driver", _driver_text),
-        "bootstrap":  HelpTopic("bootstrap", _bootstrap_text),
-        "run":        HelpTopic("run", _run_text),
+        "driver": HelpTopic("driver", _driver_text),
+        "bootstrap": HelpTopic("bootstrap", _bootstrap_text),
+        "run": HelpTopic("run", _run_text),
         "policy_packs": HelpTopic("policy_packs", _policy_pack_text),
         "observability": HelpTopic("observability", _observability_text),
         "import_dbt": HelpTopic("import_dbt", _import_dbt_text),
@@ -193,6 +201,18 @@ __all__ = [
     "infer_contract",
     "ContractInferrer",
     "ContractDraft",
+    # Schema API
+    "validate_contract",
+    "contract_schema",
+    "contract_schema_json",
+    "ValidationResult",
+    "ValidationError",
+    # Cloud credentials
+    "CloudCredentialResolver",
+    "DatabricksSecretResolver",
+    "from_databricks",
+    "resolve_storage_options",
+    # Help
     "help",
     "driver",
     "bootstrap",

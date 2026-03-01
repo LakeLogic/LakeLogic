@@ -35,6 +35,7 @@ Contract YAML usage::
 
 Apprise URL reference: https://github.com/caronc/apprise/wiki
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -158,10 +159,7 @@ class AppriseAdapter(NotificationAdapter):
             for path in attach:
                 ap_attach.add(path)
 
-        logger.info(
-            f"Sending Apprise notification to {len(self._targets)} target(s) "
-            f"[type={notify_type}]"
-        )
+        logger.info(f"Sending Apprise notification to {len(self._targets)} target(s) [type={notify_type}]")
 
         result = ap.notify(
             title=subject,
@@ -172,6 +170,5 @@ class AppriseAdapter(NotificationAdapter):
 
         if not result:
             logger.warning(
-                "Apprise returned failure for one or more targets. "
-                "Check target URLs and network connectivity."
+                "Apprise returned failure for one or more targets. Check target URLs and network connectivity."
             )

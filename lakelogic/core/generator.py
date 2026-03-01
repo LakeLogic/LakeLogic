@@ -50,6 +50,7 @@ import yaml
 # Contract type → Polars dtype mapping
 # ---------------------------------------------------------------------------
 
+
 def _polars_dtype(ftype: str):
     """Return the polars DataType for a contract field type string."""
     try:
@@ -58,36 +59,39 @@ def _polars_dtype(ftype: str):
         return None
 
     _MAP = {
-        "string":   pl.Utf8,
-        "str":      pl.Utf8,
-        "text":     pl.Utf8,
-        "varchar":  pl.Utf8,
-        "integer":  pl.Int64,
-        "int":      pl.Int64,
-        "int32":    pl.Int32,
-        "int64":    pl.Int64,
-        "long":     pl.Int64,
-        "double":   pl.Float64,
-        "float":    pl.Float64,
-        "float32":  pl.Float32,
-        "float64":  pl.Float64,
-        "decimal":  pl.Float64,
-        "number":   pl.Float64,
-        "boolean":  pl.Boolean,
-        "bool":     pl.Boolean,
-        "date":     pl.Utf8,       # stored as ISO string; processor parses
-        "timestamp":pl.Utf8,
+        "string": pl.Utf8,
+        "str": pl.Utf8,
+        "text": pl.Utf8,
+        "varchar": pl.Utf8,
+        "integer": pl.Int64,
+        "int": pl.Int64,
+        "int32": pl.Int32,
+        "int64": pl.Int64,
+        "long": pl.Int64,
+        "double": pl.Float64,
+        "float": pl.Float64,
+        "float32": pl.Float32,
+        "float64": pl.Float64,
+        "decimal": pl.Float64,
+        "number": pl.Float64,
+        "boolean": pl.Boolean,
+        "bool": pl.Boolean,
+        "date": pl.Utf8,  # stored as ISO string; processor parses
+        "timestamp": pl.Utf8,
         "datetime": pl.Utf8,
     }
     return _MAP.get(ftype.lower().split("(")[0].strip())
+
 
 # ---------------------------------------------------------------------------
 # Optional deps — only fail at call time, not at import time
 # ---------------------------------------------------------------------------
 
+
 def _try_faker():
     try:
         from faker import Faker
+
         return Faker()
     except ImportError:
         return None
@@ -168,53 +172,224 @@ _SEMANTIC_HINTS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 _REALISTIC_POOLS: Dict[str, List[str]] = {
-    "city": ["London", "Manchester", "Birmingham", "Leeds", "Bristol",
-             "Glasgow", "Edinburgh", "Liverpool", "Sheffield", "Cardiff",
-             "Belfast", "Oxford", "Cambridge", "Bath", "York"],
-    "country": ["GB", "US", "DE", "FR", "ES", "IT", "NL", "AU", "CA", "JP",
-                "BR", "IN", "CN", "KR", "SE", "NO", "DK", "FI", "IE", "NZ"],
-    "state": ["California", "Texas", "New York", "Florida", "Illinois",
-              "Pennsylvania", "Ohio", "Georgia", "Michigan", "North Carolina"],
-    "county": ["Surrey", "Kent", "Essex", "Hampshire", "Devon",
-               "Somerset", "Norfolk", "Suffolk", "Dorset", "Wiltshire"],
+    "city": [
+        "London",
+        "Manchester",
+        "Birmingham",
+        "Leeds",
+        "Bristol",
+        "Glasgow",
+        "Edinburgh",
+        "Liverpool",
+        "Sheffield",
+        "Cardiff",
+        "Belfast",
+        "Oxford",
+        "Cambridge",
+        "Bath",
+        "York",
+    ],
+    "country": [
+        "GB",
+        "US",
+        "DE",
+        "FR",
+        "ES",
+        "IT",
+        "NL",
+        "AU",
+        "CA",
+        "JP",
+        "BR",
+        "IN",
+        "CN",
+        "KR",
+        "SE",
+        "NO",
+        "DK",
+        "FI",
+        "IE",
+        "NZ",
+    ],
+    "state": [
+        "California",
+        "Texas",
+        "New York",
+        "Florida",
+        "Illinois",
+        "Pennsylvania",
+        "Ohio",
+        "Georgia",
+        "Michigan",
+        "North Carolina",
+    ],
+    "county": [
+        "Surrey",
+        "Kent",
+        "Essex",
+        "Hampshire",
+        "Devon",
+        "Somerset",
+        "Norfolk",
+        "Suffolk",
+        "Dorset",
+        "Wiltshire",
+    ],
     "currency": ["GBP", "USD", "EUR", "JPY", "AUD", "CAD", "CHF", "CNY"],
-    "color": ["Red", "Blue", "Green", "Black", "White", "Grey", "Navy",
-              "Burgundy", "Teal", "Ivory", "Charcoal", "Silver"],
-    "colour": ["Red", "Blue", "Green", "Black", "White", "Grey", "Navy",
-               "Burgundy", "Teal", "Ivory", "Charcoal", "Silver"],
-    "status": ["active", "inactive", "pending", "completed", "cancelled",
-               "expired", "suspended", "archived"],
+    "color": [
+        "Red",
+        "Blue",
+        "Green",
+        "Black",
+        "White",
+        "Grey",
+        "Navy",
+        "Burgundy",
+        "Teal",
+        "Ivory",
+        "Charcoal",
+        "Silver",
+    ],
+    "colour": [
+        "Red",
+        "Blue",
+        "Green",
+        "Black",
+        "White",
+        "Grey",
+        "Navy",
+        "Burgundy",
+        "Teal",
+        "Ivory",
+        "Charcoal",
+        "Silver",
+    ],
+    "status": [
+        "active",
+        "inactive",
+        "pending",
+        "completed",
+        "cancelled",
+        "expired",
+        "suspended",
+        "archived",
+    ],
     "priority": ["low", "medium", "high", "critical", "urgent"],
-    "category": ["Electronics", "Clothing", "Home", "Sports", "Books",
-                 "Automotive", "Health", "Food", "Travel", "Finance"],
+    "category": [
+        "Electronics",
+        "Clothing",
+        "Home",
+        "Sports",
+        "Books",
+        "Automotive",
+        "Health",
+        "Food",
+        "Travel",
+        "Finance",
+    ],
     "type": ["standard", "premium", "enterprise", "basic", "pro"],
     "tier": ["free", "starter", "professional", "enterprise"],
     "plan": ["free", "basic", "standard", "premium", "enterprise"],
     "gender": ["Male", "Female", "Non-binary", "Prefer not to say"],
-    "language": ["English", "Spanish", "French", "German", "Portuguese",
-                 "Chinese", "Japanese", "Korean", "Arabic", "Hindi"],
-    "region": ["North", "South", "East", "West", "Central",
-               "Northeast", "Southeast", "Northwest", "Southwest"],
-    "department": ["Engineering", "Sales", "Marketing", "Finance", "HR",
-                   "Operations", "Legal", "Support", "Product", "Design"],
+    "language": [
+        "English",
+        "Spanish",
+        "French",
+        "German",
+        "Portuguese",
+        "Chinese",
+        "Japanese",
+        "Korean",
+        "Arabic",
+        "Hindi",
+    ],
+    "region": [
+        "North",
+        "South",
+        "East",
+        "West",
+        "Central",
+        "Northeast",
+        "Southeast",
+        "Northwest",
+        "Southwest",
+    ],
+    "department": [
+        "Engineering",
+        "Sales",
+        "Marketing",
+        "Finance",
+        "HR",
+        "Operations",
+        "Legal",
+        "Support",
+        "Product",
+        "Design",
+    ],
     "role": ["Admin", "User", "Moderator", "Editor", "Viewer", "Manager"],
-    "industry": ["Technology", "Healthcare", "Finance", "Retail",
-                 "Manufacturing", "Education", "Energy", "Real Estate"],
-    "payment_method": ["credit_card", "debit_card", "bank_transfer",
-                       "paypal", "apple_pay", "google_pay"],
-    "property_type": ["detached", "semi-detached", "terraced", "flat",
-                      "bungalow", "maisonette", "cottage", "townhouse"],
-    "listing_status": ["for_sale", "sold", "under_offer", "withdrawn",
-                       "sale_agreed", "reduced"],
+    "industry": [
+        "Technology",
+        "Healthcare",
+        "Finance",
+        "Retail",
+        "Manufacturing",
+        "Education",
+        "Energy",
+        "Real Estate",
+    ],
+    "payment_method": [
+        "credit_card",
+        "debit_card",
+        "bank_transfer",
+        "paypal",
+        "apple_pay",
+        "google_pay",
+    ],
+    "property_type": [
+        "detached",
+        "semi-detached",
+        "terraced",
+        "flat",
+        "bungalow",
+        "maisonette",
+        "cottage",
+        "townhouse",
+    ],
+    "listing_status": [
+        "for_sale",
+        "sold",
+        "under_offer",
+        "withdrawn",
+        "sale_agreed",
+        "reduced",
+    ],
     "tenure": ["freehold", "leasehold", "share_of_freehold"],
     "condition": ["new", "excellent", "good", "fair", "poor", "refurbished"],
     "size": ["XS", "S", "M", "L", "XL", "XXL"],
-    "day_of_week": ["Monday", "Tuesday", "Wednesday", "Thursday",
-                    "Friday", "Saturday", "Sunday"],
-    "month": ["January", "February", "March", "April", "May", "June",
-              "July", "August", "September", "October", "November", "December"],
+    "day_of_week": [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ],
+    "month": [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ],
 }
-
 
 
 class DataGenerator:
@@ -252,7 +427,6 @@ class DataGenerator:
         self._unique_integer_fields: set = self._extract_unique_integer_fields()
         # Populated by from_file(); generate() uses these automatically
         self._auto_sample_pools: Optional[Dict[str, List[Any]]] = None
-
 
     @classmethod
     def from_file(
@@ -329,11 +503,11 @@ class DataGenerator:
             elif ext in (".xlsx", ".xls"):
                 try:
                     import pandas as pd
+
                     df = pl.from_pandas(pd.read_excel(p))
                 except ImportError as exc:
                     raise ImportError(
-                        "Excel support requires pandas and openpyxl: "
-                        "pip install pandas openpyxl"
+                        "Excel support requires pandas and openpyxl: pip install pandas openpyxl"
                     ) from exc
             else:
                 raise ValueError(
@@ -381,9 +555,7 @@ class DataGenerator:
             "model": {"fields": fields},
             "quality": {},
         }
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as tmp:
             yaml.dump(contract_data, tmp, sort_keys=False, allow_unicode=True)
             tmp_path = tmp.name
 
@@ -442,6 +614,7 @@ class DataGenerator:
         import yaml
 
         from lakelogic.adapters.dbt import load_contract_from_dbt
+
         contract = load_contract_from_dbt(
             schema_path,
             model=model,
@@ -470,11 +643,9 @@ class DataGenerator:
                 continue
 
             # Pattern: <col> IN ('a', 'b', 'c') or <col> IN (1, 2, 3)
-            m_in = re.match(
-                r"^\s*(\w+)\s+IN\s*\((.+)\)\s*$", sql, re.IGNORECASE | re.DOTALL
-            )
+            m_in = re.match(r"^\s*(\w+)\s+IN\s*\((.+)\)\s*$", sql, re.IGNORECASE | re.DOTALL)
             if m_in:
-                col   = m_in.group(1)
+                col = m_in.group(1)
                 inner = m_in.group(2)
                 # Parse quoted strings or bare numbers
                 values = re.findall(r"'([^']*)'|\b(-?\d+(?:\.\d+)?)\b", inner)
@@ -514,15 +685,11 @@ class DataGenerator:
             # No extra action needed.
 
         # Write enriched contract to temp YAML
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as tmp:
             yaml.dump(data, tmp, sort_keys=False, allow_unicode=True)
             tmp_path = tmp.name
 
         return cls(tmp_path, seed=seed, use_faker=use_faker)
-
-
 
     # ------------------------------------------------------------------
     # Public API
@@ -593,7 +760,7 @@ class DataGenerator:
         fk_pools: Dict[str, List[Any]] = {}
         if reference_data:
             for col, pool in reference_data.items():
-                if hasattr(pool, "to_list"):   # polars / pandas Series
+                if hasattr(pool, "to_list"):  # polars / pandas Series
                     fk_pools[col] = pool.to_list()
                 elif hasattr(pool, "tolist"):  # numpy array
                     fk_pools[col] = pool.tolist()
@@ -601,13 +768,14 @@ class DataGenerator:
                     fk_pools[col] = list(pool)
 
         n_invalid = int(rows * invalid_ratio)
-        n_valid   = rows - n_invalid
+        n_valid = rows - n_invalid
 
         # AI edge-case generation (opt-in)
         edge_pools: Optional[Dict[str, List[Any]]] = ai_edge_cases
         if ai and n_invalid > 0 and not edge_pools:
             try:
                 from lakelogic.ai.edge_case_generator import generate_edge_cases
+
                 dataset_name = ""
                 info = self._contract_raw.get("info") or {}
                 dataset_name = info.get("title") or self._contract_raw.get("dataset") or ""
@@ -620,6 +788,7 @@ class DataGenerator:
                 )
             except Exception as e:
                 from loguru import logger
+
                 logger.warning(f"AI edge case generation failed: {e}")
                 edge_pools = None
 
@@ -627,15 +796,24 @@ class DataGenerator:
         # without the caller needing to specify the file path a second time.
         auto_pools = getattr(self, "_auto_sample_pools", None) or None
 
-        valid_records   = [self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_valid)]
-        invalid_records = [self._make_row(invalid=True,  fk_pools=fk_pools, sample_pools=auto_pools, edge_case_pools=edge_pools) for _ in range(n_invalid)]
+        valid_records = [
+            self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_valid)
+        ]
+        invalid_records = [
+            self._make_row(
+                invalid=True,
+                fk_pools=fk_pools,
+                sample_pools=auto_pools,
+                edge_case_pools=edge_pools,
+            )
+            for _ in range(n_invalid)
+        ]
 
         # Shuffle so bad rows aren't all at the end
         all_records = valid_records + invalid_records
         self._rng.shuffle(all_records)
 
         return self._to_frame(all_records, output_format)
-
 
     def generate_from_sample(
         self,
@@ -715,16 +893,10 @@ class DataGenerator:
         sample_pools = self._load_sample_pools(source, columns=columns)
 
         n_invalid = int(rows * invalid_ratio)
-        n_valid   = rows - n_invalid
+        n_valid = rows - n_invalid
 
-        valid_rows   = [
-            self._make_row(invalid=False, sample_pools=sample_pools)
-            for _ in range(n_valid)
-        ]
-        invalid_rows = [
-            self._make_row(invalid=True, sample_pools=sample_pools)
-            for _ in range(n_invalid)
-        ]
+        valid_rows = [self._make_row(invalid=False, sample_pools=sample_pools) for _ in range(n_valid)]
+        invalid_rows = [self._make_row(invalid=True, sample_pools=sample_pools) for _ in range(n_invalid)]
 
         all_records = valid_rows + invalid_rows
         self._rng.shuffle(all_records)
@@ -892,10 +1064,7 @@ class DataGenerator:
         columns = list(df.columns) if is_polars else list(df.columns)
 
         if filename_field is not None and filename_field not in columns:
-            raise ValueError(
-                f"filename_field '{filename_field}' not found in DataFrame. "
-                f"Available columns: {columns}"
-            )
+            raise ValueError(f"filename_field '{filename_field}' not found in DataFrame. Available columns: {columns}")
 
         rows_iter = df.to_dicts() if is_polars else df.to_dict(orient="records")
 
@@ -917,9 +1086,7 @@ class DataGenerator:
         for key, group_rows in groups.items():
             # Resolve the stem from the first row in the group so per-row
             # field values (e.g. postcode) are reflected in the name.
-            stem = self._resolve_filename_stem(
-                group_rows[0], filename_template, key
-            )
+            stem = self._resolve_filename_stem(group_rows[0], filename_template, key)
             dest = output_dir / f"{stem}{ext}"
 
             if fmt == "json":
@@ -932,23 +1099,25 @@ class DataGenerator:
             elif fmt == "parquet":
                 if is_polars:
                     import polars as pl
+
                     pl.DataFrame(group_rows).write_parquet(dest)
                 else:
                     import pandas as pd
+
                     pd.DataFrame(group_rows).to_parquet(dest, index=False)
 
             elif fmt == "csv":
                 if is_polars:
                     import polars as pl
+
                     pl.DataFrame(group_rows).write_csv(dest)
                 else:
                     import pandas as pd
+
                     pd.DataFrame(group_rows).to_csv(dest, index=False)
 
             else:
-                raise ValueError(
-                    f"Unsupported format '{fmt}'. Choose 'json', 'parquet', or 'csv'."
-                )
+                raise ValueError(f"Unsupported format '{fmt}'. Choose 'json', 'parquet', or 'csv'.")
 
             written.append(dest)
 
@@ -1052,11 +1221,7 @@ class DataGenerator:
                     df = pl.from_dicts(raw_rows) if raw_rows else pl.DataFrame()
             elif ext in (".ndjson", ".jsonl"):
                 # ── raw read preserves nested dicts/lists ─────────────────
-                raw_rows = [
-                    _json.loads(line)
-                    for line in p.read_text(encoding="utf-8").splitlines()
-                    if line.strip()
-                ]
+                raw_rows = [_json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
                 try:
                     df = pl.read_ndjson(p)
                 except Exception:
@@ -1064,11 +1229,11 @@ class DataGenerator:
             elif ext in (".xlsx", ".xls"):
                 try:
                     import pandas as pd
+
                     df = pl.from_pandas(pd.read_excel(p))
                 except ImportError as exc:
                     raise ImportError(
-                        "Excel support requires pandas and openpyxl: "
-                        "pip install pandas openpyxl"
+                        "Excel support requires pandas and openpyxl: pip install pandas openpyxl"
                     ) from exc
             else:
                 raise ValueError(
@@ -1078,7 +1243,7 @@ class DataGenerator:
 
         # ── Identify which columns to pool ────────────────────────────────────
         schema_cols = {f["name"] for f in self._fields if "name" in f}
-        file_cols   = set(df.columns)
+        file_cols = set(df.columns)
         target_cols = schema_cols & file_cols
         if columns:
             target_cols = target_cols & set(columns)
@@ -1128,9 +1293,7 @@ class DataGenerator:
         """
         integer_types = {"integer", "int", "int32", "int64", "long"}
         integer_fields = {
-            f["name"]
-            for f in self._fields
-            if (f.get("type") or "").lower() in integer_types and "name" in f
+            f["name"] for f in self._fields if (f.get("type") or "").lower() in integer_types and "name" in f
         }
 
         quality = self._contract_raw.get("quality") or {}
@@ -1163,13 +1326,14 @@ class DataGenerator:
             if invalid and self._rng.random() < 0.4:
                 # 40% chance each field is broken in an invalid row
                 row[name] = self._make_invalid_value(
-                    name, ftype, rules, nullable,
+                    name,
+                    ftype,
+                    rules,
+                    nullable,
                     edge_case_pools=edge_case_pools,
                 )
             else:
-                row[name] = self._make_valid_value(
-                    name, ftype, rules, nullable, sample_pools=sample_pools
-                )
+                row[name] = self._make_valid_value(name, ftype, rules, nullable, sample_pools=sample_pools)
 
         return row
 
@@ -1277,9 +1441,7 @@ class DataGenerator:
                 # Booleans have no "outside" value; force None (fails required rule)
                 pass
             else:
-                strategies.append(
-                    lambda: "INVALID_" + "".join(self._rng.choices(string.ascii_uppercase, k=4))
-                )
+                strategies.append(lambda: "INVALID_" + "".join(self._rng.choices(string.ascii_uppercase, k=4)))
 
         min_val = rules.get("min")
         max_val = rules.get("max")
@@ -1322,9 +1484,9 @@ class DataGenerator:
         # Format-aware fallbacks for common field names — avoids Faker dependency.
         # These must produce values that pass the most common dbt expression_is_true checks.
         if "email" in name_lower or name_lower == "mail":
-            user   = "".join(self._rng.choices(string.ascii_lowercase, k=self._rng.randint(4, 10)))
+            user = "".join(self._rng.choices(string.ascii_lowercase, k=self._rng.randint(4, 10)))
             domain = "".join(self._rng.choices(string.ascii_lowercase, k=self._rng.randint(3, 8)))
-            tld    = self._rng.choice(["com", "org", "net", "io", "co"])
+            tld = self._rng.choice(["com", "org", "net", "io", "co"])
             return f"{user}@{domain}.{tld}"
 
         if "phone" in name_lower or "mobile" in name_lower:
@@ -1337,16 +1499,56 @@ class DataGenerator:
 
         # Realistic name fallback (no Faker required)
         _FIRST_NAMES = [
-            "James", "Emma", "Oliver", "Sophia", "William", "Ava",
-            "Alexander", "Isabella", "Henry", "Mia", "Thomas", "Amelia",
-            "Benjamin", "Charlotte", "Lucas", "Harper", "Daniel", "Evelyn",
-            "Matthew", "Abigail", "David", "Emily", "Jack", "Rose",
+            "James",
+            "Emma",
+            "Oliver",
+            "Sophia",
+            "William",
+            "Ava",
+            "Alexander",
+            "Isabella",
+            "Henry",
+            "Mia",
+            "Thomas",
+            "Amelia",
+            "Benjamin",
+            "Charlotte",
+            "Lucas",
+            "Harper",
+            "Daniel",
+            "Evelyn",
+            "Matthew",
+            "Abigail",
+            "David",
+            "Emily",
+            "Jack",
+            "Rose",
         ]
         _LAST_NAMES = [
-            "Smith", "Johnson", "Williams", "Brown", "Jones", "Davis",
-            "Miller", "Wilson", "Moore", "Taylor", "Anderson", "Thomas",
-            "Jackson", "White", "Harris", "Martin", "Thompson", "Garcia",
-            "Martinez", "Robinson", "Clark", "Rodriguez", "Lewis", "Lee",
+            "Smith",
+            "Johnson",
+            "Williams",
+            "Brown",
+            "Jones",
+            "Davis",
+            "Miller",
+            "Wilson",
+            "Moore",
+            "Taylor",
+            "Anderson",
+            "Thomas",
+            "Jackson",
+            "White",
+            "Harris",
+            "Martin",
+            "Thompson",
+            "Garcia",
+            "Martinez",
+            "Robinson",
+            "Clark",
+            "Rodriguez",
+            "Lewis",
+            "Lee",
         ]
         if name_lower in ("first_name", "firstname", "given_name"):
             return self._rng.choice(_FIRST_NAMES)
@@ -1400,9 +1602,9 @@ class DataGenerator:
             if av is not None and not (has_range and isinstance(av, list) and len(av) == 1):
                 entry.setdefault("accepted_values", av)
             if "min" in field:
-                entry["min"] = field["min"]       # always write — range overrides
+                entry["min"] = field["min"]  # always write — range overrides
             if "max" in field:
-                entry["max"] = field["max"]       # always write — range overrides
+                entry["max"] = field["max"]  # always write — range overrides
 
             # ── FK hint — inject caller-supplied pool or a surrogate fallback ──
             fk = field.get("foreign_key")  # dict with keys: contract, column (+ severity)
@@ -1411,14 +1613,14 @@ class DataGenerator:
                     # Caller provided a real pool from the reference table
                     entry["accepted_values"] = fk_pools[fname]
                     entry["_fk_contract"] = fk.get("contract")
-                    entry["_fk_column"]   = fk.get("column")
+                    entry["_fk_column"] = fk.get("column")
                 elif "accepted_values" not in entry:
                     # No pool supplied — generate surrogate integers for CI safety
                     # (valid type, referentially meaningless, but won't break type checks)
                     surrogate_n = max(10, len(self._fields) * 5)
                     entry["accepted_values"] = list(range(1, surrogate_n + 1))
                     entry["_fk_contract"] = fk.get("contract")
-                    entry["_fk_column"]   = fk.get("column")
+                    entry["_fk_column"] = fk.get("column")
                     entry["_fk_surrogate"] = True  # flag: values are synthetic, not real
 
         # ── 2. Overlay structured quality row_rules ───────────────────────────
@@ -1481,42 +1683,37 @@ class DataGenerator:
             #            rows=200,
             #            reference_data={"agent_id": agents["agent_id"]},
             #        )
-            sql_str       = rule_item.get("sql", "")
+            sql_str = rule_item.get("sql", "")
             rule_category = rule_item.get("category", "")
 
             if sql_str:
                 # Sub-case (a): col IN (literal, values) — no subquery
-                m_lit = _re.match(
-                    r"^\s*(\w+)\s+IN\s*\(([^)]+)\)\s*$", sql_str, _re.IGNORECASE
-                )
+                m_lit = _re.match(r"^\s*(\w+)\s+IN\s*\(([^)]+)\)\s*$", sql_str, _re.IGNORECASE)
                 if m_lit:
-                    col   = m_lit.group(1)
+                    col = m_lit.group(1)
                     inner = m_lit.group(2)
                     if not _re.search(r"\bSELECT\b", inner, _re.IGNORECASE):
                         # Extract quoted strings or bare numbers
-                        parsed = [
-                            s or n for s, n in
-                            _re.findall(r"'([^']*)'|\b(-?\d+(?:\.\d+)?)\b", inner)
-                        ]
+                        parsed = [s or n for s, n in _re.findall(r"'([^']*)'|\b(-?\d+(?:\.\d+)?)\b", inner)]
                         if parsed:
                             # setdefault: field-level accepted_values takes priority
                             result.setdefault(col, {}).setdefault("accepted_values", parsed)
 
                 # Sub-case (b): subquery or category == integrity → apply fk_pools
-                m_sub = _re.match(
-                    r"^\s*(\w+)\s+IN\s*\(\s*SELECT\b", sql_str, _re.IGNORECASE
-                )
+                m_sub = _re.match(r"^\s*(\w+)\s+IN\s*\(\s*SELECT\b", sql_str, _re.IGNORECASE)
                 is_integrity_category = rule_category in (
-                    "integrity", "referential_integrity", "referential"
+                    "integrity",
+                    "referential_integrity",
+                    "referential",
                 )
                 if (m_sub or is_integrity_category) and fk_pools:
                     # Primary: column named before IN in the SQL
                     col_from_sql = m_sub.group(1) if m_sub else None
                     # Fallback: any fk_pool key whose name appears verbatim in SQL
                     candidates = (
-                        [col_from_sql] if col_from_sql
-                        else [c for c in fk_pools
-                              if _re.search(r"\b" + _re.escape(c) + r"\b", sql_str)]
+                        [col_from_sql]
+                        if col_from_sql
+                        else [c for c in fk_pools if _re.search(r"\b" + _re.escape(c) + r"\b", sql_str)]
                     )
                     for col in candidates:
                         if col and col in fk_pools:
@@ -1539,10 +1736,7 @@ class DataGenerator:
                 return _json.dumps(val, ensure_ascii=False)
             return val
 
-        clean_records = [
-            {k: _normalise(v) for k, v in row.items()}
-            for row in records
-        ]
+        clean_records = [{k: _normalise(v) for k, v in row.items()} for row in records]
 
         if fmt == "polars":
             import polars as pl
@@ -1554,14 +1748,12 @@ class DataGenerator:
             cast_exprs = []
             for field in self._fields:
                 col_name = field.get("name", "")
-                ftype    = (field.get("type") or "string").lower()
-                dtype    = _polars_dtype(ftype)
+                ftype = (field.get("type") or "string").lower()
+                dtype = _polars_dtype(ftype)
                 if dtype is not None and col_name in df.columns:
                     current = df[col_name].dtype
                     if current != dtype:
-                        cast_exprs.append(
-                            pl.col(col_name).cast(dtype, strict=False).alias(col_name)
-                        )
+                        cast_exprs.append(pl.col(col_name).cast(dtype, strict=False).alias(col_name))
             if cast_exprs:
                 df = df.with_columns(cast_exprs)
 
@@ -1569,7 +1761,7 @@ class DataGenerator:
 
         elif fmt == "pandas":
             import pandas as pd
+
             return pd.DataFrame(clean_records)
         else:
             raise ValueError(f"output_format must be 'polars' or 'pandas', got: {fmt!r}")
-
