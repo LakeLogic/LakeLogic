@@ -83,6 +83,8 @@ quality:
     - name: valid_membership
       sql: "membership_level IN ('GOLD','SILVER','BRONZE','PLATINUM')"
       category: consistency
+    - name: valid_rejoin
+      sql: "region IN ('USA','UK')"
 
 lineage:
   enabled: true

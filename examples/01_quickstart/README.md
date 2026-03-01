@@ -70,6 +70,5 @@ lakelogic generate --contract contracts/customers.yaml --rows 500 \
 
 ## Next Steps
 
-- **[Core Patterns](../02_core_patterns/)** — Medallion architecture and reference joins
-- **[Data Sources](../03_data_sources/)** — Specialised connectors: XML, Excel, streaming  
-- **[Advanced Workflows](../06_advanced_workflows/)** — Polars streaming, shared governance at scale, GDPR compliance
+- **[Core Patterns](../02_core_patterns/)** — Medallion architecture and reference joins 
+- **[Advanced Workflows](../03_advanced_workflows/)** — Polars streaming, shared governance at scale, GDPR compliance

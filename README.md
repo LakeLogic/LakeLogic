@@ -199,14 +199,13 @@ LakeLogic Doctor
 
 ## Explore the Examples
 
-The [`examples/`](https://github.com/lakelogic/LakeLogic/tree/main/examples) directory contains 24 runnable notebooks:
+The [`examples/`](https://github.com/lakelogic/LakeLogic/tree/main/examples) directory contains runnable notebooks across three learning tracks:
 
-| Category | What You'll Learn |
+| Folder | What You'll Learn |
 |:---|:---|
-| **Quickstart** | Your first contract in 5 minutes, database governance, dbt+PII |
-| **Core Patterns** | Medallion architecture, bronze quality gates, SCD2, deduplication, soft deletes |
-| **Advanced** | Insurance ELT, GDPR compliance, late-arriving data, external logic, streaming, synthetic data |
-| **Compliance** | HIPAA PII masking |
+| [`01_quickstart/`](examples/01_quickstart/) | Remote CSV ingestion, database governance, dbt + PII quality |
+| [`02_core_patterns/`](examples/02_core_patterns/) | Bronze quality gate, medallion architecture, SCD2, deduplication, reference joins, soft deletes |
+| [`03_compliance_governance/`](examples/03_compliance_governance/) | HIPAA & GDPR Policy Packs, automated PII masking, audit-ready quarantine |
 
 ## Documentation
 
@@ -214,8 +213,6 @@ The [`examples/`](https://github.com/lakelogic/LakeLogic/tree/main/examples) dir
 - **[Quickstart](https://LakeLogic.github.io/LakeLogic/quickstart/)** — Get running in 5 minutes
 - **[Contract Reference](docs/contract_template.md)** — Full YAML field reference
 - **[CLI Reference](https://LakeLogic.github.io/LakeLogic/cli/)** — Command-line usage
-- **[Delta Lake Support](docs/delta_lake_support.md)** — Spark-free Delta operations
-- **[Streaming](docs/streaming_implementation_complete.md)** — Real-time ingestion
 
 ## Contributing
 

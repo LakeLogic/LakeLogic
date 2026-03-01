@@ -1,4 +1,0 @@
-pageview_id,user_id,url,event_ts
-pv1,u1,/home,2026-02-01T10:20:00Z
-pv2,u2,/pricing,2026-02-01T11:20:00Z
-pv3,,/checkout,2026-02-01T11:25:00Z

@@ -33,9 +33,13 @@ materialization:
   target_path: output/gold_dim_customers
   format: csv
   scd2:
-    effective_from_field: updated_at
+    effective_from_field: effective_from   # name of the version-start column in the destination table
+    change_date_field: updated_at          # source column that holds the real change-event date
     effective_to_field: effective_to
     current_flag_field: is_current
+    effective_from_default: "1900-01-01"   # date used when a record first appears (initial load / new key)
+    effective_to_default: "9999-12-31"     # sentinel for "still current" — no null effective_to
+  track_columns: ["name"]
 
 lineage:
   enabled: true

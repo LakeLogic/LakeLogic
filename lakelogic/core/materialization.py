@@ -570,7 +570,7 @@ def _merge_frames(
     merged = existing.reset_index()
     if not new_rows.empty:
         merged = pd.concat([merged, new_rows.reset_index()], ignore_index=True)
-        
+
     return merged
 
 
@@ -582,7 +582,23 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         existing: Existing dataframe.
         incoming: Incoming dataframe.
         primary_key: Primary key columns.
-        scd2_cfg: SCD2 configuration.
+        scd2_cfg: SCD2 configuration dict supporting keys:
+            - effective_from_field (str): NAME of the version-start column in the
+              destination dimension table (e.g. "effective_from"). This is purely a
+              column-naming setting — it does NOT control which source field is read.
+            - change_date_field (str): SOURCE column whose value is used as the start
+              date when a tracked column actually changes (e.g. "updated_at").  Defaults
+              to effective_from_field for backwards compatibility (when both share the
+              same name, e.g. the old effective_from_field: updated_at pattern).
+            - effective_to_field (str): column holding version-end date.
+            - current_flag_field (str): boolean column marking the live row.
+            - track_columns (list[str]): optional – only open a new version
+              when at least one of these columns has changed.  When omitted,
+              every incoming row for a known key triggers a new version
+              (original behaviour).
+            - effective_to_default (str): sentinel for current rows (default "9999-12-31").
+            - effective_from_default (str): origin date for initial loads / first
+              appearances (default "1900-01-01").
 
     Returns:
         Updated dataframe with SCD2 semantics.
@@ -590,10 +606,19 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     if not primary_key:
         raise ValueError("primary_key is required for scd2 strategy.")
 
-    effective_from = scd2_cfg.get("effective_from_field", "effective_from")
-    effective_to = scd2_cfg.get("effective_to_field", "effective_to")
-    current_flag = scd2_cfg.get("current_flag_field", "is_current")
+    effective_from = scd2_cfg.get("effective_from_field", "effective_from")  # destination column name
+    effective_to   = scd2_cfg.get("effective_to_field",   "effective_to")
+    current_flag   = scd2_cfg.get("current_flag_field",   "is_current")
+    track_columns: Optional[List[str]] = scd2_cfg.get("track_columns")
+    # change_date_field: which SOURCE column holds the actual change-event date.
+    # Defaults to effective_from for backwards compat (old pattern: effective_from_field: updated_at).
+    change_date_field: str = scd2_cfg.get("change_date_field", effective_from)
 
+    # Default values for SCD2 fields
+    effective_to_default = scd2_cfg.get("effective_to_default", "9999-12-31")
+    effective_from_default = scd2_cfg.get("effective_from_default", "1900-01-01")
+
+    # Timestamp for closing existing records (when a change occurs)
     now_value = scd2_cfg.get("default_effective_from")
     if not now_value:
         now_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -601,46 +626,124 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     existing = existing.copy()
     incoming = incoming.copy()
 
+    # Ensure SCD2 control columns exist on incoming
+    # For incoming, effective_from should be the actual change timestamp if provided,
+    # otherwise, it's the 'now_value' for updates.
     if effective_from not in incoming.columns:
         incoming[effective_from] = now_value
     if effective_to not in incoming.columns:
-        incoming[effective_to] = None
+        incoming[effective_to] = effective_to_default # New versions are current
     if current_flag not in incoming.columns:
         incoming[current_flag] = True
 
+    # Initial load – no existing data
     if existing.empty:
+        # For initial load, all incoming records are new and start from effective_from_default
+        incoming[effective_from] = effective_from_default
+        incoming[effective_to] = effective_to_default
+        incoming[current_flag] = True
         return incoming
 
+    # Ensure SCD2 control columns exist on existing
     if effective_from not in existing.columns:
-        existing[effective_from] = None
+        existing[effective_from] = effective_from_default # Assume existing records started from default if not specified
     if effective_to not in existing.columns:
-        existing[effective_to] = None
+        existing[effective_to] = effective_to_default # Assume existing current records end at default if not specified
     if current_flag not in existing.columns:
-        existing[current_flag] = True
+        existing[current_flag] = (existing[effective_to] == effective_to_default) # Infer current based on effective_to
+
+    # Cast SCD2 control columns so pandas can accept mixed-type writes
+    merged = existing.copy()
+    # Ensure these columns are of object type to handle mixed string/None/datetime values
+    merged[effective_to]  = merged[effective_to].astype(object)
+    merged[current_flag]  = merged[current_flag].astype(object)
+
+    # Columns to compare when track_columns is set; fall back to all
+    # non-key, non-SCD2 data columns present in both frames.
+    scd2_control = {effective_from, effective_to, current_flag}
+    if track_columns:
+        compare_cols = [c for c in track_columns if c in existing.columns and c in incoming.columns]
+    else:
+        # If no track_columns, compare all non-key, non-SCD2 columns
+        all_data_cols = list(set(existing.columns) | set(incoming.columns) - set(primary_key) - scd2_control)
+        compare_cols = [c for c in all_data_cols if c in existing.columns and c in incoming.columns]
 
     incoming_keys = incoming[primary_key].drop_duplicates()
 
-    merged = existing.copy()
+    # Rows from incoming that will actually open a new version
+    import pandas as pd
+    new_versions = []
 
     for _, key_row in incoming_keys.iterrows():
+        # Build boolean mask for this key in the merged (existing) frame
         key_filter = None
         for col in primary_key:
-            if key_filter is None:
-                key_filter = merged[col] == key_row[col]
-            else:
-                key_filter &= merged[col] == key_row[col]
+            cond = merged[col] == key_row[col]
+            key_filter = cond if key_filter is None else key_filter & cond
 
+        # Matching row(s) in incoming for this key
+        incoming_key_filter = None
+        for col in primary_key:
+            cond = incoming[col] == key_row[col]
+            incoming_key_filter = cond if incoming_key_filter is None else incoming_key_filter & cond
+
+        inc_rows = incoming[incoming_key_filter]
+        if inc_rows.empty:
+            continue
+
+        inc_row = inc_rows.iloc[0]   # single canonical incoming row per key
+        
+        # Find the currently active record for this key in the merged dataframe
         current_mask = key_filter & (merged[current_flag] == True)
-        if current_mask.any():
-            new_effective_from = incoming.loc[
-                (incoming[primary_key] == key_row.values).all(axis=1),
-                effective_from
-            ].iloc[0]
-            merged.loc[current_mask, effective_to] = new_effective_from
-            merged.loc[current_mask, current_flag] = False
 
-    import pandas as pd
-    merged = pd.concat([merged, incoming], ignore_index=True)
+        # Decide whether a change actually happened
+        changed = True # Assume change if no track_columns or no existing current record
+        if current_mask.any():
+            existing_current_row = merged[current_mask].iloc[0]
+            if compare_cols: # Only compare if track_columns are specified
+                changed = any(
+                    str(existing_current_row.get(c)) != str(inc_row.get(c))
+                    for c in compare_cols
+                )
+            else: # If no track_columns, any incoming record for an existing key is a change
+                changed = True
+        else:
+            # No current record exists for this key, so the incoming record is new
+            changed = True
+
+        if changed:
+            # Resolve the change-event date from the designated SOURCE column.
+            # change_date_field is set by the user (e.g. "updated_at"); falls back
+            # to effective_from_field for backwards compat when both share a name.
+            if change_date_field in inc_row.index and inc_row[change_date_field] is not None:
+                change_date = inc_row[change_date_field]
+            else:
+                change_date = effective_from_default
+
+            if current_mask.any():
+                # Close the existing current record: set its effective_to to the
+                # new version's start date (the real change-event date from source)
+                merged.loc[current_mask, effective_to]  = change_date
+                merged.loc[current_mask, current_flag]  = False
+
+            # Prepare the new version row
+            new_version_row = inc_row.copy()
+            if not current_mask.any():
+                # Brand-new key — first appearance → use origin sentinel
+                new_version_row[effective_from] = effective_from_default
+            else:
+                # Real change event — use the source change-event date
+                new_version_row[effective_from] = change_date
+            new_version_row[effective_to]  = effective_to_default
+            new_version_row[current_flag]  = True
+
+            new_versions.append(new_version_row.to_dict())
+        # else: no tracked columns changed → skip (no new version, no close)
+
+    if new_versions:
+        new_df = pd.DataFrame(new_versions)
+        merged = pd.concat([merged, new_df], ignore_index=True)
+
     return merged
 
 
@@ -855,31 +958,60 @@ def _spark_scd2_dataframe(
 
     # Get incoming keys
     incoming_keys = incoming_df.select(*primary_key).distinct()
+    track_columns = scd2_cfg.get("track_columns")  # optional list of columns to watch
 
-    # Records to close: existing current records that have matching incoming keys
-    join_condition = [existing_df[col] == incoming_keys[col] for col in primary_key]
-    records_to_close = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
+    # Candidate matches: existing current rows whose key appears in incoming
+    candidates = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
         F.col(current_flag) == True
     )
 
-    # Get the effective_from from incoming for closing
+    if track_columns:
+        # Join candidates with full incoming rows so we can compare field values
+        inc_alias = incoming_df.select(
+            *primary_key,
+            *[F.col(c).alias(f"_inc_{c}") for c in track_columns if c in incoming_df.columns],
+        ).distinct()
+        candidates_with_inc = candidates.join(inc_alias, on=primary_key, how="left")
+
+        # Build per-column change condition: NULLsafe inequality
+        change_conditions = [
+            F.col(c) != F.col(f"_inc_{c}")
+            for c in track_columns
+            if c in candidates.columns and c in incoming_df.columns
+        ]
+        if change_conditions:
+            any_changed = change_conditions[0]
+            for cond in change_conditions[1:]:
+                any_changed = any_changed | cond
+            records_to_close = candidates_with_inc.filter(any_changed).drop(
+                *[f"_inc_{c}" for c in track_columns]
+            )
+            # Incoming rows that actually triggered a change (used for new versions below)
+            changed_keys = records_to_close.select(*primary_key).distinct()
+            incoming_df = incoming_df.join(changed_keys, on=primary_key, how="inner")
+        else:
+            records_to_close = candidates
+    else:
+        # Original behaviour: always close+version on any key match
+        records_to_close = candidates
+
+    # Records to keep unchanged: not matching incoming keys OR already closed
+    unchanged = existing_df.join(incoming_keys, on=primary_key, how="left_anti")
+    already_closed = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
+        F.col(current_flag) == False
+    )
+
+    # Stamp effective_to on records being closed
     incoming_effective = incoming_df.select(
         *primary_key,
         F.col(effective_from).alias("_new_effective_from")
     ).distinct()
 
-    # Close the records
     closed_records = records_to_close.join(incoming_effective, on=primary_key, how="left").withColumn(
         effective_to, F.col("_new_effective_from")
     ).withColumn(
         current_flag, F.lit(False)
     ).drop("_new_effective_from")
-
-    # Records to keep unchanged: existing records NOT matching incoming keys OR already closed
-    unchanged = existing_df.join(incoming_keys, on=primary_key, how="left_anti")
-    already_closed = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(
-        F.col(current_flag) == False
-    )
 
     # Align all columns
     all_columns = list(existing_df.columns)
@@ -934,7 +1066,12 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     reprocess_policy = getattr(mat, "reprocess_policy", "overwrite_partition")
     primary_key = list(contract.primary_key or [])
     scd2_cfg = getattr(mat, "scd2", None)
-    scd2_cfg = scd2_cfg if isinstance(scd2_cfg, dict) else {}
+    scd2_cfg = dict(scd2_cfg) if isinstance(scd2_cfg, dict) else {}
+    # track_columns may be set at the materialization level (outside scd2:)
+    if "track_columns" not in scd2_cfg:
+        tc = getattr(mat, "track_columns", None)
+        if tc:
+            scd2_cfg["track_columns"] = tc
     location = _resolve_external_location(getattr(mat, "location", None))
 
     spark = df.sparkSession
@@ -1245,7 +1382,12 @@ def materialize_dataframe(
 
     primary_key = list(contract.primary_key or [])
     scd2_cfg = getattr(mat, "scd2", None)
-    scd2_cfg = scd2_cfg if isinstance(scd2_cfg, dict) else {}
+    scd2_cfg = dict(scd2_cfg) if isinstance(scd2_cfg, dict) else {}
+    # track_columns may be set at the materialization level (outside scd2:)
+    if "track_columns" not in scd2_cfg:
+        tc = getattr(mat, "track_columns", None)
+        if tc:
+            scd2_cfg["track_columns"] = tc
 
     if partition_by and strategy in ["merge", "scd2"]:
         # Partition-aware merge: merge/scd2 within each affected partition
