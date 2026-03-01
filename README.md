@@ -4,7 +4,7 @@
 
 One YAML contract. Any engine. Every row validated, quarantined, or promoted — automatically.
 
-[![CI](https://github.com/lakelogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/lakelogic/LakeLogic/actions/workflows/ci-gate.yml)
+
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://lakelogic.github.io/LakeLogic/)
 [![PyPI](https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white)](https://pypi.org/project/lakelogic/)
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org)
