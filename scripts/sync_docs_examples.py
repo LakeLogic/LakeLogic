@@ -48,7 +48,7 @@ FLAGSHIP_EXAMPLES = [
         "supporting_files": [],
     },
     {
-        "notebook": "02_core_patterns/soft_delete/playbook.ipynb",
+        "notebook": "02_core_patterns/soft_delete/soft_delete_pattern.ipynb",
         "dest_name": "soft_delete.ipynb",
         "supporting_files": [],
     },
