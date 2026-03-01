@@ -62,12 +62,12 @@ nav:
       - Notifications & Secrets: tutorials/notifications_secrets.md
   - Interactive Examples:
       - "HIPAA & GDPR Compliance": examples/hipaa_gdpr_compliance.ipynb
-      - "AI Contract Enrichment": examples/ai_enrich_demo.ipynb
-      - "AI Edge-Case Testing": examples/ai_edge_cases_demo.ipynb
-      - "Synthetic Data Generation": examples/synthetic_data_generation.ipynb
+      - "Bronze Quality Gate": examples/bronze_quality_gate.ipynb
       - "Medallion Architecture": examples/medallion_architecture.ipynb
-      - "Late-Arriving Reprocess": examples/late_arriving_reprocess.ipynb
-      - "Payments Lifecycle": examples/payments_lifecycle.ipynb
+      - "Dedup & Survivorship": examples/dedup_survivorship.ipynb
+      - "SCD2 Dimension": examples/scd2_dimension.ipynb
+      - "Soft Delete (CDC)": examples/soft_delete.ipynb
+      - "Reference Joins": examples/reference_joins.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md
