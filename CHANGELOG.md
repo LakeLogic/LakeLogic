@@ -8,60 +8,15 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ---
 
-## Workflow
-
-### Making commits
-
-Use `cz commit` instead of `git commit` for guided conventional commit formatting:
-
-```bash
-cz commit
-```
-
-This prompts you for **type**, optional **scope**, and **description**, then writes a correctly formatted message such as:
-
-```
-feat(duckdb): add lazy relation materialiser helpers
-fix(cli): prevent UnicodeEncodeError on Windows console
-test(core): add property-based tests for schema policy
-docs: rewrite installation guide with Windows notes
-chore: bump polars to 0.21.x
-```
-
-Common types and their version-bump impact:
-
-| Type | Bump | Use for |
-|---|---|---|
-| `feat` | minor | New user-facing capability |
-| `fix` | patch | Bug fix |
-| `perf` | patch | Performance improvement |
-| `refactor` | – | Internal restructure, no behaviour change |
-| `test` | – | Adding or fixing tests |
-| `docs` | – | Documentation only |
-| `chore` | – | Tooling, deps, CI |
-| `BREAKING CHANGE:` (footer) | major | Any breaking API change |
-
-### Releasing a new version
-
-```bash
-# 1. Make sure all commits since last tag use Conventional Commits
-# 2. Run bump — calculates next version, updates files, writes changelog, tags
-cz bump
-
-# 3. Push code and tag together
-git push --follow-tags
-```
-
-`cz bump` automatically:
-- Calculates the next version from commit history (`feat` → minor, `fix` → patch)
-- Updates `version` in **`pyproject.toml`** and **`lakelogic/__init__.py`**
-- Prepends a new dated section to **`CHANGELOG.md`**
-- Creates a **git tag** (`v0.1.1`, `v0.2.0`, etc.)
-
 ### Regenerating the changelog without bumping
 
 ```bash
 cz changelog
+```
+### Regenerating the changelog with bumping
+
+```bash
+cz bump
 ```
 
 ---
@@ -86,6 +41,14 @@ cz changelog
 [Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
+
+## v0.11.0 (2026-03-03)
+
+### Feat
+
+- add PII masking hook with direct and NLP-based replacement modes, and refine changelog documentation.
+- add tutorials for HIPAA, GDPR compliance, and PII masking.
+- Add tutorials demonstrating HIPAA/GDPR compliance and PII masking.
 
 ## v0.10.0 (2026-03-01)
 
