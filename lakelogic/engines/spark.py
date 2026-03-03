@@ -53,7 +53,17 @@ class SparkAdapter(EngineAdapter):
             pass
         _df_types = tuple(_df_types)
 
-        if not isinstance(df, _df_types):
+        # Auto-convert a Python list/tuple of dicts to a Spark DataFrame.
+        # This lets callers pass in-memory records (e.g. rows fetched from SQLite,
+        # a list of dicts, Pandas-style .to_dict("records")) without having to
+        # manually create a SparkSession first.
+        if isinstance(df, (list, tuple)):
+            from pyspark.sql import SparkSession
+
+            _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+            df = _spark.createDataFrame(df)
+
+        elif not isinstance(df, _df_types):
             raise TypeError(f"Expected Spark DataFrame, got {type(df)}")
 
         # 1. Register Source and Links in Spark Session
