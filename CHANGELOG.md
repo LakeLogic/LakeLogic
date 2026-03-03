@@ -4,43 +4,44 @@ All notable changes to **LakeLogic** are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/).
-
----
-
-### Regenerating the changelog without bumping
-
-```bash
-cz changelog
-```
-### Regenerating the changelog with bumping
-
-```bash
-cz bump
-```
 
 ---
 
 
 ### Added
-
-- Initial public pre-release of LakeLogic OSS.
-- Core `DataProcessor` with Polars, Pandas, DuckDB, Spark, Snowflake, and BigQuery adapter stubs.
-- `DataContract` Pydantic model with quality rules, transformations, schema policy, SLOs, and materialization.
-- `lakelogic run` — CLI command for validating a source file against a contract YAML.
-- `lakelogic bootstrap` — landing-zone scanner and contract generator.
-- `lakelogic generate` — synthetic data generator from a contract definition.
-- `lakelogic import-dbt` — dbt `schema.yml` / `sources.yml` to LakeLogic contract converter.
-- `lakelogic setup-oss` — DuckDB extension pre-installer (`iceberg`, `delta`, `httpfs`, `aws`, `azure`).
-- `PipelineDriver` in `driver.py` for multi-contract bronze/silver/gold pipeline orchestration.
-- GitHub Actions CI pipeline (`ci-gate.yml`) — Ruff lint and pytest with coverage.
+- **Initial public release of LakeLogic OSS**
+- `DataContract` — Pydantic model defining schema, quality rules, transformations, SLOs, materialization targets, and PII policy in a single YAML
+- `DataProcessor` — validates any file or DataFrame against a contract at ingest; bad rows routed to quarantine with a per-row `_reject_reason` column, never silently dropped
+- `DataGenerator` — produces realistic synthetic rows from a contract; seed from a real file's distributions for high-fidelity test data
+- `ValidationResult` — structured output with pass/fail counts, quarantine path, run ID, and lineage metadata
+- **DuckDB engine** — fully local, zero-infrastructure validation for development and CI pipelines
+- Adapter stubs for Polars, Pandas, Spark, Snowflake, and BigQuery — engine interface defined, implementations to follow in subsequent releases
+- `lakelogic bootstrap` — scans a landing zone directory and generates a starter contract for each file found
+- `PipelineDriver` — orchestrates multi-contract bronze/silver/gold pipelines from a single configuration
+- Initial documentation site (MkDocs) with quickstart, API reference, and architecture guide
 
 ---
 
-<!-- link definitions (updated by cz bump) -->
-[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
-[0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
+<!-- Link definitions -->
+[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/lakelogic/LakeLogic/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/lakelogic/LakeLogic/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/lakelogic/LakeLogic/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/lakelogic/LakeLogic/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/lakelogic/LakeLogic/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/lakelogic/LakeLogic/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/lakelogic/LakeLogic/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/lakelogic/LakeLogic/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/lakelogic/LakeLogic/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/lakelogic/LakeLogic/compare/v0.2.0b0...v0.2.0
+[0.2.0b0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0...v0.2.0b0
+[0.1.0]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0
+
+## v0.12.0 (2026-03-03)
+
+### Feat
+
+- Add "Hello World" example notebook for remote data ingestion and quality validation, and update the changelog.
 
 ## v0.11.0 (2026-03-03)
 
@@ -49,27 +50,12 @@ cz bump
 - add PII masking hook with direct and NLP-based replacement modes, and refine changelog documentation.
 - add tutorials for HIPAA, GDPR compliance, and PII masking.
 - Add tutorials demonstrating HIPAA/GDPR compliance and PII masking.
-
-## v0.10.0 (2026-03-01)
-
-### Feat
-
 - Introduce the foundational LakeLogic data processing framework, including core modules, engine integrations, AI, and CLI.
 - add script to synchronize flagship examples to the documentation directory.
 - Add a script to synchronize flagship examples to the documentation and update MkDocs navigation to feature new interactive examples.
-
-## v0.9.0 (2026-03-01)
-
-### Feat
-
 - Add new core materialization module, comprehensive examples, and initial documentation, while updating the main README.
 - Add 01_hello_world.ipynb quickstart example for remote data ingestion.
 - Add quickstart examples for remote data ingestion, database governance, and dbt PII quality, supported by new core materialization and models.
-
-## v0.8.0 (2026-02-28)
-
-### Feat
-
 - Add BigQuery and Snowflake engine adapters along with a dependency management utility for optional packages.
 
 ## v0.7.0 (2026-02-28)
@@ -83,11 +69,6 @@ cz bump
 ### Feat
 
 - Add CI quality gate and PyPI publish workflows, and update documentation examples via a new sync script.
-
-## v0.5.0 (2026-02-28)
-
-### Feat
-
 - Add extensive examples for quickstart, core patterns, advanced workflows, and compliance, alongside new documentation and a schema API.
 
 ## v0.4.0 (2026-02-28)
@@ -102,20 +83,10 @@ cz bump
 
 - Implement the initial command-line interface for contract execution, output management, and environment setup.
 - Implement a universal notification system using Apprise with new Jinja2 templates and a base adapter.
-
-## v0.2.0 (2026-02-27)
-
-### Feat
-
 - Add quickstart examples for data ingestion across various file formats using contracts and notebooks.
 - Add new documentation for notifications & secrets, playbooks, and a main index, and update mkdocs navigation.
 - Add extensive documentation including comparison, installation, and architecture guides, update project branding, and introduce core processor logic.
 - Introduce new examples covering advanced workflows and compliance/governance scenarios, including data, contracts, and notebooks.
-
-## v0.2.0b0 (2026-02-26)
-
-### Feat
-
 - Implement initial LakeLogic framework with contract inference, multi-engine support, and Databricks deployment configuration.
 - Establish core data contract models and initial data processing infrastructure with engine support.
 - Implement contract inference from data files, add dbt adapter, schema API, and advanced workflow examples.
@@ -137,6 +108,11 @@ cz bump
 - Introduce extensive new features, examples, and documentation for data integration, streaming, and cataloging, including detailed logging configuration.
 - Add a comprehensive contract template reference documentation page and update mkdocs navigation.
 - Implement initial Azure infrastructure with Terraform modules for dev, test, and prod environments, including CI/CD workflows and documentation.
+
+## v0.1.0b1 (2026-02-08)
+
+### Feat
+
 - Establish initial project structure with core logic, CLI, multiple engines, comprehensive documentation, examples, and a test suite.
 - Introduce comprehensive documentation, examples, and support for multiple data engines, core logic, and CLI functionalities.
 - add PyPI publishing workflow and comprehensive MkDocs documentation site
