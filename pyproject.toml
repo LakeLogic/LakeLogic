@@ -144,7 +144,7 @@ websocket = ["websocket-client>=1.6.0"]
 snowflake = ["snowflake-connector-python>=3.5.0"]
 bigquery = ["google-cloud-bigquery>=3.11.0"]
 notebook = ["nbclient>=0.9.0", "nbformat>=5.9.0"]
-profiling = ["dataprofiler>=0.9.0", "presidio-analyzer>=2.2.0"]
+profiling = ["dataprofiler>=0.9.0", "presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0"]
 notifications = [
     "apprise>=1.7.0",
     "Jinja2>=3.1.0",
@@ -182,6 +182,7 @@ enterprise = [
     "pyspark>=3.3.0",
     "dataprofiler>=0.9.0",
     "presidio-analyzer>=2.2.0",
+    "presidio-anonymizer>=2.2.0",
     "bytewax>=0.19.0",
     "nbclient>=0.9.0",
     "nbformat>=5.9.0",
