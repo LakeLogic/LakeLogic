@@ -42,6 +42,14 @@ cz bump
 [0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
 [0.1.0b2]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b2
 
+## v0.11.0 (2026-03-03)
+
+### Feat
+
+- add PII masking hook with direct and NLP-based replacement modes, and refine changelog documentation.
+- add tutorials for HIPAA, GDPR compliance, and PII masking.
+- Add tutorials demonstrating HIPAA/GDPR compliance and PII masking.
+
 ## v0.10.0 (2026-03-01)
 
 ### Feat
