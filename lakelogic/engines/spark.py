@@ -102,7 +102,7 @@ class SparkAdapter(EngineAdapter):
             for i, rule in enumerate(row_rules):
                 col_name = f"_rule_{i}"
                 error_msg = f"Rule failed: {rule.name} ({rule.sql})"
-                cond = F.col(col_name).isNull() | (F.col(col_name) == False)
+                cond = F.col(col_name).isNull() | ~F.col(col_name)
                 error_exprs.append(F.when(cond, F.lit(error_msg)).otherwise(None))
                 category_exprs.append(F.when(cond, F.lit(rule.category)).otherwise(None))
 
