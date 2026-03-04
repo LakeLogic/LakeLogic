@@ -9,21 +9,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 ### Added
-- **Initial public release of LakeLogic OSS**
-- `DataContract` — Pydantic model defining schema, quality rules, transformations, SLOs, materialization targets, and PII policy in a single YAML
-- `DataProcessor` — validates any file or DataFrame against a contract at ingest; bad rows routed to quarantine with a per-row `_reject_reason` column, never silently dropped
-- `DataGenerator` — produces realistic synthetic rows from a contract; seed from a real file's distributions for high-fidelity test data
-- `ValidationResult` — structured output with pass/fail counts, quarantine path, run ID, and lineage metadata
-- **DuckDB engine** — fully local, zero-infrastructure validation for development and CI pipelines
-- Adapter stubs for Polars, Pandas, Spark, Snowflake, and BigQuery — engine interface defined, implementations to follow in subsequent releases
-- `lakelogic bootstrap` — scans a landing zone directory and generates a starter contract for each file found
-- `PipelineDriver` — orchestrates multi-contract bronze/silver/gold pipelines from a single configuration
-- Initial documentation site (MkDocs) with quickstart, API reference, and architecture guide
+- Initial project structure: core logic, CLI, multiple engines, documentation, examples, and test suite
+- PyPI publishing workflow
+- Basic validation contract for the `silver_crm_customers` dataset example
+- Introduced Lakeguard (now LakeLogic) framework with multi-engine support
 
 ---
 
 <!-- Link definitions -->
-[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/lakelogic/LakeLogic/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/lakelogic/LakeLogic/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/lakelogic/LakeLogic/compare/v0.8.0...v0.9.0
@@ -36,6 +31,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [0.2.0]: https://github.com/lakelogic/LakeLogic/compare/v0.2.0b0...v0.2.0
 [0.2.0b0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0...v0.2.0b0
 [0.1.0]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0
+
+## v0.13.0 (2026-03-04)
+
+### Feat
+
+- introduce Spark execution engine for data contract validation and transformation.
 
 ## v0.12.0 (2026-03-03)
 
