@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "0.12.0"
+version = "0.13.0"
 description = "A Python-based data contract runtime for consistent quality across engines."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -131,13 +131,13 @@ gcp_messaging = ["google-cloud-pubsub>=2.18.0"]
 # Streaming processing
 streaming = [
     "bytewax>=0.19.0",  # Real-time stream processing (Rust-based)
-    "pathway>=0.12.0; python_version >= '3.10'",   # Real-time SQL transformations
+    "pathway>=0.13.0; python_version >= '3.10'",   # Real-time SQL transformations
     "kafka-python>=2.0.2",  # Apache Kafka
     "sseclient-py>=1.8.0",  # Server-Sent Events (Wikimedia, etc.)
     "websocket-client>=1.6.0",  # WebSocket (Coinbase, Binance, etc.)
 ]
 bytewax = ["bytewax>=0.19.0"]
-pathway = ["pathway>=0.12.0; python_version >= '3.10'"]
+pathway = ["pathway>=0.13.0; python_version >= '3.10'"]
 kafka = ["kafka-python>=2.0.2"]
 sse = ["sseclient-py>=1.8.0"]
 websocket = ["websocket-client>=1.6.0"]
@@ -223,7 +223,7 @@ dev-dependencies = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "0.12.0"
+version         = "0.13.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = true
