@@ -1,0 +1,8 @@
+dataset: remote_employees
+quality:
+  row_rules:
+  - name: Valid Email
+    sql: email LIKE '%@%'
+source:
+  type: landing
+version: 1.0.0

@@ -29,6 +29,9 @@ class ValidationResult:
     Unpacks as ``good_df, bad_df = processor.run(df)`` for the common
     two-variable pattern.  The raw (pre-validation) frame and the
     execution trace are available via ``.raw`` and ``.trace`` attributes.
+
+    Use ``.source_count``, ``.good_count``, and ``.bad_count`` for
+    engine-agnostic row counts (works with Polars, Pandas, Spark, DuckDB).
     """
 
     def __init__(self, good, bad, raw=None, trace=None):
@@ -37,6 +40,48 @@ class ValidationResult:
         self.raw = raw
         self.trace = trace
 
+    # ── Engine-agnostic row counting ──────────────────────────────
+    @staticmethod
+    def _count_rows(obj):
+        """Return the row count of any DataFrame-like object (Polars, Pandas, Spark, DuckDB)."""
+        if obj is None:
+            return 0
+        # Polars DataFrame / LazyFrame
+        if hasattr(obj, "height"):
+            return obj.height
+        # Spark DataFrame — .count() returns an int directly
+        if hasattr(obj, "count") and callable(getattr(obj, "count")):
+            try:
+                res = obj.count()
+                if isinstance(res, int):
+                    return res
+                # DuckDB relation — .count() returns a cursor
+                if hasattr(res, "fetchone"):
+                    return res.fetchone()[0]
+            except Exception:
+                pass
+        # Pandas / list / anything with len()
+        try:
+            return len(obj)
+        except Exception:
+            return 0
+
+    @property
+    def source_count(self) -> int:
+        """Row count of the raw (pre-validation) data."""
+        return self._count_rows(self.raw)
+
+    @property
+    def good_count(self) -> int:
+        """Row count of records that passed all quality rules."""
+        return self._count_rows(self.good)
+
+    @property
+    def bad_count(self) -> int:
+        """Row count of records routed to quarantine."""
+        return self._count_rows(self.bad)
+
+    # ── Standard dunder methods ───────────────────────────────────
     def __iter__(self):
         yield self.good
         yield self.bad
@@ -48,22 +93,7 @@ class ValidationResult:
         return 2
 
     def __repr__(self):
-        def _count(obj):
-            if obj is None:
-                return 0
-            if hasattr(obj, "height"):
-                return obj.height
-            if hasattr(obj, "count"):
-                try:
-                    return obj.count().fetchone()[0]
-                except Exception:
-                    return "?"
-            try:
-                return len(obj)
-            except Exception:
-                return "?"
-
-        return f"ValidationResult(good={_count(self.good)}, bad={_count(self.bad)})"
+        return f"ValidationResult(good={self.good_count}, bad={self.bad_count})"
 
 
 class DataProcessor:
