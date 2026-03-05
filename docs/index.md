@@ -335,4 +335,14 @@ LakeLogic is the open-source engine that enforces your data contracts. Here's ho
 
 ---
 
+## From the Blog
+
+!!! abstract "Latest Posts"
+    - [**Data Quality Management Without the Platform Tax**](https://lakelogic.org/blog/data-quality-management/) — Why YAML contracts beat enterprise DQM platforms on cost, flexibility, and version control.
+    - [**Row-Level Data Quality in Polars — Without Writing Validation Code**](https://lakelogic.org/blog/polars-data-quality/) — One YAML file replaces 200 lines of Polars validation boilerplate.
+    - [**Data Mesh Without the Chaos**](https://lakelogic.org/blog/data-mesh-data-contracts/) — How data contracts make domain ownership work at enterprise scale.
+    - [**Stop the Spark Tax**](https://lakelogic.org/blog/stop-the-spark-tax/) — One data contract, any engine — eliminate logic drift between Spark, Polars, and DuckDB.
+
+---
+
 [Quickstart](examples/01_hello_world.ipynb) | [How It Works](concepts.md) | [Patterns](deployment_patterns.md) | [CLI Usage](cli.md)

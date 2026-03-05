@@ -221,3 +221,13 @@ Snowflake and BigQuery adapters are available but are not auto-discovered; selec
 
 ### Why this matters?
 This allows you to develop logic on your laptop using **Polars**, commit it to Git, and have that same contract run on a **Spark** cluster in Databricks without changing a single line of code. 🛡️🚀
+
+---
+
+## From the Blog
+
+!!! tip "Deep Dives"
+    - [**Row-Level Data Quality in Polars — Without Writing Validation Code**](https://lakelogic.org/blog/polars-data-quality/) — See how one YAML contract replaces 200 lines of Polars validation boilerplate.
+    - [**How Quarantine Saved Our Pipeline (And My Sleep)**](https://lakelogic.org/blog/quarantine-saved-our-pipeline/) — A real-world story of quarantine preventing a 2am incident.
+    - [**Data Mesh Without the Chaos**](https://lakelogic.org/blog/data-mesh-data-contracts/) — How data contracts make domain ownership work at enterprise scale.
+
