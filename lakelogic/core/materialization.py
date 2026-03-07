@@ -54,6 +54,48 @@ def _spark_save_as_table(
         writer.mode(mode).saveAsTable(table_name)
 
 
+def _spark_apply_table_metadata(spark, table_name: str, contract) -> None:
+    """
+    Apply column comments and table properties to a Spark/Databricks table.
+
+    Reads field descriptions from ``contract.model.fields`` and emits
+    ``ALTER TABLE ... ALTER COLUMN ... COMMENT`` for each field with a
+    description.  Also applies ``materialization.table_properties`` as
+    ``ALTER TABLE ... SET TBLPROPERTIES``.
+
+    This is a best-effort operation; failures are logged but do not
+    prevent the materialization from succeeding.
+
+    Args:
+        spark: SparkSession.
+        table_name: Fully qualified table name.
+        contract: DataContract instance.
+    """
+    # ── Column comments ─────────────────────────────────────────────────────
+    if contract.model and contract.model.fields:
+        for field in contract.model.fields:
+            desc = getattr(field, "description", None)
+            if desc:
+                escaped = desc.replace("'", "\\'")
+                sql = f"ALTER TABLE {table_name} ALTER COLUMN {field.name} COMMENT '{escaped}'"
+                try:
+                    spark.sql(sql)
+                except Exception as exc:
+                    logger.debug(f"Could not set column comment on {table_name}.{field.name}: {exc}")
+
+    # ── Table properties ────────────────────────────────────────────────────
+    mat = getattr(contract, "materialization", None)
+    table_props = getattr(mat, "table_properties", None) if mat else None
+    if table_props:
+        props = ", ".join(f"'{k}' = '{v}'" for k, v in table_props.items())
+        sql = f"ALTER TABLE {table_name} SET TBLPROPERTIES ({props})"
+        try:
+            spark.sql(sql)
+            logger.info(f"Applied table properties to {table_name}: {list(table_props.keys())}")
+        except Exception as exc:
+            logger.debug(f"Could not set table properties on {table_name}: {exc}")
+
+
 def _sanitize_arrow_nulls(table):
     """
     Replace any Arrow ``null``-typed columns with ``utf8`` (string) nulls.
@@ -1111,13 +1153,16 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     if strategy == "merge":
         if not primary_key:
             raise ValueError("primary_key is required for merge strategy.")
-        return _spark_merge_dataframe(spark, df, target_str, primary_key, output_format, location=location)
+        result = _spark_merge_dataframe(spark, df, target_str, primary_key, output_format, location=location)
+        if target_str.startswith("table:"):
+            _spark_apply_table_metadata(spark, target_str[6:], contract)
+        return result
 
     # Handle SCD2 strategy natively
     if strategy == "scd2":
         if not primary_key:
             raise ValueError("primary_key is required for scd2 strategy.")
-        return _spark_scd2_dataframe(
+        result = _spark_scd2_dataframe(
             spark,
             df,
             target_str,
@@ -1126,6 +1171,9 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
             output_format,
             location=location,
         )
+        if target_str.startswith("table:"):
+            _spark_apply_table_metadata(spark, target_str[6:], contract)
+        return result
 
     # Standard append/overwrite
     writer = df.write.format(output_format)
@@ -1146,6 +1194,7 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
     if target_str.startswith("table:"):
         table_name = target_str[len("table:") :]
         _spark_save_as_table(writer, table_name, mode, location)
+        _spark_apply_table_metadata(spark, table_name, contract)
         logger.info(f"Materialized Spark dataframe to table {table_name} ({output_format})")
         return {
             "target": table_name,
@@ -1338,6 +1387,7 @@ def _partition_aware_merge(
             )
 
         logger.info(f"Partition-aware {strategy} (delta): materialized {total_rows} rows → {base_dir}")
+        _maybe_compact_delta(str(base_dir), contract)
         return {
             "target": str(base_dir),
             "rows_written": total_rows,
@@ -1584,6 +1634,7 @@ def materialize_dataframe(
             f"Materialized {rows_written} rows to Delta table: {resolved_target} "
             f"(mode={delta_mode}, partitions={delta_partition_by})"
         )
+        _maybe_compact_delta(str(resolved_target), contract)
         return {
             "target": str(resolved_target),
             "rows_written": rows_written,
@@ -1699,9 +1750,114 @@ def materialize_dataframe(
     }
 
 
+# ── Delta Compaction ─────────────────────────────────────────────────────────
+
+
+def optimize_delta(
+    target: str,
+    *,
+    vacuum: bool = True,
+    vacuum_retention_hours: int = 168,
+    storage_options: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Compact small files in a Delta table and optionally vacuum old versions.
+
+    Uses the ``deltalake`` Python package (delta-rs) — no Spark required.
+    Safe to call from Azure Functions, containers, or any Python process.
+
+    Args:
+        target: Delta table path (local or ``abfss://...``).
+        vacuum: Whether to run vacuum after compaction.
+        vacuum_retention_hours: Minimum age of files to vacuum (default 7 days).
+        storage_options: Azure/S3/GCS credentials for cloud storage.
+
+    Returns:
+        Metadata dict with compaction results.
+
+    Usage::
+
+        from lakelogic.core.materialization import optimize_delta
+
+        # Manual call
+        optimize_delta("abfss://bronze@storage.dfs.core.windows.net/orders")
+
+        # Or from contract config (auto mode)
+        # materialization:
+        #   compaction:
+        #     auto: true
+        #     vacuum_retention_hours: 168
+    """
+    try:
+        from deltalake import DeltaTable
+    except ImportError:
+        raise ImportError(
+            "Delta compaction requires the deltalake package: pip install deltalake"
+        )
+
+    result: Dict[str, Any] = {"target": target}
+
+    try:
+        dt = DeltaTable(target, storage_options=storage_options)
+
+        # ── Compact (bin-pack small files) ──────────────────────────────────
+        compact_result = dt.optimize.compact()
+        metrics = compact_result if isinstance(compact_result, dict) else {}
+        result["compaction"] = {
+            "status": "ok",
+            "metrics": metrics,
+        }
+        logger.info(f"Compacted Delta table: {target}")
+
+        # ── Vacuum (remove old file versions) ───────────────────────────────
+        if vacuum:
+            vacuum_result = dt.vacuum(
+                retention_hours=vacuum_retention_hours,
+                enforce_retention_duration=True,
+                dry_run=False,
+            )
+            result["vacuum"] = {
+                "status": "ok",
+                "retention_hours": vacuum_retention_hours,
+                "files_removed": len(vacuum_result) if isinstance(vacuum_result, list) else 0,
+            }
+            logger.info(
+                f"Vacuumed Delta table: {target} "
+                f"(retention={vacuum_retention_hours}h)"
+            )
+
+    except Exception as exc:
+        logger.warning(f"Delta compaction failed for {target}: {exc}")
+        result["error"] = str(exc)
+
+    return result
+
+
+def _maybe_compact_delta(target: str, contract) -> Optional[Dict[str, Any]]:
+    """
+    Run compaction if the contract has ``compaction.auto: true``.
+
+    Called automatically after Delta materialization writes.
+    """
+    mat = getattr(contract, "materialization", None)
+    compaction_cfg = getattr(mat, "compaction", None) if mat else None
+    if not compaction_cfg or not compaction_cfg.get("auto"):
+        return None
+
+    vacuum = compaction_cfg.get("vacuum", True)
+    retention = compaction_cfg.get("vacuum_retention_hours", 168)
+
+    return optimize_delta(
+        target,
+        vacuum=vacuum,
+        vacuum_retention_hours=retention,
+    )
+
+
 # ── Re-exports for backwards compatibility ──────────────────────────────────
 # Quarantine and run-log persistence have been extracted to focused modules.
 # The functions below are re-exported so existing imports continue to work.
 
 from lakelogic.core.quarantine import materialize_quarantine  # noqa: F401, E402
 from lakelogic.core.run_log import write_run_log, get_last_run_watermark  # noqa: F401, E402
+
