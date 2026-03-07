@@ -32,22 +32,21 @@ body = """
 ## [{{ version | trim_start_matches(pat="v") }}] — {{ timestamp | date(format="%Y-%m-%d") }}
 {% else -%}
 ## [Unreleased]
-{% endif -%}
-
-{% for group, commits in commits | group_by(attribute="group") %}
+{% endif %}
+{%- for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | striptags | trim | upper_first }}
 {% for commit in commits
 | filter(attribute="scope")
 | sort(attribute="scope") %}
 - **{{ commit.scope }}**: {{ commit.message | upper_first }}
 {%- if commit.breaking %} (**BREAKING**){% endif %}
-{%- endfor -%}
-{% for commit in commits %}
+{%- endfor %}
+{%- for commit in commits %}
 {%- if not commit.scope %}
 - {{ commit.message | upper_first }}
 {%- if commit.breaking %} (**BREAKING**){% endif %}
-{%- endif -%}
-{%- endfor -%}
+{%- endif %}
+{%- endfor %}
 {% endfor %}
 """
 footer = """
@@ -76,6 +75,11 @@ filter_unconventional = true
 split_commits = false
 
 commit_parsers = [
+    # Skip noise
+    { message = "^bump", skip = true },
+    { message = "^chore", skip = true },
+    { message = "^Merge", skip = true },
+    # Conventional commit types → changelog groups
     { message = "^feat", group = "Added" },
     { message = "^fix", group = "Fixed" },
     { message = "^perf", group = "Performance" },
@@ -85,8 +89,6 @@ commit_parsers = [
     { message = "^test", group = "Testing" },
     { message = "^build", group = "Build" },
     { message = "^ci", group = "CI/CD" },
-    { message = "^chore", skip = true },
-    { message = "^bump", skip = true },
     { body = ".*security", group = "Security" },
 ]
 

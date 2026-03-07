@@ -4,11 +4,52 @@ REM Usage:   release.bat           (auto-detect bump: patch/minor/major)
 REM          release.bat minor     (force minor bump)
 REM          release.bat major     (force major bump)
 REM
+REM Prerequisites:
+REM   pip install commitizen
+REM   winget install git-cliff     (or: cargo install git-cliff)
+REM
 REM What it does:
 REM   1. cz bump          - bumps version in pyproject.toml + creates git tag
 REM   2. git cliff        - regenerates CHANGELOG.md from all tags
 REM   3. git commit amend - folds changelog into the bump commit
-REM   4. git push         - pushes everything including tags
+REM   4. git tag -f       - re-attaches the tag to the amended commit
+REM   5. git push         - pushes everything including tags
+REM
+REM -----------------------------------------------------------------------
+REM IMPORTANT: Commit Message Format
+REM -----------------------------------------------------------------------
+REM Commits MUST use conventional format for the changelog to work.
+REM git-cliff parses commit messages to generate the changelog.
+REM Non-conventional commits are grouped under "Other".
+REM
+REM Format:  type(scope): description
+REM
+REM   Types:
+REM     feat:     New feature          -> "Added" in changelog
+REM     fix:      Bug fix              -> "Fixed" in changelog
+REM     docs:     Documentation only   -> "Documentation" in changelog
+REM     refactor: Code restructuring   -> "Changed" in changelog
+REM     perf:     Performance          -> "Performance" in changelog
+REM     test:     Adding/fixing tests  -> "Testing" in changelog
+REM     ci:       CI/CD changes        -> "CI/CD" in changelog
+REM     build:    Build system changes -> "Build" in changelog
+REM     chore:    Maintenance          -> (skipped in changelog)
+REM
+REM   Examples:
+REM     feat: add table_properties to Materialization model
+REM     feat(ddl): emit TBLPROPERTIES for Spark and Databricks
+REM     fix: column comments not applied after SCD2 merge
+REM     feat(materialization): add delta compaction with auto mode
+REM     docs: update contract YAML examples with compaction config
+REM     refactor(processor): extract metadata application to helper
+REM     perf: skip compaction when delta table has fewer than 10 files
+REM
+REM   When using AI-assisted commits (Antigravity/Copilot/Cursor):
+REM     The auto-generated messages often lack the conventional prefix.
+REM     Before running release.bat, either:
+REM       1. Use 'cz commit' for guided conventional commits, or
+REM       2. Manually prefix: git commit -m "feat: <your message>"
+REM       3. Or amend the last commit: git commit --amend -m "feat: ..."
 REM -----------------------------------------------------------------------
 
 echo.
@@ -16,9 +57,9 @@ echo ======================================================
 echo   LakeLogic Release
 echo ======================================================
 
-REM Step 1: Bump version
+REM Step 1: Bump version (creates tag + bump commit)
 echo.
-echo [1/4] Bumping version...
+echo [1/5] Bumping version...
 if "%1"=="" (
     cz bump --yes
 ) else (
@@ -31,13 +72,18 @@ if errorlevel 1 (
     echo Common causes:
     echo   - No new commits since last tag: commit your changes first
     echo   - Commits not in conventional format: use 'cz commit' or 'feat:/fix:' prefixes
+    echo   - Tip: run 'git log --oneline' to check your commits
     echo.
     exit /b 1
 )
 
-REM Step 2: Generate changelog
+REM Capture the new tag name (the latest tag on HEAD)
+for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0') do set NEW_TAG=%%i
+echo   Tag: %NEW_TAG%
+
+REM Step 2: Generate changelog (tag exists on HEAD, so git-cliff sees it)
 echo.
-echo [2/4] Generating changelog with git-cliff...
+echo [2/5] Generating changelog with git-cliff...
 git cliff -o CHANGELOG.md
 if errorlevel 1 (
     echo ERROR: git cliff failed. Is git-cliff installed? Run: winget install git-cliff
@@ -45,18 +91,32 @@ if errorlevel 1 (
 )
 
 REM Step 3: Amend the bump commit to include changelog
+REM         This creates a NEW commit hash, so the tag is now orphaned
 echo.
-echo [3/4] Amending bump commit with changelog...
+echo [3/5] Amending bump commit with changelog...
 git add CHANGELOG.md
 git commit --amend --no-edit
 
-REM Step 4: Push
+REM Step 4: Re-attach the tag to the amended commit
+REM         Without this, the tag points to the old (pre-amend) commit
 echo.
-echo [4/4] Pushing to remote...
-git push --follow-tags
+echo [4/5] Re-tagging %NEW_TAG% on amended commit...
+git tag -f %NEW_TAG%
+
+REM Step 5: Push
+echo.
+echo [5/5] Pushing to remote...
+git push --force --follow-tags
 
 echo.
 echo ======================================================
-echo   Release complete!
+echo   Release %NEW_TAG% complete!
 echo ======================================================
+echo.
+echo   To fix a bad changelog after release:
+echo     1. Edit cliff.toml or reword commits
+echo     2. git cliff -o CHANGELOG.md
+echo     3. git add CHANGELOG.md ^& git commit --amend --no-edit
+echo     4. git tag -f %NEW_TAG%
+echo     5. git push --force --follow-tags
 echo.

@@ -25,7 +25,7 @@ from lakelogic.engines.cloud_credentials import (
     resolve_storage_options,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 class HelpTopic:
