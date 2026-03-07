@@ -466,6 +466,12 @@ def generate_ddl(
         elif backend == "snowflake":
             ddl += f"\nCLUSTER BY ({cluster_cols})"
 
+    # TBLPROPERTIES (Spark/Databricks)
+    table_props = getattr(mat, "table_properties", None) or {}
+    if table_props and backend in ("spark", "databricks"):
+        props = ", ".join(f"'{k}' = '{v}'" for k, v in table_props.items())
+        ddl += f"\nTBLPROPERTIES ({props})"
+
     ddl += ";"
 
     # Add table-level comment for Snowflake / PostgreSQL

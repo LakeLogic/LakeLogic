@@ -789,6 +789,8 @@ class Materialization(BaseModel):
     soft_delete_value: Any = True  # Value to set when deleted
     soft_delete_time_column: Optional[str] = None  # e.g. '_lakelogic_deleted_at'
     soft_delete_reason_column: Optional[str] = None  # e.g. '_lakelogic_delete_reason'
+    table_properties: Optional[Dict[str, str]] = None  # e.g. {'delta.autoOptimize.optimizeWrite': 'true'}
+    compaction: Optional[Dict[str, Any]] = None  # e.g. {'auto': True, 'vacuum_retention_hours': 168}
 
 
 class LineageConfig(BaseModel):
