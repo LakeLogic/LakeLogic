@@ -18,7 +18,6 @@ from lakelogic.core.models import (
     RowRuleRegexMatch,
 )
 
-
 # ── Dialect map: engine_name -> sqlglot dialect ──────────────────────────────
 ENGINE_DIALECT_MAP: Dict[str, str] = {
     "duckdb": "duckdb",

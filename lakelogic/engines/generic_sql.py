@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
-from lakelogic.core.models import DataContract, QualityRule
+from lakelogic.core.models import DataContract
 from lakelogic.engines.base import ENGINE_DIALECT_MAP, EngineAdapter
 
 
@@ -246,7 +246,6 @@ class GenericSQLAdapter(EngineAdapter):
 
         ddl = f"CREATE TABLE {table_name} (\n{','.join(chr(10) + c for c in columns)}\n)"
 
-        target = backend or self.engine_dialect
         return self._transpile(ddl, read_dialect="duckdb")
 
     def validate_connection(self) -> Dict[str, Any]:
@@ -363,7 +362,8 @@ class GenericSQLAdapter(EngineAdapter):
 
         for field in missing:
             col_type = field.type.upper() if field.type else "TEXT"
-            default = f" DEFAULT {self._format_literal(field.default)}" if getattr(field, "default", None) is not None else ""
+            has_default = getattr(field, "default", None) is not None
+            default = f" DEFAULT {self._format_literal(field.default)}" if has_default else ""
 
             alter_sql = self._transpile(
                 f"ALTER TABLE {table} ADD COLUMN {field.name} {col_type}{default}"
@@ -566,7 +566,7 @@ class GenericSQLAdapter(EngineAdapter):
                 self._execute_sql(drop_sql)
                 self._execute_sql(create_sql)
                 self.conn.commit()
-            except Exception as e:
+            except Exception:
                 self.conn.rollback()
                 raise
 
@@ -577,7 +577,7 @@ class GenericSQLAdapter(EngineAdapter):
             try:
                 self._execute_sql(insert_sql)
                 self.conn.commit()
-            except Exception as e:
+            except Exception:
                 self.conn.rollback()
                 raise
 
@@ -628,7 +628,7 @@ class GenericSQLAdapter(EngineAdapter):
                 self._execute_sql(drop_sql)
                 self._execute_sql(create_sql)
                 self.conn.commit()
-            except Exception as e:
+            except Exception:
                 self.conn.rollback()
                 raise
 
@@ -637,7 +637,7 @@ class GenericSQLAdapter(EngineAdapter):
             try:
                 self._execute_sql(insert_sql)
                 self.conn.commit()
-            except Exception as e:
+            except Exception:
                 self.conn.rollback()
                 raise
 

@@ -8,7 +8,7 @@ from lakelogic.core.models import (
     DataContract,
     FieldDefinition,
     QualityRule,
-    TIER_CANONICAL_MAP,
+    TIER_CANONICAL_MAP as TIER_CANONICAL_MAP,
     Transformation,
 )
 from lakelogic.core.processor import DataProcessor
