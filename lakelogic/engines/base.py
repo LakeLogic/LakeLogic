@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
+import sqlglot
 from loguru import logger
 
 from lakelogic.core.models import (
@@ -16,6 +17,27 @@ from lakelogic.core.models import (
     RowRuleReferentialIntegrity,
     RowRuleRegexMatch,
 )
+
+# ── Dialect map: engine_name -> sqlglot dialect ──────────────────────────────
+ENGINE_DIALECT_MAP: Dict[str, str] = {
+    "duckdb": "duckdb",
+    "spark": "spark",
+    "polars": "duckdb",  # Polars SQL is DuckDB-compatible
+    "pandas": "duckdb",
+    "bigquery": "bigquery",
+    "snowflake": "snowflake",
+    "postgres": "postgres",
+    "postgresql": "postgres",
+    "mysql": "mysql",
+    "redshift": "redshift",
+    "clickhouse": "clickhouse",
+    "sqlserver": "tsql",
+    "mssql": "tsql",
+    "oracle": "oracle",
+    "trino": "trino",
+    "presto": "presto",
+    "databricks": "databricks",
+}
 
 
 class EngineAdapter(ABC):
@@ -38,6 +60,7 @@ class EngineAdapter(ABC):
         self.dataset_rule_results: List[Dict[str, Any]] = []
         self.schema_drift: Dict[str, List[str]] = {}
         self.engine_name: str = ""
+        self.engine_dialect: str = ""  # set by subclass or _resolve_dialect()
         self.trace: List[Any] = []  # Avoid circular import of TraceStep here if needed, or import at runtime
 
     def _add_trace(
@@ -168,6 +191,44 @@ class EngineAdapter(ABC):
             return "duckdb"
         return engine
 
+    def _resolve_dialect(self) -> str:
+        """
+        Resolve the sqlglot dialect for the current engine.
+
+        Priority: explicit engine_dialect > engine_name lookup > "duckdb" default.
+        """
+        if self.engine_dialect:
+            return self.engine_dialect
+        engine = self._normalize_engine()
+        return ENGINE_DIALECT_MAP.get(engine, "duckdb")
+
+    def _transpile(self, sql: str, read_dialect: str = "duckdb") -> str:
+        """
+        Transpile a SQL expression from a source dialect to the target engine dialect.
+
+        Standard SQL in contracts is written in DuckDB dialect (the default "read").
+        This method converts it to the active engine's dialect.
+
+        Args:
+            sql: SQL expression string (e.g. a quality rule or transformation).
+            read_dialect: Source dialect of the input SQL. Defaults to "duckdb".
+
+        Returns:
+            Transpiled SQL for the current engine.
+        """
+        target = self._resolve_dialect()
+        if read_dialect == target:
+            return sql
+        try:
+            result = sqlglot.transpile(sql, read=read_dialect, write=target)
+            return result[0] if result else sql
+        except sqlglot.errors.ErrorLevel:
+            logger.warning(f"sqlglot transpile failed for: {sql!r} -> {target}; using original")
+            return sql
+        except Exception:
+            # Fallback: return original SQL if transpilation fails
+            return sql
+
     def _format_literal(self, value: Any) -> str:
         """
         Format a literal for SQL.
@@ -191,6 +252,9 @@ class EngineAdapter(ABC):
         """
         Build an engine-specific regex SQL clause.
 
+        Uses sqlglot transpilation from a DuckDB-dialect REGEXP_MATCHES
+        expression to the target engine's equivalent.
+
         Args:
             field: Column name.
             pattern: Regex pattern.
@@ -198,17 +262,10 @@ class EngineAdapter(ABC):
         Returns:
             SQL boolean expression.
         """
-        engine = self._normalize_engine()
         qfield = self._quote_ident(field)
-        if engine == "spark":
-            return f"{qfield} RLIKE '{pattern}'"
-        if engine == "bigquery":
-            return f"REGEXP_CONTAINS({qfield}, r'{pattern}')"
-        if engine == "snowflake":
-            return f"REGEXP_LIKE({qfield}, '{pattern}')"
-        if engine == "duckdb":
-            return f"REGEXP_MATCHES({qfield}, '{pattern}')"
-        return f"REGEXP_LIKE({qfield}, '{pattern}')"
+        # Write in DuckDB dialect, let sqlglot transpile to target
+        duckdb_sql = f"REGEXP_MATCHES({qfield}, '{pattern}')"
+        return self._transpile(duckdb_sql, read_dialect="duckdb")
 
     def _quote_ident(self, name: str) -> str:
         """

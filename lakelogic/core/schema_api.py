@@ -78,7 +78,16 @@ _KNOWN_TYPES = {
     # Nullable shorthand (e.g. "string?")
 }
 
-_KNOWN_LAYERS = {"bronze", "silver", "gold", "landing", "raw"}
+_KNOWN_LAYERS = {
+    # Canonical medallion
+    "bronze", "silver", "gold",
+    # Common synonyms
+    "raw", "landing", "ingest", "ingestion",
+    "stage", "staging", "cleansed", "transform",
+    "curated", "refined", "presentation", "consumption",
+    # Cross-layer
+    "reference", "ref", "seed", "lookup", "masterdata", "master_data",
+}
 _KNOWN_FORMATS = {
     "parquet",
     "delta",
@@ -192,6 +201,7 @@ class _ContractValidator:
     def validate(self) -> ValidationResult:
         d = self._data
         self._check_root(d)
+        self._check_tier(d)
         self._check_info(d.get("info", {}), "info")
         self._check_server(d.get("server"), "server")
         self._check_source(d.get("source"), "source")
@@ -200,12 +210,85 @@ class _ContractValidator:
         self._check_transformations(d.get("transformations", []), "transformations")
         self._check_materialization(d.get("materialization"), "materialization")
         self._check_service_levels(d.get("service_levels"), "service_levels")
+        self._check_downstream(d.get("downstream", []), "downstream")
         errors = self._issues
         return ValidationResult(
             valid=not any(e.severity == "error" for e in errors),
             errors=errors,
             contract=self._data,
         )
+
+    # ── Tier / Layer ───────────────────────────────────────────────────────
+
+    def _check_tier(self, d: Dict[str, Any]) -> None:
+        """Validate the tier/layer field — accepts multiple naming conventions."""
+        # Check root-level: tier, layer, or target_layer
+        tier_value = d.get("tier") or d.get("layer") or d.get("target_layer")
+
+        # Also check inside info.target_layer for backward compatibility
+        info = d.get("info", {})
+        if not tier_value and isinstance(info, dict):
+            tier_value = info.get("target_layer") or info.get("tier") or info.get("layer")
+
+        if not tier_value:
+            self._warn(
+                "tier",
+                "'tier' (or 'layer') is missing — recommended for pipeline routing. "
+                "Accepted values: bronze/raw/landing, silver/stage/cleansed, gold/curated/refined, reference",
+            )
+            return
+
+        if not isinstance(tier_value, str):
+            self._err("tier", f"'tier' must be a string, got {type(tier_value).__name__}")
+            return
+
+        normalized = tier_value.strip().lower()
+        if normalized not in _KNOWN_LAYERS:
+            self._warn(
+                "tier",
+                f"Unknown tier '{tier_value}'. Known values: "
+                f"bronze (raw/landing), silver (stage/cleansed), gold (curated/refined), reference",
+            )
+
+    # ── Downstream Consumers ─────────────────────────────────────────────
+
+    _KNOWN_CONSUMER_TYPES = {
+        "dashboard", "report", "api", "ml_model",
+        "application", "notebook", "export", "stream",
+    }
+    _KNOWN_PLATFORMS = {
+        "power_bi", "tableau", "looker", "databricks_sql",
+        "metabase", "grafana", "superset", "redash",
+        "mlflow", "sagemaker", "vertex_ai",
+        "custom", "internal",
+    }
+
+    def _check_downstream(self, downstream: Any, path: str) -> None:
+        """Validate downstream consumer declarations."""
+        if not isinstance(downstream, list):
+            self._err(path, "'downstream' must be a list")
+            return
+        for i, consumer in enumerate(downstream):
+            cp = f"{path}[{i}]"
+            if not isinstance(consumer, dict):
+                self._err(cp, "Each downstream consumer must be a mapping")
+                continue
+            if "type" not in consumer:
+                self._err(f"{cp}.type", "Downstream consumer is missing 'type'")
+            elif consumer["type"] not in self._KNOWN_CONSUMER_TYPES:
+                self._warn(
+                    f"{cp}.type",
+                    f"Unknown consumer type '{consumer['type']}'. "
+                    f"Known: {sorted(self._KNOWN_CONSUMER_TYPES)}",
+                )
+            if "name" not in consumer:
+                self._err(f"{cp}.name", "Downstream consumer is missing 'name'")
+            platform = consumer.get("platform")
+            if platform and platform not in self._KNOWN_PLATFORMS:
+                self._warn(
+                    f"{cp}.platform",
+                    f"Unknown platform '{platform}'. Known: {sorted(self._KNOWN_PLATFORMS)}",
+                )
 
     # ── Root ──────────────────────────────────────────────────────────────────
 
@@ -701,6 +784,17 @@ def _augment_schema(schema: Dict[str, Any]) -> None:
         "See https://github.com/lakelogic/LakeLogic for full documentation."
     )
     schema["x-lakelogic-version"] = "1"
+
+    # tier enum
+    if "tier" in props:
+        props["tier"]["enum"] = [
+            "bronze", "silver", "gold", "reference",
+            "raw", "landing", "stage", "staging", "curated", "refined",
+        ]
+        props["tier"]["description"] = (
+            "Data layer tier. Accepts: bronze/raw/landing, silver/stage/cleansed, "
+            "gold/curated/refined, reference. Normalized to canonical names at parse time."
+        )
 
 
 def _set_nested_enum(

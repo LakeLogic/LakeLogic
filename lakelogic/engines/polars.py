@@ -210,7 +210,7 @@ class PolarsAdapter(EngineAdapter):
         import datetime as _dt
         import re as _re
 
-        now = _dt.datetime.utcnow()
+        now = _dt.datetime.now(_dt.timezone.utc)
         today_str = now.strftime("%Y-%m-%d")
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         time_str = now.strftime("%H:%M:%S")

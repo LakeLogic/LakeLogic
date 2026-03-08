@@ -70,7 +70,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -481,10 +481,10 @@ class IncrementalBoundary:
             if default_from is not None:
                 from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
-                from_dt = datetime.utcnow() - timedelta(days=90)
+                from_dt = datetime.now(timezone.utc) - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "target_path": target_path}
 
-        _to = to_dt or datetime.utcnow()
+        _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="max_target", metadata=meta)
 
     # ── Strategy 2: Pipeline log / audit table ────────────────────────────────
@@ -562,10 +562,10 @@ class IncrementalBoundary:
             if default_from is not None:
                 from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
-                from_dt = datetime.utcnow() - timedelta(days=90)
+                from_dt = datetime.now(timezone.utc) - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "pipeline_name": pipeline_name}
 
-        _to = to_dt or datetime.utcnow()
+        _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="pipeline_log", metadata=meta)
 
     # ── Strategy 3: Manifest file ─────────────────────────────────────────────
@@ -651,10 +651,10 @@ class IncrementalBoundary:
             if default_from is not None:
                 from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
-                from_dt = datetime.utcnow() - timedelta(days=90)
+                from_dt = datetime.now(timezone.utc) - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "manifest_path": manifest_path}
 
-        _to = to_dt or datetime.utcnow()
+        _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="manifest", metadata=meta)
 
     @classmethod
@@ -688,7 +688,7 @@ class IncrementalBoundary:
         existing = set(data.get("processed_partitions", []))
         existing.update(new_partitions)
         data["processed_partitions"] = sorted(existing)
-        data["last_updated"] = datetime.utcnow().isoformat() + "Z"
+        data["last_updated"] = datetime.now(timezone.utc).isoformat() + "Z"
 
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -744,7 +744,7 @@ class IncrementalBoundary:
             return datetime.fromisoformat(str(v))
 
         from_dt = _to_dt(from_date)
-        to_dt = _to_dt(to_date) if to_date is not None else datetime.utcnow()
+        to_dt = _to_dt(to_date) if to_date is not None else datetime.now(timezone.utc)
         return Boundary(
             from_dt=from_dt,
             to_dt=to_dt,
@@ -783,7 +783,7 @@ class IncrementalBoundary:
             ============= ===========
 
         reference_dt : datetime, optional
-            Anchor point. Defaults to ``datetime.utcnow()``.
+            Anchor point. Defaults to ``datetime.now(timezone.utc)``.
         partition_filters : dict, optional
             Static (non-temporal) partition values to AND into every filter.
             Example: ``{"country": "GB", "region": "south"}``
@@ -807,7 +807,7 @@ class IncrementalBoundary:
             boundary = IncrementalBoundary.from_lookback("30 mins")
         """
         delta = _parse_lookback(lookback)
-        to_dt = reference_dt or datetime.utcnow()
+        to_dt = reference_dt or datetime.now(timezone.utc)
         from_dt = to_dt - delta
         return Boundary(
             from_dt=from_dt,
