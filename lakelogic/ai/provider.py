@@ -8,6 +8,7 @@ Supports:
 - Azure OpenAI (``azure``) — requires ``AZURE_OPENAI_ENDPOINT`` + ``AZURE_OPENAI_API_KEY``
 - Anthropic (``anthropic``) — requires ``ANTHROPIC_API_KEY``
 - Ollama  (``ollama``)     — local, no key required (default: http://localhost:11434)
+- Local   (``local``)      — direct HuggingFace transformers, no API key or server needed
 
 Configuration is resolved from:
 1. Explicit kwargs passed to ``get_llm_client()``
@@ -190,6 +191,44 @@ class _OllamaClient:
 # ---------------------------------------------------------------------------
 
 
+class _LocalClient:
+    """Local HuggingFace model client — no API key or server required.
+
+    Uses the model_registry's local_llm task (default: Phi-3-mini).
+    The model auto-downloads on first use and caches in
+    ``~/.cache/huggingface/``.
+
+    Install::
+
+        pip install lakelogic[local]
+    """
+
+    def __init__(self, *, model: Optional[str] = None) -> None:
+        self.model = model  # None → use registry default (Phi-3)
+
+    def chat(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+        from lakelogic.engines.model_registry import load_model
+
+        pipe = load_model("local_llm", model_override=self.model)
+
+        # Combine system + user messages into a single prompt
+        parts = []
+        for m in messages:
+            if m["role"] == "system":
+                parts.append(f"System: {m['content']}")
+            elif m["role"] == "user":
+                parts.append(m["content"])
+        prompt = "\n\n".join(parts)
+
+        result = pipe(
+            prompt,
+            max_new_tokens=kwargs.get("max_tokens", 2048),
+            return_full_text=False,
+        )
+        text = result[0]["generated_text"] if result else ""
+        return LLMResponse(text=text, usage={})
+
+
 def get_llm_client(
     provider: Optional[str] = None,
     model: Optional[str] = None,
@@ -243,4 +282,12 @@ def get_llm_client(
             base_url=kwargs.get("base_url") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         )
 
-    raise ValueError(f"Unknown AI provider: {provider!r}. Supported: openai, azure, anthropic, ollama")
+    if provider == "local":
+        return _LocalClient(
+            model=model or None,  # None → registry default (Phi-3-mini)
+        )
+
+    raise ValueError(
+        f"Unknown AI provider: {provider!r}. "
+        f"Supported: openai, azure, anthropic, ollama, local"
+    )
