@@ -8,6 +8,7 @@ from lakelogic.core.models import (
     DataContract,
     FieldDefinition,
     QualityRule,
+    TIER_CANONICAL_MAP,
     Transformation,
 )
 from lakelogic.core.processor import DataProcessor
@@ -24,6 +25,8 @@ from lakelogic.engines.cloud_credentials import (
     from_databricks,
     resolve_storage_options,
 )
+from lakelogic.engines.base import ENGINE_DIALECT_MAP
+from lakelogic.engines.generic_sql import GenericSQLAdapter
 
 __version__ = "1.1.0"
 
@@ -212,6 +215,9 @@ __all__ = [
     "DatabricksSecretResolver",
     "from_databricks",
     "resolve_storage_options",
+    # Generic SQL adapter
+    "GenericSQLAdapter",
+    "ENGINE_DIALECT_MAP",
     # Help
     "help",
     "driver",

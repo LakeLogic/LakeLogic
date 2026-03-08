@@ -35,6 +35,40 @@ _QUALITY_CATEGORY_SYNONYMS = {
     "referential": "integrity",
 }
 
+# ── Tier normalization ──────────────────────────────────────────────────────
+# Maps common naming conventions to canonical medallion tiers.
+# Users can write any of these in their contract and it will be normalized.
+TIER_CANONICAL_MAP = {
+    # Canonical names
+    "bronze": "bronze",
+    "silver": "silver",
+    "gold": "gold",
+    # Alternative naming: raw / stage / curated
+    "raw": "bronze",
+    "stage": "silver",
+    "staging": "silver",
+    "curated": "gold",
+    # Alternative naming: landing / cleansed / refined
+    "landing": "bronze",
+    "cleansed": "silver",
+    "refined": "gold",
+    # Alternative naming: ingestion / transform / presentation
+    "ingestion": "bronze",
+    "ingest": "bronze",
+    "transform": "silver",
+    "presentation": "gold",
+    "consumption": "gold",
+    # Reference data (cross-layer)
+    "reference": "reference",
+    "ref": "reference",
+    "seed": "reference",
+    "lookup": "reference",
+    "masterdata": "reference",
+    "master_data": "reference",
+}
+
+TIER_VALID_CANONICAL = {"bronze", "silver", "gold", "reference"}
+
 
 class Info(BaseModel):
     """Contract metadata such as title, version, and ownership."""
@@ -228,11 +262,21 @@ class TransformationFilter(BaseModel):
 
     sql: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_string_shorthand(cls, data: Any) -> Any:
+        """Accept ``filter: 'SQL'`` as shorthand for ``filter: {sql: 'SQL'}``."""
+        if isinstance(data, str):
+            return {"sql": data}
+        return data
+
 
 class TransformationDeduplicate(BaseModel):
     """Deduplication rule configuration."""
 
-    on: List[str]
+    model_config = ConfigDict(populate_by_name=True)
+
+    on: List[str] = Field(validation_alias=AliasChoices("on", "by"))
     sort_by: Optional[List[str]] = None
     order: str = "desc"
 
@@ -793,6 +837,50 @@ class Materialization(BaseModel):
     compaction: Optional[Dict[str, Any]] = None  # e.g. {'auto': True, 'vacuum_retention_hours': 168}
 
 
+class DownstreamConsumer(BaseModel):
+    """
+    A downstream consumer of a contract's output.
+
+    Enables end-to-end lineage tracking from source → gold → dashboard/report.
+    Declared on gold-layer contracts to capture what uses the data.
+
+    Example YAML:
+        downstream:
+          - type: dashboard
+            name: Monthly Revenue Dashboard
+            platform: power_bi
+            url: https://app.powerbi.com/groups/.../dashboards/...
+            owner: analytics-team
+            refresh: "daily 06:00 UTC"
+
+          - type: report
+            name: Weekly Sales Report
+            platform: databricks_sql
+
+          - type: api
+            name: Customer Lookup API
+            platform: internal
+            url: https://api.internal.com/v1/customers
+
+          - type: ml_model
+            name: Churn Prediction
+            platform: mlflow
+            owner: data-science
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str  # dashboard | report | api | ml_model | application | notebook | export
+    name: str  # human-readable consumer name
+    platform: Optional[str] = None  # power_bi | tableau | looker | databricks_sql | metabase | grafana | custom
+    url: Optional[str] = None  # link to the dashboard/report/API
+    owner: Optional[str] = None  # team or person responsible
+    description: Optional[str] = None  # what this consumer does
+    refresh: Optional[str] = None  # refresh schedule (e.g. "daily 06:00 UTC")
+    columns_used: List[str] = Field(default_factory=list)  # which columns from this contract are used
+    sla: Optional[str] = None  # expected data freshness (e.g. "< 4 hours")
+
+
 class LineageConfig(BaseModel):
     """Lineage capture settings."""
 
@@ -859,6 +947,7 @@ class DataContract(BaseModel):
 
     # ORCHESTRATION & DEPENDENCIES
     upstream: List[str] = Field(default_factory=list)
+    downstream: List[DownstreamConsumer] = Field(default_factory=list)
     schedule: Optional[str] = None
 
     schema_policy: Optional[SchemaPolicy] = None
@@ -867,6 +956,25 @@ class DataContract(BaseModel):
     transformations: List[Transformation] = Field(default_factory=list)
     service_levels: Optional[ServiceLevel] = None
     quarantine: Optional[Quarantine] = Field(default_factory=Quarantine)
+
+    # TIER / LAYER ── mandatory for single-contract mode
+    tier: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("tier", "layer", "target_layer"),
+    )
+
+    @field_validator("tier", mode="before")
+    @classmethod
+    def _normalize_tier(cls, v: Any) -> Optional[str]:
+        """Normalize tier values to canonical medallion names."""
+        if v is None:
+            return None
+        raw = str(v).strip().lower()
+        canonical = TIER_CANONICAL_MAP.get(raw)
+        if canonical:
+            return canonical
+        # Allow passthrough for custom tiers (e.g. "platinum", "archive")
+        return raw
 
     # ── Cross-field validation ─────────────────────────────────────────────────
 
