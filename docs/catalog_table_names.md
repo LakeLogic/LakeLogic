@@ -1,67 +1,96 @@
 # Catalog Table Name Support (Unity Catalog, Fabric, Synapse)
+<!-- markdownlint-disable MD013 -->
 
-**LakeLogic now supports 3-part table names for Unity Catalog, Fabric LakeDB, and Synapse Analytics!**
-
-Use familiar table names like `catalog.schema.table` instead of full storage paths. LakeLogic automatically resolves them to the underlying Delta Lake storage locations.
+LakeLogic supports 3-part table names for Unity Catalog, Fabric LakeDB, and Synapse Analytics. Table names like `catalog.schema.table` are automatically resolved to their underlying Delta Lake storage paths — no Spark required.
 
 ---
 
-## 🚀 **Quick Start**
+## Quick Start
 
-### **Unity Catalog (Databricks)**
+### Unity Catalog (Databricks) — Fully Automatic
+
+Unity Catalog table names are **auto-detected** by the processor when `DATABRICKS_HOST` is set:
 
 ```python
 from lakelogic import DataProcessor
 
-# Use Unity Catalog table name directly
+# Automatically resolves main.default.customers → s3://bucket/.../customers/
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
 good_df, bad_df = processor.run_source("main.default.customers")
-
-# No need for full S3 path!
-# LakeLogic automatically resolves to: s3://bucket/unity-catalog/main/default/customers/
 ```
 
-### **Fabric LakeDB (Microsoft)**
+**Requirements:**
+```bash
+export DATABRICKS_HOST="https://your-workspace.cloud.databricks.com"
+export DATABRICKS_TOKEN="dapi..."
+```
+
+### Fabric LakeDB (Microsoft)
+
+Fabric uses **predictable OneLake paths** — no API call needed for resolution.
+Use `resolve_catalog_path()` with `platform="fabric"`:
 
 ```python
+from lakelogic.engines.unity_catalog import resolve_catalog_path
+
+# Resolve table name → OneLake path
+path = resolve_catalog_path("myworkspace.sales_lakehouse.customers", platform="fabric")
+# → abfss://myworkspace@onelake.dfs.fabric.microsoft.com/sales_lakehouse.Lakehouse/Tables/customers/
+
+# Then use with processor
 from lakelogic import DataProcessor
-
-# Use Fabric table name directly
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
-good_df, bad_df = processor.run_source("myworkspace.sales_lakehouse.customers")
-
-# No need for full OneLake path!
-# LakeLogic automatically resolves to: abfss://myworkspace@onelake.dfs.fabric.microsoft.com/sales_lakehouse.Lakehouse/Tables/customers/
+good_df, bad_df = processor.run_source(path)
 ```
 
-### **Synapse Analytics (Azure)**
+### Synapse Analytics (Azure)
+
+Synapse uses **predictable ADLS Gen2 paths** — no API call needed for resolution.
+Use `resolve_catalog_path()` with `platform="synapse"`:
 
 ```python
 import os
-from lakelogic import DataProcessor
+from lakelogic.engines.unity_catalog import resolve_catalog_path
 
-# Set storage account (required for Synapse)
 os.environ["SYNAPSE_STORAGE_ACCOUNT"] = "mysynapsestorage"
 
-# Use Synapse table name directly
-processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
-good_df, bad_df = processor.run_source("salesdb.dbo.customers")
+# Resolve table name → ADLS path
+path = resolve_catalog_path("salesdb.dbo.customers", platform="synapse")
+# → abfss://salesdb@mysynapsestorage.dfs.core.windows.net/dbo/customers/
 
-# No need for full ADLS path!
-# LakeLogic automatically resolves to: abfss://salesdb@mysynapsestorage.dfs.core.windows.net/dbo/customers/
+# Then use with processor
+from lakelogic import DataProcessor
+processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
+good_df, bad_df = processor.run_source(path)
 ```
 
 ---
 
-## 🔐 **Permissions Model**
+## Auto-Detection Behavior
 
-### **How Permissions Work**
+The processor calls `resolve_catalog_path(path)` **without** a `platform` parameter.
+The auto-detection logic in the code is:
 
-**LakeLogic uses a 2-step permission model:**
+| Condition | Resolved As |
+|-----------|------------|
+| `DATABRICKS_HOST` env var is set | Unity Catalog (API call) |
+| No env vars set | Tries Unity Catalog, falls back to raw path |
+| `platform="fabric"` passed explicitly | Fabric LakeDB (no API, predictable path) |
+| `platform="synapse"` passed explicitly | Synapse Analytics (no API, predictable path) |
+
+> **Note:** The processor currently only auto-detects Unity Catalog.
+> For Fabric and Synapse, resolve the path first with `resolve_catalog_path(..., platform="fabric"|"synapse")`,
+> then pass the resolved storage path to `processor.run_source()`.
+
+---
+
+## Permissions Model
+
+LakeLogic uses a **2-step permission model**:
 
 1. **Metadata Access** (resolve table name → storage path)
-   - Requires Unity Catalog/Fabric/Synapse API permissions
-   - Only needed once per table (results are cached)
+   - Unity Catalog: requires Databricks API credentials
+   - Fabric/Synapse: not required (predictable paths)
 
 2. **Data Access** (read/write Delta Lake files)
    - Requires cloud storage permissions (S3, Azure Blob, GCS)
@@ -69,24 +98,19 @@ good_df, bad_df = processor.run_source("salesdb.dbo.customers")
 
 ---
 
-## 📋 **Required Permissions by Platform**
+## Required Permissions by Platform
 
-### **Unity Catalog (Databricks)**
+### Unity Catalog (Databricks)
 
-#### **Step 1: Metadata Access**
-
-**Required:**
-- Databricks workspace access
-- Unity Catalog `SELECT` permission on table
-- Unity Catalog `USE CATALOG` and `USE SCHEMA` permissions
-
-**Setup:**
+**Metadata Access:**
+- Databricks `SELECT`, `USE CATALOG`, and `USE SCHEMA` permissions
+- Setup:
 ```bash
-# Set environment variables
 export DATABRICKS_HOST="https://your-workspace.cloud.databricks.com"
-export DATABRICKS_TOKEN="dapi..."  # Personal Access Token
-
-# Or pass directly to resolver
+export DATABRICKS_TOKEN="dapi..."
+```
+- Or pass directly:
+```python
 from lakelogic.engines.unity_catalog import UnityCatalogResolver
 resolver = UnityCatalogResolver(
     host="https://your-workspace.cloud.databricks.com",
@@ -94,19 +118,7 @@ resolver = UnityCatalogResolver(
 )
 ```
 
-**Grant permissions (SQL):**
-```sql
--- Grant catalog/schema access
-GRANT USE CATALOG ON CATALOG main TO `user@example.com`;
-GRANT USE SCHEMA ON SCHEMA main.default TO `user@example.com`;
-
--- Grant table access
-GRANT SELECT ON TABLE main.default.customers TO `user@example.com`;
-```
-
-#### **Step 2: Data Access (Cloud Storage)**
-
-**AWS S3:**
+**Data Access (AWS S3):**
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
@@ -115,31 +127,12 @@ adapter = DeltaAdapter(storage_options={
     "AWS_ACCESS_KEY_ID": "AKIA...",
     "AWS_SECRET_ACCESS_KEY": "..."
 })
-
-# Read Unity Catalog table
 df = adapter.read("main.default.customers")
 ```
 
-**Required IAM permissions:**
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::your-bucket/unity-catalog/*"
-      ]
-    }
-  ]
-}
-```
+Required IAM: `s3:GetObject`, `s3:ListBucket` on the Unity Catalog storage bucket.
 
-**Azure ADLS:**
+**Data Access (Azure ADLS):**
 ```python
 adapter = DeltaAdapter(storage_options={
     "AZURE_STORAGE_ACCOUNT_NAME": "your_account",
@@ -147,47 +140,35 @@ adapter = DeltaAdapter(storage_options={
 })
 ```
 
-**Required Azure permissions:**
-- **Storage Blob Data Reader** role on the storage account
+Required role: **Storage Blob Data Reader** on the storage account.
 
 ---
 
-### **Fabric LakeDB (Microsoft)**
+### Fabric LakeDB (Microsoft)
 
-#### **Step 1: Metadata Access**
-
-**Not required!** Fabric table names follow a predictable pattern:
+**Metadata Access:** Not required — paths follow a predictable pattern:
 ```
-workspace.lakehouse.table → abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse.Lakehouse/Tables/table/
+workspace.lakehouse.table
+  → abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse.Lakehouse/Tables/table/
 ```
 
-LakeLogic resolves this **without API calls** (no credentials needed for resolution).
-
-#### **Step 2: Data Access (OneLake)**
-
-**Required:**
-- OneLake access via Azure credentials
-- **Contributor** or **Reader** role on the Fabric workspace
-
-**Setup:**
+**Data Access (OneLake):**
+- Requires Azure credentials and **Contributor** or **Reader** role on workspace
+- Setup:
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
 adapter = DeltaAdapter(storage_options={
     "AZURE_STORAGE_ACCOUNT_NAME": "onelake",
-    "AZURE_STORAGE_ACCOUNT_KEY": "..."  # Or use Azure AD auth
+    "AZURE_STORAGE_ACCOUNT_KEY": "..."
 })
-
-# Read Fabric table
 df = adapter.read("myworkspace.sales_lakehouse.customers")
 ```
 
-**Azure AD Authentication (Recommended):**
+**Azure AD (recommended):**
 ```python
 from azure.identity import DefaultAzureCredential
-from deltalake import DeltaTable
 
-# Use Azure AD for authentication
 credential = DefaultAzureCredential()
 token = credential.get_token("https://storage.azure.com/.default")
 
@@ -199,28 +180,21 @@ adapter = DeltaAdapter(storage_options={
 
 ---
 
-### **Synapse Analytics (Azure)**
+### Synapse Analytics (Azure)
 
-#### **Step 1: Metadata Access**
-
-**Not required!** Synapse table names follow a predictable pattern:
+**Metadata Access:** Not required — paths follow a predictable pattern:
 ```
-database.schema.table → abfss://database@{STORAGE_ACCOUNT}.dfs.core.windows.net/schema/table/
+database.schema.table
+  → abfss://database@{STORAGE_ACCOUNT}.dfs.core.windows.net/schema/table/
 ```
 
-**Setup:**
+Requires `SYNAPSE_STORAGE_ACCOUNT` env var:
 ```bash
-# Set storage account (required)
 export SYNAPSE_STORAGE_ACCOUNT="mysynapsestorage"
 ```
 
-#### **Step 2: Data Access (ADLS Gen2)**
-
-**Required:**
-- ADLS Gen2 access via Azure credentials
-- **Storage Blob Data Reader** role on the storage account
-
-**Setup:**
+**Data Access (ADLS Gen2):**
+- Requires **Storage Blob Data Reader** role
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
@@ -228,26 +202,24 @@ adapter = DeltaAdapter(storage_options={
     "AZURE_STORAGE_ACCOUNT_NAME": "mysynapsestorage",
     "AZURE_STORAGE_ACCOUNT_KEY": "..."
 })
-
-# Read Synapse table
 df = adapter.read("salesdb.dbo.customers")
 ```
 
 ---
 
-## 📊 **Permission Comparison**
+## Permission Comparison
 
 | Platform | Metadata Access | Data Access | Credentials Required |
 |----------|-----------------|-------------|---------------------|
-| **Unity Catalog** | ✅ Required (Databricks API) | ✅ Required (S3/Azure/GCS) | DATABRICKS_HOST, DATABRICKS_TOKEN + Cloud creds |
-| **Fabric LakeDB** | ❌ Not required (predictable paths) | ✅ Required (OneLake) | Azure credentials only |
-| **Synapse Analytics** | ❌ Not required (predictable paths) | ✅ Required (ADLS Gen2) | SYNAPSE_STORAGE_ACCOUNT + Azure creds |
+| **Unity Catalog** | Required (Databricks API) | Required (S3/Azure/GCS) | `DATABRICKS_HOST` + `DATABRICKS_TOKEN` + cloud creds |
+| **Fabric LakeDB** | Not required (predictable paths) | Required (OneLake) | Azure credentials only |
+| **Synapse Analytics** | Not required (predictable paths) | Required (ADLS Gen2) | `SYNAPSE_STORAGE_ACCOUNT` + Azure creds |
 
 ---
 
-## 🔧 **Configuration Examples**
+## Configuration Examples
 
-### **Unity Catalog (Full Setup)**
+### Unity Catalog (Full Setup)
 
 ```bash
 # .env file
@@ -261,33 +233,29 @@ AWS_SECRET_ACCESS_KEY=...
 ```python
 from lakelogic import DataProcessor
 
-# Credentials loaded from environment
+# Credentials loaded from environment — auto-resolves UC table names
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
 good_df, bad_df = processor.run_source("main.default.customers")
 ```
 
----
-
-### **Fabric LakeDB (Full Setup)**
+### Fabric LakeDB (Full Setup)
 
 ```bash
 # .env file
 AZURE_STORAGE_ACCOUNT_NAME=onelake
 AZURE_STORAGE_ACCOUNT_KEY=...
-# Or use Azure AD (no key needed)
 ```
 
 ```python
+from lakelogic.engines.unity_catalog import resolve_catalog_path
 from lakelogic import DataProcessor
 
-# Credentials loaded from environment
+path = resolve_catalog_path("myworkspace.sales_lakehouse.customers", platform="fabric")
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
-good_df, bad_df = processor.run_source("myworkspace.sales_lakehouse.customers")
+good_df, bad_df = processor.run_source(path)
 ```
 
----
-
-### **Synapse Analytics (Full Setup)**
+### Synapse Analytics (Full Setup)
 
 ```bash
 # .env file
@@ -297,20 +265,20 @@ AZURE_STORAGE_ACCOUNT_KEY=...
 ```
 
 ```python
+from lakelogic.engines.unity_catalog import resolve_catalog_path
 from lakelogic import DataProcessor
 
-# Credentials loaded from environment
+path = resolve_catalog_path("salesdb.dbo.customers", platform="synapse")
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
-good_df, bad_df = processor.run_source("salesdb.dbo.customers")
+good_df, bad_df = processor.run_source(path)
 ```
 
 ---
 
-## 🎯 **Usage Examples**
+## Usage Examples
 
-### **Example 1: Unity Catalog with Contract YAML**
+### Contract YAML with Unity Catalog
 
-**Contract (`contracts/customers.yaml`):**
 ```yaml
 version: 1.0.0
 dataset: bronze_customers
@@ -331,158 +299,56 @@ quality:
     - not_null: id
 ```
 
-**Python:**
 ```python
 from lakelogic import DataProcessor
 
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
 good_df, bad_df = processor.run_source()  # Uses path from contract
-
-print(f"Good: {len(good_df)}, Bad: {len(bad_df)}")
 ```
 
----
-
-### **Example 2: Fabric LakeDB with Explicit Platform**
+### Explicit Platform Resolution
 
 ```python
 from lakelogic.engines.unity_catalog import resolve_catalog_path
 
-# Explicit platform hint
+# Fabric (auto-resolved, no API call)
 path = resolve_catalog_path("myworkspace.sales_lakehouse.customers", platform="fabric")
-print(path)
-# abfss://myworkspace@onelake.dfs.fabric.microsoft.com/sales_lakehouse.Lakehouse/Tables/customers/
+# → abfss://myworkspace@onelake.dfs.fabric.microsoft.com/sales_lakehouse.Lakehouse/Tables/customers/
 
-# Use with Delta adapter
+# Synapse (auto-resolved, no API call)
+path = resolve_catalog_path("salesdb.dbo.customers", platform="synapse")
+# → abfss://salesdb@mysynapsestorage.dfs.core.windows.net/dbo/customers/
+```
+
+### DeltaAdapter for Ad-Hoc Access
+
+```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
+
 adapter = DeltaAdapter()
-df = adapter.read("myworkspace.sales_lakehouse.customers")
+
+# Read
+df = adapter.read("main.default.customers")
+
+# Write
+adapter.write(df, "s3://bucket/output/", mode="append")
+
+# Merge (upsert)
+stats = adapter.merge(
+    target_path="s3://bucket/table/",
+    source_df=new_data,
+    merge_key="id"
+)
 ```
 
----
-
-### **Example 3: Multi-Platform Support**
-
-```python
-from lakelogic import DataProcessor
-
-# Unity Catalog
-processor = DataProcessor(engine="polars", contract="contracts/uc_customers.yaml")
-uc_good, uc_bad = processor.run_source("main.default.customers")
-
-# Fabric LakeDB
-processor = DataProcessor(engine="polars", contract="contracts/fabric_customers.yaml")
-fabric_good, fabric_bad = processor.run_source("myworkspace.sales_lakehouse.customers")
-
-# Synapse Analytics
-processor = DataProcessor(engine="polars", contract="contracts/synapse_customers.yaml")
-synapse_good, synapse_bad = processor.run_source("salesdb.dbo.customers")
-```
-
----
-
-## 🔍 **Troubleshooting**
-
-### **Problem: Unity Catalog table not found**
-
-**Error:**
-```
-ValueError: Failed to resolve Unity Catalog table main.default.customers: Table not found
-```
-
-**Solution:**
-1. Check Databricks credentials:
-   ```bash
-   echo $DATABRICKS_HOST
-   echo $DATABRICKS_TOKEN
-   ```
-
-2. Verify table exists:
-   ```sql
-   SHOW TABLES IN main.default;
-   ```
-
-3. Check permissions:
-   ```sql
-   SHOW GRANTS ON TABLE main.default.customers;
-   ```
-
----
-
-### **Problem: Fabric table access denied**
-
-**Error:**
-```
-AuthorizationPermissionMismatch: This request is not authorized to perform this operation
-```
-
-**Solution:**
-1. Check Azure credentials
-2. Verify workspace access (Contributor or Reader role)
-3. Use Azure AD authentication instead of account key
-
----
-
-### **Problem: Synapse storage account not set**
-
-**Error:**
-```
-SYNAPSE_STORAGE_ACCOUNT environment variable not set
-```
-
-**Solution:**
-```bash
-export SYNAPSE_STORAGE_ACCOUNT="mysynapsestorage"
-```
-
----
-
-## 💡 **Best Practices**
-
-### **1. Use Environment Variables for Credentials**
-
-```bash
-# .env file
-DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
-DATABRICKS_TOKEN=dapi...
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
-```
-
-```python
-# Load from environment (automatic)
-from lakelogic import DataProcessor
-processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
-```
-
----
-
-### **2. Use Azure AD for Fabric/Synapse (More Secure)**
-
-```python
-from azure.identity import DefaultAzureCredential
-
-# Azure AD authentication (no keys in code)
-credential = DefaultAzureCredential()
-token = credential.get_token("https://storage.azure.com/.default")
-
-adapter = DeltaAdapter(storage_options={
-    "AZURE_STORAGE_ACCOUNT_NAME": "onelake",
-    "BEARER_TOKEN": token.token
-})
-```
-
----
-
-### **3. Cache Table Paths for Performance**
+### Cache Table Paths for Performance
 
 ```python
 from lakelogic.engines.unity_catalog import get_unity_catalog_resolver
 
-# Resolver caches table paths automatically
 resolver = get_unity_catalog_resolver()
 
-# First call: API request
+# First call: API request to Databricks
 path1 = resolver.resolve_table("main.default.customers")
 
 # Second call: cached (no API request)
@@ -491,33 +357,57 @@ path2 = resolver.resolve_table("main.default.customers")
 
 ---
 
-## 📚 **Summary**
+## Troubleshooting
 
-**LakeLogic supports 3-part table names for:**
-- ✅ **Unity Catalog** (Databricks): `catalog.schema.table`
-- ✅ **Fabric LakeDB** (Microsoft): `workspace.lakehouse.table`
-- ✅ **Synapse Analytics** (Azure): `database.schema.table`
+### Unity Catalog table not found
 
-**Permissions:**
-- **Unity Catalog:** Databricks API + Cloud storage
-- **Fabric LakeDB:** Azure credentials only (no API)
-- **Synapse Analytics:** Azure credentials only (no API)
+```
+ValueError: Failed to resolve Unity Catalog table main.default.customers: Table not found
+```
 
-**Usage:**
-```python
-from lakelogic import DataProcessor
+1. Check credentials: `echo $DATABRICKS_HOST && echo $DATABRICKS_TOKEN`
+2. Verify table exists: `SHOW TABLES IN main.default;`
+3. Check permissions: `SHOW GRANTS ON TABLE main.default.customers;`
 
-# Unity Catalog
-processor = DataProcessor(engine="polars", contract="customers.yaml")
-good_df, bad_df = processor.run_source("main.default.customers")
+### Fabric table access denied
 
-# Fabric LakeDB
-good_df, bad_df = processor.run_source("myworkspace.sales_lakehouse.customers")
+```
+AuthorizationPermissionMismatch: This request is not authorized
+```
 
-# Synapse Analytics
-good_df, bad_df = processor.run_source("salesdb.dbo.customers")
+1. Check Azure credentials
+2. Verify workspace access (Contributor or Reader role)
+3. Use Azure AD authentication instead of account key
+
+### Synapse storage account not set
+
+```
+SYNAPSE_STORAGE_ACCOUNT environment variable not set
+```
+
+```bash
+export SYNAPSE_STORAGE_ACCOUNT="mysynapsestorage"
 ```
 
 ---
 
-*Last Updated: February 2026*
+## Best Practices
+
+1. **Use environment variables for credentials** — never hardcode secrets
+2. **Azure AD for Fabric/Synapse** — more secure than storage account keys
+3. **Leverage caching** — `UnityCatalogResolver` caches paths automatically
+4. **Use `DeltaAdapter` for ad-hoc work** — the processor uses delta-rs automatically for pipeline runs
+
+---
+
+## Summary
+
+| Platform | Table Name Format | Auto-Detected by Processor | Resolution Method |
+|----------|-------------------|---------------------------|-------------------|
+| **Unity Catalog** | `catalog.schema.table` | ✅ Yes (when `DATABRICKS_HOST` set) | Databricks API call |
+| **Fabric LakeDB** | `workspace.lakehouse.table` | ❌ No (use `resolve_catalog_path(..., platform="fabric")`) | Predictable path pattern |
+| **Synapse Analytics** | `database.schema.table` | ❌ No (use `resolve_catalog_path(..., platform="synapse")`) | Predictable path pattern |
+
+---
+
+*Last Updated: March 2026*

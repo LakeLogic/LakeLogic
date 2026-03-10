@@ -807,6 +807,11 @@ class FieldDefinition(BaseModel):
     # At validation time, DataProcessor evaluates the corresponding referential_integrity rule.
     foreign_key: Optional[ForeignKeyRef] = None
 
+    # LLM extraction hints (used when field appears in extraction.output_schema)
+    extraction_task: Optional[str] = None  # ner | classification | summarization | local_llm
+    extraction_examples: List[str] = Field(default_factory=list)  # few-shot examples
+    max_length: Optional[int] = None  # max string length for extracted text
+
 
 class Model(BaseModel):
     """Schema model definition."""
@@ -881,6 +886,170 @@ class DownstreamConsumer(BaseModel):
     sla: Optional[str] = None  # expected data freshness (e.g. "< 4 hours")
 
 
+# ── LLM Extraction Models ────────────────────────────────────────────────────
+
+
+# ExtractionField is intentionally NOT a separate class.
+# output_schema reuses FieldDefinition for consistency with model.fields.
+# Extraction-specific hints (extraction_task, extraction_examples, max_length)
+# are optional fields on FieldDefinition itself.
+
+
+class ConfidenceConfig(BaseModel):
+    """
+    Configuration for HOW extraction confidence is scored.
+
+    The confidence THRESHOLD belongs in quality.row_rules, not here::
+
+        quality:
+          row_rules:
+            - name: confidence_gate
+              sql: "_lakelogic_extraction_confidence >= 0.7"
+              action: quarantine
+
+    Methods:
+      - log_probs: use token-level log probabilities (OpenAI, etc.)
+      - self_assessment: ask the LLM to rate its own confidence
+      - consistency: run extraction N times, measure field-level agreement
+      - field_completeness: % of non-nullable fields that are present
+    """
+
+    enabled: bool = True
+    method: str = "field_completeness"  # log_probs | self_assessment | consistency | field_completeness
+    column: str = "_lakelogic_extraction_confidence"
+    consistency_runs: int = 3  # for consistency method only
+
+
+class RetryConfig(BaseModel):
+    """Retry configuration for LLM API calls."""
+
+    max_attempts: int = 3
+    backoff: str = "exponential"  # fixed | linear | exponential
+    initial_delay: float = 1.0  # seconds
+
+
+class PreprocessingConfig(BaseModel):
+    """
+    Preprocessing pipeline for raw unstructured files before LLM extraction.
+
+    Bronze holds raw files (PDFs, images, videos, audio). Before the LLM
+    can extract structured data, we need to convert them to text.
+
+    Example YAML:
+        preprocessing:
+          content_type: pdf
+          ocr:
+            enabled: true
+            engine: tesseract     # tesseract | azure_di | textract | google_vision
+            language: eng
+          chunking:
+            strategy: page        # page | paragraph | sentence | fixed_size
+            max_chunk_tokens: 4000
+            overlap_tokens: 200
+
+    For video:
+        preprocessing:
+          content_type: video
+          transcription:
+            engine: whisper       # whisper | azure_speech | google_speech
+            language: en
+          frame_extraction:
+            enabled: true
+            interval_seconds: 30
+            engine: gpt-4o        # vision model for frame analysis
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    content_type: str  # pdf | image | video | audio | html | email | text
+
+    # Text extraction (PDFs, images)
+    ocr: Optional[Dict[str, Any]] = None  # {engine, language, dpi, ...}
+
+    # Audio/video transcription
+    transcription: Optional[Dict[str, Any]] = None  # {engine, language, ...}
+
+    # Video frame extraction
+    frame_extraction: Optional[Dict[str, Any]] = None  # {interval_seconds, engine}
+
+    # Text chunking for long documents
+    chunking: Optional[Dict[str, Any]] = None  # {strategy, max_chunk_tokens, overlap}
+
+    # File path settings
+    file_column: Optional[str] = None  # column containing file path/URL
+    text_output_column: str = "_extracted_text"  # where extracted text goes
+
+
+class ExtractionConfig(BaseModel):
+    """
+    LLM extraction configuration for unstructured data processing.
+
+    Turns raw unstructured content (text, PDFs, images, audio, video)
+    into structured rows via LLM, governed by the data contract.
+
+    Example YAML:
+        extraction:
+          provider: openai
+          model: gpt-4o-mini
+          temperature: 0.1
+          prompt_template: |
+            Extract the following from this support ticket:
+            {{ ticket_body }}
+          output_schema:
+            - name: sentiment
+              type: string
+              enum: [positive, neutral, negative]
+          source:
+            text_column: ticket_body
+          confidence:
+            min_threshold: 0.8
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    # LLM provider and model
+    provider: str  # openai | anthropic | azure_openai | ollama | bedrock | google
+    model: str  # gpt-4o-mini | claude-3.5-sonnet | llama-3-70b | gemini-2.0-flash
+    temperature: float = 0.1  # low for deterministic extraction
+    max_tokens: int = 1000
+    response_format: str = "json"  # json | text
+
+    # Prompt
+    prompt_template: str  # Jinja2 template with access to row columns
+    system_prompt: Optional[str] = None  # system message for the LLM
+
+    # Source text configuration
+    text_column: Optional[str] = None  # column containing text to extract from
+    context_columns: List[str] = Field(default_factory=list)  # extra columns for context
+
+    # Preprocessing pipeline (for raw files: PDF, image, audio, video)
+    preprocessing: Optional[PreprocessingConfig] = None
+
+    # Output schema — what the LLM should extract (same format as model.fields)
+    output_schema: List[FieldDefinition] = Field(default_factory=list)
+
+    # Processing
+    batch_size: int = 50  # rows per API call
+    concurrency: int = 5  # parallel API calls
+    retry: Optional[RetryConfig] = Field(default_factory=RetryConfig)
+
+    # Confidence scoring
+    confidence: Optional[ConfidenceConfig] = Field(default_factory=ConfidenceConfig)
+
+    # Cost controls
+    max_cost_per_run: Optional[float] = None  # USD limit — stop if exceeded
+    max_rows_per_run: Optional[int] = None  # row limit for safety
+
+    # Fallback
+    fallback_model: Optional[str] = None  # cheaper/faster model if primary fails
+    fallback_provider: Optional[str] = None
+
+    # PII safety
+    redact_pii_before_llm: bool = False  # run PII masking before sending to LLM
+    pii_fields: List[str] = Field(default_factory=list)  # fields to redact
+
+
+
 class LineageConfig(BaseModel):
     """Lineage capture settings."""
 
@@ -944,6 +1113,9 @@ class DataContract(BaseModel):
 
     # EXTERNAL LOGIC
     external_logic: Optional[ExternalLogic] = None
+
+    # LLM EXTRACTION (unstructured → structured)
+    extraction: Optional[ExtractionConfig] = None
 
     # ORCHESTRATION & DEPENDENCIES
     upstream: List[str] = Field(default_factory=list)

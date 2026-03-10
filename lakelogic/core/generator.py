@@ -420,6 +420,20 @@ class DataGenerator:
         if self._faker and seed is not None:
             self._faker.seed_instance(seed)
         self._contract_raw: Dict[str, Any] = self._load_yaml()
+
+        # ── Guard: contracts with LLM extraction are not supported ─────────
+        if self._contract_raw.get("extraction"):
+            raise ValueError(
+                f"DataGenerator does not support contracts with an 'extraction' "
+                f"section ({self.contract_path.name}).\n"
+                f"Contracts that use LLM-based extraction require real "
+                f"unstructured data (text, PDFs, images, audio) that cannot "
+                f"be synthesised.\n"
+                f"For CI/CD testing, use a sample CSV:\n"
+                f"  df = polars.read_csv('_data/samples/your_sample.csv')\n"
+                f"  result = DataProcessor.run(contract, df)"
+            )
+
         self._fields: List[Dict[str, Any]] = self._extract_fields()
         self._quality: Dict[str, Any] = self._contract_raw.get("quality", {}) or {}
         # Fields that are integer + flagged unique in quality rules — these need
