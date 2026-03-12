@@ -191,6 +191,12 @@ class PipelineDriver:
         """
         registry_index = self._build_index(registry_paths, entity_filter, contract_filter)
 
+        # Apply registry-level cloud config (sets env vars for RemoteObserver)
+        for reg_path in registry_paths.values():
+            if reg_path:
+                self._apply_cloud_config(reg_path)
+                break  # Only need to apply once
+
         if "reference" in layers and registry_paths.get("reference"):
             self._run_layer(
                 "reference",
@@ -779,6 +785,44 @@ class PipelineDriver:
         new_contract = DataContract(**data)
         new_contract._base_path = getattr(contract, "_base_path", None)
         return new_contract
+
+    def _apply_cloud_config(self, registry_path: Path) -> None:
+        """
+        Read the optional ``cloud:`` block from a registry YAML and set
+        environment variables so ``RemoteObserver`` is configured for every
+        contract in this pipeline run.
+
+        Supported fields:
+            cloud.enabled:    bool  — toggle remote reporting
+            cloud.report_url: str   — API endpoint (supports ``${ENV_VAR}``)
+            cloud.api_key:    str   — auth key (supports ``${ENV_VAR}``)
+        """
+        try:
+            data = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        cloud_cfg = data.get("cloud") or {}
+        if not cloud_cfg.get("enabled"):
+            return
+
+        os.environ["LAKELOGIC_REMOTE_OBSERVER"] = "true"
+
+        def _resolve_env(value: str) -> str:
+            """Resolve ``${VAR_NAME}`` to the environment variable value."""
+            if value.startswith("${") and value.endswith("}"):
+                return os.getenv(value[2:-1], "")
+            return value
+
+        report_url = _resolve_env(cloud_cfg.get("report_url", ""))
+        if report_url:
+            os.environ["LINEAGELOGIC_REPORT_URL"] = report_url
+
+        api_key = _resolve_env(cloud_cfg.get("api_key", ""))
+        if api_key:
+            os.environ["LINEAGELOGIC_API_KEY"] = api_key
+
+        logger.info("Cloud reporting enabled from registry config")
 
     def _apply_policy_pack(self, contract: DataContract, stage: str) -> DataContract:
         """
