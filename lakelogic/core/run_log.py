@@ -27,6 +27,32 @@ def _is_cloud_path(path: str) -> bool:
     return any(str(path).startswith(prefix) for prefix in _CLOUD_PREFIXES)
 
 
+def _build_cloud_opts(path: str) -> Dict[str, str]:
+    """Build fsspec storage_options from environment variables for a cloud path."""
+    import os
+    opts: Dict[str, str] = {}
+    p = str(path).lower()
+    if p.startswith(("abfss://", "abfs://")):
+        for env_key, opt_key in [
+            ("AZURE_STORAGE_ACCOUNT", "account_name"),
+            ("AZURE_TENANT_ID", "tenant_id"),
+            ("AZURE_CLIENT_ID", "client_id"),
+            ("AZURE_CLIENT_SECRET", "client_secret"),
+        ]:
+            val = os.getenv(env_key)
+            if val:
+                opts[opt_key] = val
+    elif p.startswith(("s3://", "s3a://")):
+        for env_key, opt_key in [
+            ("AWS_ACCESS_KEY_ID", "key"),
+            ("AWS_SECRET_ACCESS_KEY", "secret"),
+        ]:
+            val = os.getenv(env_key)
+            if val:
+                opts[opt_key] = val
+    return opts
+
+
 def _cloud_write_json(cloud_path: str, data: Dict[str, Any]) -> None:
     """
     Write a JSON dict to a cloud storage path using fsspec.
@@ -39,8 +65,8 @@ def _cloud_write_json(cloud_path: str, data: Dict[str, Any]) -> None:
         ImportError: If fsspec is not installed.
     """
     import fsspec
-
-    with fsspec.open(cloud_path, "w", encoding="utf-8") as f:
+    opts = _build_cloud_opts(cloud_path)
+    with fsspec.open(cloud_path, "w", encoding="utf-8", **opts) as f:
         json.dump(data, f, indent=2, default=str)
 
 
@@ -56,8 +82,8 @@ def _cloud_read_json(cloud_path: str) -> Optional[Dict[str, Any]]:
     """
     try:
         import fsspec
-
-        with fsspec.open(cloud_path, "r", encoding="utf-8") as f:
+        opts = _build_cloud_opts(cloud_path)
+        with fsspec.open(cloud_path, "r", encoding="utf-8", **opts) as f:
             return json.load(f)
     except Exception:
         return None
@@ -79,7 +105,8 @@ def _cloud_list_json(cloud_dir: str, pattern: str = "run_*.json") -> List[str]:
 
         # Normalize trailing slash
         cloud_dir = cloud_dir.rstrip("/") + "/"
-        fs, _, _ = fsspec.core.url_to_fs(cloud_dir)
+        opts = _build_cloud_opts(cloud_dir)
+        fs, _, _ = fsspec.core.url_to_fs(cloud_dir, **opts)
         # Strip protocol for glob
         base = cloud_dir.split("://", 1)
         protocol = base[0] + "://"

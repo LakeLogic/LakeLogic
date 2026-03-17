@@ -537,9 +537,13 @@ class DataProcessor:
                 raise ValueError(f"Quarantine disabled but {bad} records failed validation for '{contract_title}'.")
 
         # Build run report and optionally write a log
-        from lakelogic.core.slo import compute_slos
-
-        slos = compute_slos(self.contract, good_df, counts, self.engine_name)
+        try:
+            from lakelogic.core.slo import compute_slos
+            slos = compute_slos(self.contract, good_df, counts, self.engine_name)
+        except ImportError:
+            # compute_slos was removed; SLOValidator uses a DomainRegistry now.
+            # Per-contract SLO checks are deferred to the pipeline level.
+            slos = []
         row_rule_failures = self._extract_row_rule_failures(bad_df)
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
         write_run_log(self.last_report, self.contract, engine_name=self.engine_name)
@@ -682,6 +686,8 @@ class DataProcessor:
         *,
         reprocess_from: Optional[str] = None,
         reprocess_to: Optional[str] = None,
+        reprocess_column: Optional[str] = None,
+        reprocess_values: Optional[List[str]] = None,
     ) -> ValidationResult:
         """
         Loads data from a source file and runs the contract in one step.
@@ -698,6 +704,8 @@ class DataProcessor:
             reprocess_to: Optional end date (YYYY-MM-DD) for date-range
                 reprocessing.  Rows where the date column <= this value are
                 kept.  Can be used alone or with ``reprocess_from``.
+            reprocess_column: Optional column name for ID-based reprocessing.
+            reprocess_values: Optional list of values for ID-based reprocessing.
 
         Returns:
             ValidationResult object (unpacks to good_df, bad_df).
@@ -707,6 +715,9 @@ class DataProcessor:
         # Store reprocess range for downstream use by materialize
         self._reprocess_from = reprocess_from
         self._reprocess_to = reprocess_to
+        self._reprocess_column = reprocess_column
+        self._reprocess_values = reprocess_values
+        
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
@@ -724,12 +735,18 @@ class DataProcessor:
         logger.info(f"Loading source: {path} via {self.engine_name}")
 
         # ── Reprocessing mode: bypass incremental watermark ───────────────────
-        _is_reprocess = bool(reprocess_from or reprocess_to)
+        _is_reprocess = bool(reprocess_from or reprocess_to or (reprocess_column and reprocess_values))
         if _is_reprocess:
-            logger.info(
-                f"Reprocessing mode: date range [{reprocess_from or '*'} .. "
-                f"{reprocess_to or '*'}] — incremental watermark bypassed"
-            )
+            if reprocess_column and reprocess_values:
+                logger.info(
+                    f"Targeted reprocessing mode: filter on {reprocess_column} "
+                    f"IN ({len(reprocess_values)} values) — incremental watermark bypassed"
+                )
+            else:
+                logger.info(
+                    f"Reprocessing mode: date range [{reprocess_from or '*'} .. "
+                    f"{reprocess_to or '*'}] — incremental watermark bypassed"
+                )
 
         source_files = self._expand_source_files(path)
         load_mode = getattr(self.contract.source, "load_mode", "full") if self.contract.source else "full"
@@ -754,18 +771,35 @@ class DataProcessor:
                 import polars as pl
 
                 if df is None:
+                    source_fmt = (
+                        (
+                            getattr(self.contract.source, "format", None)
+                            if getattr(self.contract, "source", None)
+                            else None
+                        )
+                        or (
+                            getattr(self.contract.materialization, "format", None)
+                            if getattr(self.contract, "materialization", None)
+                            else None
+                        )
+                        or (getattr(self.contract.server, "format", None) if getattr(self.contract, "server", None) else None)
+                        or ""
+                    ).lower()
+
                     # Use scan_* (lazy) by default for formats that support it.
                     # This enables predicate/projection pushdown and query
                     # optimisation.  We .collect() before returning so the
                     # user always receives a regular DataFrame.
-                    _scannable = path.endswith((".parquet", ".csv", ".ndjson", ".jsonl"))
+                    _scannable = source_fmt in ("parquet", "csv", "ndjson") or path.endswith(
+                        (".parquet", ".csv", ".ndjson", ".jsonl")
+                    )
 
                     if file_paths:
                         if _scannable:
                             # Lazy: scan each file and concat lazily
-                            if path.endswith(".parquet"):
+                            if source_fmt == "parquet" or path.endswith(".parquet"):
                                 lf = pl.scan_parquet(file_paths if len(file_paths) > 1 else file_paths[0])
-                            elif path.endswith((".ndjson", ".jsonl")):
+                            elif source_fmt == "ndjson" or path.endswith((".ndjson", ".jsonl")):
                                 lf = pl.concat([pl.scan_ndjson(p) for p in file_paths])
                             else:  # CSV
                                 if len(file_paths) == 1:
@@ -779,10 +813,22 @@ class DataProcessor:
 
                             def _read_json_flat(filepath: str) -> "pl.DataFrame":
                                 """Read a .json file and cast any nested Struct/List columns
-                                to JSON strings so they match a flat contract schema."""
+                                to JSON strings so they match a flat contract schema.
+                                Supports cloud URIs (abfss://, s3://, gs://) via fsspec."""
                                 import polars as pl
 
-                                raw = _json.loads(Path(filepath).read_text(encoding="utf-8"))
+                                if self._is_uri_path(filepath):
+                                    import fsspec
+                                    _sopts = self._get_cloud_storage_options(filepath)
+                                    with fsspec.open(filepath, "r", **_sopts) as f:
+                                        text = f.read()
+                                    try:
+                                        raw = _json.loads(text)
+                                    except _json.JSONDecodeError:
+                                        # NDJSON: one JSON object per line
+                                        raw = [_json.loads(line) for line in text.strip().splitlines() if line.strip()]
+                                else:
+                                    raw = _json.loads(Path(filepath).read_text(encoding="utf-8"))
                                 rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
                                 # Normalise nested objects to JSON strings
                                 flat = [
@@ -819,14 +865,15 @@ class DataProcessor:
 
                     else:
                         # No glob expansion — single path or table directory
-                        p_obj = Path(path)
                         # ── Delta table directory ──────────────────────────
-                        _is_delta_dir = p_obj.is_dir() and (
-                            (p_obj / "_delta_log").exists()  # standard Delta
-                            or getattr(getattr(self.contract, "source", None), "type", None) == "table"
-                        )
+                        _is_delta_dir = False
                         source_fmt = (
                             (
+                                getattr(self.contract.source, "format", None)
+                                if getattr(self.contract, "source", None)
+                                else None
+                            )
+                            or (
                                 getattr(self.contract.materialization, "format", None)
                                 if getattr(self.contract, "materialization", None)
                                 else None
@@ -837,7 +884,18 @@ class DataProcessor:
                                 else None
                             )
                             or ""
-                        )
+                        ).lower()
+
+                        if not self._is_uri_path(path):
+                            p_obj = Path(path)
+                            _is_delta_dir = p_obj.is_dir() and (p_obj / "_delta_log").exists()
+                        
+                        # Explicit check for delta format or table prefix
+                        if not _is_delta_dir:
+                            if path.startswith("table:") or source_fmt == "delta":
+                                _is_delta_dir = True
+                            elif getattr(getattr(self.contract, "source", None), "type", None) == "table":
+                                _is_delta_dir = True
 
                         if _is_delta_dir or source_fmt.lower() == "delta":
                             # ── Resolve incremental watermark BEFORE reading ──
@@ -855,10 +913,20 @@ class DataProcessor:
                                 if _wm_field and _tgt:
                                     _src_col, _tgt_col = self._resolve_watermark_columns(_wm_field)
                                     _max_wm = None
-                                    _tgt_delta = Path(_tgt)
-                                    if (_tgt_delta / "_delta_log").exists():
+                                    
+                                    # Watermark checking on the target table (Delta)
+                                    # Skip Path() checks for URIs to avoid OSError on Windows
+                                    _tgt_is_delta_dir = False
+                                    if not self._is_uri_path(_tgt):
+                                        _tgt_delta = Path(_tgt)
+                                        _tgt_is_delta_dir = (_tgt_delta / "_delta_log").exists()
+                                    else:
+                                        _tgt_is_delta_dir = True # Assume URI target is accessible if it's delta
+
+                                    if _tgt_is_delta_dir:
                                         try:
-                                            _tdf = pl.read_delta(str(_tgt_delta))
+                                            # Use the target path string directly. read_delta will handle abfss
+                                            _tdf = pl.read_delta(str(_tgt))
                                             if _tgt_col in _tdf.columns:
                                                 _max_wm = _tdf.select(pl.col(_tgt_col).max()).item()
                                         except Exception as _wm_err:
@@ -896,16 +964,37 @@ class DataProcessor:
                             import json as _json
 
                             if path.endswith(".json"):
-                                raw = _json.loads(Path(path).read_text(encoding="utf-8"))
-                                rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
-                                flat = [
-                                    {
-                                        k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
-                                        for k, v in r.items()
-                                    }
-                                    for r in rows
-                                ]
-                                df = pl.DataFrame(flat)
+                                if self._is_uri_path(path):
+                                    # Cloud URI — read via fsspec (pl.read_json doesn't support cloud URIs)
+                                    import fsspec
+                                    _sopts = self._get_cloud_storage_options(path)
+                                    with fsspec.open(path, "r", **_sopts) as f:
+                                        text = f.read()
+                                    try:
+                                        raw = _json.loads(text)
+                                    except _json.JSONDecodeError:
+                                        # NDJSON: one JSON object per line
+                                        raw = [_json.loads(line) for line in text.strip().splitlines() if line.strip()]
+                                    rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+                                    flat = [
+                                        {
+                                            k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                                            for k, v in r.items()
+                                        }
+                                        for r in rows
+                                    ]
+                                    df = pl.DataFrame(flat)
+                                else:
+                                    raw = _json.loads(Path(path).read_text(encoding="utf-8"))
+                                    rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+                                    flat = [
+                                        {
+                                            k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                                            for k, v in r.items()
+                                        }
+                                        for r in rows
+                                    ]
+                                    df = pl.DataFrame(flat)
                             elif path.endswith(".xml"):
                                 df = pl.read_xml(path)
                             elif path.endswith((".xlsx", ".xls")):
@@ -1095,6 +1184,32 @@ class DataProcessor:
 
         if df is None:
             raise ValueError(f"Could not load data from {path} using engine {self.engine_name}")
+
+        # ── Target Reprocessing filter ─────────────────────────────────────────
+        # Apply strict targeted reprocessing (if supplied). We apply this here
+        # so Polars/Spark lazy logic can push the predicate all the way down.
+        if reprocess_column and reprocess_values:
+            if self.engine_name == "polars":
+                import polars as pl
+                # Cast the array values to Utf8 to safely match
+                string_vals = [str(x) for x in reprocess_values]
+                df = df.filter(pl.col(reprocess_column).cast(pl.Utf8).is_in(string_vals))
+            elif self.engine_name == "spark":
+                from pyspark.sql.functions import col
+                string_vals = [str(x) for x in reprocess_values]
+                df = df.filter(col(reprocess_column).cast("string").isin(string_vals))
+            elif self.engine_name == "pandas":
+                # Pandas is eager, but we filter to save ram on transform
+                string_vals = [str(x) for x in reprocess_values]
+                df = df[df[reprocess_column].astype(str).isin(string_vals)]
+            elif self.engine_name == "duckdb":
+                import duckdb
+                # Need to run a query to enforce it
+                string_vals = ", ".join([f"'{str(x).replace(chr(39), chr(39)*2)}'" for x in reprocess_values])
+                query = f"SELECT * FROM df WHERE {reprocess_column} IN ({string_vals})"
+                df = duckdb.query(query).df()
+                
+            logger.info(f"Targeted reprocessing filter pushdown applied on {reprocess_column}")
 
         # ── JSON-string flattening (source.flatten_nested) ────────────────────
         # When a bronze table stores nested objects as JSON strings we need to
@@ -1481,10 +1596,33 @@ class DataProcessor:
 
     def _expand_source_files(self, path: str) -> Optional[List[Dict[str, Any]]]:
         """
-        Expand local file patterns into concrete file paths and mtimes.
+        Expand file patterns into concrete file paths and mtimes.
+        Supports both local globs and cloud URI globs (abfss://, s3://, gs://) via fsspec.
         """
-        if self._is_uri_path(path) or path.startswith("table:"):
+        if path.startswith("table:"):
             return None
+        if self._is_uri_path(path):
+            # Cloud URI — expand globs via fsspec if pattern contains wildcards
+            if not any(ch in path for ch in ["*", "?", "["]):
+                return None  # no glob — let the reader handle it directly
+            try:
+                import fsspec
+                _sopts = self._get_cloud_storage_options(path)
+                fs, _, paths = fsspec.get_fs_token_paths(path, storage_options=_sopts)
+                results = []
+                protocol = path.split("://")[0]
+                for p in sorted(paths):
+                    info = fs.info(p)
+                    # Reconstruct the full URI for each matched file
+                    full_uri = f"{protocol}://{p}"
+                    mtime = info.get("last_modified", 0)
+                    if hasattr(mtime, "timestamp"):
+                        mtime = mtime.timestamp()
+                    results.append({"path": full_uri, "mtime": mtime})
+                return results or None
+            except Exception as e:
+                logger.warning(f"Cloud glob expansion failed for {path}: {e}")
+                return None
         # Delta table directories (and other table formats) — no glob expansion.
         source_type = getattr(getattr(self.contract, "source", None), "type", None)
         if source_type == "table":
@@ -1556,10 +1694,44 @@ class DataProcessor:
         return []
 
     def _is_uri_path(self, path: str) -> bool:
+        r"""
+        Check if a path is a URI (abfss://, s3://, gs://, file://, etc.).
+        Also handles URIs that have been Windows-formatted (abfss:\) by pathlib.Path.
         """
-        Check if a path is a URI (s3://, gs://, file://, etc.).
+        p = str(path)
+        # Second pattern matches Windows-mangled URIs like abfss:\...
+        return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", p)) or bool(
+            re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:\\", p)
+        )
+
+    def _get_cloud_storage_options(self, path: str) -> Dict[str, str]:
         """
-        return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", str(path)))
+        Build storage_options dict for fsspec/adlfs from environment variables.
+        Supports Azure (abfss://), AWS (s3://), and GCP (gs://).
+        """
+        opts: Dict[str, str] = {}
+        p = str(path).lower()
+        if p.startswith("abfss://") or p.startswith("az://"):
+            acct = os.getenv("AZURE_STORAGE_ACCOUNT")
+            if acct:
+                opts["account_name"] = acct
+            tenant = os.getenv("AZURE_TENANT_ID")
+            if tenant:
+                opts["tenant_id"] = tenant
+            client_id = os.getenv("AZURE_CLIENT_ID")
+            if client_id:
+                opts["client_id"] = client_id
+            client_secret = os.getenv("AZURE_CLIENT_SECRET")
+            if client_secret:
+                opts["client_secret"] = client_secret
+        elif p.startswith("s3://"):
+            key = os.getenv("AWS_ACCESS_KEY_ID")
+            if key:
+                opts["key"] = key
+            secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+            if secret:
+                opts["secret"] = secret
+        return opts
 
     def _resolve_source_path(self, path_val: Union[str, Path]) -> str:
         """
@@ -1714,7 +1886,12 @@ class DataProcessor:
         Returns:
             Materialization metadata.
         """
-        target = Path(target_path) if target_path else None
+        # Avoid wrapping URIs or table: paths in Path() — it corrupts slashes on Windows
+        target = target_path
+        if target_path and not isinstance(target_path, Path):
+            target_str = str(target_path)
+            if not target_str.startswith("table:") and "://" not in target_str:
+                target = Path(target_path)
         result = materialize_dataframe(
             good_df,
             self.contract,
@@ -2018,42 +2195,56 @@ class DataProcessor:
 
     def _compute_slos(self, good_df: Any, counts: Dict[str, Optional[int]]) -> Dict[str, Any]:
         """Delegate to lakelogic.core.slo (kept for backward compat)."""
-        from lakelogic.core.slo import compute_slos
-
-        return compute_slos(self.contract, good_df, counts, self.engine_name)
+        try:
+            from lakelogic.core.slo import compute_slos
+            return compute_slos(self.contract, good_df, counts, self.engine_name)
+        except ImportError:
+            return []
 
     # ─── SLO helpers (delegated to lakelogic.core.slo) ────────────────────
     def _parse_duration_seconds(self, value: Any) -> Optional[float]:
-        from lakelogic.core.slo import _parse_duration_seconds
-
-        return _parse_duration_seconds(value)
+        try:
+            from lakelogic.core.slo import _parse_duration_seconds
+            return _parse_duration_seconds(value)
+        except ImportError:
+            return None
 
     def _get_max_timestamp(self, df: Any, field: str) -> Optional[datetime]:
-        from lakelogic.core.slo import _get_max_timestamp
-
-        return _get_max_timestamp(df, field, self.engine_name)
+        try:
+            from lakelogic.core.slo import _get_max_timestamp
+            return _get_max_timestamp(df, field, self.engine_name)
+        except ImportError:
+            return None
 
     def _coerce_datetime(self, value: Any) -> Optional[datetime]:
-        from lakelogic.core.slo import _coerce_datetime
-
-        return _coerce_datetime(value)
+        try:
+            from lakelogic.core.slo import _coerce_datetime
+            return _coerce_datetime(value)
+        except ImportError:
+            return None
 
     def _compute_freshness(self, good_df: Any, freshness_obj: Any) -> Dict[str, Any]:
-        from lakelogic.core.slo import _compute_freshness
-
-        return _compute_freshness(good_df, freshness_obj, self.engine_name)
+        try:
+            from lakelogic.core.slo import _compute_freshness
+            return _compute_freshness(good_df, freshness_obj, self.engine_name)
+        except ImportError:
+            return {}
 
     def _compute_availability(
         self, good_df: Any, counts: Dict[str, Optional[int]], availability_obj: Any
     ) -> Dict[str, Any]:
-        from lakelogic.core.slo import _compute_availability
-
-        return _compute_availability(good_df, counts, availability_obj, self.engine_name)
+        try:
+            from lakelogic.core.slo import _compute_availability
+            return _compute_availability(good_df, counts, availability_obj, self.engine_name)
+        except ImportError:
+            return {}
 
     def _non_null_ratio(self, df: Any, field: str) -> Optional[float]:
-        from lakelogic.core.slo import _non_null_ratio
-
-        return _non_null_ratio(df, field, self.engine_name)
+        try:
+            from lakelogic.core.slo import _non_null_ratio
+            return _non_null_ratio(df, field, self.engine_name)
+        except ImportError:
+            return None
 
     def _extract_row_rule_failures(self, bad_df: Any) -> list:
         """
@@ -2367,4 +2558,98 @@ class DataProcessor:
             table_name=table_name,
             db_path=db_path,
             connection=connection,
+        )
+
+    # ── GDPR & HIPAA Utilities ───────────────────────────────────────────────
+
+    def forget(
+        self,
+        df: Any,
+        subject_column: str,
+        subject_ids: List[str],
+        *,
+        erasure_strategy: str = "nullify",
+        hash_salt: str = "",
+        audit: bool = True,
+    ) -> Any:
+        """
+        GDPR Right-to-be-Forgotten: erase PII for specific data subjects.
+        Delegates to lakelogic.core.gdpr.forget_subjects using this processor's contract.
+        """
+        from lakelogic.core.gdpr import forget_subjects
+        return forget_subjects(
+            df=df,
+            contract=self.contract,
+            subject_column=subject_column,
+            subject_ids=subject_ids,
+            erasure_strategy=erasure_strategy,
+            hash_salt=hash_salt,
+            audit=audit,
+        )
+
+    def mask_pii(
+        self,
+        df: Any,
+        *,
+        strategy: str = "nullify",
+        hash_salt: str = "",
+        columns: Optional[List[str]] = None,
+    ) -> Any:
+        """
+        Mask all PII columns across all rows in a dataframe.
+        Delegates to lakelogic.core.gdpr.mask_pii_columns.
+        """
+        from lakelogic.core.gdpr import mask_pii_columns
+        return mask_pii_columns(
+            df,
+            self.contract,
+            strategy=strategy,
+            hash_salt=hash_salt,
+            columns=columns,
+        )
+
+    def forget_patient(
+        self,
+        df: Any,
+        patient_column: str,
+        patient_ids: List[str],
+        *,
+        erasure_strategy: str = "nullify",
+        hash_salt: str = "",
+        audit: bool = True,
+    ) -> Any:
+        """
+        HIPAA Right-to-be-Forgotten: erase PHI for specific patients.
+        Delegates to lakelogic.core.hipaa.forget_patients using this processor's contract.
+        """
+        from lakelogic.core.hipaa import forget_patients
+        return forget_patients(
+            df=df,
+            contract=self.contract,
+            patient_column=patient_column,
+            patient_ids=patient_ids,
+            erasure_strategy=erasure_strategy,
+            hash_salt=hash_salt,
+            audit=audit,
+        )
+
+    def mask_phi(
+        self,
+        df: Any,
+        *,
+        strategy: str = "nullify",
+        hash_salt: str = "",
+        columns: Optional[List[str]] = None,
+    ) -> Any:
+        """
+        Mask all PHI columns across all rows in a dataframe (Safe Harbor).
+        Delegates to lakelogic.core.hipaa.mask_phi_columns.
+        """
+        from lakelogic.core.hipaa import mask_phi_columns
+        return mask_phi_columns(
+            df,
+            self.contract,
+            strategy=strategy,
+            hash_salt=hash_salt,
+            columns=columns,
         )

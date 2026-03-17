@@ -29,69 +29,29 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from lakelogic.ai.data_generator import _salvage_truncated_json
+
 
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
-You are a QA engineer and data quality expert. You will receive a dataset schema
-(field names, types, constraints) and quality rules.
+You generate edge-case test values for database schemas to stress-test quality rules.
 
-Your job is to generate **realistic edge-case test values** for each field that are
-likely to break quality rules or reveal bugs in data pipelines.
+Return a JSON object mapping field names to edge-case arrays:
 
-Return a JSON object with this structure:
+{"field_name": ["edge1", "edge2"], "other_field": [0, -1, 999999]}
 
-{
-  "fields": {
-    "<field_name>": {
-      "edge_cases": [<value1>, <value2>, ...],
-      "rationale": "<brief explanation of why these are good edge cases>"
-    }
-  }
-}
-
-Guidelines for generating edge cases:
-
-**String fields:**
-- Empty string "", whitespace-only "   ", very long strings (200+ chars)
-- Unicode/emoji: "Ñ", "日本語", "🔥"
-- SQL injection attempts: "'; DROP TABLE --"
-- Format violations: wrong email format, invalid URLs
-- Case variations: "ACTIVE" vs "active" vs "Active"
-- Leading/trailing whitespace: " value ", "value\\n"
-- For constrained fields (IN list): values NOT in the list, similar misspellings
-
-**Numeric fields (integer/float):**
-- Zero (0), negative (-1), very large (2147483647, 99999999.99)
-- Floating point precision: 0.1 + 0.2 = 0.30000000000000004
-- Boundary values: min-1, max+1 if range is specified
-- NaN-like strings if field might receive string input
-
-**Date/timestamp fields:**
-- Epoch zero: 1970-01-01
-- Far future: 2099-12-31
-- Far past: 1900-01-01
-- Leap year edge: 2024-02-29
-- Invalid dates: 2023-02-29, 2023-13-01
-- Timezone edge cases: midnight UTC vs local
-
-**Boolean fields:**
-- null, 0, 1, "true", "false", "yes", "no", ""
-
-**ID/key fields:**
-- 0, -1, very large integers, duplicates
-- UUID format violations if expected
-
-**General:**
-- null / None for every field (test nullability handling)
-- Mix data types (string in numeric field, number in string field)
-
-Generate 5-10 edge cases per field. Focus on cases that are REALISTIC — things that
-actually show up in production data pipelines, not contrived examples.
-
-Return ONLY valid JSON. No markdown, no explanation.
+HARD RULES:
+- EXACTLY 1-3 edge cases per field. NO MORE.
+- All values must be SHORT (under 50 chars for strings).
+- Include: nulls, empty strings, boundary values, wrong types, invalid formats.
+- For numeric: 0, -1, MAX_INT, boundary violations.
+- For dates: epoch (1970-01-01), far future, invalid (2023-02-29).
+- For strings with accepted_values: values NOT in the list.
+- NO rationale, NO explanations, NO markdown.
+- Return ONLY the JSON object. Nothing else.
 """
 
 
@@ -234,43 +194,50 @@ def generate_edge_cases(
             {"role": "user", "content": user_prompt},
         ],
         json_mode=True,
-        temperature=0.4,  # slightly higher for creative edge cases
+        temperature=0.4,
+        max_tokens=8192,
     )
 
     if response.usage:
         tokens = response.usage.get("prompt_tokens", 0) + response.usage.get("completion_tokens", 0)
         logger.info(f"Edge case generation complete ({tokens} tokens used)")
 
-    # Parse response
+    # Parse response — with truncation recovery
+    data = None
     try:
         data = response.as_json()
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Failed to parse AI edge case response: {e}")
-        logger.debug(f"Raw response: {response.text[:500]}")
-        return {}
+    except (json.JSONDecodeError, ValueError):
+        # Try to salvage truncated JSON
+        data = _salvage_truncated_json(response.text)
+        if data:
+            logger.warning("AI edge case response was truncated; salvaged partial JSON")
+        else:
+            logger.error(f"Failed to parse AI edge case response")
+            logger.debug(f"Raw response (first 500 chars): {response.text[:500]}")
+            return {}
 
     # Build field name → type lookup
     field_types = {f["name"]: f.get("type", "string") for f in fields}
 
-    # Extract and coerce edge case values
+    # Extract and coerce — handle both flat and nested formats
     edge_pools: Dict[str, List[Any]] = {}
-    ai_fields = data.get("fields") or {}
 
-    for field_name, field_data in ai_fields.items():
-        if field_name not in field_types:
-            continue
-
-        raw_cases = field_data.get("edge_cases") or []
-        if not raw_cases:
-            continue
-
-        ftype = field_types[field_name]
-        coerced = [_coerce_value(v, ftype) for v in raw_cases]
-        edge_pools[field_name] = coerced
-
-        rationale = field_data.get("rationale", "")
-        if rationale:
-            logger.debug(f"  {field_name}: {len(coerced)} edge cases — {rationale}")
+    if "fields" in data and isinstance(data["fields"], dict):
+        # Nested: {"fields": {"name": {"edge_cases": [...]}}}
+        for field_name, field_data in data["fields"].items():
+            if field_name not in field_types:
+                continue
+            raw = field_data.get("edge_cases", []) if isinstance(field_data, dict) else (field_data if isinstance(field_data, list) else [])
+            if raw:
+                ftype = field_types[field_name]
+                edge_pools[field_name] = [_coerce_value(v, ftype) for v in raw]
+    else:
+        # Flat: {"field_name": [edge1, edge2, ...]}
+        for field_name, raw in data.items():
+            if field_name not in field_types or not isinstance(raw, list):
+                continue
+            ftype = field_types[field_name]
+            edge_pools[field_name] = [_coerce_value(v, ftype) for v in raw]
 
     total = sum(len(v) for v in edge_pools.values())
     logger.info(f"Generated {total} edge cases across {len(edge_pools)} fields")

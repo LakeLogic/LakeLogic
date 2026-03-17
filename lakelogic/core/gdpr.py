@@ -28,6 +28,17 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from lakelogic.core.constants import (
+    DELETE_REASON_GDPR_ART17,
+    ERASURE_HASH,
+    ERASURE_NULLIFY,
+    ERASURE_REDACT,
+    META_DELETE_REASON,
+    META_DELETED_AT,
+    META_IS_DELETED,
+    META_UPDATED_AT,
+    VALID_ERASURE_STRATEGIES,
+)
 from lakelogic.core.models import DataContract, FieldDefinition
 
 
@@ -77,6 +88,8 @@ def _forget_polars(
     subject_ids: List[str],
     erasure_strategy: str,
     hash_salt: str,
+    partition_filter: Optional[Dict[str, str]] = None,
+    delete_reason: str = DELETE_REASON_GDPR_ART17,
 ):
     """Erase/mask PII for specific subjects in a Polars DataFrame."""
     import polars as pl
@@ -95,6 +108,14 @@ def _forget_polars(
     # Cast subject_ids to match column type
     subject_ids_set = set(str(s) for s in subject_ids)
     mask = df[subject_column].cast(pl.Utf8).is_in(list(subject_ids_set))
+
+    # Scope erasure to a specific partition (e.g. country_code = 'FR')
+    if partition_filter:
+        pcol, pval = partition_filter["column"], partition_filter["value"]
+        if pcol in df.columns:
+            mask = mask & (df[pcol].cast(pl.Utf8) == pval)
+        else:
+            logger.warning(f"Partition column '{pcol}' not found in dataframe; ignoring partition filter.")
 
     for col in present_pii:
         if col == subject_column and erasure_strategy == "nullify":
@@ -122,6 +143,27 @@ def _forget_polars(
         elif erasure_strategy == "redact":
             df = df.with_columns(pl.when(mask).then(pl.lit("***REDACTED***")).otherwise(pl.col(col)).alias(col))
 
+    affected_count = int(mask.sum())
+
+    # ── Set compliance metadata on affected rows ─────────────────────────────
+    now = datetime.now(timezone.utc).isoformat()
+    if META_IS_DELETED not in df.columns:
+        df = df.with_columns(pl.lit(False).alias(META_IS_DELETED))
+    if META_DELETED_AT not in df.columns:
+        df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias(META_DELETED_AT))
+    if META_DELETE_REASON not in df.columns:
+        df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias(META_DELETE_REASON))
+    if META_UPDATED_AT not in df.columns:
+        df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias(META_UPDATED_AT))
+
+    df = df.with_columns(
+        pl.when(mask).then(pl.lit(True)).otherwise(pl.col(META_IS_DELETED)).alias(META_IS_DELETED),
+        pl.when(mask).then(pl.lit(now)).otherwise(pl.col(META_DELETED_AT)).alias(META_DELETED_AT),
+        pl.when(mask).then(pl.lit(delete_reason)).otherwise(pl.col(META_DELETE_REASON)).alias(META_DELETE_REASON),
+        pl.when(mask).then(pl.lit(now)).otherwise(pl.col(META_UPDATED_AT)).alias(META_UPDATED_AT),
+    )
+
+    logger.info(f"GDPR erasure ({erasure_strategy}): affected {affected_count} rows, {len(present_pii)} PII columns.")
     return df
 
 
@@ -132,6 +174,8 @@ def _forget_pandas(
     subject_ids: List[str],
     erasure_strategy: str,
     hash_salt: str,
+    partition_filter: Optional[Dict[str, str]] = None,
+    delete_reason: str = DELETE_REASON_GDPR_ART17,
 ):
     """Erase/mask PII for specific subjects in a Pandas DataFrame."""
 
@@ -146,6 +190,15 @@ def _forget_pandas(
     df = df.copy()
     subject_ids_set = set(str(s) for s in subject_ids)
     mask = df[subject_column].astype(str).isin(subject_ids_set)
+
+    # Scope erasure to a specific partition (e.g. country_code = 'FR')
+    if partition_filter:
+        pcol, pval = partition_filter["column"], partition_filter["value"]
+        if pcol in df.columns:
+            mask = mask & (df[pcol].astype(str) == pval)
+        else:
+            logger.warning(f"Partition column '{pcol}' not found in dataframe; ignoring partition filter.")
+
     affected_count = mask.sum()
 
     for col in present_pii:
@@ -160,6 +213,23 @@ def _forget_pandas(
             df.loc[mask, col] = "***REDACTED***"
 
     logger.info(f"GDPR erasure ({erasure_strategy}): affected {affected_count} rows, {len(present_pii)} PII columns.")
+
+    # ── Set compliance metadata on affected rows ─────────────────────────────
+    now = datetime.now(timezone.utc).isoformat()
+    if META_IS_DELETED not in df.columns:
+        df[META_IS_DELETED] = False
+    if META_DELETED_AT not in df.columns:
+        df[META_DELETED_AT] = None
+    if META_DELETE_REASON not in df.columns:
+        df[META_DELETE_REASON] = None
+    if META_UPDATED_AT not in df.columns:
+        df[META_UPDATED_AT] = None
+
+    df.loc[mask, META_IS_DELETED] = True
+    df.loc[mask, META_DELETED_AT] = now
+    df.loc[mask, META_DELETE_REASON] = delete_reason
+    df.loc[mask, META_UPDATED_AT] = now
+
     return df
 
 
@@ -224,9 +294,11 @@ def forget_subjects(
     subject_column: str,
     subject_ids: List[str],
     *,
-    erasure_strategy: str = "nullify",
+    erasure_strategy: str = ERASURE_NULLIFY,
     hash_salt: str = "",
     audit: bool = True,
+    partition_filter: Optional[Dict[str, str]] = None,
+    delete_reason: str = DELETE_REASON_GDPR_ART17,
 ) -> Any:
     """
     GDPR Right-to-be-Forgotten: erase PII for specific data subjects.
@@ -246,6 +318,11 @@ def forget_subjects(
             - "redact": Replace with "***REDACTED***".
         hash_salt: Salt for hashing (only used with "hash" strategy).
         audit: If True, log an audit entry about the erasure.
+        partition_filter: Optional dict with 'column' and 'value' keys to scope
+                          erasure to a specific partition (e.g. {"column": "country_code", "value": "FR"}).
+                          When provided, only rows matching BOTH the subject_ids AND
+                          the partition predicate are erased. Critical for multi-region
+                          lakehouses where IDs may be reused across partitions.
 
     Returns:
         DataFrame with PII erased for the specified subjects.
@@ -253,8 +330,8 @@ def forget_subjects(
     Raises:
         ValueError: If subject_column not in dataframe or no PII fields defined.
     """
-    if erasure_strategy not in ("nullify", "hash", "redact"):
-        raise ValueError(f"Invalid erasure_strategy: {erasure_strategy}. Must be 'nullify', 'hash', or 'redact'.")
+    if erasure_strategy not in VALID_ERASURE_STRATEGIES:
+        raise ValueError(f"Invalid erasure_strategy: {erasure_strategy}. Must be one of {VALID_ERASURE_STRATEGIES}.")
 
     pii_columns = _get_pii_column_names(contract)
     if not pii_columns:
@@ -265,9 +342,12 @@ def forget_subjects(
         return df
 
     if audit:
+        partition_msg = ""
+        if partition_filter:
+            partition_msg = f", partition={partition_filter['column']}='{partition_filter['value']}'"
         logger.info(
             f"GDPR erasure request: strategy={erasure_strategy}, "
-            f"subjects={len(subject_ids)}, pii_columns={pii_columns}, "
+            f"subjects={len(subject_ids)}, pii_columns={pii_columns}{partition_msg}, "
             f"timestamp={datetime.now(timezone.utc).isoformat()}"
         )
 
@@ -283,6 +363,8 @@ def forget_subjects(
                 subject_ids,
                 erasure_strategy,
                 hash_salt,
+                partition_filter,
+                delete_reason,
             )
     except ImportError:
         pass
@@ -298,6 +380,8 @@ def forget_subjects(
                 subject_ids,
                 erasure_strategy,
                 hash_salt,
+                partition_filter,
+                delete_reason,
             )
     except ImportError:
         pass
@@ -307,7 +391,7 @@ def forget_subjects(
         import pandas as pd
 
         pdf = df.fetchdf()
-        result = _forget_pandas(pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt)
+        result = _forget_pandas(pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt, partition_filter, delete_reason)
         import duckdb
 
         return duckdb.from_df(result)
@@ -387,6 +471,7 @@ def generate_erasure_report(
     subject_ids: List[str],
     erasure_strategy: str = "nullify",
     affected_rows: Optional[int] = None,
+    partition_filter: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Generate a GDPR-compliant audit report for an erasure operation.
@@ -397,6 +482,7 @@ def generate_erasure_report(
         subject_ids: List of erased subject IDs.
         erasure_strategy: Strategy used.
         affected_rows: Number of rows affected (if known).
+        partition_filter: Optional partition scope dict.
 
     Returns:
         Audit report dictionary.
@@ -404,7 +490,7 @@ def generate_erasure_report(
     pii_columns = _get_pii_column_names(contract)
     contract_name = contract.info.title if contract.info else "unknown"
 
-    return {
+    report: Dict[str, Any] = {
         "report_type": "gdpr_erasure",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "contract": contract_name,
@@ -418,3 +504,8 @@ def generate_erasure_report(
             "(Right to Erasure). This report should be retained for audit purposes."
         ),
     }
+
+    if partition_filter:
+        report["partition_filter"] = partition_filter
+
+    return report

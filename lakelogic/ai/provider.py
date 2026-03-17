@@ -7,6 +7,7 @@ Supports:
 - OpenAI  (``openai``)     — requires ``OPENAI_API_KEY``
 - Azure OpenAI (``azure``) — requires ``AZURE_OPENAI_ENDPOINT`` + ``AZURE_OPENAI_API_KEY``
 - Anthropic (``anthropic``) — requires ``ANTHROPIC_API_KEY``
+- Google Gemini (``gemini``) — requires ``GOOGLE_API_KEY`` or ``GEMINI_API_KEY``
 - Ollama  (``ollama``)     — local, no key required (default: http://localhost:11434)
 - Local   (``local``)      — direct HuggingFace transformers, no API key or server needed
 
@@ -186,6 +187,77 @@ class _OllamaClient:
         )
 
 
+class _GeminiClient:
+    """Google Gemini client."""
+
+    def __init__(
+        self,
+        *,
+        api_key: Optional[str] = None,
+        model: str = "gemini-2.0-flash",
+    ) -> None:
+        try:
+            from google import genai
+        except ImportError as exc:
+            raise ImportError(
+                "Google Gemini provider requires the 'google-genai' package. "
+                "Install with: pip install google-genai"
+            ) from exc
+
+        resolved_key = (
+            api_key
+            or os.getenv("GOOGLE_API_KEY")
+            or os.getenv("GEMINI_API_KEY")
+        )
+        if not resolved_key:
+            raise ValueError(
+                "Google Gemini requires an API key. Set GOOGLE_API_KEY or "
+                "GEMINI_API_KEY environment variable, or pass api_key."
+            )
+
+        self._client = genai.Client(api_key=resolved_key)
+        self.model = model
+
+    def chat(self, messages: List[Dict[str, str]], **kwargs) -> LLMResponse:
+        from google.genai import types
+
+        # Gemini uses a system_instruction and contents list
+        system_msg = ""
+        contents = []
+        for m in messages:
+            if m["role"] == "system":
+                system_msg = m["content"]
+            else:
+                role = "user" if m["role"] == "user" else "model"
+                contents.append(types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=m["content"])],
+                ))
+
+        config = types.GenerateContentConfig(
+            temperature=kwargs.get("temperature", 0.2),
+            max_output_tokens=kwargs.get("max_tokens", 4096),
+            system_instruction=system_msg if system_msg else None,
+        )
+        if kwargs.get("json_mode"):
+            config.response_mime_type = "application/json"
+
+        resp = self._client.models.generate_content(
+            model=self.model,
+            contents=contents,
+            config=config,
+        )
+
+        text = resp.text or ""
+        usage = {}
+        if resp.usage_metadata:
+            usage = {
+                "prompt_tokens": resp.usage_metadata.prompt_token_count or 0,
+                "completion_tokens": resp.usage_metadata.candidates_token_count or 0,
+            }
+        return LLMResponse(text=text, usage=usage)
+
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -280,6 +352,12 @@ def get_llm_client(
         return _OllamaClient(
             model=model or "llama3.1",
             base_url=kwargs.get("base_url") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        )
+
+    if provider in ("gemini", "google"):
+        return _GeminiClient(
+            api_key=api_key,
+            model=model or "gemini-2.0-flash",
         )
 
     if provider == "local":

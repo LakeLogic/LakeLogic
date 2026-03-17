@@ -10,6 +10,7 @@ One YAML contract. Any engine. Every row validated, quarantined, or promoted —
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Downloads](https://img.shields.io/pypi/dm/lakelogic?logo=pypi&logoColor=white)](https://pypi.org/project/lakelogic/)
+[![Changelog](https://img.shields.io/badge/changelog-latest-orange)](https://github.com/LakeLogic/LakeLogic/blob/main/CHANGELOG.md)
 
 ---
 
@@ -212,6 +213,7 @@ The [`examples/`](https://github.com/lakelogic/LakeLogic/tree/main/examples) dir
 - **[Full Docs](https://LakeLogic.github.io/LakeLogic)** — Complete guides and API reference
 - **[Quickstart](https://LakeLogic.github.io/LakeLogic/quickstart/)** — Get running in 5 minutes
 - **[Contract Reference](docs/contract_template.md)** — Full YAML field reference
+- **[Changelog](https://github.com/LakeLogic/LakeLogic/blob/main/CHANGELOG.md)** — Release history and breaking changes
 - **[CLI Reference](https://LakeLogic.github.io/LakeLogic/cli/)** — Command-line usage
 
 ## Contributing

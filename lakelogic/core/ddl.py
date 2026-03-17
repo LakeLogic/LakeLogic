@@ -415,6 +415,30 @@ def generate_ddl(
 
         col_defs.append(col_def)
 
+    # ── LakeLogic system columns (when lineage is enabled) ──────────────────
+    lineage_cfg = getattr(contract, "lineage", None)
+    if lineage_cfg and getattr(lineage_cfg, "enabled", False):
+        _sys_cols = []
+        if getattr(lineage_cfg, "capture_source_path", True):
+            _sys_cols.append((getattr(lineage_cfg, "source_column_name", "_lakelogic_source"), "string"))
+        if getattr(lineage_cfg, "capture_timestamp", True):
+            _sys_cols.append((getattr(lineage_cfg, "timestamp_column_name", "_lakelogic_processed_at"), "timestamp"))
+        if getattr(lineage_cfg, "capture_run_id", True):
+            _sys_cols.append((getattr(lineage_cfg, "run_id_column_name", "_lakelogic_run_id"), "string"))
+        if getattr(lineage_cfg, "capture_contract_name", False):
+            _sys_cols.append((getattr(lineage_cfg, "contract_name_column_name", "_lakelogic_contract_name"), "string"))
+        if getattr(lineage_cfg, "capture_domain", True):
+            _sys_cols.append((getattr(lineage_cfg, "domain_column_name", "_lakelogic_domain"), "string"))
+        if getattr(lineage_cfg, "capture_system", True):
+            _sys_cols.append((getattr(lineage_cfg, "system_column_name", "_lakelogic_system"), "string"))
+
+        # Deduplicate against user-defined fields
+        existing_names = {f.name for f in fields}
+        for col_name, col_type in _sys_cols:
+            if col_name not in existing_names:
+                sql_type = _resolve_type(col_type, backend)
+                col_defs.append(f"  {col_name} {sql_type}")
+
     # Primary key constraint
     if primary_key:
         if backend in ("duckdb", "postgresql", "sqlite"):
