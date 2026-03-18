@@ -353,9 +353,7 @@ class EngineAdapter(ABC):
         if upstream_run_id_col and upstream_run_ids_col:
             uid_q = self._quote_ident(upstream_run_id_col)
             uids_q = self._quote_ident(upstream_run_ids_col)
-            select_parts.append(
-                f"ARRAY_AGG({distinct_sql}{uid_q}) AS {uids_q}"
-            )
+            select_parts.append(f"ARRAY_AGG({distinct_sql}{uid_q}) AS {uids_q}")
 
         if not select_parts:
             select_parts = ["*"]

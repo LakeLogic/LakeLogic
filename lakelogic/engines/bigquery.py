@@ -338,9 +338,7 @@ class BigQueryAdapter(EngineAdapter):
                 parts.append(self._format_literal(trans.coalesce.default))
             sources_q = ", ".join(self._quote_ident(part) for part in sources)
             default_part = (
-                ", " + self._format_literal(trans.coalesce.default)
-                if trans.coalesce.default is not None
-                else ""
+                ", " + self._format_literal(trans.coalesce.default) if trans.coalesce.default is not None else ""
             )
             expr = f"COALESCE({sources_q}{default_part})"
             output = trans.coalesce.output or trans.coalesce.field
@@ -445,10 +443,7 @@ class BigQueryAdapter(EngineAdapter):
                 default = trans.join.defaults.get(field) if trans.join.defaults else None
                 if default is not None:
                     coalesce_val = self._format_literal(default)
-                    expr = (
-                        f"COALESCE(ref.{self._quote_ident(field)},"
-                        f" {coalesce_val}) AS {self._quote_ident(alias)}"
-                    )
+                    expr = f"COALESCE(ref.{self._quote_ident(field)}, {coalesce_val}) AS {self._quote_ident(alias)}"
                 else:
                     expr = f"ref.{self._quote_ident(field)} AS {self._quote_ident(alias)}"
                 select_fields.append(expr)

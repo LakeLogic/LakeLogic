@@ -33,7 +33,6 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
@@ -271,7 +270,7 @@ def generate_realistic_pools(
         if data:
             logger.warning("AI response was truncated; salvaged partial JSON")
         else:
-            logger.error(f"Failed to parse AI data generation response")
+            logger.error("Failed to parse AI data generation response")
             logger.debug(f"Raw response (first 500 chars): {response.text[:500]}")
             return {}
 
@@ -290,7 +289,8 @@ def generate_realistic_pools(
         for field_name, field_data in ai_fields.items():
             if field_name not in field_types:
                 continue
-            raw_values = field_data.get("values", []) if isinstance(field_data, dict) else (field_data if isinstance(field_data, list) else [])
+            field_vals = field_data.get("values", []) if isinstance(field_data, dict) else field_data
+            raw_values = field_vals if isinstance(field_vals, list) else []
             if not raw_values:
                 continue
             ftype = field_types[field_name]

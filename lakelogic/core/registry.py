@@ -14,10 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
 from loguru import logger
-
-from lakelogic.core.models import DataContract
+from pydantic import BaseModel, Field, field_validator
 
 
 class SLOFreshnessConfig(BaseModel):
@@ -90,7 +88,6 @@ class EnvironmentConfig(BaseModel):
     storage_account: Optional[str] = None
 
 
-
 def _resolve_placeholders(obj: Any, vars_map: Dict[str, str]) -> Any:
     """
     Recursively walk a dict/list structure and resolve ``{key}`` placeholders
@@ -117,6 +114,7 @@ class DomainRegistry(BaseModel):
     """
     Typed representation of a Data Mesh Domain Registry (e.g., _registry.yaml).
     """
+
     domain: str
     system: str
     ownership: Dict[str, Any] = Field(default_factory=dict)
@@ -125,7 +123,7 @@ class DomainRegistry(BaseModel):
     contracts: List[RegistryContract] = Field(default_factory=list)
     cloud: CloudReporting = Field(default_factory=CloudReporting)
     environments: Dict[str, EnvironmentConfig] = Field(default_factory=dict)
-    
+
     # Internal state
     _registry_dir: Optional[Path] = None
 
@@ -137,14 +135,14 @@ class DomainRegistry(BaseModel):
         yaml_path = Path(path)
         if not yaml_path.exists():
             raise FileNotFoundError(f"Registry not found: {yaml_path}")
-            
+
         with open(yaml_path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f)
-            
+
         # Parse into typed model
         registry = cls.model_validate(raw)
         registry._registry_dir = yaml_path.parent
-        
+
         # 1. Resolve environment bindings
         env_config = registry.environments.get(environment)
         if not env_config:
@@ -152,7 +150,7 @@ class DomainRegistry(BaseModel):
             sub_map = {}
         else:
             sub_map = env_config.model_dump(exclude_none=True)
-            
+
         # 2. Inject environment tokens into storage paths
         if sub_map:
             for field, val in registry.storage.model_dump().items():
@@ -162,28 +160,28 @@ class DomainRegistry(BaseModel):
                         setattr(registry.storage, field, new_val)
                     except KeyError as e:
                         logger.warning(f"Could not resolve template var {e} in storage.{field}: {val}")
-        
+
         # 3. Resolve actual DataContracts and absolute paths
         for c in registry.contracts:
             if not c.enabled:
                 continue
-                
+
             # Resolve the absolute path relative to the registry file
-            c_path = copy_path = Path(c.path)
+            c_path = Path(c.path)
             if not c_path.is_absolute() and registry._registry_dir:
                 c_path = registry._registry_dir / c_path
-                
+
             if not c_path.exists():
                 logger.warning(f"Contract file not found: {c_path}")
                 c.enabled = False
                 continue
-                
+
             c.resolved_path = str(c_path)
-            
+
             # Load the actual contract content
             with open(c_path, "r", encoding="utf-8") as rf:
                 c_dict = yaml.safe_load(rf)
-                c_dict["__file__"] = str(c_path) # Inject original path
+                c_dict["__file__"] = str(c_path)  # Inject original path
 
                 # Resolve storage placeholders ({landing_root}, {bronze_root}, etc.)
                 # in all string values within the contract dict.
@@ -210,9 +208,9 @@ class DomainRegistry(BaseModel):
 
                 c_dict = _resolve_placeholders(c_dict, storage_vars)
                 c.contract_dict = c_dict
-                
+
         return registry
-        
+
     def get_active_contracts(self, layer: Optional[str] = None) -> List[RegistryContract]:
         """
         Return the list of enabled contracts, optionally filtered by medallion layer.

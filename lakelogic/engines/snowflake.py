@@ -113,6 +113,7 @@ class SnowflakeAdapter(EngineAdapter):
             raise ValueError(f"Snowflake connection missing required fields: {', '.join(missing)}")
 
         import snowflake.connector
+
         return snowflake.connector.connect(**{k: v for k, v in params.items() if v})
 
     def _resolve_source_table(self, df: Any) -> Optional[str]:
@@ -468,10 +469,7 @@ class SnowflakeAdapter(EngineAdapter):
                 default = trans.join.defaults.get(field) if trans.join.defaults else None
                 if default is not None:
                     coalesce_val = self._format_literal(default)
-                    expr = (
-                        f"COALESCE(ref.{self._quote_ident(field)}, {coalesce_val})"
-                        f" AS {self._quote_ident(alias)}"
-                    )
+                    expr = f"COALESCE(ref.{self._quote_ident(field)}, {coalesce_val}) AS {self._quote_ident(alias)}"
                 else:
                     expr = f"ref.{self._quote_ident(field)} AS {self._quote_ident(alias)}"
                 select_fields.append(expr)

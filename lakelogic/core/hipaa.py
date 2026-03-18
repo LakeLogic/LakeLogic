@@ -1,7 +1,7 @@
 """
 HIPAA compliance utilities for LakeLogic.
 
-Provides right-to-forget (erasure/deletion) and PHI (Protected Health Information) 
+Provides right-to-forget (erasure/deletion) and PHI (Protected Health Information)
 masking/nullification capabilities driven by the contract's ``phi: true`` field annotations.
 
 Usage (Python API):
@@ -48,6 +48,7 @@ def _hash_value(value: Any, salt: str = "") -> Optional[str]:
 
 # ── Polars implementations ───────────────────────────────────────────────────
 
+
 def _forget_polars(
     df,
     phi_columns: List[str],
@@ -58,6 +59,7 @@ def _forget_polars(
     partition_filter: Optional[Dict[str, str]] = None,
 ):
     import polars as pl
+
     if isinstance(df, pl.LazyFrame):
         df = df.collect()
 
@@ -88,9 +90,14 @@ def _forget_polars(
             df = df.with_columns(pl.when(mask).then(pl.lit(None)).otherwise(pl.col(col)).alias(col))
         elif erasure_strategy == "hash":
             df = df.with_columns(
-                pl.when(mask).then(
-                    pl.col(col).cast(pl.Utf8).map_elements(lambda v, _s=hash_salt: _hash_value(v, _s), return_dtype=pl.Utf8)
-                ).otherwise(pl.col(col)).alias(col)
+                pl.when(mask)
+                .then(
+                    pl.col(col)
+                    .cast(pl.Utf8)
+                    .map_elements(lambda v, _s=hash_salt: _hash_value(v, _s), return_dtype=pl.Utf8)
+                )
+                .otherwise(pl.col(col))
+                .alias(col)
             )
         elif erasure_strategy == "redact":
             df = df.with_columns(pl.when(mask).then(pl.lit("***REDACTED_PHI***")).otherwise(pl.col(col)).alias(col))
@@ -145,6 +152,7 @@ def _forget_pandas(
 
 def _mask_polars(df, phi_columns: List[str], strategy: str, hash_salt: str):
     import polars as pl
+
     if isinstance(df, pl.LazyFrame):
         df = df.collect()
     present_phi = [c for c in phi_columns if c in df.columns]
@@ -154,7 +162,12 @@ def _mask_polars(df, phi_columns: List[str], strategy: str, hash_salt: str):
         if strategy == "nullify":
             df = df.with_columns(pl.lit(None).alias(col))
         elif strategy == "hash":
-            df = df.with_columns(pl.col(col).cast(pl.Utf8).map_elements(lambda v, _s=hash_salt: _hash_value(v, _s), return_dtype=pl.Utf8).alias(col))
+            df = df.with_columns(
+                pl.col(col)
+                .cast(pl.Utf8)
+                .map_elements(lambda v, _s=hash_salt: _hash_value(v, _s), return_dtype=pl.Utf8)
+                .alias(col)
+            )
         elif strategy == "redact":
             df = df.with_columns(pl.lit("***REDACTED_PHI***").alias(col))
     return df
@@ -176,6 +189,7 @@ def _mask_pandas(df, phi_columns: List[str], strategy: str, hash_salt: str):
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+
 
 def forget_patients(
     df: Any,
@@ -209,22 +223,31 @@ def forget_patients(
 
     try:
         import polars as pl
+
         if isinstance(df, (pl.DataFrame, pl.LazyFrame)):
-            return _forget_polars(df, phi_columns, patient_column, patient_ids, erasure_strategy, hash_salt, partition_filter)
+            return _forget_polars(
+                df, phi_columns, patient_column, patient_ids, erasure_strategy, hash_salt, partition_filter
+            )
     except ImportError:
         pass
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
-            return _forget_pandas(df, phi_columns, patient_column, patient_ids, erasure_strategy, hash_salt, partition_filter)
+            return _forget_pandas(
+                df, phi_columns, patient_column, patient_ids, erasure_strategy, hash_salt, partition_filter
+            )
     except ImportError:
         pass
 
     if hasattr(df, "fetchdf"):
         pdf = df.fetchdf()
-        result = _forget_pandas(pdf, phi_columns, patient_column, patient_ids, erasure_strategy, hash_salt, partition_filter)
+        result = _forget_pandas(
+            pdf, phi_columns, patient_column, patient_ids, erasure_strategy, hash_salt, partition_filter
+        )
         import duckdb
+
         return duckdb.from_df(result)
 
     raise TypeError(f"Unsupported dataframe type: {type(df)}")
@@ -251,6 +274,7 @@ def mask_phi_columns(
 
     try:
         import polars as pl
+
         if isinstance(df, (pl.DataFrame, pl.LazyFrame)):
             return _mask_polars(df, phi_columns, strategy, hash_salt)
     except ImportError:
@@ -258,6 +282,7 @@ def mask_phi_columns(
 
     try:
         import pandas as pd
+
         if isinstance(df, pd.DataFrame):
             return _mask_pandas(df, phi_columns, strategy, hash_salt)
     except ImportError:
@@ -267,6 +292,7 @@ def mask_phi_columns(
         pdf = df.fetchdf()
         result = _mask_pandas(pdf, phi_columns, strategy, hash_salt)
         import duckdb
+
         return duckdb.from_df(result)
 
     raise TypeError(f"Unsupported dataframe type: {type(df)}")

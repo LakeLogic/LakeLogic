@@ -110,10 +110,10 @@ def _build_storage_options(
     if storage_options:
         return storage_options
 
-    account  = os.getenv("AZURE_STORAGE_ACCOUNT")
-    client   = os.getenv("AZURE_CLIENT_ID")
-    secret   = os.getenv("AZURE_CLIENT_SECRET")
-    tenant   = os.getenv("AZURE_TENANT_ID")
+    account = os.getenv("AZURE_STORAGE_ACCOUNT")
+    client = os.getenv("AZURE_CLIENT_ID")
+    secret = os.getenv("AZURE_CLIENT_SECRET")
+    tenant = os.getenv("AZURE_TENANT_ID")
 
     if client and secret and tenant:
         opts: Dict[str, str] = {
@@ -1626,10 +1626,7 @@ def materialize_dataframe(
     if resolved_str.startswith("table:") and engine_name != "spark":
         location = getattr(mat, "location", None)
         if location:
-            logger.info(
-                f"Non-Spark engine '{engine_name}': falling back from table target "
-                f"to location: {location}"
-            )
+            logger.info(f"Non-Spark engine '{engine_name}': falling back from table target to location: {location}")
             resolved_target = URIPath(str(location))
         else:
             logger.warning(
@@ -1955,9 +1952,7 @@ def optimize_delta(
     try:
         from deltalake import DeltaTable
     except ImportError:
-        raise ImportError(
-            "Delta compaction requires the deltalake package: pip install deltalake"
-        )
+        raise ImportError("Delta compaction requires the deltalake package: pip install deltalake")
 
     result: Dict[str, Any] = {"target": target}
 
@@ -1985,10 +1980,7 @@ def optimize_delta(
                 "retention_hours": vacuum_retention_hours,
                 "files_removed": len(vacuum_result) if isinstance(vacuum_result, list) else 0,
             }
-            logger.info(
-                f"Vacuumed Delta table: {target} "
-                f"(retention={vacuum_retention_hours}h)"
-            )
+            logger.info(f"Vacuumed Delta table: {target} (retention={vacuum_retention_hours}h)")
 
     except Exception as exc:
         logger.warning(f"Delta compaction failed for {target}: {exc}")
@@ -2024,4 +2016,3 @@ def _maybe_compact_delta(target: str, contract) -> Optional[Dict[str, Any]]:
 
 from lakelogic.core.quarantine import materialize_quarantine  # noqa: F401, E402
 from lakelogic.core.run_log import write_run_log, get_last_run_watermark  # noqa: F401, E402
-

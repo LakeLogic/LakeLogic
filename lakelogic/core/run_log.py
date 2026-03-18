@@ -30,6 +30,7 @@ def _is_cloud_path(path: str) -> bool:
 def _build_cloud_opts(path: str) -> Dict[str, str]:
     """Build fsspec storage_options from environment variables for a cloud path."""
     import os
+
     opts: Dict[str, str] = {}
     p = str(path).lower()
     if p.startswith(("abfss://", "abfs://")):
@@ -65,6 +66,7 @@ def _cloud_write_json(cloud_path: str, data: Dict[str, Any]) -> None:
         ImportError: If fsspec is not installed.
     """
     import fsspec
+
     opts = _build_cloud_opts(cloud_path)
     with fsspec.open(cloud_path, "w", encoding="utf-8", **opts) as f:
         json.dump(data, f, indent=2, default=str)
@@ -82,6 +84,7 @@ def _cloud_read_json(cloud_path: str) -> Optional[Dict[str, Any]]:
     """
     try:
         import fsspec
+
         opts = _build_cloud_opts(cloud_path)
         with fsspec.open(cloud_path, "r", encoding="utf-8", **opts) as f:
             return json.load(f)

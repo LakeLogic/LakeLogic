@@ -872,10 +872,7 @@ class DuckDBAdapter(EngineAdapter):
                 if field_name in existing_cols:
                     # Replace existing column
                     excl = self._quote_ident(field_name)
-                    query = (
-                        f"SELECT * EXCLUDE ({excl}), ({trans.derive.sql})"
-                        f" AS {excl} FROM {derive_view}"
-                    )
+                    query = f"SELECT * EXCLUDE ({excl}), ({trans.derive.sql}) AS {excl} FROM {derive_view}"
                 else:
                     # Add new column
                     query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(field_name)} FROM {derive_view}"
@@ -901,10 +898,7 @@ class DuckDBAdapter(EngineAdapter):
                 value_expr = f"ref.{self._quote_ident(trans.lookup.value)}"
                 if trans.lookup.default_value is not None:
                     def_val = self._format_literal(trans.lookup.default_value)
-                    value_expr = (
-                        f"COALESCE(ref.{self._quote_ident(trans.lookup.value)},"
-                        f" {def_val})"
-                    )
+                    value_expr = f"COALESCE(ref.{self._quote_ident(trans.lookup.value)}, {def_val})"
                 ref_q = self._quote_qualified(trans.lookup.reference)
                 on_q = self._quote_ident(trans.lookup.on)
                 key_q = self._quote_ident(trans.lookup.key)
@@ -950,10 +944,7 @@ class DuckDBAdapter(EngineAdapter):
             default = join_cfg.defaults.get(field) if join_cfg.defaults else None
             if default is not None:
                 coalesce_val = self._format_literal(default)
-                expr = (
-                    f"COALESCE(ref.{self._quote_ident(field)},"
-                    f" {coalesce_val}) AS {self._quote_ident(alias)}"
-                )
+                expr = f"COALESCE(ref.{self._quote_ident(field)}, {coalesce_val}) AS {self._quote_ident(alias)}"
             else:
                 expr = f"ref.{self._quote_ident(field)} AS {self._quote_ident(alias)}"
             select_fields.append(expr)

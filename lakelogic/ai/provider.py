@@ -200,15 +200,10 @@ class _GeminiClient:
             from google import genai
         except ImportError as exc:
             raise ImportError(
-                "Google Gemini provider requires the 'google-genai' package. "
-                "Install with: pip install google-genai"
+                "Google Gemini provider requires the 'google-genai' package. Install with: pip install google-genai"
             ) from exc
 
-        resolved_key = (
-            api_key
-            or os.getenv("GOOGLE_API_KEY")
-            or os.getenv("GEMINI_API_KEY")
-        )
+        resolved_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not resolved_key:
             raise ValueError(
                 "Google Gemini requires an API key. Set GOOGLE_API_KEY or "
@@ -229,10 +224,12 @@ class _GeminiClient:
                 system_msg = m["content"]
             else:
                 role = "user" if m["role"] == "user" else "model"
-                contents.append(types.Content(
-                    role=role,
-                    parts=[types.Part.from_text(text=m["content"])],
-                ))
+                contents.append(
+                    types.Content(
+                        role=role,
+                        parts=[types.Part.from_text(text=m["content"])],
+                    )
+                )
 
         config = types.GenerateContentConfig(
             temperature=kwargs.get("temperature", 0.2),
@@ -365,7 +362,4 @@ def get_llm_client(
             model=model or None,  # None → registry default (Phi-3-mini)
         )
 
-    raise ValueError(
-        f"Unknown AI provider: {provider!r}. "
-        f"Supported: openai, azure, anthropic, ollama, local"
-    )
+    raise ValueError(f"Unknown AI provider: {provider!r}. Supported: openai, azure, anthropic, ollama, local")

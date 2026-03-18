@@ -212,7 +212,7 @@ def generate_edge_cases(
         if data:
             logger.warning("AI edge case response was truncated; salvaged partial JSON")
         else:
-            logger.error(f"Failed to parse AI edge case response")
+            logger.error("Failed to parse AI edge case response")
             logger.debug(f"Raw response (first 500 chars): {response.text[:500]}")
             return {}
 
@@ -227,7 +227,8 @@ def generate_edge_cases(
         for field_name, field_data in data["fields"].items():
             if field_name not in field_types:
                 continue
-            raw = field_data.get("edge_cases", []) if isinstance(field_data, dict) else (field_data if isinstance(field_data, list) else [])
+            field_vals = field_data.get("edge_cases", []) if isinstance(field_data, dict) else field_data
+            raw = field_vals if isinstance(field_vals, list) else []
             if raw:
                 ftype = field_types[field_name]
                 edge_pools[field_name] = [_coerce_value(v, ftype) for v in raw]

@@ -61,10 +61,12 @@ except ImportError:
 # Mode 1 — Direct replace
 # ---------------------------------------------------------------------------
 
+
 def _direct_replace(df: Any, columns: List[str], mask_with: str) -> Any:
     """Replace entire column values. No NLP or Presidio required."""
     try:
         import polars as pl
+
         if isinstance(df, pl.DataFrame):
             logger.info(f"PII masking (direct): {len(columns)} column(s) → '{mask_with}'")
             return df.with_columns([pl.lit(mask_with).alias(c) for c in columns if c in df.columns])
@@ -74,6 +76,7 @@ def _direct_replace(df: Any, columns: List[str], mask_with: str) -> Any:
     try:
         from pyspark.sql import DataFrame as SparkDF
         from pyspark.sql import functions as F
+
         if isinstance(df, SparkDF):
             logger.info(f"PII masking (direct/Spark): {len(columns)} column(s) → '{mask_with}'")
             for col in columns:
@@ -94,6 +97,7 @@ def _direct_replace(df: Any, columns: List[str], mask_with: str) -> Any:
 # ---------------------------------------------------------------------------
 # Mode 2 — NLP detect-and-replace (Presidio + spaCy)
 # ---------------------------------------------------------------------------
+
 
 def _nlp_replace(
     df: Any,
@@ -150,11 +154,11 @@ def _nlp_replace(
 
     try:
         import polars as pl
+
         if isinstance(df, pl.DataFrame):
             logger.info(f"PII masking (NLP/Polars): scanning {len(columns)} column(s)")
             return df.with_columns(
-                [pl.col(c).map_elements(_anonymize, return_dtype=pl.Utf8).alias(c)
-                 for c in columns if c in df.columns]
+                [pl.col(c).map_elements(_anonymize, return_dtype=pl.Utf8).alias(c) for c in columns if c in df.columns]
             )
     except ImportError:
         pass
@@ -163,6 +167,7 @@ def _nlp_replace(
         from pyspark.sql import DataFrame as SparkDF
         from pyspark.sql.functions import udf
         from pyspark.sql.types import StringType
+
         if isinstance(df, SparkDF):
             logger.info(f"PII masking (NLP/Spark): scanning {len(columns)} column(s)")
             mask_udf = udf(_anonymize, StringType())
@@ -184,6 +189,7 @@ def _nlp_replace(
 # ---------------------------------------------------------------------------
 # Public hook — called by LakeLogic external_logic
 # ---------------------------------------------------------------------------
+
 
 def mask_pii(
     df: Any,
@@ -213,6 +219,7 @@ def mask_pii(
         # No explicit columns — fall back to all string columns
         try:
             import polars as pl
+
             if isinstance(df, pl.DataFrame):
                 target_columns = [c for c in df.columns if df[c].dtype == pl.Utf8]
         except ImportError:

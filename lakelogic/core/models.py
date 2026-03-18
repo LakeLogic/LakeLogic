@@ -1054,7 +1054,6 @@ class ExtractionConfig(BaseModel):
     pii_fields: List[str] = Field(default_factory=list)  # fields to redact
 
 
-
 class LineageConfig(BaseModel):
     """Lineage capture settings."""
 
@@ -1392,9 +1391,17 @@ class DataContract(BaseModel):
             # Clean up external location (e.g. abfss:// Delta table storage)
             if mat_location:
                 loc_str = str(mat_location)
-                _is_cloud = any(loc_str.startswith(pfx) for pfx in (
-                    "abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://",
-                ))
+                _is_cloud = any(
+                    loc_str.startswith(pfx)
+                    for pfx in (
+                        "abfss://",
+                        "abfs://",
+                        "s3://",
+                        "s3a://",
+                        "gs://",
+                        "gcs://",
+                    )
+                )
                 if _is_cloud:
                     if dry_run:
                         report["materialization_location"] = {

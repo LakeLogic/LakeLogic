@@ -1,7 +1,7 @@
 """
 SLO Validation engine for Lakehouse Domains.
 
-Evaluates data freshness and pipeline schedule guarantees 
+Evaluates data freshness and pipeline schedule guarantees
 against rules defined in `_registry.yaml`.
 """
 
@@ -71,7 +71,7 @@ class SLOValidator:
 
             if layer not in layer_roots or not layer_roots[layer]:
                 continue
-                
+
             schema_root = layer_roots[layer]
             table_name = f"{schema_root}.{entity}".replace("`", "")
 
@@ -138,7 +138,7 @@ class SLOValidator:
         """
         now = datetime.datetime.now(datetime.timezone.utc)
         schedule = self.registry.slo.schedule
-        
+
         if not schedule or not schedule.expected_completion_utc:
             return None
 
@@ -164,8 +164,8 @@ class SLOValidator:
                     delay_minutes=round((now - deadline).total_seconds() / 60, 1),
                 )
         except Exception as e:
-             logger.error(f"Failed to parse or evaluate schedule SLO: {e}")
-             return None
+            logger.error(f"Failed to parse or evaluate schedule SLO: {e}")
+            return None
 
     def run_checks(self) -> SLOReport:
         """
@@ -243,9 +243,7 @@ def _coerce_datetime(value: Any) -> Optional[datetime.datetime]:
         return None
 
 
-def _get_max_timestamp(
-    df: Any, field: str, engine_name: str
-) -> Optional[datetime.datetime]:
+def _get_max_timestamp(df: Any, field: str, engine_name: str) -> Optional[datetime.datetime]:
     """Get the maximum timestamp value from a dataframe column."""
     try:
         if engine_name == "polars":
@@ -293,14 +291,14 @@ def _non_null_ratio(df: Any, field: str, engine_name: str) -> Optional[float]:
     return None
 
 
-def _compute_freshness(
-    good_df: Any, freshness_obj: Any, engine_name: str
-) -> Dict[str, Any]:
+def _compute_freshness(good_df: Any, freshness_obj: Any, engine_name: str) -> Dict[str, Any]:
     """Evaluate freshness SLO for a single contract run."""
     if freshness_obj is None:
         return {}
     field = freshness_obj.get("field") if isinstance(freshness_obj, dict) else getattr(freshness_obj, "field", None)
-    threshold = freshness_obj.get("threshold") if isinstance(freshness_obj, dict) else getattr(freshness_obj, "threshold", None)
+    threshold = (
+        freshness_obj.get("threshold") if isinstance(freshness_obj, dict) else getattr(freshness_obj, "threshold", None)
+    )
 
     if not field:
         return {}
@@ -331,8 +329,16 @@ def _compute_availability(
     """Evaluate availability SLO for a single contract run."""
     if availability_obj is None:
         return {}
-    field = availability_obj.get("field") if isinstance(availability_obj, dict) else getattr(availability_obj, "field", None)
-    threshold = availability_obj.get("threshold") if isinstance(availability_obj, dict) else getattr(availability_obj, "threshold", None)
+    field = (
+        availability_obj.get("field")
+        if isinstance(availability_obj, dict)
+        else getattr(availability_obj, "field", None)
+    )
+    threshold = (
+        availability_obj.get("threshold")
+        if isinstance(availability_obj, dict)
+        else getattr(availability_obj, "threshold", None)
+    )
 
     if not field or threshold is None:
         return {}

@@ -30,9 +30,7 @@ from loguru import logger
 
 from lakelogic.core.constants import (
     DELETE_REASON_GDPR_ART17,
-    ERASURE_HASH,
     ERASURE_NULLIFY,
-    ERASURE_REDACT,
     META_DELETE_REASON,
     META_DELETED_AT,
     META_IS_DELETED,
@@ -391,7 +389,9 @@ def forget_subjects(
         import pandas as pd
 
         pdf = df.fetchdf()
-        result = _forget_pandas(pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt, partition_filter, delete_reason)
+        result = _forget_pandas(
+            pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt, partition_filter, delete_reason
+        )
         import duckdb
 
         return duckdb.from_df(result)

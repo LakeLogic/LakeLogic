@@ -539,6 +539,7 @@ class DataProcessor:
         # Build run report and optionally write a log
         try:
             from lakelogic.core.slo import compute_slos
+
             slos = compute_slos(self.contract, good_df, counts, self.engine_name)
         except ImportError:
             # compute_slos was removed; SLOValidator uses a DomainRegistry now.
@@ -717,7 +718,7 @@ class DataProcessor:
         self._reprocess_to = reprocess_to
         self._reprocess_column = reprocess_column
         self._reprocess_values = reprocess_values
-        
+
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
@@ -782,7 +783,11 @@ class DataProcessor:
                             if getattr(self.contract, "materialization", None)
                             else None
                         )
-                        or (getattr(self.contract.server, "format", None) if getattr(self.contract, "server", None) else None)
+                        or (
+                            getattr(self.contract.server, "format", None)
+                            if getattr(self.contract, "server", None)
+                            else None
+                        )
                         or ""
                     ).lower()
 
@@ -819,6 +824,7 @@ class DataProcessor:
 
                                 if self._is_uri_path(filepath):
                                     import fsspec
+
                                     _sopts = self._get_cloud_storage_options(filepath)
                                     with fsspec.open(filepath, "r", **_sopts) as f:
                                         text = f.read()
@@ -889,7 +895,7 @@ class DataProcessor:
                         if not self._is_uri_path(path):
                             p_obj = Path(path)
                             _is_delta_dir = p_obj.is_dir() and (p_obj / "_delta_log").exists()
-                        
+
                         # Explicit check for delta format or table prefix
                         if not _is_delta_dir:
                             if path.startswith("table:") or source_fmt == "delta":
@@ -913,7 +919,7 @@ class DataProcessor:
                                 if _wm_field and _tgt:
                                     _src_col, _tgt_col = self._resolve_watermark_columns(_wm_field)
                                     _max_wm = None
-                                    
+
                                     # Watermark checking on the target table (Delta)
                                     # Skip Path() checks for URIs to avoid OSError on Windows
                                     _tgt_is_delta_dir = False
@@ -921,7 +927,7 @@ class DataProcessor:
                                         _tgt_delta = Path(_tgt)
                                         _tgt_is_delta_dir = (_tgt_delta / "_delta_log").exists()
                                     else:
-                                        _tgt_is_delta_dir = True # Assume URI target is accessible if it's delta
+                                        _tgt_is_delta_dir = True  # Assume URI target is accessible if it's delta
 
                                     if _tgt_is_delta_dir:
                                         try:
@@ -967,6 +973,7 @@ class DataProcessor:
                                 if self._is_uri_path(path):
                                     # Cloud URI — read via fsspec (pl.read_json doesn't support cloud URIs)
                                     import fsspec
+
                                     _sopts = self._get_cloud_storage_options(path)
                                     with fsspec.open(path, "r", **_sopts) as f:
                                         text = f.read()
@@ -978,7 +985,9 @@ class DataProcessor:
                                     rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
                                     flat = [
                                         {
-                                            k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                                            k: (
+                                                _json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+                                            )
                                             for k, v in r.items()
                                         }
                                         for r in rows
@@ -989,7 +998,9 @@ class DataProcessor:
                                     rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
                                     flat = [
                                         {
-                                            k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                                            k: (
+                                                _json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+                                            )
                                             for k, v in r.items()
                                         }
                                         for r in rows
@@ -1191,11 +1202,13 @@ class DataProcessor:
         if reprocess_column and reprocess_values:
             if self.engine_name == "polars":
                 import polars as pl
+
                 # Cast the array values to Utf8 to safely match
                 string_vals = [str(x) for x in reprocess_values]
                 df = df.filter(pl.col(reprocess_column).cast(pl.Utf8).is_in(string_vals))
             elif self.engine_name == "spark":
                 from pyspark.sql.functions import col
+
                 string_vals = [str(x) for x in reprocess_values]
                 df = df.filter(col(reprocess_column).cast("string").isin(string_vals))
             elif self.engine_name == "pandas":
@@ -1204,11 +1217,12 @@ class DataProcessor:
                 df = df[df[reprocess_column].astype(str).isin(string_vals)]
             elif self.engine_name == "duckdb":
                 import duckdb
+
                 # Need to run a query to enforce it
-                string_vals = ", ".join([f"'{str(x).replace(chr(39), chr(39)*2)}'" for x in reprocess_values])
+                string_vals = ", ".join([f"'{str(x).replace(chr(39), chr(39) * 2)}'" for x in reprocess_values])
                 query = f"SELECT * FROM df WHERE {reprocess_column} IN ({string_vals})"
                 df = duckdb.query(query).df()
-                
+
             logger.info(f"Targeted reprocessing filter pushdown applied on {reprocess_column}")
 
         # ── JSON-string flattening (source.flatten_nested) ────────────────────
@@ -1607,6 +1621,7 @@ class DataProcessor:
                 return None  # no glob — let the reader handle it directly
             try:
                 import fsspec
+
                 _sopts = self._get_cloud_storage_options(path)
                 fs, _, paths = fsspec.get_fs_token_paths(path, storage_options=_sopts)
                 results = []
@@ -1700,9 +1715,7 @@ class DataProcessor:
         """
         p = str(path)
         # Second pattern matches Windows-mangled URIs like abfss:\...
-        return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", p)) or bool(
-            re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:\\", p)
-        )
+        return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", p)) or bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:\\", p))
 
     def _get_cloud_storage_options(self, path: str) -> Dict[str, str]:
         """
@@ -2197,6 +2210,7 @@ class DataProcessor:
         """Delegate to lakelogic.core.slo (kept for backward compat)."""
         try:
             from lakelogic.core.slo import compute_slos
+
             return compute_slos(self.contract, good_df, counts, self.engine_name)
         except ImportError:
             return []
@@ -2205,6 +2219,7 @@ class DataProcessor:
     def _parse_duration_seconds(self, value: Any) -> Optional[float]:
         try:
             from lakelogic.core.slo import _parse_duration_seconds
+
             return _parse_duration_seconds(value)
         except ImportError:
             return None
@@ -2212,6 +2227,7 @@ class DataProcessor:
     def _get_max_timestamp(self, df: Any, field: str) -> Optional[datetime]:
         try:
             from lakelogic.core.slo import _get_max_timestamp
+
             return _get_max_timestamp(df, field, self.engine_name)
         except ImportError:
             return None
@@ -2219,6 +2235,7 @@ class DataProcessor:
     def _coerce_datetime(self, value: Any) -> Optional[datetime]:
         try:
             from lakelogic.core.slo import _coerce_datetime
+
             return _coerce_datetime(value)
         except ImportError:
             return None
@@ -2226,6 +2243,7 @@ class DataProcessor:
     def _compute_freshness(self, good_df: Any, freshness_obj: Any) -> Dict[str, Any]:
         try:
             from lakelogic.core.slo import _compute_freshness
+
             return _compute_freshness(good_df, freshness_obj, self.engine_name)
         except ImportError:
             return {}
@@ -2235,6 +2253,7 @@ class DataProcessor:
     ) -> Dict[str, Any]:
         try:
             from lakelogic.core.slo import _compute_availability
+
             return _compute_availability(good_df, counts, availability_obj, self.engine_name)
         except ImportError:
             return {}
@@ -2242,6 +2261,7 @@ class DataProcessor:
     def _non_null_ratio(self, df: Any, field: str) -> Optional[float]:
         try:
             from lakelogic.core.slo import _non_null_ratio
+
             return _non_null_ratio(df, field, self.engine_name)
         except ImportError:
             return None
@@ -2562,7 +2582,7 @@ class DataProcessor:
 
     # ── GDPR & HIPAA Utilities ───────────────────────────────────────────────
 
-    def forget(
+    def forget_hipaa(
         self,
         df: Any,
         subject_column: str,
@@ -2577,6 +2597,7 @@ class DataProcessor:
         Delegates to lakelogic.core.gdpr.forget_subjects using this processor's contract.
         """
         from lakelogic.core.gdpr import forget_subjects
+
         return forget_subjects(
             df=df,
             contract=self.contract,
@@ -2587,7 +2608,7 @@ class DataProcessor:
             audit=audit,
         )
 
-    def mask_pii(
+    def mask_pii_hipaa(
         self,
         df: Any,
         *,
@@ -2600,6 +2621,7 @@ class DataProcessor:
         Delegates to lakelogic.core.gdpr.mask_pii_columns.
         """
         from lakelogic.core.gdpr import mask_pii_columns
+
         return mask_pii_columns(
             df,
             self.contract,
@@ -2623,6 +2645,7 @@ class DataProcessor:
         Delegates to lakelogic.core.hipaa.forget_patients using this processor's contract.
         """
         from lakelogic.core.hipaa import forget_patients
+
         return forget_patients(
             df=df,
             contract=self.contract,
@@ -2646,6 +2669,7 @@ class DataProcessor:
         Delegates to lakelogic.core.hipaa.mask_phi_columns.
         """
         from lakelogic.core.hipaa import mask_phi_columns
+
         return mask_phi_columns(
             df,
             self.contract,

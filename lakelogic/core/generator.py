@@ -98,6 +98,99 @@ def _try_faker():
 
 
 # ---------------------------------------------------------------------------
+# Fallback pools for synthetic data (when Faker is not available)
+# ---------------------------------------------------------------------------
+
+_FIRST_NAMES = [
+    "James",
+    "Mary",
+    "Robert",
+    "Patricia",
+    "John",
+    "Jennifer",
+    "Michael",
+    "Linda",
+    "David",
+    "Elizabeth",
+    "William",
+    "Barbara",
+    "Richard",
+    "Susan",
+    "Joseph",
+    "Jessica",
+    "Thomas",
+    "Sarah",
+    "Charles",
+    "Karen",
+]
+
+_LAST_NAMES = [
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Garcia",
+    "Miller",
+    "Davis",
+    "Rodriguez",
+    "Martinez",
+    "Hernandez",
+    "Lopez",
+    "Gonzalez",
+    "Wilson",
+    "Anderson",
+    "Thomas",
+    "Taylor",
+    "Moore",
+    "Jackson",
+    "Martin",
+]
+
+_REALISTIC_POOLS = {
+    "status": ["active", "inactive", "pending", "deleted", "archived"],
+    "priority": ["low", "medium", "high", "critical"],
+    "category": ["general", "technical", "billing", "sales", "support"],
+    "tier": ["bronze", "silver", "gold", "platinum", "enterprise"],
+    "region": ["north", "south", "east", "west", "central"],
+    "country_code": ["US", "GB", "DE", "FR", "CA", "AU", "JP", "IN", "BR", "MX"],
+    "currency": ["USD", "GBP", "EUR", "JPY", "CAD", "AUD", "INR"],
+    "device_type": ["mobile", "tablet", "desktop", "smart_tv", "console"],
+    "browser": ["Chrome", "Safari", "Firefox", "Edge", "Samsung Browser"],
+    "os": ["iOS", "Android", "Windows", "macOS", "Linux"],
+}
+
+_TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_dt", "_ts")
+_DATE_NAME_SUFFIXES = ("_date", "_on")
+_DATE_NAME_CONTAINS = ("date_", "day_")
+
+
+def _match_semantic_hint(name: str) -> Optional[str]:
+    """
+    Map a field name to a Faker method name using regex/word boundaries.
+    """
+    # Simplified mapping for common fields
+    _HINTS = {
+        r"\bemail\b": "email",
+        r"\b(first_?name|given_?name)\b": "first_name",
+        r"\b(last_?name|family_?name|surname)\b": "last_name",
+        r"\bcity\b": "city",
+        r"\bcountry\b": "country",
+        r"\bpostcode\b": "postcode",
+        r"\bphone\b": "phone_number",
+        r"\baddress\b": "address",
+        r"\bcompany\b": "company",
+        r"\bjob\b": "job",
+        r"\b(url|website)\b": "url",
+        r"\bip\b": "ipv4",
+    }
+    for pattern, method in _HINTS.items():
+        if re.search(pattern, name, re.IGNORECASE):
+            return method
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Semantic hints — map common field names to Faker generators
 # ---------------------------------------------------------------------------
 
@@ -217,18 +310,44 @@ def _match_semantic_hint(name_lower: str) -> Optional[str]:
 
     return None
 
+
 # Patterns that identify date/timestamp fields by name (for string-typed fields)
 _DATE_NAME_SUFFIXES = (
-    "_at", "_on", "_date", "_time", "_timestamp", "_ts",
-    "_datetime", "_dt",
+    "_at",
+    "_on",
+    "_date",
+    "_time",
+    "_timestamp",
+    "_ts",
+    "_datetime",
+    "_dt",
 )
 _DATE_NAME_CONTAINS = (
-    "created", "updated", "modified", "deleted", "loaded",
-    "ingested", "processed", "completed", "submitted",
-    "approved", "shipped", "delivered", "expired",
-    "started", "ended", "registered", "published",
-    "event_time", "order_date", "ship_date", "birth_date",
-    "start_date", "end_date", "due_date", "close_date",
+    "created",
+    "updated",
+    "modified",
+    "deleted",
+    "loaded",
+    "ingested",
+    "processed",
+    "completed",
+    "submitted",
+    "approved",
+    "shipped",
+    "delivered",
+    "expired",
+    "started",
+    "ended",
+    "registered",
+    "published",
+    "event_time",
+    "order_date",
+    "ship_date",
+    "birth_date",
+    "start_date",
+    "end_date",
+    "due_date",
+    "close_date",
 )
 _TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_ts", "_datetime", "_dt")
 
@@ -1499,10 +1618,12 @@ class DataGenerator:
             # ── Epoch timestamp detection for numeric fields ──────────────
             # Fields like event_timestamp (long) should produce realistic
             # Unix epoch values, not random 1..10000.
-            is_epoch_ts = any(name_lower.endswith(s) for s in _TIMESTAMP_SUFFIXES) or \
-                          any(kw in name_lower for kw in ("epoch", "unix_time"))
+            is_epoch_ts = any(name_lower.endswith(s) for s in _TIMESTAMP_SUFFIXES) or any(
+                kw in name_lower for kw in ("epoch", "unix_time")
+            )
             if is_epoch_ts:
                 import time as _time
+
                 now = int(_time.time())
                 base = now - 90 * 86400  # 90 days ago
                 epoch_seconds = self._rng.randint(base, now)
@@ -1619,9 +1740,8 @@ class DataGenerator:
         # Must run BEFORE Faker semantic hints to prevent false matches
         # (e.g. "ship_date" matching the "ip" hint in _SEMANTIC_HINTS).
         is_timestamp_name = any(name_lower.endswith(s) for s in _TIMESTAMP_SUFFIXES)
-        is_date_name = (
-            any(name_lower.endswith(s) for s in _DATE_NAME_SUFFIXES)
-            or any(kw in name_lower for kw in _DATE_NAME_CONTAINS)
+        is_date_name = any(name_lower.endswith(s) for s in _DATE_NAME_SUFFIXES) or any(
+            kw in name_lower for kw in _DATE_NAME_CONTAINS
         )
         if is_timestamp_name:
             now = datetime.now()

@@ -619,8 +619,7 @@ class PolarsAdapter(EngineAdapter):
                     _resolved = True
                 except Exception as e:
                     logger.warning(
-                        f"Pre-Transform [Derive] '{field_name}' Polars SQL failed ({e}); "
-                        f"trying DuckDB fallback."
+                        f"Pre-Transform [Derive] '{field_name}' Polars SQL failed ({e}); trying DuckDB fallback."
                     )
                 # DuckDB fallback (mirrors post-derive logic)
                 if not _resolved:
