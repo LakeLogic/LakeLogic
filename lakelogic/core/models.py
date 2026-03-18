@@ -8,6 +8,7 @@ from pydantic import (
 )
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
+from loguru import logger
 import warnings
 
 _QUALITY_CATEGORIES = {
@@ -109,8 +110,11 @@ class Environment(BaseModel):
 class SourceConfig(BaseModel):
     """Source acquisition settings for landing/stream/table inputs."""
 
+    model_config = ConfigDict(extra="allow")
+
     type: str  # landing | stream | table
     path: Optional[str] = None
+    format: Optional[str] = None
     load_mode: str = "full"  # full | incremental | cdc
     pattern: Optional[str] = None
     watermark_field: Optional[str] = None
@@ -794,6 +798,7 @@ class FieldDefinition(BaseModel):
     type: str
     required: bool = False
     pii: bool = False
+    phi: bool = False
     classification: Optional[str] = None
     description: Optional[str] = None
     rules: List[QualityRule] = Field(default_factory=list)
@@ -1047,7 +1052,6 @@ class ExtractionConfig(BaseModel):
     # PII safety
     redact_pii_before_llm: bool = False  # run PII masking before sending to LLM
     pii_fields: List[str] = Field(default_factory=list)  # fields to redact
-
 
 
 class LineageConfig(BaseModel):
@@ -1357,9 +1361,12 @@ class DataContract(BaseModel):
 
         report: Dict[str, Any] = {}
 
-        # ── 1. Materialization target ──────────────────────────────────────────
+        # ── 1. Materialization target + external location ─────────────────────
         if "materialization" in _targets:
             mat_path = self.materialization.target_path if self.materialization else None
+            mat_location = getattr(self.materialization, "location", None) if self.materialization else None
+
+            # Clean up target_path
             if mat_path:
                 p = _resolve(mat_path)
                 if dry_run:
@@ -1380,6 +1387,86 @@ class DataContract(BaseModel):
                     "path": None,
                     "note": "no target_path configured",
                 }
+
+            # Clean up external location (e.g. abfss:// Delta table storage)
+            if mat_location:
+                loc_str = str(mat_location)
+                _is_cloud = any(
+                    loc_str.startswith(pfx)
+                    for pfx in (
+                        "abfss://",
+                        "abfs://",
+                        "s3://",
+                        "s3a://",
+                        "gs://",
+                        "gcs://",
+                    )
+                )
+                if _is_cloud:
+                    if dry_run:
+                        report["materialization_location"] = {
+                            "path": loc_str,
+                            "dry_run": True,
+                            "note": "cloud location would be deleted",
+                        }
+                    else:
+                        try:
+                            import fsspec
+                            import os as _os2
+
+                            # Build storage options from env vars
+                            _opts: dict = {}
+                            if loc_str.startswith(("abfss://", "abfs://")):
+                                for _ek, _ok in [
+                                    ("AZURE_STORAGE_ACCOUNT", "account_name"),
+                                    ("AZURE_TENANT_ID", "tenant_id"),
+                                    ("AZURE_CLIENT_ID", "client_id"),
+                                    ("AZURE_CLIENT_SECRET", "client_secret"),
+                                ]:
+                                    _v = _os2.getenv(_ek)
+                                    if _v:
+                                        _opts[_ok] = _v
+
+                            fs, path_part = fsspec.core.url_to_fs(loc_str, **_opts)
+                            logger.info(f"Reset: deleting cloud location {loc_str} (resolved path: {path_part})")
+                            if fs.exists(path_part):
+                                fs.rm(path_part, recursive=True)
+                                logger.info(f"Reset: deleted {path_part}")
+                                report["materialization_location"] = {
+                                    "path": loc_str,
+                                    "deleted": True,
+                                    "dry_run": False,
+                                }
+                            else:
+                                report["materialization_location"] = {
+                                    "path": loc_str,
+                                    "deleted": False,
+                                    "note": "path does not exist",
+                                }
+                        except Exception as _exc:
+                            logger.error(f"Reset: failed to delete cloud location {loc_str}: {_exc}")
+                            report["materialization_location"] = {
+                                "path": loc_str,
+                                "deleted": False,
+                                "error": str(_exc),
+                            }
+                            raise
+                else:
+                    # Local location path
+                    loc_p = _resolve(loc_str)
+                    if dry_run:
+                        report["materialization_location"] = {
+                            "path": str(loc_p),
+                            "exists": loc_p.exists(),
+                            "dry_run": True,
+                        }
+                    else:
+                        deleted = _delete(loc_p)
+                        report["materialization_location"] = {
+                            "path": str(loc_p),
+                            "deleted": deleted,
+                            "dry_run": False,
+                        }
 
         # ── 2. Quarantine target ───────────────────────────────────────────────
         if "quarantine" in _targets:

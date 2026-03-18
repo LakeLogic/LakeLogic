@@ -98,21 +98,120 @@ def _try_faker():
 
 
 # ---------------------------------------------------------------------------
+# Fallback pools for synthetic data (when Faker is not available)
+# ---------------------------------------------------------------------------
+
+_FIRST_NAMES = [
+    "James",
+    "Mary",
+    "Robert",
+    "Patricia",
+    "John",
+    "Jennifer",
+    "Michael",
+    "Linda",
+    "David",
+    "Elizabeth",
+    "William",
+    "Barbara",
+    "Richard",
+    "Susan",
+    "Joseph",
+    "Jessica",
+    "Thomas",
+    "Sarah",
+    "Charles",
+    "Karen",
+]
+
+_LAST_NAMES = [
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Garcia",
+    "Miller",
+    "Davis",
+    "Rodriguez",
+    "Martinez",
+    "Hernandez",
+    "Lopez",
+    "Gonzalez",
+    "Wilson",
+    "Anderson",
+    "Thomas",
+    "Taylor",
+    "Moore",
+    "Jackson",
+    "Martin",
+]
+
+_REALISTIC_POOLS = {
+    "status": ["active", "inactive", "pending", "deleted", "archived"],
+    "priority": ["low", "medium", "high", "critical"],
+    "category": ["general", "technical", "billing", "sales", "support"],
+    "tier": ["bronze", "silver", "gold", "platinum", "enterprise"],
+    "region": ["north", "south", "east", "west", "central"],
+    "country_code": ["US", "GB", "DE", "FR", "CA", "AU", "JP", "IN", "BR", "MX"],
+    "currency": ["USD", "GBP", "EUR", "JPY", "CAD", "AUD", "INR"],
+    "device_type": ["mobile", "tablet", "desktop", "smart_tv", "console"],
+    "browser": ["Chrome", "Safari", "Firefox", "Edge", "Samsung Browser"],
+    "os": ["iOS", "Android", "Windows", "macOS", "Linux"],
+}
+
+_TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_dt", "_ts")
+_DATE_NAME_SUFFIXES = ("_date", "_on")
+_DATE_NAME_CONTAINS = ("date_", "day_")
+
+
+def _match_semantic_hint(name: str) -> Optional[str]:
+    """
+    Map a field name to a Faker method name using regex/word boundaries.
+    """
+    # Simplified mapping for common fields
+    _HINTS = {
+        r"\bemail\b": "email",
+        r"\b(first_?name|given_?name)\b": "first_name",
+        r"\b(last_?name|family_?name|surname)\b": "last_name",
+        r"\bcity\b": "city",
+        r"\bcountry\b": "country",
+        r"\bpostcode\b": "postcode",
+        r"\bphone\b": "phone_number",
+        r"\baddress\b": "address",
+        r"\bcompany\b": "company",
+        r"\bjob\b": "job",
+        r"\b(url|website)\b": "url",
+        r"\bip\b": "ipv4",
+    }
+    for pattern, method in _HINTS.items():
+        if re.search(pattern, name, re.IGNORECASE):
+            return method
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Semantic hints — map common field names to Faker generators
 # ---------------------------------------------------------------------------
 
 _SEMANTIC_HINTS: Dict[str, str] = {
     # Identity & People
     "email": "email",
+    "email_address": "email",
     "name": "name",
     "full_name": "name",
     "first_name": "first_name",
     "last_name": "last_name",
     "surname": "last_name",
     "username": "user_name",
+    "user_name": "user_name",
     "phone": "phone_number",
+    "phone_number": "phone_number",
     "mobile": "phone_number",
+    "mobile_number": "phone_number",
     "telephone": "phone_number",
+    "ssn": "ssn",
+    "social_security": "ssn",
     # Address
     "address": "address",
     "street": "street_address",
@@ -125,11 +224,13 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "postal_code": "postcode",
     "zip": "zipcode",
     "zipcode": "zipcode",
+    "zip_code": "zipcode",
     "latitude": "latitude",
     "lat": "latitude",
     "longitude": "longitude",
     "lng": "longitude",
     "lon": "longitude",
+    "country_code": "country_code",
     # Business
     "company": "company",
     "company_name": "company",
@@ -141,12 +242,15 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     # Internet
     "url": "url",
     "website": "url",
-    "link": "url",
+    "domain_name": "domain_name",
+    "domain": "domain_name",
     "ip": "ipv4",
     "ip_address": "ipv4",
     "ipv4": "ipv4",
+    "ipv6": "ipv6",
     "mac_address": "mac_address",
     "user_agent": "user_agent",
+    "browser": "user_agent",
     "uuid": "uuid4",
     # Text
     "description": "sentence",
@@ -159,11 +263,94 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "iban": "iban",
     "credit_card": "credit_card_number",
     "card_number": "credit_card_number",
+    "currency_code": "currency_code",
+    "isbn": "isbn13",
+    # Files
+    "file_name": "file_name",
+    "file_path": "file_path",
+    "mime_type": "mime_type",
+    "content_type": "mime_type",
     # NOTE: 'country' intentionally omitted — Faker returns full names ('United Kingdom')
     # but most dbt accepted_values tests list ISO codes ('GB').  When an accepted_values
     # constraint is present, _make_valid_value picks from it first (before Faker), so
     # removing the hint here means the no-constraint path also uses ISO-safe random strings.
 }
+
+
+def _match_semantic_hint(name_lower: str) -> Optional[str]:
+    """
+    Match a field name to a Faker method using word-boundary-aware matching.
+
+    Priority order:
+    1. Exact match: ``ip_address`` matches ``ip_address``
+    2. Word-boundary match: ``user_email`` matches ``email`` (splits on ``_``)
+    3. No match
+
+    This prevents substring collisions like ``ship_date`` matching ``ip``
+    or ``ip_address`` matching ``address``.
+    """
+    # 1. Exact match — highest confidence
+    if name_lower in _SEMANTIC_HINTS:
+        return _SEMANTIC_HINTS[name_lower]
+
+    # 2. Word-boundary match — split on underscores and check each word/suffix
+    parts = name_lower.split("_")
+    # Try progressively longer suffixes: for "user_email_address",
+    # try "address", then "email_address", then "user_email_address"
+    for i in range(len(parts) - 1, -1, -1):
+        suffix = "_".join(parts[i:])
+        if suffix in _SEMANTIC_HINTS:
+            return _SEMANTIC_HINTS[suffix]
+
+    # 3. Also try prefixes for patterns like "email_opt_in" → "email"
+    for i in range(1, len(parts)):
+        prefix = "_".join(parts[:i])
+        if prefix in _SEMANTIC_HINTS:
+            return _SEMANTIC_HINTS[prefix]
+
+    return None
+
+
+# Patterns that identify date/timestamp fields by name (for string-typed fields)
+_DATE_NAME_SUFFIXES = (
+    "_at",
+    "_on",
+    "_date",
+    "_time",
+    "_timestamp",
+    "_ts",
+    "_datetime",
+    "_dt",
+)
+_DATE_NAME_CONTAINS = (
+    "created",
+    "updated",
+    "modified",
+    "deleted",
+    "loaded",
+    "ingested",
+    "processed",
+    "completed",
+    "submitted",
+    "approved",
+    "shipped",
+    "delivered",
+    "expired",
+    "started",
+    "ended",
+    "registered",
+    "published",
+    "event_time",
+    "order_date",
+    "ship_date",
+    "birth_date",
+    "start_date",
+    "end_date",
+    "due_date",
+    "close_date",
+)
+_TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_ts", "_datetime", "_dt")
+
 
 # ---------------------------------------------------------------------------
 # Realistic fallback pools — used when Faker is NOT installed.
@@ -786,6 +973,30 @@ class DataGenerator:
 
         # AI edge-case generation (opt-in)
         edge_pools: Optional[Dict[str, List[Any]]] = ai_edge_cases
+
+        # AI realistic value pools (opt-in) — generates contextually realistic
+        # sample values for ALL rows, not just edge cases.
+        ai_sample_pools: Optional[Dict[str, List[Any]]] = None
+        if ai:
+            try:
+                from lakelogic.ai.data_generator import generate_realistic_pools
+
+                dataset_name = ""
+                info = self._contract_raw.get("info") or {}
+                dataset_name = info.get("title") or self._contract_raw.get("dataset") or ""
+                ai_sample_pools = generate_realistic_pools(
+                    self._fields,
+                    self._quality,
+                    dataset_name=dataset_name,
+                    provider=ai_provider,
+                    model=ai_model,
+                )
+            except Exception as e:
+                from loguru import logger
+
+                logger.warning(f"AI data generation failed, falling back to Faker: {e}")
+                ai_sample_pools = None
+
         if ai and n_invalid > 0 and not edge_pools:
             try:
                 from lakelogic.ai.edge_case_generator import generate_edge_cases
@@ -808,7 +1019,8 @@ class DataGenerator:
 
         # from_file() stores auto-pools; pass them so generate() mirrors the source file
         # without the caller needing to specify the file path a second time.
-        auto_pools = getattr(self, "_auto_sample_pools", None) or None
+        # AI pools take priority over file-seeded pools.
+        auto_pools = ai_sample_pools or getattr(self, "_auto_sample_pools", None) or None
 
         valid_records = [
             self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_valid)
@@ -1401,12 +1613,44 @@ class DataGenerator:
         max_val = rules.get("max")
 
         if ftype in ("integer", "int", "int32", "int64", "long"):
+            name_lower = name.lower()
+
+            # ── Epoch timestamp detection for numeric fields ──────────────
+            # Fields like event_timestamp (long) should produce realistic
+            # Unix epoch values, not random 1..10000.
+            is_epoch_ts = any(name_lower.endswith(s) for s in _TIMESTAMP_SUFFIXES) or any(
+                kw in name_lower for kw in ("epoch", "unix_time")
+            )
+            if is_epoch_ts:
+                import time as _time
+
+                now = int(_time.time())
+                base = now - 90 * 86400  # 90 days ago
+                epoch_seconds = self._rng.randint(base, now)
+                # Detect granularity from name or description
+                if "_us" in name_lower or "micro" in name_lower:
+                    return epoch_seconds * 1_000_000
+                elif "_ms" in name_lower or "milli" in name_lower:
+                    return epoch_seconds * 1_000
+                else:
+                    # Default: check if description mentions microseconds
+                    desc = ""
+                    for f in self._fields:
+                        if f.get("name", "").lower() == name_lower:
+                            desc = (f.get("description") or "").lower()
+                            break
+                    if "micro" in desc:
+                        return epoch_seconds * 1_000_000
+                    elif "milli" in desc:
+                        return epoch_seconds * 1_000
+                    return epoch_seconds
+
             lo = int(min_val) if min_val is not None else 1
             hi = int(max_val) if max_val is not None else 10_000
             # Single-point range from a single-record source (min == max):
             # spread ID fields so every generated row gets a distinct value.
             # Non-ID integers (bathrooms=3, total_bedrooms=4) stay constant — correct.
-            if lo == hi and "id" in name.lower():
+            if lo == hi and "id" in name_lower:
                 hi = lo + 10_000
             return self._rng.randint(lo, hi)
 
@@ -1419,12 +1663,14 @@ class DataGenerator:
             return self._rng.choice([True, False])
 
         if ftype in ("date",):
-            base = date(2023, 1, 1)
-            return (base + timedelta(days=self._rng.randint(0, 730))).isoformat()
+            today = date.today()
+            base = today - timedelta(days=90)
+            return (base + timedelta(days=self._rng.randint(0, 90))).isoformat()
 
         if ftype in ("timestamp", "datetime"):
-            base = datetime(2023, 1, 1)
-            return (base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 730))).isoformat()
+            now = datetime.now()
+            base = now - timedelta(days=90)
+            return (base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 90))).isoformat()
 
         # String — try Faker semantic generation, then format-aware fallback
         return self._string_value(name)
@@ -1490,10 +1736,27 @@ class DataGenerator:
     def _string_value(self, name: str) -> str:
         name_lower = name.lower()
 
+        # ── Date/timestamp detection by field NAME (highest priority) ──────────
+        # Must run BEFORE Faker semantic hints to prevent false matches
+        # (e.g. "ship_date" matching the "ip" hint in _SEMANTIC_HINTS).
+        is_timestamp_name = any(name_lower.endswith(s) for s in _TIMESTAMP_SUFFIXES)
+        is_date_name = any(name_lower.endswith(s) for s in _DATE_NAME_SUFFIXES) or any(
+            kw in name_lower for kw in _DATE_NAME_CONTAINS
+        )
+        if is_timestamp_name:
+            now = datetime.now()
+            base = now - timedelta(days=90)
+            return (base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 90))).isoformat()
+        if is_date_name:
+            today = date.today()
+            base = today - timedelta(days=90)
+            return (base + timedelta(days=self._rng.randint(0, 90))).isoformat()
+
+        # ── Faker semantic hints (word-boundary matching) ──────────────────────
         if self._faker:
-            for hint, method in _SEMANTIC_HINTS.items():
-                if hint in name_lower:
-                    return str(getattr(self._faker, method)())
+            method = _match_semantic_hint(name_lower)
+            if method:
+                return str(getattr(self._faker, method)())
 
         # Format-aware fallbacks for common field names — avoids Faker dependency.
         # These must produce values that pass the most common dbt expression_is_true checks.
@@ -1512,58 +1775,6 @@ class DataGenerator:
             return f"https://www.{slug}.com"
 
         # Realistic name fallback (no Faker required)
-        _FIRST_NAMES = [
-            "James",
-            "Emma",
-            "Oliver",
-            "Sophia",
-            "William",
-            "Ava",
-            "Alexander",
-            "Isabella",
-            "Henry",
-            "Mia",
-            "Thomas",
-            "Amelia",
-            "Benjamin",
-            "Charlotte",
-            "Lucas",
-            "Harper",
-            "Daniel",
-            "Evelyn",
-            "Matthew",
-            "Abigail",
-            "David",
-            "Emily",
-            "Jack",
-            "Rose",
-        ]
-        _LAST_NAMES = [
-            "Smith",
-            "Johnson",
-            "Williams",
-            "Brown",
-            "Jones",
-            "Davis",
-            "Miller",
-            "Wilson",
-            "Moore",
-            "Taylor",
-            "Anderson",
-            "Thomas",
-            "Jackson",
-            "White",
-            "Harris",
-            "Martin",
-            "Thompson",
-            "Garcia",
-            "Martinez",
-            "Robinson",
-            "Clark",
-            "Rodriguez",
-            "Lewis",
-            "Lee",
-        ]
         if name_lower in ("first_name", "firstname", "given_name"):
             return self._rng.choice(_FIRST_NAMES)
         if name_lower in ("last_name", "lastname", "surname", "family_name"):
@@ -1572,12 +1783,14 @@ class DataGenerator:
             return f"{self._rng.choice(_FIRST_NAMES)} {self._rng.choice(_LAST_NAMES)}"
 
         # Check realistic fallback pools — produces real-world values
-        # Exact match first, then substring match
+        # Exact match first, then word-boundary match (like _match_semantic_hint)
         if name_lower in _REALISTIC_POOLS:
             return self._rng.choice(_REALISTIC_POOLS[name_lower])
-        for hint, pool in _REALISTIC_POOLS.items():
-            if hint in name_lower:
-                return self._rng.choice(pool)
+        parts = name_lower.split("_")
+        for i in range(len(parts) - 1, -1, -1):
+            suffix = "_".join(parts[i:])
+            if suffix in _REALISTIC_POOLS:
+                return self._rng.choice(_REALISTIC_POOLS[suffix])
 
         # Generic readable fallback — produces a code-like reference instead of
         # meaningless alphanumeric noise (e.g. "CUS-4821" instead of "kd83jf2n")
@@ -1755,7 +1968,13 @@ class DataGenerator:
         if fmt == "polars":
             import polars as pl
 
-            df = pl.DataFrame(clean_records)
+            try:
+                df = pl.DataFrame(clean_records, infer_schema_length=None)
+            except Exception:
+                # Type conflicts from invalid rows (e.g. "invalid_id" in a long column).
+                # Convert all values to strings, then cast back to contract types below.
+                str_records = [{k: str(v) if v is not None else None for k, v in row.items()} for row in clean_records]
+                df = pl.DataFrame(str_records)
 
             # Cast every column to its contract-declared dtype so the processor
             # never sees Utf8View where it expects Boolean / Int64 / Float64.

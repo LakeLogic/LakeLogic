@@ -11,6 +11,123 @@ import shutil
 from loguru import logger
 
 
+def _is_remote_path(path) -> bool:
+    """Return True if the path is a cloud storage URI (ADLS, S3, GCS)."""
+    s = str(path)
+    return s.startswith(("abfss://", "az://", "s3://", "gs://", "wasbs://"))
+
+
+class URIPath:
+    """Lightweight Path-compatible wrapper for cloud URIs and table: references.
+
+    Prevents ``pathlib.Path`` from corrupting forward slashes to backslashes
+    on Windows while supporting all Path-like operations used by the
+    materialization pipeline (``/``, ``str()``, ``exists()``, ``mkdir()``, etc.).
+    """
+
+    def __init__(self, uri: str) -> None:
+        self._uri = str(uri)
+
+    # ── Path-like interface ──────────────────────────────────────────────────
+    def __str__(self) -> str:
+        return self._uri
+
+    def __repr__(self) -> str:
+        return f"URIPath({self._uri!r})"
+
+    def __fspath__(self) -> str:
+        return self._uri
+
+    def __truediv__(self, other) -> "URIPath":
+        # Join with forward slash (preserving URI format)
+        return URIPath(self._uri.rstrip("/") + "/" + str(other).lstrip("/"))
+
+    @property
+    def suffix(self) -> str:
+        last = self._uri.rsplit("/", 1)[-1]
+        if "." in last:
+            return "." + last.rsplit(".", 1)[-1]
+        return ""
+
+    @property
+    def parent(self) -> "URIPath":
+        if "/" in self._uri:
+            return URIPath(self._uri.rsplit("/", 1)[0])
+        return self
+
+    @property
+    def name(self) -> str:
+        return self._uri.rsplit("/", 1)[-1]
+
+    def exists(self) -> bool:
+        return False  # Cloud paths require fsspec; assume not local
+
+    def is_dir(self) -> bool:
+        return False
+
+    def mkdir(self, **kwargs) -> None:
+        pass  # Cloud dirs are created on write
+
+    def joinpath(self, *args) -> "URIPath":
+        result = self
+        for a in args:
+            result = result / a
+        return result
+
+    def with_suffix(self, suffix: str) -> "URIPath":
+        if self.suffix:
+            base = self._uri[: -len(self.suffix)]
+        else:
+            base = self._uri
+        return URIPath(base + suffix)
+
+
+def _build_storage_options(
+    storage_options: Optional[Dict[str, str]] = None,
+) -> Optional[Dict[str, str]]:
+    """
+    Build Azure storage_options from environment variables if not provided.
+
+    Environment variables used:
+        AZURE_STORAGE_ACCOUNT  — storage account name
+        AZURE_CLIENT_ID        — service principal app/client ID
+        AZURE_CLIENT_SECRET    — service principal secret
+        AZURE_TENANT_ID        — Azure AD tenant ID
+
+    If ``storage_options`` is already provided, it is returned as-is.
+    If required env vars are missing, returns None (local mode).
+
+    Usage::
+
+        opts = _build_storage_options()
+        # opts = {
+        #     "account_name": "stlakelogicprod001",
+        #     "client_id":  "...",
+        #     "client_secret": "...",
+        #     "tenant_id": "...",
+        # }
+    """
+    if storage_options:
+        return storage_options
+
+    account = os.getenv("AZURE_STORAGE_ACCOUNT")
+    client = os.getenv("AZURE_CLIENT_ID")
+    secret = os.getenv("AZURE_CLIENT_SECRET")
+    tenant = os.getenv("AZURE_TENANT_ID")
+
+    if client and secret and tenant:
+        opts: Dict[str, str] = {
+            "client_id": client,
+            "client_secret": secret,
+            "tenant_id": tenant,
+        }
+        if account:
+            opts["account_name"] = account
+        return opts
+
+    return None
+
+
 def _resolve_external_location(location: Optional[str]) -> Optional[str]:
     """
     Resolve an external location value, expanding env-var placeholders.
@@ -213,8 +330,10 @@ def _resolve_target(contract, override_path: Optional[Path] = None) -> Tuple[Opt
 
     base_path = getattr(contract, "_base_path", None)
     target_str = str(target)
-    if target_str.startswith("table:"):
-        target_path = Path(target_str)
+    if target_str.startswith("table:") or "://" in target_str:
+        # Don't wrap cloud URIs or table: paths in Path() — it corrupts
+        # forward slashes to backslashes on Windows.
+        target_path = URIPath(target_str)
     else:
         target_path = _resolve_path(target_str, base_path)
 
@@ -267,23 +386,32 @@ def _to_pandas(df: Any) -> Any:
     raise TypeError(f"Unsupported dataframe type for materialization: {type(df)}")
 
 
-def _write_frame(df, path: Path, output_format: str) -> None:
+def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[str, str]] = None) -> None:
     """
-    Write a DataFrame-like object to disk.
+    Write a DataFrame-like object to disk or remote storage (ADLS/S3/GCS).
 
     Args:
         df: pandas/polars DataFrame to write.
         path: Destination path.
         output_format: csv or parquet.
     """
+    path_str = str(path)
+    is_remote = _is_remote_path(path_str)
+    opts = _build_storage_options(storage_options) if is_remote else None
+
     if output_format == "csv":
         if hasattr(df, "write_csv"):
-            df.write_csv(path)
+            df.write_csv(path_str)
         elif hasattr(df, "to_csv"):
-            df.to_csv(path, index=False)
+            df.to_csv(path_str, index=False)
         else:
             raise ValueError("Unsupported dataframe type for CSV materialization.")
     elif output_format == "parquet":
+        if is_remote and hasattr(df, "write_parquet"):
+            # Polars native write to remote (ADLS/S3/GCS) via storage_options
+            logger.info(f"Writing Parquet to remote: {path_str}")
+            df.write_parquet(path_str, storage_options=opts)
+            return
         if hasattr(df, "write_parquet"):
             df.write_parquet(path)
         elif hasattr(df, "to_parquet"):
@@ -348,6 +476,16 @@ def _write_frame(df, path: Path, output_format: str) -> None:
         try:
             from deltalake import write_deltalake
 
+            # Polars native write_delta for remote paths
+            if is_remote and hasattr(df, "write_delta"):
+                logger.info(f"Writing Delta to remote: {path_str}")
+                df.write_delta(
+                    path_str,
+                    mode="overwrite",
+                    storage_options=opts,
+                )
+                return
+
             # If it's a DuckDB relation, we need to bring it to memory (Arrow preferred)
             data = df
             if hasattr(df, "to_arrow_table"):
@@ -363,7 +501,13 @@ def _write_frame(df, path: Path, output_format: str) -> None:
             if isinstance(data, pa.Table):
                 data = _sanitize_arrow_nulls(data)
 
-            write_deltalake(path, data, mode="overwrite", schema_mode="overwrite")
+            write_deltalake(
+                path_str if is_remote else path,
+                data,
+                mode="overwrite",
+                schema_mode="overwrite",
+                storage_options=opts,
+            )
         except ImportError:
             raise ValueError("Delta materialization requires 'deltalake' installed (pip install deltalake).")
         except Exception as e:
@@ -1446,6 +1590,7 @@ def materialize_dataframe(
     *,
     output_format: Optional[str] = None,
     engine_name: Optional[str] = None,
+    storage_options: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Materialize validated data to the configured target.
@@ -1473,6 +1618,22 @@ def materialize_dataframe(
     if resolved_target is None or resolved_format is None:
         logger.warning("Materialization skipped: target path or format could not be resolved.")
         return {}
+
+    # For non-Spark engines, 'table:' targets (Unity Catalog) are not
+    # accessible.  Fall back to the materialization 'location' field which
+    # contains the actual storage path (e.g. abfss://...).
+    resolved_str = str(resolved_target)
+    if resolved_str.startswith("table:") and engine_name != "spark":
+        location = getattr(mat, "location", None)
+        if location:
+            logger.info(f"Non-Spark engine '{engine_name}': falling back from table target to location: {location}")
+            resolved_target = URIPath(str(location))
+        else:
+            logger.warning(
+                f"Non-Spark engine '{engine_name}': table target '{resolved_str}' "
+                f"is not supported and no 'location' fallback is configured."
+            )
+            return {}
 
     if engine_name == "spark" and hasattr(df, "sparkSession") and hasattr(df, "write"):
         return _materialize_spark_dataframe(
@@ -1791,9 +1952,7 @@ def optimize_delta(
     try:
         from deltalake import DeltaTable
     except ImportError:
-        raise ImportError(
-            "Delta compaction requires the deltalake package: pip install deltalake"
-        )
+        raise ImportError("Delta compaction requires the deltalake package: pip install deltalake")
 
     result: Dict[str, Any] = {"target": target}
 
@@ -1821,10 +1980,7 @@ def optimize_delta(
                 "retention_hours": vacuum_retention_hours,
                 "files_removed": len(vacuum_result) if isinstance(vacuum_result, list) else 0,
             }
-            logger.info(
-                f"Vacuumed Delta table: {target} "
-                f"(retention={vacuum_retention_hours}h)"
-            )
+            logger.info(f"Vacuumed Delta table: {target} (retention={vacuum_retention_hours}h)")
 
     except Exception as exc:
         logger.warning(f"Delta compaction failed for {target}: {exc}")
@@ -1860,4 +2016,3 @@ def _maybe_compact_delta(target: str, contract) -> Optional[Dict[str, Any]]:
 
 from lakelogic.core.quarantine import materialize_quarantine  # noqa: F401, E402
 from lakelogic.core.run_log import write_run_log, get_last_run_watermark  # noqa: F401, E402
-

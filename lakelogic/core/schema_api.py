@@ -3,7 +3,7 @@ lakelogic.core.schema_api
 =========================
 
 Public contract validation and JSON Schema export API — designed as the
-integration surface for LineageLogic's visual contract editor.
+integration surface for LakeLogic's visual contract editor.
 
 Two entry points:
 
@@ -15,7 +15,7 @@ Two entry points:
 
 ``contract_schema()``
     Return the JSON Schema dict for a LakeLogic contract.
-    LineageLogic uses this to drive form validation and field pickers.
+    LakeLogic uses this to drive form validation and field pickers.
 
 ``contract_schema_json()``
     Return the JSON Schema as a JSON string (for REST API responses).
@@ -24,7 +24,7 @@ Integration flow
 ----------------
 ::
 
-    # LineageLogic backend calls:
+    # LakeLogic backend calls:
     schema  = contract_schema()          # once at startup — drives the UI form
     result  = validate_contract(draft)   # on every save / publish action
 
@@ -80,13 +80,29 @@ _KNOWN_TYPES = {
 
 _KNOWN_LAYERS = {
     # Canonical medallion
-    "bronze", "silver", "gold",
+    "bronze",
+    "silver",
+    "gold",
     # Common synonyms
-    "raw", "landing", "ingest", "ingestion",
-    "stage", "staging", "cleansed", "transform",
-    "curated", "refined", "presentation", "consumption",
+    "raw",
+    "landing",
+    "ingest",
+    "ingestion",
+    "stage",
+    "staging",
+    "cleansed",
+    "transform",
+    "curated",
+    "refined",
+    "presentation",
+    "consumption",
     # Cross-layer
-    "reference", "ref", "seed", "lookup", "masterdata", "master_data",
+    "reference",
+    "ref",
+    "seed",
+    "lookup",
+    "masterdata",
+    "master_data",
 }
 _KNOWN_FORMATS = {
     "parquet",
@@ -253,14 +269,29 @@ class _ContractValidator:
     # ── Downstream Consumers ─────────────────────────────────────────────
 
     _KNOWN_CONSUMER_TYPES = {
-        "dashboard", "report", "api", "ml_model",
-        "application", "notebook", "export", "stream",
+        "dashboard",
+        "report",
+        "api",
+        "ml_model",
+        "application",
+        "notebook",
+        "export",
+        "stream",
     }
     _KNOWN_PLATFORMS = {
-        "power_bi", "tableau", "looker", "databricks_sql",
-        "metabase", "grafana", "superset", "redash",
-        "mlflow", "sagemaker", "vertex_ai",
-        "custom", "internal",
+        "power_bi",
+        "tableau",
+        "looker",
+        "databricks_sql",
+        "metabase",
+        "grafana",
+        "superset",
+        "redash",
+        "mlflow",
+        "sagemaker",
+        "vertex_ai",
+        "custom",
+        "internal",
     }
 
     def _check_downstream(self, downstream: Any, path: str) -> None:
@@ -278,8 +309,7 @@ class _ContractValidator:
             elif consumer["type"] not in self._KNOWN_CONSUMER_TYPES:
                 self._warn(
                     f"{cp}.type",
-                    f"Unknown consumer type '{consumer['type']}'. "
-                    f"Known: {sorted(self._KNOWN_CONSUMER_TYPES)}",
+                    f"Unknown consumer type '{consumer['type']}'. Known: {sorted(self._KNOWN_CONSUMER_TYPES)}",
                 )
             if "name" not in consumer:
                 self._err(f"{cp}.name", "Downstream consumer is missing 'name'")
@@ -651,7 +681,7 @@ def contract_schema() -> Dict[str, Any]:
     """
     Return the JSON Schema for a LakeLogic contract as a Python dict.
 
-    Intended for LineageLogic's visual editor to use at startup — the schema
+    Intended for LakeLogic's visual editor to use at startup — the schema
     drives form fields, type pickers, and real-time validation.
 
     The schema is generated from the ``DataContract`` Pydantic model and
@@ -788,8 +818,16 @@ def _augment_schema(schema: Dict[str, Any]) -> None:
     # tier enum
     if "tier" in props:
         props["tier"]["enum"] = [
-            "bronze", "silver", "gold", "reference",
-            "raw", "landing", "stage", "staging", "curated", "refined",
+            "bronze",
+            "silver",
+            "gold",
+            "reference",
+            "raw",
+            "landing",
+            "stage",
+            "staging",
+            "curated",
+            "refined",
         ]
         props["tier"]["description"] = (
             "Data layer tier. Accepts: bronze/raw/landing, silver/stage/cleansed, "

@@ -4,15 +4,133 @@ Run-log persistence for LakeLogic.
 Handles writing run reports to JSON files and multi-backend table targets
 (Spark, DuckDB, SQLite), as well as reading watermarks for incremental loads.
 
+Supports cloud storage paths (ADLS, S3, GCS) via fsspec for JSON run logs.
+
 Extracted from materialization.py to keep concerns focused.
 """
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from loguru import logger
+
+
+# ── Cloud path helpers ────────────────────────────────────────────────────────
+
+_CLOUD_PREFIXES = ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
+
+
+def _is_cloud_path(path: str) -> bool:
+    """Return True if the path is a cloud storage URI (ADLS, S3, GCS)."""
+    return any(str(path).startswith(prefix) for prefix in _CLOUD_PREFIXES)
+
+
+def _build_cloud_opts(path: str) -> Dict[str, str]:
+    """Build fsspec storage_options from environment variables for a cloud path."""
+    import os
+
+    opts: Dict[str, str] = {}
+    p = str(path).lower()
+    if p.startswith(("abfss://", "abfs://")):
+        for env_key, opt_key in [
+            ("AZURE_STORAGE_ACCOUNT", "account_name"),
+            ("AZURE_TENANT_ID", "tenant_id"),
+            ("AZURE_CLIENT_ID", "client_id"),
+            ("AZURE_CLIENT_SECRET", "client_secret"),
+        ]:
+            val = os.getenv(env_key)
+            if val:
+                opts[opt_key] = val
+    elif p.startswith(("s3://", "s3a://")):
+        for env_key, opt_key in [
+            ("AWS_ACCESS_KEY_ID", "key"),
+            ("AWS_SECRET_ACCESS_KEY", "secret"),
+        ]:
+            val = os.getenv(env_key)
+            if val:
+                opts[opt_key] = val
+    return opts
+
+
+def _cloud_write_json(cloud_path: str, data: Dict[str, Any]) -> None:
+    """
+    Write a JSON dict to a cloud storage path using fsspec.
+
+    Args:
+        cloud_path: Cloud URI (abfss://, s3://, gs://).
+        data: Dict to serialize as JSON.
+
+    Raises:
+        ImportError: If fsspec is not installed.
+    """
+    import fsspec
+
+    opts = _build_cloud_opts(cloud_path)
+    with fsspec.open(cloud_path, "w", encoding="utf-8", **opts) as f:
+        json.dump(data, f, indent=2, default=str)
+
+
+def _cloud_read_json(cloud_path: str) -> Optional[Dict[str, Any]]:
+    """
+    Read a JSON file from cloud storage using fsspec.
+
+    Args:
+        cloud_path: Cloud URI (abfss://, s3://, gs://).
+
+    Returns:
+        Parsed dict or None on failure.
+    """
+    try:
+        import fsspec
+
+        opts = _build_cloud_opts(cloud_path)
+        with fsspec.open(cloud_path, "r", encoding="utf-8", **opts) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _cloud_list_json(cloud_dir: str, pattern: str = "run_*.json") -> List[str]:
+    """
+    List JSON files in a cloud directory matching a glob pattern.
+
+    Args:
+        cloud_dir: Cloud directory URI.
+        pattern: Glob pattern for filenames.
+
+    Returns:
+        List of full cloud paths, sorted newest first (by name, descending).
+    """
+    try:
+        import fsspec
+
+        # Normalize trailing slash
+        cloud_dir = cloud_dir.rstrip("/") + "/"
+        opts = _build_cloud_opts(cloud_dir)
+        fs, _, _ = fsspec.core.url_to_fs(cloud_dir, **opts)
+        # Strip protocol for glob
+        base = cloud_dir.split("://", 1)
+        protocol = base[0] + "://"
+        path_part = base[1].rstrip("/")
+        matches = fs.glob(f"{path_part}/{pattern}")
+        # Re-attach protocol and sort newest first (UUID-based names)
+        return sorted([f"{protocol}{m}" for m in matches], reverse=True)
+    except Exception:
+        return []
+
+
+def _cloud_install_hint(path: str) -> str:
+    """Return the specific pip install command for a cloud path's provider."""
+    p = str(path).lower()
+    if p.startswith(("abfss://", "abfs://")):
+        return "fsspec adlfs"
+    if p.startswith(("s3://", "s3a://")):
+        return "fsspec s3fs"
+    if p.startswith(("gs://", "gcs://")):
+        return "fsspec gcsfs"
+    return "fsspec"
 
 
 # ── Shared helpers (duplicated intentionally to keep run_log self-contained) ──
@@ -472,18 +590,41 @@ def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] =
 
     log_path = None
     if path_value or dir_value:
-        base_path = getattr(contract, "_base_path", None)
-        if path_value:
-            log_path = _resolve_path(str(path_value), base_path)
+        raw = str(path_value or dir_value)
+
+        if _is_cloud_path(raw):
+            # ── Cloud storage (ADLS / S3 / GCS) via fsspec ──
+            if path_value:
+                cloud_target = str(path_value)
+            else:
+                run_id = report.get("run_id", "unknown")
+                cloud_target = raw.rstrip("/") + f"/run_{run_id}.json"
+            try:
+                _cloud_write_json(cloud_target, report)
+                logger.info(f"Wrote run log to {cloud_target}")
+                log_path = cloud_target  # type: ignore[assignment]
+            except ImportError:
+                _pkg = _cloud_install_hint(cloud_target)
+                logger.warning(
+                    f"Cloud run log path detected but required packages are not installed. "
+                    f"Install with: pip install {_pkg}"
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to write cloud run log to {cloud_target}: {exc}")
         else:
-            run_id = report.get("run_id", "unknown")
-            log_path = _resolve_path(str(dir_value), base_path) / f"run_{run_id}.json"
+            # ── Local filesystem ──
+            base_path = getattr(contract, "_base_path", None)
+            if path_value:
+                log_path = _resolve_path(str(path_value), base_path)
+            else:
+                run_id = report.get("run_id", "unknown")
+                log_path = _resolve_path(str(dir_value), base_path) / f"run_{run_id}.json"
 
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "w", encoding="utf-8") as handle:
-            json.dump(report, handle, indent=2, default=str)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "w", encoding="utf-8") as handle:
+                json.dump(report, handle, indent=2, default=str)
 
-        logger.info(f"Wrote run log to {log_path}")
+            logger.info(f"Wrote run log to {log_path}")
 
     _write_run_log_table(report, contract, engine_name=engine_name)
     return str(log_path) if log_path else None
@@ -589,38 +730,59 @@ def get_last_run_watermark(
 
     dir_value = metadata.get("run_log_dir")
     if dir_value:
-        base_path = getattr(contract, "_base_path", None)
-        log_dir = _resolve_path(str(dir_value), base_path)
-        if not log_dir.exists():
-            return None
-        try:
-            candidates = sorted(
-                log_dir.glob("run_*.json"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            for path in candidates:
+        raw_dir = str(dir_value)
+        if _is_cloud_path(raw_dir):
+            # ── Cloud directory scan ──
+            try:
+                candidates = _cloud_list_json(raw_dir, "run_*.json")
+                for cloud_path in candidates:
+                    data = _cloud_read_json(cloud_path)
+                    if data and data.get("contract") == contract_title and data.get("stage") == stage:
+                        return data.get("max_source_mtime")
+            except Exception:
+                return None
+        else:
+            # ── Local directory scan ──
+            base_path = getattr(contract, "_base_path", None)
+            log_dir = _resolve_path(raw_dir, base_path)
+            if not log_dir.exists():
+                return None
+            try:
+                candidates = sorted(
+                    log_dir.glob("run_*.json"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                for path in candidates:
+                    try:
+                        with open(path, "r", encoding="utf-8") as handle:
+                            data = json.load(handle)
+                        if data.get("contract") == contract_title and data.get("stage") == stage:
+                            return data.get("max_source_mtime")
+                    except Exception:
+                        continue
+            except Exception:
+                return None
+
+    path_value = metadata.get("run_log_path")
+    if path_value:
+        raw_path = str(path_value)
+        if _is_cloud_path(raw_path):
+            # ── Cloud single file ──
+            data = _cloud_read_json(raw_path)
+            if data and data.get("contract") == contract_title and data.get("stage") == stage:
+                return data.get("max_source_mtime")
+        else:
+            # ── Local single file ──
+            base_path = getattr(contract, "_base_path", None)
+            log_path = _resolve_path(raw_path, base_path)
+            if log_path.exists():
                 try:
-                    with open(path, "r", encoding="utf-8") as handle:
+                    with open(log_path, "r", encoding="utf-8") as handle:
                         data = json.load(handle)
                     if data.get("contract") == contract_title and data.get("stage") == stage:
                         return data.get("max_source_mtime")
                 except Exception:
-                    continue
-        except Exception:
-            return None
-
-    path_value = metadata.get("run_log_path")
-    if path_value:
-        base_path = getattr(contract, "_base_path", None)
-        log_path = _resolve_path(str(path_value), base_path)
-        if log_path.exists():
-            try:
-                with open(log_path, "r", encoding="utf-8") as handle:
-                    data = json.load(handle)
-                if data.get("contract") == contract_title and data.get("stage") == stage:
-                    return data.get("max_source_mtime")
-            except Exception:
-                return None
+                    return None
 
     return None

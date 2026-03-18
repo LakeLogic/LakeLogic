@@ -31,12 +31,11 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from lakelogic.core.models import DataContract, ExtractionConfig
-
 
 # ── Provider Clients ──────────────────────────────────────────────────────────
 
@@ -46,10 +45,7 @@ def _init_openai(config: ExtractionConfig) -> Any:
     try:
         from openai import OpenAI
     except ImportError:
-        raise ImportError(
-            "openai is required for provider='openai'. "
-            "Install with: pip install lakelogic[llm]"
-        )
+        raise ImportError("openai is required for provider='openai'. Install with: pip install lakelogic[llm]")
     return OpenAI()
 
 
@@ -58,10 +54,7 @@ def _init_anthropic(config: ExtractionConfig) -> Any:
     try:
         from anthropic import Anthropic
     except ImportError:
-        raise ImportError(
-            "anthropic is required for provider='anthropic'. "
-            "Install with: pip install lakelogic[llm]"
-        )
+        raise ImportError("anthropic is required for provider='anthropic'. Install with: pip install lakelogic[llm]")
     return Anthropic()
 
 
@@ -71,8 +64,7 @@ def _init_google(config: ExtractionConfig) -> Any:
         import google.generativeai as genai
     except ImportError:
         raise ImportError(
-            "google-generativeai is required for provider='google'. "
-            "Install with: pip install google-generativeai"
+            "google-generativeai is required for provider='google'. Install with: pip install google-generativeai"
         )
     return genai
 
@@ -107,10 +99,7 @@ def _render_prompt(template: str, row: Dict[str, Any]) -> str:
     try:
         from jinja2 import Template
     except ImportError:
-        raise ImportError(
-            "jinja2 is required for prompt templates. "
-            "Install with: pip install jinja2"
-        )
+        raise ImportError("jinja2 is required for prompt templates. Install with: pip install jinja2")
     return Template(template).render(**row)
 
 
@@ -316,11 +305,7 @@ def _score_confidence(
         expected = [f.name for f in config.output_schema if not f.nullable]
         if not expected:
             return 1.0
-        present = sum(
-            1 for f in expected
-            if extracted.get(f) is not None
-            and str(extracted.get(f)).strip() != ""
-        )
+        present = sum(1 for f in expected if extracted.get(f) is not None and str(extracted.get(f)).strip() != "")
         return round(present / len(expected), 4)
 
     if method == "self_assessment":
@@ -347,10 +332,7 @@ def _preprocess_pdf(file_path: str, config: Dict[str, Any]) -> str:
         try:
             import easyocr
         except ImportError:
-            raise ImportError(
-                "easyocr is required for PDF OCR. "
-                "Install with: pip install lakelogic[ocr]"
-            )
+            raise ImportError("easyocr is required for PDF OCR. Install with: pip install lakelogic[ocr]")
         reader = easyocr.Reader([config.get("language", "en")])
         results = reader.readtext(file_path)
         return " ".join([text for _, text, _ in results])
@@ -359,10 +341,7 @@ def _preprocess_pdf(file_path: str, config: Dict[str, Any]) -> str:
     try:
         import pdfplumber
     except ImportError:
-        raise ImportError(
-            "pdfplumber or easyocr required for PDF processing. "
-            "Install with: pip install pdfplumber"
-        )
+        raise ImportError("pdfplumber or easyocr required for PDF processing. Install with: pip install pdfplumber")
     text_parts = []
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
@@ -390,16 +369,14 @@ def _preprocess_image(file_path: str, config: Dict[str, Any]) -> str:
         try:
             import easyocr
         except ImportError:
-            raise ImportError(
-                "easyocr is required for image OCR. "
-                "Install with: pip install lakelogic[ocr]"
-            )
+            raise ImportError("easyocr is required for image OCR. Install with: pip install lakelogic[ocr]")
         reader = easyocr.Reader([config.get("language", "en")])
         results = reader.readtext(file_path)
         return " ".join([text for _, text, _ in results])
 
     if engine in ("blip", "blip2", "caption"):
         from lakelogic.engines.model_registry import load_model
+
         pipe = load_model("image_captioning")
         result = pipe(file_path)
         return result[0].get("generated_text", "") if result else ""
@@ -499,8 +476,7 @@ def extract_row(
         extracted = extract_fn(client, config, prompt, config.system_prompt)
     else:
         raise ValueError(
-            f"Unknown extraction provider: {provider!r}. "
-            f"Supported: local, openai, anthropic, azure_openai, google"
+            f"Unknown extraction provider: {provider!r}. Supported: local, openai, anthropic, azure_openai, google"
         )
 
     # Step 4: Score confidence
@@ -567,10 +543,7 @@ def extract_batch(
 
         # Row limit check
         if config.max_rows_per_run and i >= config.max_rows_per_run:
-            logger.warning(
-                f"Row limit reached ({config.max_rows_per_run}). "
-                f"Stopping at row {i}/{len(rows)}."
-            )
+            logger.warning(f"Row limit reached ({config.max_rows_per_run}). Stopping at row {i}/{len(rows)}.")
             break
 
         try:
@@ -581,19 +554,11 @@ def extract_batch(
         except Exception as exc:
             logger.error(f"Extraction failed for row {i}: {exc}")
             row_copy = dict(row)
-            conf_col = (
-                config.confidence.column
-                if config.confidence
-                else "_lakelogic_extraction_confidence"
-            )
+            conf_col = config.confidence.column if config.confidence else "_lakelogic_extraction_confidence"
             row_copy["_lakelogic_errors"] = f"Extraction error: {exc}"
             row_copy[conf_col] = 0.0
             results.append(row_copy)
 
-    logger.info(
-        f"Extraction complete: {len(results)} rows processed, "
-        f"total cost: ${total_cost:.4f}"
-    )
+    logger.info(f"Extraction complete: {len(results)} rows processed, total cost: ${total_cost:.4f}")
 
     return results
-

@@ -117,9 +117,7 @@ class GenericSQLAdapter(EngineAdapter):
             rule_conditions.append(rule_sql)
 
             # Count failures: rows where the rule is NOT satisfied
-            check_sql = self._transpile(
-                f"SELECT COUNT(*) FROM {table} WHERE NOT ({rule.sql})"
-            )
+            check_sql = self._transpile(f"SELECT COUNT(*) FROM {table} WHERE NOT ({rule.sql})")
             try:
                 fail_count = self._fetch_count(check_sql)
                 rule_failures[rule.name] = fail_count
@@ -157,21 +155,25 @@ class GenericSQLAdapter(EngineAdapter):
                     lo, hi = rule.must_be_between
                     passed = lo <= result <= hi
 
-                dataset_results.append({
-                    "rule": rule.name,
-                    "value": result,
-                    "passed": passed,
-                })
+                dataset_results.append(
+                    {
+                        "rule": rule.name,
+                        "value": result,
+                        "passed": passed,
+                    }
+                )
                 status = "✅" if passed else f"❌ value={result}"
                 logger.info(f"  Dataset rule '{rule.name}': {status}")
             except Exception as e:
                 logger.warning(f"  Dataset rule '{rule.name}' failed: {e}")
-                dataset_results.append({
-                    "rule": rule.name,
-                    "value": None,
-                    "passed": False,
-                    "error": str(e),
-                })
+                dataset_results.append(
+                    {
+                        "rule": rule.name,
+                        "value": None,
+                        "passed": False,
+                        "error": str(e),
+                    }
+                )
 
         self.dataset_rule_results = dataset_results
 
@@ -179,15 +181,11 @@ class GenericSQLAdapter(EngineAdapter):
         if rule_conditions:
             # Build a combined WHERE clause: all rules must pass
             combined_pass = " AND ".join(f"({c})" for c in rule_conditions)
-            combined_pass_sql = self._transpile(
-                f"SELECT COUNT(*) FROM {table} WHERE {combined_pass}"
-            )
+            combined_pass_sql = self._transpile(f"SELECT COUNT(*) FROM {table} WHERE {combined_pass}")
             try:
                 good_count = self._fetch_count(combined_pass_sql)
             except Exception:
-                good_count = source_count - sum(
-                    v for v in rule_failures.values() if v > 0
-                )
+                good_count = source_count - sum(v for v in rule_failures.values() if v > 0)
         else:
             good_count = source_count
 
@@ -205,10 +203,7 @@ class GenericSQLAdapter(EngineAdapter):
             },
         )
 
-        logger.info(
-            f"GenericSQL[{self.engine_dialect}] complete: "
-            f"{good_count} good, {bad_count} bad ({elapsed:.0f}ms)"
-        )
+        logger.info(f"GenericSQL[{self.engine_dialect}] complete: {good_count} good, {bad_count} bad ({elapsed:.0f}ms)")
 
         # ── 5. Return results ────────────────────────────────────────────
         # Unlike in-memory engines, we return dicts with counts + metadata
@@ -256,9 +251,7 @@ class GenericSQLAdapter(EngineAdapter):
             Dict with status, row_count, and column_count.
         """
         try:
-            count = self._fetch_count(
-                self._transpile(f"SELECT COUNT(*) FROM {self.source_table}")
-            )
+            count = self._fetch_count(self._transpile(f"SELECT COUNT(*) FROM {self.source_table}"))
             return {
                 "status": "ok",
                 "dialect": self.engine_dialect,
@@ -352,9 +345,7 @@ class GenericSQLAdapter(EngineAdapter):
 
         # Compare against contract
         contract_fields = {f.name.lower(): f for f in self.contract.model.fields}
-        missing = [
-            f for name, f in contract_fields.items() if name not in existing_columns
-        ]
+        missing = [f for name, f in contract_fields.items() if name not in existing_columns]
         extra_in_table = [c for c in existing_columns if c not in contract_fields]
 
         alter_statements: List[str] = []
@@ -365,9 +356,7 @@ class GenericSQLAdapter(EngineAdapter):
             has_default = getattr(field, "default", None) is not None
             default = f" DEFAULT {self._format_literal(field.default)}" if has_default else ""
 
-            alter_sql = self._transpile(
-                f"ALTER TABLE {table} ADD COLUMN {field.name} {col_type}{default}"
-            )
+            alter_sql = self._transpile(f"ALTER TABLE {table} ADD COLUMN {field.name} {col_type}{default}")
             alter_statements.append(alter_sql)
             added.append(field.name)
 
@@ -395,16 +384,13 @@ class GenericSQLAdapter(EngineAdapter):
 
         if added:
             logger.info(
-                f"GenericSQL[{self.engine_dialect}] sync_schema: "
-                f"added {len(added)} column(s) to {table}: {added}"
+                f"GenericSQL[{self.engine_dialect}] sync_schema: added {len(added)} column(s) to {table}: {added}"
             )
         else:
             logger.info(f"GenericSQL[{self.engine_dialect}] sync_schema: {table} is up to date")
 
         if extra_in_table:
-            logger.info(
-                f"  ℹ️  {len(extra_in_table)} column(s) in table but not in contract: {extra_in_table}"
-            )
+            logger.info(f"  ℹ️  {len(extra_in_table)} column(s) in table but not in contract: {extra_in_table}")
 
         self._add_trace(
             "sync_schema",
@@ -472,9 +458,7 @@ class GenericSQLAdapter(EngineAdapter):
         Returns:
             Dict with alter status.
         """
-        alter_sql = self._transpile(
-            f"ALTER TABLE {target_table} DROP COLUMN {column_name}"
-        )
+        alter_sql = self._transpile(f"ALTER TABLE {target_table} DROP COLUMN {column_name}")
 
         try:
             self._execute_sql(alter_sql)
@@ -588,9 +572,7 @@ class GenericSQLAdapter(EngineAdapter):
             self._execute_sql(create_sql)
             self.conn.commit()
 
-        count = self._fetch_count(
-            self._transpile(f"SELECT COUNT(*) FROM {target_table}")
-        )
+        count = self._fetch_count(self._transpile(f"SELECT COUNT(*) FROM {target_table}"))
         logger.info(f"GenericSQL[{self.engine_dialect}] materialized {count} good rows → {target_table}")
 
         self._add_trace("materialize_good", output_rows=count, details={"target": target_table})
@@ -646,9 +628,7 @@ class GenericSQLAdapter(EngineAdapter):
             self._execute_sql(create_sql)
             self.conn.commit()
 
-        count = self._fetch_count(
-            self._transpile(f"SELECT COUNT(*) FROM {target_table}")
-        )
+        count = self._fetch_count(self._transpile(f"SELECT COUNT(*) FROM {target_table}"))
         logger.info(f"GenericSQL[{self.engine_dialect}] materialized {count} bad rows → {target_table}")
 
         self._add_trace("materialize_bad", output_rows=count, details={"target": target_table})
@@ -719,17 +699,11 @@ class GenericSQLAdapter(EngineAdapter):
             update_columns = [c for c in all_columns if c not in merge_keys]
 
         # ── Build MERGE statement ────────────────────────────────────────
-        on_clause = " AND ".join(
-            f"target.{self._quote_ident(k)} = source.{self._quote_ident(k)}"
-            for k in merge_keys
-        )
+        on_clause = " AND ".join(f"target.{self._quote_ident(k)} = source.{self._quote_ident(k)}" for k in merge_keys)
 
         # WHEN MATCHED → UPDATE SET
         if not insert_only and update_columns:
-            update_set = ", ".join(
-                f"{self._quote_ident(c)} = source.{self._quote_ident(c)}"
-                for c in update_columns
-            )
+            update_set = ", ".join(f"{self._quote_ident(c)} = source.{self._quote_ident(c)}" for c in update_columns)
             matched_clause = f"WHEN MATCHED THEN UPDATE SET {update_set}"
         else:
             matched_clause = ""
@@ -737,9 +711,7 @@ class GenericSQLAdapter(EngineAdapter):
         # WHEN NOT MATCHED → INSERT
         insert_cols = ", ".join(self._quote_ident(c) for c in all_columns)
         insert_vals = ", ".join(f"source.{self._quote_ident(c)}" for c in all_columns)
-        not_matched_clause = (
-            f"WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})"
-        )
+        not_matched_clause = f"WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})"
 
         merge_sql = (
             f"MERGE INTO {target_table} AS target "
@@ -759,13 +731,10 @@ class GenericSQLAdapter(EngineAdapter):
             elapsed = (time.time() - start) * 1000
 
             # Get final count
-            target_count = self._fetch_count(
-                self._transpile(f"SELECT COUNT(*) FROM {target_table}")
-            )
+            target_count = self._fetch_count(self._transpile(f"SELECT COUNT(*) FROM {target_table}"))
 
             logger.info(
-                f"GenericSQL[{self.engine_dialect}] MERGE → {target_table}: "
-                f"{target_count} total rows ({elapsed:.0f}ms)"
+                f"GenericSQL[{self.engine_dialect}] MERGE → {target_table}: {target_count} total rows ({elapsed:.0f}ms)"
             )
             self._add_trace(
                 "merge",
@@ -806,9 +775,7 @@ class GenericSQLAdapter(EngineAdapter):
         """
         pass_where = self._build_pass_condition() if validate_before_insert else "1=1"
 
-        insert_sql = self._transpile(
-            f"INSERT INTO {target_table} SELECT * FROM {self.source_table} WHERE {pass_where}"
-        )
+        insert_sql = self._transpile(f"INSERT INTO {target_table} SELECT * FROM {self.source_table} WHERE {pass_where}")
 
         try:
             start = time.time()
@@ -816,9 +783,7 @@ class GenericSQLAdapter(EngineAdapter):
             self.conn.commit()
             elapsed = (time.time() - start) * 1000
 
-            count = self._fetch_count(
-                self._transpile(f"SELECT COUNT(*) FROM {self.source_table} WHERE {pass_where}")
-            )
+            count = self._fetch_count(self._transpile(f"SELECT COUNT(*) FROM {self.source_table} WHERE {pass_where}"))
             logger.info(f"GenericSQL[{self.engine_dialect}] INSERT {count} rows → {target_table}")
             self._add_trace("insert", output_rows=count, duration_ms=elapsed)
             return {"status": "ok", "table": target_table, "rows_inserted": count}
@@ -845,13 +810,9 @@ class GenericSQLAdapter(EngineAdapter):
         Returns:
             Dict with update status.
         """
-        set_clause = ", ".join(
-            f"{self._quote_ident(col)} = {expr}" for col, expr in set_columns.items()
-        )
+        set_clause = ", ".join(f"{self._quote_ident(col)} = {expr}" for col, expr in set_columns.items())
 
-        update_sql = self._transpile(
-            f"UPDATE {target_table} SET {set_clause} WHERE {where}"
-        )
+        update_sql = self._transpile(f"UPDATE {target_table} SET {set_clause} WHERE {where}")
 
         try:
             start = time.time()
@@ -886,9 +847,7 @@ class GenericSQLAdapter(EngineAdapter):
         Returns:
             Dict with delete status.
         """
-        delete_sql = self._transpile(
-            f"DELETE FROM {target_table} WHERE {where}"
-        )
+        delete_sql = self._transpile(f"DELETE FROM {target_table} WHERE {where}")
 
         try:
             start = time.time()
@@ -948,9 +907,7 @@ class GenericSQLAdapter(EngineAdapter):
 
                 # Remove recovered rows from quarantine
                 pass_where = self._build_pass_condition()
-                self._execute_sql(
-                    self._transpile(f"DELETE FROM {quarantine_table} WHERE {pass_where}")
-                )
+                self._execute_sql(self._transpile(f"DELETE FROM {quarantine_table} WHERE {pass_where}"))
                 self.conn.commit()
 
                 logger.info(

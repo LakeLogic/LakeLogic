@@ -6,7 +6,6 @@ from lakelogic.core.generator import DataGenerator
 from lakelogic.core.incremental import Boundary, IncrementalBoundary
 from lakelogic.core.models import (
     DataContract,
-    ExtractionConfig,
     FieldDefinition,
     QualityRule,
     TIER_CANONICAL_MAP as TIER_CANONICAL_MAP,
@@ -29,7 +28,7 @@ from lakelogic.engines.cloud_credentials import (
 from lakelogic.engines.base import ENGINE_DIALECT_MAP
 from lakelogic.engines.generic_sql import GenericSQLAdapter
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 
 class HelpTopic:

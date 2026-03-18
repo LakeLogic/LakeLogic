@@ -1,0 +1,4 @@
+"""
+Make pipeline a module.
+"""
+

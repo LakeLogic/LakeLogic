@@ -16,7 +16,7 @@ class RemoteObserver:
     - Set LINEAGELOGIC_REPORT_URL to your endpoint
     - Optionally set LINEAGELOGIC_API_KEY for authentication
 
-    LineageLogic SaaS users: This enables Weekly Trust Reports and quality dashboards.
+    LakeLogic SaaS users: This enables Weekly Trust Reports and quality dashboards.
     """
 
     def __init__(self, api_url: Optional[str] = None):
@@ -41,28 +41,57 @@ class RemoteObserver:
             logger.debug("Remote observer enabled but LINEAGELOGIC_REPORT_URL not set")
             return
 
+        counts = report.get("counts", {})
+        slos = report.get("slos", {})
+
         payload = {
+            # Identity
             "run_id": report.get("run_id"),
+            "pipeline_run_id": report.get("pipeline_run_id"),
             "contract": report.get("contract"),
+            "dataset": report.get("dataset"),
+            "stage": report.get("stage"),
             "engine": report.get("engine"),
             "timestamp": report.get("timestamp"),
+            # Metadata
+            "domain": report.get("domain"),
+            "system": report.get("system"),
+            "data_layer": report.get("data_layer"),
+            "source_path": report.get("source_path"),
+            # Row counts
             "metrics": {
-                "total": report.get("counts", {}).get("total"),
-                "quarantined": report.get("counts", {}).get("quarantined"),
-                "ratio": report.get("counts", {}).get("quarantine_ratio"),
+                "source": counts.get("source"),
+                "total": counts.get("total"),
+                "good": counts.get("good"),
+                "quarantined": counts.get("quarantined"),
+                "pre_transform_dropped": counts.get("pre_transform_dropped"),
+                "ratio": counts.get("quarantine_ratio"),
             },
+            # Per-rule failures
+            "row_rule_failures": report.get("row_rule_failures", []),
+            "dataset_rules": report.get("dataset_rules", []),
+            # Schema drift
+            "schema_drift": report.get("schema_drift", {}),
+            # SLOs
+            "slos": slos,
+            # Duration
+            "duration_ms": report.get("duration_ms"),
         }
 
         try:
             # We use a short timeout to not block the ETL pipeline
+            headers = {"X-LakeLogic-Version": __version__}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             with httpx.Client(timeout=2.0) as client:
                 response = client.post(
                     self.api_url,
                     json=payload,
-                    headers={"X-LakeLogic-Version": __version__},
+                    headers=headers,
                 )
                 if response.status_code == 200:
-                    logger.debug("Successfully reported metrics to LineageLogic")
+                    logger.debug("Successfully reported metrics to LakeLogic")
         except Exception as e:
             # Silent fail to ensure ETL process continues regardless of internet/SaaS status
             logger.debug(f"Remote reporting skipped: {e}")

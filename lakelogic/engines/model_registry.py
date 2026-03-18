@@ -29,7 +29,6 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-
 # ── Model Registry ────────────────────────────────────────────────────────────
 # One default model per task.  Users can override via contract YAML.
 # All defaults are commercially licensed (MIT / Apache 2.0 / BSD).
@@ -76,7 +75,6 @@ LOCAL_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "extra": "local",
         "description": "Text embeddings — converts text to vectors for search/matching",
     },
-
     # ── Document / OCR ────────────────────────────────────────────────────
     "document_qa": {
         "model": "impira/layoutlm-document-qa",
@@ -94,7 +92,6 @@ LOCAL_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "extra": "ocr",
         "description": "Table detection — finds tables in document images",
     },
-
     # ── Vision ────────────────────────────────────────────────────────────
     "image_captioning": {
         "model": "Salesforce/blip-image-captioning-large",
@@ -120,7 +117,6 @@ LOCAL_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "extra": "vision",
         "description": "Object detection — finds and labels objects in images",
     },
-
     # ── Audio ─────────────────────────────────────────────────────────────
     "transcription": {
         "model": "openai/whisper-medium",
@@ -130,7 +126,6 @@ LOCAL_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "extra": "audio",
         "description": "Speech-to-text — transcribes audio/video to text",
     },
-
     # ── Local LLM (for full extraction without cloud API) ─────────────────
     "local_llm": {
         "model": "microsoft/Phi-3-mini-4k-instruct",
@@ -185,22 +180,13 @@ def load_model(
     entry = LOCAL_MODEL_REGISTRY.get(task)
     if entry is None:
         known = sorted(LOCAL_MODEL_REGISTRY.keys())
-        raise ValueError(
-            f"Unknown extraction task: {task!r}. "
-            f"Known tasks: {known}"
-        )
+        raise ValueError(f"Unknown extraction task: {task!r}. Known tasks: {known}")
 
     model_name = model_override or entry["model"]
     hf_task = entry["task"]
 
-    logger.info(
-        f"Loading model '{model_name}' for task '{task}' "
-        f"(licence: {entry['licence']}, ~{entry['size_mb']} MB)"
-    )
-    logger.info(
-        "First run downloads the model from HuggingFace; "
-        "subsequent runs load from local cache."
-    )
+    logger.info(f"Loading model '{model_name}' for task '{task}' (licence: {entry['licence']}, ~{entry['size_mb']} MB)")
+    logger.info("First run downloads the model from HuggingFace; subsequent runs load from local cache.")
 
     try:
         from transformers import pipeline as hf_pipeline
@@ -231,6 +217,8 @@ def get_model_info(task: str) -> Dict[str, Any]:
     if entry is None:
         raise ValueError(f"Unknown task: {task!r}")
     return dict(entry)
+
+
 """
 from lakelogic.engines.model_registry import load_model
 

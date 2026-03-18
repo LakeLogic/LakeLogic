@@ -8,7 +8,7 @@ Choosing the right tool for your data platform depends on your specific needs. L
 | :--- | :--- | :--- | :--- |
 | **Primary Focus** | Runtime Data Contracts | Transformation & Warehouse Testing | Data Observability & Profiling |
 | **Execution Point** | **During** Data Movement (ETL/ELT) | **After** Data Loading (Warehouse) | **Validation Reports** (Post-Process) |
-| **Engine Support** | Polars, Spark, DuckDB, Pandas, Snowflake (table-only), BigQuery (table-only) | SQL Warehouse (Snowflake, BQ, etc.) | Python-based |
+| **Engine Support** | Polars, Spark, DuckDB, Pandas | SQL Warehouse (Snowflake, BQ, etc.) | Python-based |
 | **Handling Failures** | **Quarantine**: Detours bad rows in real-time | Fails the build or logs the error | Generates comprehensive quality reports |
 | **Best Workflow** | **Prevention**: Shift-left data quality | **Transformation**: Model-driven testing | **Observability**: Long-term data health |
 
@@ -34,10 +34,8 @@ In the modern enterprise, data often lives across multiple platforms. LakeLogic 
 
 -   **Microsoft Fabric & Azure Synapse**: Use LakeLogic as the quality gate for your Spark-based notebooks and pipelines.
 -   **Databricks**: Spark-based execution with Unity Catalog-compatible table logging (deeper integrations planned).
--   **Snowflake & BigQuery**: Table‑only warehouse adapters (SQL pushdown; file staging is still on the roadmap).
-
 ### Why this matters?
-If you migrate from **Synapse to Fabric**, your Data Contracts stay exactly the same. Snowflake/BigQuery adapters now let you run contracts directly in the warehouse (table‑only).
+If you migrate from **Synapse to Fabric**, your Data Contracts stay exactly the same. 
 
 ---
 
@@ -66,9 +64,7 @@ When running on Spark, LakeLogic uses distributed operations throughout:
 
 ---
 
-## Summary: The LakeLogic Edge
-
-LakeLogic is about **Runtime Reliability** and **Infrastructure Flexibility**. It turns your Data Contract from passive documentation into an active layer of your Medallion architecture—Ensuring your **Silver** layer is Filtered, Cleaned, Transformed, and Enriched—working in harmony with your existing modeling and observability tools to ensure data integrity at every step across **Azure** and **AWS** Spark platforms and Snowflake/BigQuery (table‑only). 🛡️🏛️
+LakeLogic is about **Runtime Reliability** and **Infrastructure Flexibility**. It turns your Data Contract from passive documentation into an active layer of your Medallion architecture—Ensuring your **Silver** layer is Filtered, Cleaned, Transformed, and Enriched—working in harmony with your existing modeling and observability tools to ensure data integrity at every step across **Azure** and **AWS** Spark platforms. 🛡️🏛️
 
 ---
 

@@ -948,9 +948,10 @@ service_levels:
     # Field to check for freshness
     description: "Customer data must be updated daily"
     # Business value: Timeliness monitoring
-  
-  availability: 99.9
-    # Percentage uptime target
+
+  availability:
+    threshold: 99.9
+    # Percentage of runs that must produce valid output
     # Business value: Reliability tracking
 
 # ============================================================
@@ -960,18 +961,42 @@ service_levels:
 external_logic:
   type: "python"
   # Options: python, notebook
-  
+
   path: "./gold/build_customer_gold.py"
   # Path to Python file or Jupyter notebook
-  
+
   entrypoint: "build_gold"
-  # Function name to call (Python only)
-  
+  # Function name to call (Python only, default: "run")
+  #
+  # ─── Required function signature ───────────────────────
+  # def build_gold(df, *, contract, engine, **kwargs):
+  #     """
+  #     Args:
+  #         df:       Validated good DataFrame (Polars/Pandas/Spark)
+  #         contract: DataContract instance (read-only)
+  #         engine:   Engine name ("polars", "pandas", "spark", etc.)
+  #         **kwargs: Values from args: below (e.g. apply_ml_scoring)
+  #
+  #     Returns:
+  #         DataFrame  → replaces good_df for materialization
+  #         str/Path   → LakeLogic reads this file as output
+  #         None       → original good_df is kept
+  #     """
+  #     return df
+  # ────────────────────────────────────────────────────────
+  # Optional extra kwargs (accepted but not required):
+  #   add_trace:  callback to append TraceStep objects
+  #   trace_step: context manager for traced blocks
+  #
+  # Runs in a sandboxed thread with timeout (default 300s).
+  # Blocked imports: subprocess, shutil, socket.
+  # Blocked builtins: exec, eval, compile.
+
   args:
     apply_ml_scoring: true
     model_path: "s3://models/churn_predictor.pkl"
     target_table: "gold_customers"
-  # Custom arguments passed to function
+  # Custom arguments passed as **kwargs to the function
   # Business value: ML scoring, complex business logic
   
   output_path: "s3://gold-bucket/customers"
@@ -1141,6 +1166,203 @@ extraction:
       overlap_tokens: 200
     # Business value: Process PDFs, images, audio, video into structured data
 
+# ============================================================
+# 20. CLOUD REPORTING (Registry-Level)
+# ============================================================
+# OPTIONAL: Send run reports to LakeLogic Cloud for centralized
+# observability, trend detection, and ops intelligence.
+#
+# This is typically set at the REGISTRY level (_registry.yaml)
+# so all contracts in a domain share the same config.
+# It can also be set per-contract if needed.
+#
+# The cloud block maps to RemoteObserver env vars:
+#   cloud.enabled    → LAKELOGIC_REMOTE_OBSERVER
+#   cloud.report_url → LINEAGELOGIC_REPORT_URL
+#   cloud.api_key    → LINEAGELOGIC_API_KEY
+#
+# Supports ${ENV_VAR} syntax for secrets.
+cloud:
+  enabled: true
+  # Toggle remote reporting (default: false)
+
+  report_url: "${LINEAGELOGIC_REPORT_URL}"
+  # API endpoint for run report ingestion
+  # Resolved from environment variable at runtime
+
+  api_key: "${LAKELOGIC_API_KEY}"
+  # Auth key — identifies your tenant
+  # Resolved from environment variable at runtime
+  # Business value: Centralized quality dashboards, SLO trend
+  # detection, quarantine spike alerts, cross-contract intelligence
+
+# ── What gets reported ─────────────────────────────────────
+# Each run sends (no raw data — metadata only):
+#   - Contract name, dataset, stage, engine, timestamp
+#   - Row counts: source, total, good, quarantined
+#   - Per-rule failure breakdown
+#   - Schema drift events
+#   - SLO scores (freshness, availability)
+#   - Duration (ms)
+#   - Domain, system, data_layer metadata
+
+# ============================================================
+# 21. COMPLIANCE — Regulatory Metadata
+# ============================================================
+# OPTIONAL: Multi-framework compliance metadata for automated
+# compliance reporting in LakeLogic Cloud. Supports GDPR, EU AI Act,
+# CCPA/CPRA, HIPAA, SOX, PIPEDA, LGPD, and Basel/BCBS 239.
+#
+# This section enables LakeLogic Cloud to generate audit-ready
+# compliance reports from your data contract registry.
+
+compliance:
+
+  # ── GDPR (EU) 2016/679 ──────────────────────────────────
+  gdpr:
+    applicable: true
+    # Whether GDPR applies to this dataset
+    # Business value: Scope determination
+
+    legal_basis: "legitimate_interest"
+    # Options: consent, contract, legitimate_interest,
+    #          legal_obligation, public_interest, vital_interest
+    # GDPR Art. 6(1) — lawful basis for processing
+    # Business value: Art. 30 RoPA mandatory field
+
+    legal_basis_detail: >
+      Processing based on legitimate interest for direct
+      marketing under Art. 6(1)(f). Data subjects can object
+      via unsubscribe mechanism at any time.
+    # Business value: Detailed justification for DPO review
+
+    purpose: "Customer engagement tracking and marketing analytics"
+    # Purpose of processing (Art. 5(1)(b))
+    # Business value: Purpose limitation compliance
+
+    retention_period: "24 months"
+    # How long data is retained (Art. 5(1)(e))
+    # Options: any human-readable duration string
+    # Business value: Storage limitation compliance
+
+    retention_basis: "Marketing consent validity"
+    # Why this retention period was chosen
+    # Business value: Audit justification
+
+    consent_type: "opt_in"
+    # Options: opt_in, opt_out, implied, none
+    # Business value: Consent management tracking
+
+    withdrawal_mechanism: true
+    # Whether data subjects can withdraw consent
+    # Business value: Art. 7(3) compliance
+
+    dpia_required: false
+    # Whether a Data Protection Impact Assessment is needed
+    # Business value: Art. 35 compliance
+
+    dpia_status: "not_required"
+    # Options: not_required, not_started, in_progress, completed
+    # Business value: Track DPIA progress
+
+    data_subject_categories:
+      - "retail_customers"
+      - "newsletter_subscribers"
+    # Categories of people whose data is processed
+    # Business value: Art. 30 RoPA field
+
+    cross_border_transfer: true
+    # Whether data crosses EU/EEA borders
+    # Business value: Chapter V transfer obligations
+
+    transfer_mechanism: "SCCs"
+    # Options: SCCs, adequacy, BCRs, derogation
+    # Business value: Transfer safeguards (Art. 46)
+
+    shared_with:
+      - name: "Klaviyo Inc."
+        role: "processor"         # processor or joint_controller
+        country: "US"
+        agreement: "DPA"          # DPA, BAA, SCC, joint_controller
+        mechanism: "SCCs"
+      - name: "Shopify Inc."
+        role: "joint_controller"
+        country: "CA"
+        agreement: "DPA"
+        mechanism: "SCCs"
+    # Data sharing agreements
+    # Business value: Art. 28 processor contracts, Art. 30 disclosures
+
+  # ── EU AI Act (Reg. 2024/1689) ─────────────────────────
+  eu_ai_act:
+    applicable: true
+    # Whether the EU AI Act applies (data feeds AI systems)
+    # Business value: Scope determination
+
+    risk_tier: "limited"
+    # Options: prohibited, high, gpai, limited, minimal
+    # Art. 6 + Annex III risk classification
+    # Business value: Determines obligation level
+
+    risk_tier_rationale: >
+      Marketing automation data classified as LIMITED RISK
+      under Art. 50. Transparency obligations apply. Would
+      escalate to HIGH RISK if used for credit scoring or
+      HR decisions under Annex III.
+    # Business value: Documented risk assessment
+
+    ai_system_purpose: "Marketing automation and personalisation"
+    # What the AI system does with this data
+    # Business value: Art. 11 technical documentation
+
+    ai_systems_using_data:
+      - name: "send_time_optimisation"
+        risk_tier: "limited"
+        description: "ML model predicting optimal email send time"
+      - name: "churn_prediction"
+        risk_tier: "limited"
+        description: "Model predicting likelihood of unsubscribe"
+    # AI systems that consume this dataset
+    # Business value: AI system inventory (Art. 6)
+
+    training_data_provenance: true
+    # Whether training data origin is documented
+    # Business value: Art. 10 — data governance for training
+
+    bias_examination: false
+    # Whether bias examination has been conducted
+    # Business value: Art. 10(2)(f) — bias detection
+
+    transparency_disclosure: true
+    # Whether users are informed about AI processing
+    # Business value: Art. 13 + Art. 50 transparency
+
+    human_oversight: true
+    # Whether human oversight mechanisms exist
+    # Business value: Art. 14 — human-in-the-loop
+
+    logging_enabled: true
+    # Whether AI operations are logged
+    # Business value: Art. 12 — automatic logging
+
+  # ── Other Frameworks (coming soon) ─────────────────────
+  # Supported but detailed section not yet available:
+  ccpa:
+    applicable: true
+    status: "coming_soon"
+  hipaa:
+    applicable: false
+  sox:
+    applicable: false
+  pipeda:
+    applicable: true
+    status: "coming_soon"
+  lgpd:
+    applicable: true
+    status: "coming_soon"
+  bcbs_239:
+    applicable: false
+
 ```
 
 ---
@@ -1294,6 +1516,71 @@ materialization:
     hash_fields: ["email", "status", "address"]
 ```
 
+### Use Case 5: Marketing Data with Compliance (GDPR + EU AI Act)
+
+```yaml
+version: 1.0.0
+info:
+  title: "Bronze Marketing Events"
+  target_layer: "bronze"
+  domain: "marketing"
+  system: "klaviyo"
+
+model:
+  fields:
+    - name: "event_id"
+      type: "string"
+      required: true
+    - name: "email"
+      type: "string"
+      pii: true
+      pii_classification: "email_address"
+    - name: "phone_number"
+      type: "string"
+      pii: true
+      pii_classification: "phone_number"
+    - name: "event_name"
+      type: "string"
+      required: true
+    - name: "timestamp"
+      type: "timestamp"
+      required: true
+
+lineage:
+  enabled: true
+  upstream:
+    - name: "klaviyo_api"
+      type: "external_api"
+  downstream:
+    - name: "silver_engagement"
+      type: "table"
+
+compliance:
+  gdpr:
+    applicable: true
+    legal_basis: "legitimate_interest"
+    purpose: "Marketing campaign analytics"
+    retention_period: "24 months"
+    consent_type: "opt_in"
+    dpia_required: false
+    cross_border_transfer: true
+    transfer_mechanism: "SCCs"
+    shared_with:
+      - name: "Klaviyo Inc."
+        role: "processor"
+        country: "US"
+        agreement: "DPA"
+  eu_ai_act:
+    applicable: true
+    risk_tier: "limited"
+    ai_system_purpose: "Marketing automation"
+    training_data_provenance: true
+    human_oversight: true
+  ccpa:
+    applicable: true
+    status: "coming_soon"
+```
+
 ---
 
 ## Quick Reference: When to Use What
@@ -1312,6 +1599,9 @@ materialization:
 | `lineage.enabled` | `true` | `true` | `true` |
 | `downstream` | N/A | Optional | Recommended |
 | `extraction` | Optional | N/A | N/A |
+| `cloud.enabled` | Optional | Optional | Optional |
+| `external_logic` | N/A | N/A | Optional |
+| `compliance` | Recommended | Recommended | Optional |
 
 ---
 

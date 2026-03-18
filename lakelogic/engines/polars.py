@@ -601,6 +601,7 @@ class PolarsAdapter(EngineAdapter):
                 logger.debug(f"Pre-Transform [Derive]: {trans.derive.field}")
                 field_name = trans.derive.field
                 derive_sql = self._normalize_sql(trans.derive.sql)
+                _resolved = False
                 try:
                     # Try Polars SQL first via a fresh context (avoids the
                     # idempotency-guard regex bug in _apply_sql_transformation).
@@ -615,11 +616,30 @@ class PolarsAdapter(EngineAdapter):
                         query = f"SELECT *, ({derive_sql}) AS {field_name} FROM {tbl}"
                     current_lf = _ctx.execute(query)
                     existing = set(current_lf.collect_schema().names())
+                    _resolved = True
                 except Exception as e:
                     logger.warning(
-                        f"Pre-Transform [Derive] '{field_name}' SQL failed ({e}); "
-                        f"falling back to post-transform handling."
+                        f"Pre-Transform [Derive] '{field_name}' Polars SQL failed ({e}); trying DuckDB fallback."
                     )
+                # DuckDB fallback (mirrors post-derive logic)
+                if not _resolved:
+                    try:
+                        if field_name in existing:
+                            _dq = f"SELECT * EXCLUDE ({field_name}), ({derive_sql}) AS {field_name} FROM source"
+                        else:
+                            _dq = f"SELECT *, ({derive_sql}) AS {field_name} FROM source"
+                        current_lf = self._apply_sql_transformation(current_lf, _dq)
+                        existing = set(current_lf.collect_schema().names())
+                        _resolved = True
+                    except Exception as e2:
+                        logger.error(
+                            f"Pre-Transform [Derive] '{field_name}' FAILED all engines. "
+                            f"SQL: {derive_sql} | Polars error + DuckDB error: {e2}"
+                        )
+                        raise RuntimeError(
+                            f"Pre-Transform [Derive] '{field_name}' failed in both Polars SQL and DuckDB. "
+                            f"SQL: {derive_sql}"
+                        ) from e2
                 continue
 
             if trans.pivot and trans_phase == "pre":
