@@ -3,7 +3,7 @@ lakelogic.core.schema_api
 =========================
 
 Public contract validation and JSON Schema export API — designed as the
-integration surface for LineageLogic's visual contract editor.
+integration surface for LakeLogic's visual contract editor.
 
 Two entry points:
 
@@ -15,7 +15,7 @@ Two entry points:
 
 ``contract_schema()``
     Return the JSON Schema dict for a LakeLogic contract.
-    LineageLogic uses this to drive form validation and field pickers.
+    LakeLogic uses this to drive form validation and field pickers.
 
 ``contract_schema_json()``
     Return the JSON Schema as a JSON string (for REST API responses).
@@ -24,7 +24,7 @@ Integration flow
 ----------------
 ::
 
-    # LineageLogic backend calls:
+    # LakeLogic backend calls:
     schema  = contract_schema()          # once at startup — drives the UI form
     result  = validate_contract(draft)   # on every save / publish action
 
@@ -651,7 +651,7 @@ def contract_schema() -> Dict[str, Any]:
     """
     Return the JSON Schema for a LakeLogic contract as a Python dict.
 
-    Intended for LineageLogic's visual editor to use at startup — the schema
+    Intended for LakeLogic's visual editor to use at startup — the schema
     drives form fields, type pickers, and real-time validation.
 
     The schema is generated from the ``DataContract`` Pydantic model and

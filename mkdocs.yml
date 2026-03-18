@@ -101,7 +101,6 @@ nav:
       - Bootstrap: bootstrap.md
       - API: api.md
       - Capability Matrix: capabilities.md
-      - Warehouse Adapters: warehouse_adapters.md
       - Public Streaming Sources: streaming_sources.md
       - Logging Configuration: logging_configuration.md
       - Validation Result: validation_result.md

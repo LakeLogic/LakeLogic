@@ -16,7 +16,7 @@ class RemoteObserver:
     - Set LINEAGELOGIC_REPORT_URL to your endpoint
     - Optionally set LINEAGELOGIC_API_KEY for authentication
 
-    LineageLogic SaaS users: This enables Weekly Trust Reports and quality dashboards.
+    LakeLogic SaaS users: This enables Weekly Trust Reports and quality dashboards.
     """
 
     def __init__(self, api_url: Optional[str] = None):
@@ -91,7 +91,7 @@ class RemoteObserver:
                     headers=headers,
                 )
                 if response.status_code == 200:
-                    logger.debug("Successfully reported metrics to LineageLogic")
+                    logger.debug("Successfully reported metrics to LakeLogic")
         except Exception as e:
             # Silent fail to ensure ETL process continues regardless of internet/SaaS status
             logger.debug(f"Remote reporting skipped: {e}")

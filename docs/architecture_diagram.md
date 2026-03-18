@@ -2,42 +2,101 @@
 
 This diagram illustrates how LakeLogic enforces data contracts as **quality gates** across the medallion architecture (Bronze → Silver → Gold).
 
-## High-Level Architecture Flow
+## High-Level Lifecycle
+
+```mermaid
+graph LR
+    %% Class Definitions for Premium Feel
+    classDef driver fill:#4e3e91,stroke:#3b2d71,color:#fff,rx:8,ry:8
+    classDef registry fill:#1a1a1a,stroke:#444,stroke-dasharray: 5 5,color:#ccc
+    classDef source fill:#10529c,stroke:#0d4380,color:#fff,rx:5,ry:5
+    classDef bronze fill:#8d3d23,stroke:#6e301b,color:#fff,rx:5,ry:5
+    classDef silver fill:#006151,stroke:#004a3e,color:#fff,rx:5,ry:5
+    classDef gold fill:#8c6512,stroke:#6e4f0e,color:#fff,rx:5,ry:5
+    classDef oss fill:#4e3e91,stroke:#3b2d71,color:#fff,rx:5,ry:5
+    classDef logic fill:#006151,stroke:#004a3e,color:#fff,rx:5,ry:5
+    classDef quarantine fill:#8c2020,stroke:#6e1a1a,color:#fff,rx:5,ry:5
+    classDef infra fill:#3a3a3a,stroke:#555,color:#fff,rx:5,ry:5
+    classDef label fill:none,stroke:none,color:#999
+
+    subgraph Inputs [" "]
+        direction TB
+        LLM["<b>LLM</b><br/>Discovery"]:::driver
+        Users["<b>Business</b><br/>BA · Power users"]:::driver
+    end
+
+    subgraph Contracts ["Contracts"]
+        direction TB
+        subgraph CRM ["Domain — CRM"]
+            direction TB
+            SF["Salesforce"]:::source --> C_BR1["Bronze"]:::bronze
+            C_BR1 --> C_SL1["Silver"]:::silver
+            C_SL1 --> C_GL1["Gold"]:::gold
+            C_BR1 --- YAML1["yaml"]:::infra
+        end
+        subgraph MKT ["Domain — Marketing"]
+            direction TB
+            GA["Google Analytics"]:::source --> C_BR2["Bronze"]:::bronze
+            C_BR2 --> C_SL2["Silver"]:::silver
+            C_SL2 --> C_GL2["Gold"]:::gold
+            C_BR2 --- YAML2["yaml"]:::infra
+        end
+    end
+
+    Inputs --> Contracts
+
+    subgraph Processing [" "]
+        direction TB
+        Logic["<b>Py Script /<br/>Custom Logic</b><br/>(Optional)"]:::logic
+        OSS["<b>LakeLogic<br/>OSS</b>"]:::oss
+        Logic --> OSS
+    end
+
+    Contracts --> Processing
+
+    subgraph Lakehouse ["Lakehouse"]
+        direction TB
+        L_BR["Bronze"]:::bronze --> L_SL["Silver"]:::silver
+        L_SL --> L_GL["Gold"]:::gold
+        L_BR -.-> L_Q["Quarantine"]:::quarantine
+    end
+
+    OSS --> L_SL
+    OSS --- E_LBL["Spark · Polars · Pandas · DuckDB"]:::label
+
+    subgraph Targets ["Compute targets"]
+        direction LR
+        Srv["Serverless"]:::infra
+        Spk["Spark"]:::infra
+        K8s["Kubernetes"]:::infra
+    end
+
+    Processing -.-> Targets
+```
+---
+
+## Detailed Medallion Flow
+
+### 🟤 BRONZE LAYER: Raw Capture
+
+**Goal**: 100% preservation of source data with zero silent drops.
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
-│       LAKELOGIC MEDALLION ARCHITECTURE                   │
-│       Data Contracts as Quality Gates                    │
-└──────────────────────────────────────────────────────────┘
-
-┌──────────────┐
-│  Raw Sources │  ← CSV, JSON, Parquet, Delta, Unity Catalog
-│  (Landing)   │
-└──────┬───────┘
-       │
-       ▼
-┌──────────────────────────────────────────────────────────┐
-│                  🟤 BRONZE LAYER                          │
-│              "Capture Everything Raw"                     │
+│              "Capture Everything Raw (No Validation)"     │
 ├──────────────────────────────────────────────────────────┤
 │                                                           │
 │  📋 Data Contract: bronze_contract.yaml                  │
 │  ┌────────────────────────────────────────────────────┐ │
-│  │ quality:                                            │ │
-│  │   row_rules:                                        │ │
-│  │     - name: "email_format"  # Minimal gates         │ │
-│  │       sql: "email LIKE '%@%'" # Catch garbage       │ │
-│  │     - name: "age_positive"                          │ │
-│  │       sql: "age IS NULL OR age >= 0"                │ │
+│  │ # No quality rules in Bronze                       │ │
+│  │ # Goal is 100% capture of source data              │ │
 │  └────────────────────────────────────────────────────┘ │
 │                                                           │
 │  📊 Strategy: overwrite or append                        │
 │  💾 Output: bronze_customers.parquet                     │
-└──────┬──────────────────────────────────────────┬────────┘
-       │                                           │
-       │ ✓ PASSED VALIDATION                       │ ✗ FAILED
-       │                                           │
-       ▼                                           ▼
+└──────────────────────────┬───────────────────────────────┘
+                           │
+                           ▼
 ┌──────────────────────────┐      ┌──────────────────────┐
 │ 🛡️ Quality Gate:          │      │ 🛑 QUARANTINE ZONE   │
 │ Bronze → Silver          │      ├──────────────────────┤
@@ -61,10 +120,13 @@ This diagram illustrates how LakeLogic enforces data contracts as **quality gate
 │   - derive fields        │
 │   - lookup/join dims     │
 └──────────┬───────────────┘
-           │
-           ▼
+```
+
+### ⚪ SILVER LAYER: Business Validation
+**Goal**: Trusted, cleaned, and queryable data for bulk analytics.
+
+```text
 ┌──────────────────────────────────────────────────────────┐
-│                   ⚪ SILVER LAYER                         │
 │          "Validated, Cleaned, Business-Ready"             │
 ├──────────────────────────────────────────────────────────┤
 │                                                           │
@@ -73,7 +135,6 @@ This diagram illustrates how LakeLogic enforces data contracts as **quality gate
 │  │ transformations:                                    │ │
 │  │   - deduplicate:                                    │ │
 │  │       on: ["customer_id"]                           │ │
-│  │       sort_by: ["updated_at"]                       │ │
 │  │                                                      │ │
 │  │ quality:                                             │ │
 │  │   row_rules:             # Full validation          │ │
@@ -81,26 +142,7 @@ This diagram illustrates how LakeLogic enforces data contracts as **quality gate
 │  │     - regex_match:                                  │ │
 │  │         field: email                                │ │
 │  │         pattern: "^[^@]+@[^@]+\\.[^@]+$"            │ │
-│  │     - range:                                        │ │
-│  │         field: age                                  │ │
-│  │         min: 18                                     │ │
-│  │         max: 120                                    │ │
-│  │     - accepted_values:                              │ │
-│  │         field: status                               │ │
-│  │         values: ["ACTIVE", "INACTIVE"]              │ │
-│  │                                                      │ │
-│  │   dataset_rules:                                    │ │
-│  │     - unique: customer_id                           │ │
-│  │     - null_ratio:                                   │ │
-│  │         field: email                                │ │
-│  │         max: 0.05      # Max 5% null emails         │ │
 │  └────────────────────────────────────────────────────┘ │
-│                                                           │
-│  📊 Materialization Strategies:                          │
-│     - append:    Transaction tables (fact tables)        │
-│     - merge:     SCD Type 1 (update existing)            │
-│     - scd2:      SCD Type 2 (history tracking)           │
-│     - overwrite: Daily snapshots                         │
 │                                                           │
 │  💾 Output: silver_customers.parquet / Delta / Iceberg   │
 └──────┬──────────────────────────────────────────┬────────┘
@@ -118,10 +160,9 @@ This diagram illustrates how LakeLogic enforces data contracts as **quality gate
 │  ✓ Referential integrity │      └──────────────────────┘
 │  ✓ Statistical checks    │
 └──────────┬───────────────┘
-           │
-           ▼
-┌──────────────────────────────────────────────────────────┐
-│                    🟡 GOLD LAYER                          │
+```
+
+### 🟡 GOLD LAYER: Aggregated & Enrich
 │       "Aggregated, Business KPIs, Analytics-Ready"        │
 ├──────────────────────────────────────────────────────────┤
 │                                                           │
@@ -176,37 +217,39 @@ This diagram illustrates how LakeLogic enforces data contracts as **quality gate
 │          (Advanced Transformations)                       │
 └──────────────────────────────────────────────────────────┘
 
-Input: silver_sales.parquet (validated DataFrame)
+API Call (Spark-Oriented):
+```python
+# Pass a Spark DataFrame to the contract
+contract = DataContract("build_sales_gold.yaml")
+good_df, bad_df = contract.run(spark_df, engine="spark")
+```
+
+Input: silver_sales (Spark DataFrame)
    │
    ▼
 ┌──────────────────────────────────────────────────────────┐
 │  📄 gold/build_sales_gold.py                             │
 │  ┌────────────────────────────────────────────────────┐ │
-│  │ import polars as pl                                 │ │
+│  │ from pyspark.sql import functions as F              │ │
 │  │                                                      │ │
-│  │ def build_gold(df: pl.DataFrame) -> pl.DataFrame:  │ │
-│  │     """Custom business logic for Gold layer"""     │ │
+│  │ def build_gold(df, **kwargs):                        │ │
+│  │     """Spark-oriented business logic for Gold"""     │ │
 │  │     return (                                        │ │
 │  │         df                                           │ │
-│  │         # ML model scoring                          │ │
-│  │         .with_columns([                             │ │
-│  │             predict_churn(pl.col("customer_id"))    │ │
-│  │                 .alias("churn_risk_score"),         │ │
-│  │             (pl.col("amount") * 1.1)                │ │
-│  │                 .alias("amount_with_tax"),          │ │
-│  │             pl.col("sale_date").dt.month()          │ │
-│  │                 .alias("sale_month")                │ │
-│  │         ])                                           │ │
-│  │         # Business filters                          │ │
-│  │         .filter(pl.col("amount") > 100)             │ │
-│  │         # Aggregations                              │ │
-│  │         .group_by(["customer_segment", "month"])    │ │
-│  │         .agg([                                      │ │
-│  │             pl.sum("amount_with_tax")               │ │
-│  │               .alias("total_rev"),                  │ │
-│  │             pl.count("customer_id")                 │ │
-│  │               .alias("txn_count")                   │ │
-│  │         ])                                           │ │
+│  │         # Dynamic partitions / ML scoring            │ │
+│  │         .withColumn("churn_risk", predict_udf("id")) │ │
+│  │         .withColumn("amount_tax", F.col("amt")*1.1)  │ │
+│  │         .withColumn("month", F.month("sale_date"))   │ │
+│  │                                                      │ │
+│  │         # Filter out outliers                        │ │
+│  │         .filter("amt > 100")                         │ │
+│  │                                                      │ │
+│  │         # Distributed aggregations                   │ │
+│  │         .groupBy("segment", "month")                 │ │
+│  │         .agg(                                        │ │
+│  │             F.sum("amount_tax").alias("total_rev"),  │ │
+│  │             F.count("id").alias("txn_count")         │ │
+│  │         )                                            │ │
 │  │     )                                                │ │
 │  └────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────┘
@@ -270,22 +313,22 @@ Auto-Discovery Priority:
 └──────────────────────────────────────────────────────────┘
 
 🟤 BRONZE: Capture & Preserve
-   • Minimal validation (catch obvious junk)
-   • All strings pattern (optional)
+   • No validation (Capture 100% of raw data)
+   • No quarantine (No silent drops)
    • Schema evolution: append/merge
-   • Goal: Zero data loss
+   • Goal: Immutable Raw Record
 
-⚪ SILVER: Validate & Standardize
+⚪ SILVER: Validate & Standardize (Latest Version)
    • Full schema enforcement
    • Business rule validation
-   • Deduplication
+   • Deduplication / SCD Type 1
    • Type casting
    • Goal: Trusted, queryable data
 
-🟡 GOLD: Aggregate & Enrich
+🟡 GOLD: Aggregate & Enrich (Snapshots/SCD2)
    • Business KPIs
    • ML feature engineering
-   • Dimension joins
+   • Dimension joins (SCD Type 2)
    • Goal: Analytics-ready datasets
 ```
 
@@ -366,73 +409,6 @@ environments:
 Usage:
   export LAKELOGIC_ENV=dev
   python run_pipeline.py
-```
-
-## Integration Patterns
-
-### Airflow Integration
-
-```python
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from lakelogic import DataProcessor
-
-def run_quality_gate(**context):
-    proc = DataProcessor(
-        contract="contracts/silver_customers.yaml",
-        engine="spark"
-    )
-    source, good, bad = proc.run_source()
-    proc.materialize(good, bad)
-    
-    # Push metrics to XCom
-    context['ti'].xcom_push(
-        key='quarantine_count',
-        value=len(bad)
-    )
-
-with DAG('customer_pipeline', ...) as dag:
-    quality_gate = PythonOperator(
-        task_id='silver_quality_gate',
-        python_callable=run_quality_gate
-    )
-```
-
-### dbt Integration (Proposed)
-
-```yaml
-# dbt_project.yml
-models:
-  my_project:
-    staging:
-      +pre-hook:
-        - "{{ lakelogic.validate('contracts/staging.yaml') }}"
-```
-
-### Databricks Integration
-
-```python
-# Databricks notebook
-from lakelogic import DataProcessor
-
-# Read from Unity Catalog
-df = spark.table("main.bronze.customers")
-
-# Apply quality gate
-proc = DataProcessor(
-    contract="/Workspace/contracts/silver_customers.yaml",
-    engine="spark"
-)
-source, good, bad = proc.run(
-    df,
-    source_path="main.bronze.customers"
-)
-
-# Write to Unity Catalog
-good.write.mode("overwrite") \
-    .saveAsTable("main.silver.customers")
-bad.write.mode("append") \
-    .saveAsTable("main.quarantine.customers")
 ```
 
 ## Observability & Lineage

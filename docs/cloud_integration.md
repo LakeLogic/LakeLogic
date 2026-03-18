@@ -47,7 +47,7 @@ contracts:
 
 cloud:
   enabled: true
-  report_url: "${LINEAGELOGIC_REPORT_URL}"
+  report_url: "${LakeLogic_REPORT_URL}"
   api_key: "${LAKELOGIC_API_KEY}"
 
 environments:
@@ -59,7 +59,7 @@ environments:
 
 ```bash
 # Set these in your environment or CI secrets
-export LINEAGELOGIC_REPORT_URL="https://api.lineagelogic.com/v1/runs"
+export LakeLogic_REPORT_URL="https://api.LakeLogic.com/v1/runs"
 export LAKELOGIC_API_KEY="llk_your_api_key_here"
 ```
 
@@ -69,8 +69,8 @@ If you're not using a registry:
 
 ```bash
 export LAKELOGIC_REMOTE_OBSERVER=true
-export LINEAGELOGIC_REPORT_URL="https://api.lineagelogic.com/v1/runs"
-export LINEAGELOGIC_API_KEY="llk_your_api_key_here"
+export LakeLogic_REPORT_URL="https://api.LakeLogic.com/v1/runs"
+export LakeLogic_API_KEY="llk_your_api_key_here"
 ```
 
 No code changes needed — `RemoteObserver` reads these automatically.
@@ -82,7 +82,7 @@ Add `cloud:` directly in a contract YAML (overrides registry):
 ```yaml
 cloud:
   enabled: true
-  report_url: "${LINEAGELOGIC_REPORT_URL}"
+  report_url: "${LakeLogic_REPORT_URL}"
   api_key: "${LAKELOGIC_API_KEY}"
 ```
 

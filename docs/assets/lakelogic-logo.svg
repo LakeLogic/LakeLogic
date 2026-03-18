@@ -1,5 +1,5 @@
 <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- LineageLogic Logo: Data flow with connected nodes representing lineage tracking -->
+  <!-- LakeLogic Logo: Data flow with connected nodes representing lineage tracking -->
   
   <!-- Background Circle -->
   <circle cx="24" cy="24" r="22" fill="url(#gradient2)" stroke="#2196F3" stroke-width="2"/>

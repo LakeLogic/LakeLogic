@@ -1,28 +1,124 @@
 <div class="hero-section" markdown>
 
-# Trust Your Data. <span style="color: var(--md-accent-fg-color);">Scale Your Logic.</span>
+# Your Data Estate. <span style="color: var(--md-accent-fg-color);">Under Contract.</span>
 
 <p class="hero-subtitle">
-Write Once. Run Anywhere. — SQL-first quality gates from Polars to petabytes.
+Open-source data contract library for Python — catch breaking data changes before they reach production.
 </p>
 
 <div class="hero-cta">
-<a href="installation/" class="md-button md-button--primary">
+<a href="examples/01_hello_world/" class="md-button md-button--primary">
 Try in 60 Seconds
-</a>
-<a href="examples/01_hello_world/" class="md-button">
-Hello World Notebook
 </a>
 <a href="https://github.com/lakelogic/LakeLogic" class="md-button">
 View on GitHub
 </a>
 </div>
+---
 
-</div>
+## 🌐 Data Mesh Alignment
+
+LakeLogic is built for the decentralized data estate, directly supporting the four pillars of **Data Mesh**:
+
+- **Domain Ownership**: Contracts are owned and defined by domain teams (e.g., CRM, Finance) who know the data best.
+- **Data as a Product**: Contracts serve as the explicit "product interface," guaranteeing quality for consumers.
+- **Self-Serve Platform**: A standardized runtime that any team can use to deploy quality gates without infra silos.
+- **Federated Governance**: Global standards (e.g., PII masking) are defined centrally but enforced locally at every layer.
 
 ---
 
-## One Contract. Four Engines. Zero Rewrites.
+## ✅ Define Once. Enforce Everywhere.
+
+LakeLogic makes your **Data Contract the Single Source of Truth**.
+
+### `contract.yaml` — this is your entire quality gate
+```yaml
+# REQUIRED: Contract version for compatibility tracking
+version: "1.0"
+
+# REQUIRED: Metadata for domain and system classification
+info:
+  title: Silver Customers
+  owner: data-team
+  domain: CRM
+  system: Salesforce
+
+# REQUIRED: Schema definition with types and constraints
+model:
+  fields:
+    - name: customer_id
+      type: integer
+      required: true
+    - name: first_name
+      type: string
+      pii: true  # Business value: Automatic PII detection and masking
+    - name: last_name
+      type: string
+      pii: true
+    - name: email
+      type: string
+      pii: true
+    - name: revenue
+      type: float
+    - name: status
+      type: string
+
+# REQUIRED: Data acquisition pattern and location
+source:
+  type: landing
+  path: "data/customers/*.csv"  # Supports: Files (S3/ADLS) or DB Tables (e.g., Unity Catalog)
+  load_mode: incremental
+
+# OPTIONAL EXAMPLE: Data cleaning, enrichment, and deduplication logic
+transformations:
+  - rename:
+      from: "cust_id"
+      to: "customer_id"
+    phase: "pre"  # PRE: Applied before schema validation (fixes source naming drift)
+  - deduplicate:
+      columns: ["customer_id"]
+      order_by: "updated_at"
+  - sql: |
+      SELECT 
+        *,
+        UPPER(status) as status_code,
+        revenue * 0.1 as tax_estimate
+      FROM source
+    phase: "post" # POST: Applied after validation (complex logic and enrichment)
+
+# OPTIONAL EXAMPLE: Validation rules (row-level and dataset-level)
+quality:
+  row_rules:
+    - sql: "customer_id IS NOT NULL AND email IS NOT NULL"
+    - sql: "status IN ('active', 'churned', 'pending')"
+    - sql: "revenue >= 0"
+    - sql: "email LIKE '%@%.%'"
+  dataset_rules:
+    - unique: "customer_id"
+
+# OPTIONAL EXAMPLE: Data provenance and audit injection
+lineage:
+  enabled: true
+
+# REQUIRED: Output storage and write strategy
+materialization:
+  strategy: merge
+  target_path: "silver/customers"  # Supports: File paths or DB Tables (e.g., Unity Catalog)
+  format: delta
+  merge_keys: [customer_id]
+
+# OPTIONAL EXAMPLE: Isolation for failed records
+quarantine:
+  enabled: true
+  target: "quarantine/customers"
+```
+
+!!! tip "Full Contract Reference"
+    Explore the **[Complete Contract Template](contract_template.md)** showing every available configuration option for Bronze, Silver, and Gold layers.
+
+---
+
+## Meet the Engines
 
 === "Polars"
 
@@ -75,19 +171,6 @@ View on GitHub
     assert len(result.raw) == len(result.good) + len(result.bad)
     ```
 
-=== "Snowflake"
-
-    ```python
-    from lakelogic import DataProcessor
-    
-    # Direct warehouse execution
-    processor = DataProcessor(
-        engine="snowflake",
-        contract="contract.yaml"
-    )
-    
-    result = processor.run_source("ANALYTICS.SILVER.CUSTOMERS")
-    ```
 
 !!! tip "Interactive Examples"
     Jump straight into **executable Jupyter notebooks** that demonstrate LakeLogic's capabilities:
@@ -220,7 +303,7 @@ LakeLogic enforces **Data Contracts as Quality Gates** at every layer of your me
 
 Each layer in the medallion uses its own contract:
 
-  🟤 BRONZE → Capture everything, catch obvious junk
+  🟤 BRONZE → Capture everything raw, no validation
   ⚪ SILVER → Full validation, business rules, dedup
   🟡 GOLD   → Aggregations, KPIs, analytics-ready
 
@@ -235,66 +318,30 @@ Each layer in the medallion uses its own contract:
 
 ---
 
-## Meet the engines
-
-<div class="grid cards" markdown>
-
--   :material-lightning-bolt:{ .lg .middle } **Polars**
-
-    ---
-
-    Blazing-fast local engine for single-node processing. Best for development, testing, and production workloads under 100GB.
-
-    [:octicons-arrow-right-24: Learn more](capabilities.md)
-
--   :material-chart-timeline:{ .lg .middle } **Spark**
-
-    ---
-
-    Distributed processing for petabyte-scale data. Native support for Delta Lake, Iceberg, and Unity Catalog.
-
-    [:octicons-arrow-right-24: Learn more](capabilities.md)
-
--   :material-database:{ .lg .middle } **DuckDB**
-
-    ---
-
-    Fast analytical SQL engine with native Iceberg and Delta support. Perfect for local development and CI/CD.
-
-    [:octicons-arrow-right-24: Learn more](capabilities.md)
-
--   :material-snowflake:{ .lg .middle } **Snowflake & BigQuery**
-
-    ---
-
-    Direct warehouse execution with SQL pushdown. Table-only adapters for cloud data warehouses.
-
-    [:octicons-arrow-right-24: Learn more](warehouse_adapters.md)
-
-</div>
-
----
-
 ## Why LakeLogic?
 
-### Write Once. Run Anywhere.
+### Stop the "Fragmented Truth" Problem
+In a traditional data stack, moving from a Warehouse (SQL) to a Lakehouse
+(PySpark) means rewriting your validation rules. This duplication creates
+**Logic Drift** — where your data quality standards differ depending on
+which tool is running the code.
 
-Stop paying the "Re-adaptation Tax." In a traditional stack, moving from a Warehouse (SQL) to a Lakehouse (PySpark) means rewriting your validation rules. With LakeLogic, your **Data Contract is the Source of Truth**.
+With LakeLogic, your **Data Contract is the Source of Truth**.
 
-- **SQL-First:** Define your constraints, rules, and logic in standard SQL—the language your team already speaks.
-- **Zero Adaptation:** Move your pipelines from **dbt/Snowflake** to **Databricks/Spark** to **Local/Polars** with **zero changes** to your contract.
-- **No Vendor Lock-in:** Your business logic is a portable asset, independent of your cloud provider or execution engine.
+- **SQL-First Simplicity**: Define your constraints and business logic in standard SQL—the language your team already speaks.
+- **Zero-Friction Portability**: Move your pipelines from **dbt/Snowflake** to **Databricks/Spark** to **Local/Polars** with zero changes to your contract.
+- **True Ownership**: Your business logic is a portable asset, independent of your cloud provider or execution engine.
 
-### Business ROI: Cost, Risk, & Trust
+### Business Impact: Trust, Speed, and ROI
 
-!!! success "Eliminate the Spark Tax"
-    Cut compute spend by up to 80% for maintenance and small-to-medium datasets by using Polars or DuckDB instead of Spark.
+!!! success "Slash Compute Costs"
+    Not every job needs a massive Spark cluster. Reduce compute spend by up to 80% for maintenance tasks and small-to-medium datasets by using high-performance engines like Polars or DuckDB.
 
-!!! info "100% Reconciliation"
-    Mathematically provable data integrity. Bad data is detoured into a **Safe Quarantine** area, ensuring production dashboards are never poisoned.
+!!! info "Guaranteed Integrity"
+    LakeLogic detours bad data into a **Safe Quarantine** zone with absolute precision. This ensures downstream dashboards are never poisoned by "dirty" data, maintaining stakeholder trust.
 
-!!! tip "Visual Traceability"
-    Gold-layer metrics should never be "Black Boxes." LakeLogic supports aggregate roll-ups that preserve source keys, providing business users with a visual drill-down from board-level KPIs back to the raw source records.
+!!! tip "Full Pipeline Transparency"
+    Eliminate the "Black Box" problem. LakeLogic provides visual drill-downs from board-level KPIs back to the raw source records, ensuring every number is auditable and explainable.
 
 ---
 
@@ -327,21 +374,41 @@ lakelogic run --contract my_contract.yaml --source raw_data.parquet
 
 ## Go Further with LakeLogic
 
-LakeLogic is the open-source engine that enforces your data contracts. Here's how to get the most out of it:
+LakeLogic is the open-source engine that enforces your data contracts.
+Here's how to get the most out of it:
 
-- :material-robot-outline: **AI-Powered Contract Generation:** Bootstrap contracts from raw data with `--ai` — field descriptions, PII detection, and SQL quality rules generated in seconds. Works with OpenAI, Anthropic, Azure OpenAI, or local Ollama.
-- :material-test-tube: **Synthetic Test Data:** Generate realistic edge-case data from your contracts to stress-test quarantine rules before production.
-- :material-web: **Project Hub:** Visit **[lakelogic.org](https://lakelogic.org)** for the latest guides, blog posts, and community resources.
+- :material-robot-outline: **AI-Powered Contract Generation:** [Bootstrap
+  contracts](llm_extraction.md) from raw data with `--ai` — field descriptions, PII detection,
+  and SQL quality rules generated in seconds.
+- :material-file-tree: **Governance at Scale:** Learn how to [organize your 
+  contracts](organization.md) for 1,000s of tables using Domain-First ownership 
+  and Registries.
+- :material-card-text-outline: **Contract Reference:** Explore the [Complete 
+  Contract Template](contract_template.md) showing every available 
+  configuration option for Bronze, Silver, and Gold layers.
+- :material-molecule: **Detailed Architecture:** Explore how LakeLogic enforces
+  [Quality Gates across the Medallion Architecture](architecture_diagram.md)
+  including Quarantine logic, Lineage, and multi-engine support.
+- :material-test-tube: **Synthetic Test Data:** Generate realistic edge-case
+  data from your contracts to stress-test quarantine rules before production.
+- :material-web: **Project Hub:** Visit **[lakelogic.org](https://lakelogic.org)**
+  for the latest guides, blog posts, and community resources.
 
 ---
 
 ## From the Blog
 
 !!! abstract "Latest Posts"
-    - [**Data Quality Management Without the Platform Tax**](https://lakelogic.org/blog/data-quality-management/) — Why YAML contracts beat enterprise DQM platforms on cost, flexibility, and version control.
-    - [**Row-Level Data Quality in Polars — Without Writing Validation Code**](https://lakelogic.org/blog/polars-data-quality/) — One YAML file replaces 200 lines of Polars validation boilerplate.
-    - [**Data Mesh Without the Chaos**](https://lakelogic.org/blog/data-mesh-data-contracts/) — How data contracts make domain ownership work at enterprise scale.
-    - [**Stop the Spark Tax**](https://lakelogic.org/blog/stop-the-spark-tax/) — One data contract, any engine — eliminate logic drift between Spark, Polars, and DuckDB.
+    - [**Data Quality Management Without the Platform Tax**](https://lakelogic.org/blog/data-quality-management/)
+      — Why YAML contracts beat enterprise DQM platforms on cost, flexibility, 
+      and version control.
+    - [**Row-Level Data Quality in Polars — Without Writing Validation Code**](https://lakelogic.org/blog/polars-data-quality/)
+      — One YAML file replaces 200 lines of Polars validation boilerplate.
+    - [**Data Mesh Without the Chaos**](https://lakelogic.org/blog/data-mesh-data-contracts/)
+      — How data contracts make domain ownership work at enterprise scale.
+    - [**Stop the Spark Tax**](https://lakelogic.org/blog/stop-the-spark-tax/)
+      — One data contract, any engine — eliminate logic drift 
+      between Spark, Polars, and DuckDB.
 
 ---
 
