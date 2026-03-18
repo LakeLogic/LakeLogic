@@ -8,6 +8,7 @@ from pydantic import (
 )
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
+from loguru import logger
 import warnings
 
 _QUALITY_CATEGORIES = {
@@ -1419,11 +1420,11 @@ class DataContract(BaseModel):
                                     if _v:
                                         _opts[_ok] = _v
 
-                            fs, _, _ = fsspec.core.url_to_fs(loc_str, **_opts)
-                            # Strip protocol for path operations
-                            path_part = loc_str.split("://", 1)[1]
+                            fs, path_part = fsspec.core.url_to_fs(loc_str, **_opts)
+                            logger.info(f"Reset: deleting cloud location {loc_str} (resolved path: {path_part})")
                             if fs.exists(path_part):
                                 fs.rm(path_part, recursive=True)
+                                logger.info(f"Reset: deleted {path_part}")
                                 report["materialization_location"] = {
                                     "path": loc_str,
                                     "deleted": True,
@@ -1436,11 +1437,13 @@ class DataContract(BaseModel):
                                     "note": "path does not exist",
                                 }
                         except Exception as _exc:
+                            logger.error(f"Reset: failed to delete cloud location {loc_str}: {_exc}")
                             report["materialization_location"] = {
                                 "path": loc_str,
                                 "deleted": False,
                                 "error": str(_exc),
                             }
+                            raise
                 else:
                     # Local location path
                     loc_p = _resolve(loc_str)
