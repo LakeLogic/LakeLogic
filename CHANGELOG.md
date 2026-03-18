@@ -4,35 +4,26 @@ All notable changes to **LakeLogic** are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+<!-- Developer Note: Update via: git cliff -o CHANGELOG.md -->
+
 
 ---
-## [1.2.0] — 2026-03-08
+## [1.3.0] — 2026-03-18
 
 ### Added
 
-- **GenericSQLAdapter**: push-down validation, DDL generation, and CTAS materialization for any DB-API 2.0 database via `sqlglot` transpilation — supports PostgreSQL, MySQL, BigQuery, Snowflake, Redshift, ClickHouse, SQL Server, Oracle, Trino, and Databricks
-- **DML operations**: `merge()`, `insert_validated()`, `update_where()`, `delete_where()`, and `reprocess_quarantine()` methods on `GenericSQLAdapter` for incremental loading and data lifecycle management
-- **Schema evolution**: `sync_schema()` compares contract fields against live table columns, generates `ALTER TABLE ADD COLUMN` statements; `alter_add_column()` and `alter_drop_column()` for manual column management
-- **Tier normalization**: `TIER_CANONICAL_MAP` normalizes 20+ naming conventions (raw→bronze, staging→silver, curated→gold, masterdata→reference) to canonical medallion tiers at parse time
-- **Tier field on `DataContract`**: new `tier` field with `AliasChoices` accepting `tier`, `layer`, or `target_layer` keys — backward compatible with `info.target_layer`
-- **Contract validation for tier**: `validate_contract()` warns when tier is missing and validates against known naming conventions
-- **Downstream consumers**: `DownstreamConsumer` model and `downstream` list on `DataContract` for end-to-end lineage tracking from source → gold → dashboard/report/API/ML model, with `columns_used` for column-level lineage
-- **Downstream validation**: `validate_contract()` checks downstream consumer structure, warns on unknown types and platforms
-- **`TransformationFilter` string shorthand**: `filter: "order_id IS NOT NULL"` now accepted as shorthand for `filter: {sql: "..."}`
-- **`TransformationDeduplicate` `by` alias**: `deduplicate.by` accepted as alias for `deduplicate.on` for backward compatibility
-- **`ENGINE_DIALECT_MAP`**: 17 engine-to-dialect mappings exposed via `lakelogic.engines.base`
-- **`_transpile()` method**: centralized sqlglot transpilation on `EngineAdapter` base class, replacing manual if/else branching in `_regex_sql()`
-- **Test suite**: `test_tier_and_filter.py` with 37 test cases covering tier normalization, filter shorthand, dedup alias, transpilation, dialect map, and validation
-
-### Fixed
-
-- **Deprecated `datetime.utcnow()`**: replaced all occurrences in `polars.py` and `incremental.py` with `datetime.now(timezone.utc)` (Python 3.12+ compatibility)
-
-## [1.1.0] — 2026-03-07
-
-### Added
-
+- Add comprehensive project documentation, custom styling, and core observer and schema API modules.
+- Add Polars execution engine adapter with SQL transformations, link registration, and schema application.
+- Introduce core data processing logic with engine adapters and dbt integration.
+- Add documentation for engine capabilities, lakehouse catalog table name resolution, and a contract template.
+- Add documentation for engine capabilities, lakehouse catalog table name resolution, and a contract template.
+- Add LLM extraction engine and model registry for unstructured data processing
+- Enhance schema validation and add GenericSQL adapter
 - Add core materialization utilities for data persistence, including Spark table management, path resolution, and dataframe output.
+
+### Changed
+
+- Clean up import statements and exception handling in GenericSQLAdapter
 ## [1.0.0] — 2026-03-05
 
 ### Added
@@ -138,8 +129,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.2.0]: https://github.com/lakelogic/LakeLogic/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.1.0
+[1.3.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.3.0
 [1.0.0]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...v1.0.0
 [0.11.0]: https://github.com/lakelogic/LakeLogic/compare/v0.7.0...v0.11.0
 [0.7.0]: https://github.com/lakelogic/LakeLogic/compare/v0.6.0...v0.7.0
