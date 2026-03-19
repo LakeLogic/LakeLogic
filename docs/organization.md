@@ -15,6 +15,7 @@ We recommend organizing your repository by **Business Domain** rather than by te
 
 ### Global Scalability Pattern
 
+```text
 contracts/
 ├── finance/                    <-- Domain (Ownership Boundary)
 │   ├── _registry.yaml           <-- Central control plane for the domain
@@ -27,9 +28,7 @@ contracts/
 │   └── payment_gateway/
 ├── marketing/
 └── shared/                      <-- Global entities (e.g., Dim_Date, Dim_Geo)
-
-
-
+```
 **Business ROI:**
 - **Clear Accountability**: Incidents are automatically routed to the domain owner.
 - **Decoupled Growth**: Marketing can update their contracts without impacting Finance.

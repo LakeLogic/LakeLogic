@@ -4,75 +4,7 @@ This diagram illustrates how LakeLogic enforces data contracts as **quality gate
 
 ## High-Level Lifecycle
 
-```mermaid
-graph LR
-    %% Class Definitions for Premium Feel
-    classDef driver fill:#4e3e91,stroke:#3b2d71,color:#fff,rx:8,ry:8
-    classDef registry fill:#1a1a1a,stroke:#444,stroke-dasharray: 5 5,color:#ccc
-    classDef source fill:#10529c,stroke:#0d4380,color:#fff,rx:5,ry:5
-    classDef bronze fill:#8d3d23,stroke:#6e301b,color:#fff,rx:5,ry:5
-    classDef silver fill:#006151,stroke:#004a3e,color:#fff,rx:5,ry:5
-    classDef gold fill:#8c6512,stroke:#6e4f0e,color:#fff,rx:5,ry:5
-    classDef oss fill:#4e3e91,stroke:#3b2d71,color:#fff,rx:5,ry:5
-    classDef logic fill:#006151,stroke:#004a3e,color:#fff,rx:5,ry:5
-    classDef quarantine fill:#8c2020,stroke:#6e1a1a,color:#fff,rx:5,ry:5
-    classDef infra fill:#3a3a3a,stroke:#555,color:#fff,rx:5,ry:5
-    classDef label fill:none,stroke:none,color:#999
-
-    subgraph Inputs [" "]
-        direction TB
-        LLM["<b>LLM</b><br/>Discovery"]:::driver
-        Users["<b>Business</b><br/>BA · Power users"]:::driver
-    end
-
-    subgraph Contracts ["Contracts"]
-        direction TB
-        subgraph CRM ["Domain — CRM"]
-            direction TB
-            SF["Salesforce"]:::source --> C_BR1["Bronze"]:::bronze
-            C_BR1 --> C_SL1["Silver"]:::silver
-            C_SL1 --> C_GL1["Gold"]:::gold
-            C_BR1 --- YAML1["yaml"]:::infra
-        end
-        subgraph MKT ["Domain — Marketing"]
-            direction TB
-            GA["Google Analytics"]:::source --> C_BR2["Bronze"]:::bronze
-            C_BR2 --> C_SL2["Silver"]:::silver
-            C_SL2 --> C_GL2["Gold"]:::gold
-            C_BR2 --- YAML2["yaml"]:::infra
-        end
-    end
-
-    Inputs --> Contracts
-
-    subgraph Processing [" "]
-        direction TB
-        Logic["<b>Py Script /<br/>Custom Logic</b><br/>(Optional)"]:::logic
-        OSS["<b>LakeLogic<br/>OSS</b>"]:::oss
-        Logic --> OSS
-    end
-
-    Contracts --> Processing
-
-    subgraph Lakehouse ["Lakehouse"]
-        direction TB
-        L_BR["Bronze"]:::bronze --> L_SL["Silver"]:::silver
-        L_SL --> L_GL["Gold"]:::gold
-        L_BR -.-> L_Q["Quarantine"]:::quarantine
-    end
-
-    OSS --> L_SL
-    OSS --- E_LBL["Spark · Polars · Pandas · DuckDB"]:::label
-
-    subgraph Targets ["Compute targets"]
-        direction LR
-        Srv["Serverless"]:::infra
-        Spk["Spark"]:::infra
-        K8s["Kubernetes"]:::infra
-    end
-
-    Processing -.-> Targets
-```
+![LakeLogic High-Level Architecture](assets/lakelogic_architecture.png)
 ---
 
 ## Detailed Medallion Flow
@@ -82,179 +14,191 @@ graph LR
 **Goal**: 100% preservation of source data with zero silent drops.
 
 ```text
-┌──────────────────────────────────────────────────────────┐
-│              "Capture Everything Raw (No Validation)"     │
-├──────────────────────────────────────────────────────────┤
-│                                                           │
-│  📋 Data Contract: bronze_contract.yaml                  │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ # No quality rules in Bronze                       │ │
-│  │ # Goal is 100% capture of source data              │ │
-│  └────────────────────────────────────────────────────┘ │
-│                                                           │
-│  📊 Strategy: overwrite or append                        │
-│  💾 Output: bronze_customers.parquet                     │
-└──────────────────────────┬───────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────┐      ┌──────────────────────┐
-│ 🛡️ Quality Gate:          │      │ 🛑 QUARANTINE ZONE   │
-│ Bronze → Silver          │      ├──────────────────────┤
-│                          │      │ quarantine/          │
-│ 1️⃣ Pre-Processing        │      │  bronze_bad.parquet  │
-│   - rename columns       │      │                      │
-│   - filter invalid rows  │      │ 📝 Error Reasons:    │
-│   - deduplicate          │      │  - email_format      │
-│   - trim, lower, cast    │      │  - age_positive      │
-│                          │      │  - missing_id        │
-│ 2️⃣ Schema Enforcement    │      │                      │
-│   - Type validation      │      │ 🔄 Correction Loop:  │
-│   - Required fields      │      │  1. Fix source data  │
-│   - Unknown field policy │      │  2. Reprocess        │
-│                          │      │  3. Flow to Silver   │
-│ 3️⃣ Quality Rules         │      └──────────────────────┘
-│   - Row: not_null, regex │
-│   - Dataset: unique      │
-│                          │
-│ 4️⃣ Post-Processing       │
-│   - derive fields        │
-│   - lookup/join dims     │
-└──────────┬───────────────┘
++----------------------------------------------------------+
+|            "Capture Everything Raw (No Validation)"       |
++----------------------------------------------------------+
+|                                                           |
+|  [Contract] bronze_contract.yaml                          |
+|  +----------------------------------------------------+  |
+|  | # No quality rules in Bronze                       |  |
+|  | # Goal is 100% capture of source data              |  |
+|  +----------------------------------------------------+  |
+|                                                           |
+|  Strategy: overwrite or append                            |
+|  Output:   bronze_customers.parquet                       |
++----------------------------+------------------------------+
+                             |
+                             v
++----------------------------+    +--------------------------+
+| QUALITY GATE:              |    | QUARANTINE ZONE          |
+| Bronze -> Silver           |    +--------------------------+
+|                            |    | quarantine/              |
+| [1] Pre-Processing         |    |   bronze_bad.parquet     |
+|   - rename columns         |    |                          |
+|   - filter invalid rows    |    | Error Reasons:           |
+|   - deduplicate            |    |   - email_format         |
+|   - trim, lower, cast      |    |   - age_positive         |
+|                            |    |   - missing_id           |
+| [2] Schema Enforcement     |    |                          |
+|   - Type validation        |    | Correction Loop:         |
+|   - Required fields        |    |   1. Fix source data     |
+|   - Unknown field policy   |    |   2. Reprocess           |
+|                            |    |   3. Flow to Silver      |
+| [3] Quality Rules          |    +--------------------------+
+|   - Row: not_null, regex   |
+|   - Dataset: unique        |
+|                            |
+| [4] Post-Processing        |
+|   - derive fields          |
+|   - lookup/join dims       |
++----------------------------+
 ```
 
 ### ⚪ SILVER LAYER: Business Validation
 **Goal**: Trusted, cleaned, and queryable data for bulk analytics.
 
 ```text
-┌──────────────────────────────────────────────────────────┐
-│          "Validated, Cleaned, Business-Ready"             │
-├──────────────────────────────────────────────────────────┤
-│                                                           │
-│  📋 Data Contract: silver_contract.yaml                  │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ transformations:                                    │ │
-│  │   - deduplicate:                                    │ │
-│  │       on: ["customer_id"]                           │ │
-│  │                                                      │ │
-│  │ quality:                                             │ │
-│  │   row_rules:             # Full validation          │ │
-│  │     - not_null: email                               │ │
-│  │     - regex_match:                                  │ │
-│  │         field: email                                │ │
-│  │         pattern: "^[^@]+@[^@]+\\.[^@]+$"            │ │
-│  └────────────────────────────────────────────────────┘ │
-│                                                           │
-│  💾 Output: silver_customers.parquet / Delta / Iceberg   │
-└──────┬──────────────────────────────────────────┬────────┘
-       │                                           │
-       │ ✓ PASSED                                  │ ✗ FAILED
-       │                                           │
-       ▼                                           ▼
-┌──────────────────────────┐      ┌──────────────────────┐
-│ 🛡️ Quality Gate:          │      │ 🛑 QUARANTINE ZONE   │
-│ Silver → Gold            │      ├──────────────────────┤
-│                          │      │ quarantine/          │
-│ Contract Enforcement:    │      │  silver_bad.parquet  │
-│  ✓ Schema validation     │      │                      │
-│  ✓ Business rules        │      │ Reason codes logged  │
-│  ✓ Referential integrity │      └──────────────────────┘
-│  ✓ Statistical checks    │
-└──────────┬───────────────┘
++----------------------------------------------------------+
+|          "Validated, Cleaned, Business-Ready"             |
++----------------------------------------------------------+
+|                                                           |
+|  [Contract] silver_contract.yaml                          |
+|  +----------------------------------------------------+  |
+|  | transformations:                                    |  |
+|  |   - deduplicate:                                    |  |
+|  |       on: ["customer_id"]                           |  |
+|  |                                                      |  |
+|  | quality:                                             |  |
+|  |   row_rules:             # Full validation          |  |
+|  |     - not_null: email                               |  |
+|  |     - regex_match:                                  |  |
+|  |         field: email                                |  |
+|  |         pattern: "^[^@]+@[^@]+\\.[^@]+$"            |  |
+|  +----------------------------------------------------+  |
+|                                                           |
+|  Output: silver_customers.parquet / Delta / Iceberg       |
++--------+--------------------------------------+----------+
+         |                                      |
+         | PASSED                                | FAILED
+         |                                      |
+         v                                      v
++----------------------------+    +--------------------------+
+| QUALITY GATE:              |    | QUARANTINE ZONE          |
+| Silver -> Gold             |    +--------------------------+
+|                            |    | quarantine/              |
+| Contract Enforcement:      |    |   silver_bad.parquet     |
+|   - Schema validation      |    |                          |
+|   - Business rules         |    | Reason codes logged      |
+|   - Referential integrity  |    +--------------------------+
+|   - Statistical checks     |
++----------------------------+
 ```
 
 ### 🟡 GOLD LAYER: Aggregated & Enrich
-│       "Aggregated, Business KPIs, Analytics-Ready"        │
-├──────────────────────────────────────────────────────────┤
-│                                                           │
-│  📋 Data Contract: gold_contract.yaml                    │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ # OPTION 1: SQL-Based Aggregation                  │ │
-│  │ transformations:                                    │ │
-│  │   - sql: |                                          │ │
-│  │       SELECT                                        │ │
-│  │         customer_segment,                           │ │
-│  │         DATE_TRUNC('month', sale_date) AS month,    │ │
-│  │         SUM(revenue) AS total_revenue,              │ │
-│  │         COUNT(DISTINCT customer_id) AS customers    │ │
-│  │       FROM silver_sales                             │ │
-│  │       GROUP BY customer_segment, month              │ │
-│  │     phase: post                                     │ │
-│  │                                                      │ │
-│  │ # OPTION 2: External Python Logic                  │ │
-│  │ external_logic:                                     │ │
-│  │   type: python                                      │ │
-│  │   path: ./gold/build_sales_gold.py                  │ │
-│  │   entrypoint: build_gold                            │ │
-│  │   args:                                             │ │
-│  │     apply_ml_scoring: true                          │ │
-│  │                                                      │ │
-│  │ # OPTION 3: Jupyter Notebook                        │ │
-│  │ external_logic:                                     │ │
-│  │   type: notebook                                    │ │
-│  │   path: ./gold/sales_analytics.ipynb                │ │
-│  │   output_path: output/gold_fact_sales.parquet       │ │
-│  └────────────────────────────────────────────────────┘ │
-│                                                           │
-│  💾 Output: gold_fact_sales.parquet / Delta / Iceberg    │
-└──────────────────────────┬────────────────────────────────┘
-                           │
-                           ▼
-                ┌──────────────────────┐
-                │ 📊 Business Use      │
-                ├──────────────────────┤
-                │ • Dashboards         │
-                │ • ML Models          │
-                │ • APIs               │
-                │ • Data Products      │
-                └──────────────────────┘
+
+**Goal**: Business-ready aggregations, KPIs, and analytics datasets.
+
+```text
++----------------------------------------------------------+
+|     "Aggregated, Business KPIs, Analytics-Ready"          |
++----------------------------------------------------------+
+|                                                           |
+|  [Contract] gold_contract.yaml                            |
+|  +----------------------------------------------------+  |
+|  | # OPTION 1: SQL-Based Aggregation                  |  |
+|  | transformations:                                    |  |
+|  |   - sql: |                                          |  |
+|  |       SELECT                                        |  |
+|  |         customer_segment,                           |  |
+|  |         DATE_TRUNC('month', sale_date) AS month,    |  |
+|  |         SUM(revenue) AS total_revenue,              |  |
+|  |         COUNT(DISTINCT customer_id) AS customers    |  |
+|  |       FROM silver_sales                             |  |
+|  |       GROUP BY customer_segment, month              |  |
+|  |     phase: post                                     |  |
+|  |                                                      |  |
+|  | # OPTION 2: External Python Logic                  |  |
+|  | external_logic:                                     |  |
+|  |   type: python                                      |  |
+|  |   path: ./gold/build_sales_gold.py                  |  |
+|  |   entrypoint: build_gold                            |  |
+|  |   args:                                             |  |
+|  |     apply_ml_scoring: true                          |  |
+|  |                                                      |  |
+|  | # OPTION 3: Jupyter Notebook                        |  |
+|  | external_logic:                                     |  |
+|  |   type: notebook                                    |  |
+|  |   path: ./gold/sales_analytics.ipynb                |  |
+|  |   output_path: output/gold_fact_sales.parquet       |  |
+|  +----------------------------------------------------+  |
+|                                                           |
+|  Output: gold_fact_sales.parquet / Delta / Iceberg        |
++----------------------------+------------------------------+
+                             |
+                             v
+              +--------------------------+
+              | Business Use             |
+              +--------------------------+
+              |  - Dashboards            |
+              |  - ML Models             |
+              |  - APIs                  |
+              |  - Data Products         |
+              +--------------------------+
 ```
 
 ## External Python Logic Detail
 
 ```text
-┌──────────────────────────────────────────────────────────┐
-│     EXTERNAL PYTHON LOGIC FOR GOLD LAYER                  │
-│          (Advanced Transformations)                       │
-└──────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+|     EXTERNAL PYTHON LOGIC FOR GOLD LAYER                  |
+|          (Advanced Transformations)                       |
++----------------------------------------------------------+
+```
 
-API Call (Spark-Oriented):
+**API Call (Spark-Oriented):**
+
 ```python
 # Pass a Spark DataFrame to the contract
 contract = DataContract("build_sales_gold.yaml")
 good_df, bad_df = contract.run(spark_df, engine="spark")
 ```
 
+**Example Gold Processor:**
+
+```text
 Input: silver_sales (Spark DataFrame)
-   │
-   ▼
-┌──────────────────────────────────────────────────────────┐
-│  📄 gold/build_sales_gold.py                             │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ from pyspark.sql import functions as F              │ │
-│  │                                                      │ │
-│  │ def build_gold(df, **kwargs):                        │ │
-│  │     """Spark-oriented business logic for Gold"""     │ │
-│  │     return (                                        │ │
-│  │         df                                           │ │
-│  │         # Dynamic partitions / ML scoring            │ │
-│  │         .withColumn("churn_risk", predict_udf("id")) │ │
-│  │         .withColumn("amount_tax", F.col("amt")*1.1)  │ │
-│  │         .withColumn("month", F.month("sale_date"))   │ │
-│  │                                                      │ │
-│  │         # Filter out outliers                        │ │
-│  │         .filter("amt > 100")                         │ │
-│  │                                                      │ │
-│  │         # Distributed aggregations                   │ │
-│  │         .groupBy("segment", "month")                 │ │
-│  │         .agg(                                        │ │
-│  │             F.sum("amount_tax").alias("total_rev"),  │ │
-│  │             F.count("id").alias("txn_count")         │ │
-│  │         )                                            │ │
-│  │     )                                                │ │
-│  └────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────┘
-   │
-   ▼
+   |
+   v
++----------------------------------------------------------+
+|  gold/build_sales_gold.py                                 |
++----------------------------------------------------------+
+```
+
+```python
+from pyspark.sql import functions as F
+
+def build_gold(df, **kwargs):
+    """Spark-oriented business logic for Gold"""
+    return (
+        df
+        # Dynamic partitions / ML scoring
+        .withColumn("churn_risk", predict_udf("id"))
+        .withColumn("amount_tax", F.col("amt") * 1.1)
+        .withColumn("month", F.month("sale_date"))
+
+        # Filter out outliers
+        .filter("amt > 100")
+
+        # Distributed aggregations
+        .groupBy("segment", "month")
+        .agg(
+            F.sum("amount_tax").alias("total_rev"),
+            F.count("id").alias("txn_count")
+        )
+    )
+```
+
+```text
 Output: gold_fact_sales.parquet (ML-enriched, aggregated)
 ```
 

@@ -49,34 +49,12 @@ Recommended pattern:
 
 Example dependency graph (explicit layers):
 
-```mermaid
-graph TD
-  subgraph Bronze
-    B1[bronze_crm_customers]
-    B2[bronze_erp_products]
-    B3[bronze_pos_orders]
-  end
-  subgraph Silver
-    S1[silver_crm_customers]
-    S2[silver_erp_products]
-    S3[silver_pos_orders]
-  end
-  subgraph Gold
-    D1[gold_dim_customers]
-    D2[gold_dim_products]
-    F1[gold_fact_sales]
-    G1[gold_sales_mart]
-  end
-
-  B1 --> S1
-  B2 --> S2
-  B3 --> S3
-  S1 --> D1
-  S2 --> D2
-  S3 --> F1
-  D1 --> F1
-  D2 --> F1
-  F1 --> G1
+```text
+  BRONZE                   SILVER                   GOLD
+  ------                   ------                   ----
+  bronze_crm_customers --> silver_crm_customers --> gold_dim_customers --+
+  bronze_erp_products  --> silver_erp_products  --> gold_dim_products  --+--> gold_fact_sales --> gold_sales_mart
+  bronze_pos_orders    --> silver_pos_orders    -------------------------+
 ```
 
 In practice, this lets you run all Bronze contracts in parallel, then all Silver entity cleanses in parallel, then Gold dimensions/facts, and finally Gold marts/aggregates.

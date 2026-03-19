@@ -33,25 +33,33 @@ LakeLogic makes your **Data Contract the Single Source of Truth**.
 
 ### `contract.yaml` — this is your entire quality gate
 ```yaml
-# REQUIRED: Contract version for compatibility tracking
+# Contract version for compatibility tracking
 version: "1.0"
 
-# REQUIRED: Metadata for domain and system classification
+# Metadata: who owns this data and where it lives in the org
 info:
-  title: Silver Customers
-  owner: data-team
-  domain: CRM
-  system: Salesforce
+  title: Silver Customers                 # Human-readable name for logs and monitoring
+  owner: data-team                        # Team responsible for this contract
+  domain: CRM                             # Data mesh domain (CRM, Finance, Marketing...)
+  system: Salesforce                      # Source system this data originates from
+  classification: "confidential"          # Data sensitivity: public | internal | confidential | restricted
+  status: "production"                    # Lifecycle stage: development | staging | production | deprecated
 
-# REQUIRED: Schema definition with types and constraints
+# Custom tags for governance, cost tracking, and SLA enforcement
+metadata:
+  pii_present: true                       # Flags this dataset as containing personal data
+  retention_days: 2555                    # Operational retention policy (7 years) — used by automated purge jobs
+  sla_tier: "tier1"                       # SLA priority: tier1 = critical (< 4hr response)
+
+# Schema definition: expected columns, types, and constraints
 model:
   fields:
     - name: customer_id
       type: integer
-      required: true
+      required: true                      # Generates automatic NOT NULL quality rule
     - name: first_name
       type: string
-      pii: true  # Business value: Automatic PII detection and masking
+      pii: true                           # Marks as personally identifiable — enables auto-masking
     - name: last_name
       type: string
       pii: true
@@ -63,54 +71,62 @@ model:
     - name: status
       type: string
 
-# REQUIRED: Data acquisition pattern and location
+# Where to load data from (supports files, S3, ADLS, databases)
 source:
-  type: landing
-  path: "data/customers/*.csv"  # Supports: Files (S3/ADLS) or DB Tables (e.g., Unity Catalog)
-  load_mode: incremental
+  type: landing                           # Acquisition pattern: landing (files) | table (DB) | stream (Kafka)
+  path: "data/customers/*.csv"            # Glob pattern — also supports s3://, abfss://, Unity Catalog tables
+  load_mode: incremental                  # Only process new/changed data: full | incremental | cdc
 
-# OPTIONAL EXAMPLE: Data cleaning, enrichment, and deduplication logic
+# Data transformations: pre (before validation) and post (after validation)
 transformations:
-  - rename:
+  - rename:                               # Fix source naming drift before schema checks
       from: "cust_id"
       to: "customer_id"
-    phase: "pre"  # PRE: Applied before schema validation (fixes source naming drift)
-  - deduplicate:
+    phase: "pre"                          # PRE = applied before quality rules run
+  - deduplicate:                          # Keep most recent record per business key
       columns: ["customer_id"]
       order_by: "updated_at"
-  - sql: |
-      SELECT 
-        *,
-        UPPER(status) as status_code,
+  - sql: |                                # Full SQL for complex enrichment logic
+      SELECT *, UPPER(status) as status_code,
         revenue * 0.1 as tax_estimate
       FROM source
-    phase: "post" # POST: Applied after validation (complex logic and enrichment)
+    phase: "post"                         # POST = applied after validation, on good data only
 
-# OPTIONAL EXAMPLE: Validation rules (row-level and dataset-level)
+# Quality rules: rows that fail are quarantined, not silently dropped
 quality:
-  row_rules:
-    - sql: "customer_id IS NOT NULL AND email IS NOT NULL"
-    - sql: "status IN ('active', 'churned', 'pending')"
-    - sql: "revenue >= 0"
-    - sql: "email LIKE '%@%.%'"
-  dataset_rules:
-    - unique: "customer_id"
+  row_rules:                              # Row-level: each row evaluated independently
+    - sql: "customer_id IS NOT NULL AND email IS NOT NULL"   # Completeness check
+    - sql: "status IN ('active', 'churned', 'pending')"     # Enum validation
+    - sql: "revenue >= 0"                                    # Range validation
+    - sql: "email LIKE '%@%.%'"                              # Format validation
+  dataset_rules:                          # Dataset-level: aggregate checks on all good rows
+    - unique: "customer_id"               # No duplicate business keys
 
-# OPTIONAL EXAMPLE: Data provenance and audit injection
+# Data provenance and audit injection
 lineage:
-  enabled: true
+  enabled: true                           # Stamps every row with run_id, source path, timestamps
 
-# REQUIRED: Output storage and write strategy
+# Output: where and how to write validated data
 materialization:
-  strategy: merge
-  target_path: "silver/customers"  # Supports: File paths or DB Tables (e.g., Unity Catalog)
-  format: delta
-  merge_keys: [customer_id]
+  strategy: merge                         # Write mode: overwrite | append | merge (upsert)
+  target_path: "silver/customers"         # Destination path (also supports Unity Catalog table names)
+  format: delta                           # Storage format: delta | parquet | iceberg | csv
+  merge_keys: [customer_id]              # Business keys for merge/upsert operations
 
-# OPTIONAL EXAMPLE: Isolation for failed records
+# Quarantine: isolate failed rows with error reasons for replay
 quarantine:
-  enabled: true
-  target: "quarantine/customers"
+  enabled: true                           # If false, pipeline hard-fails on any quality error
+  target: "quarantine/customers"          # Where bad rows are written (with _lakelogic_errors column)
+
+# Regulatory compliance metadata — used for audit-ready reports
+compliance:
+  gdpr:
+    applicable: true                      # Whether GDPR applies to this dataset
+    legal_basis: "legitimate_interest"    # Art. 6(1) lawful basis for processing
+    purpose: "Customer engagement tracking"  # Why this data is processed (Art. 5(1)(b))
+    retention_period: "24 months"         # Legal retention limit for PII — separate from operational retention
+  eu_ai_act:
+    applicable: false                     # Whether EU AI Act applies (for ML feature datasets)
 ```
 
 !!! tip "Full Contract Reference"
@@ -251,68 +267,7 @@ LakeLogic automatically resolves catalog table names and uses **Delta-RS** for f
 
 LakeLogic enforces **Data Contracts as Quality Gates** at every layer of your medallion architecture:
 
-```text
-┌──────────────────────────────────────────────────┐
-│  📂 DATA SOURCE                                  │
-│  CSV · Parquet · Delta · JSON · XML · Excel      │
-│  APIs · URLs · Databases · Cloud Storage         │
-└───────────────────────┬──────────────────────────┘
-                        │
-                        ▼
-┌──────────────────────────────────────────────────┐
-│  📜 CONTRACT.YAML                                │
-│  Schema · Types · Nullability · Quality Rules    │
-└───────────────────────┬──────────────────────────┘
-                        │
-              ┌─────────┴─────────┐
-              │  DataProcessor    │
-              │  .run_source()    │
-              └─────────┬─────────┘
-                        │
-          ┌─────────────┼─────────────┐
-          ▼             ▼             ▼
-  ┌───────────┐ ┌───────────┐ ┌───────────┐
-  │  Polars   │ │  Spark    │ │  DuckDB   │  Same contract,
-  │  (local)  │ │  (cluster)│ │  (in-proc)│  any engine
-  └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
-        └──────────────┼──────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼                         ▼
-┌──────────────────┐     ┌──────────────────┐
-│  ✅ good_df      │     │  ❌ bad_df       │
-│  ────────────    │     │  ────────────    │
-│  Schema valid    │     │  🛑 QUARANTINE   │
-│  Rules passed    │     │  Every failed    │
-│  Types correct   │     │  row saved with  │
-│  Ready for next  │     │  failure reason  │
-│  layer           │     │  ↻ Fix & replay  │
-└────────┬─────────┘     └──────────────────┘
-         │
-         ▼
-┌──────────────────────────────────────────────────┐
-│  📊 PIPELINE ENRICHMENT                          │
-│  ✓ Lineage injection (run_id, timestamps)        │
-│  ✓ SLO checks (freshness, completeness)          │
-│  ✓ Schema drift detection                        │
-│  ✓ External logic (Python scripts / notebooks)   │
-│  ✓ Materialization (Delta, Parquet, DB)           │
-│  ✓ Run log (DuckDB audit trail)                  │
-│  ✓ Notifications (alerts on quarantine/failure)   │
-└──────────────────────────────────────────────────┘
-
-Each layer in the medallion uses its own contract:
-
-  🟤 BRONZE → Capture everything raw, no validation
-  ⚪ SILVER → Full validation, business rules, dedup
-  🟡 GOLD   → Aggregations, KPIs, analytics-ready
-
-✨ Key Guarantees:
-  • 100% Reconciliation: source_count = good_count + bad_count
-  • Engine Agnostic: Same contract on Polars, Spark, DuckDB
-  • No Silent Failures: Every bad row quarantined with reasons
-  • Full Lineage: Source → Bronze → Silver → Gold, all traced
-```
+![How LakeLogic Works](assets/lakelogic_how_it_works.png)
 
 [:octicons-arrow-right-24: See detailed architecture](architecture_diagram.md)
 

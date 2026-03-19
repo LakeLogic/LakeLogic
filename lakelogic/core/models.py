@@ -160,7 +160,10 @@ class SourceConfig(BaseModel):
     #     watermark_field: _snapshot_date
     #     watermark_strategy: manifest
     #     manifest_path: /dbfs/mnt/meta/manifests/bronze_to_silver_zoopla.json
-    watermark_strategy: str = "max_target"  # max_target | pipeline_log | manifest | lookback | date_range
+    #   delta_version — Snapshot version tracking for Spark Delta tables
+    #
+    # Example contract YAML:
+    watermark_strategy: Optional[str] = "max_target"  # max_target | pipeline_log | manifest | lookback | date_range | delta_version
     target_path: Optional[str] = None  # required when strategy == max_target
     lookback: Optional[str] = None  # e.g. "7 days", "3 hours" — strategy == lookback
     from_date: Optional[str] = None  # ISO date — strategy == date_range
@@ -1180,6 +1183,10 @@ class DataContract(BaseModel):
 
         load_mode = getattr(source, "load_mode", None)
         if load_mode != "incremental":
+            return self
+
+        # delta_version can store state in table properties, so it's exempt from mandatory run_log
+        if getattr(source, "watermark_strategy", None) == "delta_version":
             return self
 
         metadata = self.metadata or {}

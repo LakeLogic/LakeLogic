@@ -1260,7 +1260,24 @@ def _spark_scd2_dataframe(
     }
 
 
-def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format: str) -> Dict[str, Any]:
+def _spark_update_incremental_version(spark, table_name, version):
+    """Update the target table's properties with the last processed version."""
+    try:
+        # Use simple table name if it's a spark table reference
+        clean_name = table_name[6:] if table_name.startswith("table:") else table_name
+        spark.sql(f"ALTER TABLE {clean_name} SET TBLPROPERTIES ('lakelogic.last_source_version' = '{version}')")
+        logger.info(f"Updated {clean_name} property lakelogic.last_source_version to {version}")
+    except Exception as e:
+        logger.warning(f"Failed to update table property for {clean_name}: {e}")
+
+
+def _materialize_spark_dataframe(
+    df: Any,
+    contract,
+    target: Path,
+    output_format: str,
+    incremental_metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Materialize Spark DataFrames to a path (CSV, Parquet, Delta, Iceberg).
 
@@ -1299,7 +1316,12 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
             raise ValueError("primary_key is required for merge strategy.")
         result = _spark_merge_dataframe(spark, df, target_str, primary_key, output_format, location=location)
         if target_str.startswith("table:"):
-            _spark_apply_table_metadata(spark, target_str[6:], contract)
+            table_name = target_str[6:]
+            _spark_apply_table_metadata(spark, table_name, contract)
+            if incremental_metadata and incremental_metadata.get("strategy") == "delta_version":
+                tv = incremental_metadata.get("to_version")
+                if tv is not None:
+                    _spark_update_incremental_version(spark, table_name, tv)
         return result
 
     # Handle SCD2 strategy natively
@@ -1316,7 +1338,12 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
             location=location,
         )
         if target_str.startswith("table:"):
-            _spark_apply_table_metadata(spark, target_str[6:], contract)
+            table_name = target_str[6:]
+            _spark_apply_table_metadata(spark, table_name, contract)
+            if incremental_metadata and incremental_metadata.get("strategy") == "delta_version":
+                tv = incremental_metadata.get("to_version")
+                if tv is not None:
+                    _spark_update_incremental_version(spark, table_name, tv)
         return result
 
     # Standard append/overwrite
@@ -1339,6 +1366,10 @@ def _materialize_spark_dataframe(df: Any, contract, target: Path, output_format:
         table_name = target_str[len("table:") :]
         _spark_save_as_table(writer, table_name, mode, location)
         _spark_apply_table_metadata(spark, table_name, contract)
+        if incremental_metadata and incremental_metadata.get("strategy") == "delta_version":
+            tv = incremental_metadata.get("to_version")
+            if tv is not None:
+                _spark_update_incremental_version(spark, table_name, tv)
         logger.info(f"Materialized Spark dataframe to table {table_name} ({output_format})")
         return {
             "target": table_name,
@@ -1591,6 +1622,7 @@ def materialize_dataframe(
     output_format: Optional[str] = None,
     engine_name: Optional[str] = None,
     storage_options: Optional[Dict[str, str]] = None,
+    incremental_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Materialize validated data to the configured target.
@@ -1641,6 +1673,7 @@ def materialize_dataframe(
             contract,
             resolved_target,
             resolved_format,
+            incremental_metadata=incremental_metadata,
         )
 
     strategy = (mat.strategy or "append").lower()

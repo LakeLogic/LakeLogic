@@ -186,21 +186,21 @@ This enforces approval gates before publishing Gold outputs when thresholds are 
 
 ## Lifecycle Window Rule
 
-Validate that event timestamps fall within a subscriber lifecycle:
+Validate that event timestamps fall within a customer lifecycle:
 
 ```yaml
 quality:
   row_rules:
     - lifecycle_window:
         event_ts: event_ts
-        event_key: subscriber_id
-        reference: subscribers
-        reference_key: subscriber_id
+        event_key: customer_id
+        reference: customers
+        reference_key: customer_id
         start_field: start_date
         end_field: end_date
         end_default: "9999-12-31"
 ```
-This catches events that occur before a subscriber starts or after they end.
+This catches events that occur before a customer starts or after they end.
 
 ## Upstream Freshness Policy
 
