@@ -33,10 +33,10 @@ LakeLogic makes your **Data Contract the Single Source of Truth**.
 
 ### `contract.yaml` — this is your entire quality gate
 ```yaml
-# Contract version for compatibility tracking
+# REQUIRED: Contract version for compatibility tracking
 version: "1.0"
 
-# Metadata: who owns this data and where it lives in the org
+# REQUIRED: Metadata — who owns this data and where it lives in the org
 info:
   title: Silver Customers                 # Human-readable name for logs and monitoring
   owner: data-team                        # Team responsible for this contract
@@ -45,39 +45,48 @@ info:
   classification: "confidential"          # Data sensitivity: public | internal | confidential | restricted
   status: "production"                    # Lifecycle stage: development | staging | production | deprecated
 
-# Custom tags for governance, cost tracking, and SLA enforcement
+# OPTIONAL: Custom tags for governance, cost tracking, and SLA enforcement
 metadata:
   pii_present: true                       # Flags this dataset as containing personal data
   retention_days: 2555                    # Operational retention policy (7 years) — used by automated purge jobs
   sla_tier: "tier1"                       # SLA priority: tier1 = critical (< 4hr response)
 
-# Schema definition: expected columns, types, and constraints
+# REQUIRED: Schema definition — expected columns, types, and constraints
+# Field descriptions serve two purposes:
+#   1. Business documentation — so analysts understand each field without asking
+#   2. LLM context — used by `lakelogic bootstrap --ai` to generate smarter rules
 model:
   fields:
     - name: customer_id
       type: integer
       required: true                      # Generates automatic NOT NULL quality rule
+      description: "Unique identifier for each customer record"
     - name: first_name
       type: string
       pii: true                           # Marks as personally identifiable — enables auto-masking
+      description: "Customer's legal first name"
     - name: last_name
       type: string
       pii: true
+      description: "Customer's legal last name"
     - name: email
       type: string
       pii: true
+      description: "Primary email address used for account login and communications"
     - name: revenue
       type: float
+      description: "Lifetime revenue attributed to this customer in base currency"
     - name: status
       type: string
+      description: "Current account state: active, churned, or pending onboarding"
 
-# Where to load data from (supports files, S3, ADLS, databases)
+# REQUIRED: Where to load data from (supports files, S3, ADLS, databases)
 source:
   type: landing                           # Acquisition pattern: landing (files) | table (DB) | stream (Kafka)
   path: "data/customers/*.csv"            # Glob pattern — also supports s3://, abfss://, Unity Catalog tables
   load_mode: incremental                  # Only process new/changed data: full | incremental | cdc
 
-# Data transformations: pre (before validation) and post (after validation)
+# OPTIONAL: Data transformations — pre (before validation) and post (after validation)
 transformations:
   - rename:                               # Fix source naming drift before schema checks
       from: "cust_id"
@@ -92,7 +101,7 @@ transformations:
       FROM source
     phase: "post"                         # POST = applied after validation, on good data only
 
-# Quality rules: rows that fail are quarantined, not silently dropped
+# OPTIONAL: Quality rules — rows that fail are quarantined, not silently dropped
 quality:
   row_rules:                              # Row-level: each row evaluated independently
     - sql: "customer_id IS NOT NULL AND email IS NOT NULL"   # Completeness check
@@ -102,23 +111,31 @@ quality:
   dataset_rules:                          # Dataset-level: aggregate checks on all good rows
     - unique: "customer_id"               # No duplicate business keys
 
-# Data provenance and audit injection
+# OPTIONAL: Data provenance and audit injection
 lineage:
   enabled: true                           # Stamps every row with run_id, source path, timestamps
 
-# Output: where and how to write validated data
+# REQUIRED: Output — where and how to write validated data
 materialization:
   strategy: merge                         # Write mode: overwrite | append | merge (upsert)
   target_path: "silver/customers"         # Destination path (also supports Unity Catalog table names)
   format: delta                           # Storage format: delta | parquet | iceberg | csv
   merge_keys: [customer_id]              # Business keys for merge/upsert operations
 
-# Quarantine: isolate failed rows with error reasons for replay
+# OPTIONAL: Quarantine — isolate failed rows with error reasons for replay
 quarantine:
   enabled: true                           # If false, pipeline hard-fails on any quality error
   target: "quarantine/customers"          # Where bad rows are written (with _lakelogic_errors column)
 
-# Regulatory compliance metadata — used for audit-ready reports
+# OPTIONAL: Service Level Objectives — data reliability monitoring
+service_levels:
+  freshness:
+    threshold: "24h"                      # Data must be refreshed within this window
+    field: "updated_at"                   # Timestamp field to check staleness against
+  availability:
+    threshold: 99.9                       # % of runs that must produce valid output
+
+# OPTIONAL: Regulatory compliance metadata — used for audit-ready reports
 compliance:
   gdpr:
     applicable: true                      # Whether GDPR applies to this dataset
