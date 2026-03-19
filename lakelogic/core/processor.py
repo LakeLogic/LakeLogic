@@ -1147,46 +1147,67 @@ class DataProcessor:
 
                         # ── Incremental watermark for Spark table sources ─────
                         _src_cfg = getattr(self.contract, "source", None)
-                        if getattr(_src_cfg, "load_mode", None) == "incremental" and not os.environ.get(
+                        if _src_cfg and getattr(_src_cfg, "load_mode", None) == "incremental" and not os.environ.get(
                             "LAKELOGIC_SKIP_INCREMENTAL_CHECK"
                         ):
-                            _wm_field = getattr(_src_cfg, "watermark_field", None)
-                            _mat = getattr(self.contract, "materialization", None)
-                            _tgt = getattr(_mat, "target_path", None) if _mat else None
-                            if _wm_field and _tgt:
-                                _src_col, _tgt_col = self._resolve_watermark_columns(_wm_field)
+                            from lakelogic.core.incremental import IncrementalBoundary
 
-                                # Read max watermark from the target table
-                                _max_wm = None
-                                _tgt_name = _tgt[6:] if _tgt.startswith("table:") else _tgt
-                                try:
-                                    _wm_row = spark.sql(
-                                        f"SELECT MAX(`{_tgt_col}`) AS max_wm FROM {_tgt_name}"
-                                    ).collect()
-                                    if _wm_row and _wm_row[0]["max_wm"] is not None:
-                                        _max_wm = _wm_row[0]["max_wm"]
-                                except Exception as _wm_err:
-                                    logger.debug(f"Watermark read failed (full load): {_wm_err}")
-
-                                if _max_wm is not None:
-                                    from pyspark.sql import functions as F
-
-                                    logger.info(
-                                        f"Incremental load: filtering {_src_col} > {_max_wm!r} "
-                                        f"(target column: '{_tgt_col}')"
-                                    )
-                                    df = df.filter(F.col(_src_col) > F.lit(_max_wm))
+                            try:
+                                # Resolve boundary using the unified IncrementalBoundary factory
+                                boundary = IncrementalBoundary.from_source_config(_src_cfg)
+                                
+                                if boundary.strategy == "delta_version":
+                                    fv = boundary.metadata.get("from_version")
+                                    tv = boundary.metadata.get("to_version")
+                                    logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
+                                    # Reload with version options
+                                    table_name = path[6:] if path.startswith("table:") else path
+                                    df = spark.read.format("delta") \
+                                        .option("startingVersion", fv) \
+                                        .option("endingVersion", tv) \
+                                        .table(table_name)
                                 else:
-                                    logger.info("Incremental load: first run or target empty — loading all rows.")
+                                    # Standard watermark filter
+                                    _wm_field = getattr(_src_cfg, "watermark_field", None)
+                                    if _wm_field:
+                                        df = df.filter(boundary.spark_filter(_wm_field))
+                                        logger.info(f"Incremental load (Spark): applied {boundary.strategy} boundary")
+
+                                # Store metadata for materialization stage (saving the new high-water mark)
+                                self._incremental_metadata = boundary.metadata
+                            except Exception as _wm_err:
+                                logger.debug(f"Incremental boundary resolution failed (falling back to full): {_wm_err}")
+
                     else:
+                        # File path or explicit format
+                        _src_cfg = getattr(self.contract, "source", None)
+                        if _src_cfg and getattr(_src_cfg, "load_mode", None) == "incremental" and fmt == "delta":
+                            from lakelogic.core.incremental import IncrementalBoundary
+                            try:
+                                boundary = IncrementalBoundary.from_source_config(_src_cfg)
+                                if boundary.strategy == "delta_version":
+                                    fv = boundary.metadata.get("from_version")
+                                    tv = boundary.metadata.get("to_version")
+                                    logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
+                                    df = spark.read.format("delta") \
+                                        .option("readChangeFeed", "true") \
+                                        .option("startingVersion", fv) \
+                                        .option("endingVersion", tv) \
+                                        .load(path)
+                                    self._incremental_metadata = boundary.metadata
+                                    # If using CDF, we don't need a normal load
+                                    return self.run(df, source_path=path, reset_trace=False)
+                            except Exception as _cdf_err:
+                                logger.debug(f"Delta CDF read failed, falling back to standard read: {_cdf_err}")
+
                         reader = spark.read.format(fmt)
                         if fmt == "csv":
                             reader = reader.option("header", "true")
                         elif fmt == "json":
-                            # Each .json file is a single JSON object (not NDJSON),
-                            # so multiLine=true is required for Spark to parse it
-                            # as one record rather than one-line-per-record.
                             reader = reader.option("multiLine", "true")
+                        df = reader.load(file_paths if file_paths else path)
+                        # Default Spark load for other formats (Parquet, CSV, JSON)
+                        # We use the reader configured above (lines 1198-1202)
                         df = reader.load(file_paths if file_paths else path)
 
             elif self.engine_name in ["snowflake", "bigquery"]:
@@ -1910,6 +1931,7 @@ class DataProcessor:
             self.contract,
             target_path=target,
             engine_name=self.engine_name,
+            incremental_metadata=getattr(self, "_incremental_metadata", None),
         )
 
         if bad_df is not None and self.contract.quarantine and self.contract.quarantine.target:
@@ -2084,6 +2106,7 @@ class DataProcessor:
             "slos": slos or {},
             "row_rule_failures": row_rule_failures or [],
             "schema_drift": schema_drift or {},
+            "incremental_metadata": getattr(self, "_incremental_metadata", {}),
         }
 
     def _inject_lineage(

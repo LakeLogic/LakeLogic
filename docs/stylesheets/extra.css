@@ -155,9 +155,22 @@
   background: rgba(37, 99, 235, 0.08);
 }
 
+/* --- Mermaid Diagram Sizing --- */
+.md-typeset .mermaid {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.md-typeset .mermaid svg {
+  min-width: 800px;
+  max-width: 100%;
+  height: auto;
+}
+
 /* --- Hero Section Styling --- */
 .hero-section {
-  text-align: center;
+  text-align: left;
   padding: 4rem 2rem;
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(59, 130, 246, 0.05));
   border-radius: 12px;
@@ -176,14 +189,12 @@
   color: var(--md-default-fg-color--light);
   margin-bottom: 2rem;
   max-width: 700px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 .hero-cta {
   display: flex;
   gap: 1rem;
-  justify-content: center;
+  justify-content: flex-start;
   flex-wrap: wrap;
   margin-top: 2rem;
 }

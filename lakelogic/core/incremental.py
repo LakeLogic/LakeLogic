@@ -73,6 +73,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +489,94 @@ class IncrementalBoundary:
 
         _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="max_target", metadata=meta)
+
+    # ── Strategy 1b: Delta Table Version (Snapshot) ───────────────────────────
+
+    @classmethod
+    def from_delta_version(
+        cls,
+        source_path: str,
+        target_path: str,
+        *,
+        to_version: Optional[int] = None,
+        default_version: int = 0,
+    ) -> Boundary:
+        """
+        Strategy: query processing window based on Delta table versions.
+
+        Retrieves the 'lakelogic.last_source_version' from the target Delta
+        table's properties.  If not found, starts from `default_version`.
+
+        Parameters
+        ----------
+        source_path : str
+            Source Delta table path.
+        target_path : str
+            Target Delta table path (where we store the state).
+        to_version : int, optional
+            Upper bound — defaults to the current source version.
+        default_version : int, optional
+            Fallback version if no state is found. Default: 0.
+        """
+        try:
+            from pyspark.sql import SparkSession
+
+            spark = SparkSession.getActiveSession()
+            if spark is None:
+                raise RuntimeError("No active Spark session")
+
+            # 1. Resolve starting version from target properties
+            try:
+                # We use SHOW TBLPROPERTIES which is standard in Spark/Databricks
+                target_name = target_path[6:] if target_path.startswith("table:") else f"delta.`{target_path}`"
+                props_df = spark.sql(f"SHOW TBLPROPERTIES {target_name}")
+                props = {row["key"]: row["value"] for row in props_df.collect()}
+                last_ver_str = props.get("lakelogic.last_source_version")
+                last_version = int(last_ver_str) if last_ver_str else None
+            except Exception:
+                last_version = None
+
+            # 2. Resolve target version from source history
+            source_name = source_path[6:] if source_path.startswith("table:") else f"delta.`{source_path}`"
+            curr_version = spark.sql(f"DESCRIBE HISTORY {source_name} LIMIT 1").collect()[0]["version"]
+
+            from_v = (last_version + 1) if last_version is not None else default_version
+            to_v = to_version if to_version is not None else curr_version
+
+            # Handle source rollback or target state beyond source history
+            if from_v > to_v:
+                logger.warning(
+                    f"Last processed version ({last_version}) is >= current source version ({curr_version}). "
+                    f"Possible source rollback or target state drift. Resetting to {to_v} (nothing to process)."
+                )
+                from_v = to_v
+
+            meta = {
+                "from_version": from_v,
+                "to_version": to_v,
+                "last_processed_version": last_version,
+                "source_path": source_path,
+                "target_path": target_path,
+            }
+
+            # Map version numbers to dummy datetimes (Boundary requires datetimes)
+            # We use the epoch + version-seconds as a stable-ish representation
+            return Boundary(
+                from_dt=datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=from_v),
+                to_dt=datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=to_v),
+                strategy="delta_version",
+                metadata=meta,
+            )
+
+        except Exception as exc:
+            # Fallback to full load if Spark/Delta check fails
+            logger.warning(f"Delta version resolution failed for {source_path}: {exc}")
+            return Boundary(
+                from_dt=datetime(1900, 1, 1, tzinfo=timezone.utc),
+                to_dt=datetime.now(timezone.utc),
+                strategy="delta_version",
+                metadata={"error": str(exc), "from_version": 0},
+            )
 
     # ── Strategy 2: Pipeline log / audit table ────────────────────────────────
 
@@ -919,6 +1010,11 @@ class IncrementalBoundary:
             td = to_date or src.get("to_date")
             return cls.from_date_range(fd, td, partition_filters=merged_pf or None)
 
+        if strategy == "delta_version":
+            tp = target_path or src.get("target_path", "")
+            sp = src.get("path", "")
+            return cls.from_delta_version(sp, tp)
+
         tp = target_path or src.get("target_path", "")
         b = cls.from_max_target(tp, watermark_field=wm_field)
         b.partition_filters = merged_pf
@@ -992,6 +1088,11 @@ class IncrementalBoundary:
                 cfg.get("from_date"),
                 cfg.get("to_date"),
                 partition_filters=merged_pf or None,
+            )
+        if strategy == "delta_version":
+            return cls.from_delta_version(
+                cfg.get("path", ""),
+                cfg.get("target_path", ""),
             )
         b = cls.from_max_target(cfg.get("target_path", ""), watermark_field=wm_field)
         b.partition_filters = merged_pf

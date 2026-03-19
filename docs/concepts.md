@@ -1,36 +1,8 @@
-# The Medallion Architecture
+# How It Works
 
 LakeLogic is the **quality gate** between the layers of your Data Lakehouse.
 
-```mermaid
-graph LR
-    subgraph "Landing"
-        A[Raw Sources]
-    end
-
-    subgraph "Bronze Layer"
-        B[Raw Data]
-    end
-
-    subgraph "Silver Layer"
-        C[Filtered, Cleaned, Transformed, Enriched]
-    end
-
-    subgraph "Gold Layer"
-        D[Business Ready]
-    end
-
-    B -->|🛡️ Quality Gate| C
-    C -->|🛡️ Materialize| D
-    
-    B -.->|Fail| Q[Quarantine 🛑]
-    Q -.->|Correction| B
-    
-    style B fill:#cd7f32,stroke:#8b5a00,color:#fff,stroke-width:3px
-    style C fill:#e8e8e8,stroke:#666,color:#000,stroke-width:3px
-    style D fill:#ffd700,stroke:#b8860b,color:#000,stroke-width:3px
-    style Q fill:#ef4444,stroke:#991b1b,color:#fff,stroke-width:3px
-```
+> For the full architecture diagram showing how Data Sources, Data Contracts, and LakeLogic connect to the Medallion Architecture, see the [Architecture Overview](architecture_diagram.md).
 
 ## Cleansing Transformations (Bronze → Silver)
 
