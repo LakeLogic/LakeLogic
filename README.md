@@ -13,14 +13,16 @@ Every row validated, quarantined, or promoted — automatically.
 
 ---
 
-LakeLogic replaces fragile scripts with a **modular, LEGO-block architecture**. Each table lives in its own container with its own Data Contract — making your **Data Contract the Single Source of Truth**.
+## 🌐 Data Mesh Alignment
 
-| Principle | What It Means |
+LakeLogic is built for the decentralized data estate, directly supporting the four pillars of Data Mesh:
+
+| Pillar | How LakeLogic Delivers |
 | :--- | :--- |
-| **Standardized Engine** | Each module uses the same LakeLogic runtime for Bronze and Silver. Write rules once, not 50 times. |
-| **External Plug-ins (Gold)** | For complex Gold tables, plug in specific Python scripts or Notebooks for business KPIs. |
-| **Independent Testing** | Run 100 stress tests on Table A without needing Table B to exist. |
-| **Engine Portability** | Same contract runs on **Polars**, **Spark**, **DuckDB**, or **Pandas** — no code changes. |
+| **Domain Ownership** | Contracts are owned and defined by domain teams (e.g., CRM, Finance) who know the data best. |
+| **Data as a Product** | Contracts serve as the explicit "product interface," guaranteeing quality for consumers. |
+| **Self-Serve Platform** | A standardized runtime that any team can use to deploy quality gates without infra silos. |
+| **Federated Governance** | Global standards (e.g., PII masking) are defined centrally but enforced locally at every layer. |
 
 ---
 
