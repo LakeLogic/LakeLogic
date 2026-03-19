@@ -99,11 +99,32 @@ model:
       type: string
       description: "Current account state: active, churned, or pending onboarding"
 
+# OPTIONAL: Schema evolution and unknown field handling
+schema_policy:
+  evolution: "strict"                     # Schema change behavior: strict | compatible | allow
+  unknown_fields: "quarantine"            # Unknown columns: quarantine | drop | allow
+
 # REQUIRED: Where to load data from (supports files, S3, ADLS, databases)
 source:
   type: landing                           # Acquisition pattern: landing (files) | table (DB) | stream (Kafka)
   path: "data/customers/*.csv"            # Glob pattern — also supports s3://, abfss://, Unity Catalog tables
   load_mode: incremental                  # Only process new/changed data: full | incremental | cdc
+
+# OPTIONAL: Reference data for joins and enrichment
+links:
+  - name: "dim_countries"                  # Logical name used in lookup/join transformations
+    path: "./reference/countries.parquet"   # File path, S3 URI, or Unity Catalog table
+    type: "parquet"                         # Format: parquet | csv | table
+    broadcast: true                        # Broadcast join for small dimensions (Spark)
+
+# OPTIONAL: Environment-specific overrides (activate via LAKELOGIC_ENV)
+environments:
+  dev:
+    path: "dev/customers"                  # Cheaper storage for development
+    format: "parquet"
+  prod:
+    path: "s3://prod-lake/silver/customers"
+    format: "delta"
 
 # OPTIONAL: Data transformations — pre (before validation) and post (after validation)
 transformations:
@@ -130,17 +151,36 @@ quality:
   dataset_rules:                          # Dataset-level: aggregate checks on all good rows
     - unique: "customer_id"               # No duplicate business keys
 
+# OPTIONAL: Data provenance and audit trail
+lineage:
+  enabled: true                           # Stamps every row with run_id, source path, timestamps
+
 # REQUIRED: Output — where and how to write validated data
 materialization:
   strategy: merge                         # Write mode: overwrite | append | merge (upsert)
   target_path: "silver/customers"         # Destination path (also supports Unity Catalog table names)
   format: delta                           # Storage format: delta | parquet | iceberg | csv
   merge_keys: [customer_id]              # Business keys for merge/upsert operations
+  partition_by:                           # Partition columns for query performance
+    - "country"
+    - "created_date"
+  cluster_by: ["customer_id"]            # Clustering columns (Delta/Iceberg optimization)
+  reprocess_policy: "overwrite_partition" # Idempotent re-runs: overwrite_partition | append | fail
+
+# OPTIONAL: Soft deletes — GDPR "right to erasure" without losing audit trail
+soft_deletes:
+  enabled: true                           # Mark rows as deleted instead of hard-deleting
+  flag_field: "_is_deleted"               # Boolean column added to target table
+  reason_field: "_delete_reason"          # e.g. "GDPR request", "duplicate"
+  timestamp_field: "_deleted_at"          # When the deletion was recorded
 
 # OPTIONAL: Quarantine — isolate failed rows with error reasons for replay
 quarantine:
   enabled: true                           # If false, pipeline hard-fails on any quality error
   target: "quarantine/customers"          # Where bad rows are written (with _lakelogic_errors column)
+  notifications:                          # Alert channels when rows are quarantined
+    - target: "https://hooks.slack.com/services/YOUR/WEBHOOK"  # Slack, Teams, email auto-detected
+      on_events: ["quarantine", "failure", "schema_drift"]
 
 # OPTIONAL: Service Level Objectives — data reliability monitoring
 service_levels:
