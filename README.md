@@ -13,22 +13,10 @@ Every row validated, quarantined, or promoted — automatically.
 
 ---
 
-## The Problem
-
-In most data teams, pipelines are built as **single, breakable chains**. One giant script handles multiple tables — when you change a column for Table A, you accidentally break Table B.
-
-This creates two compounding problems:
-
-- **Logic Drift** — You define "valid" in SQL for your warehouse, then rewrite those same rules in Python for your Spark jobs. Your definitions of "good data" diverge silently.
-- **The Ripple Effect** — Intertwined scripts mean one error crashes the whole system. Debugging means searching through a "monster" script to find which table broke.
-
-## The Solution: Define Once. Enforce Everywhere
-
 LakeLogic replaces fragile scripts with a **modular, LEGO-block architecture**. Each table lives in its own container with its own Data Contract — making your **Data Contract the Single Source of Truth**.
 
 | Principle | What It Means |
 | :--- | :--- |
-| **Isolation** | `CRM_Customers` and `CRM_Transactions` have zero code dependencies. If Transactions fails, Customers still loads. |
 | **Standardized Engine** | Each module uses the same LakeLogic runtime for Bronze and Silver. Write rules once, not 50 times. |
 | **External Plug-ins (Gold)** | For complex Gold tables, plug in specific Python scripts or Notebooks for business KPIs. |
 | **Independent Testing** | Run 100 stress tests on Table A without needing Table B to exist. |
