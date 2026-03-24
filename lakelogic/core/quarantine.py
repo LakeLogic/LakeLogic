@@ -146,6 +146,13 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
         catalog_schema = ".".join(parts[:-1])
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog_schema}")
 
+    # Count rows before writing — counting the table after append would
+    # return the cumulative total, not just the rows from this run.
+    try:
+        rows_written = df.count()
+    except Exception:
+        rows_written = 0
+
     writer = df.write.mode(mode).format(table_format)
     # Enable schema evolution so new quarantine columns (from contract changes)
     # are merged into the existing table rather than causing a schema mismatch.
@@ -155,14 +162,6 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
         writer = writer.option("merge-schema", "true")
 
     writer.saveAsTable(table_name)
-
-    # Use spark.sql count to avoid df.count() which triggers RDD operations
-    # not permitted on Databricks Unity Catalog shared / serverless clusters.
-    try:
-        rows_written = spark.sql(f"SELECT COUNT(*) FROM {table_name}").collect()[0][0]
-    except Exception as e:
-        logger.warning(f"Failed to count quarantined rows in {table_name}: {e}")
-        rows_written = 0
 
     logger.info(
         f"Wrote {rows_written} quarantined rows to Spark table {table_name} (format={table_format}, mode={mode})"
@@ -421,9 +420,7 @@ def _write_quarantine_table_bigquery(df: Any, contract, table_name: str, metadat
     return {"target": table_id, "rows_written": rows_written, "format": "bigquery"}
 
 
-# ── Public API ──
-
-
+# ──
 def materialize_quarantine(
     df: Any,
     contract,
@@ -431,6 +428,7 @@ def materialize_quarantine(
     *,
     output_format: Optional[str] = None,
     engine_name: Optional[str] = None,
+    quarantine_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Materialize quarantined records to the quarantine target.
@@ -440,18 +438,42 @@ def materialize_quarantine(
         contract: DataContract with quarantine settings.
         target_path: Optional override target path.
         output_format: Optional override output format.
+        engine_name: Engine name for backend defaults.
+        quarantine_mode: Runtime mode — "path" (file target), "table" (shared table).
+            Defaults to "path". When "table", uses quarantine.table instead of quarantine.target.
 
     Returns:
         Metadata about the write.
     """
-    if contract is None or contract.quarantine is None or not contract.quarantine.target:
+    if contract is None or contract.quarantine is None:
+        return {}
+
+    mode = (quarantine_mode or "path").lower().strip()
+    q = contract.quarantine
+
+    # ── Table mode: route to quarantine.table via table backend ──
+    if mode == "table":
+        table_name = getattr(q, "table", None)
+        if not table_name:
+            logger.warning("quarantine_mode='table' but no quarantine.table defined — falling back to path")
+            mode = "path"
+        else:
+            return _write_quarantine_table(
+                df,
+                contract,
+                table_name,
+                engine_name=engine_name,
+            )
+
+    # ── Path mode (default): write to quarantine.target ──
+    if not q.target:
         return {}
 
     base_path = getattr(contract, "_base_path", None)
     raw_target = str(target_path or contract.quarantine.target)
 
     if raw_target.startswith("table:"):
-        table_name = raw_target[len("table:") :]
+        table_name = raw_target[len("table:"):]
         return _write_quarantine_table(
             df,
             contract,

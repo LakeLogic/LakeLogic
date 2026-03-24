@@ -75,7 +75,8 @@ class Info(BaseModel):
     """Contract metadata such as title, version, and ownership."""
 
     title: str
-    version: str
+    table_name: Optional[str] = None  # canonical table name (e.g. "bronze_ga_events")
+    version: str = "1.0.0"
     description: Optional[str] = None
     owner: Optional[str] = None
     contact: Optional[Union[str, Dict[str, str]]] = None
@@ -107,6 +108,30 @@ class Environment(BaseModel):
     format: Optional[str] = None
 
 
+class SourcePartition(BaseModel):
+    """Date-partitioned landing directory configuration.
+
+    Limits file globbing to only the relevant date partitions instead
+    of scanning the entire landing directory.
+
+    Example YAML::
+
+        source:
+          path: "{landing_root}/events"
+          partition:
+            format: "y_%Y/m_%m/d_%d"   # strftime tokens
+            lookback_days: 3
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    format: str                              # strftime format, e.g. "y_%Y/m_%m/d_%d"
+    lookback_days: int = 1                   # how many days back to scan
+    start_date: Optional[str] = None         # ISO date override for backfills
+    end_date: Optional[str] = None           # ISO date override for backfills
+    file_pattern: Optional[str] = None       # glob pattern; auto-derives from source.format
+
+
 class SourceConfig(BaseModel):
     """Source acquisition settings for landing/stream/table inputs."""
 
@@ -120,6 +145,9 @@ class SourceConfig(BaseModel):
     watermark_field: Optional[str] = None
     cdc_op_field: Optional[str] = None
     cdc_delete_values: List[str] = Field(default_factory=list)
+
+    # Date-partitioned landing support
+    partition: Optional[SourcePartition] = None
 
     # ── Incremental processing strategy ──────────────────────────────────────
     # Declares HOW the pipeline resolves the (from_dt, to_dt) window for
@@ -228,6 +256,10 @@ class Link(BaseModel):
     type: str = "parquet"  # parquet, csv, table
     table: Optional[str] = None
     broadcast: bool = False
+    # Column projection — only load these columns from the linked table.
+    # Reduces DataFrame footprint by avoiding loading unused columns.
+    # If empty, all columns are loaded (default behavior).
+    columns: List[str] = Field(default_factory=list)
 
 
 class TransformationRename(BaseModel):
@@ -680,6 +712,7 @@ class QualityRule(BaseModel):
     category: str = "correctness"
     description: Optional[str] = None
     severity: str = "error"  # error, warning, info
+    phase: str = "pre"  # pre | post — post-phase rules run after transforms
 
     # Thresholds for dataset-level rules
     must_be_between: Optional[List[float]] = None
@@ -764,6 +797,7 @@ class Quarantine(BaseModel):
     """Quarantine settings and notification routing."""
 
     target: Optional[str] = None
+    table: Optional[str] = None  # shared quarantine table (e.g. "{domain_catalog}._quarantine")
     enabled: bool = True
     include_error_reason: bool = True
     strict_notifications: bool = True
@@ -807,13 +841,24 @@ class FieldDefinition(BaseModel):
     rules: List[QualityRule] = Field(default_factory=list)
     # Generator hints — persisted so DataGenerator.from_dbt() round-trips correctly.
     # accepted_values: generator picks from this list; validator checks the IN rule.
-    # min / max: generator stays within range; validator checks >=/<= expression rules.
+    # min / max: generator stays within range; validator checks >=/< expression rules.
     accepted_values: Optional[List[Any]] = None
     min: Optional[float] = None
     max: Optional[float] = None
     # Foreign-key hint — generator samples from the PK pool of the referenced contract.
     # At validation time, DataProcessor evaluates the corresponding referential_integrity rule.
     foreign_key: Optional[ForeignKeyRef] = None
+
+    # ── PII Security Group Mapping ───────────────────────────────────────────
+    # security_groups: list of group names that are allowed to see unmasked values.
+    # If the current user is NOT in any of these groups, the masking strategy is applied.
+    # Groups map to IAM/AD groups, Databricks UC groups, or custom group providers.
+    security_groups: List[str] = Field(default_factory=list)
+    # Per-field default masking strategy: nullify | hash | redact | partial | tokenize | encrypt
+    masking: Optional[str] = None
+    # Optional reference to an encrypted PII vault table for reversible unmasking.
+    # Format: "catalog.schema.table.column" or "vault://key-name"
+    pii_vault: Optional[str] = None
 
     # LLM extraction hints (used when field appears in extraction.output_schema)
     extraction_task: Optional[str] = None  # ner | classification | summarization | local_llm
@@ -1417,47 +1462,74 @@ class DataContract(BaseModel):
                             "note": "cloud location would be deleted",
                         }
                     else:
+                        _deleted = False
+                        # Strategy 1: Databricks dbutils (natively handles abfss://, s3://, etc.)
                         try:
-                            import fsspec
-                            import os as _os2
+                            from pyspark.sql import SparkSession
+                            _spark = SparkSession.getActiveSession()
+                            if _spark:
+                                _dbutils = None
+                                try:
+                                    # Databricks runtime injects dbutils
+                                    _dbutils = _spark._jvm.com.databricks.service.DBUtils(_spark._jsc.sc())
+                                except Exception:
+                                    try:
+                                        import IPython
+                                        _dbutils = IPython.get_ipython().user_ns.get("dbutils")
+                                    except Exception:
+                                        pass
+                                if _dbutils:
+                                    _dbutils.fs.rm(loc_str, True)
+                                    _deleted = True
+                                    logger.info(f"Reset: deleted cloud location {loc_str} via dbutils")
+                        except Exception as _db_exc:
+                            logger.debug(f"Reset: dbutils.fs.rm failed: {_db_exc}")
 
-                            # Build storage options from env vars
-                            _opts: dict = {}
-                            if loc_str.startswith(("abfss://", "abfs://")):
-                                for _ek, _ok in [
-                                    ("AZURE_STORAGE_ACCOUNT", "account_name"),
-                                    ("AZURE_TENANT_ID", "tenant_id"),
-                                    ("AZURE_CLIENT_ID", "client_id"),
-                                    ("AZURE_CLIENT_SECRET", "client_secret"),
-                                ]:
-                                    _v = _os2.getenv(_ek)
-                                    if _v:
-                                        _opts[_ok] = _v
+                        # Strategy 2: fsspec (for non-Databricks environments)
+                        if not _deleted:
+                            try:
+                                import fsspec
+                                import os as _os2
 
-                            fs, path_part = fsspec.core.url_to_fs(loc_str, **_opts)
-                            logger.info(f"Reset: deleting cloud location {loc_str} (resolved path: {path_part})")
-                            if fs.exists(path_part):
-                                fs.rm(path_part, recursive=True)
-                                logger.info(f"Reset: deleted {path_part}")
-                                report["materialization_location"] = {
-                                    "path": loc_str,
-                                    "deleted": True,
-                                    "dry_run": False,
-                                }
-                            else:
-                                report["materialization_location"] = {
-                                    "path": loc_str,
-                                    "deleted": False,
-                                    "note": "path does not exist",
-                                }
-                        except Exception as _exc:
-                            logger.error(f"Reset: failed to delete cloud location {loc_str}: {_exc}")
+                                _opts: dict = {}
+                                if loc_str.startswith(("abfss://", "abfs://")):
+                                    for _ek, _ok in [
+                                        ("AZURE_STORAGE_ACCOUNT", "account_name"),
+                                        ("AZURE_TENANT_ID", "tenant_id"),
+                                        ("AZURE_CLIENT_ID", "client_id"),
+                                        ("AZURE_CLIENT_SECRET", "client_secret"),
+                                    ]:
+                                        _v = _os2.getenv(_ek)
+                                        if _v:
+                                            _opts[_ok] = _v
+
+                                fs, path_part = fsspec.core.url_to_fs(loc_str, **_opts)
+                                logger.info(f"Reset: deleting cloud location {loc_str} (resolved path: {path_part})")
+                                if fs.exists(path_part):
+                                    fs.rm(path_part, recursive=True)
+                                    _deleted = True
+                                    logger.info(f"Reset: deleted {path_part}")
+                                else:
+                                    logger.info(f"Reset: cloud path {path_part} does not exist")
+                            except Exception as _fs_exc:
+                                logger.debug(f"Reset: fsspec delete failed: {_fs_exc}")
+
+                        if _deleted:
+                            report["materialization_location"] = {
+                                "path": loc_str,
+                                "deleted": True,
+                                "dry_run": False,
+                            }
+                        else:
+                            logger.warning(
+                                f"Reset: could not delete cloud location {loc_str}. "
+                                "This is non-fatal — DROP TABLE handles storage cleanup."
+                            )
                             report["materialization_location"] = {
                                 "path": loc_str,
                                 "deleted": False,
-                                "error": str(_exc),
+                                "note": "non-fatal — table DROP handles storage cleanup",
                             }
-                            raise
                 else:
                     # Local location path
                     loc_p = _resolve(loc_str)

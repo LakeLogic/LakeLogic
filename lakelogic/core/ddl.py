@@ -397,7 +397,12 @@ def generate_ddl(
             and field.description
             and backend in ("spark", "databricks", "snowflake", "bigquery", "postgresql")
         ):
-            escaped = field.description.replace("'", "''")
+            # Spark's parser does NOT handle '' escaping inside inline
+            # COMMENT clauses, so strip single quotes for Spark/Databricks.
+            if backend in ("spark", "databricks"):
+                escaped = field.description.replace("'", "")
+            else:
+                escaped = field.description.replace("'", "''")
             if backend in ("spark", "databricks"):
                 comment = f" COMMENT '{escaped}'"
             # For other backends, comments are added post-CREATE
@@ -495,6 +500,11 @@ def generate_ddl(
     if table_props and backend in ("spark", "databricks"):
         props = ", ".join(f"'{k}' = '{v}'" for k, v in table_props.items())
         ddl += f"\nTBLPROPERTIES ({props})"
+
+    # LOCATION (Spark/Databricks external tables)
+    ext_location = getattr(mat, "location", None)
+    if ext_location and backend in ("spark", "databricks"):
+        ddl += f"\nLOCATION '{ext_location}'"
 
     ddl += ";"
 

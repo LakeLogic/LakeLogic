@@ -1,0 +1,49 @@
+{# ── {{ domain | title }} Domain Configuration ── #}
+# ── Domain Ownership ──
+ownership:
+  domain_owner: "{{ owner_team | default('Data Engineering Team') }}"
+  team: {{ team | default('data_engineering') }}
+  contacts:
+    - name: {{ owner_name | default(domain | title + ' Analytics Lead') }}
+      role: domain_lead
+      email: {{ owner_email | default(domain + '-analytics@company.com') }}
+      slack: "#{{ domain }}-data"
+    - name: Data Engineering On-Call
+      role: oncall
+      email: data-oncall@company.com
+      slack: "#data-oncall"
+  cost_center: {{ cost_center | default(domain + '_analytics') }}
+  jira_project: {{ jira_project | default(domain[:4] | upper) }}
+
+# ── SLO / Freshness Checks ──
+slo:
+  freshness:
+    bronze:
+      max_delay_minutes: {{ bronze_freshness_minutes | default(120) }}
+      check_column: _lakelogic_loaded_at
+    silver:
+      max_delay_minutes: {{ silver_freshness_minutes | default(180) }}
+      check_column: _lakelogic_loaded_at
+    gold:
+      max_delay_minutes: {{ gold_freshness_minutes | default(240) }}
+      check_column: gold_processed_at
+  quality:
+    min_good_ratio: {{ min_good_ratio | default(0.90) }}
+    max_quarantine_ratio: {{ max_quarantine_ratio | default(0.10) }}
+
+# ── GDPR Compliance ──
+compliance:
+  gdpr:
+    applicable: {{ gdpr_applicable | default(true) | lower }}
+    legal_basis: {{ gdpr_legal_basis | default('legitimate_interest') }}
+    # Options: consent, contract, legal_obligation, vital_interest, public_task, legitimate_interest
+    purpose: "{{ gdpr_purpose | default('Data processing for ' + domain + ' analytics and reporting') }}"
+    retention_period: "{{ gdpr_retention | default('7 years') }}"
+    retention_basis: {{ gdpr_retention_basis | default('contractual_obligation') }}
+    # Options: contractual_obligation, legal_requirement, consent_duration, business_need
+    dpia_required: {{ gdpr_dpia_required | default(false) | lower }}
+    dpia_status: {{ gdpr_dpia_status | default('not_required') }}
+    # Options: not_required, pending, approved, rejected
+  data_classification: {{ data_classification | default('internal') }}
+  # Options: public, internal, confidential, restricted
+  encryption_at_rest: {{ encryption_at_rest | default(true) | lower }}

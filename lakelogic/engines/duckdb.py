@@ -271,13 +271,14 @@ class DuckDBAdapter(EngineAdapter):
                     logger.warning(f"Link file not found: {path}")
                     continue
 
+                col_clause = ", ".join(link.columns) if link.columns else "*"
                 if path.suffix.lower() == ".parquet":
                     con.execute(
-                        f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_parquet('{path.as_posix()}')"
+                        f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_parquet('{path.as_posix()}')"
                     )
                 elif path.suffix.lower() == ".csv":
                     con.execute(
-                        f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_csv_auto('{path.as_posix()}')"
+                        f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_csv_auto('{path.as_posix()}')"
                     )
                 else:
                     logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")

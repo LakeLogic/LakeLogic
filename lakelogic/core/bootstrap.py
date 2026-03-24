@@ -32,6 +32,7 @@ Python API
 
 from __future__ import annotations
 
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -427,6 +428,10 @@ class ContractInferrer:
         pii_sample_size: int = 50,
         extra: Optional[Dict[str, Any]] = None,
         preserve_nested: Union[bool, List[str]] = False,
+        all_strings: bool = False,
+        describe_with_ai: bool = False,
+        ai_provider: str = "openai",
+        ai_model: Optional[str] = None,
     ) -> None:
         self.source = source
         self.title = title
@@ -445,6 +450,10 @@ class ContractInferrer:
         #   True            — keep all nested values as raw JSON strings (bronze)
         #   ["col", ...]    — preserve only the listed columns; explode the rest
         self.preserve_nested: Union[bool, List[str]] = preserve_nested
+        self.all_strings = all_strings
+        self.describe_with_ai = describe_with_ai
+        self.ai_provider = ai_provider
+        self.ai_model = ai_model
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -472,11 +481,37 @@ class ContractInferrer:
         # ── 3. Infer fields + quality ─────────────────────────────────────
         pii_map: Dict[str, str] = {}
         if self.detect_pii:
-            # Use pandas for Presidio (it works on plain Python iterables)
-            pd_df = df.to_pandas()
-            pii_map = self._detect_pii(pd_df)
+            try:
+                pd_df = df.to_pandas()
+                pii_map = self._detect_pii_presidio(pd_df)
+            except ImportError:
+                # Presidio not installed — use lightweight detection
+                pii_map = self._detect_pii_lightweight(df)
+        else:
+            # Always run lightweight PII even if detect_pii=False
+            pii_map = self._detect_pii_lightweight(df)
 
         fields = self._infer_fields(df, pii_map)
+
+        # ── 3b. AI-powered column descriptions ────────────────────────────
+        if self.describe_with_ai:
+            try:
+                from lakelogic.core.describe_columns import describe_columns
+                descriptions = describe_columns(
+                    fields,
+                    provider=self.ai_provider,
+                    model=self.ai_model,
+                    domain=self.domain or "",
+                    system=self.system or "",
+                    layer=self.layer,
+                )
+                for field in fields:
+                    if field["name"] in descriptions:
+                        field["description"] = descriptions[field["name"]]
+            except Exception as exc:
+                from loguru import logger
+                logger.warning(f"AI column descriptions skipped: {exc}")
+
         quality: Dict[str, Any] = {}
         if self.suggest_rules:
             quality = self._suggest_rules(df)
@@ -573,12 +608,78 @@ class ContractInferrer:
                 df = pl.from_pandas(pd.read_excel(p, nrows=self.sample_rows))
             except ImportError as exc:
                 raise ImportError("Excel support requires pandas and openpyxl: pip install pandas openpyxl") from exc
+        elif ext == ".xml":
+            df = self._load_xml(p, pl)
         else:
             raise ValueError(
                 f"Cannot infer file format from extension {ext!r}. "
-                "Supported: .csv, .parquet, .json, .ndjson, .jsonl, .xlsx, .xls"
+                "Supported: .csv, .parquet, .json, .ndjson, .jsonl, .xlsx, .xls, .xml"
             )
         return df, p
+
+    @staticmethod
+    def _load_xml(path: Path, pl) -> Any:
+        """Parse an XML file into a flat Polars DataFrame.
+
+        Strategy: find repeating child elements under the root (the "records"),
+        then flatten each record's element tree into ``parent_child`` keys.
+        Text content becomes the value; attributes are merged as ``@attr`` keys.
+        """
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(str(path))
+        root = tree.getroot()
+
+        # Strip namespace prefixes for cleaner column names
+        def _strip_ns(tag: str) -> str:
+            return tag.split("}")[-1] if "}" in tag else tag
+
+        def _flatten_element(elem, prefix: str = "") -> Dict[str, Any]:
+            """Recursively flatten an XML element into a flat dict."""
+            record: Dict[str, Any] = {}
+            # Element attributes
+            for attr_name, attr_val in elem.attrib.items():
+                key = f"{prefix}@{attr_name}" if prefix else f"@{attr_name}"
+                record[key] = attr_val
+            # Element text
+            if elem.text and elem.text.strip():
+                if prefix:
+                    record[prefix] = elem.text.strip()
+                else:
+                    record["_text"] = elem.text.strip()
+            # Children
+            for child in elem:
+                child_tag = _strip_ns(child.tag)
+                child_prefix = f"{prefix}_{child_tag}" if prefix else child_tag
+                if len(child) == 0 and not child.attrib:
+                    # Leaf element
+                    record[child_prefix] = (child.text or "").strip()
+                else:
+                    # Nested element — recurse
+                    record.update(_flatten_element(child, child_prefix))
+            return record
+
+        # Find the repeating record elements (children of root)
+        root_tag = _strip_ns(root.tag)
+        children = list(root)
+        if not children:
+            # Single-element XML — treat root itself as one record
+            records = [_flatten_element(root)]
+        else:
+            # Check if all children have the same tag (typical: <rows><row>...</row></rows>)
+            child_tags = [_strip_ns(c.tag) for c in children]
+            most_common_tag = max(set(child_tags), key=child_tags.count)
+            record_elements = [c for c in children if _strip_ns(c.tag) == most_common_tag]
+            if len(record_elements) >= 2:
+                records = [_flatten_element(el) for el in record_elements]
+            else:
+                # Mixed children — flatten the whole root as one record
+                records = [_flatten_element(root)]
+
+        if not records:
+            raise ValueError(f"Could not extract records from XML file: {path}")
+
+        return pl.from_dicts(records)
 
     def _flatten_df(self, df) -> Any:
         """
@@ -753,7 +854,7 @@ class ContractInferrer:
         fields = []
         for col_name in df.columns:
             col_dtype = df[col_name].dtype
-            ctype = _polars_dtype_to_contract(col_dtype)
+            ctype = "string" if self.all_strings else _polars_dtype_to_contract(col_dtype)
             series = df[col_name].drop_nulls()
             null_ratio = 1.0 - len(series) / max(len(df), 1)
             required = null_ratio < 0.01
@@ -887,7 +988,11 @@ class ContractInferrer:
                 continue
 
             # ── unique (dataset-level) ─────────────────────────────────────
-            if n_unique == total and total > 1:
+            # Require minimum sample size to avoid flagging everything as PK,
+            # BUT always flag columns named 'id' or '*_id'/'*_key' that are unique.
+            col_lower = col_name.lower()
+            is_id_column = col_lower == "id" or col_lower.endswith("_id") or col_lower.endswith("_key")
+            if n_unique == total and (total >= 10 or is_id_column):
                 dataset_rules.append(
                     {
                         "name": f"{col_name}_unique",
@@ -980,12 +1085,77 @@ class ContractInferrer:
             result["dataset_rules"] = dataset_rules
         return result
 
-    def _detect_pii(self, pd_df) -> Dict[str, str]:
-        """Run Presidio PII detection on sampled column values."""
-        try:
-            from presidio_analyzer import AnalyzerEngine
-        except ImportError as exc:
-            raise ImportError("PII detection requires presidio-analyzer: pip install lakelogic[profiling]") from exc
+    # ── PII keyword / regex patterns (no external deps) ─────────
+    _PII_COLUMN_KEYWORDS: Dict[str, str] = {
+        "email": "email", "e_mail": "email", "email_address": "email",
+        "user_email": "email",
+        "phone": "phone", "phone_number": "phone", "mobile": "phone",
+        "telephone": "phone", "cell": "phone",
+        "ssn": "ssn", "social_security": "ssn",
+        "social_security_number": "ssn",
+        "first_name": "person_name", "last_name": "person_name",
+        "full_name": "person_name", "name": "person_name",
+        "address": "address", "street": "address", "city": "address",
+        "zip": "address", "zipcode": "address", "zip_code": "address",
+        "postal_code": "address", "postcode": "address",
+        "date_of_birth": "date_of_birth", "dob": "date_of_birth",
+        "birth_date": "date_of_birth", "birthday": "date_of_birth",
+        "credit_card": "credit_card", "card_number": "credit_card",
+        "cc_number": "credit_card",
+        "ip_address": "ip_address", "ip": "ip_address",
+        "user_ip": "ip_address",
+        "passport": "passport", "passport_number": "passport",
+        "drivers_license": "drivers_license",
+        "license_number": "drivers_license",
+        "national_id": "national_id", "tax_id": "tax_id", "tin": "tax_id",
+    }
+
+    _PII_VALUE_PATTERNS: List[tuple] = [
+        ("email", re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")),
+        ("phone", re.compile(r"^[\+]?[(]?[0-9]{1,4}[)]?[-\s\./0-9]{7,15}$")),
+        ("ssn", re.compile(r"^\d{3}-?\d{2}-?\d{4}$")),
+        ("credit_card", re.compile(r"^\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}$")),
+        ("ip_address", re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")),
+    ]
+
+    def _detect_pii_lightweight(self, df) -> Dict[str, str]:
+        """Detect PII using column name keywords and value regex patterns.
+
+        No external dependencies required. This runs automatically even
+        when ``detect_pii=False`` to provide baseline PII awareness.
+        """
+        pii_map: Dict[str, str] = {}
+        for col_name in df.columns:
+            col_lower = col_name.lower().replace(" ", "_")
+
+            # Check column name against PII keywords
+            for keyword, pii_type in self._PII_COLUMN_KEYWORDS.items():
+                if keyword in col_lower:
+                    pii_map[col_name] = pii_type
+                    break
+
+            # If not detected by name, check sample values
+            if col_name not in pii_map:
+                series = df[col_name].drop_nulls()
+                dtype_name = series.dtype.__class__.__name__.lower()
+                if dtype_name in ("utf8", "string", "large_utf8", "categorical"):
+                    sample = [str(v) for v in series.head(20).to_list()]
+                    if sample:
+                        for pii_type, pattern in self._PII_VALUE_PATTERNS:
+                            matches = sum(1 for v in sample if pattern.match(v))
+                            if matches / len(sample) >= 0.5:
+                                pii_map[col_name] = pii_type
+                                break
+
+        return pii_map
+
+    def _detect_pii_presidio(self, pd_df) -> Dict[str, str]:
+        """Run Presidio PII detection on sampled column values.
+
+        Requires ``pip install lakelogic[profiling]``.
+        Raises ImportError if presidio-analyzer is not installed.
+        """
+        from presidio_analyzer import AnalyzerEngine
 
         analyzer = AnalyzerEngine()
         pii_map: Dict[str, str] = {}
@@ -1024,6 +1194,10 @@ def infer_contract(
     pii_sample_size: int = 50,
     extra: Optional[Dict[str, Any]] = None,
     preserve_nested: Union[bool, List[str]] = False,
+    all_strings: bool = False,
+    describe_with_ai: bool = False,
+    ai_provider: str = "openai",
+    ai_model: Optional[str] = None,
 ) -> ContractDraft:
     """
     Infer a LakeLogic contract from an existing data file — no contract needed upfront.
@@ -1127,4 +1301,8 @@ def infer_contract(
         pii_sample_size=pii_sample_size,
         extra=extra,
         preserve_nested=preserve_nested,
+        all_strings=all_strings,
+        describe_with_ai=describe_with_ai,
+        ai_provider=ai_provider,
+        ai_model=ai_model,
     ).infer()

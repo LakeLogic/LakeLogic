@@ -79,8 +79,11 @@ class SparkAdapter(EngineAdapter):
         df, schema_errors = self._apply_schema(df)
         df.createOrReplaceTempView(tbl_name)
 
-        # 2. Evaluate Row-Level Rules
+        # 2. Evaluate Row-Level Rules (pre-phase — before transforms)
         row_rules = self.get_row_rules()
+        pre_rules = [r for r in row_rules if getattr(r, "phase", "pre").lower() != "post"]
+        post_rules = [r for r in row_rules if getattr(r, "phase", "pre").lower() == "post"]
+
         error_exprs = []
         category_exprs = []
 
@@ -90,18 +93,18 @@ class SparkAdapter(EngineAdapter):
 
         df_eval = df
         internal_cols = []
-        if row_rules:
+        if pre_rules:
             rule_exprs = []
-            for i, rule in enumerate(row_rules):
+            for i, rule in enumerate(pre_rules):
                 rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as _rule_{i}")
                 internal_cols.append(f"_rule_{i}")
 
             eval_sql = f"SELECT *, {', '.join(rule_exprs)} FROM {tbl_name}"
             df_eval = spark.sql(eval_sql)
 
-            for i, rule in enumerate(row_rules):
+            for i, rule in enumerate(pre_rules):
                 col_name = f"_rule_{i}"
-                error_msg = f"Rule failed: {rule.name} ({rule.sql})"
+                error_msg = f"[pre] Rule failed: {rule.name} ({rule.sql})"
                 cond = F.col(col_name).isNull() | ~F.col(col_name)
                 error_exprs.append(F.when(cond, F.lit(error_msg)).otherwise(None))
                 category_exprs.append(F.when(cond, F.lit(rule.category)).otherwise(None))
@@ -141,6 +144,69 @@ class SparkAdapter(EngineAdapter):
         # 5. Apply Transformations to Good Data
         if self.contract.transformations:
             good_df = self._apply_post_transformations(good_df)
+
+        # 6. Evaluate post-phase rules (after transforms — can reference derived columns)
+        if post_rules:
+            post_tbl = "__lakelogic_post_transform__"
+            good_df.createOrReplaceTempView(post_tbl)
+
+            post_rule_exprs = []
+            post_internal = []
+            for i, rule in enumerate(post_rules):
+                col_id = f"_post_rule_{i}"
+                post_rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as {col_id}")
+                post_internal.append(col_id)
+
+            post_sql = f"SELECT *, {', '.join(post_rule_exprs)} FROM {post_tbl}"
+            good_eval = spark.sql(post_sql)
+
+            post_error_exprs = []
+            post_cat_exprs = []
+            for i, rule in enumerate(post_rules):
+                col_id = f"_post_rule_{i}"
+                error_msg = f"[post] Rule failed: {rule.name} ({rule.sql})"
+                cond = F.col(col_id).isNull() | ~F.col(col_id)
+                post_error_exprs.append(F.when(cond, F.lit(error_msg)).otherwise(None))
+                post_cat_exprs.append(F.when(cond, F.lit(rule.category)).otherwise(None))
+
+            post_err_array = F.array(*post_error_exprs)
+            post_cat_array = F.array(*post_cat_exprs)
+            good_eval = good_eval.withColumn(self.ERROR_COLUMN, post_err_array).withColumn(
+                self.CATEGORY_COLUMN, post_cat_array
+            )
+            good_eval = good_eval.withColumn(
+                self.ERROR_COLUMN,
+                F.expr(f"filter({self.ERROR_COLUMN}, x -> x IS NOT NULL)"),
+            ).withColumn(
+                self.CATEGORY_COLUMN,
+                F.expr(f"filter({self.CATEGORY_COLUMN}, x -> x IS NOT NULL)"),
+            )
+
+            post_has_errors = F.size(F.col(self.ERROR_COLUMN)) > 0
+
+            post_bad = (
+                good_eval.filter(post_has_errors)
+                .withColumn("quarantine_state", F.lit("active"))
+                .withColumn("quarantine_reprocessed", F.lit(False))
+            )
+            # Union new bad rows with existing bad_df
+            if bad_df is not None:
+                # Align schemas before union
+                for col in post_bad.columns:
+                    if col not in bad_df.columns:
+                        bad_df = bad_df.withColumn(col, F.lit(None))
+                for col in bad_df.columns:
+                    if col not in post_bad.columns:
+                        post_bad = post_bad.withColumn(col, F.lit(None))
+                bad_df = bad_df.select(sorted(bad_df.columns)).unionByName(
+                    post_bad.select(sorted(post_bad.columns)), allowMissingColumns=True
+                )
+            else:
+                bad_df = post_bad
+
+            good_df = good_eval.filter(~post_has_errors).drop(
+                *([self.ERROR_COLUMN, self.CATEGORY_COLUMN] + post_internal)
+            )
 
         include_errors = True
         if self.contract.quarantine:
@@ -365,6 +431,69 @@ class SparkAdapter(EngineAdapter):
 
         return current_df
 
+    # Contract type → Spark SQL cast type
+    _CONTRACT_TO_SPARK_TYPE = {
+        "integer": "INT",
+        "long": "BIGINT",
+        "double": "DOUBLE",
+        "float": "FLOAT",
+        "boolean": "BOOLEAN",
+        "date": "DATE",
+        "timestamp": "TIMESTAMP",
+        "decimal": "DECIMAL(38,10)",
+        "short": "SMALLINT",
+        "byte": "TINYINT",
+        "binary": "BINARY",
+    }
+
+    def _cast_to_contract_types(self, df: Any) -> Any:
+        """Cast string columns to their contract-declared types.
+
+        When the source is CSV (all columns arrive as StringType), Spark SQL
+        functions like ``timestamp_micros()`` fail because they expect a
+        typed input (e.g. LongType) rather than a string.
+
+        This method inspects the DataFrame schema: if **every** column is
+        ``StringType``, it casts each column whose contract type has a known
+        Spark mapping (integer → INT, long → BIGINT, etc.).
+
+        For typed sources (Parquet, Delta, JSON-with-schema) some columns
+        will already be non-string, so this method becomes a no-op — existing
+        typed DataFrames are never modified.
+        """
+        from pyspark.sql.types import StringType
+        from pyspark.sql import functions as F
+
+        if not self.contract.model or not self.contract.model.fields:
+            return df
+
+        # Quick check: is this an all-strings DataFrame?
+        all_string = all(isinstance(f.dataType, StringType) for f in df.schema.fields)
+        if not all_string:
+            return df
+
+        # Build a lookup: column_name → contract type
+        field_types = {
+            f.name: (f.type or "string").lower()
+            for f in self.contract.model.fields
+        }
+
+        cast_count = 0
+        current_df = df
+        for col_name in current_df.columns:
+            contract_type = field_types.get(col_name, "string")
+            spark_type = self._CONTRACT_TO_SPARK_TYPE.get(contract_type)
+            if spark_type:
+                current_df = current_df.withColumn(
+                    col_name, F.col(col_name).cast(spark_type)
+                )
+                cast_count += 1
+
+        if cast_count:
+            logger.debug(f"Auto-cast {cast_count} columns from StringType to contract types")
+
+        return current_df
+
     def _apply_post_transformations(self, df: Any) -> Any:
         """
         Apply post-processing transformations (derive, lookup, join, SQL).
@@ -375,7 +504,8 @@ class SparkAdapter(EngineAdapter):
         Returns:
             Transformed Spark DataFrame.
         """
-        current_df = df
+        # Auto-cast string columns to contract types before transforms
+        current_df = self._cast_to_contract_types(df)
 
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
@@ -539,6 +669,11 @@ class SparkAdapter(EngineAdapter):
                         logger.warning(f"Link '{link.name}' missing table name.")
                         continue
                     ref_df = spark.table(table_name)
+                    if link.columns:
+                        available = set(ref_df.columns)
+                        select_cols = [c for c in link.columns if c in available]
+                        if select_cols:
+                            ref_df = ref_df.select(*select_cols)
                     ref_df.createOrReplaceTempView(link.name)
                     continue
 
@@ -565,6 +700,14 @@ class SparkAdapter(EngineAdapter):
                 else:
                     logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
                     continue
+
+                # Column projection — only keep specified columns
+                if link.columns:
+                    available = set(ref_df.columns)
+                    select_cols = [c for c in link.columns if c in available]
+                    if select_cols:
+                        ref_df = ref_df.select(*select_cols)
+                        logger.debug(f"Link '{link.name}' projected to {len(select_cols)} columns")
 
                 ref_df.createOrReplaceTempView(link.name)
             except Exception as e:

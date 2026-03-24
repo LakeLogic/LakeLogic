@@ -85,6 +85,14 @@ class PolarsAdapter(EngineAdapter):
                     logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
                     continue
 
+                # Column projection — only keep specified columns
+                if link.columns:
+                    available = set(link_lf.collect_schema().names())
+                    select_cols = [c for c in link.columns if c in available]
+                    if select_cols:
+                        link_lf = link_lf.select(select_cols)
+                        logger.debug(f"Link '{link.name}' projected to {len(select_cols)} columns")
+
                 if cache_enabled:
                     self._link_cache[cache_key] = link_lf
                 ctx.register(link.name, link_lf)
@@ -182,12 +190,14 @@ class PolarsAdapter(EngineAdapter):
                     if not path.exists():
                         continue
                     if path.suffix.lower() == ".parquet":
+                        col_clause = ", ".join(link.columns) if link.columns else "*"
                         con.execute(
-                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_parquet('{path.as_posix()}')"
+                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_parquet('{path.as_posix()}')"
                         )
                     elif path.suffix.lower() == ".csv":
+                        col_clause = ", ".join(link.columns) if link.columns else "*"
                         con.execute(
-                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT * FROM read_csv_auto('{path.as_posix()}')"
+                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_csv_auto('{path.as_posix()}')"
                         )
                 except Exception:
                     continue

@@ -4,7 +4,7 @@
 
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LakeLogic.github.io/LakeLogic/)
 [![PyPI](https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white)](https://pypi.org/project/lakelogic/)
-[![Downloads](https://img.shields.io/pypi/dm/lakelogic)](https://pypi.org/project/lakelogic/)
+[![Installs](https://img.shields.io/pepy/dt/lakelogic?color=blue&label=installs)](https://pepy.tech/project/lakelogic)
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 

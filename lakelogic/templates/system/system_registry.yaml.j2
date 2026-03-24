@@ -1,0 +1,48 @@
+{# ── {{ system | title }} ({{ domain | title }}) System Registry ── #}
+domain: {{ domain }}
+system: {{ system }}
+
+storage:
+  # Databricks Unity Catalog paths
+  contract_root: "/Volumes/{catalog}/nondelta/nondelta_volume_01/_domains/{{ domain }}/{{ system }}"
+  landing_root: "/Volumes/{catalog}/nondelta/nondelta_volume_01/_data/{{ domain }}/{{ system }}"
+  bronze_root: "`{catalog}`.bronze_{{ domain }}_{{ system | replace(' ', '_') }}"
+  silver_root: "`{catalog}`.silver_{{ domain }}_{{ system | replace(' ', '_') }}"
+  gold_root: "`{catalog}`.gold_{{ domain }}_{{ system | replace(' ', '_') }}"
+  quarantine_root: "`{catalog}`.quarantine_{{ domain }}_{{ system | replace(' ', '_') }}"
+  log_root: "/Volumes/{catalog}/nondelta/nondelta_volume_01/_data/_log"
+
+  # Azure Data Lake Storage paths
+  landing_path: "abfss://nondelta@{storage_account}.dfs.core.windows.net/_data/{{ domain }}/{{ system }}"
+  contract_path: "abfss://nondelta@{storage_account}.dfs.core.windows.net/_contracts/{{ domain }}/{{ system }}"
+  bronze_path: "abfss://bronze@{storage_account}.dfs.core.windows.net/{{ domain }}/{{ system }}"
+  silver_path: "abfss://silver@{storage_account}.dfs.core.windows.net/{{ domain }}/{{ system }}"
+  gold_path: "abfss://gold@{storage_account}.dfs.core.windows.net/{{ domain }}/{{ system }}"
+  log_path: "abfss://nondelta@{storage_account}.dfs.core.windows.net/_data/_log"
+  quarantine_path: "abfss://quarantine@{storage_account}.dfs.core.windows.net/{{ domain }}/{{ system }}"
+
+contracts:
+{% for contract in contracts %}
+  # ── {{ contract.layer | title }} Layer ───
+  - layer: {{ contract.layer }}
+    entity: {{ contract.entity }}
+    path: "contracts/{{ contract.layer }}/{{ contract.layer }}_{{ system }}_{{ contract.entity }}_v1.0.yaml"
+    enabled: {{ contract.enabled | default(true) | lower }}
+{% endfor %}
+
+# ── Cloud Reporting ──
+cloud:
+  enabled: true
+  report_url: "${LAKELOGIC_REPORT_URL}"
+  api_key: "${LAKELOGIC_API_KEY}"
+
+environments:
+  dev:
+    catalog: "{{ catalog_prefix | default('lakelogic') }}-dev-001"
+    storage_account: "sa{{ storage_prefix | default('lakelogic') }}devadls001"
+  staging:
+    catalog: "{{ catalog_prefix | default('lakelogic') }}-staging-001"
+    storage_account: "sa{{ storage_prefix | default('lakelogic') }}stagingadls001"
+  prod:
+    catalog: "{{ catalog_prefix | default('lakelogic') }}-prod-001"
+    storage_account: "sa{{ storage_prefix | default('lakelogic') }}prodadls001"

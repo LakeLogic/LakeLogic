@@ -185,6 +185,7 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "timestamp": report.get("timestamp"),
         "engine": report.get("engine"),
         "contract": report.get("contract"),
+        "contract_version": report.get("contract_version"),
         "stage": report.get("stage"),
         "dataset": report.get("dataset"),
         "domain": report.get("domain"),
@@ -234,7 +235,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
     backend = (metadata.get("run_log_backend") or "").lower()
     if not backend:
-        backend = "spark" if engine_name == "spark" else "duckdb"
+        backend = "spark" if engine_name == "spark" else "delta"
 
     record = _flatten_report(report)
 
@@ -253,7 +254,58 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             schema = ".".join(parts[:-1])
             spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
-        df = spark.createDataFrame([record])
+        # Build explicit schema to avoid CANNOT_DETERMINE_TYPE when
+        # record values are None (Spark cannot infer type from null).
+        from pyspark.sql.types import (
+            StructType, StructField, StringType, LongType,
+            DoubleType, BooleanType,
+        )
+        _run_log_schema = StructType([
+            StructField("run_id", StringType(), True),
+            StructField("pipeline_run_id", StringType(), True),
+            StructField("timestamp", StringType(), True),
+            StructField("engine", StringType(), True),
+            StructField("contract", StringType(), True),
+            StructField("contract_version", StringType(), True),
+            StructField("stage", StringType(), True),
+            StructField("dataset", StringType(), True),
+            StructField("domain", StringType(), True),
+            StructField("system", StringType(), True),
+            StructField("data_layer", StringType(), True),
+            StructField("source_path", StringType(), True),
+            StructField("counts_source", LongType(), True),
+            StructField("counts_total", LongType(), True),
+            StructField("counts_good", LongType(), True),
+            StructField("counts_quarantined", LongType(), True),
+            StructField("counts_pre_transform_dropped", LongType(), True),
+            StructField("quarantine_ratio", DoubleType(), True),
+            StructField("max_source_mtime", DoubleType(), True),
+            StructField("source_files_json", StringType(), True),
+            StructField("freshness_seconds", DoubleType(), True),
+            StructField("freshness_pass", BooleanType(), True),
+            StructField("freshness_threshold_seconds", DoubleType(), True),
+            StructField("availability_ratio", DoubleType(), True),
+            StructField("availability_pass", BooleanType(), True),
+            StructField("availability_threshold", DoubleType(), True),
+            StructField("dataset_rules_json", StringType(), True),
+            StructField("row_rule_failures_json", StringType(), True),
+            StructField("schema_drift_json", StringType(), True),
+            StructField("report_json", StringType(), True),
+        ])
+        # Only include fields that are defined in the schema
+        _schema_fields = {f.name for f in _run_log_schema.fields}
+        _typed_record = {k: v for k, v in record.items() if k in _schema_fields}
+        # Add any extra record keys not in schema as StringType
+        _extra_fields = []
+        for k, v in record.items():
+            if k not in _schema_fields:
+                _extra_fields.append(StructField(k, StringType(), True))
+                _typed_record[k] = str(v) if v is not None else None
+        if _extra_fields:
+            _run_log_schema = StructType(_run_log_schema.fields + _extra_fields)
+
+        from pyspark.sql import Row
+        df = spark.createDataFrame([Row(**_typed_record)], schema=_run_log_schema)
         merge_on_run_id = metadata.get("run_log_merge_on_run_id", True)
         table_format = metadata.get("run_log_table_format") or "delta"
 
@@ -558,6 +610,92 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         logger.info(f"Wrote run log to SQLite table {table_name} ({db_path})")
         return f"{db_path}:{table_name}"
 
+    if backend == "delta":
+        try:
+            import pyarrow as pa
+            from deltalake import DeltaTable, write_deltalake
+        except ImportError as exc:
+            logger.warning(
+                f"Run log table backend 'delta' requires 'deltalake' and 'pyarrow'. "
+                f"Install with: pip install deltalake pyarrow. Error: {exc}"
+            )
+            return None
+
+        # Build storage options for cloud paths
+        storage_options = _build_cloud_opts(table_name) if _is_cloud_path(table_name) else None
+
+        # Convert flat record to Arrow table
+        schema = pa.schema([
+            ("run_id", pa.string()),
+            ("pipeline_run_id", pa.string()),
+            ("timestamp", pa.string()),
+            ("engine", pa.string()),
+            ("contract", pa.string()),
+            ("stage", pa.string()),
+            ("dataset", pa.string()),
+            ("domain", pa.string()),
+            ("system", pa.string()),
+            ("data_layer", pa.string()),
+            ("source_path", pa.string()),
+            ("counts_source", pa.int64()),
+            ("counts_total", pa.int64()),
+            ("counts_good", pa.int64()),
+            ("counts_quarantined", pa.int64()),
+            ("counts_pre_transform_dropped", pa.int64()),
+            ("quarantine_ratio", pa.float64()),
+            ("max_source_mtime", pa.float64()),
+            ("source_files_json", pa.string()),
+            ("freshness_seconds", pa.float64()),
+            ("freshness_pass", pa.bool_()),
+            ("freshness_threshold_seconds", pa.float64()),
+            ("availability_ratio", pa.float64()),
+            ("availability_pass", pa.bool_()),
+            ("availability_threshold", pa.float64()),
+            ("dataset_rules_json", pa.string()),
+            ("row_rule_failures_json", pa.string()),
+            ("schema_drift_json", pa.string()),
+            ("report_json", pa.string()),
+        ])
+
+        arrays = []
+        for field in schema:
+            val = record.get(field.name)
+            arrays.append(pa.array([val], type=field.type))
+        arrow_table = pa.table(arrays, schema=schema)
+
+        merge_on_run_id = metadata.get("run_log_merge_on_run_id", True)
+
+        try:
+            if DeltaTable.is_deltatable(table_name, storage_options=storage_options):
+                if merge_on_run_id:
+                    dt = DeltaTable(table_name, storage_options=storage_options)
+                    (
+                        dt.merge(
+                            source=arrow_table,
+                            predicate="target.run_id = source.run_id",
+                            source_alias="source",
+                            target_alias="target",
+                        )
+                        .when_matched_update_all()
+                        .when_not_matched_insert_all()
+                        .execute()
+                    )
+                else:
+                    write_deltalake(
+                        table_name, arrow_table, mode="append",
+                        storage_options=storage_options, schema_mode="merge",
+                    )
+            else:
+                write_deltalake(
+                    table_name, arrow_table, mode="overwrite",
+                    storage_options=storage_options,
+                )
+            logger.info(f"Wrote run log to Delta table {table_name}")
+            return table_name
+        except Exception as exc:
+            logger.warning(f"Failed to write run log to Delta table {table_name}: {exc}")
+            return None
+
     logger.warning(f"Unsupported run_log_backend: {backend}")
     return None
 
@@ -565,7 +703,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 # ── Public API ──
 
 
-def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] = None) -> Optional[str]:
+def write_run_log(
+    report: Dict[str, Any],
+    contract,
+    engine_name: Optional[str] = None,
+    run_log_mode: Optional[str] = None,
+) -> Optional[str]:
     """
     Write run logs to JSON and/or table backends.
 
@@ -573,6 +716,10 @@ def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] =
         report: Run report dict.
         contract: DataContract with metadata.
         engine_name: Engine name for backend defaults.
+        run_log_mode: Runtime override for which backends to use.
+            "dir"   — file-based only (run_log_dir / run_log_path)
+            "table" — table-based only (run_log_table)
+            "all"   — both (default when None)
 
     Returns:
         Path to the JSON log file if written.
@@ -588,8 +735,13 @@ def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] =
     if not path_value and not dir_value and not table_value:
         return None
 
+    # Normalise mode
+    mode = (run_log_mode or "all").lower().strip()
+    _write_file = mode in ("all", "dir", "file")
+    _write_table = mode in ("all", "table")
+
     log_path = None
-    if path_value or dir_value:
+    if (path_value or dir_value) and _write_file:
         raw = str(path_value or dir_value)
 
         if _is_cloud_path(raw):
@@ -626,15 +778,20 @@ def write_run_log(report: Dict[str, Any], contract, engine_name: Optional[str] =
 
             logger.info(f"Wrote run log to {log_path}")
 
-    _write_run_log_table(report, contract, engine_name=engine_name)
+    if _write_table:
+        _write_run_log_table(report, contract, engine_name=engine_name)
     return str(log_path) if log_path else None
 
 
 def get_last_run_watermark(
-    contract, contract_title: str, stage: str, engine_name: Optional[str] = None
+    contract, contract_title: str, stage: str, engine_name: Optional[str] = None,
+    dataset: Optional[str] = None, data_layer: Optional[str] = None,
 ) -> Optional[float]:
     """
-    Fetch the last max_source_mtime for a contract/stage from run logs.
+    Fetch the last max_source_mtime for a contract from run logs.
+
+    Uses ``dataset`` + ``data_layer`` for precise filtering when available,
+    falling back to ``contract_title`` + ``stage`` for backward compatibility.
     """
     if not contract:
         return None
@@ -643,7 +800,10 @@ def get_last_run_watermark(
     table_value = metadata.get("run_log_table")
     backend = (metadata.get("run_log_backend") or "").lower()
     if table_value and not backend:
-        backend = "spark" if engine_name == "spark" else "duckdb"
+        backend = "spark" if engine_name == "spark" else "delta"
+
+    # Build filter criteria: prefer dataset + data_layer, fallback to contract + stage
+    _use_precise = bool(dataset)
 
     if table_value and backend == "duckdb":
         try:
@@ -671,12 +831,21 @@ def get_last_run_watermark(
                 full_table = f"{schema_name}.{table_only}"
             else:
                 full_table = table_name
+            if _use_precise:
+                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                params = [dataset]
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params.append(data_layer)
+            else:
+                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                params = [contract_title]
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params.append(data_layer)
             res = con.execute(
-                f"""
-                SELECT max(max_source_mtime) FROM {full_table}
-                WHERE contract = ? AND stage = ?
-                """,
-                [contract_title, stage],
+                f"SELECT max(max_source_mtime) FROM {full_table} WHERE {where}",
+                params,
             ).fetchone()
             return res[0] if res and res[0] is not None else None
         except Exception:
@@ -698,9 +867,21 @@ def get_last_run_watermark(
         con = sqlite3.connect(str(db_path))
         try:
             table_name = _prepare_table_name(table_value, backend)
+            if _use_precise:
+                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                params = (dataset,)
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params = (dataset, data_layer)
+            else:
+                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                params = (contract_title,)
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params = (contract_title, data_layer)
             cursor = con.execute(
-                f"SELECT max(max_source_mtime) FROM {table_name} WHERE contract = ? AND stage = ?",
-                (contract_title, stage),
+                f"SELECT max(max_source_mtime) FROM {table_name} WHERE {where}",
+                params,
             )
             res = cursor.fetchone()
             return res[0] if res and res[0] is not None else None
@@ -718,13 +899,69 @@ def get_last_run_watermark(
         try:
             spark = SparkSession.builder.getOrCreate()
             df = spark.table(table_value)
+            if _use_precise:
+                filt = (
+                    (F.col("dataset") == dataset)
+                    & (F.col("stage") != "no_new_data")
+                    & (F.col("stage") != "reprocess")
+                )
+                if data_layer:
+                    filt = filt & (F.col("data_layer") == data_layer)
+            else:
+                filt = (
+                    (F.col("contract") == contract_title)
+                    & (F.col("stage") != "no_new_data")
+                    & (F.col("stage") != "reprocess")
+                )
+                if data_layer:
+                    filt = filt & (F.col("data_layer") == data_layer)
             res = (
-                df.filter((F.col("contract") == contract_title) & (F.col("stage") == stage))
+                df.filter(filt)
                 .agg(F.max(F.col("max_source_mtime")).alias("max_mtime"))
                 .collect()
             )
             if res:
                 return res[0]["max_mtime"]
+        except Exception:
+            return None
+
+    if table_value and backend == "delta":
+        try:
+            from deltalake import DeltaTable
+        except ImportError:
+            return None
+        storage_options = _build_cloud_opts(table_value) if _is_cloud_path(table_value) else None
+        try:
+            if not DeltaTable.is_deltatable(table_value, storage_options=storage_options):
+                return None
+            dt = DeltaTable(table_value, storage_options=storage_options)
+            if _use_precise:
+                filters = [("dataset", "=", dataset)]
+                if data_layer:
+                    filters.append(("data_layer", "=", data_layer))
+            else:
+                filters = [
+                    ("contract", "=", contract_title),
+                ]
+                if data_layer:
+                    filters.append(("data_layer", "=", data_layer))
+            df = dt.to_pyarrow_table(
+                columns=["max_source_mtime", "stage"],
+                filters=filters,
+            )
+            if len(df) == 0:
+                return None
+            # Exclude reprocess and no_new_data entries
+            import pyarrow.compute as pc
+            mask = pc.and_(
+                pc.not_equal(df.column("stage"), "no_new_data"),
+                pc.not_equal(df.column("stage"), "reprocess"),
+            )
+            df = df.filter(mask)
+            if len(df) == 0:
+                return None
+            max_val = pc.max(df.column("max_source_mtime")).as_py()
+            return max_val
         except Exception:
             return None
 

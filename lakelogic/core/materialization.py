@@ -153,9 +153,10 @@ def _spark_save_as_table(
     """
     Write a Spark DataFrame to a Unity Catalog table, optionally at an external location.
 
-    When ``location`` is provided, the writer uses ``.option("path", location)``
-    so Spark registers the table in Unity Catalog while storing the data at the
-    specified external storage path (ADLS, S3, GCS, etc.).
+    For external locations, data is written directly to the path via ``save()``
+    then the table is registered in UC via ``CREATE TABLE ... USING DELTA LOCATION``.
+    This avoids issues with ``saveAsTable`` + ``option("path")`` on Unity Catalog
+    which fails when the table doesn't exist or has inconsistent metadata.
 
     Args:
         writer: Spark DataFrameWriter (already configured with format, partitionBy, etc.)
@@ -165,8 +166,30 @@ def _spark_save_as_table(
     """
     if location:
         resolved_loc = _resolve_external_location(location)
-        logger.info(f"Using external location for table {table_name}: {resolved_loc}")
-        writer.option("path", resolved_loc).mode(mode).saveAsTable(table_name)
+        logger.info(f"Writing to external location for table {table_name}: {resolved_loc}")
+
+        from pyspark.sql import SparkSession
+        spark = SparkSession.builder.getOrCreate()
+
+        # Ensure the UC schema exists
+        parts = table_name.split(".")
+        if len(parts) >= 2:
+            schema_ref = ".".join(parts[:-1])
+            try:
+                spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_ref}")
+            except Exception as e:
+                logger.debug(f"Schema creation skipped: {e}")
+
+        # Write data directly to the external storage path
+        writer.mode(mode).save(resolved_loc)
+
+        # Register (or confirm) the table in UC pointing to that location
+        try:
+            spark.sql(f"CREATE TABLE IF NOT EXISTS {table_name} USING DELTA LOCATION '{resolved_loc}'")
+        except Exception as e:
+            logger.debug(f"Table registration skipped (may already exist): {e}")
+
+        logger.info(f"Materialized to {table_name} via external location {resolved_loc}")
     else:
         writer.mode(mode).saveAsTable(table_name)
 
@@ -1277,6 +1300,7 @@ def _materialize_spark_dataframe(
     target: Path,
     output_format: str,
     incremental_metadata: Optional[Dict[str, Any]] = None,
+    is_reprocess: bool = False,
 ) -> Dict[str, Any]:
     """
     Materialize Spark DataFrames to a path (CSV, Parquet, Delta, Iceberg).
@@ -1351,8 +1375,17 @@ def _materialize_spark_dataframe(
     if partition_by:
         writer = writer.partitionBy(*partition_by)
 
+    # Delta schema evolution — driven by contract server.schema_evolution
+    if output_format == "delta" and contract:
+        server = contract.effective_server() if hasattr(contract, "effective_server") else None
+        evolution = getattr(server, "schema_evolution", "strict") if server else "strict"
+        if evolution in ("append", "merge"):
+            writer = writer.option("mergeSchema", "true")
+        elif evolution == "overwrite":
+            writer = writer.option("overwriteSchema", "true")
+
     mode = "append" if strategy == "append" else "overwrite"
-    if strategy == "append" and reprocess_policy in [
+    if strategy == "append" and is_reprocess and reprocess_policy in [
         "overwrite_partition",
         "overwrite_partition_safe",
     ]:
@@ -1364,6 +1397,14 @@ def _materialize_spark_dataframe(
 
     if target_str.startswith("table:"):
         table_name = target_str[len("table:") :]
+        # For append mode on UC with external locations, the table must
+        # already exist. On first run, fall back to overwrite to create it.
+        if mode == "append":
+            try:
+                spark.table(table_name)
+            except Exception:
+                logger.info(f"Table {table_name} does not exist yet — using overwrite for initial create.")
+                mode = "overwrite"
         _spark_save_as_table(writer, table_name, mode, location)
         _spark_apply_table_metadata(spark, table_name, contract)
         if incremental_metadata and incremental_metadata.get("strategy") == "delta_version":
@@ -1623,6 +1664,7 @@ def materialize_dataframe(
     engine_name: Optional[str] = None,
     storage_options: Optional[Dict[str, str]] = None,
     incremental_metadata: Optional[Dict[str, Any]] = None,
+    is_reprocess: bool = False,
 ) -> Dict[str, Any]:
     """
     Materialize validated data to the configured target.
@@ -1674,6 +1716,7 @@ def materialize_dataframe(
             resolved_target,
             resolved_format,
             incremental_metadata=incremental_metadata,
+            is_reprocess=is_reprocess,
         )
 
     strategy = (mat.strategy or "append").lower()
@@ -1846,7 +1889,7 @@ def materialize_dataframe(
                 part_dir = part_dir / f"{col}={_safe_partition_value(val)}"
 
             safe_overwrite = reprocess_policy == "overwrite_partition_safe"
-            overwrite_partition = reprocess_policy == "overwrite_partition" or strategy == "overwrite" or safe_overwrite
+            overwrite_partition = (is_reprocess and (reprocess_policy == "overwrite_partition" or safe_overwrite)) or strategy == "overwrite"
 
             if overwrite_partition and not safe_overwrite:
                 if part_dir.exists():

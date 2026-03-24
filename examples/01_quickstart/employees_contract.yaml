@@ -1,0 +1,87 @@
+version: 1.0.0
+dataset: employees
+
+info:
+  title: Employee Directory (Quickstart)
+  description: >
+    Validates and cleanses employee CSV data. Enforces email format,
+    required fields, salary ranges, and department accepted values.
+    Demonstrates schema enforcement, quality rules, and transformations.
+
+# ── Schema ──────────────────────────────────────────────────────────────
+model:
+  fields:
+    - name: id
+      type: integer
+      required: true
+      description: "Unique employee identifier."
+    - name: name
+      type: string
+      required: true
+      description: "Full name."
+    - name: email
+      type: string
+      required: true
+      description: "Corporate email address."
+    - name: department
+      type: string
+      description: "Business unit (Engineering, Sales, HR, Marketing, etc.)."
+    - name: salary
+      type: integer
+      description: "Annual base salary (USD)."
+    - name: hire_date
+      type: string
+      description: "ISO hire date (YYYY-MM-DD)."
+    - name: status
+      type: string
+      description: "Employment status (active, inactive)."
+
+# ── Source ───────────────────────────────────────────────────────────────
+source:
+  type: landing
+
+# ── Transformations ─────────────────────────────────────────────────────
+transformations:
+  - phase: pre
+    derive:
+      field: department_upper
+      sql: "UPPER(department)"
+
+  - phase: pre
+    derive:
+      field: tenure_category
+      sql: >
+        CASE
+          WHEN hire_date >= '2024-01-01' THEN 'New Hire'
+          WHEN hire_date >= '2023-01-01' THEN 'Mid-Tenure'
+          ELSE 'Veteran'
+        END
+
+# ── Quality Rules ───────────────────────────────────────────────────────
+quality:
+  row_rules:
+    - name: valid_email
+      sql: "email LIKE '%@%'"
+      category: validity
+
+    - name: has_name
+      sql: "name IS NOT NULL AND name != ''"
+      category: completeness
+
+    - name: valid_salary
+      sql: "salary > 0 AND salary < 500000"
+      category: validity
+
+    - name: valid_department
+      sql: "department IN ('Engineering', 'Sales', 'HR', 'Marketing', 'Finance')"
+      category: accepted_values
+
+    - name: is_active
+      sql: "status = 'active'"
+      category: validity
+
+# ── Materialization ─────────────────────────────────────────────────────
+materialization:
+  target_path: "./output/employees_validated"
+  format: parquet
+  strategy: overwrite

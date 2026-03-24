@@ -81,6 +81,35 @@ metadata:
   
   sla_tier: "tier1"
   # Business value: SLA classification (tier1 = critical)
+  
+  # ── Run Log Persistence ────────────────────────────────────
+  # Controls where pipeline run metadata is stored.
+  # All three targets can be used simultaneously.
+  
+  run_log_dir: "{log_root}/runs/{domain}_{system}_{bronze_layer}_events"
+  # Per-run JSON files — one file per run. Works on local + ADLS + S3 + GCS.
+  # Best for: lightweight logging, cloud storage
+  
+  # run_log_path: "{log_root}/run_log.json"
+  # Single JSON file — overwritten each run (no history).
+  # Best for: simplest possible logging
+  
+  run_log_table: "{domain_catalog}._run_logs"
+  # Queryable table — auto-detects backend from engine:
+  #   spark engine  → Spark Delta table (Unity Catalog)
+  #   polars engine → Delta table via delta-rs (ADLS/S3/local)
+  #   duckdb engine → local DuckDB file
+  # Best for: production — queryable, partitionable, Delta format
+  
+  # run_log_backend: "delta"
+  # Explicit backend override. Options: spark, delta, duckdb, sqlite
+  # If omitted, auto-detected from engine (spark → spark, everything else → delta)
+  
+  # run_log_table_partition_by: ["domain", "data_layer"]
+  # Partition the run log table for faster queries (Spark + delta backends)
+  
+  # run_log_database: "logs/lakelogic_run_logs.duckdb"
+  # Only for duckdb/sqlite backends: path to embedded database file
 
 # ============================================================
 # 2. DATA SOURCE CONFIGURATION
@@ -157,6 +186,37 @@ source:
   # Options: false (default), true (all), [col, col, ...] (named)
   # Flatten JSON-string columns from bronze tables into flat columns
   # Business value: Bronze → Silver workflows with nested JSON data
+  
+  # ── Date-Partitioned Landing ───────────────────────────────
+  # Limits file globbing to only relevant date partitions instead
+  # of scanning the entire landing directory. Critical for scale.
+  partition:
+    format: "y_%Y/m_%m/d_%d"
+    # Strftime-style format defining the directory structure.
+    # Examples:
+    #   "y_%Y/m_%m/d_%d"     → events/y_2026/m_03/d_22/*.json
+    #   "date=%Y%m%d"         → events/date=20260322/*.json
+    #   "%Y/%m/%d"            → events/2026/03/22/*.json
+    #   "year=%Y/month=%m"    → events/year=2026/month=03/*.json
+    #   "dt=%Y-%m-%d/%H"      → events/dt=2026-03-22/17/*.json (hourly)
+    # Business value: Scan scope drops from millions of files to days
+    
+    lookback_days: 3
+    # How many days back to scan from today. Default: 1.
+    # On FIRST RUN (no watermark), lookback is ignored — all partitions scanned.
+    # Can be overridden at runtime: pipeline.run(lookback_days=30)
+    # Business value: Controls daily scan scope
+    
+    # start_date: "2026-01-01"
+    # end_date: "2026-03-22"
+    # Optional: explicit date range for backfills.
+    # Also auto-populated from pipeline.run(reprocess_from=..., reprocess_to=...)
+    # Business value: Targeted historical reprocessing
+    
+    # file_pattern: "*.json"
+    # Optional: glob pattern for files within each partition.
+    # Auto-derived from source.format if omitted (format: json → *.json)
+    # Business value: Only needed when file_pattern differs from format
 
 # ============================================================
 # 3. SERVER/STORAGE CONFIGURATION
@@ -228,13 +288,18 @@ links:
     # Options: parquet, csv, table
     broadcast: true
     # If true, Spark will broadcast join (for small tables)
-    # Business value: Lookup/join enrichment, referential integrity
+    columns: ["code", "name", "region"]
+    # Column projection — only load these columns from the linked table.
+    # Reduces DataFrame footprint by avoiding unused columns.
+    # If omitted or empty, all columns are loaded (default).
+    # Business value: Memory optimization for wide reference tables
   
   - name: "dim_products"
     table: "catalog.reference.products"
     type: "table"
     broadcast: false
-    # Business value: Unity Catalog / Hive table reference
+    columns: ["id", "product_name", "category", "price"]
+    # Business value: Unity Catalog / Hive table reference with projection
   
   - name: "valid_emails"
     path: "s3://reference/email_domains.csv"
@@ -298,6 +363,21 @@ model:
       pii: true
       classification: "confidential"
       description: "Customer email address"
+      # ── PII Security Group Mapping ──
+      security_groups: ["pii-readers", "compliance-team"]
+      # Groups allowed to see unmasked values.
+      # Maps to IAM/AD groups or Databricks UC is_member() groups.
+      # Business value: Role-based data masking per field
+      masking: "partial"
+      # Default mask when user NOT in security_groups.
+      # Options: nullify | hash | redact | partial | tokenize | encrypt
+      # partial → j***@company.com  (preserves structure)
+      # Business value: Configurable masking strategy per field
+      pii_vault: "vault://pii-encryption-key"
+      # Optional: encrypted vault table for reversible unmasking.
+      # When set, pipeline dual-writes: masked output + encrypted PII vault.
+      # Authorized users can rejoin vault to reconstruct unmasked data.
+      # Business value: Reversible masking for authorized re-identification
       rules:
         - name: "email_format"
           sql: "email RLIKE '^[^@]+@[^@]+\\.[^@]+$'"
@@ -607,6 +687,19 @@ transformations:
 # 10. QUALITY RULES
 # ============================================================
 # OPTIONAL: Data quality validation rules
+#
+# ── Pipeline Execution Order ──────────────────────────────────
+# 1. Pre-transforms  → renames, filters, dedup (phase: pre)
+# 2. Schema enforcement → cast columns to contract types
+# 3. Pre quality rules (default) → validate source columns
+# 4. Good/bad split → quarantine rows failing pre-rules
+# 5. Post-transforms → derives, lookups, joins (phase: post)
+# 6. Post quality rules (phase: post) → validate derived columns,
+#    quarantine failures
+#
+# Pre-phase rules can only reference SOURCE columns.
+# Post-phase rules can reference both source AND derived columns.
+# ──────────────────────────────────────────────────────────────
 quality:
   enforce_required: true
   # If true, generate not_null rules for required fields
@@ -689,6 +782,16 @@ quality:
       description: "Block disposable email domains"
       severity: "error"
       # Business value: Business-specific validation
+    
+    # Post-phase rule (runs AFTER transforms — can reference derived columns)
+    - name: "derived_date_not_null"
+      sql: "event_date_parsed IS NOT NULL"
+      phase: "post"
+      category: "correctness"
+      description: "Derived date must parse successfully"
+      # phase: pre (default) — runs before transforms, source columns only
+      # phase: post — runs after transforms, can reference derived columns
+      # Errors tagged [pre] or [post] in _lakelogic_errors for traceability
   
   # ──────────────────────────────────────────────────────
   # DATASET-LEVEL RULES (aggregate checks on good data)
@@ -878,6 +981,8 @@ materialization:
   # OPTIONAL: External storage location for Unity Catalog tables
   location: "abfss://container@account.dfs.core.windows.net/silver/customers/"
   # Business value: Control physical storage for UC managed tables
+  # Supports placeholders: "{silver_path}/{silver_layer}_{system}_customers"
+  # See _system.yaml Placeholders section below
   
   # OPTIONAL: Delta/Iceberg table properties
   table_properties:
@@ -1583,6 +1688,97 @@ compliance:
 
 ---
 
+## `_system.yaml` Placeholders & Layer Aliases
+
+Contracts support placeholder variables resolved from the domain registry's `_system.yaml`.
+This keeps paths DRY and portable across environments.
+
+### Available Placeholders
+
+```yaml
+# _system.yaml — domain-level configuration
+domain: marketing
+system: google_analytics
+
+# Configurable layer aliases (default values shown)
+bronze_layer: bronze           # → {bronze_layer} in contracts
+silver_layer: silver           # → {silver_layer}
+gold_layer: gold               # → {gold_layer}
+
+# Storage paths
+bronze_path: "abfss://bronze@acct.dfs.core.windows.net"
+silver_path: "abfss://silver@acct.dfs.core.windows.net"
+gold_path: "abfss://gold@acct.dfs.core.windows.net"
+landing_root: "abfss://landing@acct.dfs.core.windows.net"
+log_root: "abfss://logs@acct.dfs.core.windows.net"
+
+# Catalog
+domain_catalog: "retail_marketing"
+```
+
+### Placeholder Usage in Contracts
+
+```yaml
+source:
+  path: "{landing_root}/events"
+
+materialization:
+  target_path: "{bronze_path}/{bronze_layer}_{system}_events"
+  location: "{bronze_path}/{bronze_layer}/{domain}/{system}/events"
+
+quarantine:
+  target: "{bronze_path}/{bronze_layer}_{system}_events_quarantine"
+
+metadata:
+  run_log_dir: "{log_root}/runs/{domain}/{system}/{bronze_layer}_events"
+  run_log_table: "{domain_catalog}._run_logs"
+```
+
+### Layer Alias Flexibility
+
+Override layer names per domain — useful for migrating naming conventions:
+
+```yaml
+# _system.yaml
+bronze_layer: raw        # {bronze_layer} → "raw" everywhere
+silver_layer: cleansed    # {silver_layer} → "cleansed"
+gold_layer: curated       # {gold_layer} → "curated"
+```
+
+### Run Log Backend Selection
+
+```yaml
+# Metadata in contract or _system.yaml defaults
+metadata:
+  # Auto-detected from engine:
+  #   spark  → Spark Delta table (Unity Catalog)
+  #   polars → Delta table via delta-rs (cloud or local)
+  #   duckdb → DuckDB file
+  run_log_table: "{domain_catalog}._run_logs"
+
+  # Explicit override:
+  # run_log_backend: delta    # spark | delta | duckdb | sqlite
+```
+
+### Pipeline Runtime Parameters
+
+```python
+from lakelogic.pipeline import LakehousePipeline
+
+pipeline = LakehousePipeline(registry)
+
+# Daily run — uses contract defaults (lookback_days: 3)
+pipeline.run()
+
+# Override lookback at runtime
+pipeline.run(lookback_days=30)
+
+# Backfill — auto-scopes partition scan to date range
+pipeline.run(reprocess_from="2026-01-01", reprocess_to="2026-03-22")
+```
+
+---
+
 ## Quick Reference: When to Use What
 
 | Feature | Bronze | Silver | Gold |
@@ -1591,12 +1787,15 @@ compliance:
 | `server.mode` | `ingest` | `validate` | `validate` |
 | `server.cast_to_string` | `true` | `false` | `false` |
 | `server.schema_evolution` | `append` | `strict` | `strict` |
+| `source.partition` | Recommended | N/A | N/A |
+| `source.partition.lookback_days` | 1-7 | N/A | N/A |
 | `source.flatten_nested` | N/A | `true` / `[cols]` | `true` / `[cols]` |
 | `quality.enforce_required` | `false` | `true` | `true` |
 | `quality.row_rules` | Minimal | Full | Minimal |
 | `quality.dataset_rules` | None | Yes | Yes |
 | `materialization.strategy` | `append` | `merge`/`scd2` | `overwrite` |
 | `lineage.enabled` | `true` | `true` | `true` |
+| `metadata.run_log_table` | Optional | Optional | Optional |
 | `downstream` | N/A | Optional | Recommended |
 | `extraction` | Optional | N/A | N/A |
 | `cloud.enabled` | Optional | Optional | Optional |
@@ -1606,3 +1805,4 @@ compliance:
 ---
 
 *For more examples, see the [LakeLogic Examples](https://github.com/lakelogic/LakeLogic/tree/main/examples) directory.*
+
