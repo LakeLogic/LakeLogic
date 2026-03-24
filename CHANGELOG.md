@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.5.0] — 2026-03-24
+
+### Added
+
+- Add GitHub Actions CI quality gate for Python linting and tests.
+- Add GitHub Actions CI quality gate for backend linting and core tests with coverage checks.
+- Add quickstart and pipeline examples including notebooks and associated data contracts for bronze, silver, and gold layers.
 ## [1.4.0] — 2026-03-24
 
 ### Added
@@ -141,6 +148,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.5.0]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/lakelogic/LakeLogic/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.3.0
 [1.0.0]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...v1.0.0
