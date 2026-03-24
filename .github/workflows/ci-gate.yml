@@ -57,7 +57,7 @@ jobs:
 
       - name: Install Project & Test Dependencies
         run: |
-          uv pip install --system -e ".[dev]"
+          uv pip install --system -e ".[dev,cli,engines]"
           uv pip install --system pytest pytest-cov
 
       - name: Run Tests
