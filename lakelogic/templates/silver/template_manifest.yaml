@@ -1,0 +1,26 @@
+# ============================================================
+# LAKELOGIC — SILVER PIPELINE TEMPLATE MANIFEST
+# ============================================================
+# Registry of Silver cleansing/typing templates for contract generation.
+
+templates:
+  - id: silver_cleansed
+    name: "Cleansed & Typed"
+    description: >
+      Transform Bronze data into a typed, cleansed Silver table.
+      Applies type casting, PII detection tags, deduplication,
+      null checks, and range/accepted-value quality rules.
+    contract_template: silver_cleansed_contract.yaml.j2
+    use_when:
+      - "silver"
+      - "cleanse"
+      - "clean"
+      - "typed"
+      - "deduplicate"
+      - "quality"
+      - "pii"
+      - "transform"
+    example_prompts:
+      - "Cleanse raw customer data, detect PII, enforce types"
+      - "Deduplicate orders by order_id, cast amounts to decimal"
+      - "Build typed Silver product table with quality rules"

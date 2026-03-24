@@ -138,7 +138,8 @@ class BigQueryAdapter(EngineAdapter):
                     logger.warning(f"BigQuery link '{link.name}' uses file path '{link.path}'. Table links only.")
                 continue
 
-            sql = f"CREATE OR REPLACE TEMP TABLE {link.name} AS SELECT * FROM {table_name}"
+            col_clause = ", ".join(link.columns) if link.columns else "*"
+            sql = f"CREATE OR REPLACE TEMP TABLE {link.name} AS SELECT {col_clause} FROM {table_name}"
             self._execute(client, sql)
 
     def _temp_name(self, label: str) -> str:

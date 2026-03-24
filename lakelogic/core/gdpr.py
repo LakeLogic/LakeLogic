@@ -283,6 +283,98 @@ def _mask_pandas(df, pii_columns: List[str], strategy: str, hash_salt: str):
     return df
 
 
+# ── PySpark implementations ─────────────────────────────────────────────
+
+
+def _forget_pyspark(
+    df,
+    pii_columns: List[str],
+    subject_column: str,
+    subject_ids: List[str],
+    erasure_strategy: str,
+    hash_salt: str,
+    partition_filter: Optional[Dict[str, str]] = None,
+    delete_reason: str = DELETE_REASON_GDPR_ART17,
+):
+    """Erase/mask PII for specific subjects in a PySpark DataFrame."""
+    from pyspark.sql import functions as F
+
+    present_pii = [c for c in pii_columns if c in df.columns]
+    if not present_pii:
+        logger.info("No PII columns found in dataframe; nothing to erase.")
+        return df
+
+    if subject_column not in df.columns:
+        raise ValueError(f"Subject column '{subject_column}' not found in dataframe.")
+
+    # Build the subject mask
+    mask = F.col(subject_column).cast("string").isin([str(s) for s in subject_ids])
+
+    # Scope erasure to a specific partition
+    if partition_filter:
+        pcol, pval = partition_filter["column"], partition_filter["value"]
+        if pcol in df.columns:
+            mask = mask & (F.col(pcol).cast("string") == pval)
+        else:
+            logger.warning(f"Partition column '{pcol}' not found in dataframe; ignoring partition filter.")
+
+    for col in present_pii:
+        if col == subject_column and erasure_strategy == "nullify":
+            continue
+
+        if erasure_strategy == "nullify":
+            df = df.withColumn(col, F.when(mask, F.lit(None)).otherwise(F.col(col)))
+        elif erasure_strategy == "hash":
+            # SHA-256 hash with salt
+            df = df.withColumn(
+                col,
+                F.when(mask, F.sha2(F.concat(F.lit(hash_salt), F.col(col).cast("string")), 256))
+                .otherwise(F.col(col)),
+            )
+        elif erasure_strategy == "redact":
+            df = df.withColumn(col, F.when(mask, F.lit("***REDACTED***")).otherwise(F.col(col)))
+
+    # ── Set compliance metadata on affected rows ─────────────────────────
+    now = datetime.now(timezone.utc).isoformat()
+    for meta_col, default_val in [
+        (META_IS_DELETED, False),
+        (META_DELETED_AT, None),
+        (META_DELETE_REASON, None),
+        (META_UPDATED_AT, None),
+    ]:
+        if meta_col not in df.columns:
+            df = df.withColumn(meta_col, F.lit(default_val))
+
+    df = df.withColumn(META_IS_DELETED, F.when(mask, F.lit(True)).otherwise(F.col(META_IS_DELETED)))
+    df = df.withColumn(META_DELETED_AT, F.when(mask, F.lit(now)).otherwise(F.col(META_DELETED_AT)))
+    df = df.withColumn(META_DELETE_REASON, F.when(mask, F.lit(delete_reason)).otherwise(F.col(META_DELETE_REASON)))
+    df = df.withColumn(META_UPDATED_AT, F.when(mask, F.lit(now)).otherwise(F.col(META_UPDATED_AT)))
+
+    logger.info(f"GDPR erasure ({erasure_strategy}): processed PySpark DataFrame, {len(present_pii)} PII columns.")
+    return df
+
+
+def _mask_pyspark(df, pii_columns: List[str], strategy: str, hash_salt: str):
+    """Mask all PII columns in a PySpark DataFrame (all rows)."""
+    from pyspark.sql import functions as F
+
+    present_pii = [c for c in pii_columns if c in df.columns]
+    if not present_pii:
+        logger.info("No PII columns found in dataframe; nothing to mask.")
+        return df
+
+    for col in present_pii:
+        if strategy == "nullify":
+            df = df.withColumn(col, F.lit(None))
+        elif strategy == "hash":
+            df = df.withColumn(col, F.sha2(F.concat(F.lit(hash_salt), F.col(col).cast("string")), 256))
+        elif strategy == "redact":
+            df = df.withColumn(col, F.lit("***REDACTED***"))
+
+    logger.info(f"PII masking ({strategy}): masked {len(present_pii)} PySpark columns across all rows.")
+    return df
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
@@ -384,6 +476,24 @@ def forget_subjects(
     except ImportError:
         pass
 
+    # PySpark DataFrame
+    try:
+        from pyspark.sql import DataFrame as SparkDataFrame
+
+        if isinstance(df, SparkDataFrame):
+            return _forget_pyspark(
+                df,
+                pii_columns,
+                subject_column,
+                subject_ids,
+                erasure_strategy,
+                hash_salt,
+                partition_filter,
+                delete_reason,
+            )
+    except ImportError:
+        pass
+
     # DuckDB relation → convert to pandas, process, convert back
     if hasattr(df, "fetchdf"):
         import pandas as pd
@@ -450,6 +560,15 @@ def mask_pii_columns(
 
         if isinstance(df, pd.DataFrame):
             return _mask_pandas(df, pii_columns, strategy, hash_salt)
+    except ImportError:
+        pass
+
+    # PySpark DataFrame
+    try:
+        from pyspark.sql import DataFrame as SparkDataFrame
+
+        if isinstance(df, SparkDataFrame):
+            return _mask_pyspark(df, pii_columns, strategy, hash_salt)
     except ImportError:
         pass
 

@@ -40,13 +40,17 @@ class RegistrySLO(BaseModel):
 
 
 class RegistryStorage(BaseModel):
-    # Databricks Volume / Unity Catalog roots
+    # Unity Catalog table config — pipeline derives targets from info.table_name
+    domain_catalog: Optional[str] = None  # e.g. "`catalog`.domain"
+    quarantine_root: Optional[str] = None  # e.g. "`catalog`.quarantine"
+    run_log_table: Optional[str] = None  # e.g. "`catalog`.domain._run_logs"
+    external_location_root: Optional[str] = None  # e.g. "abfss://domain@acct.dfs.core.windows.net"
+    # Databricks Volume / operational roots
     landing_root: Optional[str] = None
     contract_root: Optional[str] = None
     bronze_root: Optional[str] = None
     silver_root: Optional[str] = None
     gold_root: Optional[str] = None
-    quarantine_root: Optional[str] = None
     log_root: Optional[str] = None
     # Cloud storage paths (e.g. abfss://, s3://, gs://)
     landing_path: Optional[str] = None
@@ -61,6 +65,7 @@ class RegistryContract(BaseModel):
     layer: str
     entity: str
     path: str
+    depends_on: List[str] = Field(default_factory=list)  # entity names within the same layer
     contract_version: str = "1.0"
     enabled: bool = True
     # Injected fields after resolution
@@ -117,20 +122,41 @@ class DomainRegistry(BaseModel):
 
     domain: str
     system: str
+    storage_mode: str = "uc"  # "uc" (Unity Catalog) | "direct" (ADLS / cloud paths)
+    # Layer aliases — override to rename medallion layers (e.g. bronze_layer: "raw")
+    bronze_layer: str = "bronze"
+    silver_layer: str = "silver"
+    gold_layer: str = "gold"
     ownership: Dict[str, Any] = Field(default_factory=dict)
     slo: RegistrySLO = Field(default_factory=RegistrySLO)
     storage: RegistryStorage = Field(default_factory=RegistryStorage)
     contracts: List[RegistryContract] = Field(default_factory=list)
     cloud: CloudReporting = Field(default_factory=CloudReporting)
     environments: Dict[str, EnvironmentConfig] = Field(default_factory=dict)
+    # System-level defaults — inherited by contracts that don't define their own
+    lineage: Dict[str, Any] = Field(default_factory=dict)
+    quarantine: Dict[str, Any] = Field(default_factory=dict)
+    materialization: Dict[str, Any] = Field(default_factory=dict)  # per-layer defaults
+    server_defaults: Dict[str, Any] = Field(default_factory=dict)  # per-layer server config
 
     # Internal state
     _registry_dir: Optional[Path] = None
 
     @classmethod
-    def from_yaml(cls, path: str, environment: str = "dev") -> "DomainRegistry":
+    def from_yaml(cls, path: str, environment: str = "dev", storage_mode: str = "uc") -> "DomainRegistry":
         """
         Load a registry from a YAML file, resolving environment tokens and contract paths.
+
+        Parameters
+        ----------
+        path : str
+            Path to the registry YAML file.
+        environment : str
+            Environment name to resolve (e.g. "dev", "staging", "prod").
+        storage_mode : str
+            ``"uc"``  — resolve paths using Unity Catalog Volumes / table names
+            (Databricks pipelines).  ``"direct"`` — resolve paths using cloud
+            storage URIs such as ``abfss://`` (Azure Functions, non-Spark runtimes).
         """
         yaml_path = Path(path)
         if not yaml_path.exists():
@@ -141,6 +167,7 @@ class DomainRegistry(BaseModel):
 
         # Parse into typed model
         registry = cls.model_validate(raw)
+        registry.storage_mode = storage_mode
         registry._registry_dir = yaml_path.parent
 
         # 1. Resolve environment bindings
@@ -151,7 +178,12 @@ class DomainRegistry(BaseModel):
         else:
             sub_map = env_config.model_dump(exclude_none=True)
 
-        # 2. Inject environment tokens into storage paths
+        # 2. Inject environment tokens + registry-level vars into storage paths
+        sub_map["domain"] = registry.domain
+        sub_map["system"] = registry.system
+        sub_map["bronze_layer"] = registry.bronze_layer
+        sub_map["silver_layer"] = registry.silver_layer
+        sub_map["gold_layer"] = registry.gold_layer
         if sub_map:
             for field, val in registry.storage.model_dump().items():
                 if isinstance(val, str) and "{" in val:
@@ -166,8 +198,17 @@ class DomainRegistry(BaseModel):
             if not c.enabled:
                 continue
 
+            # Resolve {domain}/{system}/{*_layer} placeholders in the contract path
+            resolved_contract_path = c.path
+            if "{" in resolved_contract_path:
+                resolved_contract_path = resolved_contract_path.replace("{domain}", registry.domain)
+                resolved_contract_path = resolved_contract_path.replace("{system}", registry.system)
+                resolved_contract_path = resolved_contract_path.replace("{bronze_layer}", registry.bronze_layer)
+                resolved_contract_path = resolved_contract_path.replace("{silver_layer}", registry.silver_layer)
+                resolved_contract_path = resolved_contract_path.replace("{gold_layer}", registry.gold_layer)
+
             # Resolve the absolute path relative to the registry file
-            c_path = Path(c.path)
+            c_path = Path(resolved_contract_path)
             if not c_path.is_absolute() and registry._registry_dir:
                 c_path = registry._registry_dir / c_path
 
@@ -190,21 +231,32 @@ class DomainRegistry(BaseModel):
                 for field, val in registry.storage.model_dump().items():
                     if val is not None:
                         storage_vars[field] = val
-                # Also map _root keys to _path values when _path is available
-                # e.g. {landing_root} -> landing_path value (for non-Databricks)
-                _root_to_path = {
-                    "landing_root": "landing_path",
-                    "contract_root": "contract_path",
-                    "bronze_root": "bronze_path",
-                    "silver_root": "silver_path",
-                    "gold_root": "gold_path",
-                    "log_root": "log_path",
-                }
-                for root_key, path_key in _root_to_path.items():
-                    path_val = storage_vars.get(path_key)
-                    if path_val:
-                        # When _path (cloud) exists, use it as the value for _root placeholders
-                        storage_vars[root_key] = path_val
+                # Include registry-level vars so contract content
+                # (e.g. info.table_name: "{silver_layer}_{system}_sessions")
+                # gets fully resolved.
+                storage_vars["domain"] = registry.domain
+                storage_vars["system"] = registry.system
+                storage_vars["bronze_layer"] = registry.bronze_layer
+                storage_vars["silver_layer"] = registry.silver_layer
+                storage_vars["gold_layer"] = registry.gold_layer
+                storage_vars.update(sub_map)  # env vars (catalog, storage_account, etc.)
+                # In "direct" mode (Azure Functions / non-Spark), override UC
+                # _root variables with their ADLS _path equivalents so that
+                # contracts resolve to cloud storage URIs.
+                # In "uc" mode (Databricks), keep _root values as-is.
+                if storage_mode == "direct":
+                    _root_to_path = {
+                        "landing_root": "landing_path",
+                        "contract_root": "contract_path",
+                        "bronze_root": "bronze_path",
+                        "silver_root": "silver_path",
+                        "gold_root": "gold_path",
+                        "log_root": "log_path",
+                    }
+                    for root_key, path_key in _root_to_path.items():
+                        path_val = storage_vars.get(path_key)
+                        if path_val:
+                            storage_vars[root_key] = path_val
 
                 c_dict = _resolve_placeholders(c_dict, storage_vars)
                 c.contract_dict = c_dict

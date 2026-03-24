@@ -1,0 +1,78 @@
+version: 1.0.0
+dataset: silver_employees
+
+info:
+  title: Employees (Silver)
+  table_name: "{silver_layer}_employees"
+  description: >
+    Cleansed and enriched employee data. Adds tenure category,
+    validates department values, and enforces salary ranges.
+  target_layer: silver
+  domain: hr
+  system: employees
+
+primary_key:
+  - id
+
+model:
+  fields:
+    - name: id
+      type: integer
+      required: true
+    - name: name
+      type: string
+      required: true
+    - name: email
+      type: string
+      required: true
+    - name: department
+      type: string
+      required: true
+    - name: salary
+      type: integer
+    - name: hire_date
+      type: string
+    - name: status
+      type: string
+      required: true
+    - name: tenure_category
+      type: string
+      description: "Derived: New Hire / Mid-Tenure / Veteran"
+
+source:
+  type: landing
+  path: "../../data"
+  format: csv
+  options:
+    header: "true"
+
+transformations:
+  - phase: pre
+    derive:
+      field: tenure_category
+      sql: >
+        CASE
+          WHEN hire_date >= '2024-01-01' THEN 'New Hire'
+          WHEN hire_date >= '2023-01-01' THEN 'Mid-Tenure'
+          ELSE 'Veteran'
+        END
+
+quality:
+  row_rules:
+    - name: valid_email
+      sql: "email LIKE '%@%'"
+      category: validity
+    - name: valid_salary
+      sql: "salary > 0 AND salary < 500000"
+      category: validity
+    - name: valid_department
+      sql: "department IN ('Engineering', 'Sales', 'HR', 'Marketing', 'Finance')"
+      category: accepted_values
+    - name: is_active
+      sql: "status = 'active'"
+      category: validity
+
+materialization:
+  target_path: "../../output/silver_employees"
+  strategy: overwrite
+  format: parquet

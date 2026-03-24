@@ -1,0 +1,73 @@
+version: 1.0.0
+dataset: gold_headcount
+
+info:
+  title: Headcount by Department (Gold)
+  table_name: "{gold_layer}_headcount"
+  description: >
+    Department-level headcount summary. Aggregates active employees
+    from silver into department metrics for executive dashboards.
+  target_layer: gold
+  domain: hr
+  system: employees
+
+primary_key:
+  - department
+
+model:
+  fields:
+    - name: department
+      type: string
+      required: true
+    - name: headcount
+      type: integer
+      description: "Number of active employees."
+    - name: avg_salary
+      type: double
+      description: "Average salary in department."
+    - name: new_hires
+      type: integer
+      description: "Employees hired in 2024+."
+
+source:
+  type: landing
+  path: "../../data"
+  format: csv
+  options:
+    header: "true"
+
+transformations:
+  - phase: pre
+    filter: "status = 'active'"
+
+  - phase: pre
+    derive:
+      field: tenure_category
+      sql: >
+        CASE
+          WHEN hire_date >= '2024-01-01' THEN 'New Hire'
+          WHEN hire_date >= '2023-01-01' THEN 'Mid-Tenure'
+          ELSE 'Veteran'
+        END
+
+  - phase: pre
+    aggregate:
+      group_by: [department]
+      columns:
+        - name: headcount
+          sql: "COUNT(*)"
+        - name: avg_salary
+          sql: "ROUND(AVG(salary), 2)"
+        - name: new_hires
+          sql: "SUM(CASE WHEN tenure_category = 'New Hire' THEN 1 ELSE 0 END)"
+
+quality:
+  row_rules:
+    - name: positive_headcount
+      sql: "headcount > 0"
+      category: validity
+
+materialization:
+  target_path: "../../output/gold_headcount"
+  strategy: overwrite
+  format: parquet

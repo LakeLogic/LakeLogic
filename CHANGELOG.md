@@ -4,10 +4,22 @@ All notable changes to **LakeLogic** are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-<!-- Developer Note: Update via: git cliff -o CHANGELOG.md -->
-
 
 ---
+## [1.4.0] — 2026-03-24
+
+### Added
+
+- Implement core data contract inference, generation, and pipeline execution framework with multi-engine support, removing temporary development files.
+- Enhance data contract specification with schema policies, reference data, and soft deletes, and add new documentation and a quickstart example.
+- Introduce core LakeLogic data processing, validation, and materialization features with extensive documentation and architecture diagrams.
+- Implement initial declarative data mesh pipeline engine with core processing, AI data generation, and GDPR compliance modules.
+
+### Documentation
+
+- Update README to detail LakeLogic's alignment with Data Mesh pillars.
+- Add initial project documentation and enhance the README contract example with clarifications and new service level objectives.
+- Remove "The Problem" section and "The Solution" header from README.
 ## [1.3.0] — 2026-03-18
 
 ### Added
@@ -129,6 +141,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.4.0]: https://github.com/lakelogic/LakeLogic/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.3.0
 [1.0.0]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...v1.0.0
 [0.11.0]: https://github.com/lakelogic/LakeLogic/compare/v0.7.0...v0.11.0

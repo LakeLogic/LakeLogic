@@ -48,7 +48,7 @@ def inject_lineage(
         bad_df = _preserve_upstream_lineage(bad_df, preserve_cols, prefix, engine_name)
 
     source_value = str(source_path) if source_path else None
-    timestamp_value = datetime.now(timezone.utc).replace(microsecond=0)
+    timestamp_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     run_id_value = last_run_id
     if getattr(lineage, "run_id_source", "run_id") == "pipeline_run_id" and pipeline_run_id:
         run_id_value = pipeline_run_id
@@ -347,7 +347,8 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
             all_cols = updated.columns
             ordered = _sorted_to_right(all_cols)
             return updated.select(ordered)
-        except Exception:
+        except Exception as exc:
+            logger.warning(f"Spark lineage injection failed (columns not added): {exc}")
             return df
 
     return df

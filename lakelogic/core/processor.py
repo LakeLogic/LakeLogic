@@ -112,6 +112,7 @@ class DataProcessor:
         stage: Optional[str] = None,
         pipeline_run_id: Optional[str] = None,
         trace: bool = False,
+        run_log_mode: Optional[str] = None,
     ):
         """
         Initialize the DataProcessor.
@@ -122,6 +123,7 @@ class DataProcessor:
             stage: Optional stage override (e.g., bronze/silver) applied from contract "stages".
             pipeline_run_id: Optional pipeline-level run id for correlation across contracts.
             trace: Enable detailed execution tracing and row debugging.
+            run_log_mode: Which run log backends to use: "dir", "table", or "all" (default).
         """
         self._configure_logging()
         self.engine_name = (engine or self._discover_engine()).lower()
@@ -138,6 +140,7 @@ class DataProcessor:
         self.last_source_path: Optional[str] = None
         self._source_files: List[Dict[str, Any]] = []
         self._source_max_mtime: Optional[float] = None
+        self._run_log_mode: Optional[str] = run_log_mode
 
     # ------------------------------------------------------------------
     # Alternative constructors
@@ -435,6 +438,10 @@ class DataProcessor:
 
         start_time = time.perf_counter()
 
+        # Capture source_path for run report
+        if source_path and not self.last_source_path:
+            self.last_source_path = str(source_path)
+
         # Execute via adapter
         good_df, bad_df = self.adapter.execute(df)
 
@@ -497,12 +504,24 @@ class DataProcessor:
             dropped_display = f", Pre-Transform Dropped: {dropped}" if dropped is not None else ""
             source_display = f"Source: {source_total}, " if source_total is not None else ""
             if quality_enabled:
+                _dropped_line = f"\n    Pre-Transform Dropped: {dropped}" if dropped is not None else ""
                 logger.info(
-                    f"Run complete.{tags_display} {source_display}Total (post-transform): {total}, "
-                    f"Good: {counts.get('good')}, Quarantined: {bad}{dropped_display}, Ratio: {ratio_display}"
+                    f"Run complete.{tags_display}"
+                    f"\n    Source:               {source_total if source_total is not None else 'n/a'}"
+                    f"\n    Total (post-transform):{total}"
+                    f"\n    Good:                 {counts.get('good')}"
+                    f"\n    Quarantined:          {bad}"
+                    f"{_dropped_line}"
+                    f"\n    Quarantine Ratio:     {ratio_display}"
                 )
             else:
-                logger.info(f"Run complete.{tags_display} {source_display}Total: {total}{dropped_display}")
+                _dropped_line = f"\n    Pre-Transform Dropped: {dropped}" if dropped is not None else ""
+                logger.info(
+                    f"Run complete.{tags_display}"
+                    f"\n    Source: {source_total if source_total is not None else 'n/a'}"
+                    f"\n    Total:  {total}"
+                    f"{_dropped_line}"
+                )
 
             if bad > 0:
                 msg = (
@@ -522,14 +541,39 @@ class DataProcessor:
         # Schema drift detection (ingest mode)
         drift = getattr(self.adapter, "schema_drift", {}) or {}
         if drift.get("missing_fields") or drift.get("unknown_fields"):
+            # Exclude columns that will be created by transformations
+            derived_fields = set()
+            rename_targets = set()  # new names (will appear after rename)
+            rename_sources = set()  # old names (expected in source, removed after rename)
+            if self.contract.transformations:
+                for t in self.contract.transformations:
+                    t_dict = t if isinstance(t, dict) else (t.model_dump() if hasattr(t, "model_dump") else {})
+                    # Derived columns (phase: post)
+                    derive = t_dict.get("derive") or {}
+                    if derive.get("field"):
+                        derived_fields.add(derive["field"])
+                    # Rename mappings — source → target
+                    rename = t_dict.get("rename") or {}
+                    mappings = rename.get("mappings") or {}
+                    for src, tgt in mappings.items():
+                        rename_sources.add(src)
+                        rename_targets.add(tgt)
+
+            # Filter out false alarms
+            missing = drift.get("missing_fields", [])
+            unknown = drift.get("unknown_fields", [])
+            real_missing = sorted(set(missing) - derived_fields - rename_targets)
+            real_unknown = sorted(set(unknown) - rename_sources)
+
             allow = drift.get("allow_schema_drift", True)
-            drift_msg = (
-                f"Schema drift detected for '{contract_title}': "
-                f"missing={drift.get('missing_fields')}, unknown={drift.get('unknown_fields')}"
-            )
-            logger.warning(drift_msg)
-            if not allow:
-                self.notify(event="schema_drift", message=drift_msg)
+            if real_missing or real_unknown:
+                drift_msg = (
+                    f"Schema drift detected for '{contract_title}': "
+                    f"missing={real_missing}, unknown={real_unknown}"
+                )
+                logger.warning(drift_msg)
+                if not allow:
+                    self.notify(event="schema_drift", message=drift_msg)
 
         # Fail-fast if quarantine is disabled
         if self.contract.quarantine and not self.contract.quarantine.enabled:
@@ -547,7 +591,7 @@ class DataProcessor:
             slos = []
         row_rule_failures = self._extract_row_rule_failures(bad_df)
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
-        write_run_log(self.last_report, self.contract, engine_name=self.engine_name)
+        write_run_log(self.last_report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
 
         # Optional external logic hook (python/notebook)
         from lakelogic.core.external_logic import apply_external_logic
@@ -689,6 +733,7 @@ class DataProcessor:
         reprocess_to: Optional[str] = None,
         reprocess_column: Optional[str] = None,
         reprocess_values: Optional[List[str]] = None,
+        lookback_days: Optional[int] = None,
     ) -> ValidationResult:
         """
         Loads data from a source file and runs the contract in one step.
@@ -707,6 +752,8 @@ class DataProcessor:
                 kept.  Can be used alone or with ``reprocess_from``.
             reprocess_column: Optional column name for ID-based reprocessing.
             reprocess_values: Optional list of values for ID-based reprocessing.
+            lookback_days: Optional runtime override for partition lookback_days.
+                Overrides the contract's ``source.partition.lookback_days``.
 
         Returns:
             ValidationResult object (unpacks to good_df, bad_df).
@@ -716,8 +763,22 @@ class DataProcessor:
         # Store reprocess range for downstream use by materialize
         self._reprocess_from = reprocess_from
         self._reprocess_to = reprocess_to
-        self._reprocess_column = reprocess_column
         self._reprocess_values = reprocess_values
+
+        # Per-contract reprocess_column: each layer can map to its own column name
+        # (e.g. bronze=cus_id, silver=cus_ap_id, gold=cus_ss_id).
+        # Falls back to the global reprocess_column parameter from the pipeline.
+        mat = getattr(self.contract, "materialization", None)
+        per_contract_col = getattr(mat, "reprocess_column", None) if mat else None
+        resolved_reprocess_column = per_contract_col or reprocess_column
+        self._reprocess_column = resolved_reprocess_column
+        if per_contract_col and reprocess_column and per_contract_col != reprocess_column:
+            logger.info(
+                f"Using per-contract reprocess_column '{per_contract_col}' "
+                f"(overriding global '{reprocess_column}')"
+            )
+
+        self._is_reprocess = bool(reprocess_from or reprocess_to or (resolved_reprocess_column and reprocess_values))
 
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
@@ -736,11 +797,11 @@ class DataProcessor:
         logger.info(f"Loading source: {path} via {self.engine_name}")
 
         # ── Reprocessing mode: bypass incremental watermark ───────────────────
-        _is_reprocess = bool(reprocess_from or reprocess_to or (reprocess_column and reprocess_values))
+        _is_reprocess = bool(reprocess_from or reprocess_to or (resolved_reprocess_column and reprocess_values))
         if _is_reprocess:
-            if reprocess_column and reprocess_values:
+            if resolved_reprocess_column and reprocess_values:
                 logger.info(
-                    f"Targeted reprocessing mode: filter on {reprocess_column} "
+                    f"Targeted reprocessing mode: filter on {resolved_reprocess_column} "
                     f"IN ({len(reprocess_values)} values) — incremental watermark bypassed"
                 )
             else:
@@ -749,7 +810,47 @@ class DataProcessor:
                     f"{reprocess_to or '*'}] — incremental watermark bypassed"
                 )
 
-        source_files = self._expand_source_files(path)
+        # ── Date-partitioned landing: expand path into per-date globs ─────────
+        partition_cfg = getattr(self.contract.source, "partition", None) if self.contract.source else None
+        if partition_cfg and partition_cfg.format:
+            # Auto-detect initial load: if no prior watermark exists, this is a
+            # first run → skip lookback and scan ALL partitions via full glob.
+            load_mode = getattr(self.contract.source, "load_mode", "full") if self.contract.source else "full"
+            _is_initial_load = False
+            if load_mode == "incremental" and not _is_reprocess:
+                watermark = self._get_last_source_watermark()
+                if watermark is None:
+                    _is_initial_load = True
+                    logger.info(
+                        "Initial load detected (no prior watermark) — "
+                        "scanning all partitions regardless of lookback_days"
+                    )
+
+            if _is_initial_load:
+                # First run: scan everything via standard glob (no date restriction)
+                source_files = self._expand_source_files(path + "/**/*")
+                if not source_files:
+                    # Fall back: try non-recursive glob
+                    source_files = self._expand_source_files(path)
+            else:
+                # Apply runtime lookback_days override if provided
+                effective_cfg = partition_cfg
+                if lookback_days is not None:
+                    effective_cfg = partition_cfg.model_copy(update={"lookback_days": lookback_days})
+                source_files = self._expand_partitioned_paths(
+                    path, effective_cfg,
+                    override_start=reprocess_from,
+                    override_end=reprocess_to,
+                )
+
+            # Guard: if partitioned expansion found zero files, return early
+            # rather than letting the engine attempt to read an empty directory.
+            if source_files is not None and len(source_files) == 0:
+                logger.info("No source files found in partitioned path; skipping run.")
+                self._write_empty_run_log("no_new_data")
+                return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
+        else:
+            source_files = self._expand_source_files(path)
         load_mode = getattr(self.contract.source, "load_mode", "full") if self.contract.source else "full"
         if load_mode == "incremental" and source_files and not _is_reprocess:
             watermark = self._get_last_source_watermark()
@@ -757,6 +858,7 @@ class DataProcessor:
                 source_files = [f for f in source_files if f.get("mtime", 0) > watermark]
             if not source_files:
                 logger.info("No new files detected for incremental load; skipping run.")
+                self._write_empty_run_log("no_new_data")
                 return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
 
         self._source_files = source_files or []
@@ -1033,33 +1135,43 @@ class DataProcessor:
                     return pd.DataFrame(flat)
 
                 if df is None:
+                    source_fmt = (
+                        (
+                            getattr(self.contract.source, "format", None)
+                            if getattr(self.contract, "source", None)
+                            else None
+                        )
+                        or (
+                            getattr(self.contract.materialization, "format", None)
+                            if getattr(self.contract, "materialization", None)
+                            else None
+                        )
+                        or (
+                            getattr(self.contract.server, "format", None)
+                            if getattr(self.contract, "server", None)
+                            else None
+                        )
+                        or ""
+                    ).lower()
+
+                    def _pd_read_single(filepath: str) -> "pd.DataFrame":
+                        """Read a single file using source_fmt or file extension."""
+                        if source_fmt == "parquet" or filepath.endswith(".parquet"):
+                            return pd.read_parquet(filepath)
+                        elif source_fmt == "json" or filepath.endswith(".json"):
+                            return _pandas_read_json_flat(filepath)
+                        elif source_fmt == "xml" or filepath.endswith(".xml"):
+                            return pd.read_xml(filepath)
+                        elif source_fmt in ("excel", "xlsx") or filepath.endswith((".xlsx", ".xls")):
+                            return pd.read_excel(filepath)
+                        else:
+                            return pd.read_csv(filepath)
+
                     if file_paths:
-                        frames = []
-                        for file in file_paths:
-                            if file.endswith(".parquet"):
-                                frames.append(pd.read_parquet(file))
-                            elif file.endswith(".xml"):
-                                frames.append(pd.read_xml(file))
-                            elif file.endswith((".xlsx", ".xls")):
-                                frames.append(pd.read_excel(file))
-                            elif file.endswith(".json"):
-                                frames.append(_pandas_read_json_flat(file))
-                            else:
-                                frames.append(pd.read_csv(file))
+                        frames = [_pd_read_single(f) for f in file_paths]
                         df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
                     else:
-                        if path.endswith(".json"):
-                            df = _pandas_read_json_flat(path)
-                        elif path.endswith(".csv"):
-                            df = pd.read_csv(path)
-                        elif path.endswith(".parquet"):
-                            df = pd.read_parquet(path)
-                        elif path.endswith(".xml"):
-                            df = pd.read_xml(path)
-                        elif path.endswith((".xlsx", ".xls")):
-                            df = pd.read_excel(path)
-                        else:
-                            df = pd.read_csv(path)
+                        df = _pd_read_single(path)
 
             elif self.engine_name == "duckdb":
                 import duckdb
@@ -1101,22 +1213,40 @@ class DataProcessor:
 
                 rel = None
                 if df is None:
+                    source_fmt = (
+                        (
+                            getattr(self.contract.source, "format", None)
+                            if getattr(self.contract, "source", None)
+                            else None
+                        )
+                        or (
+                            getattr(self.contract.materialization, "format", None)
+                            if getattr(self.contract, "materialization", None)
+                            else None
+                        )
+                        or (
+                            getattr(self.contract.server, "format", None)
+                            if getattr(self.contract, "server", None)
+                            else None
+                        )
+                        or ""
+                    ).lower()
+
+                    def _duck_read(targets):
+                        """Read using source_fmt or file extension."""
+                        nonlocal df, rel
+                        p = targets if isinstance(targets, str) else (targets[0] if targets else path)
+                        if source_fmt == "parquet" or p.endswith(".parquet"):
+                            rel = duckdb.read_parquet(targets)
+                        elif source_fmt == "json" or p.endswith(".json"):
+                            df = _duckdb_read_json(targets)
+                        else:
+                            rel = _duckdb_read_csv(targets)
+
                     if file_paths:
-                        if path.endswith(".parquet"):
-                            rel = duckdb.read_parquet(file_paths)
-                        elif path.endswith(".json"):
-                            df = _duckdb_read_json(file_paths)
-                        else:
-                            rel = _duckdb_read_csv(file_paths)
+                        _duck_read(file_paths)
                     else:
-                        if path.endswith(".json"):
-                            df = _duckdb_read_json(path)
-                        elif path.endswith(".csv"):
-                            rel = _duckdb_read_csv(path)
-                        elif path.endswith(".parquet"):
-                            rel = duckdb.read_parquet(path)
-                        else:
-                            rel = _duckdb_read_csv(path)
+                        _duck_read(path)
 
                     if rel is not None:
                         df = rel.df()
@@ -1126,11 +1256,25 @@ class DataProcessor:
 
                 spark = SparkSession.builder.getOrCreate()
                 # ── Format detection ──────────────────────────────────────────
-                # Explicit server.format wins; otherwise infer from file extension.
+                # Check source.format first, then materialization.format,
+                # then server.format; fall back to file extension or parquet.
                 fmt = (
-                    self.contract.server.format.lower()
-                    if self.contract.server and self.contract.server.format
-                    else (
+                    (
+                        getattr(self.contract.source, "format", None)
+                        if getattr(self.contract, "source", None)
+                        else None
+                    )
+                    or (
+                        getattr(self.contract.materialization, "format", None)
+                        if getattr(self.contract, "materialization", None)
+                        else None
+                    )
+                    or (
+                        getattr(self.contract.server, "format", None)
+                        if getattr(self.contract, "server", None)
+                        else None
+                    )
+                    or (
                         "json"
                         if path.endswith(".json")
                         else "csv"
@@ -1139,7 +1283,7 @@ class DataProcessor:
                         if path.endswith((".xlsx", ".xls"))
                         else "parquet"
                     )
-                )
+                ).lower()
 
                 if df is None:
                     if path.startswith("table:"):
@@ -1205,10 +1349,73 @@ class DataProcessor:
                             reader = reader.option("header", "true")
                         elif fmt == "json":
                             reader = reader.option("multiLine", "true")
-                        df = reader.load(file_paths if file_paths else path)
-                        # Default Spark load for other formats (Parquet, CSV, JSON)
-                        # We use the reader configured above (lines 1198-1202)
-                        df = reader.load(file_paths if file_paths else path)
+                        # When reading a directory (no explicit file list), enable
+                        # recursive scanning so Spark finds files in partition
+                        # subdirectories (e.g. y_2026/m_03/d_21/data.csv).
+                        if not file_paths:
+                            reader = reader.option("recursiveFileLookup", "true")
+
+                        # ── Contract-driven schema ────────────────────────────
+                        # Build a Spark StructType from the contract's model
+                        # fields so CSV/JSON reads don't need to infer schema
+                        # (which fails on empty dirs or Volumes FUSE paths).
+                        _contract_type = type(self.contract).__name__
+                        logger.debug(f"Spark read: fmt={fmt}, file_paths={len(file_paths) if file_paths else 'None'}, contract_type={_contract_type}")
+
+                        _model = getattr(self.contract, "model", None)
+                        _fields_list = getattr(_model, "fields", None) if _model else None
+                        if not _fields_list and isinstance(self.contract, dict):
+                            _fields_list = self.contract.get("model", {}).get("fields", [])
+                        
+                        logger.debug(f"Spark schema: model={_model is not None}, fields_list={len(_fields_list) if _fields_list else 'None'}")
+
+                        if _fields_list:
+                            from pyspark.sql.types import (
+                                StructType, StructField, StringType, LongType,
+                                IntegerType, DoubleType, FloatType, BooleanType,
+                                TimestampType, DateType,
+                            )
+                            _type_map = {
+                                "string": StringType(),
+                                "long": LongType(),
+                                "bigint": LongType(),
+                                "integer": IntegerType(),
+                                "int": IntegerType(),
+                                "double": DoubleType(),
+                                "float": FloatType(),
+                                "boolean": BooleanType(),
+                                "bool": BooleanType(),
+                                "timestamp": TimestampType(),
+                                "date": DateType(),
+                            }
+                            spark_fields = []
+                            for f in _fields_list:
+                                fname = f.get("name") if isinstance(f, dict) else getattr(f, "name", None)
+                                ftype = f.get("type", "string") if isinstance(f, dict) else getattr(f, "type", "string")
+                                nullable = not (f.get("required", False) if isinstance(f, dict) else getattr(f, "required", False))
+                                spark_type = _type_map.get((ftype or "string").lower(), StringType())
+                                if fname:
+                                    spark_fields.append(StructField(fname, spark_type, nullable))
+                            if spark_fields:
+                                schema = StructType(spark_fields)
+                                reader = reader.schema(schema)
+                                logger.info(f"✅ Applied contract schema ({len(spark_fields)} fields) to Spark reader")
+                            else:
+                                logger.warning("⚠ Contract model.fields found but produced 0 Spark fields")
+                        else:
+                            logger.warning("⚠ No contract model.fields found — Spark will infer schema")
+
+                        _load_target = file_paths if file_paths else path
+                        if isinstance(_load_target, list):
+                            _max_show = 5
+                            _shown = _load_target[:_max_show]
+                            _display = "\n    ".join(_shown)
+                            _remaining = len(_load_target) - _max_show
+                            _suffix = f"\n    ... and {_remaining} more file(s)" if _remaining > 0 else ""
+                            logger.info(f"Spark loading {len(_load_target)} file(s):\n    {_display}{_suffix}")
+                        else:
+                            logger.info(f"Spark loading: {_load_target}")
+                        df = reader.load(_load_target)
 
             elif self.engine_name in ["snowflake", "bigquery"]:
                 table_name = path[6:] if path.startswith("table:") else path
@@ -1220,31 +1427,33 @@ class DataProcessor:
         # ── Target Reprocessing filter ─────────────────────────────────────────
         # Apply strict targeted reprocessing (if supplied). We apply this here
         # so Polars/Spark lazy logic can push the predicate all the way down.
-        if reprocess_column and reprocess_values:
+        # Uses resolved_reprocess_column which may come from the contract's
+        # materialization.reprocess_column or the global pipeline parameter.
+        if resolved_reprocess_column and reprocess_values:
             if self.engine_name == "polars":
                 import polars as pl
 
                 # Cast the array values to Utf8 to safely match
                 string_vals = [str(x) for x in reprocess_values]
-                df = df.filter(pl.col(reprocess_column).cast(pl.Utf8).is_in(string_vals))
+                df = df.filter(pl.col(resolved_reprocess_column).cast(pl.Utf8).is_in(string_vals))
             elif self.engine_name == "spark":
                 from pyspark.sql.functions import col
 
                 string_vals = [str(x) for x in reprocess_values]
-                df = df.filter(col(reprocess_column).cast("string").isin(string_vals))
+                df = df.filter(col(resolved_reprocess_column).cast("string").isin(string_vals))
             elif self.engine_name == "pandas":
                 # Pandas is eager, but we filter to save ram on transform
                 string_vals = [str(x) for x in reprocess_values]
-                df = df[df[reprocess_column].astype(str).isin(string_vals)]
+                df = df[df[resolved_reprocess_column].astype(str).isin(string_vals)]
             elif self.engine_name == "duckdb":
                 import duckdb
 
                 # Need to run a query to enforce it
                 string_vals = ", ".join([f"'{str(x).replace(chr(39), chr(39) * 2)}'" for x in reprocess_values])
-                query = f"SELECT * FROM df WHERE {reprocess_column} IN ({string_vals})"
-                df = duckdb.query(query).df()
+                query = f"SELECT * FROM df WHERE {resolved_reprocess_column} IN ({string_vals})"
+                df = duckdb.sql(query).fetchdf()
 
-            logger.info(f"Targeted reprocessing filter pushdown applied on {reprocess_column}")
+            logger.info(f"Targeted reprocessing filter pushdown applied on {resolved_reprocess_column}")
 
         # ── JSON-string flattening (source.flatten_nested) ────────────────────
         # When a bronze table stores nested objects as JSON strings we need to
@@ -1387,7 +1596,8 @@ class DataProcessor:
             if reprocess_from:
                 df = df.filter(F.col(date_col) >= F.lit(reprocess_from))
             if reprocess_to:
-                df = df.filter(F.col(date_col) <= F.lit(reprocess_to))
+                _to_val = reprocess_to + "T23:59:59" if "T" not in reprocess_to else reprocess_to
+                df = df.filter(F.col(date_col) <= F.lit(_to_val))
             post_count = df.count()
             logger.info(
                 f"Reprocess filter ({date_col}): {pre_count} → {post_count} rows "
@@ -1676,7 +1886,7 @@ class DataProcessor:
         if base and not Path(pattern).is_absolute():
             pattern = str(Path(base) / pattern)
 
-        files = [f for f in glob(pattern) if Path(f).is_file()]
+        files = [f for f in glob(pattern, recursive=True) if Path(f).is_file()]
         results = []
         for file in sorted(files):
             try:
@@ -1690,9 +1900,94 @@ class DataProcessor:
                 continue
         return results or None
 
+    def _expand_partitioned_paths(
+        self,
+        base_path: str,
+        partition_cfg,
+        *,
+        override_start: Optional[str] = None,
+        override_end: Optional[str] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Expand a base landing path into date-partitioned sub-paths using strftime.
+
+        Instead of globbing the entire landing directory, only scans the
+        directories for [today - lookback_days ... today] (or start_date..end_date).
+
+        Args:
+            base_path: Base source path (e.g. "/Volumes/.../events").
+            partition_cfg: SourcePartition config with format, lookback_days, etc.
+            override_start: Reprocessing start date (YYYY-MM-DD) — overrides partition config.
+            override_end: Reprocessing end date (YYYY-MM-DD) — overrides partition config.
+
+        Returns:
+            List of {path, mtime} dicts for all files found across partitions.
+        """
+        from datetime import date, timedelta
+
+        # Reprocessing dates take precedence over partition config dates
+        eff_start = override_start or partition_cfg.start_date
+        eff_end = override_end or partition_cfg.end_date
+
+        # Determine date range
+        if eff_start and eff_end:
+            start = date.fromisoformat(eff_start)
+            end = date.fromisoformat(eff_end)
+        elif eff_start:
+            start = date.fromisoformat(eff_start)
+            end = date.today()
+        elif eff_end:
+            end = date.fromisoformat(eff_end)
+            start = end - timedelta(days=partition_cfg.lookback_days)
+        else:
+            end = date.today()
+            start = end - timedelta(days=partition_cfg.lookback_days)
+
+        file_pattern = partition_cfg.file_pattern
+        if not file_pattern:
+            # Auto-derive from source.format (e.g. json → *.json)
+            src_fmt = getattr(getattr(self.contract, "source", None), "format", None)
+            file_pattern = f"*.{src_fmt}" if src_fmt else "*"
+        fmt = partition_cfg.format
+
+        # Strip trailing glob from base_path if present (e.g. ".../events/*.json" -> ".../events")
+        # The file_pattern from partition config will be used instead.
+        base_clean = base_path.rstrip("/")
+        # If path ends with a glob like "/*.json", extract the file pattern
+        if "*" in base_clean.split("/")[-1]:
+            parts = base_clean.rsplit("/", 1)
+            base_clean = parts[0]
+            if file_pattern == "*":
+                file_pattern = parts[1]  # e.g. "*.json"
+
+        all_files: List[Dict[str, Any]] = []
+        current = start
+        while current <= end:
+            partition_dir = current.strftime(fmt)
+            partition_path = f"{base_clean}/{partition_dir}/{file_pattern}"
+            logger.debug(f"Scanning partition: {partition_path}")
+            files = self._expand_source_files(partition_path)
+            if files:
+                all_files.extend(files)
+            current += timedelta(days=1)
+
+        if all_files:
+            logger.info(
+                f"Date-partitioned scan: {len(all_files)} files found "
+                f"across {(end - start).days + 1} partitions ({start} to {end})"
+            )
+        else:
+            logger.info(
+                f"Date-partitioned scan: no files found "
+                f"in {(end - start).days + 1} partitions ({start} to {end})"
+            )
+
+        return all_files or None
+
     def _get_last_source_watermark(self) -> Optional[float]:
         """
         Fetch the last max_source_mtime for this contract/stage from run logs.
+        Uses dataset (target table name) + data_layer for precise filtering.
         """
         try:
             from lakelogic.core.materialization import get_last_run_watermark
@@ -1700,7 +1995,43 @@ class DataProcessor:
             return None
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
         stage = self.stage or "default"
-        return get_last_run_watermark(self.contract, contract_title, stage, engine_name=self.engine_name)
+
+        # Resolve dataset (target table name) and data_layer for precise filtering
+        mat = getattr(self.contract, "materialization", None)
+        _target_path = ""
+        if mat:
+            _target_path = getattr(mat, "target_path", "") or getattr(mat, "path", "") or ""
+        dataset = None
+        if str(_target_path).startswith("table:"):
+            _table_full = str(_target_path)[len("table:"):]
+            dataset = _table_full.split(".")[-1] if "." in _table_full else _table_full
+
+        metadata = getattr(self.contract, "metadata", {}) or {}
+        info = getattr(self.contract, "info", None)
+        data_layer = metadata.get("data_layer") or (getattr(info, "target_layer", None) if info else None)
+
+        return get_last_run_watermark(
+            self.contract, contract_title, stage,
+            engine_name=self.engine_name,
+            dataset=dataset, data_layer=data_layer,
+        )
+
+    def _write_empty_run_log(self, stage: str = "no_new_data") -> None:
+        """Write a minimal run log entry for runs that found no new data.
+
+        This ensures the run_log table always has a record of the pipeline
+        attempt, even when there were no new files to process.
+        """
+        try:
+            contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
+            empty_counts = {"source": 0, "total": 0, "good": 0, "quarantined": 0, "quarantine_ratio": None}
+            report = self._build_report(contract_title, empty_counts)
+            # Override stage to indicate no new data (don't affect watermark)
+            report["stage"] = stage
+            report["max_source_mtime"] = None
+            write_run_log(report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
+        except Exception as e:
+            logger.debug(f"Could not write empty run log: {e}")
 
     def _empty_frame(self) -> Any:
         """
@@ -1932,6 +2263,7 @@ class DataProcessor:
             target_path=target,
             engine_name=self.engine_name,
             incremental_metadata=getattr(self, "_incremental_metadata", None),
+            is_reprocess=getattr(self, "_is_reprocess", False),
         )
 
         if bad_df is not None and self.contract.quarantine and self.contract.quarantine.target:
@@ -2075,8 +2407,19 @@ class DataProcessor:
         data_layer = _meta_or_info("data_layer") or (getattr(info, "target_layer", None) if info else None)
 
         # ── Resolve dataset ─────────────────────────────────────────────────────
-        # contract.dataset is a top-level field; fall back to info.title
-        dataset = self.contract.dataset or (info.title if info else None)
+        # Prefer actual target table name for easier filtering in run_log queries.
+        # Falls back to contract.dataset or info.title.
+        mat_obj = getattr(self.contract, "materialization", None)
+        _target_path = ""
+        if mat_obj:
+            _target_path = getattr(mat_obj, "target_path", "") or getattr(mat_obj, "path", "") or ""
+        if str(_target_path).startswith("table:"):
+            # Use just the table name part (after "table:")
+            _table_full = str(_target_path)[len("table:"):]
+            # Use the last part (table name) for the dataset field
+            dataset = _table_full.split(".")[-1] if "." in _table_full else _table_full
+        else:
+            dataset = self.contract.dataset or (info.title if info else None)
 
         # ── Resolve source_path ─────────────────────────────────────────────────
         # run() callers set last_source_path; run_source() doesn't — use first
@@ -2087,19 +2430,34 @@ class DataProcessor:
             if source_files:
                 source_path = source_files[0].get("path")
 
+        # Resolve contract version
+        contract_version = None
+        if info:
+            contract_version = getattr(info, "version", None)
+        if not contract_version:
+            contract_version = self.contract.version if hasattr(self.contract, "version") else None
+
+        # During reprocessing, mark the run log entry so the incremental
+        # watermark reader ignores it (it filters on stage == "source"/"default").
+        _is_reprocess = getattr(self, "_is_reprocess", False)
+        _stage = "reprocess" if _is_reprocess else (self.stage or "default")
+        # Don't regress the watermark with older files during reprocessing
+        _max_mtime = None if _is_reprocess else self._source_max_mtime
+
         return {
             "run_id": self.last_run_id,
             "pipeline_run_id": self.pipeline_run_id,
             "engine": self.engine_name,
             "contract": contract_title,
-            "stage": self.stage or "default",
+            "contract_version": str(contract_version) if contract_version else None,
+            "stage": _stage,
             "dataset": dataset,
             "domain": domain,
             "system": system,
             "data_layer": data_layer,
             "source_path": source_path,
             "source_files": self._source_files or [],
-            "max_source_mtime": self._source_max_mtime,
+            "max_source_mtime": _max_mtime,
             "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "counts": counts,
             "dataset_rules": getattr(self.adapter, "dataset_rule_results", []),

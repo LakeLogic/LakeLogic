@@ -2,6 +2,7 @@ from typing import Optional, Dict
 
 from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
 from lakelogic.core.bootstrap import ContractDraft, ContractInferrer, infer_contract
+from lakelogic.core.describe_columns import describe_columns
 from lakelogic.core.generator import DataGenerator
 from lakelogic.core.incremental import Boundary, IncrementalBoundary
 from lakelogic.core.models import (
@@ -28,7 +29,7 @@ from lakelogic.engines.cloud_credentials import (
 from lakelogic.engines.base import ENGINE_DIALECT_MAP
 from lakelogic.engines.generic_sql import GenericSQLAdapter
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 class HelpTopic:
@@ -204,6 +205,7 @@ __all__ = [
     "infer_contract",
     "ContractInferrer",
     "ContractDraft",
+    "describe_columns",
     # Schema API
     "validate_contract",
     "contract_schema",
