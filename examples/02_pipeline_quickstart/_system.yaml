@@ -15,20 +15,20 @@ variables:
 # ── Contract Registry ──────────────────────────────────────────────────────
 contracts:
   - layer: bronze
-    entity: employees
+    entity: raw_employees
     path: "contracts/bronze/bronze_employees_v1.0.yaml"
     enabled: true
 
   - layer: silver
-    entity: employees
+    entity: clean_employees
     path: "contracts/silver/silver_employees_v1.0.yaml"
-    depends_on: [employees]
+    depends_on: [raw_employees]
     enabled: true
 
   - layer: gold
     entity: headcount
     path: "contracts/gold/gold_headcount_v1.0.yaml"
-    depends_on: [employees]
+    depends_on: [clean_employees]
     enabled: true
 
 # ── Server Defaults (per-layer) ────────────────────────────────────────────

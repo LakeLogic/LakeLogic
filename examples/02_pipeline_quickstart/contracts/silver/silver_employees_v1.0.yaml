@@ -3,6 +3,7 @@ dataset: silver_employees
 
 info:
   title: Employees (Silver)
+  version: 1.0.0
   table_name: "{silver_layer}_employees"
   description: >
     Cleansed and enriched employee data. Adds tenure category,
@@ -41,10 +42,8 @@ model:
 
 source:
   type: landing
-  path: "../../data"
-  format: csv
-  options:
-    header: "true"
+  path: "output/bronze_employees/data.parquet"
+  format: parquet
 
 transformations:
   - phase: pre
@@ -67,12 +66,12 @@ quality:
       category: validity
     - name: valid_department
       sql: "department IN ('Engineering', 'Sales', 'HR', 'Marketing', 'Finance')"
-      category: accepted_values
+      category: validity
     - name: is_active
       sql: "status = 'active'"
       category: validity
 
 materialization:
-  target_path: "../../output/silver_employees"
+  target_path: "output/silver_employees"
   strategy: overwrite
   format: parquet

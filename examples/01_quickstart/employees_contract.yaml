@@ -3,6 +3,7 @@ dataset: employees
 
 info:
   title: Employee Directory (Quickstart)
+  version: 1.0.0
   description: >
     Validates and cleanses employee CSV data. Enforces email format,
     required fields, salary ranges, and department accepted values.
@@ -74,7 +75,7 @@ quality:
 
     - name: valid_department
       sql: "department IN ('Engineering', 'Sales', 'HR', 'Marketing', 'Finance')"
-      category: accepted_values
+      category: validity
 
     - name: is_active
       sql: "status = 'active'"

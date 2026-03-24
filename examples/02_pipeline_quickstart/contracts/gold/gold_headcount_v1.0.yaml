@@ -3,71 +3,72 @@ dataset: gold_headcount
 
 info:
   title: Headcount by Department (Gold)
+  version: 1.0.0
   table_name: "{gold_layer}_headcount"
   description: >
-    Department-level headcount summary. Aggregates active employees
-    from silver into department metrics for executive dashboards.
+    Department-level headcount summary. Filters to active employees
+    and enriches with salary band for executive dashboards.
   target_layer: gold
   domain: hr
   system: employees
 
 primary_key:
-  - department
+  - id
 
 model:
   fields:
+    - name: id
+      type: integer
+      required: true
+    - name: name
+      type: string
+    - name: email
+      type: string
     - name: department
       type: string
       required: true
-    - name: headcount
+    - name: salary
       type: integer
-      description: "Number of active employees."
-    - name: avg_salary
-      type: double
-      description: "Average salary in department."
-    - name: new_hires
-      type: integer
-      description: "Employees hired in 2024+."
+    - name: hire_date
+      type: string
+    - name: status
+      type: string
+    - name: salary_band
+      type: string
+      description: "Derived: Junior / Mid / Senior / Executive"
 
 source:
   type: landing
-  path: "../../data"
-  format: csv
-  options:
-    header: "true"
+  path: "output/silver_employees/data.parquet"
+  format: parquet
 
 transformations:
+  # Only active employees
   - phase: pre
     filter: "status = 'active'"
 
+  # Derive salary band
   - phase: pre
     derive:
-      field: tenure_category
+      field: salary_band
       sql: >
         CASE
-          WHEN hire_date >= '2024-01-01' THEN 'New Hire'
-          WHEN hire_date >= '2023-01-01' THEN 'Mid-Tenure'
-          ELSE 'Veteran'
+          WHEN salary < 70000 THEN 'Junior'
+          WHEN salary < 90000 THEN 'Mid'
+          WHEN salary < 120000 THEN 'Senior'
+          ELSE 'Executive'
         END
-
-  - phase: pre
-    aggregate:
-      group_by: [department]
-      columns:
-        - name: headcount
-          sql: "COUNT(*)"
-        - name: avg_salary
-          sql: "ROUND(AVG(salary), 2)"
-        - name: new_hires
-          sql: "SUM(CASE WHEN tenure_category = 'New Hire' THEN 1 ELSE 0 END)"
 
 quality:
   row_rules:
-    - name: positive_headcount
-      sql: "headcount > 0"
+    - name: valid_salary
+      sql: "salary > 0"
       category: validity
+    - name: valid_department
+      sql: "department IS NOT NULL"
+      category: completeness
 
 materialization:
-  target_path: "../../output/gold_headcount"
+  target_path: "output/gold_headcount"
   strategy: overwrite
   format: parquet

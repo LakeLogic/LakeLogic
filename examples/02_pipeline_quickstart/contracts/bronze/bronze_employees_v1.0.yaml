@@ -3,6 +3,7 @@ dataset: bronze_employees
 
 info:
   title: Employees (Bronze)
+  version: 1.0.0
   table_name: "{bronze_layer}_employees"
   description: "Raw employee data — minimal transformation, maximum fidelity."
   target_layer: bronze
@@ -31,7 +32,7 @@ model:
 
 source:
   type: landing
-  path: "../../data"
+  path: "data"
   format: csv
   options:
     header: "true"
@@ -46,6 +47,6 @@ quality:
       category: validity
 
 materialization:
-  target_path: "../../output/bronze_employees"
+  target_path: "output/bronze_employees"
   strategy: append
   format: parquet
