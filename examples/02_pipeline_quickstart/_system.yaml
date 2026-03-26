@@ -5,6 +5,7 @@
 
 domain: hr
 system: employees
+storage_mode: direct  # local files, not Unity Catalog tables
 
 # ── Variables (resolved at contract load time) ─────────────────────────────
 variables:

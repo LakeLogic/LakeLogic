@@ -11,16 +11,17 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SLOFreshnessConfig(BaseModel):
     max_delay_minutes: int
-    check_column: str = "_lakelogic_loaded_at"
+    check_column: Union[str, List[str]] = "_lakelogic_loaded_at"
+    exclude_tables: List[str] = Field(default_factory=list)
 
 
 class SLOQualityConfig(BaseModel):
@@ -62,6 +63,8 @@ class RegistryStorage(BaseModel):
 
 
 class RegistryContract(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     layer: str
     entity: str
     path: str
@@ -138,6 +141,8 @@ class DomainRegistry(BaseModel):
     quarantine: Dict[str, Any] = Field(default_factory=dict)
     materialization: Dict[str, Any] = Field(default_factory=dict)  # per-layer defaults
     server_defaults: Dict[str, Any] = Field(default_factory=dict)  # per-layer server config
+    # Cross-domain lineage: upstream tables not managed by this registry
+    external_sources: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Internal state
     _registry_dir: Optional[Path] = None
@@ -259,6 +264,25 @@ class DomainRegistry(BaseModel):
                             storage_vars[root_key] = path_val
 
                 c_dict = _resolve_placeholders(c_dict, storage_vars)
+
+                # Inject system-level materialization defaults
+                if registry.materialization and c.layer in registry.materialization:
+                    if not c_dict.get("materialization"):
+                        c_dict["materialization"] = registry.materialization[c.layer]
+                    else:
+                        for k, v in registry.materialization[c.layer].items():
+                            c_dict["materialization"].setdefault(k, v)
+
+                # Inject arbitrary extra fields from _system.yaml's contract array
+                # (e.g. pipeline configs like schedule/frequency)
+                extras = c.model_extra or {}
+                for k, v in extras.items():
+                    if k not in c_dict:
+                        c_dict[k] = _resolve_placeholders(v, storage_vars)
+                    elif isinstance(v, dict) and isinstance(c_dict[k], dict):
+                        for sub_k, sub_v in v.items():
+                            c_dict[k].setdefault(sub_k, _resolve_placeholders(sub_v, storage_vars))
+
                 c.contract_dict = c_dict
 
         return registry

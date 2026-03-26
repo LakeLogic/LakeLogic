@@ -8,6 +8,8 @@ Extracted from materialization.py to keep concerns focused.
 """
 
 import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -420,6 +422,80 @@ def _write_quarantine_table_bigquery(df: Any, contract, table_name: str, metadat
     return {"target": table_id, "rows_written": rows_written, "format": "bigquery"}
 
 
+# ── Lineage stamping ──
+
+
+def _stamp_quarantine_lineage(
+    df: Any,
+    contract,
+    *,
+    run_id: Optional[str] = None,
+) -> Any:
+    """
+    Inject _lakelogic_* lineage columns into the quarantine DataFrame.
+
+    This ensures every quarantined record can be traced back to the
+    pipeline run, contract, domain, and system that produced it.
+
+    Supports Spark, Polars, and Pandas DataFrames.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rid = run_id or str(uuid.uuid4())
+
+    # Extract lineage config from contract metadata
+    metadata = getattr(contract, "metadata", None) or {}
+    lineage_cfg = metadata.get("lineage") or {}
+
+    # Resolve column names from lineage config or use defaults
+    col_run_id = lineage_cfg.get("run_id_column_name", "_lakelogic_run_id")
+    col_processed_at = lineage_cfg.get("timestamp_column_name", "_lakelogic_processed_at")
+    col_source = lineage_cfg.get("source_column_name", "_lakelogic_source")
+    col_contract = lineage_cfg.get("contract_name_column_name", "_lakelogic_contract_name")
+    col_domain = lineage_cfg.get("domain_column_name", "_lakelogic_domain")
+    col_system = lineage_cfg.get("system_column_name", "_lakelogic_system")
+
+    # Resolve values
+    contract_name = ""
+    if hasattr(contract, "info") and contract.info:
+        contract_name = getattr(contract.info, "title", "") or ""
+    if not contract_name:
+        contract_name = getattr(contract, "dataset", "") or ""
+
+    domain_name = metadata.get("domain", "")
+    system_name = metadata.get("system", "")
+    source_path = ""
+    if hasattr(contract, "source") and contract.source:
+        source_path = getattr(contract.source, "path", "") or ""
+
+    lineage_values = {
+        col_run_id: rid,
+        col_processed_at: now_iso,
+        col_source: str(source_path),
+        col_contract: contract_name,
+        col_domain: domain_name,
+        col_system: system_name,
+    }
+
+    # Use the unified lineage injector which correctly sorts all _lakelogic_*
+    # columns (including errors and categories) to the far right of the schema.
+    try:
+        from lakelogic.core.lineage import add_columns
+        
+        # Determine engine name for add_columns
+        engine_name = "pandas"
+        if hasattr(df, "sparkSession"):
+            engine_name = "spark"
+        elif _is_polars_frame(df):
+            engine_name = "polars"
+        elif hasattr(df, "connection") or type(df).__name__ == "DuckDBPyRelation":
+            engine_name = "duckdb"
+            
+        return add_columns(df, lineage_values, engine_name=engine_name)
+    except Exception as e:
+        logger.warning(f"Failed to stamp quarantine lineage: {e}")
+        return df
+
+
 # ──
 def materialize_quarantine(
     df: Any,
@@ -447,6 +523,19 @@ def materialize_quarantine(
     """
     if contract is None or contract.quarantine is None:
         return {}
+
+    # Stamp lineage columns onto the quarantine DataFrame so every bad
+    # record can be traced back to the pipeline run that produced it.
+    # SKIP if lineage was already injected by the processor's inject_lineage()
+    # (indicated by the presence of _lakelogic_run_id or equivalent column).
+    _already_stamped = False
+    _df_cols = df.columns if hasattr(df, "columns") else []
+    lineage_cfg = getattr(contract, "lineage", None)
+    _run_id_col = getattr(lineage_cfg, "run_id_column_name", "_lakelogic_run_id") if lineage_cfg else "_lakelogic_run_id"
+    if _run_id_col in _df_cols:
+        _already_stamped = True
+    if not _already_stamped:
+        df = _stamp_quarantine_lineage(df, contract)
 
     mode = (quarantine_mode or "path").lower().strip()
     q = contract.quarantine
@@ -517,6 +606,8 @@ def materialize_quarantine(
             writer = df.write.format(resolved_format).mode(spark_write_mode)
             if resolved_format in ["csv", "json"]:
                 writer = writer.option("header", "true")
+            elif resolved_format in ["delta", "iceberg"]:
+                writer = writer.option("mergeSchema", "true")
             writer.save(str(target_file))
             rows_written = int(df.count())
             logger.info(

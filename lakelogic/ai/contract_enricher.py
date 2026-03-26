@@ -190,10 +190,24 @@ def enrich_contract(
     # Parse the response
     try:
         enrichment = response.as_json()
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Failed to parse AI response as JSON: {e}")
-        logger.debug(f"Raw response: {response.text[:500]}")
-        return contract
+    except (json.JSONDecodeError, ValueError):
+        # Gemini often outputs trailing commas in JSON — strip them and retry
+        import re
+        cleaned = response.text.strip()
+        # Strip markdown fences
+        if cleaned.startswith("```"):
+            first_nl = cleaned.index("\n") if "\n" in cleaned else 3
+            cleaned = cleaned[first_nl + 1:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+        # Remove trailing commas before } or ]
+        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned.strip())
+        try:
+            enrichment = json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as e2:
+            logger.error(f"Failed to parse AI response as JSON: {e2}")
+            logger.debug(f"Raw response: {response.text[:500]}")
+            return contract
 
     # ── Merge field descriptions + PII flags ──────────────────────────
     ai_fields = {f["name"]: f for f in (enrichment.get("fields") or [])}

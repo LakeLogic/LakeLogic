@@ -191,7 +191,8 @@ class SourceConfig(BaseModel):
     #   delta_version — Snapshot version tracking for Spark Delta tables
     #
     # Example contract YAML:
-    watermark_strategy: Optional[str] = "max_target"  # max_target | pipeline_log | manifest | lookback | date_range | delta_version
+    # max_target | pipeline_log | manifest | lookback | date_range | delta_version
+    watermark_strategy: Optional[str] = "max_target"
     target_path: Optional[str] = None  # required when strategy == max_target
     lookback: Optional[str] = None  # e.g. "7 days", "3 hours" — strategy == lookback
     from_date: Optional[str] = None  # ISO date — strategy == date_range
@@ -1113,12 +1114,20 @@ class LineageConfig(BaseModel):
     source_column_name: str = "_lakelogic_source"
     timestamp_column_name: str = "_lakelogic_processed_at"
     run_id_column_name: str = "_lakelogic_run_id"
-    capture_contract_name: bool = False
+    capture_contract_name: bool = True
     contract_name_column_name: str = "_lakelogic_contract_name"
     capture_domain: bool = True
     capture_system: bool = True
     domain_column_name: str = "_lakelogic_domain"
     system_column_name: str = "_lakelogic_system"
+    capture_created_at: bool = True
+
+    created_at_column_name: str = "_lakelogic_created_at"
+
+    capture_created_by: bool = True
+    created_by_column_name: str = "_lakelogic_created_by"
+
+    created_by_override: Optional[str] = None  # Static value; bypasses auto-detection
     preserve_upstream: List[str] = Field(default_factory=list)
     upstream_prefix: str = "_upstream"
     run_id_source: str = "run_id"  # run_id | pipeline_run_id
@@ -1258,6 +1267,56 @@ class DataContract(BaseModel):
                 "To suppress this error while testing pass "
                 "LAKELOGIC_SKIP_INCREMENTAL_CHECK=1 as an environment variable."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_load_mode_properties(self) -> "DataContract":
+        """Validate that required properties are present for each load_mode.
+
+        load_mode: incremental
+           - watermark_field recommended (defaults to _lakelogic_processed_at)
+        load_mode: cdc
+           - cdc_op_field required
+        """
+        import warnings
+        source = getattr(self, "source", None)
+        if source is None:
+            return self
+
+        load_mode = getattr(source, "load_mode", "full")
+
+        if load_mode == "incremental":
+            wm_field = getattr(source, "watermark_field", None)
+            wm_strategy = getattr(source, "watermark_strategy", None)
+            if not wm_field and not wm_strategy:
+                warnings.warn(
+                    "source.load_mode is 'incremental' but no watermark_field is set. "
+                    "Defaulting to '_lakelogic_processed_at'. To silence this warning, "
+                    "add 'watermark_field: _lakelogic_processed_at' to the source block.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            # pipeline_log_table defaults to "pipeline_runs" at runtime
+            # (see incremental.py), so no warning needed here.
+            if wm_strategy == "lookback" and not getattr(source, "lookback", None):
+                warnings.warn(
+                    "watermark_strategy is 'lookback' but lookback duration is not set. "
+                    "Defaulting to '7 days'.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        elif load_mode == "cdc":
+            if not getattr(source, "cdc_op_field", None):
+                raise ValueError(
+                    "source.load_mode is 'cdc' but cdc_op_field is not set. "
+                    "This field must specify the column indicating the CDC operation type.\n\n"
+                    "  source:\n"
+                    "    load_mode: cdc\n"
+                    "    cdc_op_field: _operation\n"
+                    "    cdc_delete_values: [\"D\", \"DELETE\"]"
+                )
+
         return self
 
     # ── Convenience constructors ───────────────────────────────────────────────

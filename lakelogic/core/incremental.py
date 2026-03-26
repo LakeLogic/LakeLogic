@@ -7,32 +7,59 @@ Given a source layer (e.g. Bronze) that may have accumulated multiple days of
 partitions, this module answers: **which partitions have NOT yet been processed
 into the target layer (Silver / Gold)?**
 
-Four strategies — all produce the same ``Boundary(from_dt, to_dt)`` output:
+Five strategies — all produce the same ``Boundary(from_dt, to_dt)`` output:
 
-  1. ``max_target``    — query MAX(watermark_field) from the target Delta table.
-                         Processes everything newer than that high-water mark.
+  1. ``max_target`` *(default)* — query MAX(watermark_field) from the target
+                         Delta table.  Processes everything newer than that
+                         high-water mark.  Self-healing: if silver is manually
+                         modified, the next run re-reads based on the timestamp
+                         boundary, not a version pointer.
 
-  2. ``pipeline_log``  — query a pipeline audit log table for the last successful run.
-                         More reliable than watermark when the target table can be
-                         partially overwritten.
+  2. ``pipeline_log``  — query a pipeline audit log table for the last
+                         successful run.  More reliable than watermark when the
+                         target table can be partially overwritten.
 
-  3. ``manifest``      — read a JSON manifest file listing already-processed partition
-                         values.  Lightweight, no Spark required.
+  3. ``manifest``      — read a JSON manifest file listing already-processed
+                         partition values.  Lightweight, no Spark required.
 
-  4. ``date_range``    — explicit from/to dates or a human-readable lookback string
-                         (e.g. ``"7 days"``, ``"3 hours"``, ``"1 month"``).
+  4. ``date_range``    — explicit from/to dates or a human-readable lookback
+                         string (e.g. ``"7 days"``, ``"3 hours"``).
                          Useful for ad-hoc backfills and Databricks Widgets.
+
+  5. ``delta_version`` — use Delta transaction log versions to identify new
+                         commits.  Fastest for large tables: reads only the
+                         specific Parquet files added/changed between versions.
+                         State is stored in target table TBLPROPERTIES
+                         (``lakelogic.last_source_version``).
+
+Default strategy
+~~~~~~~~~~~~~~~~
+When ``watermark_strategy`` is not specified in the contract source block,
+``max_target`` is used.  When ``watermark_field`` is also omitted,
+the processor defaults to ``_lakelogic_processed_at`` (stamped by lineage).
+
+Choosing a strategy
+~~~~~~~~~~~~~~~~~~~
+==============  ===================  ==========================================
+Strategy        Best for             Notes
+==============  ===================  ==========================================
+max_target      Most batch pipelines Self-healing; safe with external edits
+pipeline_log    Partial overwrites   Needs a log table; most reliable
+manifest        No-Spark pipelines   Lightweight JSON; good for Polars/Pandas
+date_range      Backfills & widgets  Explicit control; not automated
+delta_version   Large streaming      Fastest; Spark-only; gap-free capture
+==============  ===================  ==========================================
 
 Usage
 -----
 ::
 
-    from lakelogic.core.incremental import IncrementalBoundary, Lookback
+    from lakelogic.core.incremental import IncrementalBoundary
 
-    # Strategy 1 — watermark on target table
+    # Strategy 1 — watermark on target table (DEFAULT)
     boundary = IncrementalBoundary.from_max_target(
         target_path="abfss://silver@.../listings",
-        watermark_field="_snapshot_date",
+        watermark_field="_lakelogic_processed_at",
     )
 
     # Strategy 2 — pipeline log
@@ -58,12 +85,23 @@ Usage
     boundary = IncrementalBoundary.from_lookback("3 hours")
     boundary = IncrementalBoundary.from_lookback("1 month")
 
+    # Strategy 5 — Delta table version tracking
+    boundary = IncrementalBoundary.from_delta_version(
+        source_path="table:catalog.bronze.sessions",
+        target_path="table:catalog.silver.sessions",
+    )
+    # First run:  reads all versions from 0
+    # Next runs:  reads only versions > last stored version
+    # State:      stored in target TBLPROPERTIES('lakelogic.last_source_version')
+    # Safeguards: detects source rollback (from_v > to_v) and auto-resets
+
     # Use the boundary to filter source data
     bronze_df = (
         spark.read.format("delta").load(BRONZE_ROOT)
-             .filter(boundary.spark_filter("_snapshot_date"))
+             .filter(boundary.spark_filter("_lakelogic_processed_at"))
     )
 """
+
 
 from __future__ import annotations
 
@@ -192,8 +230,8 @@ class Boundary:
 
         # ── Temporal filter ───────────────────────────────────────────────────
         if field is not None:
-            parts.append(f"{field} >= '{self.from_date}'")
-            parts.append(f"{field} <= '{self.to_date}'")
+            parts.append(f"{field} >= '{self.from_iso}'")
+            parts.append(f"{field} <= '{self.to_iso}'")
 
         elif date_parts is not None:
             # Normalise to dict
@@ -586,30 +624,43 @@ class IncrementalBoundary:
         pipeline_name: str,
         *,
         log_table: str = "pipeline_runs",
+        dataset: Optional[str] = None,
+        data_layer: Optional[str] = None,
+        domain: Optional[str] = None,
+        system: Optional[str] = None,
         to_dt: Optional[datetime] = None,
         default_from: Optional[Union[datetime, str]] = None,
     ) -> Boundary:
         """
-        Strategy: query a pipeline audit log for the last successful run.
+        Strategy: query the LakeLogic ``_run_logs`` table for the last
+        successful run of a specific contract/dataset.
 
-        Reads``MAX(processed_through)`` from ``log_table`` WHERE
-        ``pipeline_name = :name AND status = 'success'``.
+        When ``dataset`` is provided (recommended), the method queries the
+        ``_run_logs`` table written by ``run_log.py`` using the ``dataset``
+        column (which holds the actual target table name, e.g.
+        ``bronze_google_analytics_events``).  Additional precision filters
+        (``data_layer``, ``domain``, ``system``) are applied when available.
 
-        The log table schema::
-
-            pipeline_name   STRING
-            status          STRING    -- 'success' | 'failed' | 'running'
-            started_at      TIMESTAMP
-            completed_at    TIMESTAMP
-            processed_from  TIMESTAMP -- lower bound of data processed
-            processed_through TIMESTAMP -- upper bound of data processed
+        Falls back to the legacy ``pipeline_runs`` table query (using
+        ``pipeline_name`` + ``processed_through``) when ``dataset`` is not
+        provided, for backward compatibility.
 
         Parameters
         ----------
         pipeline_name : str
-            Registered name of the pipeline (e.g. ``"bronze_to_silver_zoopla"``).
+            Registered name of the pipeline — used only in legacy fallback.
         log_table : str
-            Spark/Databricks table name.
+            Spark/Databricks table name for the run log (e.g.
+            ``"`catalog`.domain._run_logs"``).
+        dataset : str, optional
+            Target table name stored in the ``dataset`` column of
+            ``_run_logs`` (e.g. ``"bronze_google_analytics_events"``).
+        data_layer : str, optional
+            Layer filter (``bronze``, ``silver``, ``gold``).
+        domain : str, optional
+            Domain filter (e.g. ``"marketing"``).
+        system : str, optional
+            System filter (e.g. ``"google_analytics"``).
         to_dt : datetime, optional
             Upper bound — defaults to NOW (UTC).
         default_from : datetime or ISO string, optional
@@ -620,8 +671,12 @@ class IncrementalBoundary:
         ::
 
             boundary = IncrementalBoundary.from_pipeline_log(
-                pipeline_name="bronze_to_silver_zoopla_listings",
-                log_table="meta.pipeline_runs",
+                pipeline_name="bronze_google_analytics_events",
+                log_table="`lakelogic-lakehouse-dev-001`.marketing._run_logs",
+                dataset="bronze_google_analytics_events",
+                data_layer="bronze",
+                domain="marketing",
+                system="google_analytics",
             )
         """
         try:
@@ -632,26 +687,90 @@ class IncrementalBoundary:
             if spark is None:
                 raise RuntimeError("No active Spark session")
 
-            row = (
-                spark.table(log_table)
-                .filter((F.col("pipeline_name") == pipeline_name) & (F.col("status") == "success"))
-                .agg(F.max("processed_through").alias("last_success"))
-                .collect()[0]
-            )
-            last_success = row["last_success"]
-            if last_success is None:
-                raise ValueError(f"No successful run found for {pipeline_name!r}")
+            if dataset:
+                # ── Modern path: query _run_logs by dataset column ────────
+                filt = (
+                    (F.col("dataset") == dataset)
+                    & (F.col("stage") != "no_new_data")
+                    & (F.col("stage") != "reprocess")
+                )
+                if data_layer:
+                    filt = filt & (F.col("data_layer") == data_layer)
+                if domain:
+                    filt = filt & (F.col("domain") == domain)
+                if system:
+                    filt = filt & (F.col("system") == system)
 
-            from_dt = (
-                last_success + timedelta(seconds=1)
-                if isinstance(last_success, datetime)
-                else datetime(last_success.year, last_success.month, last_success.day) + timedelta(days=1)
-            )
-            meta = {"last_success": str(last_success), "pipeline_name": pipeline_name}
+                row = (
+                    spark.table(log_table)
+                    .filter(filt)
+                    .agg(
+                        F.max("max_watermark_value").alias("last_watermark"),
+                        F.max("timestamp").alias("last_success")
+                    )
+                    .collect()[0]
+                )
+                last_success_str = row["last_watermark"] or row["last_success"]
+                if last_success_str is None:
+                    raise ValueError(
+                        f"No successful run found in {log_table} for "
+                        f"dataset={dataset!r} data_layer={data_layer!r}"
+                    )
+
+                # timestamp is stored as ISO string in _run_logs
+                if isinstance(last_success_str, str):
+                    last_success = datetime.fromisoformat(
+                        last_success_str.replace("Z", "+00:00")
+                    )
+                elif isinstance(last_success_str, datetime):
+                    last_success = last_success_str
+                else:
+                    last_success = datetime.fromisoformat(str(last_success_str))
+
+                from_dt = last_success + timedelta(seconds=1)
+                meta = {
+                    "last_success": str(last_success),
+                    "dataset": dataset,
+                    "data_layer": data_layer or "",
+                    "domain": domain or "",
+                    "system": system or "",
+                    "log_table": log_table,
+                }
+            else:
+                # ── Legacy path: query pipeline_runs by pipeline_name ─────
+                row = (
+                    spark.table(log_table)
+                    .filter(
+                        (F.col("pipeline_name") == pipeline_name)
+                        & (F.col("status") == "success")
+                    )
+                    .agg(F.max("processed_through").alias("last_success"))
+                    .collect()[0]
+                )
+                last_success = row["last_success"]
+                if last_success is None:
+                    raise ValueError(f"No successful run found for {pipeline_name!r}")
+
+                from_dt = (
+                    last_success + timedelta(seconds=1)
+                    if isinstance(last_success, datetime)
+                    else datetime(
+                        last_success.year, last_success.month, last_success.day
+                    )
+                    + timedelta(days=1)
+                )
+                meta = {
+                    "last_success": str(last_success),
+                    "pipeline_name": pipeline_name,
+                }
 
         except Exception as exc:
             if default_from is not None:
-                from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
+                from_dt = (
+                    datetime.fromisoformat(default_from)
+                    if isinstance(default_from, str)
+                    else default_from
+                )
             else:
                 from_dt = datetime.now(timezone.utc) - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "pipeline_name": pipeline_name}
@@ -995,7 +1114,14 @@ class IncrementalBoundary:
         if strategy == "pipeline_log":
             log_table = src.get("pipeline_log_table", "pipeline_runs")
             p_name = pipeline_name or src.get("pipeline_name", Path(contract_path).stem)
-            b = cls.from_pipeline_log(p_name, log_table=log_table)
+            b = cls.from_pipeline_log(
+                p_name,
+                log_table=log_table,
+                dataset=src.get("dataset"),
+                data_layer=src.get("data_layer"),
+                domain=src.get("domain"),
+                system=src.get("system"),
+            )
             b.partition_filters = merged_pf
             return b
 
@@ -1076,6 +1202,10 @@ class IncrementalBoundary:
             b = cls.from_pipeline_log(
                 cfg.get("pipeline_name", "unknown"),
                 log_table=cfg.get("pipeline_log_table", "pipeline_runs"),
+                dataset=cfg.get("dataset"),
+                data_layer=cfg.get("data_layer"),
+                domain=cfg.get("domain"),
+                system=cfg.get("system"),
             )
             b.partition_filters = merged_pf
             return b

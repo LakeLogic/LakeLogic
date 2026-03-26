@@ -463,8 +463,8 @@ def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[st
                         if owns_connection and con is not None:
                             con.close()
                     return
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"DuckDB parquet write fallback failed: {exc}")
                 try:
                     import polars as pl
 
@@ -650,8 +650,8 @@ def _read_frame(path: Path, output_format: str):
                 import duckdb
 
                 return duckdb.read_parquet(str(path)).df()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"DuckDB parquet read fallback failed: {exc}")
             try:
                 import polars as pl
 
@@ -836,6 +836,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     # Default values for SCD2 fields
     effective_to_default = scd2_cfg.get("effective_to_default", "9999-12-31")
     effective_from_default = scd2_cfg.get("effective_from_default", "1900-01-01")
+    change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
     # Timestamp for closing existing records (when a change occurs)
     now_value = scd2_cfg.get("default_effective_from")
@@ -861,6 +862,8 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         incoming[effective_from] = effective_from_default
         incoming[effective_to] = effective_to_default
         incoming[current_flag] = True
+        if change_reason_col:
+            incoming[change_reason_col] = "initial_load"
         return incoming
 
     # Ensure SCD2 control columns exist on existing
@@ -920,15 +923,22 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
 
         # Decide whether a change actually happened
         changed = True  # Assume change if no track_columns or no existing current record
+        changed_fields = []  # Track which fields changed
         if current_mask.any():
             existing_current_row = merged[current_mask].iloc[0]
-            if compare_cols:  # Only compare if track_columns are specified
-                changed = any(str(existing_current_row.get(c)) != str(inc_row.get(c)) for c in compare_cols)
-            else:  # If no track_columns, any incoming record for an existing key is a change
+            if compare_cols:
+                changed_fields = [
+                    c for c in compare_cols
+                    if str(existing_current_row.get(c)) != str(inc_row.get(c))
+                ]
+                changed = len(changed_fields) > 0
+            else:
                 changed = True
+                changed_fields = ["all"]
         else:
             # No current record exists for this key, so the incoming record is new
             changed = True
+            changed_fields = ["initial_load"]
 
         if changed:
             # Resolve the change-event date from the designated SOURCE column.
@@ -956,12 +966,52 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
             new_version_row[effective_to] = effective_to_default
             new_version_row[current_flag] = True
 
+            # Stamp the change reason
+            if change_reason_col:
+                new_version_row[change_reason_col] = ",".join(changed_fields)
+
             new_versions.append(new_version_row.to_dict())
         # else: no tracked columns changed → skip (no new version, no close)
 
     if new_versions:
         new_df = pd.DataFrame(new_versions)
         merged = pd.concat([merged, new_df], ignore_index=True)
+
+    # ── Surrogate key injection ──────────────────────────────────
+    sk_column = scd2_cfg.get("surrogate_key", "_sk")
+    sk_strategy = scd2_cfg.get(
+        "surrogate_key_strategy", "hash"
+    )
+    if sk_column:
+        import hashlib
+
+        def _compute_sk(row):
+            pk_val = "|".join(
+                str(row.get(c, "")) for c in primary_key
+            )
+            ef_val = str(row.get(effective_from, ""))
+            raw = f"{pk_val}|{ef_val}"
+            if sk_strategy == "uuid":
+                import uuid
+                return uuid.uuid4().hex[:16]
+            # Default: hash (deterministic)
+            return hashlib.sha256(
+                raw.encode("utf-8")
+            ).hexdigest()[:16]
+
+        merged[sk_column] = merged.apply(_compute_sk, axis=1)
+
+    # ── Version number injection ─────────────────────────────────
+    version_column = scd2_cfg.get(
+        "version_column", "_version"
+    )
+    if version_column:
+        merged = merged.sort_values(
+            primary_key + [effective_from]
+        )
+        merged[version_column] = (
+            merged.groupby(primary_key).cumcount() + 1
+        )
 
     return merged
 
@@ -1158,13 +1208,12 @@ def _spark_scd2_dataframe(
     is_table = target.startswith("table:")
     table_or_path = target[6:] if is_table else target
 
-    # Add SCD2 columns to incoming if missing
-    if effective_from not in incoming_df.columns:
-        incoming_df = incoming_df.withColumn(effective_from, F.lit(now_value))
-    if effective_to not in incoming_df.columns:
-        incoming_df = incoming_df.withColumn(effective_to, F.lit(None).cast("string"))
-    if current_flag not in incoming_df.columns:
-        incoming_df = incoming_df.withColumn(current_flag, F.lit(True))
+    # Always stamp SCD2 control columns on incoming — the materializer owns
+    # these fields.  The columns may already exist (from DDL or contract
+    # schema) but with NULL values which must be overwritten.
+    incoming_df = incoming_df.withColumn(effective_from, F.to_timestamp(F.lit(now_value)))
+    incoming_df = incoming_df.withColumn(effective_to, F.lit(None).cast("timestamp"))
+    incoming_df = incoming_df.withColumn(current_flag, F.lit(True))
 
     # Try to read existing data
     existing_df = None
@@ -1177,6 +1226,20 @@ def _spark_scd2_dataframe(
         pass
 
     if existing_df is None or existing_df.count() == 0:
+        # Generate surrogate key for initial load
+        sk_column = scd2_cfg.get("surrogate_key", "_sk")
+        sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
+        if sk_column:
+            pk_concat = F.concat_ws(
+                "|",
+                *[F.col(c).cast("string") for c in primary_key],
+                F.col(effective_from).cast("string")
+            )
+            if sk_strategy == "uuid":
+                incoming_df = incoming_df.withColumn(sk_column, F.expr("substring(uuid(), 1, 16)"))
+            else:
+                incoming_df = incoming_df.withColumn(sk_column, F.substring(F.sha2(pk_concat, 256), 1, 16))
+
         # No existing data, just write incoming
         writer = incoming_df.write.format(output_format)
         if is_table:
@@ -1193,9 +1256,9 @@ def _spark_scd2_dataframe(
 
     # Ensure existing has SCD2 columns
     if effective_from not in existing_df.columns:
-        existing_df = existing_df.withColumn(effective_from, F.lit(None).cast("string"))
+        existing_df = existing_df.withColumn(effective_from, F.lit(None).cast("timestamp"))
     if effective_to not in existing_df.columns:
-        existing_df = existing_df.withColumn(effective_to, F.lit(None).cast("string"))
+        existing_df = existing_df.withColumn(effective_to, F.lit(None).cast("timestamp"))
     if current_flag not in existing_df.columns:
         existing_df = existing_df.withColumn(current_flag, F.lit(True))
 
@@ -1227,9 +1290,19 @@ def _spark_scd2_dataframe(
             records_to_close = candidates_with_inc.filter(any_changed).drop(*[f"_inc_{c}" for c in track_columns])
             # Incoming rows that actually triggered a change (used for new versions below)
             changed_keys = records_to_close.select(*primary_key).distinct()
-            incoming_df = incoming_df.join(changed_keys, on=primary_key, how="inner")
+            
+            # Also keep completely new keys that aren't in the dimension yet
+            existing_keys = existing_df.select(*primary_key).distinct()
+            new_keys = incoming_keys.join(existing_keys, on=primary_key, how="left_anti").distinct()
+            
+            keys_to_keep = changed_keys.unionByName(new_keys)
+            incoming_df = incoming_df.join(keys_to_keep, on=primary_key, how="inner")
         else:
             records_to_close = candidates
+            # When track_columns has no changes, filter incoming to ONLY completely new keys!
+            existing_keys = existing_df.select(*primary_key).distinct()
+            new_keys = incoming_keys.join(existing_keys, on=primary_key, how="left_anti").distinct()
+            incoming_df = incoming_df.join(new_keys, on=primary_key, how="inner")
     else:
         # Original behaviour: always close+version on any key match
         records_to_close = candidates
@@ -1247,6 +1320,84 @@ def _spark_scd2_dataframe(
         .withColumn(current_flag, F.lit(False))
         .drop("_new_effective_from")
     )
+
+    # ── Change reason column (Spark) ────────────────────────────
+    change_reason_col = scd2_cfg.get(
+        "change_reason_column", "_change_reason"
+    )
+    if change_reason_col:
+        # Incoming rows that matched existing keys: compute which fields changed
+        if track_columns:
+            # Join incoming with existing current rows to compare fields
+            existing_current = existing_df.filter(F.col(current_flag))
+            inc_with_existing = incoming_df.join(
+                existing_current.select(
+                    *primary_key,
+                    *[
+                        F.col(c).alias(f"_old_{c}")
+                        for c in track_columns
+                        if c in existing_current.columns
+                    ],
+                ),
+                on=primary_key,
+                how="left",
+            )
+            # Build per-column change indicator
+            change_parts = [
+                F.when(
+                    F.col(c) != F.col(f"_old_{c}"),
+                    F.lit(c),
+                )
+                for c in track_columns
+                if c in existing_current.columns
+            ]
+            if change_parts:
+                reason_expr = F.concat_ws(
+                    ",",
+                    *change_parts,
+                )
+                # NULL _old_ columns mean new key → initial_load
+                first_old = f"_old_{track_columns[0]}"
+                incoming_df = inc_with_existing.withColumn(
+                    change_reason_col,
+                    F.when(
+                        F.col(first_old).isNull(),
+                        F.lit("initial_load"),
+                    ).otherwise(reason_expr),
+                ).drop(
+                    *[f"_old_{c}" for c in track_columns]
+                )
+            else:
+                incoming_df = incoming_df.withColumn(
+                    change_reason_col, F.lit("all")
+                )
+        else:
+            # No track_columns → stamp "all" for existing keys, "initial_load" for new
+            existing_keys = existing_df.select(
+                *primary_key
+            ).distinct()
+            incoming_df = incoming_df.join(
+                existing_keys.withColumn("_existed", F.lit(True)),
+                on=primary_key,
+                how="left",
+            ).withColumn(
+                change_reason_col,
+                F.when(
+                    F.col("_existed").isNull(),
+                    F.lit("initial_load"),
+                ).otherwise(F.lit("all")),
+            ).drop("_existed")
+
+        # Unchanged and already_closed rows get NULL for change_reason
+        unchanged = unchanged.withColumn(
+            change_reason_col, F.lit(None).cast("string")
+        )
+        already_closed = already_closed.withColumn(
+            change_reason_col, F.lit(None).cast("string")
+        )
+        closed_records = closed_records.withColumn(
+            change_reason_col, F.lit(None).cast("string")
+        )
 
     # Align all columns
     all_columns = list(existing_df.columns)
@@ -1267,6 +1418,42 @@ def _spark_scd2_dataframe(
 
     # Union all: unchanged + already closed + newly closed + incoming
     result = unchanged.union(already_closed).union(closed_records).union(incoming_df)
+
+    # ── Surrogate key injection (Spark) ─────────────────────────
+    sk_column = scd2_cfg.get("surrogate_key", "_sk")
+    sk_strategy = scd2_cfg.get(
+        "surrogate_key_strategy", "hash"
+    )
+    if sk_column:
+        pk_concat = F.concat_ws(
+            "|",
+            *[F.col(c).cast("string") for c in primary_key],
+            F.col(effective_from).cast("string"),
+        )
+        if sk_strategy == "uuid":
+            result = result.withColumn(
+                sk_column, F.expr("substring(uuid(), 1, 16)")
+            )
+        else:
+            # Default: hash (deterministic, vectorized)
+            result = result.withColumn(
+                sk_column,
+                F.substring(F.sha2(pk_concat, 256), 1, 16),
+            )
+
+    # ── Version number injection (Spark) ────────────────────────
+    version_column = scd2_cfg.get(
+        "version_column", "_version"
+    )
+    if version_column:
+        from pyspark.sql.window import Window
+
+        w = Window.partitionBy(
+            *primary_key
+        ).orderBy(effective_from)
+        result = result.withColumn(
+            version_column, F.row_number().over(w)
+        )
 
     writer = result.write.format(output_format)
     if is_table:
@@ -1391,8 +1578,8 @@ def _materialize_spark_dataframe(
     ]:
         try:
             spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Could not set partitionOverwriteMode to dynamic: {exc}")
         mode = "overwrite"
 
     if target_str.startswith("table:"):
@@ -1531,8 +1718,8 @@ def _partition_aware_merge(
                     dt = DeltaTable(target_str)
                     part_filter = [(col, "=", str(val)) for col, val in part_values.items()]
                     existing = dt.to_pandas(filters=part_filter)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(f"Could not read existing Delta partition for merge/scd2: {exc}")
 
                 if strategy == "merge":
                     merged = _merge_frames(
@@ -1801,8 +1988,8 @@ def materialize_dataframe(
             if rows_written is None and hasattr(df, "collect"):
                 try:
                     rows_written = int(df.collect().height)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"Could not determine row count via collect: {exc}")
         logger.info(f"Materialized {rows_written if rows_written is not None else '?'} rows to {target_file}")
         return {
             "target": str(target_file),

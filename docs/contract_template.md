@@ -127,15 +127,17 @@ source:
   load_mode: "incremental"
   # Options: full, incremental, cdc
   # Business value: Optimize processing (only new/changed data)
+  #
+  # ── Load Mode Validation ─────────────────────────────────────
+  # The pipeline validates required properties per load_mode:
+  #   incremental → watermark_field recommended (defaults to _lakelogic_processed_at)
+  #   cdc         → cdc_op_field REQUIRED (raises error if missing)
+  #   full        → no additional requirements
   
   pattern: "*.parquet"
   # OPTIONAL: File pattern filter
   # Business value: Select specific files from directory
-  
-  watermark_field: "updated_at"
-  # REQUIRED for incremental: Field to track progress
-  # Business value: Efficient incremental loading
-  
+
   cdc_op_field: "operation"
   # REQUIRED for cdc: Field indicating operation type
   # Business value: Change data capture support
@@ -145,30 +147,141 @@ source:
   # Business value: Handle deletes in CDC streams
   
   watermark_strategy: "max_target"
-  # Options: max_target, pipeline_log, manifest, lookback, date_range
-  # max_target: MAX(watermark_field) on target Delta table (default)
-  # pipeline_log: last successful run from audit log table
-  # manifest: JSON manifest file listing processed partitions
-  # lookback: sliding window back from NOW (e.g. "7 days")
-  # date_range: explicit from_date / to_date (backfills)
+  # Options: max_target (default), pipeline_log, manifest, lookback, date_range, delta_version
   # Business value: Flexible incremental boundary resolution
-  
-  target_path: "s3://silver-bucket/customers"
-  # REQUIRED for max_target strategy: target table path
-  
-  lookback: "7 days"
-  # For lookback strategy: "3 hours", "30 mins", "1 month" etc.
-  
-  from_date: "2024-01-01"
-  to_date: "2024-12-31"
-  # For date_range strategy: explicit ISO date boundaries
-  
-  pipeline_log_table: "meta.pipeline_runs"
-  pipeline_name: "bronze_to_silver_customers"
-  # For pipeline_log strategy: audit table and pipeline ID
-  
-  manifest_path: "/dbfs/mnt/meta/manifests/customers.json"
-  # For manifest strategy: JSON manifest file path
+  #
+  # ── Strategy Comparison ───────────────────────────────────────────
+  #
+  # ┌────────────────┬─────────────────────────┬────────────────────────────────┬──────────────┐
+  # │ Strategy       │ Best For                │ State Stored In                │ Needs Spark? │
+  # ├────────────────┼─────────────────────────┼────────────────────────────────┼──────────────┤
+  # │ max_target     │ Most batch pipelines    │ Target table (self-healing)    │ Yes          │
+  # │ pipeline_log   │ Partial overwrites      │ _run_logs table (via run_log)  │ Yes          │
+  # │ lookback       │ Simple rolling windows  │ None (stateless)               │ No           │
+  # │ date_range     │ Backfills & widgets     │ None (explicit dates)          │ No           │
+  # │ manifest       │ Non-Spark pipelines     │ JSON manifest file             │ No           │
+  # │ delta_version  │ Large streaming tables  │ Target TBLPROPERTIES           │ Yes          │
+  # └────────────────┴─────────────────────────┴────────────────────────────────┴──────────────┘
+  #
+  # ── Strategy 1: max_target (DEFAULT) ──────────────────────────────
+  # Queries MAX(watermark_field) on the target Delta table.
+  # Self-healing: if target is manually edited, next run re-reads from
+  # the actual high-water mark.
+  #
+  # Example:
+  #   source:
+  #     type: table
+  #     path: "{domain_catalog}.{bronze_layer}_{system}_events"
+  #     load_mode: incremental
+  #     watermark_strategy: max_target
+  #     watermark_field: "_lakelogic_processed_at"
+  #     target_path: "abfss://silver@acct.dfs.core.windows.net/events"
+  #   # Requires: target_path pointing to the target Delta table
+  #   # Uses watermark_field: YES — to query MAX and to filter source
+  #
+  # ── Strategy 2: pipeline_log ──────────────────────────────────────
+  # Queries the _run_logs table (written by LakeLogic after each run)
+  # for the last successful run of this dataset.
+  # Uses MAX(timestamp) from _run_logs filtered by dataset column.
+  #
+  # Example:
+  #   source:
+  #     type: table
+  #     path: "{domain_catalog}.{bronze_layer}_{system}_events"
+  #     load_mode: incremental
+  #     watermark_strategy: pipeline_log
+  #   # State: _run_logs table (configured via metadata.run_log_table)
+  #   # Filters by: dataset (target table name), data_layer, domain, system
+  #   # Uses watermark_field: YES — to filter source after boundary resolved
+  #   # Fallback: if no prior runs, uses NOW - 90 days
+  #
+  # ── Strategy 3: lookback ──────────────────────────────────────────
+  # Sliding window: processes everything from NOW - duration to NOW.
+  # No state needed. Simple and predictable.
+  #
+  # Example (daily):
+  #   source:
+  #     type: table
+  #     path: "{domain_catalog}.{bronze_layer}_{system}_events"
+  #     load_mode: incremental
+  #     watermark_strategy: lookback
+  #     lookback: "7 days"
+  #     watermark_field: "_lakelogic_processed_at"
+  #
+  # Example (near-real-time):
+  #   source:
+  #     watermark_strategy: lookback
+  #     lookback: "3 hours"
+  #     watermark_field: "event_timestamp"
+  #
+  # Example (monthly batch):
+  #   source:
+  #     watermark_strategy: lookback
+  #     lookback: "1 month"
+  #
+  # Supported durations: "N days", "N hours", "N mins", "N month(s)"
+  # Uses watermark_field: YES — to filter source
+  # Overlap: allows reprocessing of data within the window (idempotent writes recommended)
+  #
+  # ── Strategy 4: date_range ────────────────────────────────────────
+  # Explicit from/to dates. Ideal for backfills and Databricks Widgets.
+  #
+  # Example:
+  #   source:
+  #     type: table
+  #     path: "{domain_catalog}.{bronze_layer}_{system}_events"
+  #     load_mode: incremental
+  #     watermark_strategy: date_range
+  #     from_date: "2024-01-01"
+  #     to_date: "2024-12-31"
+  #     watermark_field: "event_date"
+  #   # Uses watermark_field: YES — to filter source
+  #   # Tip: from_date/to_date can be overridden at runtime via pipeline params
+  #
+  # ── Strategy 5: manifest ──────────────────────────────────────────
+  # Reads a JSON manifest file listing already-processed partitions.
+  # Lightweight alternative for non-Spark environments (Polars, Pandas, Azure Functions).
+  #
+  # Example:
+  #   source:
+  #     type: landing
+  #     path: "abfss://landing@acct.dfs.core.windows.net/events/"
+  #     load_mode: incremental
+  #     watermark_strategy: manifest
+  #     manifest_path: "abfss://meta@acct.dfs.core.windows.net/manifests/events.json"
+  #     watermark_field: "_snapshot_date"
+  #   # Manifest JSON format:
+  #   #   { "processed_partitions": ["2024-03-20", "2024-03-21"], "last_updated": "..." }
+  #   # State: the manifest file itself
+  #   # Uses watermark_field: YES — as the partition field tracked in the manifest
+  #   # Note: external process must update the manifest after each successful run
+  #
+  # ── Strategy 6: delta_version ─────────────────────────────────────
+  # Uses Delta transaction log versions instead of timestamp columns.
+  # Reads only the specific Parquet files added/changed between versions.
+  # Fastest strategy for large tables — no column scanning required.
+  #
+  # Example:
+  #   source:
+  #     type: table
+  #     path: "catalog.bronze.sessions"
+  #     load_mode: incremental
+  #     watermark_strategy: delta_version
+  #     target_path: "table:catalog.silver.sessions"
+  #   # State: target table TBLPROPERTIES('lakelogic.last_source_version')
+  #   # Also captured in _run_logs for full audit trail
+  #   # Uses watermark_field: NO — versions replace timestamps entirely
+  #   # Safeguards:
+  #   #   - Detects source rollback (from_v > to_v) and auto-resets
+  #   #   - Exempt from mandatory run_log requirement (uses TBLPROPERTIES)
+  #   # Requirement: Spark-only, both source and target must be Delta tables
+
+  watermark_field: "_lakelogic_processed_at"
+  # For incremental loads: Field to track processing progress.
+  # If omitted, defaults to "_lakelogic_processed_at" (stamped by lineage as TIMESTAMP).
+  # For partition-pruned reads, use the partition column (e.g. session_date).
+  # NOT used by delta_version strategy (operates on version numbers).
+  # Business value: Efficient incremental loading
   
   watermark_date_parts: ["year", "month", "day"]
   # Multi-column partition support when temporal boundary is
@@ -248,8 +361,10 @@ server:
   # Business value: Control schema change behavior
   
   allow_schema_drift: false
-  # If true, log drift but don't fail
-  # Business value: Monitoring vs enforcement trade-off
+  # If true, allow undocumented columns to pass through the pipeline.
+  # If false (and schema_evolution is strict), the pipeline automatically prunes any
+  # unmapped columns from the final table, strictly enforcing the contract exactly.
+  # Business value: Monitoring vs strict contract enforcement
   
   cast_to_string: false
   # If true, cast all columns to string (Bronze "all strings" pattern)
@@ -966,6 +1081,40 @@ materialization:
     hash_fields: ["email", "status", "age"]
     # Fields to hash for change detection
     # Business value: Full history tracking
+    
+    track_columns: ["email", "status", "age"]
+    # OPTIONAL: Only open a new version when one of these columns changes.
+    # If omitted, any incoming row for a known key triggers a new version.
+    # Business value: Reduce version churn from no-op updates
+    
+    # ── Surrogate Key (auto-generated) ─────────────────────────
+    surrogate_key: "_sk"
+    # Column name for auto-generated surrogate key. Default: "_sk"
+    # Set to null/empty to disable.
+    # Business value: Unique row-level ID for downstream joins
+    
+    surrogate_key_strategy: "hash"
+    # Options: hash (default), uuid
+    # hash: SHA256(primary_key|effective_from)[:16] — deterministic, reprocess-safe
+    # uuid: random 16-char hex — unique but non-deterministic
+    # Business value: Idempotent surrogate keys for reprocessing
+    
+    # ── Version Number (auto-generated) ────────────────────────
+    version_column: "_version"
+    # Column name for auto-incrementing version per business key. Default: "_version"
+    # Computed as ROW_NUMBER() OVER (partition_by primary_key ORDER BY effective_from)
+    # Set to null/empty to disable.
+    # Business value: "Give me version N of this customer"
+    
+    # ── Change Reason (auto-generated) ─────────────────────────
+    change_reason_column: "_change_reason"
+    # Column name for tracking which fields triggered a new version.
+    # Default: "_change_reason". Set to null/empty to disable.
+    # Values:
+    #   "initial_load"   — first appearance of this business key
+    #   "email,status"   — comma-separated list of changed tracked fields
+    #   "all"            — no track_columns specified (all changes trigger version)
+    # Business value: Audit trail — why was a new version created?
   
   # OPTIONAL: Soft-delete support (mark deleted instead of removing)
   soft_delete_column: "_lakelogic_is_deleted"
@@ -999,7 +1148,19 @@ materialization:
 # ============================================================
 # 13. LINEAGE & OBSERVABILITY
 # ============================================================
-# OPTIONAL: Lineage capture configuration
+# OPTIONAL: Lineage capture configuration.
+# When enabled, up to 8 lineage columns are injected into every output row.
+#
+# All 8 lineage columns:
+#   _lakelogic_source         — source file/table path
+#   _lakelogic_processed_at   — updated every pipeline run
+#   _lakelogic_run_id         — unique run identifier
+#   _lakelogic_contract_name  — YAML contract filename
+#   _lakelogic_domain         — domain from metadata
+#   _lakelogic_system         — system from metadata
+#   _lakelogic_created_at     — first-insert timestamp (immutable)
+#   _lakelogic_created_by     — username/service principal
+#
 lineage:
   enabled: true
   # If true, inject lineage columns
@@ -1011,11 +1172,17 @@ lineage:
   
   capture_timestamp: true
   timestamp_column_name: "_lakelogic_processed_at"
-  # Capture processing timestamp
+  # Updated every pipeline run (processing time)
+  # Also serves as default watermark for incremental loading
   
   capture_run_id: true
   run_id_column_name: "_lakelogic_run_id"
   # Capture unique run identifier
+  
+  capture_contract_name: true
+  contract_name_column_name: "_lakelogic_contract_name"
+  # Inject contract title into every output row
+  # Business value: Identify which contract produced each record
   
   capture_domain: true
   domain_column_name: "_lakelogic_domain"
@@ -1025,6 +1192,28 @@ lineage:
   system_column_name: "_lakelogic_system"
   # Capture source system from metadata
   
+  # ── Record Creation Tracking ─────────────────────────────
+  capture_created_at: true
+  created_at_column_name: "_lakelogic_created_at"
+  # Stamped when record is FIRST created (immutable on re-runs).
+  # Unlike _lakelogic_processed_at (updated every run),
+  # this preserves the original insertion timestamp.
+  # Business value: Audit trail — when was this record first ingested?
+  
+  capture_created_by: true
+  created_by_column_name: "_lakelogic_created_by"
+  # Captures the user/service principal that created the record.
+  # Default: getpass.getuser() — resolves to service principal in Databricks.
+  # Business value: Track who/what system inserted each record
+  
+  created_by_override: "etl_pipeline_svc"
+  # OPTIONAL: Override the default user detection with a static value.
+  # Useful for CI/CD pipelines or shared service accounts.
+  # If omitted, falls back to getpass.getuser().
+  # Can also be passed from pipeline_driver.py or Databricks Widgets.
+  # Business value: Consistent identity in multi-user environments
+  
+  # ── Upstream Lineage ─────────────────────────────────────
   preserve_upstream: ["_upstream_run_id", "_upstream_source"]
   # Preserve lineage columns from upstream datasets
   # Business value: Multi-hop lineage tracking
@@ -1035,11 +1224,6 @@ lineage:
   run_id_source: "run_id"
   # Options: run_id, pipeline_run_id
   # Use pipeline_run_id for cross-contract correlation
-  
-  capture_contract_name: true
-  contract_name_column_name: "_lakelogic_contract_name"
-  # Inject contract title into every output row
-  # Business value: Identify which contract produced each record
 
 # ============================================================
 # 14. SERVICE LEVEL OBJECTIVES
@@ -1651,14 +1835,17 @@ model:
       type: "timestamp"
       required: true
 
+downstream:
+  - name: "Marketing Engagement Dashboard"
+    type: "dashboard"
+    platform: "Tableau"
+    owner: "Marketing Team"
+
 lineage:
   enabled: true
   upstream:
     - name: "klaviyo_api"
       type: "external_api"
-  downstream:
-    - name: "silver_engagement"
-      type: "table"
 
 compliance:
   gdpr:
@@ -1779,6 +1966,83 @@ pipeline.run(reprocess_from="2026-01-01", reprocess_to="2026-03-22")
 
 ---
 
+## _system.yaml: External Sources (Cross-Domain Lineage)
+
+When your domain consumes tables managed by **another** domain's pipeline,
+declare them as `external_sources` so the DAG shows the full lineage:
+
+```yaml
+# In _system.yaml
+external_sources:
+  - name: "silver_ga4_sessions"
+    catalog_path: "catalog.silver.ga4_sessions"
+    source_domain: "marketing/google_analytics"
+    consumed_by: ["gold_marketing_funnel", "gold_attribution"]
+    # consumed_by: entity names of contracts in THIS registry that read this table
+
+  - name: "silver_crm_customers"
+    catalog_path: "catalog.silver.crm_customers"
+    source_domain: "sales/crm"
+    consumed_by: ["gold_customer_360"]
+```
+
+**What this does:**
+- 🌐 External nodes appear in the DAG with dashed borders (teal) in an "EXTERNAL" column
+- Edges connect external sources → consuming contracts. Generic entity matches (e.g. `['events']`) automatically restrict to the Bronze layer to prevent duplicates, but you can explicitly map to other layers via ID (e.g. `['silver_events']`).
+- Metadata-only — LakeLogic does **not** orchestrate the external pipeline
+- Late-arriving data in the external source is picked up automatically if
+  consuming contracts use `watermark_field: _lakelogic_processed_at`
+
+---
+
+## Contract YAML: Downstream Consumers (DAG Lineage)
+
+When a contract is consumed by reports, dashboards, APIs, or external teams, declare them at the top level of the contract file (`downstream:`) to visualize them in the DAG:
+
+```yaml
+# In cross-domain or Gold contracts
+downstream:
+  - name: "Executive KPI Dashboard"
+    type: "dashboard"    # Icons: dashboard (📊), api (🔌), report (📈), table (📋)
+    platform: "PowerBI"
+    owner: "Executive Team"
+    
+  - name: "Churn Prediction Model"
+    type: "api"
+    platform: "Databricks Model Serving"
+    owner: "Data Science"
+```
+
+**What this does:**
+- 🌐 Creates purple `DOWNSTREAM` nodes at the very end of your DAG hierarchy.
+- Edges connect the current contract → the defined business consumers.
+- Helps teams immediately identify which critical business assets will be impacted by upstream schema drift or freshness delays.
+
+---
+
+
+## SCD1 (Merge) Notes
+
+SCD1 uses `strategy: merge` with the contract-level `primary_key` for the merge ON condition:
+
+```yaml
+primary_key: [customer_id]
+
+materialization:
+  strategy: merge
+  # Merge uses primary_key to match rows (NOT incremental_key)
+  # incremental_key is only used for source filtering (what's new?)
+```
+
+**Key behaviors:**
+- **Matched rows** → UPDATE all non-key columns
+- **Unmatched incoming rows** → INSERT
+- **Unmatched existing rows** → no change (kept as-is)
+- **`_lakelogic_processed_at`** → updated on every merge (serves as "last modified")
+- **`_lakelogic_created_at`** → immutable (preserves first-insert time)
+
+---
+
 ## Quick Reference: When to Use What
 
 | Feature | Bronze | Silver | Gold |
@@ -1797,6 +2061,7 @@ pipeline.run(reprocess_from="2026-01-01", reprocess_to="2026-03-22")
 | `lineage.enabled` | `true` | `true` | `true` |
 | `metadata.run_log_table` | Optional | Optional | Optional |
 | `downstream` | N/A | Optional | Recommended |
+| `external_sources` | N/A | N/A | Via `_system.yaml` |
 | `extraction` | Optional | N/A | N/A |
 | `cloud.enabled` | Optional | Optional | Optional |
 | `external_logic` | N/A | N/A | Optional |
@@ -1805,4 +2070,3 @@ pipeline.run(reprocess_from="2026-01-01", reprocess_to="2026-03-22")
 ---
 
 *For more examples, see the [LakeLogic Examples](https://github.com/lakelogic/LakeLogic/tree/main/examples) directory.*
-

@@ -9,11 +9,14 @@ REM   pip install commitizen
 REM   winget install git-cliff     (or: cargo install git-cliff)
 REM
 REM What it does:
-REM   1. cz bump          - bumps version in pyproject.toml + creates git tag
-REM   2. git cliff        - regenerates CHANGELOG.md from all tags
-REM   3. git commit amend - folds changelog into the bump commit
-REM   4. git tag -f       - re-attaches the tag to the amended commit
-REM   5. git push         - pushes everything including tags
+REM   0.  uv lock --upgrade   - pull latest patched dependency versions
+REM   0b. pytest              - compatibility check (abort if tests fail)
+REM   0c. ruff check/format   - auto-fix lint & formatting
+REM   1.  cz bump             - bumps version in pyproject.toml + creates git tag
+REM   2.  git cliff           - regenerates CHANGELOG.md from all tags
+REM   3.  git commit amend    - folds changelog into the bump commit
+REM   4.  git tag -f          - re-attaches the tag to the amended commit
+REM   5.  git push            - pushes everything including tags
 REM
 REM -----------------------------------------------------------------------
 REM IMPORTANT: Commit Message Format
@@ -57,9 +60,36 @@ echo ======================================================
 echo   LakeLogic Release
 echo ======================================================
 
+REM Step 0: Upgrade dependencies (pull latest security patches)
+echo.
+echo [0/6] Upgrading dependencies (security patches)...
+uv lock --upgrade
+if errorlevel 1 (
+    echo WARNING: uv lock --upgrade failed. Continuing with existing lockfile.
+)
+git add uv.lock
+
+REM Step 0b: Compatibility check — abort release if upgraded deps break tests
+echo.
+echo [0b/6] Running compatibility tests...
+python -m pytest tests/ -x -q --tb=short
+if errorlevel 1 (
+    echo.
+    echo ERROR: Tests failed after dependency upgrade. Review uv.lock changes.
+    echo   To revert: git checkout uv.lock
+    exit /b 1
+)
+
+REM Step 0c: Lint and format (auto-fix safe issues)
+echo.
+echo [0c/6] Running ruff lint and format...
+ruff check . --exclude _ref --fix --quiet
+ruff format . --exclude _ref --quiet
+git add -u
+
 REM Step 1: Bump version (creates tag + bump commit)
 echo.
-echo [1/5] Bumping version...
+echo [1/6] Bumping version...
 if "%1"=="" (
     cz bump --yes
 ) else (
@@ -83,7 +113,7 @@ echo   Tag: %NEW_TAG%
 
 REM Step 2: Generate changelog (tag exists on HEAD, so git-cliff sees it)
 echo.
-echo [2/5] Generating changelog with git-cliff...
+echo [2/6] Generating changelog with git-cliff...
 git cliff -o CHANGELOG.md
 if errorlevel 1 (
     echo ERROR: git cliff failed. Is git-cliff installed? Run: winget install git-cliff
@@ -93,19 +123,19 @@ if errorlevel 1 (
 REM Step 3: Amend the bump commit to include changelog
 REM         This creates a NEW commit hash, so the tag is now orphaned
 echo.
-echo [3/5] Amending bump commit with changelog...
+echo [3/6] Amending bump commit with changelog...
 git add CHANGELOG.md
 git commit --amend --no-edit
 
 REM Step 4: Re-attach the tag to the amended commit
 REM         Without this, the tag points to the old (pre-amend) commit
 echo.
-echo [4/5] Re-tagging %NEW_TAG% on amended commit...
+echo [4/6] Re-tagging %NEW_TAG% on amended commit...
 git tag -f %NEW_TAG%
 
 REM Step 5: Push
 echo.
-echo [5/5] Pushing to remote...
+echo [5/6] Pushing to remote...
 git push --force --follow-tags
 
 echo.

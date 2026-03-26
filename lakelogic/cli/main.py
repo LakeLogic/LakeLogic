@@ -440,6 +440,28 @@ def bootstrap(
         if total == 0:
             return rules
 
+        # Field name patterns that strongly suggest categorical/enum fields
+        _ENUM_KEYWORDS = {
+            "type", "status", "category", "mode", "tier", "level", "grade",
+            "class", "kind", "group", "segment", "channel", "source", "medium",
+            "priority", "severity", "stage", "phase", "state", "role",
+            "gender", "currency", "country", "region", "platform", "device",
+            "browser", "language", "format", "method", "protocol", "plan",
+            "subscription", "membership", "rating", "flag", "indicator",
+            "option", "preference", "consent",
+        }
+        # Field name patterns that should NEVER get accepted_values
+        _NEVER_ENUM_KEYWORDS = {
+            "id", "uuid", "key", "hash", "token", "secret", "password",
+            "name", "title", "description", "comment", "note", "text",
+            "message", "body", "content", "summary", "detail", "reason",
+            "path", "url", "uri", "email", "address", "phone",
+            "timestamp", "date", "time", "created", "updated", "modified",
+            "amount", "price", "cost", "total", "balance", "quantity",
+            "count", "score", "value", "size", "length", "width", "height",
+            "lat", "lon", "latitude", "longitude", "zip", "postal",
+        }
+
         for col in df.columns:
             series = df[col]
             null_ratio = series.isna().mean()
@@ -448,22 +470,41 @@ def bootstrap(
                 rules["row_rules"].append({"not_null": col})
             if distinct == total and total > 1:
                 rules["dataset_rules"].append({"unique": col})
-            if distinct > 0 and distinct <= 20 and series.dtype == "object":
-                values = [v for v in series.dropna().unique().tolist() if v is not None]
-                rules["row_rules"].append({"accepted_values": {"field": col, "values": values}})
+
+            # ── Smart accepted_values: cardinality + name heuristics ──────
+            if distinct > 0 and series.dtype == "object":
+                col_lower = col.lower()
+                col_parts = set(col_lower.replace("-", "_").split("_"))
+
+                # Skip fields that should never be enum
+                if col_parts & _NEVER_ENUM_KEYWORDS:
+                    continue
+
+                # Cardinality ratio: distinct values / total rows
+                cardinality_ratio = distinct / total if total > 0 else 1.0
+
+                # Accept if: (a) field name matches enum keywords, OR
+                #             (b) very low cardinality ratio with small distinct count
+                is_enum_name = bool(col_parts & _ENUM_KEYWORDS)
+                is_low_cardinality = cardinality_ratio < 0.3 and distinct <= 15
+
+                if (is_enum_name or is_low_cardinality) and distinct <= 20:
+                    values = [v for v in series.dropna().unique().tolist() if v is not None]
+                    rules["row_rules"].append({"accepted_values": {"field": col, "values": values}})
         return rules
 
     def _discover_entities(root: Path) -> Dict[str, List[Path]]:
         subdirs = [p for p in root.iterdir() if p.is_dir()]
+        target_pattern = pattern.replace("**/", "") if pattern.startswith("**/") else pattern
         if subdirs:
             entities: Dict[str, List[Path]] = {}
             for subdir in subdirs:
-                files = sorted(subdir.glob(pattern))
+                files = sorted([f for f in subdir.rglob(target_pattern) if f.is_file()])
                 if files:
                     entities[subdir.name] = files
             return entities
 
-        files = sorted(root.glob(pattern))
+        files = sorted([f for f in root.rglob(target_pattern) if f.is_file()])
         entities = {}
         for file_path in files:
             stem = file_path.stem
@@ -482,7 +523,7 @@ def bootstrap(
     existing_entries = {}
     if sync and registry.exists():
         existing_registry = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
-        for entry in existing_registry.get("entries", []):
+        for entry in existing_registry.get("contracts", []):
             name = str(entry.get("entity") or "").strip()
             if name:
                 existing_entries[name] = entry
@@ -555,7 +596,7 @@ def bootstrap(
             },
             "source": {
                 "type": "landing",
-                "path": str(sample_file.parent if sample_file.parent != landing else landing),
+                "path": str(landing / entity),
                 "load_mode": "full",
                 "pattern": pattern,
             },
@@ -615,15 +656,90 @@ def bootstrap(
                 }
             )
 
-    if sync and existing_registry.get("entries"):
+    if sync and existing_registry.get("contracts"):
         seen = {e.get("entity") for e in registry_entries}
-        for entry in existing_registry.get("entries", []):
+        for entry in existing_registry.get("contracts", []):
             if entry.get("entity") not in seen:
                 registry_entries.append(entry)
 
     registry.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Try to infer system/domain from landing path (e.g. landing_marketing/google_analytics)
+    domain_name = "TODO_DOMAIN"
+    system_name = "TODO_SYSTEM"
+    parts = landing.parts
+    if len(parts) >= 2:
+        system_name = parts[-1]
+        parent_name = parts[-2]
+        if parent_name.startswith("landing_"):
+            domain_name = parent_name.replace("landing_", "")
+        else:
+            domain_name = parent_name
+
+    # Build the full scaffold using the lakehouse standard template
+    registry_scaffold = {
+        "domain": domain_name,
+        "system": system_name,
+        "bronze_layer": "bronze",
+        "silver_layer": "silver",
+        "gold_layer": "gold",
+        "slo": {
+            "freshness": {
+                "bronze": {"max_delay_minutes": 60, "check_column": "_lakelogic_loaded_at"},
+                "silver": {"max_delay_minutes": 240, "check_column": "_lakelogic_processed_at"},
+            }
+        },
+        "storage": {
+            "domain_catalog": "`{catalog}`.{domain}",
+            "quarantine_root": "`{catalog}`.quarantine",
+            "run_log_table": "`{catalog}`.{domain}._run_logs",
+            "external_location_root": "abfss://{domain}@{storage_account}.dfs.core.windows.net",
+            "contract_root": "/Workspace/Shared/data_platform/domains_retail/{domain}/{system}",
+            "landing_root": "/Volumes/{catalog}/nondelta/landing_{domain}/{system}",
+            "log_root": "/Volumes/{catalog}/nondelta/_logs",
+            "landing_path": "abfss://nondelta@{storage_account}.dfs.core.windows.net/_data/{domain}/{system}",
+            "contract_path": "abfss://nondelta@{storage_account}.dfs.core.windows.net/_contracts/{domain}/{system}",
+        },
+        "external_sources": [],
+        "lineage": {
+            "enabled": True,
+            "source_column_name": "_lakelogic_source",
+            "timestamp_column_name": "_lakelogic_processed_at",
+            "run_id_column_name": "_lakelogic_run_id",
+            "contract_name_column_name": "_lakelogic_contract_name",
+            "domain_column_name": "_lakelogic_domain",
+            "system_column_name": "_lakelogic_system",
+        },
+        "materialization": {
+            "bronze": {"strategy": "append", "format": "delta"},
+            "silver": {"strategy": "merge", "format": "delta"},
+            "gold": {"strategy": "overwrite", "format": "delta"},
+        },
+        "server_defaults": {
+            "bronze": {"schema_evolution": "append", "allow_schema_drift": True},
+            "silver": {"schema_evolution": "strict"},
+            "gold": {"schema_evolution": "strict"},
+        },
+        "quarantine": {
+            "enabled": True,
+            "include_error_reason": True,
+        },
+        "environments": {
+            "dev": {"catalog": "lakelogic-lakehouse-dev-001", "storage_account": "salakelogicdevadls001"},
+            "staging": {"catalog": "lakelogic-lakehouse-staging-001", "storage_account": "salakelogicdevadls001"},
+            "prod": {"catalog": "lakelogic-lakehouse-prod-001", "storage_account": "salakelogicdevadls001"},
+        },
+        "contracts": registry_entries,
+    }
+
+    if sync and registry.exists():
+        # Keep existing top-level keys if updating an existing registry
+        existing_full = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
+        existing_full["contracts"] = registry_entries
+        registry_scaffold = existing_full
+
     registry.write_text(
-        yaml.safe_dump({"entries": registry_entries}, sort_keys=False),
+        yaml.safe_dump(registry_scaffold, sort_keys=False),
         encoding="utf-8",
     )
 
