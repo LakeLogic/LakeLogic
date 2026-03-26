@@ -77,26 +77,62 @@ class SLOValidator:
 
             # Get the SLO rules for this specific layer
             layer_slo = freshness_config.get(layer)
+            if layer_slo and entity in layer_slo.exclude_tables:
+                continue
+
             max_delay = layer_slo.max_delay_minutes if layer_slo else 999999
-            check_col = layer_slo.check_column if layer_slo else "_lakelogic_loaded_at"
+            
+            check_col_conf = layer_slo.check_column if layer_slo else "_lakelogic_loaded_at"
+            if isinstance(check_col_conf, str):
+                check_cols = [check_col_conf]
+            else:
+                check_cols = list(check_col_conf)
+                
+            # Always fallback to the standard audit column if not explicitly in the list
+            if "_lakelogic_loaded_at" not in check_cols:
+                check_cols.append("_lakelogic_loaded_at")
 
-            try:
-                # Query the latest timestamp from the table
-                row = self.spark.sql(f"SELECT MAX({check_col}) as latest_ts FROM {table_name}").first()
-                latest_ts = row["latest_ts"]
+            latest_ts = None
+            found_col = None
+            last_error = None
 
-                if latest_ts is None:
-                    results.append(
-                        SLOCheckResult(
-                            layer=layer,
-                            entity=entity,
-                            status="⚠️ NO DATA",
-                            passed=False,
-                            slo_max_minutes=max_delay,
-                        )
-                    )
+            for col in check_cols:
+                try:
+                    # Query the latest timestamp from the table using the current column candidate
+                    row = self.spark.sql(f"SELECT MAX({col}) as latest_ts FROM {table_name}").first()
+                    latest_ts = row["latest_ts"]
+                    found_col = col
+                    break
+                except Exception as e:
+                    last_error = e
                     continue
 
+            if not found_col:
+                # Table might not exist or none of the columns exist
+                results.append(
+                    SLOCheckResult(
+                        layer=layer,
+                        entity=entity,
+                        status=f"⚠️ ERROR: {str(last_error)[:80]}",
+                        passed=False,
+                        slo_max_minutes=max_delay,
+                    )
+                )
+                continue
+
+            if latest_ts is None:
+                results.append(
+                    SLOCheckResult(
+                        layer=layer,
+                        entity=entity,
+                        status="⚠️ NO DATA",
+                        passed=False,
+                        slo_max_minutes=max_delay,
+                    )
+                )
+                continue
+
+            try:
                 # Calculate delay
                 if hasattr(latest_ts, "timestamp"):
                     latest_utc = datetime.datetime.fromtimestamp(latest_ts.timestamp(), tz=datetime.timezone.utc)

@@ -666,10 +666,28 @@ def create_table(
             from pyspark.sql import SparkSession
 
             spark = SparkSession.builder.getOrCreate()
+
+            # Ensure the target schema exists before CREATE TABLE
+            _resolved = table_name or _resolve_table_name(contract)
+            if _resolved:
+                _parts = _resolved.replace("`", "").split(".")
+                if len(_parts) >= 2:
+                    _schema_ref = ".".join(
+                        [f"`{p}`" if "-" in p else p for p in _parts[:-1]]
+                    )
+                    try:
+                        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {_schema_ref}")
+                    except Exception as schema_exc:
+                        logger.warning(
+                            f"Could not create schema {_schema_ref}: {schema_exc}. "
+                            f"CREATE TABLE may fail if schema does not exist."
+                        )
+
             for statement in ddl.split(";"):
                 statement = statement.strip()
                 if statement:
                     spark.sql(statement)
+
             logger.info(f"Created table via Spark: {ddl.splitlines()[0]}")
         except ImportError:
             raise ValueError("Spark backend requires pyspark installed.")

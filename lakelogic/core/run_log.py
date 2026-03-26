@@ -197,8 +197,10 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "counts_good": counts.get("good"),
         "counts_quarantined": counts.get("quarantined"),
         "counts_pre_transform_dropped": counts.get("pre_transform_dropped"),
+        "pre_transform_filter": report.get("pre_transform_filter"),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
         "max_source_mtime": report.get("max_source_mtime"),
+        "max_watermark_value": report.get("max_watermark_value"),
         "source_files_json": json.dumps(report.get("source_files", []), default=str),
         "freshness_seconds": _num(freshness.get("age_seconds")),
         "freshness_pass": freshness.get("passed"),
@@ -278,8 +280,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             StructField("counts_good", LongType(), True),
             StructField("counts_quarantined", LongType(), True),
             StructField("counts_pre_transform_dropped", LongType(), True),
+            StructField("pre_transform_filter", StringType(), True),
             StructField("quarantine_ratio", DoubleType(), True),
             StructField("max_source_mtime", DoubleType(), True),
+            StructField("max_watermark_value", StringType(), True),
             StructField("source_files_json", StringType(), True),
             StructField("freshness_seconds", DoubleType(), True),
             StructField("freshness_pass", BooleanType(), True),
@@ -338,8 +342,13 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     ("system", "STRING"),
                     ("data_layer", "STRING"),
                     ("counts_source", "BIGINT"),
+                    ("counts_good", "BIGINT"),
+                    ("counts_quarantined", "BIGINT"),
                     ("counts_pre_transform_dropped", "BIGINT"),
+                    ("pre_transform_filter", "STRING"),
+                    ("quarantine_ratio", "DOUBLE"),
                     ("max_source_mtime", "DOUBLE"),
+                    ("max_watermark_value", "STRING"),
                     ("source_files_json", "STRING"),
                 ]:
                     if col_name not in existing_cols:
@@ -428,8 +437,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_good BIGINT,
                 counts_quarantined BIGINT,
                 counts_pre_transform_dropped BIGINT,
+                pre_transform_filter STRING,
                 quarantine_ratio DOUBLE,
                 max_source_mtime DOUBLE,
+                max_watermark_value VARCHAR,
                 source_files_json VARCHAR,
                 freshness_seconds DOUBLE,
                 freshness_pass BOOLEAN,
@@ -451,8 +462,13 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS system VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS data_layer VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_source BIGINT")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_good BIGINT")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_quarantined BIGINT")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_pre_transform_dropped BIGINT")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS pre_transform_filter STRING")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS quarantine_ratio DOUBLE")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_source_mtime DOUBLE")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_watermark_value VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS source_files_json VARCHAR")
         except Exception:
             pass
@@ -473,8 +489,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_good",
             "counts_quarantined",
             "counts_pre_transform_dropped",
+            "pre_transform_filter",
             "quarantine_ratio",
             "max_source_mtime",
+            "max_watermark_value",
             "source_files_json",
             "freshness_seconds",
             "freshness_pass",
@@ -525,8 +543,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_good INTEGER,
                 counts_quarantined INTEGER,
                 counts_pre_transform_dropped INTEGER,
+                pre_transform_filter TEXT,
                 quarantine_ratio REAL,
                 max_source_mtime REAL,
+                max_watermark_value TEXT,
                 source_files_json TEXT,
                 freshness_seconds REAL,
                 freshness_pass INTEGER,
@@ -551,8 +571,13 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("system", "TEXT"),
                 ("data_layer", "TEXT"),
                 ("counts_source", "INTEGER"),
+                ("counts_good", "INTEGER"),
+                ("counts_quarantined", "INTEGER"),
                 ("counts_pre_transform_dropped", "INTEGER"),
+                ("pre_transform_filter", "TEXT"),
+                ("quarantine_ratio", "REAL"),
                 ("max_source_mtime", "REAL"),
+                ("max_watermark_value", "TEXT"),
                 ("source_files_json", "TEXT"),
             ]:
                 if col_name not in cols:
@@ -576,8 +601,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_good",
             "counts_quarantined",
             "counts_pre_transform_dropped",
+            "pre_transform_filter",
             "quarantine_ratio",
             "max_source_mtime",
+            "max_watermark_value",
             "source_files_json",
             "freshness_seconds",
             "freshness_pass",
@@ -642,6 +669,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             ("counts_good", pa.int64()),
             ("counts_quarantined", pa.int64()),
             ("counts_pre_transform_dropped", pa.int64()),
+            ("pre_transform_filter", pa.string()),
             ("quarantine_ratio", pa.float64()),
             ("max_source_mtime", pa.float64()),
             ("source_files_json", pa.string()),

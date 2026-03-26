@@ -449,6 +449,58 @@ class DataProcessor:
         if hasattr(self.adapter, "trace") and self.adapter.trace:
             self._active_trace_steps.extend(self.adapter.trace)
 
+        # ── INTERNALLY ENFORCE SQL FIELD LIST ────────────────────────────────
+        # If the user defined an explicit model and wants strict schema
+        # (allow_schema_drift is False OR schema_evolution is strict), prune undocumented columns.
+        if good_df is not None and self.contract.model and self.contract.model.fields:
+            allow_schema_drift = True
+            schema_evolution = "strict"
+            
+            server = getattr(self.contract, "server", None)
+            if server:
+                allow_schema_drift = getattr(server, "allow_schema_drift", True)
+                schema_evolution = getattr(server, "schema_evolution", "strict") or "strict"
+                
+            # If evolution is append/merge, or drift is explicitly allowed, do NOT prune.
+            if not allow_schema_drift or schema_evolution.lower() == "strict":
+                expected_cols = [f.name for f in self.contract.model.fields]
+                
+                # Polars Engine
+                if self.engine_name == "polars":
+                    import polars as pl
+                    existing = good_df.columns
+                    kepts = [c for c in expected_cols if c in existing]
+                    if kepts:
+                        good_df = good_df.select(kepts)
+                        
+                # Spark Engine
+                elif self.engine_name == "spark":
+                    existing = good_df.columns
+                    kepts = [c for c in expected_cols if c in existing]
+                    # Preserve _source_file for lineage injection (added during load)
+                    if "_source_file" in existing and "_source_file" not in kepts:
+                        kepts.append("_source_file")
+                    if kepts:
+                        good_df = good_df.select(*kepts)
+                        
+                # DuckDB / SQLite Engines
+                elif self.engine_name in ("duckdb", "sqlite"):
+                    existing = good_df.columns.tolist() if hasattr(good_df, "columns") else []
+                    kepts = [c for c in expected_cols if c in existing]
+                    if kepts and hasattr(good_df, "select"):
+                        try:
+                            # DuckDB PyRelation supports string args in select()
+                            good_df = good_df.select(*kepts)
+                        except Exception as exc:
+                            logger.warning(f"DuckDB column select failed ({exc}), schema enforcement skipped")
+                            
+                # Pandas Engine
+                elif self.engine_name == "pandas":
+                    existing = good_df.columns.tolist()
+                    kepts = [c for c in expected_cols if c in existing]
+                    if kepts:
+                        good_df = good_df[kepts]
+
         # Inject lineage metadata
         step_start = time.perf_counter()
         from lakelogic.core.lineage import inject_lineage
@@ -490,6 +542,14 @@ class DataProcessor:
             domain = metadata.get("domain")
             system = metadata.get("system")
             data_layer = metadata.get("data_layer")
+            # Resolve a human-readable target identifier for parallel-mode logs
+            _info = getattr(self.contract, "info", None)
+            _target_name = (
+                getattr(_info, "table_name", None)
+                or getattr(_info, "title", None)
+                or getattr(self.contract, "dataset", None)
+                or "unknown"
+            )
             tags = []
             if domain:
                 tags.append(f"domain={domain}")
@@ -501,12 +561,12 @@ class DataProcessor:
             ratio = counts.get("quarantine_ratio")
             ratio_display = f"{ratio:.2%}" if ratio is not None else "n/a"
             dropped = counts.get("pre_transform_dropped")
-            dropped_display = f", Pre-Transform Dropped: {dropped}" if dropped is not None else ""
-            source_display = f"Source: {source_total}, " if source_total is not None else ""
+            _dropped_display = f", Pre-Transform Dropped: {dropped}" if dropped is not None else ""  # noqa: F841
+            _source_display = f"Source: {source_total}, " if source_total is not None else ""  # noqa: F841
             if quality_enabled:
                 _dropped_line = f"\n    Pre-Transform Dropped: {dropped}" if dropped is not None else ""
                 logger.info(
-                    f"Run complete.{tags_display}"
+                    f"Run complete — {_target_name}{tags_display}"
                     f"\n    Source:               {source_total if source_total is not None else 'n/a'}"
                     f"\n    Total (post-transform):{total}"
                     f"\n    Good:                 {counts.get('good')}"
@@ -517,7 +577,7 @@ class DataProcessor:
             else:
                 _dropped_line = f"\n    Pre-Transform Dropped: {dropped}" if dropped is not None else ""
                 logger.info(
-                    f"Run complete.{tags_display}"
+                    f"Run complete — {_target_name}{tags_display}"
                     f"\n    Source: {source_total if source_total is not None else 'n/a'}"
                     f"\n    Total:  {total}"
                     f"{_dropped_line}"
@@ -562,8 +622,16 @@ class DataProcessor:
             # Filter out false alarms
             missing = drift.get("missing_fields", [])
             unknown = drift.get("unknown_fields", [])
+            # _source_file is a transient column from _metadata.file_path
+            # capture — excluded from drift as it's dropped after lineage.
+            internal_cols = {"_source_file"}
             real_missing = sorted(set(missing) - derived_fields - rename_targets)
-            real_unknown = sorted(set(unknown) - rename_sources)
+            
+            # Remove rename sources, internal columns, and any framework lineage columns
+            real_unknown = sorted(
+                c for c in set(unknown) - rename_sources - internal_cols
+                if not c.startswith("_lakelogic_")
+            )
 
             allow = drift.get("allow_schema_drift", True)
             if real_missing or real_unknown:
@@ -591,6 +659,23 @@ class DataProcessor:
             slos = []
         row_rule_failures = self._extract_row_rule_failures(bad_df)
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
+        
+        # Extract pre-transform filter string for run log
+        pre_filters = []
+        if self.contract.transformations:
+            for t in self.contract.transformations:
+                t_dict = t if isinstance(t, dict) else (t.model_dump() if hasattr(t, "model_dump") else {})
+                t_phase = (t_dict.get("phase") or "post").lower()
+                if t_phase == "pre" and t_dict.get("filter") and t_dict["filter"].get("sql"):
+                    pre_filters.append(t_dict["filter"]["sql"])
+        if pre_filters:
+            self.last_report["pre_transform_filter"] = " AND ".join(f"({f})" for f in pre_filters)
+            
+        # Extract max watermark value if computed
+        inc_meta = getattr(self, "_incremental_metadata", {})
+        if "max_watermark_value" in inc_meta:
+            self.last_report["max_watermark_value"] = inc_meta["max_watermark_value"]
+            
         write_run_log(self.last_report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
 
         # Optional external logic hook (python/notebook)
@@ -649,8 +734,8 @@ class DataProcessor:
 
             observer = RemoteObserver()
             observer.report(self.last_report)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Remote observer not available or failed: {exc}")
 
         # Call to action for SaaS (opt-in only)
         quarantined = counts.get("quarantined")
@@ -1296,10 +1381,52 @@ class DataProcessor:
                         ):
                             from lakelogic.core.incremental import IncrementalBoundary
 
+                            # Enrich source config with contract context so
+                            # pipeline_log strategy can query _run_logs by dataset
+                            _wm_strategy = getattr(_src_cfg, "watermark_strategy", None)
                             try:
-                                # Resolve boundary using the unified IncrementalBoundary factory
-                                boundary = IncrementalBoundary.from_source_config(_src_cfg)
-                                
+                                _src_overrides = {}
+                                if _wm_strategy == "pipeline_log":
+                                    _info = getattr(self.contract, "info", None)
+                                    _meta = getattr(self.contract, "metadata", None) or {}
+                                    # Resolve dataset: target table name written to _run_logs
+                                    _dataset = (
+                                        _meta.get("dataset")
+                                        or (getattr(_info, "table_name", None) if _info else None)
+                                        or getattr(self.contract, "dataset", None)
+                                    )
+                                    _data_layer = (
+                                        _meta.get("data_layer")
+                                        or (getattr(_info, "target_layer", None) if _info else None)
+                                    )
+                                    _domain = _meta.get("domain") or (getattr(_info, "domain", None) if _info else None)
+                                    _system = _meta.get("system") or (getattr(_info, "system", None) if _info else None)
+                                    _log_table = _meta.get("run_log_table")
+                                    # Inject into source config for from_source_config()
+                                    if _dataset:
+                                        _src_overrides["dataset"] = _dataset
+                                    if _data_layer:
+                                        _src_overrides["data_layer"] = _data_layer
+                                    if _domain:
+                                        _src_overrides["domain"] = _domain
+                                    if _system:
+                                        _src_overrides["system"] = _system
+                                    if _log_table:
+                                        _src_overrides["pipeline_log_table"] = _log_table
+                                elif _wm_strategy in ("max_target", "delta_version"):
+                                    # Auto-inject target_path if materialization is defined
+                                    if getattr(_src_cfg, "target_path", None) is None:
+                                        _mat = getattr(self.contract, "materialization", None)
+                                        if _mat and getattr(_mat, "target", None):
+                                            _src_overrides["target_path"] = _mat.target
+
+                                if _src_overrides:
+                                    boundary = IncrementalBoundary.from_source_config(
+                                        _src_cfg, **_src_overrides
+                                    )
+                                else:
+                                    boundary = IncrementalBoundary.from_source_config(_src_cfg)
+
                                 if boundary.strategy == "delta_version":
                                     fv = boundary.metadata.get("from_version")
                                     tv = boundary.metadata.get("to_version")
@@ -1313,14 +1440,36 @@ class DataProcessor:
                                 else:
                                     # Standard watermark filter
                                     _wm_field = getattr(_src_cfg, "watermark_field", None)
-                                    if _wm_field:
-                                        df = df.filter(boundary.spark_filter(_wm_field))
-                                        logger.info(f"Incremental load (Spark): applied {boundary.strategy} boundary")
+                                    # Default to the lineage timestamp when no watermark is configured.
+                                    # Bronze records are stamped with _lakelogic_processed_at,
+                                    # making it a natural high-water mark for silver reads.
+                                    if not _wm_field:
+                                        _wm_field = "_lakelogic_processed_at"
+                                        logger.info(f"No watermark_field configured — defaulting to '{_wm_field}'")
+                                    df = df.filter(boundary.spark_filter(_wm_field))
+                                    logger.info(
+                                        f"Incremental load (Spark): applied "
+                                        f"{boundary.strategy} boundary on '{_wm_field}'"
+                                    )
+                                    # Compute Max Watermark Value via PySpark aggregation if pipeline_log strategy
+                                    if boundary.strategy == "pipeline_log":
+                                        try:
+                                            from pyspark.sql import functions as F
+                                            _max_row = df.select(F.max(_wm_field).cast("string").alias("max_wm")).collect()[0]
+                                            _max_val = _max_row["max_wm"]
+                                            if _max_val:
+                                                boundary.metadata["max_watermark_value"] = str(_max_val)
+                                                logger.debug(f"Computed max_watermark_value='{_max_val}' for {_wm_field}")
+                                        except Exception as wm_exc:
+                                            logger.debug(f"Failed to compute max_watermark_value: {wm_exc}")
 
                                 # Store metadata for materialization stage (saving the new high-water mark)
-                                self._incremental_metadata = boundary.metadata
+                                self._incremental_metadata = dict(boundary.metadata)
+                                self._incremental_metadata["strategy"] = boundary.strategy
                             except Exception as _wm_err:
-                                logger.debug(f"Incremental boundary resolution failed (falling back to full): {_wm_err}")
+                                logger.debug(
+                                    f"Incremental boundary resolution failed (falling back to full): {_wm_err}"
+                                )
 
                     else:
                         # File path or explicit format
@@ -1360,14 +1509,21 @@ class DataProcessor:
                         # fields so CSV/JSON reads don't need to infer schema
                         # (which fails on empty dirs or Volumes FUSE paths).
                         _contract_type = type(self.contract).__name__
-                        logger.debug(f"Spark read: fmt={fmt}, file_paths={len(file_paths) if file_paths else 'None'}, contract_type={_contract_type}")
+                        logger.debug(
+                            f"Spark read: fmt={fmt}, "
+                            f"file_paths={len(file_paths) if file_paths else 'None'}, "
+                            f"contract_type={_contract_type}"
+                        )
 
                         _model = getattr(self.contract, "model", None)
                         _fields_list = getattr(_model, "fields", None) if _model else None
                         if not _fields_list and isinstance(self.contract, dict):
                             _fields_list = self.contract.get("model", {}).get("fields", [])
-                        
-                        logger.debug(f"Spark schema: model={_model is not None}, fields_list={len(_fields_list) if _fields_list else 'None'}")
+
+                        logger.debug(
+                            f"Spark schema: model={_model is not None}, "
+                            f"fields_list={len(_fields_list) if _fields_list else 'None'}"
+                        )
 
                         if _fields_list:
                             from pyspark.sql.types import (
@@ -1392,7 +1548,11 @@ class DataProcessor:
                             for f in _fields_list:
                                 fname = f.get("name") if isinstance(f, dict) else getattr(f, "name", None)
                                 ftype = f.get("type", "string") if isinstance(f, dict) else getattr(f, "type", "string")
-                                nullable = not (f.get("required", False) if isinstance(f, dict) else getattr(f, "required", False))
+                                if isinstance(f, dict):
+                                    freq = f.get("required", False)
+                                else:
+                                    freq = getattr(f, "required", False)
+                                nullable = not freq
                                 spark_type = _type_map.get((ftype or "string").lower(), StringType())
                                 if fname:
                                     spark_fields.append(StructField(fname, spark_type, nullable))
@@ -1407,15 +1567,38 @@ class DataProcessor:
 
                         _load_target = file_paths if file_paths else path
                         if isinstance(_load_target, list):
-                            _max_show = 5
-                            _shown = _load_target[:_max_show]
-                            _display = "\n    ".join(_shown)
-                            _remaining = len(_load_target) - _max_show
-                            _suffix = f"\n    ... and {_remaining} more file(s)" if _remaining > 0 else ""
-                            logger.info(f"Spark loading {len(_load_target)} file(s):\n    {_display}{_suffix}")
+                            logger.info(f"Spark loading {len(_load_target)} file(s)")
                         else:
                             logger.info(f"Spark loading: {_load_target}")
                         df = reader.load(_load_target)
+
+                        # Capture per-row file path from Spark's hidden
+                        # _metadata column before transformations strip it.
+                        # This enables per-row source traceability in
+                        # _lakelogic_source (vs. a single directory path).
+                        _source_captured = False
+                        try:
+                            from pyspark.sql import functions as F
+                            # Strategy 1: _metadata.file_path (full path — preferred)
+                            df = df.select("*", F.col("_metadata.file_path").alias("_source_file"))
+                            _source_captured = True
+                        except Exception:
+                            try:
+                                from pyspark.sql import functions as F
+                                # Strategy 2: _metadata.file_name (just filename)
+                                df = df.select("*", F.col("_metadata.file_name").alias("_source_file"))
+                                _source_captured = True
+                            except Exception:
+                                try:
+                                    from pyspark.sql import functions as F
+                                    # Strategy 3: input_file_name() (works for non-UC file reads)
+                                    ifn = F.input_file_name()
+                                    df = df.withColumn("_source_file", F.when(ifn != F.lit(""), ifn).otherwise(F.lit(path)))
+                                    _source_captured = True
+                                except Exception as exc:
+                                    logger.debug(f"input_file_name() fallback failed: {exc}")
+                        if not _source_captured:
+                            logger.debug(f"Could not capture per-row source file path for {path} — lineage will use directory path")
 
             elif self.engine_name in ["snowflake", "bigquery"]:
                 table_name = path[6:] if path.startswith("table:") else path
@@ -2670,8 +2853,8 @@ class DataProcessor:
                 for item in series:
                     if item:
                         errors.extend(item)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Polars error extraction failed: {exc}")
 
         try:
             import pandas as pd
@@ -2679,8 +2862,8 @@ class DataProcessor:
             if isinstance(bad_df, pd.DataFrame) and error_col in bad_df.columns:
                 for item in bad_df[error_col].explode().dropna().tolist():
                     errors.append(item)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Pandas error extraction failed: {exc}")
 
         if self.engine_name == "spark":
             try:
@@ -2689,8 +2872,8 @@ class DataProcessor:
                 if error_col in bad_df.columns:
                     rows = bad_df.select(F.explode(F.col(error_col)).alias("error")).distinct().collect()
                     errors.extend([r["error"] for r in rows if r["error"]])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"Spark error extraction failed: {exc}")
 
         failures = []
         for err in set(errors):

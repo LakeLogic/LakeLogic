@@ -63,59 +63,46 @@ def inject_lineage(
         contract_path = getattr(contract, "_contract_path", None)
         if contract_path:
             contract_name_value = Path(contract_path).name
+        # Append version from info block if available
+        info = getattr(contract, "info", None)
+        if info:
+            version = getattr(info, "version", None)
+            if version and contract_name_value:
+                contract_name_value = f"{contract_name_value} (v{version})"
     except Exception:
         contract_name_value = None
 
-    # If any capture_* field is explicitly set, only honor those explicitly set fields.
-    capture_fields = {
-        "capture_source_path",
-        "capture_timestamp",
-        "capture_run_id",
-        "capture_contract_name",
-        "capture_domain",
-        "capture_system",
-    }
-    explicit_fields = set()
-    if hasattr(lineage, "model_fields_set"):
-        explicit_fields = set(getattr(lineage, "model_fields_set"))
-    elif hasattr(lineage, "__pydantic_fields_set__"):
-        explicit_fields = set(getattr(lineage, "__pydantic_fields_set__"))
-    explicit_capture = explicit_fields & capture_fields
+    # Resolve created_by — the user or service principal running the pipeline.
+    created_by_value = getattr(lineage, "created_by_override", None)
+    if not created_by_value:
+        try:
+            import getpass
+            created_by_value = getpass.getuser()
+        except Exception:
+            created_by_value = "unknown"
+    # created_at timestamp — stamped on first insert; merge strategy preserves it.
+    created_at_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     metadata = getattr(contract, "metadata", {}) or {}
     domain_value = metadata.get("domain")
     system_value = metadata.get("system")
     columns: Dict[str, Any] = {}
-    if (("capture_source_path" in explicit_capture) if explicit_capture else True) and getattr(
-        lineage, "capture_source_path", False
-    ):
+    if getattr(lineage, "capture_source_path", True):
         columns[lineage.source_column_name] = source_value
-    if (("capture_timestamp" in explicit_capture) if explicit_capture else True) and getattr(
-        lineage, "capture_timestamp", False
-    ):
+    if getattr(lineage, "capture_timestamp", True):
         columns[lineage.timestamp_column_name] = timestamp_value
-    if (("capture_run_id" in explicit_capture) if explicit_capture else True) and getattr(
-        lineage, "capture_run_id", False
-    ):
+    if getattr(lineage, "capture_run_id", True):
         columns[lineage.run_id_column_name] = run_id_value
-    if (
-        (("capture_contract_name" in explicit_capture) if explicit_capture else True)
-        and getattr(lineage, "capture_contract_name", False)
-        and contract_name_value is not None
-    ):
+    if getattr(lineage, "capture_contract_name", True) and contract_name_value is not None:
         columns[lineage.contract_name_column_name] = contract_name_value
-    if (
-        (("capture_domain" in explicit_capture) if explicit_capture else True)
-        and getattr(lineage, "capture_domain", False)
-        and domain_value is not None
-    ):
+    if getattr(lineage, "capture_domain", True) and domain_value is not None:
         columns[lineage.domain_column_name] = domain_value
-    if (
-        (("capture_system" in explicit_capture) if explicit_capture else True)
-        and getattr(lineage, "capture_system", False)
-        and system_value is not None
-    ):
+    if getattr(lineage, "capture_system", True) and system_value is not None:
         columns[lineage.system_column_name] = system_value
+    if getattr(lineage, "capture_created_at", True):
+        columns[getattr(lineage, "created_at_column_name", "_lakelogic_created_at")] = created_at_value
+    if getattr(lineage, "capture_created_by", True) and created_by_value is not None:
+        columns[getattr(lineage, "created_by_column_name", "_lakelogic_created_by")] = created_by_value
 
     if not columns:
         return good_df, bad_df
@@ -341,8 +328,30 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
             from pyspark.sql import functions as F
 
             updated = df
+            _has_source_file = "_source_file" in (df.columns if hasattr(df, "columns") else [])
             for name, value in columns.items():
-                updated = updated.withColumn(name, F.lit(value))
+                # For the source column, prefer the per-row _source_file column
+                # (captured from _metadata.file_path at read time).  Fall back
+                # to input_file_name(), then the static contract-level path.
+                if name.endswith("_source") and value:
+                    if name in df.columns:
+                        pass
+                    elif _has_source_file:
+                        updated = updated.withColumn(name, F.col("_source_file"))
+                    else:
+                        updated = updated.withColumn(name, F.lit(value))
+                else:
+                    # Cast timestamp columns to proper TimestampType
+                    if name.endswith("_at") and isinstance(value, str) and "T" in value:
+                        # Convert ISO8601 to Spark compatible timestamp
+                        from pyspark.sql.types import TimestampType
+                        # We cast to TimestampType directly because Spark 3.x to_timestamp is strict
+                        updated = updated.withColumn(name, F.lit(value).cast(TimestampType()))
+                    else:
+                        updated = updated.withColumn(name, F.lit(value))
+            # Drop the temporary _source_file column if present
+            if _has_source_file and "_source_file" in updated.columns:
+                updated = updated.drop("_source_file")
             # Move _lakelogic_* to the end
             all_cols = updated.columns
             ordered = _sorted_to_right(all_cols)

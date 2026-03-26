@@ -2529,6 +2529,42 @@ class DataGenerator:
         # AI pools take priority over file-seeded pools.
         auto_pools = ai_sample_pools or getattr(self, "_auto_sample_pools", None) or None
 
+        # ── Generation rationale logging ──────────────────────────────────
+        from loguru import logger as _gen_logger
+
+        dataset_label = ""
+        info = self._contract_raw.get("info") or {}
+        dataset_label = info.get("title") or self._contract_raw.get("dataset") or "unknown"
+
+        _gen_logger.info(f"📋 Generating data for: {dataset_label}")
+        _gen_logger.info(f"   Records    : {n_valid:,} valid + {n_invalid:,} invalid = {rows:,} total")
+
+        # Log data source rationale
+        if ai_sample_pools:
+            pool_fields = len(ai_sample_pools)
+            pool_values = sum(len(v) for v in ai_sample_pools.values())
+            _gen_logger.info(f"   Source     : AI-generated realistic pools ({pool_fields} fields, {pool_values} values)")
+        elif getattr(self, "_auto_sample_pools", None):
+            file_fields = len(self._auto_sample_pools)
+            _gen_logger.info(f"   Source     : File-seeded sample pools ({file_fields} fields from source data)")
+        else:
+            _gen_logger.info(f"   Source     : Faker + heuristic generation (no AI or file seeds)")
+
+        # Log edge case details
+        if edge_pools and n_invalid > 0:
+            edge_field_count = len(edge_pools)
+            edge_total = sum(len(v) for v in edge_pools.values())
+            _gen_logger.info(f"   Edge cases : {edge_total} values across {edge_field_count} fields (AI-generated)")
+            # Show top 5 fields with most edge cases
+            top_fields = sorted(edge_pools.items(), key=lambda x: len(x[1]), reverse=True)[:5]
+            for fname, fvals in top_fields:
+                sample = str(fvals[:3])
+                if len(sample) > 60:
+                    sample = sample[:57] + "..."
+                _gen_logger.debug(f"     • {fname}: {len(fvals)} cases — e.g. {sample}")
+        elif n_invalid > 0:
+            _gen_logger.info(f"   Edge cases : Heuristic-only (no AI edge cases available)")
+
         valid_records = [
             self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_valid)
         ]
@@ -2545,6 +2581,8 @@ class DataGenerator:
         # Shuffle so bad rows aren't all at the end
         all_records = valid_records + invalid_records
         self._rng.shuffle(all_records)
+
+        _gen_logger.info(f"   ✅ Row generation complete: {len(all_records):,} records built")
 
         return self._to_frame(all_records, output_format)
 
@@ -4413,7 +4451,17 @@ class DataGenerator:
                 if dtype is not None and col_name in df.columns:
                     current = df[col_name].dtype
                     if current != dtype:
-                        cast_exprs.append(pl.col(col_name).cast(dtype, strict=False).alias(col_name))
+                        if dtype == pl.Boolean:
+                            cast_exprs.append(
+                                pl.when(pl.col(col_name).cast(pl.Utf8).str.to_lowercase().is_in(["true", "t", "yes", "y", "1"]))
+                                .then(True)
+                                .when(pl.col(col_name).cast(pl.Utf8).str.to_lowercase().is_in(["false", "f", "no", "n", "0"]))
+                                .then(False)
+                                .otherwise(None)
+                                .alias(col_name)
+                            )
+                        else:
+                            cast_exprs.append(pl.col(col_name).cast(dtype, strict=False).alias(col_name))
             if cast_exprs:
                 df = df.with_columns(cast_exprs)
 

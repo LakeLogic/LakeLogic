@@ -152,25 +152,81 @@ class LakehousePipeline:
         storage = self.registry.storage if self.registry else None
 
         # ── Step 1: Derive missing paths from table_name ──────────────────
+        _is_direct = self.storage_mode == "direct"
+
+        # ── Direct-mode pre-flight checks ─────────────────────────────────
+        if _is_direct and table_name and storage:
+            if not storage.external_location_root:
+                raise ValueError(
+                    "storage_mode='direct' requires storage.external_location_root "
+                    "to be set (e.g. 'abfss://domain@account.dfs.core.windows.net'). "
+                    "Set this in _system.yaml under storage.external_location_root."
+                )
+            root = storage.external_location_root
+            if "abfss://" in root or "adl://" in root:
+                # Azure ADLS — check for SPN or storage key credentials
+                spn_vars = ["AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"]
+                key_vars = ["AZURE_STORAGE_ACCOUNT_KEY"]
+                has_spn = all(os.environ.get(v) for v in spn_vars)
+                has_key = any(os.environ.get(v) for v in key_vars)
+                if not has_spn and not has_key:
+                    logger.warning(
+                        f"Direct mode with Azure storage — no credentials detected. "
+                        f"Set either SPN ({', '.join(spn_vars)}) or "
+                        f"storage key ({', '.join(key_vars)}) env vars. "
+                        f"On Databricks this may be handled via cluster config."
+                    )
+            elif "s3://" in root or "s3a://" in root:
+                aws_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+                if not all(os.environ.get(v) for v in aws_vars):
+                    logger.warning(
+                        f"Direct mode with S3 — credentials may be needed: {', '.join(aws_vars)}"
+                    )
+            elif "gs://" in root:
+                if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+                    logger.warning(
+                        "Direct mode with GCS — GOOGLE_APPLICATION_CREDENTIALS may be needed."
+                    )
+
         if table_name and storage:
             # Materialization
             mat = contract_dict.setdefault("materialization", {})
-            if not mat.get("target_path") and storage.domain_catalog:
-                mat["target_path"] = f"{storage.domain_catalog}.{table_name}"
+            if _is_direct:
+                if not mat.get("target_path") and storage.external_location_root:
+                    mat["target_path"] = f"{storage.external_location_root}/{table_name}"
+                if not mat.get("format"):
+                    mat["format"] = "delta"
+            else:
+                if not mat.get("target_path") and storage.domain_catalog:
+                    mat["target_path"] = f"{storage.domain_catalog}.{table_name}"
             if not mat.get("location") and storage.external_location_root:
                 mat["location"] = f"{storage.external_location_root}/{table_name}"
+
+            # Quarantine — inherit system-level defaults first so that
+            # quar.get("enabled") is truthful before we derive the target.
+            if self.registry and self.registry.quarantine:
+                existing_quar = contract_dict.get("quarantine") or {}
+                merged_q = {**self.registry.quarantine, **existing_quar}
+                contract_dict["quarantine"] = merged_q
 
             # Quarantine — prefix table name with domain so tables from
             # different domains don't collide in the shared quarantine schema.
             quar = contract_dict.get("quarantine") or {}
-            if quar.get("enabled") and not quar.get("target") and storage.quarantine_root:
-                _domain = info.get("domain", "")
-                _q_table = f"{_domain}_{table_name}" if _domain else table_name
-                quar["target"] = f"{storage.quarantine_root}.{_q_table}"
-                contract_dict["quarantine"] = quar
+            if _is_direct:
+                if quar.get("enabled") and not quar.get("target") and storage.external_location_root:
+                    _domain = info.get("domain", "")
+                    _q_table = f"{_domain}_{table_name}" if _domain else table_name
+                    quar["target"] = f"{storage.external_location_root}/_quarantine/{_q_table}"
+                    contract_dict["quarantine"] = quar
+            else:
+                if quar.get("enabled") and not quar.get("target") and storage.quarantine_root:
+                    _domain = info.get("domain", "")
+                    _q_table = f"{_domain}_{table_name}" if _domain else table_name
+                    quar["target"] = f"{storage.quarantine_root}.{_q_table}"
+                    contract_dict["quarantine"] = quar
 
-            # Run log (from registry, not per-contract)
-            if storage.run_log_table:
+            # Run log (from registry, not per-contract) — skip in direct mode
+            if not _is_direct and storage.run_log_table:
                 metadata = contract_dict.setdefault("metadata", {})
                 if not metadata.get("run_log_table"):
                     metadata["run_log_table"] = storage.run_log_table
@@ -178,9 +234,16 @@ class LakehousePipeline:
             # Source for silver/gold — derive from table_name of upstream layer
             if target_layer in ("silver", "gold"):
                 source = contract_dict.get("source") or {}
-                if source.get("type") == "table" and not source.get("path") and storage.domain_catalog:
-                    source["path"] = f"{storage.domain_catalog}.{table_name}"
-                    contract_dict["source"] = source
+                if _is_direct:
+                    if not source.get("path") and storage.external_location_root:
+                        source["path"] = f"{storage.external_location_root}/{table_name}"
+                        source.setdefault("type", "landing")
+                        source.setdefault("format", "delta")
+                        contract_dict["source"] = source
+                else:
+                    if source.get("type") == "table" and not source.get("path") and storage.domain_catalog:
+                        source["path"] = f"{storage.domain_catalog}.{table_name}"
+                        contract_dict["source"] = source
 
         # ── Step 2: Auto-prefix table: in UC mode ────────────────────────
         if self.storage_mode == "uc":
@@ -331,6 +394,7 @@ class LakehousePipeline:
         ai_provider: Optional[str] = None,
         ai_model: Optional[str] = None,
         ai_api_key: Optional[str] = None,
+        suggest_rules: bool = False,
     ) -> None:
         """Generate test landing-zone data for bronze contracts.
 
@@ -364,11 +428,23 @@ class LakehousePipeline:
 
             logger.info(f"  🧪 Generating {rows} test rows for {c.entity} (format={fmt})")
 
+            # Log schema overview for observability
+            fields = (c.contract_dict.get("model") or {}).get("fields") or []
+            n_required = sum(1 for f in fields if f.get("required"))
+            n_nullable = len(fields) - n_required
+            logger.info(f"     Schema   : {len(fields)} fields ({n_required} required, {n_nullable} nullable)")
+            if partition_cfg:
+                logger.info(f"     Partition: {partition_cfg}")
+
             try:
                 df = gen.generate(rows=rows, invalid_ratio=invalid_ratio, ai=ai, ai_provider=ai_provider, ai_model=ai_model)
             except Exception as e:
                 logger.warning(f"Test data generation failed for {c.entity}: {e}")
                 continue
+
+            # Log output summary
+            if hasattr(df, 'shape'):
+                logger.info(f"     Output   : {df.shape[0]:,} rows × {df.shape[1]} columns")
 
             # Determine output path
             output_dir = Path(landing_path)
@@ -394,6 +470,31 @@ class LakehousePipeline:
                 self._write_test_data(df, output_dir / f"test_data.{fmt}", fmt)
 
             logger.info(f"  ✅ Test data written to {output_dir}")
+
+            if suggest_rules and c.resolved_path:
+                try:
+                    from lakelogic.ai.contract_enricher import enrich_contract
+                    from lakelogic.core.bootstrap import _format_contract_yaml
+                    logger.info(f"  🤖 Suggesting quality rules for {c.entity}...")
+                    
+                    # Convert generated df to pandas for enrichment
+                    pd_df = df.to_pandas() if hasattr(df, "to_pandas") else df
+                    
+                    enriched_dict = enrich_contract(
+                        c.contract_dict,
+                        pd_df,
+                        provider=ai_provider,
+                        model=ai_model,
+                        api_key=ai_api_key,
+                        sample_size=20
+                    )
+                    
+                    with open(c.resolved_path, "w", encoding="utf-8") as f:
+                        f.write(_format_contract_yaml(enriched_dict))
+                    
+                    logger.info(f"  ✅ Saved suggested rules to {c.resolved_path}")
+                except Exception as e:
+                    logger.warning(f"  ⚠️ Failed to suggest rules for {c.entity}: {e}")
 
     @staticmethod
     def _write_test_data(df: Any, path: Path, fmt: str) -> None:
@@ -500,6 +601,38 @@ class LakehousePipeline:
                         logger.info(f"  Dropped quarantine table {q_table}")
                     except Exception as _q_exc:
                         logger.warning(f"  Could not drop quarantine table {q_table}: {_q_exc}")
+
+                    # Also clean up the cloud storage location for the quarantine table
+                    storage = self.registry.storage if self.registry else None
+                    if storage and storage.external_location_root:
+                        info = contract_dict.get("info") or {}
+                        _tbl = info.get("table_name", "")
+                        _domain = info.get("domain", "")
+                        _q_name = f"{_domain}_{_tbl}" if _domain else _tbl
+                        q_cloud_path = f"{storage.external_location_root}/_quarantine/{_q_name}"
+                        try:
+                            _dbutils = None
+                            try:
+                                _dbutils = self.spark._jvm.com.databricks.service.DBUtils(self.spark._jsc.sc())
+                            except Exception:
+                                try:
+                                    import IPython
+                                    _dbutils = IPython.get_ipython().user_ns.get("dbutils")
+                                except Exception:
+                                    pass
+                            if _dbutils:
+                                _dbutils.fs.rm(q_cloud_path, True)
+                                logger.info(f"  Reset: deleted quarantine cloud location {q_cloud_path} via dbutils")
+                            else:
+                                logger.debug(f"  dbutils not available; quarantine cloud path {q_cloud_path} not deleted")
+                        except Exception as _qp_exc:
+                            logger.warning(f"  Could not delete quarantine cloud path {q_cloud_path}: {_qp_exc}")
+
+                elif q_cfg.get("enabled"):
+                    logger.warning(
+                        f"  Quarantine is enabled for {name} but no 'table:' target resolved "
+                        f"(target='{q_target}'). Quarantine table was NOT dropped."
+                    )
 
                 # Clear run log entries using precise multi-column filter
                 self._delete_run_log_entries(contract_dict, name, layer)
@@ -797,12 +930,15 @@ class LakehousePipeline:
         ddl_only: bool = False,
         environment: str = "",
         debug_mode: bool = False,
+        # Lineage
+        created_by: Optional[str] = None,
     ) -> PipelineRunSummary:
         """
         Execute the pipeline loop.
         """
         forget_values = forget_values or []
         forget_patient_ids = forget_patient_ids or []
+        self._created_by_override = created_by
 
         targets = [layer.strip().lower() for layer in target_layers.split(",") if layer.strip()]
         layer_order = ["bronze", "silver", "gold"]
@@ -1001,6 +1137,10 @@ class LakehousePipeline:
 
         try:
             resolved_mode = self._resolve_run_log_mode(c.contract_dict, run_log_mode)
+            # Inject created_by override into lineage config if provided
+            if getattr(self, "_created_by_override", None):
+                lineage_cfg = c.contract_dict.setdefault("lineage", {})
+                lineage_cfg["created_by_override"] = self._created_by_override
             processor = DataProcessor(contract=c.contract_dict, engine=self.engine, pipeline_run_id=self.run_id, run_log_mode=resolved_mode)
             result = processor.run_source(
                 reprocess_from=reprocess_from,
@@ -1149,11 +1289,13 @@ class LakehousePipeline:
         import yaml
 
         contracts = self.registry.get_active_contracts()
-        layer_order = ["bronze", "silver", "gold"]
+        layer_order = ["external", "bronze", "silver", "gold", "downstream"]
         layer_colors = {
+            "external": ("#0d9488", "#2dd4bf"),
             "bronze": ("#b8860b", "#daa520"),
             "silver": ("#6b7b8d", "#8fa4b8"),
             "gold": ("#daa520", "#ffd700"),
+            "downstream": ("#7c3aed", "#a78bfa"),
         }
 
         # Parse filters
@@ -1167,6 +1309,8 @@ class LakehousePipeline:
             cd = c.contract_dict or {}
             info = cd.get("info", {})
             pii_count = sum(1 for f in (cd.get("model", {}).get("fields", [])) if f.get("pii"))
+            pipeline_config = cd.get("pipeline", {})
+            frequency = pipeline_config.get("frequency", "") if isinstance(pipeline_config, dict) else ""
             nodes.append({
                 "id": f"{c.layer}_{c.entity}",
                 "entity": c.entity,
@@ -1174,7 +1318,25 @@ class LakehousePipeline:
                 "title": info.get("title", c.entity),
                 "version": cd.get("version", ""),
                 "pii": pii_count,
+                "frequency": frequency,
                 "depends_on": [f"{c.layer}_{d}" for d in c.depends_on],
+            })
+
+        # ── External source nodes (cross-domain lineage) ────────────
+        ext_sources = getattr(self.registry, "external_sources", []) or []
+        for ext in ext_sources:
+            ext_id = f"ext_{ext.get('name', 'unknown')}"
+            nodes.append({
+                "id": ext_id,
+                "entity": ext.get("name", "unknown"),
+                "layer": "external",
+                "title": ext.get("name", "External Source"),
+                "version": "",
+                "pii": 0,
+                "depends_on": [],
+                "external": True,
+                "source_domain": ext.get("source_domain", ""),
+                "catalog_path": ext.get("catalog_path", ""),
             })
 
         # Infer cross-layer edges: bronze → silver, silver → gold
@@ -1194,6 +1356,58 @@ class LakehousePipeline:
             for n in layer_entities.get(layer, []):
                 for upstream_n in layer_entities.get(upstream_layer, []):
                     edges.append((upstream_n["id"], n["id"], "lineage"))
+
+        # External source → consuming contract edges
+        for ext in ext_sources:
+            ext_id = f"ext_{ext.get('name', 'unknown')}"
+            consumed_by = ext.get("consumed_by", [])
+            for consumer in consumed_by:
+                # Match consumer to contract nodes
+                for n in nodes:
+                    if n.get("external"):
+                        continue
+                    # Match explicitly by ID (e.g., 'silver_events') OR generically by entity (only for Bronze target)
+                    if n["id"] == consumer or (n["entity"] == consumer and n["layer"] == "bronze"):
+                        edges.append((ext_id, n["id"], "external"))
+
+        # ── Downstream consumer nodes (from contract YAML) ─────────
+        ds_icon_map = {
+            "dashboard": "📊",
+            "api": "🔌",
+            "report": "📈",
+            "table": "📋",
+        }
+        seen_ds = set()
+        for c in contracts:
+            cd = c.contract_dict or {}
+            downstream_list = cd.get("downstream", [])
+            for ds in downstream_list:
+                ds_name = ds.get("name", "unknown")
+                ds_type = ds.get("type", "table")
+                ds_id = f"ds_{ds_name.replace(' ', '_').lower()}"
+                if ds_id not in seen_ds:
+                    seen_ds.add(ds_id)
+                    nodes.append({
+                        "id": ds_id,
+                        "entity": ds_name,
+                        "layer": "downstream",
+                        "title": ds_name,
+                        "version": "",
+                        "pii": 0,
+                        "depends_on": [],
+                        "downstream": True,
+                        "ds_type": ds_type,
+                        "ds_platform": ds.get("platform", ""),
+                        "ds_owner": ds.get("owner", ""),
+                        "ds_icon": ds_icon_map.get(
+                            ds_type, "📋"
+                        ),
+                    })
+                # Edge: parent contract → downstream consumer
+                parent_id = f"{c.layer}_{c.entity}"
+                edges.append(
+                    (parent_id, ds_id, "downstream")
+                )
 
         # ── Determine highlighted vs dimmed nodes ────────────────────────────
         if _has_filter:
@@ -1224,14 +1438,18 @@ class LakehousePipeline:
             highlighted_edges = set(range(len(edges)))
 
         # Layout: position nodes in columns by layer with generous spacing
-        x_positions = {"bronze": 50, "silver": 460, "gold": 870}
-        node_width = 260
-        node_height = 120
+        x_positions = {"external": 0, "bronze": 410, "silver": 820, "gold": 1230, "downstream": 1640}
+        node_width = 280
+        node_height = 100
         header_h = 40  # space for layer column headers
-        y_gap = 200    # vertical gap between nodes in same column
+        y_gap = 180    # vertical gap between nodes in same column
         node_positions = {}
+        used_layers = set()
         for layer in layer_order:
             layer_nodes = [n for n in nodes if n["layer"] == layer]
+            if not layer_nodes:
+                continue
+            used_layers.add(layer)
             total = len(layer_nodes)
             total_height = total * node_height + (total - 1) * (y_gap - node_height) if total else 0
             start_y = max(header_h + 10, header_h + (500 - total_height) // 2) if total else header_h + 100
@@ -1239,13 +1457,25 @@ class LakehousePipeline:
                 y = start_y + i * y_gap
                 node_positions[n["id"]] = (x_positions.get(layer, 400), y)
 
+        # Normalize x positions: shift so minimum x starts at padding
+        if node_positions:
+            min_x = min(p[0] for p in node_positions.values())
+            max_x = max(p[0] for p in node_positions.values())
+            x_shift = 50 - min_x  # shift so leftmost is at x=50
+            node_positions = {k: (v[0] + x_shift, v[1]) for k, v in node_positions.items()}
+            # Also shift header positions
+            x_positions = {k: v + x_shift for k, v in x_positions.items()}
+        else:
+            x_shift = 0
+
         canvas_h = max(n[1] for n in node_positions.values()) + node_height + 80 if node_positions else 400
+        canvas_w = max(n[0] for n in node_positions.values()) + node_width + 80 if node_positions else 1200
 
         # Layer column headers
         header_html = ""
-        layer_labels = {"bronze": "BRONZE", "silver": "SILVER", "gold": "GOLD"}
+        layer_labels = {"external": "EXTERNAL", "bronze": "BRONZE", "silver": "SILVER", "gold": "GOLD", "downstream": "DOWNSTREAM"}
         for layer in layer_order:
-            if layer in layer_entities:
+            if layer in layer_entities and layer in used_layers:
                 x = x_positions[layer]
                 bg, fg = layer_colors.get(layer, ("#444", "#888"))
                 header_html += f'<div style="position:absolute;left:{x}px;top:4px;font-size:0.65rem;font-weight:700;color:{fg};letter-spacing:0.1em;opacity:0.6;">{layer_labels[layer]}</div>'
@@ -1256,6 +1486,7 @@ class LakehousePipeline:
             x, y = node_positions[n["id"]]
             bg, fg = layer_colors.get(n["layer"], ("#444", "#888"))
             pii_badge = f'<span class="dag-badge dag-badge-pii">🔒 {n["pii"]} PII</span>' if n["pii"] else ""
+            is_external = n.get("external", False)
 
             # Determine opacity/styling based on filter
             if _has_filter:
@@ -1276,19 +1507,40 @@ class LakehousePipeline:
                 border_style = f"border-color:{bg}55;"
                 dot_color = "#22c55e"
 
+            # External nodes get dashed borders
+            if is_external:
+                border_style += "border-style:dashed;"
+                node_icon = "🌐"
+                subtitle = n.get("source_domain", "")
+                ver_badge = ""
+            elif n.get("downstream"):
+                border_style += "border-style:dashed;"
+                node_icon = n.get("ds_icon", "📋")
+                platform = n.get("ds_platform", "")
+                ds_type = n.get("ds_type", "")
+                subtitle = f"{platform} • {ds_type}" if platform else ds_type
+                ver_badge = ""
+            else:
+                node_icon = "📋"
+                subtitle = self.registry.system.upper()
+                ver_badge = f'<span class="dag-badge dag-badge-ver">📄 V{n["version"]}</span>'
+                
+            freq_badge = f'<span class="dag-badge dag-badge-freq">⏱ {n["frequency"]}</span>' if n.get("frequency") else ""
+
             node_html += f"""
             <div class="dag-node" style="left:{x}px;top:{y}px;{border_style}opacity:{opacity};"
                  onmouseover="this.style.borderColor='{bg}cc';this.style.boxShadow='0 8px 32px {bg}33';this.style.opacity='1.0'"
                  onmouseout="this.style.borderColor='{bg}55';this.style.boxShadow='none';this.style.opacity='{opacity}'">
               <div class="dag-dot" style="background:{dot_color};box-shadow:0 0 6px {dot_color};"></div>
               <div class="dag-hdr">
-                <div class="dag-icon" style="background:{bg}22;color:{fg};">📋</div>
+                <div class="dag-icon" style="background:{bg}22;color:{fg};">{node_icon}</div>
                 <div class="dag-ttl">{n['title']}</div>
               </div>
-              <div class="dag-sys">{self.registry.system.upper()}</div>
+              <div class="dag-sys">{subtitle}</div>
               <div class="dag-badges">
                 <span class="dag-badge" style="background:{bg}33;color:{fg};">{n['layer'].upper()}</span>
-                <span class="dag-badge dag-badge-ver">📄 V{n['version']}</span>
+                {ver_badge}
+                {freq_badge}
                 {pii_badge}
               </div>
             </div>"""
@@ -1335,26 +1587,31 @@ class LakehousePipeline:
                     f'class="{cls}" style="{edge_opacity}" marker-end="url(#{marker})"/>\n'
                 )
 
-        # Subtitle
+        # Subtitle metrics — only count standard data layers
+        std_layers = {"bronze", "silver", "gold"}
+        std_nodes = [n for n in nodes if n["layer"] in std_layers]
+        std_contract_count = len(std_nodes)
+        std_layer_count = len(set(n["layer"] for n in std_nodes))
+
         if _has_filter:
             filter_parts = []
             if _layer_set:
                 filter_parts.append(f"Layer: {', '.join(sorted(_layer_set)).upper()}")
             if _entity_set:
                 filter_parts.append(f"Entity: {', '.join(sorted(_entity_set))}")
-            subtitle = f"{len(nodes)} contracts • {len(set(n['layer'] for n in nodes))} layers • Filter: {' / '.join(filter_parts)}"
+            subtitle = f"{std_contract_count} contracts • {std_layer_count} layers • Filter: {' / '.join(filter_parts)}"
         else:
-            subtitle = f"{len(nodes)} contracts • {len(set(n['layer'] for n in nodes))} layers"
+            subtitle = f"{std_contract_count} contracts • {std_layer_count} layers"
 
         html = f"""
         <div style="font-family:'Inter','Segoe UI',sans-serif;background:#0d0d0f;
              background-image:radial-gradient(circle at 1px 1px,#1a1a1f 1px,transparent 0);
-             background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;">
+             background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;overflow-x:auto;">
           <h2 style="color:#fff;font-size:1.2rem;margin:0 0 4px;">📊 Pipeline DAG — {self.registry.domain} / {self.registry.system}</h2>
           <p style="color:#666;font-size:0.8rem;margin:0 0 24px;">{subtitle}</p>
-          <div style="position:relative;width:1160px;height:{canvas_h}px;">
+          <div style="position:relative;width:{canvas_w}px;height:{canvas_h}px;">
             {header_html}
-            <svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 1160 {canvas_h}">
+            <svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 {canvas_w} {canvas_h}">
               <defs>
                 <marker id="dag-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="10" markerHeight="8" orient="auto-start-reverse">
                   <path d="M 0 0 L 12 5 L 0 10 z" fill="#555"/>
@@ -1368,16 +1625,19 @@ class LakehousePipeline:
             {node_html}
           </div>
           <div style="display:flex;gap:24px;font-size:0.7rem;color:#666;margin-top:16px;">
+            <span>◼ <span style="color:#2dd4bf">External</span></span>
             <span>◼ <span style="color:#daa520">Bronze</span></span>
             <span>◼ <span style="color:#8fa4b8">Silver</span></span>
             <span>◼ <span style="color:#ffd700">Gold</span></span>
+            <span>◼ <span style="color:#a78bfa">Downstream</span></span>
             <span style="color:#4a9eff">━━ Dependency</span>
             <span style="color:#555">╌╌ Data Flow</span>
           </div>
         </div>
         <style>
           .dag-node{{position:absolute;background:#16161a;border:2px solid #2a2a30;border-radius:12px;
-                     padding:14px 18px;min-width:{node_width}px;max-width:{node_width}px;transition:all 0.2s ease;cursor:default;}}
+                     padding:14px 18px;width:{node_width}px;height:{node_height}px;box-sizing:border-box;
+                     transition:all 0.2s ease;cursor:default;}}
           .dag-hdr{{display:flex;align-items:center;gap:10px;margin-bottom:6px;}}
           .dag-icon{{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;}}
           .dag-ttl{{font-size:0.82rem;font-weight:600;color:#f0f0f0;line-height:1.25;}}
@@ -1385,6 +1645,7 @@ class LakehousePipeline:
           .dag-badges{{display:flex;gap:5px;flex-wrap:wrap;}}
           .dag-badge{{font-size:0.55rem;font-weight:600;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:0.04em;}}
           .dag-badge-ver{{background:#1e3a5f44;color:#4a9eff;}}
+          .dag-badge-freq{{background:#2dd4bf22;color:#2dd4bf;}}
           .dag-badge-pii{{background:#dc262633;color:#f87171;}}
           .dag-dot{{width:7px;height:7px;border-radius:50%;position:absolute;top:10px;right:12px;}}
           svg .dag-flow{{fill:none;stroke:#444;stroke-width:2;stroke-dasharray:8 4;opacity:0.5;}}

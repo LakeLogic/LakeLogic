@@ -111,7 +111,8 @@ class EngineAdapter(ABC):
                         return res.fetchone()[0]
                     if isinstance(res, int):
                         return res
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"`count()` failed natively, falling back to len(): {e}")
                     pass
             return int(len(df))
         except Exception:
