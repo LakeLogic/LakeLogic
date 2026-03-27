@@ -6,13 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
-## [1.5.0] — 2026-03-24
+## [1.7.0] — 2026-03-27
 
 ### Added
 
+- Add Polars, Snowflake, and DuckDB execution engines, and core pipeline components.
+## [1.6.1] — 2026-03-27
+
+### Added
+
+- Introduce core data processing, materialization, and AI-driven contract generation features with comprehensive tests.
+- Implement materialization core logic and bootstrap tests, updating dependencies for anthropic, boto3, botocore, and streamlining cryptography.
+- Implement core data processing, materialization, and governance framework including a pipeline runner, CLI, and AI contract enrichment.
+- Add new quickstart example notebooks for basic data governance and data pipelines.
 - Add GitHub Actions CI quality gate for Python linting and tests.
 - Add GitHub Actions CI quality gate for backend linting and core tests with coverage checks.
 - Add quickstart and pipeline examples including notebooks and associated data contracts for bronze, silver, and gold layers.
+
+### Clean
+
+- Delete stale test output and artifact files.
 ## [1.4.0] — 2026-03-24
 
 ### Added
@@ -148,7 +161,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.5.0]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.5.0
+[1.7.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.7.0
+[1.6.1]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.6.1
 [1.4.0]: https://github.com/lakelogic/LakeLogic/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.3.0
 [1.0.0]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...v1.0.0

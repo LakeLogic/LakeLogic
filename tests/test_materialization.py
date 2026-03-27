@@ -39,10 +39,10 @@ def test_materialization_partitioned_append(tmp_path):
     processor = DataProcessor(engine="polars", contract=contract)
     processor.materialize(df)
 
-    part_a = tmp_path / "out" / "event_date=2024-01-01" / "data.csv"
-    part_b = tmp_path / "out" / "event_date=2024-01-02" / "data.csv"
-    assert part_a.exists()
-    assert part_b.exists()
+    part_a_dir = tmp_path / "out" / "event_date=2024-01-01"
+    part_b_dir = tmp_path / "out" / "event_date=2024-01-02"
+    assert list(part_a_dir.glob("data*.csv")), f"No CSV in {part_a_dir}"
+    assert list(part_b_dir.glob("data*.csv")), f"No CSV in {part_b_dir}"
 
 
 def test_materialization_merge(tmp_path):

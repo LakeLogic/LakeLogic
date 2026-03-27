@@ -125,11 +125,11 @@ class SourcePartition(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    format: str                              # strftime format, e.g. "y_%Y/m_%m/d_%d"
-    lookback_days: int = 1                   # how many days back to scan
-    start_date: Optional[str] = None         # ISO date override for backfills
-    end_date: Optional[str] = None           # ISO date override for backfills
-    file_pattern: Optional[str] = None       # glob pattern; auto-derives from source.format
+    format: str  # strftime format, e.g. "y_%Y/m_%m/d_%d"
+    lookback_days: int = 1  # how many days back to scan
+    start_date: Optional[str] = None  # ISO date override for backfills
+    end_date: Optional[str] = None  # ISO date override for backfills
+    file_pattern: Optional[str] = None  # glob pattern; auto-derives from source.format
 
 
 class SourceConfig(BaseModel):
@@ -1279,6 +1279,7 @@ class DataContract(BaseModel):
            - cdc_op_field required
         """
         import warnings
+
         source = getattr(self, "source", None)
         if source is None:
             return self
@@ -1300,8 +1301,7 @@ class DataContract(BaseModel):
             # (see incremental.py), so no warning needed here.
             if wm_strategy == "lookback" and not getattr(source, "lookback", None):
                 warnings.warn(
-                    "watermark_strategy is 'lookback' but lookback duration is not set. "
-                    "Defaulting to '7 days'.",
+                    "watermark_strategy is 'lookback' but lookback duration is not set. Defaulting to '7 days'.",
                     UserWarning,
                     stacklevel=2,
                 )
@@ -1314,7 +1314,7 @@ class DataContract(BaseModel):
                     "  source:\n"
                     "    load_mode: cdc\n"
                     "    cdc_op_field: _operation\n"
-                    "    cdc_delete_values: [\"D\", \"DELETE\"]"
+                    '    cdc_delete_values: ["D", "DELETE"]'
                 )
 
         return self
@@ -1525,6 +1525,7 @@ class DataContract(BaseModel):
                         # Strategy 1: Databricks dbutils (natively handles abfss://, s3://, etc.)
                         try:
                             from pyspark.sql import SparkSession
+
                             _spark = SparkSession.getActiveSession()
                             if _spark:
                                 _dbutils = None
@@ -1534,6 +1535,7 @@ class DataContract(BaseModel):
                                 except Exception:
                                     try:
                                         import IPython
+
                                         _dbutils = IPython.get_ipython().user_ns.get("dbutils")
                                     except Exception:
                                         pass

@@ -102,7 +102,6 @@ Usage
     )
 """
 
-
 from __future__ import annotations
 
 import json
@@ -690,9 +689,7 @@ class IncrementalBoundary:
             if dataset:
                 # ── Modern path: query _run_logs by dataset column ────────
                 filt = (
-                    (F.col("dataset") == dataset)
-                    & (F.col("stage") != "no_new_data")
-                    & (F.col("stage") != "reprocess")
+                    (F.col("dataset") == dataset) & (F.col("stage") != "no_new_data") & (F.col("stage") != "reprocess")
                 )
                 if data_layer:
                     filt = filt & (F.col("data_layer") == data_layer)
@@ -704,24 +701,18 @@ class IncrementalBoundary:
                 row = (
                     spark.table(log_table)
                     .filter(filt)
-                    .agg(
-                        F.max("max_watermark_value").alias("last_watermark"),
-                        F.max("timestamp").alias("last_success")
-                    )
+                    .agg(F.max("max_watermark_value").alias("last_watermark"), F.max("timestamp").alias("last_success"))
                     .collect()[0]
                 )
                 last_success_str = row["last_watermark"] or row["last_success"]
                 if last_success_str is None:
                     raise ValueError(
-                        f"No successful run found in {log_table} for "
-                        f"dataset={dataset!r} data_layer={data_layer!r}"
+                        f"No successful run found in {log_table} for dataset={dataset!r} data_layer={data_layer!r}"
                     )
 
                 # timestamp is stored as ISO string in _run_logs
                 if isinstance(last_success_str, str):
-                    last_success = datetime.fromisoformat(
-                        last_success_str.replace("Z", "+00:00")
-                    )
+                    last_success = datetime.fromisoformat(last_success_str.replace("Z", "+00:00"))
                 elif isinstance(last_success_str, datetime):
                     last_success = last_success_str
                 else:
@@ -740,10 +731,7 @@ class IncrementalBoundary:
                 # ── Legacy path: query pipeline_runs by pipeline_name ─────
                 row = (
                     spark.table(log_table)
-                    .filter(
-                        (F.col("pipeline_name") == pipeline_name)
-                        & (F.col("status") == "success")
-                    )
+                    .filter((F.col("pipeline_name") == pipeline_name) & (F.col("status") == "success"))
                     .agg(F.max("processed_through").alias("last_success"))
                     .collect()[0]
                 )
@@ -754,10 +742,7 @@ class IncrementalBoundary:
                 from_dt = (
                     last_success + timedelta(seconds=1)
                     if isinstance(last_success, datetime)
-                    else datetime(
-                        last_success.year, last_success.month, last_success.day
-                    )
-                    + timedelta(days=1)
+                    else datetime(last_success.year, last_success.month, last_success.day) + timedelta(days=1)
                 )
                 meta = {
                     "last_success": str(last_success),
@@ -766,11 +751,7 @@ class IncrementalBoundary:
 
         except Exception as exc:
             if default_from is not None:
-                from_dt = (
-                    datetime.fromisoformat(default_from)
-                    if isinstance(default_from, str)
-                    else default_from
-                )
+                from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
                 from_dt = datetime.now(timezone.utc) - timedelta(days=90)
             meta = {"fallback_reason": str(exc), "pipeline_name": pipeline_name}

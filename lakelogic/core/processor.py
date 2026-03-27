@@ -451,28 +451,27 @@ class DataProcessor:
 
         # ── INTERNALLY ENFORCE SQL FIELD LIST ────────────────────────────────
         # If the user defined an explicit model and wants strict schema
-        # (allow_schema_drift is False OR schema_evolution is strict), prune undocumented columns.
+        # (allow_schema_drift is False AND schema_evolution is strict), prune undocumented columns.
         if good_df is not None and self.contract.model and self.contract.model.fields:
             allow_schema_drift = True
             schema_evolution = "strict"
-            
+
             server = getattr(self.contract, "server", None)
             if server:
                 allow_schema_drift = getattr(server, "allow_schema_drift", True)
                 schema_evolution = getattr(server, "schema_evolution", "strict") or "strict"
-                
+
             # If evolution is append/merge, or drift is explicitly allowed, do NOT prune.
-            if not allow_schema_drift or schema_evolution.lower() == "strict":
+            if not allow_schema_drift and schema_evolution.lower() == "strict":
                 expected_cols = [f.name for f in self.contract.model.fields]
-                
+
                 # Polars Engine
                 if self.engine_name == "polars":
-                    import polars as pl
                     existing = good_df.columns
                     kepts = [c for c in expected_cols if c in existing]
                     if kepts:
                         good_df = good_df.select(kepts)
-                        
+
                 # Spark Engine
                 elif self.engine_name == "spark":
                     existing = good_df.columns
@@ -482,10 +481,10 @@ class DataProcessor:
                         kepts.append("_source_file")
                     if kepts:
                         good_df = good_df.select(*kepts)
-                        
+
                 # DuckDB / SQLite Engines
                 elif self.engine_name in ("duckdb", "sqlite"):
-                    existing = good_df.columns.tolist() if hasattr(good_df, "columns") else []
+                    existing = list(good_df.columns) if hasattr(good_df, "columns") else []
                     kepts = [c for c in expected_cols if c in existing]
                     if kepts and hasattr(good_df, "select"):
                         try:
@@ -493,7 +492,7 @@ class DataProcessor:
                             good_df = good_df.select(*kepts)
                         except Exception as exc:
                             logger.warning(f"DuckDB column select failed ({exc}), schema enforcement skipped")
-                            
+
                 # Pandas Engine
                 elif self.engine_name == "pandas":
                     existing = good_df.columns.tolist()
@@ -626,18 +625,16 @@ class DataProcessor:
             # capture — excluded from drift as it's dropped after lineage.
             internal_cols = {"_source_file"}
             real_missing = sorted(set(missing) - derived_fields - rename_targets)
-            
+
             # Remove rename sources, internal columns, and any framework lineage columns
             real_unknown = sorted(
-                c for c in set(unknown) - rename_sources - internal_cols
-                if not c.startswith("_lakelogic_")
+                c for c in set(unknown) - rename_sources - internal_cols if not c.startswith("_lakelogic_")
             )
 
             allow = drift.get("allow_schema_drift", True)
             if real_missing or real_unknown:
                 drift_msg = (
-                    f"Schema drift detected for '{contract_title}': "
-                    f"missing={real_missing}, unknown={real_unknown}"
+                    f"Schema drift detected for '{contract_title}': missing={real_missing}, unknown={real_unknown}"
                 )
                 logger.warning(drift_msg)
                 if not allow:
@@ -659,7 +656,7 @@ class DataProcessor:
             slos = []
         row_rule_failures = self._extract_row_rule_failures(bad_df)
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
-        
+
         # Extract pre-transform filter string for run log
         pre_filters = []
         if self.contract.transformations:
@@ -670,12 +667,12 @@ class DataProcessor:
                     pre_filters.append(t_dict["filter"]["sql"])
         if pre_filters:
             self.last_report["pre_transform_filter"] = " AND ".join(f"({f})" for f in pre_filters)
-            
+
         # Extract max watermark value if computed
         inc_meta = getattr(self, "_incremental_metadata", {})
         if "max_watermark_value" in inc_meta:
             self.last_report["max_watermark_value"] = inc_meta["max_watermark_value"]
-            
+
         write_run_log(self.last_report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
 
         # Optional external logic hook (python/notebook)
@@ -859,8 +856,7 @@ class DataProcessor:
         self._reprocess_column = resolved_reprocess_column
         if per_contract_col and reprocess_column and per_contract_col != reprocess_column:
             logger.info(
-                f"Using per-contract reprocess_column '{per_contract_col}' "
-                f"(overriding global '{reprocess_column}')"
+                f"Using per-contract reprocess_column '{per_contract_col}' (overriding global '{reprocess_column}')"
             )
 
         self._is_reprocess = bool(reprocess_from or reprocess_to or (resolved_reprocess_column and reprocess_values))
@@ -923,7 +919,8 @@ class DataProcessor:
                 if lookback_days is not None:
                     effective_cfg = partition_cfg.model_copy(update={"lookback_days": lookback_days})
                 source_files = self._expand_partitioned_paths(
-                    path, effective_cfg,
+                    path,
+                    effective_cfg,
                     override_start=reprocess_from,
                     override_end=reprocess_to,
                 )
@@ -1344,11 +1341,7 @@ class DataProcessor:
                 # Check source.format first, then materialization.format,
                 # then server.format; fall back to file extension or parquet.
                 fmt = (
-                    (
-                        getattr(self.contract.source, "format", None)
-                        if getattr(self.contract, "source", None)
-                        else None
-                    )
+                    (getattr(self.contract.source, "format", None) if getattr(self.contract, "source", None) else None)
                     or (
                         getattr(self.contract.materialization, "format", None)
                         if getattr(self.contract, "materialization", None)
@@ -1376,8 +1369,10 @@ class DataProcessor:
 
                         # ── Incremental watermark for Spark table sources ─────
                         _src_cfg = getattr(self.contract, "source", None)
-                        if _src_cfg and getattr(_src_cfg, "load_mode", None) == "incremental" and not os.environ.get(
-                            "LAKELOGIC_SKIP_INCREMENTAL_CHECK"
+                        if (
+                            _src_cfg
+                            and getattr(_src_cfg, "load_mode", None) == "incremental"
+                            and not os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK")
                         ):
                             from lakelogic.core.incremental import IncrementalBoundary
 
@@ -1395,9 +1390,8 @@ class DataProcessor:
                                         or (getattr(_info, "table_name", None) if _info else None)
                                         or getattr(self.contract, "dataset", None)
                                     )
-                                    _data_layer = (
-                                        _meta.get("data_layer")
-                                        or (getattr(_info, "target_layer", None) if _info else None)
+                                    _data_layer = _meta.get("data_layer") or (
+                                        getattr(_info, "target_layer", None) if _info else None
                                     )
                                     _domain = _meta.get("domain") or (getattr(_info, "domain", None) if _info else None)
                                     _system = _meta.get("system") or (getattr(_info, "system", None) if _info else None)
@@ -1421,9 +1415,7 @@ class DataProcessor:
                                             _src_overrides["target_path"] = _mat.target
 
                                 if _src_overrides:
-                                    boundary = IncrementalBoundary.from_source_config(
-                                        _src_cfg, **_src_overrides
-                                    )
+                                    boundary = IncrementalBoundary.from_source_config(_src_cfg, **_src_overrides)
                                 else:
                                     boundary = IncrementalBoundary.from_source_config(_src_cfg)
 
@@ -1433,10 +1425,12 @@ class DataProcessor:
                                     logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
                                     # Reload with version options
                                     table_name = path[6:] if path.startswith("table:") else path
-                                    df = spark.read.format("delta") \
-                                        .option("startingVersion", fv) \
-                                        .option("endingVersion", tv) \
+                                    df = (
+                                        spark.read.format("delta")
+                                        .option("startingVersion", fv)
+                                        .option("endingVersion", tv)
                                         .table(table_name)
+                                    )
                                 else:
                                     # Standard watermark filter
                                     _wm_field = getattr(_src_cfg, "watermark_field", None)
@@ -1455,11 +1449,16 @@ class DataProcessor:
                                     if boundary.strategy == "pipeline_log":
                                         try:
                                             from pyspark.sql import functions as F
-                                            _max_row = df.select(F.max(_wm_field).cast("string").alias("max_wm")).collect()[0]
+
+                                            _max_row = df.select(
+                                                F.max(_wm_field).cast("string").alias("max_wm")
+                                            ).collect()[0]
                                             _max_val = _max_row["max_wm"]
                                             if _max_val:
                                                 boundary.metadata["max_watermark_value"] = str(_max_val)
-                                                logger.debug(f"Computed max_watermark_value='{_max_val}' for {_wm_field}")
+                                                logger.debug(
+                                                    f"Computed max_watermark_value='{_max_val}' for {_wm_field}"
+                                                )
                                         except Exception as wm_exc:
                                             logger.debug(f"Failed to compute max_watermark_value: {wm_exc}")
 
@@ -1476,17 +1475,20 @@ class DataProcessor:
                         _src_cfg = getattr(self.contract, "source", None)
                         if _src_cfg and getattr(_src_cfg, "load_mode", None) == "incremental" and fmt == "delta":
                             from lakelogic.core.incremental import IncrementalBoundary
+
                             try:
                                 boundary = IncrementalBoundary.from_source_config(_src_cfg)
                                 if boundary.strategy == "delta_version":
                                     fv = boundary.metadata.get("from_version")
                                     tv = boundary.metadata.get("to_version")
                                     logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
-                                    df = spark.read.format("delta") \
-                                        .option("readChangeFeed", "true") \
-                                        .option("startingVersion", fv) \
-                                        .option("endingVersion", tv) \
+                                    df = (
+                                        spark.read.format("delta")
+                                        .option("readChangeFeed", "true")
+                                        .option("startingVersion", fv)
+                                        .option("endingVersion", tv)
                                         .load(path)
+                                    )
                                     self._incremental_metadata = boundary.metadata
                                     # If using CDF, we don't need a normal load
                                     return self.run(df, source_path=path, reset_trace=False)
@@ -1527,10 +1529,18 @@ class DataProcessor:
 
                         if _fields_list:
                             from pyspark.sql.types import (
-                                StructType, StructField, StringType, LongType,
-                                IntegerType, DoubleType, FloatType, BooleanType,
-                                TimestampType, DateType,
+                                StructType,
+                                StructField,
+                                StringType,
+                                LongType,
+                                IntegerType,
+                                DoubleType,
+                                FloatType,
+                                BooleanType,
+                                TimestampType,
+                                DateType,
                             )
+
                             _type_map = {
                                 "string": StringType(),
                                 "long": LongType(),
@@ -1579,26 +1589,34 @@ class DataProcessor:
                         _source_captured = False
                         try:
                             from pyspark.sql import functions as F
+
                             # Strategy 1: _metadata.file_path (full path — preferred)
                             df = df.select("*", F.col("_metadata.file_path").alias("_source_file"))
                             _source_captured = True
                         except Exception:
                             try:
                                 from pyspark.sql import functions as F
+
                                 # Strategy 2: _metadata.file_name (just filename)
                                 df = df.select("*", F.col("_metadata.file_name").alias("_source_file"))
                                 _source_captured = True
                             except Exception:
                                 try:
                                     from pyspark.sql import functions as F
+
                                     # Strategy 3: input_file_name() (works for non-UC file reads)
                                     ifn = F.input_file_name()
-                                    df = df.withColumn("_source_file", F.when(ifn != F.lit(""), ifn).otherwise(F.lit(path)))
+                                    df = df.withColumn(
+                                        "_source_file", F.when(ifn != F.lit(""), ifn).otherwise(F.lit(path))
+                                    )
                                     _source_captured = True
                                 except Exception as exc:
                                     logger.debug(f"input_file_name() fallback failed: {exc}")
                         if not _source_captured:
-                            logger.debug(f"Could not capture per-row source file path for {path} — lineage will use directory path")
+                            logger.debug(
+                                f"Could not capture per-row source file path"
+                                f" for {path} — lineage will use directory path"
+                            )
 
             elif self.engine_name in ["snowflake", "bigquery"]:
                 table_name = path[6:] if path.startswith("table:") else path
@@ -2161,8 +2179,7 @@ class DataProcessor:
             )
         else:
             logger.info(
-                f"Date-partitioned scan: no files found "
-                f"in {(end - start).days + 1} partitions ({start} to {end})"
+                f"Date-partitioned scan: no files found in {(end - start).days + 1} partitions ({start} to {end})"
             )
 
         return all_files or None
@@ -2186,7 +2203,7 @@ class DataProcessor:
             _target_path = getattr(mat, "target_path", "") or getattr(mat, "path", "") or ""
         dataset = None
         if str(_target_path).startswith("table:"):
-            _table_full = str(_target_path)[len("table:"):]
+            _table_full = str(_target_path)[len("table:") :]
             dataset = _table_full.split(".")[-1] if "." in _table_full else _table_full
 
         metadata = getattr(self.contract, "metadata", {}) or {}
@@ -2194,9 +2211,12 @@ class DataProcessor:
         data_layer = metadata.get("data_layer") or (getattr(info, "target_layer", None) if info else None)
 
         return get_last_run_watermark(
-            self.contract, contract_title, stage,
+            self.contract,
+            contract_title,
+            stage,
             engine_name=self.engine_name,
-            dataset=dataset, data_layer=data_layer,
+            dataset=dataset,
+            data_layer=data_layer,
         )
 
     def _write_empty_run_log(self, stage: str = "no_new_data") -> None:
@@ -2598,7 +2618,7 @@ class DataProcessor:
             _target_path = getattr(mat_obj, "target_path", "") or getattr(mat_obj, "path", "") or ""
         if str(_target_path).startswith("table:"):
             # Use just the table name part (after "table:")
-            _table_full = str(_target_path)[len("table:"):]
+            _table_full = str(_target_path)[len("table:") :]
             # Use the last part (table name) for the dataset field
             dataset = _table_full.split(".")[-1] if "." in _table_full else _table_full
         else:

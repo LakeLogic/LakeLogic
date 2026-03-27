@@ -480,7 +480,7 @@ def _stamp_quarantine_lineage(
     # columns (including errors and categories) to the far right of the schema.
     try:
         from lakelogic.core.lineage import add_columns
-        
+
         # Determine engine name for add_columns
         engine_name = "pandas"
         if hasattr(df, "sparkSession"):
@@ -489,7 +489,7 @@ def _stamp_quarantine_lineage(
             engine_name = "polars"
         elif hasattr(df, "connection") or type(df).__name__ == "DuckDBPyRelation":
             engine_name = "duckdb"
-            
+
         return add_columns(df, lineage_values, engine_name=engine_name)
     except Exception as e:
         logger.warning(f"Failed to stamp quarantine lineage: {e}")
@@ -531,7 +531,9 @@ def materialize_quarantine(
     _already_stamped = False
     _df_cols = df.columns if hasattr(df, "columns") else []
     lineage_cfg = getattr(contract, "lineage", None)
-    _run_id_col = getattr(lineage_cfg, "run_id_column_name", "_lakelogic_run_id") if lineage_cfg else "_lakelogic_run_id"
+    _run_id_col = (
+        getattr(lineage_cfg, "run_id_column_name", "_lakelogic_run_id") if lineage_cfg else "_lakelogic_run_id"
+    )
     if _run_id_col in _df_cols:
         _already_stamped = True
     if not _already_stamped:
@@ -562,7 +564,7 @@ def materialize_quarantine(
     raw_target = str(target_path or contract.quarantine.target)
 
     if raw_target.startswith("table:"):
-        table_name = raw_target[len("table:"):]
+        table_name = raw_target[len("table:") :]
         return _write_quarantine_table(
             df,
             contract,

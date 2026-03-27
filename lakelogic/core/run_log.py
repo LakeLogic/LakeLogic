@@ -259,43 +259,50 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         # Build explicit schema to avoid CANNOT_DETERMINE_TYPE when
         # record values are None (Spark cannot infer type from null).
         from pyspark.sql.types import (
-            StructType, StructField, StringType, LongType,
-            DoubleType, BooleanType,
+            StructType,
+            StructField,
+            StringType,
+            LongType,
+            DoubleType,
+            BooleanType,
         )
-        _run_log_schema = StructType([
-            StructField("run_id", StringType(), True),
-            StructField("pipeline_run_id", StringType(), True),
-            StructField("timestamp", StringType(), True),
-            StructField("engine", StringType(), True),
-            StructField("contract", StringType(), True),
-            StructField("contract_version", StringType(), True),
-            StructField("stage", StringType(), True),
-            StructField("dataset", StringType(), True),
-            StructField("domain", StringType(), True),
-            StructField("system", StringType(), True),
-            StructField("data_layer", StringType(), True),
-            StructField("source_path", StringType(), True),
-            StructField("counts_source", LongType(), True),
-            StructField("counts_total", LongType(), True),
-            StructField("counts_good", LongType(), True),
-            StructField("counts_quarantined", LongType(), True),
-            StructField("counts_pre_transform_dropped", LongType(), True),
-            StructField("pre_transform_filter", StringType(), True),
-            StructField("quarantine_ratio", DoubleType(), True),
-            StructField("max_source_mtime", DoubleType(), True),
-            StructField("max_watermark_value", StringType(), True),
-            StructField("source_files_json", StringType(), True),
-            StructField("freshness_seconds", DoubleType(), True),
-            StructField("freshness_pass", BooleanType(), True),
-            StructField("freshness_threshold_seconds", DoubleType(), True),
-            StructField("availability_ratio", DoubleType(), True),
-            StructField("availability_pass", BooleanType(), True),
-            StructField("availability_threshold", DoubleType(), True),
-            StructField("dataset_rules_json", StringType(), True),
-            StructField("row_rule_failures_json", StringType(), True),
-            StructField("schema_drift_json", StringType(), True),
-            StructField("report_json", StringType(), True),
-        ])
+
+        _run_log_schema = StructType(
+            [
+                StructField("run_id", StringType(), True),
+                StructField("pipeline_run_id", StringType(), True),
+                StructField("timestamp", StringType(), True),
+                StructField("engine", StringType(), True),
+                StructField("contract", StringType(), True),
+                StructField("contract_version", StringType(), True),
+                StructField("stage", StringType(), True),
+                StructField("dataset", StringType(), True),
+                StructField("domain", StringType(), True),
+                StructField("system", StringType(), True),
+                StructField("data_layer", StringType(), True),
+                StructField("source_path", StringType(), True),
+                StructField("counts_source", LongType(), True),
+                StructField("counts_total", LongType(), True),
+                StructField("counts_good", LongType(), True),
+                StructField("counts_quarantined", LongType(), True),
+                StructField("counts_pre_transform_dropped", LongType(), True),
+                StructField("pre_transform_filter", StringType(), True),
+                StructField("quarantine_ratio", DoubleType(), True),
+                StructField("max_source_mtime", DoubleType(), True),
+                StructField("max_watermark_value", StringType(), True),
+                StructField("source_files_json", StringType(), True),
+                StructField("freshness_seconds", DoubleType(), True),
+                StructField("freshness_pass", BooleanType(), True),
+                StructField("freshness_threshold_seconds", DoubleType(), True),
+                StructField("availability_ratio", DoubleType(), True),
+                StructField("availability_pass", BooleanType(), True),
+                StructField("availability_threshold", DoubleType(), True),
+                StructField("dataset_rules_json", StringType(), True),
+                StructField("row_rule_failures_json", StringType(), True),
+                StructField("schema_drift_json", StringType(), True),
+                StructField("report_json", StringType(), True),
+            ]
+        )
         # Only include fields that are defined in the schema
         _schema_fields = {f.name for f in _run_log_schema.fields}
         _typed_record = {k: v for k, v in record.items() if k in _schema_fields}
@@ -309,6 +316,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             _run_log_schema = StructType(_run_log_schema.fields + _extra_fields)
 
         from pyspark.sql import Row
+
         df = spark.createDataFrame([Row(**_typed_record)], schema=_run_log_schema)
         merge_on_run_id = metadata.get("run_log_merge_on_run_id", True)
         table_format = metadata.get("run_log_table_format") or "delta"
@@ -652,38 +660,40 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         storage_options = _build_cloud_opts(table_name) if _is_cloud_path(table_name) else None
 
         # Convert flat record to Arrow table
-        schema = pa.schema([
-            ("run_id", pa.string()),
-            ("pipeline_run_id", pa.string()),
-            ("timestamp", pa.string()),
-            ("engine", pa.string()),
-            ("contract", pa.string()),
-            ("stage", pa.string()),
-            ("dataset", pa.string()),
-            ("domain", pa.string()),
-            ("system", pa.string()),
-            ("data_layer", pa.string()),
-            ("source_path", pa.string()),
-            ("counts_source", pa.int64()),
-            ("counts_total", pa.int64()),
-            ("counts_good", pa.int64()),
-            ("counts_quarantined", pa.int64()),
-            ("counts_pre_transform_dropped", pa.int64()),
-            ("pre_transform_filter", pa.string()),
-            ("quarantine_ratio", pa.float64()),
-            ("max_source_mtime", pa.float64()),
-            ("source_files_json", pa.string()),
-            ("freshness_seconds", pa.float64()),
-            ("freshness_pass", pa.bool_()),
-            ("freshness_threshold_seconds", pa.float64()),
-            ("availability_ratio", pa.float64()),
-            ("availability_pass", pa.bool_()),
-            ("availability_threshold", pa.float64()),
-            ("dataset_rules_json", pa.string()),
-            ("row_rule_failures_json", pa.string()),
-            ("schema_drift_json", pa.string()),
-            ("report_json", pa.string()),
-        ])
+        schema = pa.schema(
+            [
+                ("run_id", pa.string()),
+                ("pipeline_run_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("engine", pa.string()),
+                ("contract", pa.string()),
+                ("stage", pa.string()),
+                ("dataset", pa.string()),
+                ("domain", pa.string()),
+                ("system", pa.string()),
+                ("data_layer", pa.string()),
+                ("source_path", pa.string()),
+                ("counts_source", pa.int64()),
+                ("counts_total", pa.int64()),
+                ("counts_good", pa.int64()),
+                ("counts_quarantined", pa.int64()),
+                ("counts_pre_transform_dropped", pa.int64()),
+                ("pre_transform_filter", pa.string()),
+                ("quarantine_ratio", pa.float64()),
+                ("max_source_mtime", pa.float64()),
+                ("source_files_json", pa.string()),
+                ("freshness_seconds", pa.float64()),
+                ("freshness_pass", pa.bool_()),
+                ("freshness_threshold_seconds", pa.float64()),
+                ("availability_ratio", pa.float64()),
+                ("availability_pass", pa.bool_()),
+                ("availability_threshold", pa.float64()),
+                ("dataset_rules_json", pa.string()),
+                ("row_rule_failures_json", pa.string()),
+                ("schema_drift_json", pa.string()),
+                ("report_json", pa.string()),
+            ]
+        )
 
         arrays = []
         for field in schema:
@@ -710,12 +720,17 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     )
                 else:
                     write_deltalake(
-                        table_name, arrow_table, mode="append",
-                        storage_options=storage_options, schema_mode="merge",
+                        table_name,
+                        arrow_table,
+                        mode="append",
+                        storage_options=storage_options,
+                        schema_mode="merge",
                     )
             else:
                 write_deltalake(
-                    table_name, arrow_table, mode="overwrite",
+                    table_name,
+                    arrow_table,
+                    mode="overwrite",
                     storage_options=storage_options,
                 )
             logger.info(f"Wrote run log to Delta table {table_name}")
@@ -812,8 +827,12 @@ def write_run_log(
 
 
 def get_last_run_watermark(
-    contract, contract_title: str, stage: str, engine_name: Optional[str] = None,
-    dataset: Optional[str] = None, data_layer: Optional[str] = None,
+    contract,
+    contract_title: str,
+    stage: str,
+    engine_name: Optional[str] = None,
+    dataset: Optional[str] = None,
+    data_layer: Optional[str] = None,
 ) -> Optional[float]:
     """
     Fetch the last max_source_mtime for a contract from run logs.
@@ -929,9 +948,7 @@ def get_last_run_watermark(
             df = spark.table(table_value)
             if _use_precise:
                 filt = (
-                    (F.col("dataset") == dataset)
-                    & (F.col("stage") != "no_new_data")
-                    & (F.col("stage") != "reprocess")
+                    (F.col("dataset") == dataset) & (F.col("stage") != "no_new_data") & (F.col("stage") != "reprocess")
                 )
                 if data_layer:
                     filt = filt & (F.col("data_layer") == data_layer)
@@ -943,11 +960,7 @@ def get_last_run_watermark(
                 )
                 if data_layer:
                     filt = filt & (F.col("data_layer") == data_layer)
-            res = (
-                df.filter(filt)
-                .agg(F.max(F.col("max_source_mtime")).alias("max_mtime"))
-                .collect()
-            )
+            res = df.filter(filt).agg(F.max(F.col("max_source_mtime")).alias("max_mtime")).collect()
             if res:
                 return res[0]["max_mtime"]
         except Exception:
@@ -981,6 +994,7 @@ def get_last_run_watermark(
                 return None
             # Exclude reprocess and no_new_data entries
             import pyarrow.compute as pc
+
             mask = pc.and_(
                 pc.not_equal(df.column("stage"), "no_new_data"),
                 pc.not_equal(df.column("stage"), "reprocess"),

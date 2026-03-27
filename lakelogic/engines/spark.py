@@ -461,8 +461,8 @@ class SparkAdapter(EngineAdapter):
         will already be non-string, so this method becomes a no-op — existing
         typed DataFrames are never modified.
         """
-        from pyspark.sql.types import StringType
         from pyspark.sql import functions as F
+        from pyspark.sql.types import StringType
 
         if not self.contract.model or not self.contract.model.fields:
             return df
@@ -473,10 +473,7 @@ class SparkAdapter(EngineAdapter):
             return df
 
         # Build a lookup: column_name → contract type
-        field_types = {
-            f.name: (f.type or "string").lower()
-            for f in self.contract.model.fields
-        }
+        field_types = {f.name: (f.type or "string").lower() for f in self.contract.model.fields}
 
         cast_count = 0
         current_df = df
@@ -484,9 +481,7 @@ class SparkAdapter(EngineAdapter):
             contract_type = field_types.get(col_name, "string")
             spark_type = self._CONTRACT_TO_SPARK_TYPE.get(contract_type)
             if spark_type:
-                current_df = current_df.withColumn(
-                    col_name, F.col(col_name).cast(spark_type)
-                )
+                current_df = current_df.withColumn(col_name, F.col(col_name).cast(spark_type))
                 cast_count += 1
 
         if cast_count:

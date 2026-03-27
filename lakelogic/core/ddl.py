@@ -672,9 +672,7 @@ def create_table(
             if _resolved:
                 _parts = _resolved.replace("`", "").split(".")
                 if len(_parts) >= 2:
-                    _schema_ref = ".".join(
-                        [f"`{p}`" if "-" in p else p for p in _parts[:-1]]
-                    )
+                    _schema_ref = ".".join([f"`{p}`" if "-" in p else p for p in _parts[:-1]])
                     try:
                         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {_schema_ref}")
                     except Exception as schema_exc:

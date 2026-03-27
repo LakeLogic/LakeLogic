@@ -328,8 +328,7 @@ def _forget_pyspark(
             # SHA-256 hash with salt
             df = df.withColumn(
                 col,
-                F.when(mask, F.sha2(F.concat(F.lit(hash_salt), F.col(col).cast("string")), 256))
-                .otherwise(F.col(col)),
+                F.when(mask, F.sha2(F.concat(F.lit(hash_salt), F.col(col).cast("string")), 256)).otherwise(F.col(col)),
             )
         elif erasure_strategy == "redact":
             df = df.withColumn(col, F.when(mask, F.lit("***REDACTED***")).otherwise(F.col(col)))

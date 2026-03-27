@@ -77,6 +77,7 @@ def inject_lineage(
     if not created_by_value:
         try:
             import getpass
+
             created_by_value = getpass.getuser()
         except Exception:
             created_by_value = "unknown"
@@ -345,6 +346,7 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
                     if name.endswith("_at") and isinstance(value, str) and "T" in value:
                         # Convert ISO8601 to Spark compatible timestamp
                         from pyspark.sql.types import TimestampType
+
                         # We cast to TimestampType directly because Spark 3.x to_timestamp is strict
                         updated = updated.withColumn(name, F.lit(value).cast(TimestampType()))
                     else:

@@ -27,7 +27,7 @@ def test_bootstrap_generates_contracts(tmp_path: Path) -> None:
 
     assert registry_path.exists()
     registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
-    assert len(registry.get("entries", [])) == 2
-    for entry in registry["entries"]:
+    assert len(registry.get("contracts", [])) == 2
+    for entry in registry["contracts"]:
         contract_path = output_dir / entry["contracts"]["bronze"]
         assert contract_path.exists()
