@@ -615,29 +615,22 @@ class LakehousePipeline:
 
                 if mat_target.startswith("table:") and self.spark:
                     # Explicit table: target in materialization
-                    main_table = mat_target[len("table:"):]
+                    main_table = mat_target[len("table:") :]
                     try:
                         self.spark.sql(f"DROP TABLE IF EXISTS {main_table}")
                         logger.info(f"  Dropped main table {main_table}")
                     except Exception as _mt_exc:
-                        logger.warning(
-                            f"  Could not drop main table {main_table}: {_mt_exc}"
-                        )
+                        logger.warning(f"  Could not drop main table {main_table}: {_mt_exc}")
                 elif _table_name and self.spark and self.registry:
                     # Derive from domain_catalog + table_name (UC convention)
                     storage = self.registry.storage
                     if storage and storage.domain_catalog:
                         main_table = f"{storage.domain_catalog}.{_table_name}"
                         try:
-                            self.spark.sql(
-                                f"DROP TABLE IF EXISTS {main_table}"
-                            )
+                            self.spark.sql(f"DROP TABLE IF EXISTS {main_table}")
                             logger.info(f"  Dropped main table {main_table}")
                         except Exception as _mt_exc:
-                            logger.warning(
-                                f"  Could not drop main table"
-                                f" {main_table}: {_mt_exc}"
-                            )
+                            logger.warning(f"  Could not drop main table {main_table}: {_mt_exc}")
 
                 # Drop the quarantine table for this entity too
                 q_cfg = contract_dict.get("quarantine", {})
