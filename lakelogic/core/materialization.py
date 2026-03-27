@@ -169,6 +169,7 @@ def _spark_save_as_table(
         logger.info(f"Writing to external location for table {table_name}: {resolved_loc}")
 
         from pyspark.sql import SparkSession
+
         spark = SparkSession.builder.getOrCreate()
 
         # Ensure the UC schema exists
@@ -929,10 +930,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         if current_mask.any():
             existing_current_row = merged[current_mask].iloc[0]
             if compare_cols:
-                changed_fields = [
-                    c for c in compare_cols
-                    if str(existing_current_row.get(c)) != str(inc_row.get(c))
-                ]
+                changed_fields = [c for c in compare_cols if str(existing_current_row.get(c)) != str(inc_row.get(c))]
                 changed = len(changed_fields) > 0
             else:
                 changed = True
@@ -981,39 +979,28 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
 
     # ── Surrogate key injection ──────────────────────────────────
     sk_column = scd2_cfg.get("surrogate_key", "_sk")
-    sk_strategy = scd2_cfg.get(
-        "surrogate_key_strategy", "hash"
-    )
+    sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
     if sk_column:
         import hashlib
 
         def _compute_sk(row):
-            pk_val = "|".join(
-                str(row.get(c, "")) for c in primary_key
-            )
+            pk_val = "|".join(str(row.get(c, "")) for c in primary_key)
             ef_val = str(row.get(effective_from, ""))
             raw = f"{pk_val}|{ef_val}"
             if sk_strategy == "uuid":
                 import uuid
+
                 return uuid.uuid4().hex[:16]
             # Default: hash (deterministic)
-            return hashlib.sha256(
-                raw.encode("utf-8")
-            ).hexdigest()[:16]
+            return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
         merged[sk_column] = merged.apply(_compute_sk, axis=1)
 
     # ── Version number injection ─────────────────────────────────
-    version_column = scd2_cfg.get(
-        "version_column", "_version"
-    )
+    version_column = scd2_cfg.get("version_column", "_version")
     if version_column:
-        merged = merged.sort_values(
-            primary_key + [effective_from]
-        )
-        merged[version_column] = (
-            merged.groupby(primary_key).cumcount() + 1
-        )
+        merged = merged.sort_values(primary_key + [effective_from])
+        merged[version_column] = merged.groupby(primary_key).cumcount() + 1
 
     return merged
 
@@ -1233,9 +1220,7 @@ def _spark_scd2_dataframe(
         sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
         if sk_column:
             pk_concat = F.concat_ws(
-                "|",
-                *[F.col(c).cast("string") for c in primary_key],
-                F.col(effective_from).cast("string")
+                "|", *[F.col(c).cast("string") for c in primary_key], F.col(effective_from).cast("string")
             )
             if sk_strategy == "uuid":
                 incoming_df = incoming_df.withColumn(sk_column, F.expr("substring(uuid(), 1, 16)"))
@@ -1292,11 +1277,11 @@ def _spark_scd2_dataframe(
             records_to_close = candidates_with_inc.filter(any_changed).drop(*[f"_inc_{c}" for c in track_columns])
             # Incoming rows that actually triggered a change (used for new versions below)
             changed_keys = records_to_close.select(*primary_key).distinct()
-            
+
             # Also keep completely new keys that aren't in the dimension yet
             existing_keys = existing_df.select(*primary_key).distinct()
             new_keys = incoming_keys.join(existing_keys, on=primary_key, how="left_anti").distinct()
-            
+
             keys_to_keep = changed_keys.unionByName(new_keys)
             incoming_df = incoming_df.join(keys_to_keep, on=primary_key, how="inner")
         else:
@@ -1324,9 +1309,7 @@ def _spark_scd2_dataframe(
     )
 
     # ── Change reason column (Spark) ────────────────────────────
-    change_reason_col = scd2_cfg.get(
-        "change_reason_column", "_change_reason"
-    )
+    change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
     if change_reason_col:
         # Incoming rows that matched existing keys: compute which fields changed
         if track_columns:
@@ -1335,11 +1318,7 @@ def _spark_scd2_dataframe(
             inc_with_existing = incoming_df.join(
                 existing_current.select(
                     *primary_key,
-                    *[
-                        F.col(c).alias(f"_old_{c}")
-                        for c in track_columns
-                        if c in existing_current.columns
-                    ],
+                    *[F.col(c).alias(f"_old_{c}") for c in track_columns if c in existing_current.columns],
                 ),
                 on=primary_key,
                 how="left",
@@ -1366,40 +1345,32 @@ def _spark_scd2_dataframe(
                         F.col(first_old).isNull(),
                         F.lit("initial_load"),
                     ).otherwise(reason_expr),
-                ).drop(
-                    *[f"_old_{c}" for c in track_columns]
-                )
+                ).drop(*[f"_old_{c}" for c in track_columns])
             else:
-                incoming_df = incoming_df.withColumn(
-                    change_reason_col, F.lit("all")
-                )
+                incoming_df = incoming_df.withColumn(change_reason_col, F.lit("all"))
         else:
             # No track_columns → stamp "all" for existing keys, "initial_load" for new
-            existing_keys = existing_df.select(
-                *primary_key
-            ).distinct()
-            incoming_df = incoming_df.join(
-                existing_keys.withColumn("_existed", F.lit(True)),
-                on=primary_key,
-                how="left",
-            ).withColumn(
-                change_reason_col,
-                F.when(
-                    F.col("_existed").isNull(),
-                    F.lit("initial_load"),
-                ).otherwise(F.lit("all")),
-            ).drop("_existed")
+            existing_keys = existing_df.select(*primary_key).distinct()
+            incoming_df = (
+                incoming_df.join(
+                    existing_keys.withColumn("_existed", F.lit(True)),
+                    on=primary_key,
+                    how="left",
+                )
+                .withColumn(
+                    change_reason_col,
+                    F.when(
+                        F.col("_existed").isNull(),
+                        F.lit("initial_load"),
+                    ).otherwise(F.lit("all")),
+                )
+                .drop("_existed")
+            )
 
         # Unchanged and already_closed rows get NULL for change_reason
-        unchanged = unchanged.withColumn(
-            change_reason_col, F.lit(None).cast("string")
-        )
-        already_closed = already_closed.withColumn(
-            change_reason_col, F.lit(None).cast("string")
-        )
-        closed_records = closed_records.withColumn(
-            change_reason_col, F.lit(None).cast("string")
-        )
+        unchanged = unchanged.withColumn(change_reason_col, F.lit(None).cast("string"))
+        already_closed = already_closed.withColumn(change_reason_col, F.lit(None).cast("string"))
+        closed_records = closed_records.withColumn(change_reason_col, F.lit(None).cast("string"))
 
     # Align all columns
     all_columns = list(existing_df.columns)
@@ -1423,9 +1394,7 @@ def _spark_scd2_dataframe(
 
     # ── Surrogate key injection (Spark) ─────────────────────────
     sk_column = scd2_cfg.get("surrogate_key", "_sk")
-    sk_strategy = scd2_cfg.get(
-        "surrogate_key_strategy", "hash"
-    )
+    sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
     if sk_column:
         pk_concat = F.concat_ws(
             "|",
@@ -1433,9 +1402,7 @@ def _spark_scd2_dataframe(
             F.col(effective_from).cast("string"),
         )
         if sk_strategy == "uuid":
-            result = result.withColumn(
-                sk_column, F.expr("substring(uuid(), 1, 16)")
-            )
+            result = result.withColumn(sk_column, F.expr("substring(uuid(), 1, 16)"))
         else:
             # Default: hash (deterministic, vectorized)
             result = result.withColumn(
@@ -1444,18 +1411,12 @@ def _spark_scd2_dataframe(
             )
 
     # ── Version number injection (Spark) ────────────────────────
-    version_column = scd2_cfg.get(
-        "version_column", "_version"
-    )
+    version_column = scd2_cfg.get("version_column", "_version")
     if version_column:
         from pyspark.sql.window import Window
 
-        w = Window.partitionBy(
-            *primary_key
-        ).orderBy(effective_from)
-        result = result.withColumn(
-            version_column, F.row_number().over(w)
-        )
+        w = Window.partitionBy(*primary_key).orderBy(effective_from)
+        result = result.withColumn(version_column, F.row_number().over(w))
 
     writer = result.write.format(output_format)
     if is_table:
@@ -1574,10 +1535,15 @@ def _materialize_spark_dataframe(
             writer = writer.option("overwriteSchema", "true")
 
     mode = "append" if strategy == "append" else "overwrite"
-    if strategy == "append" and is_reprocess and reprocess_policy in [
-        "overwrite_partition",
-        "overwrite_partition_safe",
-    ]:
+    if (
+        strategy == "append"
+        and is_reprocess
+        and reprocess_policy
+        in [
+            "overwrite_partition",
+            "overwrite_partition_safe",
+        ]
+    ):
         try:
             spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
         except Exception as exc:
@@ -2078,7 +2044,9 @@ def materialize_dataframe(
                 part_dir = part_dir / f"{col}={_safe_partition_value(val)}"
 
             safe_overwrite = reprocess_policy == "overwrite_partition_safe"
-            overwrite_partition = (is_reprocess and (reprocess_policy == "overwrite_partition" or safe_overwrite)) or strategy == "overwrite"
+            overwrite_partition = (
+                is_reprocess and (reprocess_policy == "overwrite_partition" or safe_overwrite)
+            ) or strategy == "overwrite"
 
             if overwrite_partition and not safe_overwrite:
                 if part_dir.exists():

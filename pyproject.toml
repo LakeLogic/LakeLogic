@@ -242,7 +242,7 @@ dev = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "1.5.0"
+version         = "1.6.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = false

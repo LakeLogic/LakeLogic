@@ -26,6 +26,7 @@ class SLOFreshnessConfig(BaseModel):
 
 class SLORowCountConfig(BaseModel):
     """Per-layer row count thresholds checked against run log entries."""
+
     min_rows: Optional[int] = None
     max_rows: Optional[int] = None
     check_field: str = "counts_good"  # run log column to check

@@ -33,7 +33,6 @@ CLI
 
 from __future__ import annotations
 
-import math
 import random
 import re
 import string
@@ -183,7 +182,6 @@ for _a2, _a3, _num, _name, _curr in _GEO_DATA:
         "currency_code": _curr,
         "currency": _curr,
     }
-
 
 
 _TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_dt", "_ts")
@@ -395,93 +393,93 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     # constraint is present, _make_valid_value picks from it first (before Faker), so
     # removing the hint here means the no-constraint path also uses ISO-safe random strings.
     # ── Telecom Identity & Subscriber ─────────────────────────────────────
-    "msisdn":               "numerify(text='447#########')",
-    "calling_number":       "numerify(text='447#########')",
-    "called_number":        "numerify(text='447#########')",
-    "cli":                  "numerify(text='447#########')",
-    "a_number":             "numerify(text='447#########')",
-    "b_number":             "numerify(text='447#########')",
-    "iccid":                "numerify(text='8944####################')",
-    "sim_serial":           "numerify(text='8944####################')",
-    "imsi":                 "numerify(text='23430##########')",
-    "subscriber_id":        "numerify(text='23430##########')",
-    "imei":                 "numerify(text='35######-######-#')",
-    "device_imei":          "numerify(text='35######-######-#')",
-    "tac":                  "numerify(text='35######')",
-    "impi":                 "bothify(text='???????@ims.mnc###.mcc###.3gppnetwork.org')",
-    "impu":                 "bothify(text='sip:+447#########@ims.mnc###.mcc###.3gppnetwork.org')",
-    "min":                  "numerify(text='##########')",
-    "mdn":                  "numerify(text='447#########')",
-    "msin":                 "numerify(text='##########')",
-    "esim_eid":             "numerify(text='89##########################')",
-    "eid":                  "numerify(text='89##########################')",
+    "msisdn": "numerify(text='447#########')",
+    "calling_number": "numerify(text='447#########')",
+    "called_number": "numerify(text='447#########')",
+    "cli": "numerify(text='447#########')",
+    "a_number": "numerify(text='447#########')",
+    "b_number": "numerify(text='447#########')",
+    "iccid": "numerify(text='8944####################')",
+    "sim_serial": "numerify(text='8944####################')",
+    "imsi": "numerify(text='23430##########')",
+    "subscriber_id": "numerify(text='23430##########')",
+    "imei": "numerify(text='35######-######-#')",
+    "device_imei": "numerify(text='35######-######-#')",
+    "tac": "numerify(text='35######')",
+    "impi": "bothify(text='???????@ims.mnc###.mcc###.3gppnetwork.org')",
+    "impu": "bothify(text='sip:+447#########@ims.mnc###.mcc###.3gppnetwork.org')",
+    "min": "numerify(text='##########')",
+    "mdn": "numerify(text='447#########')",
+    "msin": "numerify(text='##########')",
+    "esim_eid": "numerify(text='89##########################')",
+    "eid": "numerify(text='89##########################')",
     # ── Telecom Network Infrastructure ────────────────────────────────────
-    "cell_id":              "numerify(text='######')",
-    "cell_global_id":       "bothify(text='234-30-####-######')",
-    "cgi":                  "bothify(text='234-30-####-######')",
-    "ecgi":                 "bothify(text='234-30-#######')",
-    "enodeb_id":            "numerify(text='#######')",
-    "gnodeb_id":            "numerify(text='#########')",
-    "sector_id":            "numerify(text='###')",
-    "lac":                  "numerify(text='#####')",
-    "rac":                  "numerify(text='###')",
-    "tac_5g":               "numerify(text='######')",
-    "sac":                  "numerify(text='####')",
-    "ran_node_id":          "bothify(text='RAN-##-???-######')",
-    "bsc_id":               "bothify(text='BSC-####')",
-    "rnc_id":               "bothify(text='RNC-####')",
-    "mme_id":               "bothify(text='MME-####')",
-    "sgw_id":               "bothify(text='SGW-####')",
-    "pgw_id":               "bothify(text='PGW-####')",
-    "amf_id":               "bothify(text='AMF-####')",
-    "smf_id":               "bothify(text='SMF-####')",
-    "upf_id":               "bothify(text='UPF-####')",
-    "plmn":                 "numerify(text='23430')",
-    "mcc":                  "numerify(text='234')",
-    "mnc":                  "numerify(text='30')",
-    "pdp_context_id":       "numerify(text='##')",
+    "cell_id": "numerify(text='######')",
+    "cell_global_id": "bothify(text='234-30-####-######')",
+    "cgi": "bothify(text='234-30-####-######')",
+    "ecgi": "bothify(text='234-30-#######')",
+    "enodeb_id": "numerify(text='#######')",
+    "gnodeb_id": "numerify(text='#########')",
+    "sector_id": "numerify(text='###')",
+    "lac": "numerify(text='#####')",
+    "rac": "numerify(text='###')",
+    "tac_5g": "numerify(text='######')",
+    "sac": "numerify(text='####')",
+    "ran_node_id": "bothify(text='RAN-##-???-######')",
+    "bsc_id": "bothify(text='BSC-####')",
+    "rnc_id": "bothify(text='RNC-####')",
+    "mme_id": "bothify(text='MME-####')",
+    "sgw_id": "bothify(text='SGW-####')",
+    "pgw_id": "bothify(text='PGW-####')",
+    "amf_id": "bothify(text='AMF-####')",
+    "smf_id": "bothify(text='SMF-####')",
+    "upf_id": "bothify(text='UPF-####')",
+    "plmn": "numerify(text='23430')",
+    "mcc": "numerify(text='234')",
+    "mnc": "numerify(text='30')",
+    "pdp_context_id": "numerify(text='##')",
     # ── Telecom Usage / CDR Metrics ───────────────────────────────────────
     "call_duration_seconds": "pyint(min_value=1, max_value=7200)",
     "call_duration_minutes": "pyint(min_value=0, max_value=120)",
-    "data_volume_bytes":    "pyint(min_value=1024, max_value=10737418240)",
-    "data_volume_kb":       "pyint(min_value=1, max_value=10485760)",
-    "data_volume_mb":       "pyfloat(min_value=0.001, max_value=10240, right_digits=3)",
-    "sms_count":            "pyint(min_value=0, max_value=500)",
-    "mms_count":            "pyint(min_value=0, max_value=50)",
-    "roaming_data_mb":      "pyfloat(min_value=0, max_value=2048, right_digits=2)",
-    "setup_time_ms":        "pyint(min_value=50, max_value=5000)",
-    "call_attempt_count":   "pyint(min_value=1, max_value=5)",
-    "charging_id":          "numerify(text='##########')",
-    "rating_group":         "numerify(text='###')",
-    "service_identifier":   "numerify(text='###')",
-    "bearer_id":            "numerify(text='##')",
+    "data_volume_bytes": "pyint(min_value=1024, max_value=10737418240)",
+    "data_volume_kb": "pyint(min_value=1, max_value=10485760)",
+    "data_volume_mb": "pyfloat(min_value=0.001, max_value=10240, right_digits=3)",
+    "sms_count": "pyint(min_value=0, max_value=500)",
+    "mms_count": "pyint(min_value=0, max_value=50)",
+    "roaming_data_mb": "pyfloat(min_value=0, max_value=2048, right_digits=2)",
+    "setup_time_ms": "pyint(min_value=50, max_value=5000)",
+    "call_attempt_count": "pyint(min_value=1, max_value=5)",
+    "charging_id": "numerify(text='##########')",
+    "rating_group": "numerify(text='###')",
+    "service_identifier": "numerify(text='###')",
+    "bearer_id": "numerify(text='##')",
     # ── Telecom Billing / Charging ────────────────────────────────────────
-    "account_number":       "numerify(text='##########')",
-    "ban":                  "numerify(text='##########')",
-    "charge_amount":        "pyfloat(min_value=0, max_value=500, right_digits=4)",
-    "rated_amount":         "pyfloat(min_value=0, max_value=500, right_digits=4)",
-    "bundle_id":            "bothify(text='BDL-??????-##')",
-    "addon_id":             "bothify(text='ADD-######')",
-    "promo_code":           "bothify(text='PROMO-????##')",
-    "bolt_on_id":           "bothify(text='BOLT-####')",
-    "allowance_remaining":  "pyfloat(min_value=0, max_value=100000, right_digits=2)",
+    "account_number": "numerify(text='##########')",
+    "ban": "numerify(text='##########')",
+    "charge_amount": "pyfloat(min_value=0, max_value=500, right_digits=4)",
+    "rated_amount": "pyfloat(min_value=0, max_value=500, right_digits=4)",
+    "bundle_id": "bothify(text='BDL-??????-##')",
+    "addon_id": "bothify(text='ADD-######')",
+    "promo_code": "bothify(text='PROMO-????##')",
+    "bolt_on_id": "bothify(text='BOLT-####')",
+    "allowance_remaining": "pyfloat(min_value=0, max_value=100000, right_digits=2)",
     "out_of_bundle_charge": "pyfloat(min_value=0, max_value=50, right_digits=4)",
-    "roaming_charge":       "pyfloat(min_value=0, max_value=200, right_digits=4)",
-    "invoice_number":       "bothify(text='INV-#######-????')",
-    "direct_debit_ref":     "bothify(text='DD-??########')",
+    "roaming_charge": "pyfloat(min_value=0, max_value=200, right_digits=4)",
+    "invoice_number": "bothify(text='INV-#######-????')",
+    "direct_debit_ref": "bothify(text='DD-??########')",
     # ── Telecom RF / QoS Metrics ──────────────────────────────────────────
-    "rsrp":                 "pyfloat(min_value=-140, max_value=-44, right_digits=1)",
-    "rsrq":                 "pyfloat(min_value=-20, max_value=-3, right_digits=1)",
-    "rssi":                 "pyfloat(min_value=-110, max_value=-50, right_digits=1)",
-    "sinr":                 "pyfloat(min_value=-20, max_value=30, right_digits=1)",
-    "cqi":                  "pyint(min_value=0, max_value=15)",
-    "throughput_dl_mbps":   "pyfloat(min_value=0.1, max_value=1000, right_digits=2)",
-    "throughput_ul_mbps":   "pyfloat(min_value=0.1, max_value=300, right_digits=2)",
-    "latency_ms":           "pyfloat(min_value=1, max_value=500, right_digits=1)",
-    "jitter_ms":            "pyfloat(min_value=0, max_value=50, right_digits=2)",
-    "packet_loss_pct":      "pyfloat(min_value=0, max_value=10, right_digits=3)",
-    "bler":                 "pyfloat(min_value=0, max_value=0.5, right_digits=4)",
-    "handover_count":       "pyint(min_value=0, max_value=20)",
+    "rsrp": "pyfloat(min_value=-140, max_value=-44, right_digits=1)",
+    "rsrq": "pyfloat(min_value=-20, max_value=-3, right_digits=1)",
+    "rssi": "pyfloat(min_value=-110, max_value=-50, right_digits=1)",
+    "sinr": "pyfloat(min_value=-20, max_value=30, right_digits=1)",
+    "cqi": "pyint(min_value=0, max_value=15)",
+    "throughput_dl_mbps": "pyfloat(min_value=0.1, max_value=1000, right_digits=2)",
+    "throughput_ul_mbps": "pyfloat(min_value=0.1, max_value=300, right_digits=2)",
+    "latency_ms": "pyfloat(min_value=1, max_value=500, right_digits=1)",
+    "jitter_ms": "pyfloat(min_value=0, max_value=50, right_digits=2)",
+    "packet_loss_pct": "pyfloat(min_value=0, max_value=10, right_digits=3)",
+    "bler": "pyfloat(min_value=0, max_value=0.5, right_digits=4)",
+    "handover_count": "pyint(min_value=0, max_value=20)",
 }
 
 
@@ -565,70 +563,70 @@ _TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_ts", "_datetime", "_dt")
 
 _TEMPORAL_TRIPLETS = {
     "session": {
-        "start":    "session_start",
-        "end":      "session_end",
+        "start": "session_start",
+        "end": "session_end",
         "duration": "session_duration_seconds",
-        "unit":     "seconds",
+        "unit": "seconds",
         "min_duration": 1,
         "max_duration": 86400,
         "formula": "end - start = duration",
     },
     "call": {
-        "start":    "call_start_time",
-        "end":      "call_end_time",
+        "start": "call_start_time",
+        "end": "call_end_time",
         "duration": "call_duration_seconds",
-        "unit":     "seconds",
+        "unit": "seconds",
         "min_duration": 1,
         "max_duration": 7200,
         "formula": "end - start = duration",
     },
     "data_session": {
-        "start":    "data_session_start",
-        "end":      "data_session_end",
+        "start": "data_session_start",
+        "end": "data_session_end",
         "duration": "data_volume_mb",
-        "unit":     "seconds",
+        "unit": "seconds",
         "min_duration": 1,
         "max_duration": 86400,
     },
     "job": {
-        "start":    "job_start_time",
-        "end":      "job_end_time",
+        "start": "job_start_time",
+        "end": "job_end_time",
         "duration": "duration_ms",
-        "unit":     "milliseconds",
+        "unit": "milliseconds",
         "min_duration": 100,
         "max_duration": 3600000,
         "formula": "end - start = duration / 1000",
     },
     "appointment": {
-        "start":    "appointment_start",
-        "end":      "appointment_end",
+        "start": "appointment_start",
+        "end": "appointment_end",
         "duration": "appointment_duration_minutes",
-        "unit":     "minutes",
+        "unit": "minutes",
         "min_duration": 15,
         "max_duration": 480,
         "slot_sizes": [15, 30, 45, 60, 90, 120],
     },
     "incident": {
-        "start":    "opened_at",
-        "end":      "resolved_at",
+        "start": "opened_at",
+        "end": "resolved_at",
         "duration": "resolution_time_minutes",
-        "unit":     "minutes",
+        "unit": "minutes",
         "min_duration": 5,
         "max_duration": 20160,
         "nullable_end": True,
     },
     "contract_period": {
-        "start":    "contract_start_date",
-        "end":      "contract_end_date",
+        "start": "contract_start_date",
+        "end": "contract_end_date",
         "duration": "contract_length_months",
-        "unit":     "months",
+        "unit": "months",
         "allowed_durations": [1, 6, 12, 18, 24, 36],
     },
     "fulfilment": {
-        "start":    "picked_at",
-        "end":      "dispatched_at",
+        "start": "picked_at",
+        "end": "dispatched_at",
         "duration": "pick_duration_minutes",
-        "unit":     "minutes",
+        "unit": "minutes",
         "min_duration": 1,
         "max_duration": 480,
     },
@@ -640,14 +638,14 @@ _TRIPLET_GENERATION_STRATEGY = {
         "step_2": "generate session_duration_seconds within min/max",
         "step_3": "session_end = session_start + duration",
         "advantage": "duration is always exact integer",
-        "use_when": "duration field is the source of truth"
+        "use_when": "duration field is the source of truth",
     },
     "start_to_end": {
         "step_1": "generate session_start randomly",
         "step_2": "generate session_end = session_start + random(min, max)",
         "step_3": "session_duration_seconds = (session_end - session_start).seconds",
         "advantage": "timestamps look natural",
-        "use_when": "start/end timestamps are the source of truth"
+        "use_when": "start/end timestamps are the source of truth",
     },
 }
 
@@ -657,45 +655,45 @@ _TRIPLET_INVALID_PATTERNS = {
         "seen_in_screen": True,
         "generate": "end = start - random(1, 86400)",
         "duration": "null or wrong",
-        "real_world_cause": "timezone bug, DST switch, clock skew"
+        "real_world_cause": "timezone bug, DST switch, clock skew",
     },
     "duration_mismatch": {
         "description": "duration does not match end - start",
         "seen_in_screen": True,
         "generate": "correct timestamps, wrong duration value",
-        "real_world_cause": "duration calculated in wrong unit (ms vs s)"
+        "real_world_cause": "duration calculated in wrong unit (ms vs s)",
     },
     "null_duration": {
         "description": "session_end exists but duration is null",
         "seen_in_screen": True,
         "generate": "valid start and end, duration = null",
-        "real_world_cause": "ETL job failed to calculate derived field"
+        "real_world_cause": "ETL job failed to calculate derived field",
     },
     "null_end_with_duration": {
         "description": "session_end is null but duration is populated",
         "generate": "valid start, end = null, duration = random",
-        "real_world_cause": "session still open but heartbeat sent duration"
+        "real_world_cause": "session still open but heartbeat sent duration",
     },
     "zero_duration": {
         "description": "start == end, duration == 0",
         "generate": "end = start, duration = 0",
-        "real_world_cause": "instant event logged as session"
+        "real_world_cause": "instant event logged as session",
     },
     "impossibly_long": {
         "description": "duration exceeds max realistic value",
         "generate": "duration > max_duration * 10",
-        "real_world_cause": "session not properly closed, runaway counter"
+        "real_world_cause": "session not properly closed, runaway counter",
     },
     "future_end": {
         "description": "session_end is in the future",
         "generate": "end = now() + random(1hr, 30 days)",
-        "real_world_cause": "wrong year, timezone issue, test data in prod"
+        "real_world_cause": "wrong year, timezone issue, test data in prod",
     },
     "microsecond_precision_mismatch": {
         "description": "start has microseconds, end does not — or vice versa",
         "seen_in_screen": True,
         "generate": "start=...092257, end=...143995",
-        "real_world_cause": "different source systems with different clock precision"
+        "real_world_cause": "different source systems with different clock precision",
     },
 }
 
@@ -910,165 +908,372 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
     ],
     # ── Inventory / Warehouse / Product ───────────────────────────────────
     "item_name": [
-        "Widget Pro", "Gadget Ultra", "Sensor Module A", "Control Board v2",
-        "Power Supply 500W", "Mounting Bracket", "Filter Cartridge", "LED Panel 4K",
-        "Cooling Fan 120mm", "Cable Assembly", "Connector Kit", "Display Module",
-        "Battery Pack Li-Ion", "Adapter USB-C", "Motor Driver IC", "Circuit Board",
+        "Widget Pro",
+        "Gadget Ultra",
+        "Sensor Module A",
+        "Control Board v2",
+        "Power Supply 500W",
+        "Mounting Bracket",
+        "Filter Cartridge",
+        "LED Panel 4K",
+        "Cooling Fan 120mm",
+        "Cable Assembly",
+        "Connector Kit",
+        "Display Module",
+        "Battery Pack Li-Ion",
+        "Adapter USB-C",
+        "Motor Driver IC",
+        "Circuit Board",
     ],
     "product_name": [
-        "Widget Pro", "Gadget Ultra", "Sensor Module A", "Control Board v2",
-        "Power Supply 500W", "Mounting Bracket", "Filter Cartridge", "LED Panel 4K",
-        "Cooling Fan 120mm", "Cable Assembly", "Connector Kit", "Display Module",
+        "Widget Pro",
+        "Gadget Ultra",
+        "Sensor Module A",
+        "Control Board v2",
+        "Power Supply 500W",
+        "Mounting Bracket",
+        "Filter Cartridge",
+        "LED Panel 4K",
+        "Cooling Fan 120mm",
+        "Cable Assembly",
+        "Connector Kit",
+        "Display Module",
     ],
     "display_name": [
-        "Widget Pro", "Gadget Ultra", "Sensor Module A", "Control Board v2",
-        "Power Supply 500W", "Mounting Bracket", "Filter Cartridge", "LED Panel 4K",
+        "Widget Pro",
+        "Gadget Ultra",
+        "Sensor Module A",
+        "Control Board v2",
+        "Power Supply 500W",
+        "Mounting Bracket",
+        "Filter Cartridge",
+        "LED Panel 4K",
     ],
     "item_display_name": [
-        "Widget Pro", "Cable Type-C", "Bracket M8", "Connector RJ45",
-        "Filter Cartridge", "Sensor Module", "Panel Board A3", "Gasket Kit",
+        "Widget Pro",
+        "Cable Type-C",
+        "Bracket M8",
+        "Connector RJ45",
+        "Filter Cartridge",
+        "Sensor Module",
+        "Panel Board A3",
+        "Gasket Kit",
     ],
     "item_type": ["standard", "premium", "enterprise", "basic", "pro", "custom"],
     "location_name": [
-        "Warehouse A", "Warehouse B", "Distribution Center 1", "DC East",
-        "Fulfillment Center West", "Main Depot", "Regional Hub North",
-        "Cross-Dock Facility", "Storage Unit 12", "Cold Storage",
+        "Warehouse A",
+        "Warehouse B",
+        "Distribution Center 1",
+        "DC East",
+        "Fulfillment Center West",
+        "Main Depot",
+        "Regional Hub North",
+        "Cross-Dock Facility",
+        "Storage Unit 12",
+        "Cold Storage",
     ],
     "warehouse": [
-        "Warehouse A", "Warehouse B", "DC East", "DC West", "Main Depot",
-        "Regional Hub", "Fulfillment Center", "Cold Storage",
+        "Warehouse A",
+        "Warehouse B",
+        "DC East",
+        "DC West",
+        "Main Depot",
+        "Regional Hub",
+        "Fulfillment Center",
+        "Cold Storage",
     ],
     "channel": [
-        "online", "in-store", "wholesale", "marketplace", "direct",
-        "partner", "mobile_app", "social",
+        "online",
+        "in-store",
+        "wholesale",
+        "marketplace",
+        "direct",
+        "partner",
+        "mobile_app",
+        "social",
     ],
     "supplier": [
-        "Acme Corp", "GlobalTech", "FastShip Ltd", "ElectroParts Inc",
-        "Pacific Supply Co", "Nordic Components", "Alpine Industrial",
+        "Acme Corp",
+        "GlobalTech",
+        "FastShip Ltd",
+        "ElectroParts Inc",
+        "Pacific Supply Co",
+        "Nordic Components",
+        "Alpine Industrial",
     ],
     # ── Finance ────────────────────────────────────────────────────────────
     "payment_status": [
-        "pending", "authorised", "captured", "settled",
-        "refunded", "partially_refunded", "voided", "failed", "disputed",
+        "pending",
+        "authorised",
+        "captured",
+        "settled",
+        "refunded",
+        "partially_refunded",
+        "voided",
+        "failed",
+        "disputed",
     ],
     "transaction_type": [
-        "purchase", "refund", "chargeback", "adjustment",
-        "transfer", "withdrawal", "deposit", "fee",
+        "purchase",
+        "refund",
+        "chargeback",
+        "adjustment",
+        "transfer",
+        "withdrawal",
+        "deposit",
+        "fee",
     ],
     "return_reason": [
-        "faulty", "not_as_described", "changed_mind", "wrong_item",
-        "arrived_late", "damaged_in_transit", "duplicate_order",
+        "faulty",
+        "not_as_described",
+        "changed_mind",
+        "wrong_item",
+        "arrived_late",
+        "damaged_in_transit",
+        "duplicate_order",
     ],
     "refund_status": ["requested", "approved", "processed", "denied", "partial"],
     # ── Logistics / Shipping ──────────────────────────────────────────────
     "carrier": [
-        "DHL", "FedEx", "UPS", "Royal Mail", "DPD", "Hermes",
-        "Yodel", "TNT", "Parcelforce", "Amazon Logistics",
+        "DHL",
+        "FedEx",
+        "UPS",
+        "Royal Mail",
+        "DPD",
+        "Hermes",
+        "Yodel",
+        "TNT",
+        "Parcelforce",
+        "Amazon Logistics",
     ],
     "shipment_status": [
-        "pending", "picked_up", "in_transit", "out_for_delivery",
-        "delivered", "failed_delivery", "returned_to_sender", "lost",
+        "pending",
+        "picked_up",
+        "in_transit",
+        "out_for_delivery",
+        "delivered",
+        "failed_delivery",
+        "returned_to_sender",
+        "lost",
     ],
     "incoterm": ["EXW", "FCA", "CPT", "CIP", "DAP", "DPU", "DDP", "FOB", "CIF"],
     "port": [
-        "Felixstowe", "Southampton", "Rotterdam", "Hamburg",
-        "Antwerp", "Shanghai", "Singapore", "Los Angeles", "New York",
+        "Felixstowe",
+        "Southampton",
+        "Rotterdam",
+        "Hamburg",
+        "Antwerp",
+        "Shanghai",
+        "Singapore",
+        "Los Angeles",
+        "New York",
     ],
     "port_of_origin": [
-        "Shanghai", "Singapore", "Rotterdam", "Los Angeles",
-        "Hamburg", "Busan", "Hong Kong", "Antwerp",
+        "Shanghai",
+        "Singapore",
+        "Rotterdam",
+        "Los Angeles",
+        "Hamburg",
+        "Busan",
+        "Hong Kong",
+        "Antwerp",
     ],
     # ── Marketing / Analytics ─────────────────────────────────────────────
     "source": ["organic", "paid", "email", "social", "referral", "direct"],
     "medium": ["cpc", "cpm", "email", "social", "organic", "display", "affiliate"],
     "utm_source": [
-        "google", "facebook", "instagram", "twitter", "linkedin",
-        "email", "organic", "referral", "direct", "tiktok", "youtube",
+        "google",
+        "facebook",
+        "instagram",
+        "twitter",
+        "linkedin",
+        "email",
+        "organic",
+        "referral",
+        "direct",
+        "tiktok",
+        "youtube",
     ],
     "utm_medium": [
-        "cpc", "organic", "email", "social", "referral",
-        "display", "affiliate", "push", "sms",
+        "cpc",
+        "organic",
+        "email",
+        "social",
+        "referral",
+        "display",
+        "affiliate",
+        "push",
+        "sms",
     ],
     "acquisition_channel": [
-        "organic_search", "paid_search", "social_organic", "social_paid",
-        "email", "referral", "direct", "display", "affiliate",
+        "organic_search",
+        "paid_search",
+        "social_organic",
+        "social_paid",
+        "email",
+        "referral",
+        "direct",
+        "display",
+        "affiliate",
     ],
     "email_status": [
-        "subscribed", "unsubscribed", "bounced", "complained",
-        "pending_confirmation", "archived",
+        "subscribed",
+        "unsubscribed",
+        "bounced",
+        "complained",
+        "pending_confirmation",
+        "archived",
     ],
     # ── Healthcare ────────────────────────────────────────────────────────
     "blood_type": ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"],
     "appointment_type": [
-        "consultation", "follow_up", "emergency", "routine_check",
-        "specialist_referral", "procedure", "vaccination",
+        "consultation",
+        "follow_up",
+        "emergency",
+        "routine_check",
+        "specialist_referral",
+        "procedure",
+        "vaccination",
     ],
     "appointment_status": [
-        "scheduled", "confirmed", "attended", "dna", "cancelled",
-        "rescheduled", "walk_in",
+        "scheduled",
+        "confirmed",
+        "attended",
+        "dna",
+        "cancelled",
+        "rescheduled",
+        "walk_in",
     ],
     "ward": [
-        "cardiology", "oncology", "orthopaedics", "paediatrics",
-        "neurology", "A&E", "ICU", "maternity", "radiology", "pharmacy",
+        "cardiology",
+        "oncology",
+        "orthopaedics",
+        "paediatrics",
+        "neurology",
+        "A&E",
+        "ICU",
+        "maternity",
+        "radiology",
+        "pharmacy",
     ],
     # ── HR ────────────────────────────────────────────────────────────────
     "employment_type": [
-        "full_time", "part_time", "contract", "freelance",
-        "intern", "apprentice", "zero_hours",
+        "full_time",
+        "part_time",
+        "contract",
+        "freelance",
+        "intern",
+        "apprentice",
+        "zero_hours",
     ],
     "contract_type": [
-        "permanent", "fixed_term", "temporary", "casual", "probationary",
+        "permanent",
+        "fixed_term",
+        "temporary",
+        "casual",
+        "probationary",
     ],
     "leave_type": [
-        "annual", "sick", "maternity", "paternity", "shared_parental",
-        "compassionate", "unpaid", "study",
+        "annual",
+        "sick",
+        "maternity",
+        "paternity",
+        "shared_parental",
+        "compassionate",
+        "unpaid",
+        "study",
     ],
     "absence_reason": [
-        "illness", "family_emergency", "medical_appointment",
-        "mental_health", "bereavement", "unauthorised",
+        "illness",
+        "family_emergency",
+        "medical_appointment",
+        "mental_health",
+        "bereavement",
+        "unauthorised",
     ],
     "performance_band": ["exceeds", "meets", "developing", "underperforming"],
     # ── Real Estate / Property ────────────────────────────────────────────
     "energy_rating": ["A", "B", "C", "D", "E", "F", "G"],
     "heating_type": [
-        "gas_central", "electric", "oil", "heat_pump",
-        "underfloor", "solar", "wood_burning",
+        "gas_central",
+        "electric",
+        "oil",
+        "heat_pump",
+        "underfloor",
+        "solar",
+        "wood_burning",
     ],
     "parking": ["garage", "driveway", "on_street", "allocated", "none"],
     "garden_type": ["rear", "front", "both", "communal", "roof_terrace", "none"],
     # ── IoT / Technical ───────────────────────────────────────────────────
     "event_type": [
-        "click", "view", "purchase", "sign_up", "login", "logout",
-        "error", "timeout", "heartbeat", "alert", "threshold_exceeded",
+        "click",
+        "view",
+        "purchase",
+        "sign_up",
+        "login",
+        "logout",
+        "error",
+        "timeout",
+        "heartbeat",
+        "alert",
+        "threshold_exceeded",
     ],
     "log_level": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "FATAL"],
     "alert_type": [
-        "threshold_breach", "anomaly_detected", "connection_lost",
-        "battery_low", "firmware_update", "tamper_detected",
+        "threshold_breach",
+        "anomaly_detected",
+        "connection_lost",
+        "battery_low",
+        "firmware_update",
+        "tamper_detected",
     ],
     "protocol": ["HTTP", "HTTPS", "MQTT", "CoAP", "AMQP", "WebSocket", "gRPC"],
     "http_method": ["GET", "POST", "PUT", "PATCH", "DELETE"],
     "http_status": [200, 201, 204, 301, 302, 400, 401, 403, 404, 409, 422, 500, 502, 503],
     # ── Support / CRM ─────────────────────────────────────────────────────
     "ticket_status": [
-        "open", "pending", "in_progress", "waiting_on_customer",
-        "escalated", "resolved", "closed", "reopened",
+        "open",
+        "pending",
+        "in_progress",
+        "waiting_on_customer",
+        "escalated",
+        "resolved",
+        "closed",
+        "reopened",
     ],
     "resolution_type": [
-        "fixed", "workaround", "by_design", "duplicate",
-        "cannot_reproduce", "wont_fix", "user_error",
+        "fixed",
+        "workaround",
+        "by_design",
+        "duplicate",
+        "cannot_reproduce",
+        "wont_fix",
+        "user_error",
     ],
     "satisfaction_score": [1, 2, 3, 4, 5],
     "nps_score": list(range(0, 11)),
     "contact_reason": [
-        "billing_query", "technical_issue", "product_question",
-        "complaint", "cancellation", "upgrade_request", "general_enquiry",
+        "billing_query",
+        "technical_issue",
+        "product_question",
+        "complaint",
+        "cancellation",
+        "upgrade_request",
+        "general_enquiry",
     ],
     "contact_channel": ["phone", "email", "chat", "social", "in_person", "self_service"],
     # ── Content / Media ───────────────────────────────────────────────────
     "content_type": [
-        "article", "video", "podcast", "webinar", "whitepaper",
-        "case_study", "infographic", "tutorial", "product_page",
+        "article",
+        "video",
+        "podcast",
+        "webinar",
+        "whitepaper",
+        "case_study",
+        "infographic",
+        "tutorial",
+        "product_page",
     ],
     "content_status": ["draft", "review", "approved", "published", "archived", "deleted"],
     "file_type": ["pdf", "docx", "xlsx", "csv", "jpg", "png", "mp4", "mp3", "zip"],
@@ -1076,272 +1281,606 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
     "risk_band": ["very_low", "low", "medium", "high", "very_high", "critical"],
     "credit_band": ["excellent", "good", "fair", "poor", "very_poor"],
     "segment": [
-        "new", "active", "at_risk", "churned", "win_back",
-        "vip", "dormant", "high_value", "low_value",
+        "new",
+        "active",
+        "at_risk",
+        "churned",
+        "win_back",
+        "vip",
+        "dormant",
+        "high_value",
+        "low_value",
     ],
     "model_version": ["v1.0", "v1.1", "v2.0", "v2.1", "v3.0"],
     "prediction_label": ["positive", "negative", "uncertain"],
     # ── Financial Services ────────────────────────────────────────────────
     "account_type": [
-        "current", "savings", "isa", "sipp", "stocks_and_shares",
-        "junior_isa", "business_current", "fixed_rate_bond",
+        "current",
+        "savings",
+        "isa",
+        "sipp",
+        "stocks_and_shares",
+        "junior_isa",
+        "business_current",
+        "fixed_rate_bond",
     ],
     "mortgage_type": [
-        "fixed", "variable", "tracker", "discount",
-        "offset", "interest_only", "repayment",
+        "fixed",
+        "variable",
+        "tracker",
+        "discount",
+        "offset",
+        "interest_only",
+        "repayment",
     ],
     "loan_purpose": [
-        "home_improvement", "debt_consolidation", "car_purchase",
-        "holiday", "wedding", "education", "medical", "business",
+        "home_improvement",
+        "debt_consolidation",
+        "car_purchase",
+        "holiday",
+        "wedding",
+        "education",
+        "medical",
+        "business",
     ],
     "kyc_status": [
-        "not_started", "in_progress", "pending_review",
-        "approved", "rejected", "expired", "suspended",
+        "not_started",
+        "in_progress",
+        "pending_review",
+        "approved",
+        "rejected",
+        "expired",
+        "suspended",
     ],
     "aml_risk": ["low", "medium", "high", "pep", "sanctioned"],
     "fund_type": [
-        "equity", "bond", "money_market", "mixed",
-        "index_tracker", "etf", "hedge_fund", "private_equity",
+        "equity",
+        "bond",
+        "money_market",
+        "mixed",
+        "index_tracker",
+        "etf",
+        "hedge_fund",
+        "private_equity",
     ],
     "market": [
-        "LSE", "NYSE", "NASDAQ", "EURONEXT", "TSX",
-        "ASX", "HKEX", "TSE", "BSE", "NSE",
+        "LSE",
+        "NYSE",
+        "NASDAQ",
+        "EURONEXT",
+        "TSX",
+        "ASX",
+        "HKEX",
+        "TSE",
+        "BSE",
+        "NSE",
     ],
     "asset_class": [
-        "equities", "fixed_income", "commodities", "forex",
-        "real_estate", "crypto", "derivatives", "cash",
+        "equities",
+        "fixed_income",
+        "commodities",
+        "forex",
+        "real_estate",
+        "crypto",
+        "derivatives",
+        "cash",
     ],
     "regulatory_status": [
-        "FCA_authorised", "FCA_registered", "exempt",
-        "appointed_representative", "unregulated",
+        "FCA_authorised",
+        "FCA_registered",
+        "exempt",
+        "appointed_representative",
+        "unregulated",
     ],
     # ── Telecom ───────────────────────────────────────────────────────────
     "plan_type": [
-        "pay_as_you_go", "sim_only_monthly", "sim_only_annual",
-        "handset_24m", "handset_36m", "broadband_only",
-        "bundle_broadband_tv", "business_unlimited",
+        "pay_as_you_go",
+        "sim_only_monthly",
+        "sim_only_annual",
+        "handset_24m",
+        "handset_36m",
+        "broadband_only",
+        "bundle_broadband_tv",
+        "business_unlimited",
     ],
     "network_type": ["2G", "3G", "4G", "4G+", "5G", "5G+"],
     "roaming_zone": ["UK", "EU", "Zone_1", "Zone_2", "Zone_3", "Worldwide"],
     "fault_type": [
-        "no_signal", "slow_data", "call_dropping", "billing_error",
-        "port_issue", "sim_swap", "handset_fault", "coverage_gap",
+        "no_signal",
+        "slow_data",
+        "call_dropping",
+        "billing_error",
+        "port_issue",
+        "sim_swap",
+        "handset_fault",
+        "coverage_gap",
     ],
     "churn_reason": [
-        "price", "coverage", "customer_service", "handset",
-        "competitor_offer", "moving_abroad", "deceased", "unknown",
+        "price",
+        "coverage",
+        "customer_service",
+        "handset",
+        "competitor_offer",
+        "moving_abroad",
+        "deceased",
+        "unknown",
     ],
     "activation_channel": [
-        "store", "online", "telesales", "partner_retail",
-        "direct_mail", "business_account_manager",
+        "store",
+        "online",
+        "telesales",
+        "partner_retail",
+        "direct_mail",
+        "business_account_manager",
     ],
     "tariff_band": ["budget", "mid", "premium", "unlimited", "enterprise"],
     "number_type": ["mobile", "landline", "voip", "freephone", "premium_rate"],
     # ── Healthcare (extended) ─────────────────────────────────────────────
     "icd10_chapter": [
-        "A00-B99", "C00-D48", "D50-D89", "E00-E90",
-        "F00-F99", "G00-G99", "H00-H59", "I00-I99",
-        "J00-J99", "K00-K93", "L00-L99", "M00-M99",
+        "A00-B99",
+        "C00-D48",
+        "D50-D89",
+        "E00-E90",
+        "F00-F99",
+        "G00-G99",
+        "H00-H59",
+        "I00-I99",
+        "J00-J99",
+        "K00-K93",
+        "L00-L99",
+        "M00-M99",
     ],
     "snomed_concept": [
-        "Hypertension", "Type 2 Diabetes", "Asthma",
-        "COPD", "Atrial Fibrillation", "Heart Failure",
-        "Osteoarthritis", "Depression", "Anxiety", "Obesity",
+        "Hypertension",
+        "Type 2 Diabetes",
+        "Asthma",
+        "COPD",
+        "Atrial Fibrillation",
+        "Heart Failure",
+        "Osteoarthritis",
+        "Depression",
+        "Anxiety",
+        "Obesity",
     ],
     "care_setting": [
-        "GP", "A&E", "outpatient", "inpatient",
-        "day_surgery", "ICU", "community", "telehealth",
+        "GP",
+        "A&E",
+        "outpatient",
+        "inpatient",
+        "day_surgery",
+        "ICU",
+        "community",
+        "telehealth",
     ],
     "referral_source": [
-        "GP", "self_referral", "A&E", "111",
-        "consultant", "community_nurse", "social_services",
+        "GP",
+        "self_referral",
+        "A&E",
+        "111",
+        "consultant",
+        "community_nurse",
+        "social_services",
     ],
     "discharge_destination": [
-        "home", "care_home", "rehabilitation", "transfer",
-        "deceased", "self_discharge",
+        "home",
+        "care_home",
+        "rehabilitation",
+        "transfer",
+        "deceased",
+        "self_discharge",
     ],
     "funding_type": ["NHS", "private", "insurance", "overseas_visitor"],
     # ── Real Estate (extended) ────────────────────────────────────────────
     "property_style": [
-        "Victorian", "Edwardian", "Georgian", "Art_Deco",
-        "Post_War", "1960s", "1970s", "Modern", "New_Build", "Contemporary",
+        "Victorian",
+        "Edwardian",
+        "Georgian",
+        "Art_Deco",
+        "Post_War",
+        "1960s",
+        "1970s",
+        "Modern",
+        "New_Build",
+        "Contemporary",
     ],
     "sale_type": [
-        "private_treaty", "auction", "tender",
-        "shared_ownership", "help_to_buy", "right_to_buy",
+        "private_treaty",
+        "auction",
+        "tender",
+        "shared_ownership",
+        "help_to_buy",
+        "right_to_buy",
     ],
     "valuation_method": [
-        "comparable", "income_approach", "cost_approach",
-        "automated_valuation", "RICS_survey",
+        "comparable",
+        "income_approach",
+        "cost_approach",
+        "automated_valuation",
+        "RICS_survey",
     ],
     "mortgage_status": [
-        "no_mortgage", "mortgage_agreed", "mortgage_applied",
-        "awaiting_valuation", "exchanged", "completed",
+        "no_mortgage",
+        "mortgage_agreed",
+        "mortgage_applied",
+        "awaiting_valuation",
+        "exchanged",
+        "completed",
     ],
     "survey_type": [
-        "condition_report", "homebuyer_report",
-        "full_structural", "new_build_snagging", "valuation_only",
+        "condition_report",
+        "homebuyer_report",
+        "full_structural",
+        "new_build_snagging",
+        "valuation_only",
     ],
     # ── Retail / FMCG ─────────────────────────────────────────────────────
     "promotion_type": [
-        "percentage_off", "fixed_amount_off", "buy_one_get_one",
-        "multibuy", "bundle", "free_gift", "loyalty_points",
-        "flash_sale", "clearance", "member_exclusive",
+        "percentage_off",
+        "fixed_amount_off",
+        "buy_one_get_one",
+        "multibuy",
+        "bundle",
+        "free_gift",
+        "loyalty_points",
+        "flash_sale",
+        "clearance",
+        "member_exclusive",
     ],
     "return_policy": ["14_day", "28_day", "60_day", "90_day", "no_return"],
     "fulfilment_type": [
-        "standard_delivery", "next_day", "same_day", "click_and_collect",
-        "locker_pickup", "express_international", "economy_international",
+        "standard_delivery",
+        "next_day",
+        "same_day",
+        "click_and_collect",
+        "locker_pickup",
+        "express_international",
+        "economy_international",
     ],
     "merchandising_zone": [
-        "end_cap", "mid_aisle", "checkout", "entrance",
-        "promotional_bay", "online_homepage", "category_page",
+        "end_cap",
+        "mid_aisle",
+        "checkout",
+        "entrance",
+        "promotional_bay",
+        "online_homepage",
+        "category_page",
     ],
     "demand_class": ["A", "B", "C", "D"],
     "replenishment_method": [
-        "min_max", "reorder_point", "just_in_time",
-        "vendor_managed", "consignment", "make_to_order",
+        "min_max",
+        "reorder_point",
+        "just_in_time",
+        "vendor_managed",
+        "consignment",
+        "make_to_order",
     ],
     # ── Domain-specific name pools (used by non-person name router) ────────
     "item_name": [
-        "Widget Pro", "Cable Type-C", "Bracket M8", "Connector RJ45",
-        "Filter Cartridge", "Sensor Module", "Panel Board A3", "Gasket Kit",
-        "Bearing Assembly", "Drive Belt", "Nozzle 10mm", "Valve Body",
-        "Relay Switch", "Fuse 15A", "Display Unit", "Power Supply 500W",
-        "Pump Motor", "Heat Sink", "Circuit Board", "Control Unit",
-        "Standard Widget", "Premium Widget", "Heavy Duty Bracket",
-        "Precision Valve", "Industrial Pump", "Safety Harness",
-        "Thermal Pad", "Optical Lens", "Adhesive Strip", "Mounting Plate",
+        "Widget Pro",
+        "Cable Type-C",
+        "Bracket M8",
+        "Connector RJ45",
+        "Filter Cartridge",
+        "Sensor Module",
+        "Panel Board A3",
+        "Gasket Kit",
+        "Bearing Assembly",
+        "Drive Belt",
+        "Nozzle 10mm",
+        "Valve Body",
+        "Relay Switch",
+        "Fuse 15A",
+        "Display Unit",
+        "Power Supply 500W",
+        "Pump Motor",
+        "Heat Sink",
+        "Circuit Board",
+        "Control Unit",
+        "Standard Widget",
+        "Premium Widget",
+        "Heavy Duty Bracket",
+        "Precision Valve",
+        "Industrial Pump",
+        "Safety Harness",
+        "Thermal Pad",
+        "Optical Lens",
+        "Adhesive Strip",
+        "Mounting Plate",
     ],
     "product_name": [
-        "Widget Pro", "Cable Type-C", "Bracket M8", "Connector RJ45",
-        "Filter Cartridge", "Sensor Module", "Panel Board A3", "Gasket Kit",
-        "Bearing Assembly", "Drive Belt", "Standard Widget", "Premium Widget",
+        "Widget Pro",
+        "Cable Type-C",
+        "Bracket M8",
+        "Connector RJ45",
+        "Filter Cartridge",
+        "Sensor Module",
+        "Panel Board A3",
+        "Gasket Kit",
+        "Bearing Assembly",
+        "Drive Belt",
+        "Standard Widget",
+        "Premium Widget",
     ],
     "location_name": [
-        "Warehouse A", "Warehouse B", "Distribution Centre East",
-        "Distribution Centre West", "Main Store", "Outlet South",
-        "Fulfilment Hub", "Regional Depot", "Sorting Facility",
-        "Returns Processing", "Cold Storage Unit", "Bonded Warehouse",
-        "Cross-Dock Terminal", "Service Centre", "Assembly Plant 1",
-        "Head Office", "Branch North", "Branch South",
+        "Warehouse A",
+        "Warehouse B",
+        "Distribution Centre East",
+        "Distribution Centre West",
+        "Main Store",
+        "Outlet South",
+        "Fulfilment Hub",
+        "Regional Depot",
+        "Sorting Facility",
+        "Returns Processing",
+        "Cold Storage Unit",
+        "Bonded Warehouse",
+        "Cross-Dock Terminal",
+        "Service Centre",
+        "Assembly Plant 1",
+        "Head Office",
+        "Branch North",
+        "Branch South",
     ],
     "company_name": [
-        "Acme Corp", "GlobalTech Ltd", "Pinnacle Solutions",
-        "NextWave Industries", "Sterling Partners", "Atlas Manufacturing",
-        "Summit Logistics", "Vanguard Supply Co", "Meridian Trading",
-        "Pacific Wholesale", "Horizon Electronics", "Apex Components",
-        "Delta Materials", "Omega Precision", "Quantum Systems",
-        "Nordic Supplies", "Phoenix Distribution", "Titan Enterprises",
-        "BlueChip Trading", "Pioneer Industrial",
+        "Acme Corp",
+        "GlobalTech Ltd",
+        "Pinnacle Solutions",
+        "NextWave Industries",
+        "Sterling Partners",
+        "Atlas Manufacturing",
+        "Summit Logistics",
+        "Vanguard Supply Co",
+        "Meridian Trading",
+        "Pacific Wholesale",
+        "Horizon Electronics",
+        "Apex Components",
+        "Delta Materials",
+        "Omega Precision",
+        "Quantum Systems",
+        "Nordic Supplies",
+        "Phoenix Distribution",
+        "Titan Enterprises",
+        "BlueChip Trading",
+        "Pioneer Industrial",
     ],
     "brand_name": [
-        "ProLine", "TechVault", "EcoSmart", "PureCore", "MaxDrive",
-        "SwiftEdge", "NovaPrime", "ZenithPlus", "CoreTech", "AquaFlow",
-        "SteelGuard", "VoltMax", "OptiGrade", "CloudNine", "IronEdge",
+        "ProLine",
+        "TechVault",
+        "EcoSmart",
+        "PureCore",
+        "MaxDrive",
+        "SwiftEdge",
+        "NovaPrime",
+        "ZenithPlus",
+        "CoreTech",
+        "AquaFlow",
+        "SteelGuard",
+        "VoltMax",
+        "OptiGrade",
+        "CloudNine",
+        "IronEdge",
     ],
     # ── Telecom Extended Pools ─────────────────────────────────────────────
     "apn": [
-        "internet", "mms", "wap.vodafone.co.uk",
-        "ee.co.uk", "three.co.uk", "o2.co.uk",
-        "mobile.bt.com", "globaldata.vodafone.com",
-        "iot.1nce.net", "super.telstra.com",
+        "internet",
+        "mms",
+        "wap.vodafone.co.uk",
+        "ee.co.uk",
+        "three.co.uk",
+        "o2.co.uk",
+        "mobile.bt.com",
+        "globaldata.vodafone.com",
+        "iot.1nce.net",
+        "super.telstra.com",
     ],
     "network_type": [
-        "2G_GSM", "2G_GPRS", "2G_EDGE",
-        "3G_UMTS", "3G_HSPA", "3G_HSPA+",
-        "4G_LTE", "4G_LTE-A", "4G_LTE-A_Pro",
-        "5G_NSA", "5G_SA", "5G_mmWave",
-        "WiFi", "WiFi_Calling", "VoLTE", "VoWiFi",
+        "2G_GSM",
+        "2G_GPRS",
+        "2G_EDGE",
+        "3G_UMTS",
+        "3G_HSPA",
+        "3G_HSPA+",
+        "4G_LTE",
+        "4G_LTE-A",
+        "4G_LTE-A_Pro",
+        "5G_NSA",
+        "5G_SA",
+        "5G_mmWave",
+        "WiFi",
+        "WiFi_Calling",
+        "VoLTE",
+        "VoWiFi",
     ],
     "call_type": [
-        "voice_mo", "voice_mt",
-        "sms_mo", "sms_mt",
-        "mms_mo", "mms_mt",
-        "data_session", "volte_mo", "volte_mt",
-        "vowifi_mo", "vowifi_mt",
-        "roaming_mo", "roaming_mt",
-        "premium_rate", "international_mo",
+        "voice_mo",
+        "voice_mt",
+        "sms_mo",
+        "sms_mt",
+        "mms_mo",
+        "mms_mt",
+        "data_session",
+        "volte_mo",
+        "volte_mt",
+        "vowifi_mo",
+        "vowifi_mt",
+        "roaming_mo",
+        "roaming_mt",
+        "premium_rate",
+        "international_mo",
         "emergency_call",
     ],
     "termination_reason": [
-        "normal_clearing", "busy", "no_answer",
-        "congestion", "call_rejected", "number_changed",
-        "destination_out_of_order", "invalid_number",
-        "facility_rejected", "response_to_status_enquiry",
-        "normal_unspecified", "radio_link_failure",
+        "normal_clearing",
+        "busy",
+        "no_answer",
+        "congestion",
+        "call_rejected",
+        "number_changed",
+        "destination_out_of_order",
+        "invalid_number",
+        "facility_rejected",
+        "response_to_status_enquiry",
+        "normal_unspecified",
+        "radio_link_failure",
         "handover_failure",
     ],
     "event_type": [
-        "call_attempt", "call_connected", "call_ended",
-        "sms_sent", "sms_delivered", "sms_failed",
-        "data_session_start", "data_session_end",
-        "handover", "cell_reselection",
-        "attach", "detach", "location_update",
-        "pdp_context_activate", "pdp_context_deactivate",
-        "roaming_start", "roaming_end",
-        "sim_swap", "imei_change", "plan_change",
-        "topup", "bundle_activated", "bundle_expired",
-        "payment_received", "payment_failed",
-        "service_barred", "service_unbarred",
-        "number_port_in", "number_port_out",
+        "call_attempt",
+        "call_connected",
+        "call_ended",
+        "sms_sent",
+        "sms_delivered",
+        "sms_failed",
+        "data_session_start",
+        "data_session_end",
+        "handover",
+        "cell_reselection",
+        "attach",
+        "detach",
+        "location_update",
+        "pdp_context_activate",
+        "pdp_context_deactivate",
+        "roaming_start",
+        "roaming_end",
+        "sim_swap",
+        "imei_change",
+        "plan_change",
+        "topup",
+        "bundle_activated",
+        "bundle_expired",
+        "payment_received",
+        "payment_failed",
+        "service_barred",
+        "service_unbarred",
+        "number_port_in",
+        "number_port_out",
     ],
     "sim_status": [
-        "active", "inactive", "suspended", "barred",
-        "terminated", "stolen", "lost", "ported_out",
-        "replacement_pending", "test",
+        "active",
+        "inactive",
+        "suspended",
+        "barred",
+        "terminated",
+        "stolen",
+        "lost",
+        "ported_out",
+        "replacement_pending",
+        "test",
     ],
     "port_status": [
-        "not_porting", "port_requested", "port_in_progress",
-        "ported_in", "ported_out", "port_rejected", "port_cancelled",
+        "not_porting",
+        "port_requested",
+        "port_in_progress",
+        "ported_in",
+        "ported_out",
+        "port_rejected",
+        "port_cancelled",
     ],
     "service_class": [
-        "voice", "data", "sms", "mms", "roaming",
-        "international", "premium_rate", "directory_enquiry",
-        "emergency", "iot", "m2m", "nb_iot", "lte_m",
+        "voice",
+        "data",
+        "sms",
+        "mms",
+        "roaming",
+        "international",
+        "premium_rate",
+        "directory_enquiry",
+        "emergency",
+        "iot",
+        "m2m",
+        "nb_iot",
+        "lte_m",
     ],
     "barring_type": [
-        "outgoing_all", "outgoing_international",
+        "outgoing_all",
+        "outgoing_international",
         "outgoing_international_except_home",
-        "incoming_all", "incoming_when_roaming",
-        "premium_rate_outgoing", "premium_rate_incoming",
+        "incoming_all",
+        "incoming_when_roaming",
+        "premium_rate_outgoing",
+        "premium_rate_incoming",
     ],
     "roaming_zone": [
-        "domestic", "EU", "ROW_zone_1", "ROW_zone_2",
-        "ROW_zone_3", "USA_Canada", "Australia_NZ",
-        "Rest_of_World", "restricted",
+        "domestic",
+        "EU",
+        "ROW_zone_1",
+        "ROW_zone_2",
+        "ROW_zone_3",
+        "USA_Canada",
+        "Australia_NZ",
+        "Rest_of_World",
+        "restricted",
     ],
     "handset_os": [
-        "iOS_17", "iOS_16", "iOS_15",
-        "Android_14", "Android_13", "Android_12",
-        "HarmonyOS_4", "KaiOS_3",
+        "iOS_17",
+        "iOS_16",
+        "iOS_15",
+        "Android_14",
+        "Android_13",
+        "Android_12",
+        "HarmonyOS_4",
+        "KaiOS_3",
     ],
     "handset_manufacturer": [
-        "Apple", "Samsung", "Google", "OnePlus", "Xiaomi",
-        "Huawei", "Nokia", "Motorola", "Sony", "OPPO",
-        "Vivo", "Realme", "Nothing", "Fairphone",
+        "Apple",
+        "Samsung",
+        "Google",
+        "OnePlus",
+        "Xiaomi",
+        "Huawei",
+        "Nokia",
+        "Motorola",
+        "Sony",
+        "OPPO",
+        "Vivo",
+        "Realme",
+        "Nothing",
+        "Fairphone",
     ],
     "churn_reason": [
-        "price_too_high", "poor_coverage", "poor_customer_service",
-        "better_competitor_offer", "handset_upgrade_elsewhere",
-        "moving_abroad", "no_longer_needed", "deceased",
-        "business_closure", "consolidating_plans", "unknown",
+        "price_too_high",
+        "poor_coverage",
+        "poor_customer_service",
+        "better_competitor_offer",
+        "handset_upgrade_elsewhere",
+        "moving_abroad",
+        "no_longer_needed",
+        "deceased",
+        "business_closure",
+        "consolidating_plans",
+        "unknown",
     ],
     "complaint_category": [
-        "billing_error", "coverage_complaint", "service_quality",
-        "data_speed", "handset_fault", "staff_conduct",
-        "mis_selling", "port_delay", "contract_dispute",
-        "roaming_charge_dispute", "number_not_working",
+        "billing_error",
+        "coverage_complaint",
+        "service_quality",
+        "data_speed",
+        "handset_fault",
+        "staff_conduct",
+        "mis_selling",
+        "port_delay",
+        "contract_dispute",
+        "roaming_charge_dispute",
+        "number_not_working",
     ],
     "drop_call_indicator": ["Y", "N"],
     "codec": [
-        "AMR-NB", "AMR-WB", "EVS", "OPUS",
-        "G.711", "G.722", "G.729",
+        "AMR-NB",
+        "AMR-WB",
+        "EVS",
+        "OPUS",
+        "G.711",
+        "G.722",
+        "G.729",
     ],
     "qos_class": ["GBR", "Non-GBR", "Delay-Critical_GBR"],
     "bearer_type": [
-        "default", "dedicated_GBR", "dedicated_Non-GBR",
-        "IMS_signalling", "IMS_voice", "IMS_video",
+        "default",
+        "dedicated_GBR",
+        "dedicated_Non-GBR",
+        "IMS_signalling",
+        "IMS_voice",
+        "IMS_video",
     ],
 }
 
@@ -1352,23 +1891,23 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
 
 _MCC_MNC_POOL: List[Tuple[str, str, str, str]] = [
     # (MCC, MNC, operator, country)
-    ("234", "10", "O2 UK",          "GB"),
-    ("234", "20", "Three UK",       "GB"),
-    ("234", "30", "EE",             "GB"),
-    ("234", "15", "Vodafone UK",    "GB"),
-    ("310", "410", "AT&T",          "US"),
-    ("310", "260", "T-Mobile US",   "US"),
-    ("311", "480", "Verizon",       "US"),
-    ("262", "01", "T-Mobile DE",    "DE"),
-    ("262", "02", "Vodafone DE",    "DE"),
-    ("208", "10", "SFR",            "FR"),
-    ("208", "20", "Bouygues",       "FR"),
-    ("404", "20", "Airtel India",   "IN"),
-    ("404", "45", "Airtel India",   "IN"),
-    ("505", "01", "Telstra",        "AU"),
-    ("505", "03", "Vodafone AU",    "AU"),
-    ("440", "10", "NTT Docomo",     "JP"),
-    ("440", "20", "SoftBank",       "JP"),
+    ("234", "10", "O2 UK", "GB"),
+    ("234", "20", "Three UK", "GB"),
+    ("234", "30", "EE", "GB"),
+    ("234", "15", "Vodafone UK", "GB"),
+    ("310", "410", "AT&T", "US"),
+    ("310", "260", "T-Mobile US", "US"),
+    ("311", "480", "Verizon", "US"),
+    ("262", "01", "T-Mobile DE", "DE"),
+    ("262", "02", "Vodafone DE", "DE"),
+    ("208", "10", "SFR", "FR"),
+    ("208", "20", "Bouygues", "FR"),
+    ("404", "20", "Airtel India", "IN"),
+    ("404", "45", "Airtel India", "IN"),
+    ("505", "01", "Telstra", "AU"),
+    ("505", "03", "Vodafone AU", "AU"),
+    ("440", "10", "NTT Docomo", "JP"),
+    ("440", "20", "SoftBank", "JP"),
 ]
 
 # Fast lookup: MCC → list of (MNC, operator, country) for correlation
@@ -1439,20 +1978,49 @@ _CORRELATED_POOLS: Dict[Tuple[str, str], Dict[str, Any]] = {
     },
     # ── Currency by country ───────────────────────────────────────────────
     ("country_code", "currency"): {
-        "GB": "GBP", "US": "USD", "DE": "EUR", "FR": "EUR", "ES": "EUR",
-        "IT": "EUR", "NL": "EUR", "AU": "AUD", "CA": "CAD", "JP": "JPY",
-        "BR": "BRL", "IN": "INR", "CN": "CNY", "KR": "KRW", "MX": "MXN",
-        "SE": "SEK", "NO": "NOK", "DK": "DKK", "CH": "CHF",
+        "GB": "GBP",
+        "US": "USD",
+        "DE": "EUR",
+        "FR": "EUR",
+        "ES": "EUR",
+        "IT": "EUR",
+        "NL": "EUR",
+        "AU": "AUD",
+        "CA": "CAD",
+        "JP": "JPY",
+        "BR": "BRL",
+        "IN": "INR",
+        "CN": "CNY",
+        "KR": "KRW",
+        "MX": "MXN",
+        "SE": "SEK",
+        "NO": "NOK",
+        "DK": "DKK",
+        "CH": "CHF",
     },
     ("country_code", "currency_code"): {
-        "GB": "GBP", "US": "USD", "DE": "EUR", "FR": "EUR",
-        "AU": "AUD", "CA": "CAD", "JP": "JPY", "IN": "INR",
+        "GB": "GBP",
+        "US": "USD",
+        "DE": "EUR",
+        "FR": "EUR",
+        "AU": "AUD",
+        "CA": "CAD",
+        "JP": "JPY",
+        "IN": "INR",
     },
     # ── State/region by country ───────────────────────────────────────────
     ("country_code", "state"): {
         "US": [
-            "California", "Texas", "New York", "Florida", "Illinois",
-            "Pennsylvania", "Ohio", "Georgia", "Michigan", "North Carolina",
+            "California",
+            "Texas",
+            "New York",
+            "Florida",
+            "Illinois",
+            "Pennsylvania",
+            "Ohio",
+            "Georgia",
+            "Michigan",
+            "North Carolina",
         ],
         "AU": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
         "CA": ["Ontario", "Quebec", "British Columbia", "Alberta", "Manitoba"],
@@ -1470,10 +2038,10 @@ _CORRELATED_POOLS: Dict[Tuple[str, str], Dict[str, Any]] = {
     },
     # ── National ID format by country ─────────────────────────────────────
     ("country_code", "national_id"): {
-        "GB": "??######?",          # NI number: AB123456C
-        "US": "###-##-####",        # SSN
-        "DE": "###########",        # 11-digit
-        "IN": "############",       # Aadhaar (12-digit)
+        "GB": "??######?",  # NI number: AB123456C
+        "US": "###-##-####",  # SSN
+        "DE": "###########",  # 11-digit
+        "IN": "############",  # Aadhaar (12-digit)
     },
     # ── VAT number format by country ──────────────────────────────────────
     ("country_code", "vat_number"): {
@@ -1502,7 +2070,6 @@ _CORRELATED_POOLS: Dict[Tuple[str, str], Dict[str, Any]] = {
     # ── Telecom lookups ───────────────────────────────────────────────────
     ("mcc", "country_code"): {mcc: cc for mcc, _, _, cc in _MCC_MNC_POOL},
     ("country_code", "mcc"): {cc: mcc for mcc, _, _, cc in _MCC_MNC_POOL},
-    
     # Format MSISDN based on country code (or MCC):
     ("country_code", "msisdn"): {
         "GB": "447#########",
@@ -1515,8 +2082,12 @@ _CORRELATED_POOLS: Dict[Tuple[str, str], Dict[str, Any]] = {
     },
     ("mcc", "msisdn"): {
         mcc: {
-            "GB": "447#########", "US": "1##########", "DE": "4915########",
-            "FR": "336########", "IN": "91##########", "AU": "614########",
+            "GB": "447#########",
+            "US": "1##########",
+            "DE": "4915########",
+            "FR": "336########",
+            "IN": "91##########",
+            "AU": "614########",
             "JP": "8190########",
         }.get(cc, "##########")
         for mcc, _, _, cc in _MCC_MNC_POOL
@@ -1530,42 +2101,42 @@ _CORRELATED_POOLS: Dict[Tuple[str, str], Dict[str, Any]] = {
 
 _LOCALE_FORMATS: Dict[str, Dict[str, str]] = {
     "GB": {
-        "phone":        "+44 7### ######",
-        "postcode":     "?#? #??",
-        "national_id":  "??######?",
-        "vat_number":   "GB#########",
+        "phone": "+44 7### ######",
+        "postcode": "?#? #??",
+        "national_id": "??######?",
+        "vat_number": "GB#########",
         "bank_account": "########",
-        "sort_code":    "##-##-##",
-        "date_format":  "DD/MM/YYYY",
+        "sort_code": "##-##-##",
+        "date_format": "DD/MM/YYYY",
     },
     "US": {
-        "phone":        "+1 (###) ###-####",
-        "postcode":     "#####",
-        "national_id":  "###-##-####",
-        "vat_number":   "##-#######",
-        "date_format":  "MM/DD/YYYY",
+        "phone": "+1 (###) ###-####",
+        "postcode": "#####",
+        "national_id": "###-##-####",
+        "vat_number": "##-#######",
+        "date_format": "MM/DD/YYYY",
     },
     "DE": {
-        "phone":        "+49 ### #######",
-        "postcode":     "#####",
-        "national_id":  "###########",
-        "vat_number":   "DE#########",
-        "iban":         "DE####################",
-        "date_format":  "DD.MM.YYYY",
+        "phone": "+49 ### #######",
+        "postcode": "#####",
+        "national_id": "###########",
+        "vat_number": "DE#########",
+        "iban": "DE####################",
+        "date_format": "DD.MM.YYYY",
     },
     "FR": {
-        "phone":        "+33 # ## ## ## ##",
-        "postcode":     "#####",
-        "vat_number":   "FR??#########",
-        "iban":         "FR#########################",
-        "date_format":  "DD/MM/YYYY",
+        "phone": "+33 # ## ## ## ##",
+        "postcode": "#####",
+        "vat_number": "FR??#########",
+        "iban": "FR#########################",
+        "date_format": "DD/MM/YYYY",
     },
     "IN": {
-        "phone":        "+91 #####-#####",
-        "postcode":     "######",
-        "national_id":  "############",
-        "vat_number":   "##?????####?#?#",
-        "date_format":  "DD/MM/YYYY",
+        "phone": "+91 #####-#####",
+        "postcode": "######",
+        "national_id": "############",
+        "vat_number": "##?????####?#?#",
+        "date_format": "DD/MM/YYYY",
     },
 }
 
@@ -1574,8 +2145,12 @@ _LOCALE_FORMATS: Dict[str, Dict[str, str]] = {
 _LOCALE_FORMATS_BY_MCC: Dict[str, Dict[str, str]] = {
     mcc: {
         "msisdn": {
-            "GB": "447#########", "US": "1##########", "DE": "4915########",
-            "FR": "336########", "IN": "91##########", "AU": "614########",
+            "GB": "447#########",
+            "US": "1##########",
+            "DE": "4915########",
+            "FR": "336########",
+            "IN": "91##########",
+            "AU": "614########",
             "JP": "8190########",
         }.get(cc, "##########")
     }
@@ -1587,11 +2162,26 @@ _LOCALE_FORMATS_BY_MCC: Dict[str, Dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 _COUNTRY_CURRENCY: Dict[str, str] = {
-    "GB": "GBP", "US": "USD", "DE": "EUR", "FR": "EUR",
-    "ES": "EUR", "IT": "EUR", "NL": "EUR", "AU": "AUD",
-    "CA": "CAD", "JP": "JPY", "IN": "INR", "BR": "BRL",
-    "MX": "MXN", "CN": "CNY", "KR": "KRW", "SE": "SEK",
-    "NO": "NOK", "DK": "DKK", "CH": "CHF", "NZ": "NZD",
+    "GB": "GBP",
+    "US": "USD",
+    "DE": "EUR",
+    "FR": "EUR",
+    "ES": "EUR",
+    "IT": "EUR",
+    "NL": "EUR",
+    "AU": "AUD",
+    "CA": "CAD",
+    "JP": "JPY",
+    "IN": "INR",
+    "BR": "BRL",
+    "MX": "MXN",
+    "CN": "CNY",
+    "KR": "KRW",
+    "SE": "SEK",
+    "NO": "NOK",
+    "DK": "DKK",
+    "CH": "CHF",
+    "NZ": "NZD",
 }
 
 
@@ -1675,71 +2265,71 @@ def _match_null_probability(name_lower: str) -> Optional[float]:
 # fixes any violations by adjusting the later field to be >= the earlier field.
 _TEMPORAL_ORDERING_RULES: List[Tuple[str, str, str]] = [
     # (earlier_field, later_field, relationship)
-    ("created_at",      "updated_at",       "lte"),
-    ("created_at",      "deleted_at",       "lte"),
-    ("order_date",      "ship_date",        "lte"),
-    ("ship_date",       "delivered_at",     "lte"),
-    ("order_date",      "delivered_at",     "lte"),
-    ("start_date",      "end_date",         "lte"),
-    ("valid_from",      "valid_to",         "lte"),
-    ("hired_at",        "terminated_at",    "lte"),
-    ("born_at",         "hired_at",         "lte"),
-    ("issued_at",       "expires_at",       "lte"),
-    ("submitted_at",    "approved_at",      "lte"),
-    ("approved_at",     "completed_at",     "lte"),
-    ("opened_at",       "closed_at",        "lte"),
-    ("scheduled_at",    "started_at",       "lte"),
-    ("started_at",      "ended_at",         "lte"),
-    ("first_seen_at",   "last_seen_at",     "lte"),
-    ("first_order_at",  "last_order_at",    "lte"),
+    ("created_at", "updated_at", "lte"),
+    ("created_at", "deleted_at", "lte"),
+    ("order_date", "ship_date", "lte"),
+    ("ship_date", "delivered_at", "lte"),
+    ("order_date", "delivered_at", "lte"),
+    ("start_date", "end_date", "lte"),
+    ("valid_from", "valid_to", "lte"),
+    ("hired_at", "terminated_at", "lte"),
+    ("born_at", "hired_at", "lte"),
+    ("issued_at", "expires_at", "lte"),
+    ("submitted_at", "approved_at", "lte"),
+    ("approved_at", "completed_at", "lte"),
+    ("opened_at", "closed_at", "lte"),
+    ("scheduled_at", "started_at", "lte"),
+    ("started_at", "ended_at", "lte"),
+    ("first_seen_at", "last_seen_at", "lte"),
+    ("first_order_at", "last_order_at", "lte"),
     # ── Telecom ───────────────────────────────────────────────────────────
-    ("call_start_time",     "call_end_time",        "lte"),
-    ("data_session_start",  "data_session_end",     "lte"),
+    ("call_start_time", "call_end_time", "lte"),
+    ("data_session_start", "data_session_end", "lte"),
     ("sim_activation_date", "sim_termination_date", "lte"),
-    ("contract_start_date", "contract_end_date",    "lte"),
-    ("port_request_date",   "port_completion_date", "lte"),
-    ("complaint_raised_at", "complaint_resolved_at","lte"),
-    ("invoice_date",        "payment_due_date",     "lte"),
-    ("payment_due_date",    "payment_received_date","lte"),
+    ("contract_start_date", "contract_end_date", "lte"),
+    ("port_request_date", "port_completion_date", "lte"),
+    ("complaint_raised_at", "complaint_resolved_at", "lte"),
+    ("invoice_date", "payment_due_date", "lte"),
+    ("payment_due_date", "payment_received_date", "lte"),
 ]
 
 # How far apart related dates should be: (min_minutes, max_minutes).
 # Used to generate a realistic gap when the later field needs adjustment.
 _TEMPORAL_GAPS: Dict[Tuple[str, str], Tuple[int, int]] = {
-    ("order_date",   "ship_date"):      (60,    4320),      # 1 hr to 3 days
-    ("ship_date",    "delivered_at"):    (1440,  20160),     # 1 day to 2 weeks
-    ("created_at",   "updated_at"):     (0,     525600),    # 0 to 1 year
-    ("submitted_at", "approved_at"):    (60,    10080),     # 1 hr to 1 week
-    ("started_at",   "ended_at"):       (5,     480),       # 5 mins to 8 hrs
-    ("issued_at",    "expires_at"):     (43800, 525600),    # 1 month to 1 year
-    ("hired_at",     "terminated_at"):  (43800, 3153600),   # 1 month to 6 years
-    ("opened_at",    "closed_at"):      (30,    43200),     # 30 mins to 30 days
-    ("scheduled_at", "started_at"):     (0,     1440),      # 0 to 1 day
+    ("order_date", "ship_date"): (60, 4320),  # 1 hr to 3 days
+    ("ship_date", "delivered_at"): (1440, 20160),  # 1 day to 2 weeks
+    ("created_at", "updated_at"): (0, 525600),  # 0 to 1 year
+    ("submitted_at", "approved_at"): (60, 10080),  # 1 hr to 1 week
+    ("started_at", "ended_at"): (5, 480),  # 5 mins to 8 hrs
+    ("issued_at", "expires_at"): (43800, 525600),  # 1 month to 1 year
+    ("hired_at", "terminated_at"): (43800, 3153600),  # 1 month to 6 years
+    ("opened_at", "closed_at"): (30, 43200),  # 30 mins to 30 days
+    ("scheduled_at", "started_at"): (0, 1440),  # 0 to 1 day
     # ── Telecom ───────────────────────────────────────────────────────────
-    ("call_start_time",    "call_end_time"):         (0,     120),       # 0 to 2 hrs
-    ("data_session_start", "data_session_end"):      (0,     1440),      # 0 to 1 day
-    ("port_request_date",  "port_completion_date"):  (1440,  10080),     # 1 to 7 days
-    ("invoice_date",       "payment_due_date"):      (20160, 43200),     # 14 to 30 days
+    ("call_start_time", "call_end_time"): (0, 120),  # 0 to 2 hrs
+    ("data_session_start", "data_session_end"): (0, 1440),  # 0 to 1 day
+    ("port_request_date", "port_completion_date"): (1440, 10080),  # 1 to 7 days
+    ("invoice_date", "payment_due_date"): (20160, 43200),  # 14 to 30 days
 }
 
 # Age-based constraints for date-of-birth style fields.
 _AGE_CONSTRAINTS: Dict[str, Dict[str, int]] = {
     "date_of_birth": {"min_age_years": 18, "max_age_years": 85},
-    "birth_date":    {"min_age_years": 18, "max_age_years": 85},
-    "dob":           {"min_age_years": 18, "max_age_years": 85},
+    "birth_date": {"min_age_years": 18, "max_age_years": 85},
+    "dob": {"min_age_years": 18, "max_age_years": 85},
     "incorporation_date": {"min_age_years": 0, "max_age_years": 50},
 }
 
 # Business-hours awareness: True = cluster 08:00-18:00, False = any time.
 _BUSINESS_HOURS_FIELDS: Dict[str, bool] = {
-    "submitted_at":    True,
-    "approved_at":     True,
-    "support_opened":  True,
-    "invoice_date":    True,
-    "payment_date":    True,
+    "submitted_at": True,
+    "approved_at": True,
+    "support_opened": True,
+    "invoice_date": True,
+    "payment_date": True,
     "order_placed_at": False,
-    "login_at":        False,
-    "event_time":      False,
+    "login_at": False,
+    "event_time": False,
 }
 
 # Fields unlikely to fall on weekends.
@@ -1792,7 +2382,6 @@ _FIELD_CONSISTENCY_RULES: Dict[str, Dict[str, Any]] = {
         "correlates_with": "country_name",
         "format_lookup": "_GEO_LOOKUP_BY_NAME",
     },
-
     # If status is 'deleted', deleted_at must not be null
     "deleted_at": {
         "condition_field": "status",
@@ -1882,10 +2471,10 @@ _FIELD_CONSISTENCY_RULES: Dict[str, Dict[str, Any]] = {
 _NUMERIC_CONSISTENCY: Dict[Tuple[str, str], str] = {
     ("quantity_committed", "quantity_on_hand"): "lte",
     ("quantity_available", "quantity_on_hand"): "lte",
-    ("discount_amount",    "subtotal"):        "lte",
-    ("refund_amount",      "order_total"):     "lte",
-    ("paid_amount",        "invoice_amount"):  "lte",
-    ("used_quantity",      "total_quantity"):  "lte",
+    ("discount_amount", "subtotal"): "lte",
+    ("refund_amount", "order_total"): "lte",
+    ("paid_amount", "invoice_amount"): "lte",
+    ("used_quantity", "total_quantity"): "lte",
 }
 
 
@@ -1896,37 +2485,37 @@ _NUMERIC_CONSISTENCY: Dict[Tuple[str, str], str] = {
 # When generating string ID fields, use these formatted patterns instead of
 # random noise.  {:06d} is replaced with a zero-padded random integer.
 _ENTITY_ID_PATTERNS: Dict[str, str] = {
-    "customer_id":  "CUST-{:06d}",
-    "order_id":     "ORD-{:06d}",
-    "product_id":   "PROD-{:06d}",
-    "employee_id":  "EMP-{:06d}",
-    "supplier_id":  "SUP-{:06d}",
-    "invoice_id":   "INV-{:06d}",
-    "ticket_id":    "TKT-{:06d}",
-    "campaign_id":  "CMP-{:06d}",
-    "session_id":   "SES-{:06d}",
-    "device_id":    "DEV-{:06d}",
-    "shipment_id":  "SHP-{:06d}",
-    "patient_id":   "PAT-{:06d}",
-    "account_id":   "ACC-{:06d}",
-    "contract_id":  "CTR-{:06d}",
-    "project_id":   "PRJ-{:06d}",
-    "user_id":      "USR-{:06d}",
+    "customer_id": "CUST-{:06d}",
+    "order_id": "ORD-{:06d}",
+    "product_id": "PROD-{:06d}",
+    "employee_id": "EMP-{:06d}",
+    "supplier_id": "SUP-{:06d}",
+    "invoice_id": "INV-{:06d}",
+    "ticket_id": "TKT-{:06d}",
+    "campaign_id": "CMP-{:06d}",
+    "session_id": "SES-{:06d}",
+    "device_id": "DEV-{:06d}",
+    "shipment_id": "SHP-{:06d}",
+    "patient_id": "PAT-{:06d}",
+    "account_id": "ACC-{:06d}",
+    "contract_id": "CTR-{:06d}",
+    "project_id": "PRJ-{:06d}",
+    "user_id": "USR-{:06d}",
 }
 
 # Cardinality hints — used when generating multiple related contracts together.
 # Prevents unrealistic 1:1 when 1:many is expected.
 # (parent_entity, child_entity): (min_children, max_children)
 _CARDINALITY_HINTS: Dict[Tuple[str, str], Tuple[int, int]] = {
-    ("customer",    "order"):          (0, 25),
-    ("customer",    "address"):        (1, 3),
-    ("order",       "order_line"):     (1, 10),
-    ("invoice",     "invoice_line"):   (1, 20),
-    ("product",     "variant"):        (1, 8),
-    ("employee",    "timesheet"):      (0, 52),
-    ("campaign",    "ad_impression"):  (100, 10000),
-    ("ticket",      "comment"):        (0, 15),
-    ("device",      "event"):          (10, 1000),
+    ("customer", "order"): (0, 25),
+    ("customer", "address"): (1, 3),
+    ("order", "order_line"): (1, 10),
+    ("invoice", "invoice_line"): (1, 20),
+    ("product", "variant"): (1, 8),
+    ("employee", "timesheet"): (0, 52),
+    ("campaign", "ad_impression"): (100, 10000),
+    ("ticket", "comment"): (0, 15),
+    ("device", "event"): (10, 1000),
 }
 
 # Pre-built index: match entity ID patterns by suffix (word-boundary aware)
@@ -1946,16 +2535,23 @@ _DISTRIBUTION_PROFILES: Dict[str, Dict[str, Any]] = {
     "status": {
         "distribution": "weighted",
         "weights": {
-            "active": 0.65, "inactive": 0.15, "pending": 0.12,
-            "suspended": 0.05, "deleted": 0.03,
+            "active": 0.65,
+            "inactive": 0.15,
+            "pending": 0.12,
+            "suspended": 0.05,
+            "deleted": 0.03,
         },
     },
     # Order status — most orders are delivered
     "order_status": {
         "distribution": "weighted",
         "weights": {
-            "delivered": 0.70, "processing": 0.12, "shipped": 0.08,
-            "cancelled": 0.06, "refunded": 0.03, "failed": 0.01,
+            "delivered": 0.70,
+            "processing": 0.12,
+            "shipped": 0.08,
+            "cancelled": 0.06,
+            "refunded": 0.03,
+            "failed": 0.01,
         },
     },
     # Ticket priority — most tickets are low/medium
@@ -1966,7 +2562,10 @@ _DISTRIBUTION_PROFILES: Dict[str, Dict[str, Any]] = {
     # Revenue — right-skewed (most small, few large)
     "revenue": {
         "distribution": "lognormal",
-        "mean": 4.5, "std": 1.2, "min": 0.01, "max": 50000,
+        "mean": 4.5,
+        "std": 1.2,
+        "min": 0.01,
+        "max": 50000,
     },
     # CSAT scores pile at 4 and 5
     "satisfaction_score": {
@@ -1976,7 +2575,8 @@ _DISTRIBUTION_PROFILES: Dict[str, Dict[str, Any]] = {
     # Churn risk — skewed toward 0 (low risk)
     "churn_risk": {
         "distribution": "beta",
-        "alpha": 1.5, "beta": 5.0,
+        "alpha": 1.5,
+        "beta": 5.0,
     },
     # NPS — bimodal (promoters and detractors)
     "nps_score": {
@@ -1988,16 +2588,25 @@ _DISTRIBUTION_PROFILES: Dict[str, Dict[str, Any]] = {
     # Age — working-age customers
     "age": {
         "distribution": "normal",
-        "mean": 38, "std": 12, "min": 18, "max": 80,
+        "mean": 38,
+        "std": 12,
+        "min": 18,
+        "max": 80,
     },
     # Amount / price — right-skewed
     "amount": {
         "distribution": "lognormal",
-        "mean": 3.5, "std": 1.0, "min": 0.01, "max": 10000,
+        "mean": 3.5,
+        "std": 1.0,
+        "min": 0.01,
+        "max": 10000,
     },
     "price": {
         "distribution": "lognormal",
-        "mean": 3.0, "std": 0.8, "min": 0.01, "max": 999.99,
+        "mean": 3.0,
+        "std": 0.8,
+        "min": 0.01,
+        "max": 999.99,
     },
 }
 
@@ -2025,10 +2634,17 @@ _EDGE_CASE_PROFILES: Dict[str, Dict[str, Any]] = {
     "unicode_injection": {
         "fields": ["name", "full_name", "description", "notes", "address", "comment"],
         "values": [
-            "José García", "Müller, Hans", "Søren Aaberg",
-            "François Dupont", "Ανδρέας Παπαδόπουλος", "张伟",
-            "田中 太郎", "محمد علي", "O'Brien",
-            "St. John-Smith", "McDonald's & Co.",
+            "José García",
+            "Müller, Hans",
+            "Søren Aaberg",
+            "François Dupont",
+            "Ανδρέας Παπαδόπουλος",
+            "张伟",
+            "田中 太郎",
+            "محمد علي",
+            "O'Brien",
+            "St. John-Smith",
+            "McDonald's & Co.",
         ],
     },
     # SQL injection attempts — tests sanitisation
@@ -2066,10 +2682,10 @@ _EDGE_CASE_PROFILES: Dict[str, Dict[str, Any]] = {
     },
     # Format violations
     "format_violations": {
-        "email":    ["notanemail", "@nodomain", "missing@", "spaces in@email.com"],
+        "email": ["notanemail", "@nodomain", "missing@", "spaces in@email.com"],
         "postcode": ["INVALID", "00000", "ABC", "SW1A1A"],
-        "phone":    ["0000", "not-a-phone", "++44", "123"],
-        "iban":     ["GB00000", "not-an-iban", "12345"],
+        "phone": ["0000", "not-a-phone", "++44", "123"],
+        "iban": ["GB00000", "not-an-iban", "12345"],
     },
 }
 
@@ -2543,12 +3159,14 @@ class DataGenerator:
         if ai_sample_pools:
             pool_fields = len(ai_sample_pools)
             pool_values = sum(len(v) for v in ai_sample_pools.values())
-            _gen_logger.info(f"   Source     : AI-generated realistic pools ({pool_fields} fields, {pool_values} values)")
+            _gen_logger.info(
+                f"   Source     : AI-generated realistic pools ({pool_fields} fields, {pool_values} values)"
+            )
         elif getattr(self, "_auto_sample_pools", None):
             file_fields = len(self._auto_sample_pools)
             _gen_logger.info(f"   Source     : File-seeded sample pools ({file_fields} fields from source data)")
         else:
-            _gen_logger.info(f"   Source     : Faker + heuristic generation (no AI or file seeds)")
+            _gen_logger.info("   Source     : Faker + heuristic generation (no AI or file seeds)")
 
         # Log edge case details
         if edge_pools and n_invalid > 0:
@@ -2563,7 +3181,7 @@ class DataGenerator:
                     sample = sample[:57] + "..."
                 _gen_logger.debug(f"     • {fname}: {len(fvals)} cases — e.g. {sample}")
         elif n_invalid > 0:
-            _gen_logger.info(f"   Edge cases : Heuristic-only (no AI edge cases available)")
+            _gen_logger.info("   Edge cases : Heuristic-only (no AI edge cases available)")
 
         valid_records = [
             self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_valid)
@@ -3079,22 +3697,32 @@ class DataGenerator:
     def _detect_triplets(self) -> List[Dict[str, Any]]:
         fields = [f.get("name") for f in self._fields if f.get("name")]
         detected = []
-        
-        START_SUFFIXES  = ["_start", "_start_time", "_start_at", "_begin", "_opened_at"]
-        END_SUFFIXES    = ["_end",   "_end_time",   "_end_at",   "_close", "_closed_at"]
-        DUR_SUFFIXES    = ["_duration", "_duration_seconds", "_duration_minutes",
-                           "_duration_ms", "_length", "_elapsed"]
-        
+
+        START_SUFFIXES = ["_start", "_start_time", "_start_at", "_begin", "_opened_at"]
+        END_SUFFIXES = ["_end", "_end_time", "_end_at", "_close", "_closed_at"]
+        DUR_SUFFIXES = ["_duration", "_duration_seconds", "_duration_minutes", "_duration_ms", "_length", "_elapsed"]
+
         for field in fields:
             for suf in START_SUFFIXES:
                 if field.endswith(suf):
-                    prefix = field[:-len(suf)]
+                    prefix = field[: -len(suf)]
                     end_field = next((f for f in fields for es in END_SUFFIXES if f == prefix + es), None)
-                    dur_field = next((f for f in fields for ds in DUR_SUFFIXES if f.startswith(prefix) and f.endswith(ds.split("_")[-1])), None)
-                    
+                    dur_field = next(
+                        (
+                            f
+                            for f in fields
+                            for ds in DUR_SUFFIXES
+                            if f.startswith(prefix) and f.endswith(ds.split("_")[-1])
+                        ),
+                        None,
+                    )
+
                     if end_field and dur_field:
                         # Match to a config
-                        cfg = next((v for k, v in _TEMPORAL_TRIPLETS.items() if prefix.startswith(k) or k.startswith(prefix)), None)
+                        cfg = next(
+                            (v for k, v in _TEMPORAL_TRIPLETS.items() if prefix.startswith(k) or k.startswith(prefix)),
+                            None,
+                        )
                         if not cfg:
                             # Fallback auto-config
                             cfg = {
@@ -3116,18 +3744,18 @@ class DataGenerator:
 
     def _generate_temporal_triplet(self, cfg: dict, is_valid: bool) -> dict:
         now = datetime.now()
-        
+
         if is_valid:
             # Valid generation
             base = now - timedelta(days=730)  # 2 years
             start_offset = self._rng.randint(0, int((now - base).total_seconds()))
             start = base + timedelta(seconds=start_offset)
-            
+
             if "allowed_durations" in cfg:
                 duration = self._rng.choice(cfg["allowed_durations"])
             else:
                 duration = self._rng.randint(cfg.get("min_duration", 1), cfg.get("max_duration", 86400))
-                
+
             unit = cfg.get("unit", "seconds")
             if unit == "seconds":
                 end = start + timedelta(seconds=duration)
@@ -3139,15 +3767,15 @@ class DataGenerator:
                 end = start + timedelta(days=duration * 30)
             else:
                 end = start + timedelta(seconds=duration)
-                
+
             if cfg.get("nullable_end") and self._rng.random() < 0.15:
                 end = None
                 duration = None
-                
+
             return {
                 cfg["start"]: start.isoformat(),
                 cfg["end"]: end.isoformat() if end else None,
-                cfg["duration"]: duration
+                cfg["duration"]: duration,
             }
         else:
             # Invalid generation
@@ -3157,7 +3785,7 @@ class DataGenerator:
             start = base + timedelta(seconds=start_offset)
             end = None
             duration = None
-            
+
             if pattern == "end_before_start":
                 end = start - timedelta(seconds=self._rng.randint(1, 86400))
             elif pattern == "duration_mismatch":
@@ -3181,16 +3809,12 @@ class DataGenerator:
                 end = start + timedelta(seconds=self._rng.randint(100, 3600))
                 end_iso = end.strftime("%Y-%m-%dT%H:%M:%S")
                 duration = int((end - start).total_seconds())
-                return {
-                    cfg["start"]: start_iso,
-                    cfg["end"]: end_iso,
-                    cfg["duration"]: duration
-                }
-                
+                return {cfg["start"]: start_iso, cfg["end"]: end_iso, cfg["duration"]: duration}
+
             return {
                 cfg["start"]: start.isoformat(),
                 cfg["end"]: end.isoformat() if end else None,
-                cfg["duration"]: duration
+                cfg["duration"]: duration,
             }
 
     def _make_row(
@@ -3457,7 +4081,10 @@ class DataGenerator:
                         if field.get("name") == target:
                             ftype = (field.get("type") or "string").lower()
                             row[target] = self._make_valid_value(
-                                target, ftype, {}, nullable=False,
+                                target,
+                                ftype,
+                                {},
+                                nullable=False,
                             )
                             break
             elif matched and behaviour == "must_be_null":
@@ -3732,10 +4359,19 @@ class DataGenerator:
             # Fields like quantity_on_hand, reorder_point, stock_level are
             # often typed as float/double but represent discrete counts.
             _WHOLE_NUMBER_KEYWORDS = (
-                "quantity", "qty", "count", "units", "stock_level",
-                "reorder_point", "reorder_quantity", "headcount",
-                "num_items", "number_of", "total_items",
-                "preferred_stock", "backordered",
+                "quantity",
+                "qty",
+                "count",
+                "units",
+                "stock_level",
+                "reorder_point",
+                "reorder_quantity",
+                "headcount",
+                "num_items",
+                "number_of",
+                "total_items",
+                "preferred_stock",
+                "backordered",
             )
             if any(kw in name_lower for kw in _WHOLE_NUMBER_KEYWORDS):
                 lo = int(float(min_val)) if min_val is not None else 0
@@ -3826,8 +4462,19 @@ class DataGenerator:
                 return future_dt.isoformat()
 
             # Numeric boundary injection
-            if ftype in ("integer", "int", "int32", "int64", "long",
-                         "double", "float", "float32", "float64", "decimal", "number"):
+            if ftype in (
+                "integer",
+                "int",
+                "int32",
+                "int64",
+                "long",
+                "double",
+                "float",
+                "float32",
+                "float64",
+                "decimal",
+                "number",
+            ):
                 boundary_vals = _EDGE_CASE_PROFILES.get("numeric_boundaries", {}).get("values", [])
                 if boundary_vals:
                     return self._rng.choice(boundary_vals)
@@ -4149,13 +4796,41 @@ class DataGenerator:
         # Fields like item_display_name, location_name, preferred_vendor_name
         # contain "name" but should NOT generate person names.
         _NON_PERSON_NAME_KEYWORDS = {
-            "item", "product", "display", "sku",
-            "location", "warehouse", "store", "facility", "site", "depot",
-            "vendor", "supplier", "company", "org", "organisation",
-            "brand", "manufacturer", "distributor", "partner", "merchant",
-            "category", "channel", "campaign", "project",
-            "plan", "policy", "account", "file", "table", "column",
-            "field", "metric", "event", "model", "template",
+            "item",
+            "product",
+            "display",
+            "sku",
+            "location",
+            "warehouse",
+            "store",
+            "facility",
+            "site",
+            "depot",
+            "vendor",
+            "supplier",
+            "company",
+            "org",
+            "organisation",
+            "brand",
+            "manufacturer",
+            "distributor",
+            "partner",
+            "merchant",
+            "category",
+            "channel",
+            "campaign",
+            "project",
+            "plan",
+            "policy",
+            "account",
+            "file",
+            "table",
+            "column",
+            "field",
+            "metric",
+            "event",
+            "model",
+            "template",
         }
         if "name" in name_lower:
             parts = name_lower.replace("_name", "").replace("name_", "").split("_")
@@ -4168,16 +4843,26 @@ class DataGenerator:
             if matched_keyword:
                 # Route to domain-specific pool
                 _DOMAIN_POOL_MAP = {
-                    "item": "item_name", "product": "item_name", "sku": "item_name",
+                    "item": "item_name",
+                    "product": "item_name",
+                    "sku": "item_name",
                     "display": "item_name",
-                    "location": "location_name", "warehouse": "location_name",
-                    "store": "location_name", "facility": "location_name",
-                    "site": "location_name", "depot": "location_name",
-                    "vendor": "company_name", "supplier": "company_name",
-                    "company": "company_name", "org": "company_name",
-                    "organisation": "company_name", "brand": "brand_name",
-                    "manufacturer": "company_name", "distributor": "company_name",
-                    "partner": "company_name", "merchant": "company_name",
+                    "location": "location_name",
+                    "warehouse": "location_name",
+                    "store": "location_name",
+                    "facility": "location_name",
+                    "site": "location_name",
+                    "depot": "location_name",
+                    "vendor": "company_name",
+                    "supplier": "company_name",
+                    "company": "company_name",
+                    "org": "company_name",
+                    "organisation": "company_name",
+                    "brand": "brand_name",
+                    "manufacturer": "company_name",
+                    "distributor": "company_name",
+                    "partner": "company_name",
+                    "merchant": "company_name",
                 }
                 pool_key = _DOMAIN_POOL_MAP.get(matched_keyword)
                 if pool_key and pool_key in _REALISTIC_POOLS:
@@ -4453,9 +5138,19 @@ class DataGenerator:
                     if current != dtype:
                         if dtype == pl.Boolean:
                             cast_exprs.append(
-                                pl.when(pl.col(col_name).cast(pl.Utf8).str.to_lowercase().is_in(["true", "t", "yes", "y", "1"]))
+                                pl.when(
+                                    pl.col(col_name)
+                                    .cast(pl.Utf8)
+                                    .str.to_lowercase()
+                                    .is_in(["true", "t", "yes", "y", "1"])
+                                )
                                 .then(True)
-                                .when(pl.col(col_name).cast(pl.Utf8).str.to_lowercase().is_in(["false", "f", "no", "n", "0"]))
+                                .when(
+                                    pl.col(col_name)
+                                    .cast(pl.Utf8)
+                                    .str.to_lowercase()
+                                    .is_in(["false", "f", "no", "n", "0"])
+                                )
                                 .then(False)
                                 .otherwise(None)
                                 .alias(col_name)
@@ -4468,26 +5163,26 @@ class DataGenerator:
             # Reorder columns to match the contract schema exactly
             ordered_cols = [f.get("name") for f in self._fields if f.get("name")]
             valid_cols = [c for c in ordered_cols if c in df.columns]
-            
+
             # Add any extra columns (like _invalid_reason) to the end
             extra_cols = [c for c in df.columns if c not in valid_cols]
             final_cols = valid_cols + extra_cols
-            
+
             return df.select(final_cols)
 
         elif fmt == "pandas":
             import pandas as pd
 
             df = pd.DataFrame(clean_records)
-            
+
             # Reorder columns to match the contract schema exactly
             ordered_cols = [f.get("name") for f in self._fields if f.get("name")]
             valid_cols = [c for c in ordered_cols if c in df.columns]
-            
+
             # Add any extra columns (like _invalid_reason) to the end
             extra_cols = [c for c in df.columns if c not in valid_cols]
             final_cols = valid_cols + extra_cols
-            
+
             return df[final_cols]
         else:
             raise ValueError(f"output_format must be 'polars' or 'pandas', got: {fmt!r}")

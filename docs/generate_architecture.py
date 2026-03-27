@@ -4,15 +4,17 @@ Uses the 'diagrams' Python library to create a professional architecture diagram
 Run: python docs/generate_architecture.py
 Output: docs/assets/lakelogic_architecture.png
 """
+
 import os
+
 os.environ["PATH"] += os.pathsep + r"C:\Program Files\Graphviz\bin"
 
-from diagrams import Diagram, Cluster, Edge
-from diagrams.generic.storage import Storage
+from diagrams import Cluster, Diagram, Edge
 from diagrams.generic.database import SQL
+from diagrams.generic.storage import Storage
 from diagrams.onprem.analytics import Spark
-from diagrams.programming.language import Python
 from diagrams.onprem.compute import Server
+from diagrams.programming.language import Python
 
 output_dir = os.path.join(os.path.dirname(__file__), "assets")
 output_path = os.path.join(output_dir, "lakelogic_architecture")
@@ -54,57 +56,106 @@ with Diagram(
     edge_attr=edge_attr,
 ):
     # ── Data Sources ──
-    with Cluster("Data Sources", graph_attr={
-        "bgcolor": "#0f1520", "fontcolor": "#aaa", "fontname": "Helvetica",
-        "style": "rounded,dashed", "color": "#10529c", "fontsize": "12",
-    }):
+    with Cluster(
+        "Data Sources",
+        graph_attr={
+            "bgcolor": "#0f1520",
+            "fontcolor": "#aaa",
+            "fontname": "Helvetica",
+            "style": "rounded,dashed",
+            "color": "#10529c",
+            "fontsize": "12",
+        },
+    ):
         sources = SQL("Files  APIs\nDatabases\nCloud Storage")
 
     # ── Contracts ──
-    with Cluster("Data Contracts  (Domain / System / Layer)", graph_attr={
-        "bgcolor": "#0f1520", "fontcolor": "#aaa", "fontname": "Helvetica",
-        "style": "rounded,dashed", "color": "#4e3e91", "fontsize": "12",
-        "label": "Data Contracts\nDomain / System / Layer\nLLM Discoverable   Data Mesh",
-    }):
-        with Cluster("CRM / Salesforce", graph_attr={
-            "bgcolor": "#111827", "fontcolor": "#999", "fontname": "Helvetica",
-            "style": "rounded", "color": "#333", "fontsize": "10",
-        }):
+    with Cluster(
+        "Data Contracts  (Domain / System / Layer)",
+        graph_attr={
+            "bgcolor": "#0f1520",
+            "fontcolor": "#aaa",
+            "fontname": "Helvetica",
+            "style": "rounded,dashed",
+            "color": "#4e3e91",
+            "fontsize": "12",
+            "label": "Data Contracts\nDomain / System / Layer\nLLM Discoverable   Data Mesh",
+        },
+    ):
+        with Cluster(
+            "CRM / Salesforce",
+            graph_attr={
+                "bgcolor": "#111827",
+                "fontcolor": "#999",
+                "fontname": "Helvetica",
+                "style": "rounded",
+                "color": "#333",
+                "fontsize": "10",
+            },
+        ):
             crm = Storage("bronze.yaml\nsilver.yaml\ngold.yaml")
 
-        with Cluster("Marketing / GA", graph_attr={
-            "bgcolor": "#111827", "fontcolor": "#999", "fontname": "Helvetica",
-            "style": "rounded", "color": "#333", "fontsize": "10",
-        }):
+        with Cluster(
+            "Marketing / GA",
+            graph_attr={
+                "bgcolor": "#111827",
+                "fontcolor": "#999",
+                "fontname": "Helvetica",
+                "style": "rounded",
+                "color": "#333",
+                "fontsize": "10",
+            },
+        ):
             mkt = Storage("bronze.yaml\nsilver.yaml\ngold.yaml")
 
     # ── LakeLogic OSS ──
-    with Cluster("LakeLogic OSS", graph_attr={
-        "bgcolor": "#1a1035", "fontcolor": "#ccc", "fontname": "Helvetica-Bold",
-        "style": "filled,rounded", "color": "#4e3e91", "fontsize": "14",
-        "penwidth": "3",
-    }):
+    with Cluster(
+        "LakeLogic OSS",
+        graph_attr={
+            "bgcolor": "#1a1035",
+            "fontcolor": "#ccc",
+            "fontname": "Helvetica-Bold",
+            "style": "filled,rounded",
+            "color": "#4e3e91",
+            "fontsize": "14",
+            "penwidth": "3",
+        },
+    ):
         lakelogic = Python("LakeLogic\nGatekeeper")
         spark_eng = Spark("Spark")
         polars_eng = Server("Polars")
         duckdb_eng = SQL("DuckDB")
 
     # ── Lakehouse ──
-    with Cluster("Lakehouse (Medallion)", graph_attr={
-        "bgcolor": "#0f1520", "fontcolor": "#aaa", "fontname": "Helvetica",
-        "style": "rounded,dashed", "color": "#006151", "fontsize": "12",
-    }):
+    with Cluster(
+        "Lakehouse (Medallion)",
+        graph_attr={
+            "bgcolor": "#0f1520",
+            "fontcolor": "#aaa",
+            "fontname": "Helvetica",
+            "style": "rounded,dashed",
+            "color": "#006151",
+            "fontsize": "12",
+        },
+    ):
         bronze = Storage("BRONZE\nRaw Capture")
         silver = Storage("SILVER\nValidated")
         gold = Storage("GOLD\nAggregates")
         quarantine = SQL("QUARANTINE\nBad Data")
 
     # ── External Logic ──
-    with Cluster("External Logic (Gold)", graph_attr={
-        "bgcolor": "#0f1520", "fontcolor": "#aaa", "fontname": "Helvetica",
-        "style": "rounded,dashed", "color": "#8c6512", "fontsize": "12",
-        "label": "External Logic (Gold)\n20% Custom Code",
-    }):
+    with Cluster(
+        "External Logic (Gold)",
+        graph_attr={
+            "bgcolor": "#0f1520",
+            "fontcolor": "#aaa",
+            "fontname": "Helvetica",
+            "style": "rounded,dashed",
+            "color": "#8c6512",
+            "fontsize": "12",
+            "label": "External Logic (Gold)\n20% Custom Code",
+        },
+    ):
         scripts = Python("Notebooks\nPython Scripts")
 
     # ── Flow ──

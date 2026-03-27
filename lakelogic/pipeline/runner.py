@@ -55,13 +55,29 @@ class PipelineRunSummary:
         self.dry_run = dry_run
         self.results: List[Dict[str, Any]] = []
 
-    def append(self, contract: str, layer: str, status: str, rows: Any = "-", error: str = "",
-               rows_raw: Any = None, rows_good: Any = None, rows_bad: Any = None):
-        self.results.append({
-            "contract": contract, "layer": layer, "status": status,
-            "rows": rows, "rows_raw": rows_raw, "rows_good": rows_good,
-            "rows_bad": rows_bad, "error": error,
-        })
+    def append(
+        self,
+        contract: str,
+        layer: str,
+        status: str,
+        rows: Any = "-",
+        error: str = "",
+        rows_raw: Any = None,
+        rows_good: Any = None,
+        rows_bad: Any = None,
+    ):
+        self.results.append(
+            {
+                "contract": contract,
+                "layer": layer,
+                "status": status,
+                "rows": rows,
+                "rows_raw": rows_raw,
+                "rows_good": rows_good,
+                "rows_bad": rows_bad,
+                "error": error,
+            }
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -179,14 +195,10 @@ class LakehousePipeline:
             elif "s3://" in root or "s3a://" in root:
                 aws_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
                 if not all(os.environ.get(v) for v in aws_vars):
-                    logger.warning(
-                        f"Direct mode with S3 — credentials may be needed: {', '.join(aws_vars)}"
-                    )
+                    logger.warning(f"Direct mode with S3 — credentials may be needed: {', '.join(aws_vars)}")
             elif "gs://" in root:
                 if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-                    logger.warning(
-                        "Direct mode with GCS — GOOGLE_APPLICATION_CREDENTIALS may be needed."
-                    )
+                    logger.warning("Direct mode with GCS — GOOGLE_APPLICATION_CREDENTIALS may be needed.")
 
         if table_name and storage:
             # Materialization
@@ -366,9 +378,7 @@ class LakehousePipeline:
             if not c or not c.depends_on:
                 levels[entity] = 0
                 return 0
-            dep_level = max(
-                _level(dep, visited) for dep in c.depends_on if dep in by_entity
-            )
+            dep_level = max(_level(dep, visited) for dep in c.depends_on if dep in by_entity)
             levels[entity] = dep_level + 1
             return dep_level + 1
 
@@ -437,13 +447,15 @@ class LakehousePipeline:
                 logger.info(f"     Partition: {partition_cfg}")
 
             try:
-                df = gen.generate(rows=rows, invalid_ratio=invalid_ratio, ai=ai, ai_provider=ai_provider, ai_model=ai_model)
+                df = gen.generate(
+                    rows=rows, invalid_ratio=invalid_ratio, ai=ai, ai_provider=ai_provider, ai_model=ai_model
+                )
             except Exception as e:
                 logger.warning(f"Test data generation failed for {c.entity}: {e}")
                 continue
 
             # Log output summary
-            if hasattr(df, 'shape'):
+            if hasattr(df, "shape"):
                 logger.info(f"     Output   : {df.shape[0]:,} rows × {df.shape[1]} columns")
 
             # Determine output path
@@ -453,7 +465,11 @@ class LakehousePipeline:
                 # Generate date-partitioned directories
                 import datetime
 
-                partition_format = partition_cfg.get("format", "y_%Y/m_%m/d_%d") if isinstance(partition_cfg, dict) else str(partition_cfg)
+                partition_format = (
+                    partition_cfg.get("format", "y_%Y/m_%m/d_%d")
+                    if isinstance(partition_cfg, dict)
+                    else str(partition_cfg)
+                )
                 lookback_days = partition_cfg.get("lookback_days", 3) if isinstance(partition_cfg, dict) else 3
                 today = datetime.date.today()
                 rows_per_day = max(1, rows // lookback_days)
@@ -462,7 +478,13 @@ class LakehousePipeline:
                     day = today - datetime.timedelta(days=day_offset)
                     partition_dir = output_dir / day.strftime(partition_format)
                     partition_dir.mkdir(parents=True, exist_ok=True)
-                    day_df = gen.generate(rows=rows_per_day, invalid_ratio=invalid_ratio, ai=ai, ai_provider=ai_provider, ai_model=ai_model)
+                    day_df = gen.generate(
+                        rows=rows_per_day,
+                        invalid_ratio=invalid_ratio,
+                        ai=ai,
+                        ai_provider=ai_provider,
+                        ai_model=ai_model,
+                    )
                     self._write_test_data(day_df, partition_dir / f"data.{fmt}", fmt)
                     logger.debug(f"    Partition: {partition_dir} ({rows_per_day} rows)")
             else:
@@ -475,23 +497,19 @@ class LakehousePipeline:
                 try:
                     from lakelogic.ai.contract_enricher import enrich_contract
                     from lakelogic.core.bootstrap import _format_contract_yaml
+
                     logger.info(f"  🤖 Suggesting quality rules for {c.entity}...")
-                    
+
                     # Convert generated df to pandas for enrichment
                     pd_df = df.to_pandas() if hasattr(df, "to_pandas") else df
-                    
+
                     enriched_dict = enrich_contract(
-                        c.contract_dict,
-                        pd_df,
-                        provider=ai_provider,
-                        model=ai_model,
-                        api_key=ai_api_key,
-                        sample_size=20
+                        c.contract_dict, pd_df, provider=ai_provider, model=ai_model, api_key=ai_api_key, sample_size=20
                     )
-                    
+
                     with open(c.resolved_path, "w", encoding="utf-8") as f:
                         f.write(_format_contract_yaml(enriched_dict))
-                    
+
                     logger.info(f"  ✅ Saved suggested rules to {c.resolved_path}")
                 except Exception as e:
                     logger.warning(f"  ⚠️ Failed to suggest rules for {c.entity}: {e}")
@@ -514,9 +532,7 @@ class LakehousePipeline:
 
     # ── Phase 1: Setup & Resets ──────────────────────────────────────────────
 
-    def _delete_run_log_entries(
-        self, contract_dict: Dict[str, Any], entity_name: str, layer: str
-    ) -> None:
+    def _delete_run_log_entries(self, contract_dict: Dict[str, Any], entity_name: str, layer: str) -> None:
         """Delete run log entries for a specific contract using precise filtering.
 
         Uses dataset (target table name), data_layer, domain, and system to
@@ -531,7 +547,7 @@ class LakehousePipeline:
         mat_cfg = contract_dict.get("materialization", {})
         _target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
         if str(_target).startswith("table:"):
-            _table_full = str(_target)[len("table:"):]
+            _table_full = str(_target)[len("table:") :]
             dataset_val = _table_full.split(".")[-1] if "." in _table_full else _table_full
         else:
             dataset_val = None
@@ -595,7 +611,7 @@ class LakehousePipeline:
                 q_cfg = contract_dict.get("quarantine", {})
                 q_target = q_cfg.get("target", "")
                 if q_target.startswith("table:") and self.spark:
-                    q_table = q_target[len("table:"):]
+                    q_table = q_target[len("table:") :]
                     try:
                         self.spark.sql(f"DROP TABLE IF EXISTS {q_table}")
                         logger.info(f"  Dropped quarantine table {q_table}")
@@ -617,6 +633,7 @@ class LakehousePipeline:
                             except Exception:
                                 try:
                                     import IPython
+
                                     _dbutils = IPython.get_ipython().user_ns.get("dbutils")
                                 except Exception:
                                     pass
@@ -624,7 +641,9 @@ class LakehousePipeline:
                                 _dbutils.fs.rm(q_cloud_path, True)
                                 logger.info(f"  Reset: deleted quarantine cloud location {q_cloud_path} via dbutils")
                             else:
-                                logger.debug(f"  dbutils not available; quarantine cloud path {q_cloud_path} not deleted")
+                                logger.debug(
+                                    f"  dbutils not available; quarantine cloud path {q_cloud_path} not deleted"
+                                )
                         except Exception as _qp_exc:
                             logger.warning(f"  Could not delete quarantine cloud path {q_cloud_path}: {_qp_exc}")
 
@@ -644,7 +663,7 @@ class LakehousePipeline:
                 mat_target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
 
                 if mat_target.startswith("table:") and self.spark:
-                    table_name = mat_target[len("table:"):]
+                    table_name = mat_target[len("table:") :]
                     if not dry_run:
                         try:
                             self.spark.sql(f"TRUNCATE TABLE {table_name}")
@@ -655,7 +674,7 @@ class LakehousePipeline:
                 q_cfg = contract_dict.get("quarantine", {})
                 q_target = q_cfg.get("target", "")
                 if q_target.startswith("table:") and q_cfg.get("enabled", False) and self.spark:
-                    q_table = q_target[len("table:"):]
+                    q_table = q_target[len("table:") :]
                     if not dry_run:
                         try:
                             self.spark.sql(f"TRUNCATE TABLE {q_table}")
@@ -958,6 +977,7 @@ class LakehousePipeline:
 
         # Set log level based on debug_mode
         import sys
+
         if debug_mode:
             logger.info("Debug mode enabled — verbose logging active")
             logger.remove()
@@ -1022,7 +1042,6 @@ class LakehousePipeline:
                 partition_filter=hipaa_partition,
             )
 
-
         # 3. DDL Only
         if ddl_only:
             layer_filtered = [c for c in all_active if c.layer in target_set]
@@ -1085,17 +1104,33 @@ class LakehousePipeline:
                 if parallel and len(wave) > 1:
                     logger.info(f"  Wave {wave_idx}: [{', '.join(c.entity for c in wave)}] (parallel)")
                     self._execute_wave_parallel(
-                        wave, layer, summary, dry_run, run_log_mode,
-                        reprocess_from, reprocess_to, reprocess_column,
-                        reprocess_values, lookback_days, layers_with_new_data,
+                        wave,
+                        layer,
+                        summary,
+                        dry_run,
+                        run_log_mode,
+                        reprocess_from,
+                        reprocess_to,
+                        reprocess_column,
+                        reprocess_values,
+                        lookback_days,
+                        layers_with_new_data,
                         max_workers,
                     )
                 else:
                     for c in wave:
                         self._process_single_contract(
-                            c, layer, summary, dry_run, run_log_mode,
-                            reprocess_from, reprocess_to, reprocess_column,
-                            reprocess_values, lookback_days, layers_with_new_data,
+                            c,
+                            layer,
+                            summary,
+                            dry_run,
+                            run_log_mode,
+                            reprocess_from,
+                            reprocess_to,
+                            reprocess_column,
+                            reprocess_values,
+                            lookback_days,
+                            layers_with_new_data,
                         )
 
         return summary
@@ -1124,11 +1159,7 @@ class LakehousePipeline:
         _version = (c.contract_dict or {}).get("version", "")
         logger.info("  ─────────────────────────────────────────────────────────")
         _ver_str = f" v{_version}" if _version else ""
-        logger.info(
-            f"  📄 [{layer}] {c.entity}"
-            f"\n    Contract: {_title}{_ver_str}"
-            f"\n    Target:   {_target}"
-        )
+        logger.info(f"  📄 [{layer}] {c.entity}\n    Contract: {_title}{_ver_str}\n    Target:   {_target}")
 
         if dry_run:
             logger.info(f"DRY RUN - skipping {c.entity}")
@@ -1141,7 +1172,9 @@ class LakehousePipeline:
             if getattr(self, "_created_by_override", None):
                 lineage_cfg = c.contract_dict.setdefault("lineage", {})
                 lineage_cfg["created_by_override"] = self._created_by_override
-            processor = DataProcessor(contract=c.contract_dict, engine=self.engine, pipeline_run_id=self.run_id, run_log_mode=resolved_mode)
+            processor = DataProcessor(
+                contract=c.contract_dict, engine=self.engine, pipeline_run_id=self.run_id, run_log_mode=resolved_mode
+            )
             result = processor.run_source(
                 reprocess_from=reprocess_from,
                 reprocess_to=reprocess_to,
@@ -1198,7 +1231,9 @@ class LakehousePipeline:
                         else:
                             df_bad = self.spark.createDataFrame(df_bad)
 
-            logger.debug(f"Pre-materialize: df_good type={type(df_good).__name__}, df_bad type={type(df_bad).__name__ if df_bad is not None else 'None'}")
+            logger.debug(
+                f"Pre-materialize: df_good type={type(df_good).__name__}, df_bad type={type(df_bad).__name__ if df_bad is not None else 'None'}"
+            )
             if hasattr(df_good, "dtypes"):
                 try:
                     logger.debug(f"Pre-materialize: df_good schema={df_good.dtypes}")
@@ -1219,8 +1254,9 @@ class LakehousePipeline:
 
             logger.info(f"✅ Materialized {row_count} rows for {c.entity} -> {mat_result}")
             layers_with_new_data.add(layer)
-            summary.append(c.entity, layer, "success", rows=row_count,
-                           rows_raw=rows_raw, rows_good=rows_good, rows_bad=rows_bad)
+            summary.append(
+                c.entity, layer, "success", rows=row_count, rows_raw=rows_raw, rows_good=rows_good, rows_bad=rows_bad
+            )
 
         except Exception as e:
             logger.error(f"❌ Failed to process {c.entity}: {e}")
@@ -1248,9 +1284,17 @@ class LakehousePipeline:
         def _run_contract(c: RegistryContract) -> None:
             with logger.contextualize(entity=c.entity):
                 self._process_single_contract(
-                    c, layer, summary, dry_run, run_log_mode,
-                    reprocess_from, reprocess_to, reprocess_column,
-                    reprocess_values, lookback_days, layers_with_new_data,
+                    c,
+                    layer,
+                    summary,
+                    dry_run,
+                    run_log_mode,
+                    reprocess_from,
+                    reprocess_to,
+                    reprocess_column,
+                    reprocess_values,
+                    lookback_days,
+                    layers_with_new_data,
                 )
 
         with ThreadPoolExecutor(max_workers=min(max_workers, len(wave))) as executor:
@@ -1286,7 +1330,6 @@ class LakehousePipeline:
             # Filtered view — highlight bronze sessions and its connections:
             displayHTML(pipeline.visualize_dag(entity_filter="sessions", layer_filter="bronze"))
         """
-        import yaml
 
         contracts = self.registry.get_active_contracts()
         layer_order = ["external", "bronze", "silver", "gold", "downstream"]
@@ -1311,33 +1354,37 @@ class LakehousePipeline:
             pii_count = sum(1 for f in (cd.get("model", {}).get("fields", [])) if f.get("pii"))
             pipeline_config = cd.get("pipeline", {})
             frequency = pipeline_config.get("frequency", "") if isinstance(pipeline_config, dict) else ""
-            nodes.append({
-                "id": f"{c.layer}_{c.entity}",
-                "entity": c.entity,
-                "layer": c.layer,
-                "title": info.get("title", c.entity),
-                "version": cd.get("version", ""),
-                "pii": pii_count,
-                "frequency": frequency,
-                "depends_on": [f"{c.layer}_{d}" for d in c.depends_on],
-            })
+            nodes.append(
+                {
+                    "id": f"{c.layer}_{c.entity}",
+                    "entity": c.entity,
+                    "layer": c.layer,
+                    "title": info.get("title", c.entity),
+                    "version": cd.get("version", ""),
+                    "pii": pii_count,
+                    "frequency": frequency,
+                    "depends_on": [f"{c.layer}_{d}" for d in c.depends_on],
+                }
+            )
 
         # ── External source nodes (cross-domain lineage) ────────────
         ext_sources = getattr(self.registry, "external_sources", []) or []
         for ext in ext_sources:
             ext_id = f"ext_{ext.get('name', 'unknown')}"
-            nodes.append({
-                "id": ext_id,
-                "entity": ext.get("name", "unknown"),
-                "layer": "external",
-                "title": ext.get("name", "External Source"),
-                "version": "",
-                "pii": 0,
-                "depends_on": [],
-                "external": True,
-                "source_domain": ext.get("source_domain", ""),
-                "catalog_path": ext.get("catalog_path", ""),
-            })
+            nodes.append(
+                {
+                    "id": ext_id,
+                    "entity": ext.get("name", "unknown"),
+                    "layer": "external",
+                    "title": ext.get("name", "External Source"),
+                    "version": "",
+                    "pii": 0,
+                    "depends_on": [],
+                    "external": True,
+                    "source_domain": ext.get("source_domain", ""),
+                    "catalog_path": ext.get("catalog_path", ""),
+                }
+            )
 
         # Infer cross-layer edges: bronze → silver, silver → gold
         layer_entities = {}
@@ -1387,27 +1434,25 @@ class LakehousePipeline:
                 ds_id = f"ds_{ds_name.replace(' ', '_').lower()}"
                 if ds_id not in seen_ds:
                     seen_ds.add(ds_id)
-                    nodes.append({
-                        "id": ds_id,
-                        "entity": ds_name,
-                        "layer": "downstream",
-                        "title": ds_name,
-                        "version": "",
-                        "pii": 0,
-                        "depends_on": [],
-                        "downstream": True,
-                        "ds_type": ds_type,
-                        "ds_platform": ds.get("platform", ""),
-                        "ds_owner": ds.get("owner", ""),
-                        "ds_icon": ds_icon_map.get(
-                            ds_type, "📋"
-                        ),
-                    })
+                    nodes.append(
+                        {
+                            "id": ds_id,
+                            "entity": ds_name,
+                            "layer": "downstream",
+                            "title": ds_name,
+                            "version": "",
+                            "pii": 0,
+                            "depends_on": [],
+                            "downstream": True,
+                            "ds_type": ds_type,
+                            "ds_platform": ds.get("platform", ""),
+                            "ds_owner": ds.get("owner", ""),
+                            "ds_icon": ds_icon_map.get(ds_type, "📋"),
+                        }
+                    )
                 # Edge: parent contract → downstream consumer
                 parent_id = f"{c.layer}_{c.entity}"
-                edges.append(
-                    (parent_id, ds_id, "downstream")
-                )
+                edges.append((parent_id, ds_id, "downstream"))
 
         # ── Determine highlighted vs dimmed nodes ────────────────────────────
         if _has_filter:
@@ -1442,7 +1487,7 @@ class LakehousePipeline:
         node_width = 280
         node_height = 100
         header_h = 40  # space for layer column headers
-        y_gap = 180    # vertical gap between nodes in same column
+        y_gap = 180  # vertical gap between nodes in same column
         node_positions = {}
         used_layers = set()
         for layer in layer_order:
@@ -1473,7 +1518,13 @@ class LakehousePipeline:
 
         # Layer column headers
         header_html = ""
-        layer_labels = {"external": "EXTERNAL", "bronze": "BRONZE", "silver": "SILVER", "gold": "GOLD", "downstream": "DOWNSTREAM"}
+        layer_labels = {
+            "external": "EXTERNAL",
+            "bronze": "BRONZE",
+            "silver": "SILVER",
+            "gold": "GOLD",
+            "downstream": "DOWNSTREAM",
+        }
         for layer in layer_order:
             if layer in layer_entities and layer in used_layers:
                 x = x_positions[layer]
@@ -1500,7 +1551,7 @@ class LakehousePipeline:
                     dot_color = "#22c55e88"
                 else:
                     opacity = "0.25"
-                    border_style = f"border-color:#2a2a30;"
+                    border_style = "border-color:#2a2a30;"
                     dot_color = "#555"
             else:
                 opacity = "1.0"
@@ -1524,8 +1575,10 @@ class LakehousePipeline:
                 node_icon = "📋"
                 subtitle = self.registry.system.upper()
                 ver_badge = f'<span class="dag-badge dag-badge-ver">📄 V{n["version"]}</span>'
-                
-            freq_badge = f'<span class="dag-badge dag-badge-freq">⏱ {n["frequency"]}</span>' if n.get("frequency") else ""
+
+            freq_badge = (
+                f'<span class="dag-badge dag-badge-freq">⏱ {n["frequency"]}</span>' if n.get("frequency") else ""
+            )
 
             node_html += f"""
             <div class="dag-node" style="left:{x}px;top:{y}px;{border_style}opacity:{opacity};"
@@ -1534,11 +1587,11 @@ class LakehousePipeline:
               <div class="dag-dot" style="background:{dot_color};box-shadow:0 0 6px {dot_color};"></div>
               <div class="dag-hdr">
                 <div class="dag-icon" style="background:{bg}22;color:{fg};">{node_icon}</div>
-                <div class="dag-ttl">{n['title']}</div>
+                <div class="dag-ttl">{n["title"]}</div>
               </div>
               <div class="dag-sys">{subtitle}</div>
               <div class="dag-badges">
-                <span class="dag-badge" style="background:{bg}33;color:{fg};">{n['layer'].upper()}</span>
+                <span class="dag-badge" style="background:{bg}33;color:{fg};">{n["layer"].upper()}</span>
                 {ver_badge}
                 {freq_badge}
                 {pii_badge}
@@ -1553,22 +1606,22 @@ class LakehousePipeline:
             sx, sy = node_positions[src_id]
             dx, dy = node_positions[dst_id]
 
-            same_column = (sx == dx)
+            same_column = sx == dx
             cls = "dag-dep" if edge_type == "dependency" else "dag-flow"
             marker = "dag-arrow-dep" if edge_type == "dependency" else "dag-arrow"
 
             # Dim edges not connected to the focused entity
-            edge_opacity = "" if not _has_filter or idx in highlighted_edges else 'opacity:0.15;'
+            edge_opacity = "" if not _has_filter or idx in highlighted_edges else "opacity:0.15;"
 
             if same_column:
                 # Intra-layer dependency: arc to the right of nodes
                 src_exit_y = sy + node_height  # exit from bottom
-                dst_enter_y = dy               # enter at top
-                mid_x = sx + node_width + 60   # arc out to the right
+                dst_enter_y = dy  # enter at top
+                mid_x = sx + node_width + 60  # arc out to the right
                 edge_paths += (
                     f'<path d="M {sx + node_width // 2},{src_exit_y} '
-                    f'C {mid_x},{src_exit_y + 40} '
-                    f'{mid_x},{dst_enter_y - 40} '
+                    f"C {mid_x},{src_exit_y + 40} "
+                    f"{mid_x},{dst_enter_y - 40} "
                     f'{dx + node_width // 2},{dst_enter_y}" '
                     f'class="{cls}" style="{edge_opacity}" marker-end="url(#{marker})"/>\n'
                 )
@@ -1582,7 +1635,7 @@ class LakehousePipeline:
                 cpx2 = enter_x - 80
                 edge_paths += (
                     f'<path d="M {exit_x},{exit_y} '
-                    f'C {cpx1},{exit_y} {cpx2},{enter_y} '
+                    f"C {cpx1},{exit_y} {cpx2},{enter_y} "
                     f'{enter_x},{enter_y}" '
                     f'class="{cls}" style="{edge_opacity}" marker-end="url(#{marker})"/>\n'
                 )
@@ -1653,4 +1706,3 @@ class LakehousePipeline:
         </style>
         """
         return html
-

@@ -497,6 +497,7 @@ class ContractInferrer:
         if self.describe_with_ai:
             try:
                 from lakelogic.core.describe_columns import describe_columns
+
                 descriptions = describe_columns(
                     fields,
                     provider=self.ai_provider,
@@ -510,6 +511,7 @@ class ContractInferrer:
                         field["description"] = descriptions[field["name"]]
             except Exception as exc:
                 from loguru import logger
+
                 logger.warning(f"AI column descriptions skipped: {exc}")
 
         quality: Dict[str, Any] = {}
@@ -1087,27 +1089,47 @@ class ContractInferrer:
 
     # ── PII keyword / regex patterns (no external deps) ─────────
     _PII_COLUMN_KEYWORDS: Dict[str, str] = {
-        "email": "email", "e_mail": "email", "email_address": "email",
+        "email": "email",
+        "e_mail": "email",
+        "email_address": "email",
         "user_email": "email",
-        "phone": "phone", "phone_number": "phone", "mobile": "phone",
-        "telephone": "phone", "cell": "phone",
-        "ssn": "ssn", "social_security": "ssn",
+        "phone": "phone",
+        "phone_number": "phone",
+        "mobile": "phone",
+        "telephone": "phone",
+        "cell": "phone",
+        "ssn": "ssn",
+        "social_security": "ssn",
         "social_security_number": "ssn",
-        "first_name": "person_name", "last_name": "person_name",
-        "full_name": "person_name", "name": "person_name",
-        "address": "address", "street": "address", "city": "address",
-        "zip": "address", "zipcode": "address", "zip_code": "address",
-        "postal_code": "address", "postcode": "address",
-        "date_of_birth": "date_of_birth", "dob": "date_of_birth",
-        "birth_date": "date_of_birth", "birthday": "date_of_birth",
-        "credit_card": "credit_card", "card_number": "credit_card",
+        "first_name": "person_name",
+        "last_name": "person_name",
+        "full_name": "person_name",
+        "name": "person_name",
+        "address": "address",
+        "street": "address",
+        "city": "address",
+        "zip": "address",
+        "zipcode": "address",
+        "zip_code": "address",
+        "postal_code": "address",
+        "postcode": "address",
+        "date_of_birth": "date_of_birth",
+        "dob": "date_of_birth",
+        "birth_date": "date_of_birth",
+        "birthday": "date_of_birth",
+        "credit_card": "credit_card",
+        "card_number": "credit_card",
         "cc_number": "credit_card",
-        "ip_address": "ip_address", "ip": "ip_address",
+        "ip_address": "ip_address",
+        "ip": "ip_address",
         "user_ip": "ip_address",
-        "passport": "passport", "passport_number": "passport",
+        "passport": "passport",
+        "passport_number": "passport",
         "drivers_license": "drivers_license",
         "license_number": "drivers_license",
-        "national_id": "national_id", "tax_id": "tax_id", "tin": "tax_id",
+        "national_id": "national_id",
+        "tax_id": "tax_id",
+        "tin": "tax_id",
     }
 
     _PII_VALUE_PATTERNS: List[tuple] = [

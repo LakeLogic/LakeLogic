@@ -31,7 +31,6 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-
 # ── Prompt Template ───────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = (
@@ -96,9 +95,7 @@ def _call_openai(prompt: str, model: str) -> Dict[str, str]:
     try:
         from openai import OpenAI
     except ImportError:
-        raise ImportError(
-            "openai is required. Install with: pip install lakelogic[llm]"
-        )
+        raise ImportError("openai is required. Install with: pip install lakelogic[llm]")
     client = OpenAI()
     response = client.chat.completions.create(
         model=model,
@@ -119,9 +116,7 @@ def _call_anthropic(prompt: str, model: str) -> Dict[str, str]:
     try:
         from anthropic import Anthropic
     except ImportError:
-        raise ImportError(
-            "anthropic is required. Install with: pip install lakelogic[llm]"
-        )
+        raise ImportError("anthropic is required. Install with: pip install lakelogic[llm]")
     client = Anthropic()
     response = client.messages.create(
         model=model,
@@ -158,9 +153,7 @@ def _call_google(prompt: str, model: str) -> Dict[str, str]:
     try:
         import google.generativeai as genai
     except ImportError:
-        raise ImportError(
-            "google-generativeai is required. Install with: pip install google-generativeai"
-        )
+        raise ImportError("google-generativeai is required. Install with: pip install google-generativeai")
     gen_model = genai.GenerativeModel(model)
     response = gen_model.generate_content(
         f"{_SYSTEM_PROMPT}\n\n{prompt}",
@@ -249,10 +242,7 @@ def describe_columns(
         return {}
 
     try:
-        logger.info(
-            f"Generating AI column descriptions via {provider}/{model} "
-            f"for {len(fields)} fields"
-        )
+        logger.info(f"Generating AI column descriptions via {provider}/{model} for {len(fields)} fields")
         result = call_fn(prompt, model)
 
         # Validate: ensure keys match field names

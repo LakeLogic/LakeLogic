@@ -193,6 +193,7 @@ def enrich_contract(
     except (json.JSONDecodeError, ValueError):
         # Apply progressive JSON repair (trailing commas, single quotes, etc.)
         from lakelogic.ai.data_generator import _repair_llm_json
+
         enrichment = _repair_llm_json(response.text)
         if enrichment is None:
             logger.error("Failed to parse AI response as JSON after repair attempts")

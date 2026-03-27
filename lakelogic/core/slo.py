@@ -84,13 +84,13 @@ class SLOValidator:
                 continue
 
             max_delay = layer_slo.max_delay_minutes if layer_slo else 999999
-            
+
             check_col_conf = layer_slo.check_column if layer_slo else "_lakelogic_loaded_at"
             if isinstance(check_col_conf, str):
                 check_cols = [check_col_conf]
             else:
                 check_cols = list(check_col_conf)
-                
+
             # Always fallback to the standard audit column if not explicitly in the list
             if "_lakelogic_loaded_at" not in check_cols:
                 check_cols.append("_lakelogic_loaded_at")
