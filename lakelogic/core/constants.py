@@ -1,5 +1,5 @@
 """
-LakeLogic standard constants.
+LakeLogic standard constants
 
 Centralised constants for delete/erasure reasons, metadata column names,
 and compliance values used across the platform.
