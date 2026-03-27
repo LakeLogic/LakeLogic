@@ -662,7 +662,6 @@ class ContractInferrer:
             return record
 
         # Find the repeating record elements (children of root)
-        root_tag = _strip_ns(root.tag)
         children = list(root)
         if not children:
             # Single-element XML — treat root itself as one record

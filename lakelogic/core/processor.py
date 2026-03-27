@@ -1614,7 +1614,8 @@ class DataProcessor:
                                     logger.debug(f"input_file_name() fallback failed: {exc}")
                         if not _source_captured:
                             logger.debug(
-                                f"Could not capture per-row source file path for {path} — lineage will use directory path"
+                                f"Could not capture per-row source file path"
+                                f" for {path} — lineage will use directory path"
                             )
 
             elif self.engine_name in ["snowflake", "bigquery"]:

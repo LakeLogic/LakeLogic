@@ -154,9 +154,8 @@ class SnowflakeAdapter(EngineAdapter):
                         logger.warning(f"Snowflake link '{link.name}' uses file path '{link.path}'. Table links only.")
                     continue
 
-                cursor.execute(
-                    f"CREATE OR REPLACE TEMP VIEW {link.name} AS SELECT {', '.join(link.columns) if link.columns else '*'} FROM {table_name}"
-                )
+                cols = ", ".join(link.columns) if link.columns else "*"
+                cursor.execute(f"CREATE OR REPLACE TEMP VIEW {link.name} AS SELECT {cols} FROM {table_name}")
         finally:
             cursor.close()
 

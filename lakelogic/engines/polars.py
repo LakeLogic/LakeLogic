@@ -191,14 +191,18 @@ class PolarsAdapter(EngineAdapter):
                         continue
                     if path.suffix.lower() == ".parquet":
                         col_clause = ", ".join(link.columns) if link.columns else "*"
-                        con.execute(
-                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_parquet('{path.as_posix()}')"
+                        sql = (
+                            f"CREATE OR REPLACE VIEW {link.name} AS"
+                            f" SELECT {col_clause} FROM read_parquet('{path.as_posix()}')"
                         )
+                        con.execute(sql)
                     elif path.suffix.lower() == ".csv":
                         col_clause = ", ".join(link.columns) if link.columns else "*"
-                        con.execute(
-                            f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_csv_auto('{path.as_posix()}')"
+                        sql = (
+                            f"CREATE OR REPLACE VIEW {link.name} AS"
+                            f" SELECT {col_clause} FROM read_csv_auto('{path.as_posix()}')"
                         )
+                        con.execute(sql)
                 except Exception:
                     continue
             rel = con.query(sql)

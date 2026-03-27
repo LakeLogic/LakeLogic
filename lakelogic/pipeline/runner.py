@@ -1231,9 +1231,8 @@ class LakehousePipeline:
                         else:
                             df_bad = self.spark.createDataFrame(df_bad)
 
-            logger.debug(
-                f"Pre-materialize: df_good type={type(df_good).__name__}, df_bad type={type(df_bad).__name__ if df_bad is not None else 'None'}"
-            )
+            _bad_type = type(df_bad).__name__ if df_bad is not None else "None"
+            logger.debug(f"Pre-materialize: df_good type={type(df_good).__name__}, df_bad type={_bad_type}")
             if hasattr(df_good, "dtypes"):
                 try:
                     logger.debug(f"Pre-materialize: df_good schema={df_good.dtypes}")
@@ -1343,7 +1342,7 @@ class LakehousePipeline:
 
         # Parse filters
         _entity_set = {e.strip().lower() for e in entity_filter.split(",") if e.strip()} if entity_filter else set()
-        _layer_set = {l.strip().lower() for l in layer_filter.split(",") if l.strip()} if layer_filter else set()
+        _layer_set = {lyr.strip().lower() for lyr in layer_filter.split(",") if lyr.strip()} if layer_filter else set()
         _has_filter = bool(_entity_set or _layer_set)
 
         # Build node data
@@ -1505,7 +1504,6 @@ class LakehousePipeline:
         # Normalize x positions: shift so minimum x starts at padding
         if node_positions:
             min_x = min(p[0] for p in node_positions.values())
-            max_x = max(p[0] for p in node_positions.values())
             x_shift = 50 - min_x  # shift so leftmost is at x=50
             node_positions = {k: (v[0] + x_shift, v[1]) for k, v in node_positions.items()}
             # Also shift header positions
@@ -1529,7 +1527,12 @@ class LakehousePipeline:
             if layer in layer_entities and layer in used_layers:
                 x = x_positions[layer]
                 bg, fg = layer_colors.get(layer, ("#444", "#888"))
-                header_html += f'<div style="position:absolute;left:{x}px;top:4px;font-size:0.65rem;font-weight:700;color:{fg};letter-spacing:0.1em;opacity:0.6;">{layer_labels[layer]}</div>'
+                hdr_style = (
+                    f"position:absolute;left:{x}px;top:4px;"
+                    f"font-size:0.65rem;font-weight:700;color:{fg};"
+                    f"letter-spacing:0.1em;opacity:0.6;"
+                )
+                header_html += f'<div style="{hdr_style}">{layer_labels[layer]}</div>'
 
         # Generate node HTML
         node_html = ""
@@ -1580,11 +1583,18 @@ class LakehousePipeline:
                 f'<span class="dag-badge dag-badge-freq">⏱ {n["frequency"]}</span>' if n.get("frequency") else ""
             )
 
+            hover_in = (
+                f"this.style.borderColor='{bg}cc';this.style.boxShadow='0 8px 32px {bg}33';this.style.opacity='1.0'"
+            )
+            hover_out = f"this.style.borderColor='{bg}55';this.style.boxShadow='none';this.style.opacity='{opacity}'"
             node_html += f"""
-            <div class="dag-node" style="left:{x}px;top:{y}px;{border_style}opacity:{opacity};"
-                 onmouseover="this.style.borderColor='{bg}cc';this.style.boxShadow='0 8px 32px {bg}33';this.style.opacity='1.0'"
-                 onmouseout="this.style.borderColor='{bg}55';this.style.boxShadow='none';this.style.opacity='{opacity}'">
-              <div class="dag-dot" style="background:{dot_color};box-shadow:0 0 6px {dot_color};"></div>
+            <div class="dag-node"
+                 style="left:{x}px;top:{y}px;{border_style}opacity:{opacity};"
+                 onmouseover="{hover_in}"
+                 onmouseout="{hover_out}">
+              <div class="dag-dot"
+                   style="background:{dot_color};box-shadow:0 0 6px {dot_color};"
+                   ></div>
               <div class="dag-hdr">
                 <div class="dag-icon" style="background:{bg}22;color:{fg};">{node_icon}</div>
                 <div class="dag-ttl">{n["title"]}</div>
@@ -1660,16 +1670,23 @@ class LakehousePipeline:
         <div style="font-family:'Inter','Segoe UI',sans-serif;background:#0d0d0f;
              background-image:radial-gradient(circle at 1px 1px,#1a1a1f 1px,transparent 0);
              background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;overflow-x:auto;">
-          <h2 style="color:#fff;font-size:1.2rem;margin:0 0 4px;">📊 Pipeline DAG — {self.registry.domain} / {self.registry.system}</h2>
+          <h2 style="color:#fff;font-size:1.2rem;margin:0 0 4px;"
+              >📊 Pipeline DAG — {self.registry.domain} / {self.registry.system}</h2>
           <p style="color:#666;font-size:0.8rem;margin:0 0 24px;">{subtitle}</p>
           <div style="position:relative;width:{canvas_w}px;height:{canvas_h}px;">
             {header_html}
-            <svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 {canvas_w} {canvas_h}">
+            <svg style="position:absolute;top:0;left:0;width:100%;
+                        height:100%;pointer-events:none;"
+                 viewBox="0 0 {canvas_w} {canvas_h}">
               <defs>
-                <marker id="dag-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="10" markerHeight="8" orient="auto-start-reverse">
+                <marker id="dag-arrow" viewBox="0 0 12 10"
+                        refX="11" refY="5" markerWidth="10"
+                        markerHeight="8" orient="auto-start-reverse">
                   <path d="M 0 0 L 12 5 L 0 10 z" fill="#555"/>
                 </marker>
-                <marker id="dag-arrow-dep" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="10" markerHeight="8" orient="auto-start-reverse">
+                <marker id="dag-arrow-dep" viewBox="0 0 12 10"
+                        refX="11" refY="5" markerWidth="10"
+                        markerHeight="8" orient="auto-start-reverse">
                   <path d="M 0 0 L 12 5 L 0 10 z" fill="#4a9eff"/>
                 </marker>
               </defs>
@@ -1696,7 +1713,9 @@ class LakehousePipeline:
           .dag-ttl{{font-size:0.82rem;font-weight:600;color:#f0f0f0;line-height:1.25;}}
           .dag-sys{{font-size:0.62rem;color:#555;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;}}
           .dag-badges{{display:flex;gap:5px;flex-wrap:wrap;}}
-          .dag-badge{{font-size:0.55rem;font-weight:600;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:0.04em;}}
+          .dag-badge{{font-size:0.55rem;font-weight:600;padding:2px 7px;
+                     border-radius:4px;text-transform:uppercase;
+                     letter-spacing:0.04em;}}
           .dag-badge-ver{{background:#1e3a5f44;color:#4a9eff;}}
           .dag-badge-freq{{background:#2dd4bf22;color:#2dd4bf;}}
           .dag-badge-pii{{background:#dc262633;color:#f87171;}}

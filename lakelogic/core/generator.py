@@ -454,7 +454,7 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "service_identifier": "numerify(text='###')",
     "bearer_id": "numerify(text='##')",
     # ── Telecom Billing / Charging ────────────────────────────────────────
-    "account_number": "numerify(text='##########')",
+    # NOTE: account_number already defined above (Finance & Banking section)
     "ban": "numerify(text='##########')",
     "charge_amount": "pyfloat(min_value=0, max_value=500, right_digits=4)",
     "rated_amount": "pyfloat(min_value=0, max_value=500, right_digits=4)",
@@ -465,7 +465,7 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "allowance_remaining": "pyfloat(min_value=0, max_value=100000, right_digits=2)",
     "out_of_bundle_charge": "pyfloat(min_value=0, max_value=50, right_digits=4)",
     "roaming_charge": "pyfloat(min_value=0, max_value=200, right_digits=4)",
-    "invoice_number": "bothify(text='INV-#######-????')",
+    # NOTE: invoice_number already defined above (Finance & Banking section)
     "direct_debit_ref": "bothify(text='DD-??########')",
     # ── Telecom RF / QoS Metrics ──────────────────────────────────────────
     "rsrp": "pyfloat(min_value=-140, max_value=-44, right_digits=1)",
@@ -1554,73 +1554,9 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
         "consignment",
         "make_to_order",
     ],
-    # ── Domain-specific name pools (used by non-person name router) ────────
-    "item_name": [
-        "Widget Pro",
-        "Cable Type-C",
-        "Bracket M8",
-        "Connector RJ45",
-        "Filter Cartridge",
-        "Sensor Module",
-        "Panel Board A3",
-        "Gasket Kit",
-        "Bearing Assembly",
-        "Drive Belt",
-        "Nozzle 10mm",
-        "Valve Body",
-        "Relay Switch",
-        "Fuse 15A",
-        "Display Unit",
-        "Power Supply 500W",
-        "Pump Motor",
-        "Heat Sink",
-        "Circuit Board",
-        "Control Unit",
-        "Standard Widget",
-        "Premium Widget",
-        "Heavy Duty Bracket",
-        "Precision Valve",
-        "Industrial Pump",
-        "Safety Harness",
-        "Thermal Pad",
-        "Optical Lens",
-        "Adhesive Strip",
-        "Mounting Plate",
-    ],
-    "product_name": [
-        "Widget Pro",
-        "Cable Type-C",
-        "Bracket M8",
-        "Connector RJ45",
-        "Filter Cartridge",
-        "Sensor Module",
-        "Panel Board A3",
-        "Gasket Kit",
-        "Bearing Assembly",
-        "Drive Belt",
-        "Standard Widget",
-        "Premium Widget",
-    ],
-    "location_name": [
-        "Warehouse A",
-        "Warehouse B",
-        "Distribution Centre East",
-        "Distribution Centre West",
-        "Main Store",
-        "Outlet South",
-        "Fulfilment Hub",
-        "Regional Depot",
-        "Sorting Facility",
-        "Returns Processing",
-        "Cold Storage Unit",
-        "Bonded Warehouse",
-        "Cross-Dock Terminal",
-        "Service Centre",
-        "Assembly Plant 1",
-        "Head Office",
-        "Branch North",
-        "Branch South",
-    ],
+    # NOTE: duplicate "item_name" and "product_name" keys removed
+    # (already defined in the Inventory/Warehouse/Product section above)
+    # NOTE: duplicate "location_name" key removed (already defined earlier)
     "company_name": [
         "Acme Corp",
         "GlobalTech Ltd",
@@ -1673,24 +1609,7 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
         "iot.1nce.net",
         "super.telstra.com",
     ],
-    "network_type": [
-        "2G_GSM",
-        "2G_GPRS",
-        "2G_EDGE",
-        "3G_UMTS",
-        "3G_HSPA",
-        "3G_HSPA+",
-        "4G_LTE",
-        "4G_LTE-A",
-        "4G_LTE-A_Pro",
-        "5G_NSA",
-        "5G_SA",
-        "5G_mmWave",
-        "WiFi",
-        "WiFi_Calling",
-        "VoLTE",
-        "VoWiFi",
-    ],
+    # NOTE: duplicate "network_type" key removed (already defined earlier)
     "call_type": [
         "voice_mo",
         "voice_mt",
@@ -1724,37 +1643,7 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
         "radio_link_failure",
         "handover_failure",
     ],
-    "event_type": [
-        "call_attempt",
-        "call_connected",
-        "call_ended",
-        "sms_sent",
-        "sms_delivered",
-        "sms_failed",
-        "data_session_start",
-        "data_session_end",
-        "handover",
-        "cell_reselection",
-        "attach",
-        "detach",
-        "location_update",
-        "pdp_context_activate",
-        "pdp_context_deactivate",
-        "roaming_start",
-        "roaming_end",
-        "sim_swap",
-        "imei_change",
-        "plan_change",
-        "topup",
-        "bundle_activated",
-        "bundle_expired",
-        "payment_received",
-        "payment_failed",
-        "service_barred",
-        "service_unbarred",
-        "number_port_in",
-        "number_port_out",
-    ],
+    # NOTE: duplicate "event_type" key removed (already defined earlier)
     "sim_status": [
         "active",
         "inactive",
@@ -1800,17 +1689,7 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
         "premium_rate_outgoing",
         "premium_rate_incoming",
     ],
-    "roaming_zone": [
-        "domestic",
-        "EU",
-        "ROW_zone_1",
-        "ROW_zone_2",
-        "ROW_zone_3",
-        "USA_Canada",
-        "Australia_NZ",
-        "Rest_of_World",
-        "restricted",
-    ],
+    # NOTE: duplicate "roaming_zone" key removed (already defined earlier)
     "handset_os": [
         "iOS_17",
         "iOS_16",
@@ -1837,19 +1716,7 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
         "Nothing",
         "Fairphone",
     ],
-    "churn_reason": [
-        "price_too_high",
-        "poor_coverage",
-        "poor_customer_service",
-        "better_competitor_offer",
-        "handset_upgrade_elsewhere",
-        "moving_abroad",
-        "no_longer_needed",
-        "deceased",
-        "business_closure",
-        "consolidating_plans",
-        "unknown",
-    ],
+    # NOTE: duplicate "churn_reason" key removed (already defined earlier)
     "complaint_category": [
         "billing_error",
         "coverage_complaint",
@@ -4198,7 +4065,7 @@ class DataGenerator:
         if dist_type == "bimodal":
             peak_1 = profile.get("peak_1", {})
             peak_2 = profile.get("peak_2", {})
-            flat_weight = profile.get("flat_weight", 0.3)
+            # flat_weight not currently used but kept in profile schema
 
             p1_val = peak_1.get("value", 8)
             p1_wt = peak_1.get("weight", 0.4)
@@ -4407,7 +4274,6 @@ class DataGenerator:
             val = val[:max_len]
         if min_len is not None and len(val) < min_len:
             # Pad with realistic filler to reach minimum
-            pad = val
             while len(val) < min_len:
                 val += self._rng.choice(string.ascii_lowercase)
         return val

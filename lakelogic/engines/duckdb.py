@@ -273,13 +273,17 @@ class DuckDBAdapter(EngineAdapter):
 
                 col_clause = ", ".join(link.columns) if link.columns else "*"
                 if path.suffix.lower() == ".parquet":
-                    con.execute(
-                        f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_parquet('{path.as_posix()}')"
+                    sql = (
+                        f"CREATE OR REPLACE VIEW {link.name} AS"
+                        f" SELECT {col_clause} FROM read_parquet('{path.as_posix()}')"
                     )
+                    con.execute(sql)
                 elif path.suffix.lower() == ".csv":
-                    con.execute(
-                        f"CREATE OR REPLACE VIEW {link.name} AS SELECT {col_clause} FROM read_csv_auto('{path.as_posix()}')"
+                    sql = (
+                        f"CREATE OR REPLACE VIEW {link.name} AS"
+                        f" SELECT {col_clause} FROM read_csv_auto('{path.as_posix()}')"
                     )
+                    con.execute(sql)
                 else:
                     logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
             except Exception as e:
