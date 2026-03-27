@@ -24,6 +24,9 @@ class SLOCheckResult(BaseModel):
     latest_ts: Optional[str] = None
     delay_minutes: Optional[float] = None
     slo_max_minutes: Optional[int] = None
+    row_count: Optional[int] = None
+    slo_min_rows: Optional[int] = None
+    slo_max_rows: Optional[int] = None
 
 
 class SLOReport(BaseModel):
@@ -168,6 +171,117 @@ class SLOValidator:
 
         return results
 
+    def check_row_counts(self) -> List[SLOCheckResult]:
+        """
+        Check the row counts of the most recent run log entry for each active
+        contract against the per-layer thresholds defined in ``slo.row_count``.
+
+        Reads from the run log table (no live COUNT queries) using the existing
+        ``counts_good`` / ``counts_source`` / ``counts_total`` columns.
+        """
+        if not self.spark:
+            logger.warning("SLOValidator.check_row_counts requires a Spark session. Skipping.")
+            return []
+
+        results = []
+        row_count_config = self.registry.slo.row_count
+        storage = self.registry.storage
+        run_log_table = storage.run_log_table
+
+        if not run_log_table:
+            logger.warning("No run_log_table configured in storage; cannot check row counts.")
+            return []
+
+        # Strip backticks for Spark SQL compatibility
+        run_log_table_clean = run_log_table.replace("`", "")
+
+        for contract in self.registry.get_active_contracts():
+            layer = contract.layer
+            entity = contract.entity
+
+            layer_slo = row_count_config.get(layer)
+            if not layer_slo:
+                continue
+
+            if entity in layer_slo.exclude_tables:
+                continue
+
+            min_rows = layer_slo.min_rows
+            max_rows = layer_slo.max_rows
+            check_field = layer_slo.check_field or "counts_good"
+
+            if min_rows is None and max_rows is None:
+                continue
+
+            try:
+                # Query the most recent run log entry for this entity + layer
+                row = self.spark.sql(f"""
+                    SELECT {check_field}, timestamp
+                    FROM {run_log_table_clean}
+                    WHERE data_layer = '{layer}'
+                      AND dataset = '{entity}'
+                      AND stage NOT IN ('no_new_data', 'reprocess')
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                """).first()
+            except Exception as e:
+                results.append(
+                    SLOCheckResult(
+                        layer=layer,
+                        entity=entity,
+                        status=f"⚠️ ERROR: {str(e)[:80]}",
+                        passed=False,
+                        slo_min_rows=min_rows,
+                        slo_max_rows=max_rows,
+                    )
+                )
+                continue
+
+            if row is None or row[check_field] is None:
+                results.append(
+                    SLOCheckResult(
+                        layer=layer,
+                        entity=entity,
+                        status="⚠️ NO DATA",
+                        passed=False,
+                        slo_min_rows=min_rows,
+                        slo_max_rows=max_rows,
+                    )
+                )
+                continue
+
+            actual_count = int(row[check_field])
+            passed = True
+            status_parts = []
+
+            if min_rows is not None and actual_count < min_rows:
+                passed = False
+                status_parts.append(f"❌ TOO FEW ROWS ({actual_count} < {min_rows})")
+
+            if max_rows is not None and actual_count > max_rows:
+                passed = False
+                status_parts.append(f"❌ TOO MANY ROWS ({actual_count} > {max_rows})")
+
+            if passed:
+                status = f"✅ OK ({actual_count} rows)"
+            else:
+                status = "; ".join(status_parts)
+
+            results.append(
+                SLOCheckResult(
+                    layer=layer,
+                    entity=entity,
+                    status=status,
+                    passed=passed,
+                    row_count=actual_count,
+                    slo_min_rows=min_rows,
+                    slo_max_rows=max_rows,
+                    latest_ts=str(row["timestamp"]) if row["timestamp"] else None,
+                )
+            )
+
+        return results
+
     def check_schedule(self) -> Optional[SLOCheckResult]:
         """
         Check if the pipeline completed before the expected UTC deadline.
@@ -212,6 +326,9 @@ class SLOValidator:
 
         if self.registry.slo.freshness:
             results.extend(self.check_freshness())
+
+        if self.registry.slo.row_count:
+            results.extend(self.check_row_counts())
 
         schedule_res = self.check_schedule()
         if schedule_res:

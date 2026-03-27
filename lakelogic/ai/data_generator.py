@@ -159,45 +159,75 @@ def _coerce_value(value: Any, ftype: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _salvage_truncated_json(raw: str) -> Optional[Dict[str, Any]]:
+def _repair_llm_json(raw: str) -> Optional[Dict[str, Any]]:
     """
-    Attempt to repair truncated JSON from an LLM response.
+    Attempt to repair broken / near-valid JSON from an LLM response.
 
-    Strategy:
-    1. Strip markdown fences if present.
-    2. Walk backwards to find the last complete "values": [...] entry.
-    3. Close any open brackets/braces.
+    Progressive strategy:
+    1. Strip markdown fences.
+    2. Remove trailing commas before ``}`` or ``]``.
+    3. Remove single-line comments (``// ...``).
+    4. Convert single-quoted strings to double-quoted.
+    5. Try ``json.loads`` on the cleaned text.
+    6. Extract outermost ``{...}`` object and retry.
+    7. Fall back to truncation recovery (walk backwards for last valid ``]``).
     """
     import re
 
     text = raw.strip()
-    # Strip markdown code fences
+
+    # Step 1: Strip markdown code fences
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     text = text.strip()
 
+    # Step 2: Remove trailing commas before } or ]
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+
+    # Step 3: Remove single-line comments (// ...)
+    text = re.sub(r"//[^\n]*", "", text)
+
+    # Step 4: Replace single-quoted strings with double-quoted
+    text = re.sub(
+        r"(?<![\"\\])'([^'\\]*(?:\\.[^'\\]*)*)'(?![\"\\])",
+        r'"\1"',
+        text,
+    )
+
+    # Step 5: Try parsing
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Step 6: Extract outermost JSON object
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Step 7: Truncation recovery — walk backwards
     if not text.startswith("{"):
         return None
 
-    # Try progressively shorter substrings, closing brackets
-    # Find the last complete field block
-    best = None
-    # Look for the last ']' that successfully closes a values array
     for i in range(len(text) - 1, 0, -1):
         if text[i] == "]":
-            # Try closing from here
             candidate = text[: i + 1]
-            # Close any open structures
             open_braces = candidate.count("{") - candidate.count("}")
             open_brackets = candidate.count("[") - candidate.count("]")
             suffix = "]" * max(0, open_brackets) + "}" * max(0, open_braces)
             try:
-                best = json.loads(candidate + suffix)
-                break
+                return json.loads(candidate + suffix)
             except json.JSONDecodeError:
                 continue
 
-    return best
+    return None
+
+
+# Keep the old name as an alias for backward compatibility
+_salvage_truncated_json = _repair_llm_json
 
 
 # ---------------------------------------------------------------------------

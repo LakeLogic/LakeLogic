@@ -2,7 +2,8 @@ from pathlib import Path
 
 import yaml
 
-from lakelogic.cli import main
+from lakelogic.cli import main as cli_main_module
+from lakelogic.cli.main import bootstrap
 
 
 def test_bootstrap_sync_adds_new_entities(tmp_path: Path) -> None:
@@ -13,7 +14,7 @@ def test_bootstrap_sync_adds_new_entities(tmp_path: Path) -> None:
     output_dir = tmp_path / "contracts"
     registry_path = output_dir / "_registry.yaml"
 
-    main.bootstrap(
+    bootstrap(
         landing=landing,
         output_dir=output_dir,
         registry=registry_path,
@@ -25,7 +26,7 @@ def test_bootstrap_sync_adds_new_entities(tmp_path: Path) -> None:
 
     (landing / "orders.csv").write_text("id,amount\n1,10.0\n", encoding="utf-8")
 
-    main.bootstrap(
+    bootstrap(
         landing=landing,
         output_dir=output_dir,
         registry=registry_path,
@@ -37,7 +38,7 @@ def test_bootstrap_sync_adds_new_entities(tmp_path: Path) -> None:
     )
 
     registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
-    entries = registry.get("entries", [])
+    entries = registry.get("contracts", [])
     entities = {e.get("entity") for e in entries}
     assert "customers" in entities
     assert "orders" in entities

@@ -788,7 +788,9 @@ def _merge_frames(
 
     merged = existing.reset_index()
     if not new_rows.empty:
-        merged = pd.concat([merged, new_rows.reset_index()], ignore_index=True)
+        frames = [merged, new_rows.reset_index()]
+        frames = [f for f in frames if not f.empty and not f.isna().all(axis=None)]
+        merged = pd.concat(frames, ignore_index=True) if frames else merged
 
     return merged
 

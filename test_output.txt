@@ -1,0 +1,65 @@
+=========================================================================================================================================== test session starts ===========================================================================================================================================
+collecting ... collected 5 items
+
+tests/test_spark_delta_logic.py::test_spark_delta_version_options_table FAILED
+tests/test_spark_delta_logic.py::test_spark_delta_version_options_file FAILED
+tests/test_driver_e2e.py::test_driver_end_to_end_pipeline PASSED
+tests/test_driver_e2e.py::test_driver_incremental_window_selection PASSED
+tests/test_driver_e2e.py::test_driver_reprocess_overwrite_partition_safe FAILED
+
+================================================================================================================================================ FAILURES =================================================================================================================================================
+_________________________________________________________________________________________________________________________________ test_spark_delta_version_options_table __________________________________________________________________________________________________________________________________
+tests\test_spark_delta_logic.py:62: in test_spark_delta_version_options_table
+    mock_good.count.return_value = 0
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'method' object has no attribute 'return_value'
+__________________________________________________________________________________________________________________________________ test_spark_delta_version_options_file __________________________________________________________________________________________________________________________________
+tests\test_spark_delta_logic.py:109: in test_spark_delta_version_options_file
+    mock_good.count.return_value = 0
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'method' object has no attribute 'return_value'
+_____________________________________________________________________________________________________________________________ test_driver_reprocess_overwrite_partition_safe ______________________________________________________________________________________________________________________________
+tests\test_driver_e2e.py:229: in test_driver_reprocess_overwrite_partition_safe
+    df = pd.read_csv(partition_file)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\pandas\io\parsers\readers.py:1026: in read_csv
+    return _read(filepath_or_buffer, kwds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\pandas\io\parsers\readers.py:620: in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\pandas\io\parsers\readers.py:1620: in __init__
+    self._engine = self._make_engine(f, self.engine)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\pandas\io\parsers\readers.py:1880: in _make_engine
+    self.handles = get_handle(
+.venv\Lib\site-packages\pandas\io\common.py:873: in get_handle
+    handle = open(
+E   FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\colli\\AppData\\Local\\Temp\\pytest-of-colli\\pytest-31\\test_driver_reprocess_overwrit0\\out\\silver_policies\\run_date=2026-02-05\\data.csv'
+------------------------------------------------------------------------------------------------------------------------------------------ Captured stderr call -------------------------------------------------------------------------------------------------------------------------------------------
+2026-03-26 21:07:23.573 | INFO     | lakelogic.core.processor:run_source:882 - Loading source: C:\Users\colli\AppData\Local\Temp\pytest-of-colli\pytest-31\test_driver_reprocess_overwrit0\landing\policies_2026-02-05.csv via polars
+2026-03-26 21:07:23.576 | INFO     | lakelogic.core.processor:run:568 - Run complete � silver_policies
+    Source:               1
+    Total (post-transform):1
+    Good:                 1
+    Quarantined:          0
+    Pre-Transform Dropped: 0
+    Quarantine Ratio:     0.00%
+2026-03-26 21:07:23.580 | INFO     | lakelogic.core.materialization:materialize_dataframe:2112 - Materialized 1 rows to partitioned path: C:\Users\colli\AppData\Local\Temp\pytest-of-colli\pytest-31\test_driver_reprocess_overwrit0\out\silver_policies
+2026-03-26 21:07:23.580 | INFO     | lakelogic.cli.driver:_run_contract:397 - silver_policies: full load executed
+2026-03-26 21:07:23.582 | INFO     | lakelogic.cli.observability:finalize_summary:62 - Wrote pipeline summary to C:\Users\colli\AppData\Local\Temp\pytest-of-colli\pytest-31\test_driver_reprocess_overwrit0\summary.json
+2026-03-26 21:07:23.589 | INFO     | lakelogic.core.processor:run_source:882 - Loading source: C:\Users\colli\AppData\Local\Temp\pytest-of-colli\pytest-31\test_driver_reprocess_overwrit0\landing\policies_2026-02-05.csv via polars
+2026-03-26 21:07:23.592 | INFO     | lakelogic.core.processor:run:568 - Run complete � silver_policies
+    Source:               1
+    Total (post-transform):1
+    Good:                 1
+    Quarantined:          0
+    Pre-Transform Dropped: 0
+    Quarantine Ratio:     0.00%
+2026-03-26 21:07:23.596 | INFO     | lakelogic.core.materialization:materialize_dataframe:2112 - Materialized 1 rows to partitioned path: C:\Users\colli\AppData\Local\Temp\pytest-of-colli\pytest-31\test_driver_reprocess_overwrit0\out\silver_policies
+2026-03-26 21:07:23.597 | INFO     | lakelogic.cli.observability:finalize_summary:62 - Wrote pipeline summary to C:\Users\colli\AppData\Local\Temp\pytest-of-colli\pytest-31\test_driver_reprocess_overwrit0\summary.json
+========================================================================================================================================= short test summary info =========================================================================================================================================
+FAILED tests/test_spark_delta_logic.py::test_spark_delta_version_options_table - AttributeError: 'method' object has no attribute 'return_value'
+FAILED tests/test_spark_delta_logic.py::test_spark_delta_version_options_file - AttributeError: 'method' object has no attribute 'return_value'
+FAILED tests/test_driver_e2e.py::test_driver_reprocess_overwrite_partition_safe - FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\colli\\AppData\\Local\\Temp\\pytest-of-colli\\pytest-31\\test_driver_reprocess_overwrit0\\out\\silver_policies\\run_date=2026-02-05\\data.csv'
+======================================================================================================================================= 3 failed, 2 passed in 1.30s =======================================================================================================================================

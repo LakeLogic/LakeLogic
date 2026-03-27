@@ -191,23 +191,14 @@ def enrich_contract(
     try:
         enrichment = response.as_json()
     except (json.JSONDecodeError, ValueError):
-        # Gemini often outputs trailing commas in JSON — strip them and retry
-        import re
-        cleaned = response.text.strip()
-        # Strip markdown fences
-        if cleaned.startswith("```"):
-            first_nl = cleaned.index("\n") if "\n" in cleaned else 3
-            cleaned = cleaned[first_nl + 1:]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-        # Remove trailing commas before } or ]
-        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned.strip())
-        try:
-            enrichment = json.loads(cleaned)
-        except (json.JSONDecodeError, ValueError) as e2:
-            logger.error(f"Failed to parse AI response as JSON: {e2}")
-            logger.debug(f"Raw response: {response.text[:500]}")
+        # Apply progressive JSON repair (trailing commas, single quotes, etc.)
+        from lakelogic.ai.data_generator import _repair_llm_json
+        enrichment = _repair_llm_json(response.text)
+        if enrichment is None:
+            logger.error("Failed to parse AI response as JSON after repair attempts")
+            logger.debug(f"Raw response (first 500 chars): {response.text[:500]}")
             return contract
+        logger.warning("AI response required JSON repair to parse")
 
     # ── Merge field descriptions + PII flags ──────────────────────────
     ai_fields = {f["name"]: f for f in (enrichment.get("fields") or [])}

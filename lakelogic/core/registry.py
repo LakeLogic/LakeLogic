@@ -24,6 +24,14 @@ class SLOFreshnessConfig(BaseModel):
     exclude_tables: List[str] = Field(default_factory=list)
 
 
+class SLORowCountConfig(BaseModel):
+    """Per-layer row count thresholds checked against run log entries."""
+    min_rows: Optional[int] = None
+    max_rows: Optional[int] = None
+    check_field: str = "counts_good"  # run log column to check
+    exclude_tables: List[str] = Field(default_factory=list)
+
+
 class SLOQualityConfig(BaseModel):
     min_good_ratio: float = 0.95
     max_quarantine_ratio: float = 0.05
@@ -36,6 +44,7 @@ class SLOScheduleConfig(BaseModel):
 
 class RegistrySLO(BaseModel):
     freshness: Dict[str, SLOFreshnessConfig] = Field(default_factory=dict)
+    row_count: Dict[str, SLORowCountConfig] = Field(default_factory=dict)
     quality: Optional[SLOQualityConfig] = None
     schedule: Optional[SLOScheduleConfig] = None
 

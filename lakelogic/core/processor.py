@@ -451,7 +451,7 @@ class DataProcessor:
 
         # ── INTERNALLY ENFORCE SQL FIELD LIST ────────────────────────────────
         # If the user defined an explicit model and wants strict schema
-        # (allow_schema_drift is False OR schema_evolution is strict), prune undocumented columns.
+        # (allow_schema_drift is False AND schema_evolution is strict), prune undocumented columns.
         if good_df is not None and self.contract.model and self.contract.model.fields:
             allow_schema_drift = True
             schema_evolution = "strict"
@@ -462,7 +462,7 @@ class DataProcessor:
                 schema_evolution = getattr(server, "schema_evolution", "strict") or "strict"
                 
             # If evolution is append/merge, or drift is explicitly allowed, do NOT prune.
-            if not allow_schema_drift or schema_evolution.lower() == "strict":
+            if not allow_schema_drift and schema_evolution.lower() == "strict":
                 expected_cols = [f.name for f in self.contract.model.fields]
                 
                 # Polars Engine
@@ -485,7 +485,7 @@ class DataProcessor:
                         
                 # DuckDB / SQLite Engines
                 elif self.engine_name in ("duckdb", "sqlite"):
-                    existing = good_df.columns.tolist() if hasattr(good_df, "columns") else []
+                    existing = list(good_df.columns) if hasattr(good_df, "columns") else []
                     kepts = [c for c in expected_cols if c in existing]
                     if kepts and hasattr(good_df, "select"):
                         try:

@@ -225,7 +225,9 @@ def test_driver_reprocess_overwrite_partition_safe(tmp_path: Path) -> None:
     file_day1.write_text("policy_id,run_date\nP-2,2026-02-05\n", encoding="utf-8")
     drv.run({"system": registry_path}, ["silver"], driver.Window(None, None, "reprocess"), True)
 
-    partition_file = out_dir / "silver_policies" / "run_date=2026-02-05" / "data.csv"
-    df = pd.read_csv(partition_file)
+    partition_dir = out_dir / "silver_policies" / "run_date=2026-02-05"
+    csv_files = list(partition_dir.glob("data*.csv"))
+    assert csv_files, f"No CSV files found in {partition_dir}"
+    df = pd.read_csv(csv_files[0])
     assert len(df) == 1
     assert df.iloc[0]["policy_id"] == "P-2"
