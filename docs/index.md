@@ -1,29 +1,134 @@
+---
+hide:
+  - navigation
+---
 <div class="hero-section" markdown>
 
+<div class="hero-content" markdown>
 # Your Data Estate. <span style="color: var(--md-accent-fg-color);">Under Contract.</span>
 
-<p class="hero-subtitle">
-Open-source data contract library for Python — catch breaking data changes before they reach production.
+<p class="hero-subtitle" style="font-size: 1.3rem; font-weight: 500;">
+Stop rewriting ingestion boilerplate.<br>
+Define a contract — LakeLogic handles the rest.
 </p>
 
-<div class="hero-cta">
-<a href="examples/01_hello_world/" class="md-button md-button--primary">
-Try in 60 Seconds
-</a>
-<a href="https://github.com/lakelogic/LakeLogic" class="md-button">
-View on GitHub
-</a>
+<p class="hero-keyword-anchor" style="font-size: 0.95rem; opacity: 0.8; line-height: 1.5;">
+LakeLogic automatically enforces schema, data quality, and SCD logic across your medallion architecture.<br><br>
+The open-source alternative to Databricks DLT. dbt transformed SQL — LakeLogic does the same for ingestion and dimensional modelling.<br><br>
+Powered by Spark, Polars, and DuckDB.
+</p>
+
+<div class="hero-cta" markdown>
+[ :simple-googlecolab: Try Interactive Notebook in 60s ](https://colab.research.google.com/github/lakelogic/LakeLogic/blob/main/examples/01_quickstart/01_hello_world.ipynb){: target="_blank" .md-button .md-button--primary .md-button--lg }
+[ :simple-github: View on GitHub ](https://github.com/lakelogic/LakeLogic){: .md-button .md-button--secondary }
 </div>
+</div>
+
+<div class="hero-visual" markdown>
+=== "1. Define Contract"
+
+    ```yaml title="contract.yaml"
+    # 1. Read incrementally from cloud storage
+    source:
+      path: s3://landing/customers/*.json
+      load_mode: incremental
+
+    # 2. Enforce schema & PII masking
+    model:
+      fields:
+        - name: cus_id
+          type: string
+          required: true
+        - name: email
+          required: true
+          pii: true
+          masking: "encrypt"            # AES-256 for standard users
+          pii_vault: "vault://pii-key"  # Reversible unmasking for admins
+
+    # 3. Apply SQL transformations
+    transformations:
+      - sql: "LOWER(TRIM(email)) AS email"
+
+    # 4. Enforce quality & SLO guarantees
+    quality:
+      row_rules:
+        - sql: "email LIKE '%@%.%'"
+    service_levels:
+      freshness_hours: 24
+
+    # 5. Write 100% clean data directly to Catalog
+    materialization:
+      strategy: merge
+      primary_key: [cus_id]
+      target_path: catalog.silver.customers
+    ```
+
+=== "2. Run Pipeline"
+
+    ```bash title="Standard CLI"
+    lakelogic run contract.yaml
+    ```
+    
+    ```python title="Python / Databricks"
+    from lakelogic import DataProcessor
+
+    proc = DataProcessor("contract.yaml")
+    
+    # Executes the contract end-to-end
+    result = proc.run()
+    ```
+
+=== "3. View Output"
+
+    ```log title="Execution Logs"
+    LakeLogic Alert: 2 records quarantined in 'customers'. Total: 4
+    [2026-03-28 12:00:01] INFO  | Wrote 2 quarantined rows to catalog.quarantine.silver_customers
+    [2026-03-28 12:00:02] INFO  | Wrote 2 valid rows to catalog.silver.customers
+    [2026-03-28 12:00:03] INFO  | Run complete [layer=silver] | Total: 4 | Good: 2 | Quarantine: 2 | Ratio: 50.0%
+    ```
+
+    **✅ `result.good` (Passed Quality Gate & PII Masked)**
+    
+    | cus_id | email                  |
+    |--------|------------------------|
+    | C100   | ***@***.***            |
+    | C101   | ***@***.***            |
+    
+    **🚨 `result.bad` (Quarantined by LakeLogic)**
+    
+    | cus_id | email          | _lakelogic_categories           | _lakelogic_errors                                |
+    |--------|----------------|---------------------------------|--------------------------------------------------|
+    | C102   | not_an_email   | `["correctness"]`               | `["Rule failed: email LIKE '%@%.%'"]`            |
+    | C103   | null           | `["completeness"]`              | `["Rule failed: email is required"]`             |
+</div>
+
+</div>
+
 ---
 
 ## 🌐 Data Mesh Alignment
 
-LakeLogic is built for the decentralized data estate, directly supporting the four pillars of **Data Mesh**:
+LakeLogic is the missing runtime layer for Data Mesh — where domain ownership and federated governance stop being principles and start being enforced.
 
-- **Domain Ownership**: Contracts are owned and defined by domain teams (e.g., CRM, Finance) who know the data best.
-- **Data as a Product**: Contracts serve as the explicit "product interface," guaranteeing quality for consumers.
-- **Self-Serve Platform**: A standardized runtime that any team can use to deploy quality gates without infra silos.
-- **Federated Governance**: Global standards (e.g., PII masking) are defined centrally but enforced locally at every layer.
+<div class="grid cards" markdown>
+
+- :material-home-city-outline: **Domain Ownership**
+  <hr>
+  Contracts are owned and defined by domain teams (e.g., CRM, Finance) who know the data best.
+
+- :material-cube-outline: **Data as a Product**
+  <hr>
+  The contract IS the product interface — a versioned, schema-enforced, SLA-backed guarantee that consuming teams can depend on.
+
+- :material-server-network: **Self-Serve Platform**
+  <hr>
+  A standardized runtime that any team can use to deploy quality gates without infra silos.
+
+- :material-shield-check-outline: **Federated Governance**
+  <hr>
+  PII masking rules, SLA thresholds, and schema standards defined once in a central registry — automatically enforced at every domain pipeline.
+
+</div>
 
 ---
 
@@ -251,16 +356,16 @@ compliance:
 
 ---
 
-## Delta Lake & Catalog Support (Spark-Free!)
+## Delta Lake & Catalog Support — Lightweight Mode
 
-LakeLogic automatically resolves catalog table names and uses **Delta-RS** for fast, Spark-free Delta Lake operations.
+LakeLogic automatically resolves catalog table names and uses **Delta-RS** for fast, lightweight Delta Lake operations — no Spark cluster required.
 
 === "Unity Catalog (Databricks)"
 
     ```python
     from lakelogic import DataProcessor
     
-    # Use Unity Catalog table names directly (no Spark required!)
+    # Use Unity Catalog table names directly — lightweight mode
     processor = DataProcessor(
         engine="polars", 
         contract="contracts/customers.yaml"
@@ -385,22 +490,33 @@ lakelogic run --contract my_contract.yaml --source raw_data.parquet
 LakeLogic is the open-source engine that enforces your data contracts.
 Here's how to get the most out of it:
 
-- :material-robot-outline: **AI-Powered Contract Generation:** [Bootstrap
-  contracts](llm_extraction.md) from raw data with `--ai` — field descriptions, PII detection,
-  and SQL quality rules generated in seconds.
-- :material-file-tree: **Governance at Scale:** Learn how to [organize your 
-  contracts](organization.md) for 1,000s of tables using Domain-First ownership 
-  and Registries.
-- :material-card-text-outline: **Contract Reference:** Explore the [Complete 
-  Contract Template](contract_template.md) showing every available 
-  configuration option for Bronze, Silver, and Gold layers.
-- :material-molecule: **Detailed Architecture:** Explore how LakeLogic enforces
-  [Quality Gates across the Medallion Architecture](architecture_diagram.md)
-  including Quarantine logic, Lineage, and multi-engine support.
-- :material-test-tube: **Synthetic Test Data:** Generate realistic edge-case
-  data from your contracts to stress-test quarantine rules before production.
-- :material-web: **Project Hub:** Visit **[lakelogic.org](https://lakelogic.org)**
-  for the latest guides, blog posts, and community resources.
+<div class="grid cards" markdown>
+
+- :material-robot-outline: **[AI-Powered Contract Generation](llm_extraction.md)**
+  <hr>
+  Bootstrap contracts from raw data with `--ai` — descriptions, PII detection, and SQL rules generated in seconds.
+
+- :material-file-tree: **[Governance at Scale](organization.md)**
+  <hr>
+  Learn how to organize your contracts for 1,000s of tables using Domain-First ownership and Registries.
+
+- :material-card-text-outline: **[Contract Reference](contract_template.md)**
+  <hr>
+  Explore the complete template showing every available configuration option for Bronze, Silver, and Gold layers.
+
+- :material-molecule: **[Detailed Architecture](architecture_diagram.md)**
+  <hr>
+  Explore how LakeLogic enforces Quality Gates across the Medallion Architecture including Quarantine logic.
+
+- :material-test-tube: **[Synthetic Test Data](concepts.md)**
+  <hr>
+  Generate realistic edge-case data from your contracts to stress-test quarantine rules before production.
+
+- :material-web: **[Project Hub](https://lakelogic.org)**
+  <hr>
+  Visit lakelogic.org for the latest guides, blog posts, and community resources.
+
+</div>
 
 ---
 

@@ -38,8 +38,7 @@ theme:
   features:
     - navigation.instant        # Instant loading (SPA-like)
     - navigation.tracking       # URL updates with scroll
-    - navigation.sections       # Expand sections in sidebar
-    - navigation.expand         # Expand all sections by default
+    - navigation.tabs           # Top-level tabs
     - navigation.top            # Back to top button
     - navigation.footer         # Previous/next links
     - navigation.indexes        # Allow index pages for sections
@@ -57,6 +56,7 @@ nav:
       - "Quickstart: Hello World": examples/01_hello_world.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
+      - Open Data Contract Standard (ODCS): odcs.md
       - How it Works: concepts.md
       - Return Values: return_values.md
       - Contract Organization: organization.md

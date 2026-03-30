@@ -500,7 +500,10 @@ class IncrementalBoundary:
             if spark is None:
                 raise RuntimeError("No active Spark session")
 
-            df = spark.read.format("delta").load(target_path)
+            if str(target_path).startswith("table:"):
+                df = spark.table(target_path[6:])
+            else:
+                df = spark.read.format("delta").load(target_path)
             max_val = df.agg(F.max(watermark_field)).collect()[0][0]
 
             if max_val is None:
@@ -537,6 +540,11 @@ class IncrementalBoundary:
         *,
         to_version: Optional[int] = None,
         default_version: int = 0,
+        dataset: Optional[str] = None,
+        data_layer: Optional[str] = None,
+        domain: Optional[str] = None,
+        system: Optional[str] = None,
+        log_table: str = "pipeline_runs",
     ) -> Boundary:
         """
         Strategy: query processing window based on Delta table versions.
@@ -570,30 +578,83 @@ class IncrementalBoundary:
                 props = {row["key"]: row["value"] for row in props_df.collect()}
                 last_ver_str = props.get("lakelogic.last_source_version")
                 last_version = int(last_ver_str) if last_ver_str else None
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to read Delta property for target {target_name}: {e}")
                 last_version = None
+
+            if last_version is None and dataset is not None:
+                logger.debug(f"No target property found for {target_name}. Attempting fallback to {log_table}...")
+                try:
+                    import pyspark.sql.functions as F
+                    filt = (F.col("dataset") == dataset) & (F.col("stage") != "no_new_data") & (F.col("stage") != "reprocess")
+                    if data_layer:
+                        filt = filt & (F.col("data_layer") == data_layer)
+                    if domain:
+                        filt = filt & (F.col("domain") == domain)
+                    if system:
+                        filt = filt & (F.col("system") == system)
+
+                    row = (
+                        spark.table(log_table)
+                        .filter(filt)
+                        .agg(
+                            F.max("max_watermark_value").alias("last_watermark"),
+                            F.max(F.get_json_object("report_json", "$.incremental_metadata.to_version").cast("int")).alias("last_json_version")
+                        )
+                        .collect()[0]
+                    )
+                    
+                    _wm_val = row["last_watermark"]
+                    _json_val = row["last_json_version"]
+                    
+                    if _wm_val is not None:
+                        last_version = int(_wm_val)
+                        logger.info(f"Healed missing Delta property from {log_table}.max_watermark_value. Resuming from {last_version}.")
+                    elif _json_val is not None:
+                        last_version = int(_json_val)
+                        logger.info(f"Healed missing Delta property from {log_table}.report_json. Resuming from {last_version}.")
+                except Exception as log_exc:
+                    logger.debug(f"Fallback to {log_table} failed for {dataset}: {log_exc}")
+
+            if last_version is None:
+                logger.warning(
+                    f"INCREMENTAL RESET: No Delta version state for [{dataset}]. Full load from v{default_version}."
+                )
+                logger.warning(
+                    f"INCREMENTAL RESET context: domain={domain}, system={system}, data_layer={data_layer}, log_table={log_table}"
+                )
 
             # 2. Resolve target version from source history
             source_name = source_path[6:] if source_path.startswith("table:") else f"delta.`{source_path}`"
             curr_version = spark.sql(f"DESCRIBE HISTORY {source_name} LIMIT 1").collect()[0]["version"]
 
-            from_v = (last_version + 1) if last_version is not None else default_version
             to_v = to_version if to_version is not None else curr_version
 
-            # Handle source rollback or target state beyond source history
-            if from_v > to_v:
-                logger.warning(
-                    f"Last processed version ({last_version}) is >= current source version ({curr_version}). "
-                    f"Possible source rollback or target state drift. Resetting to {to_v} (nothing to process)."
+            skip_sync = False
+            if last_version == curr_version:
+                logger.info(
+                    f"Target version ({last_version}) matches source version ({curr_version}). No sync required."
                 )
-                from_v = to_v
+                from_v = curr_version
+                to_v = curr_version
+                skip_sync = True
+            else:
+                from_v = (last_version + 1) if last_version is not None else default_version
+                # Handle source rollback / drop-recreate (target claims to be ahead of source)
+                if from_v > to_v:
+                    logger.warning(
+                        f"Target version ({last_version}) > current source version ({curr_version}). "
+                        f"Source table may have been dropped or re-created. Resetting to FULL reload from version {default_version}."
+                    )
+                    from_v = default_version
+                    to_v = curr_version
 
             meta = {
                 "from_version": from_v,
                 "to_version": to_v,
-                "last_processed_version": last_version,
                 "source_path": source_path,
                 "target_path": target_path,
+                "skip_sync": skip_sync,
             }
 
             # Map version numbers to dummy datetimes (Boundary requires datetimes)
@@ -701,26 +762,43 @@ class IncrementalBoundary:
                 row = (
                     spark.table(log_table)
                     .filter(filt)
-                    .agg(F.max("max_watermark_value").alias("last_watermark"), F.max("timestamp").alias("last_success"))
+                    .agg(
+                        F.max("max_source_mtime").alias("last_source_mtime"),
+                        F.max("max_watermark_value").alias("last_watermark"),
+                        F.max("timestamp").alias("last_success"),
+                    )
                     .collect()[0]
                 )
-                last_success_str = row["last_watermark"] or row["last_success"]
-                if last_success_str is None:
-                    raise ValueError(
-                        f"No successful run found in {log_table} for dataset={dataset!r} data_layer={data_layer!r}"
-                    )
 
-                # timestamp is stored as ISO string in _run_logs
-                if isinstance(last_success_str, str):
-                    last_success = datetime.fromisoformat(last_success_str.replace("Z", "+00:00"))
-                elif isinstance(last_success_str, datetime):
-                    last_success = last_success_str
+                # Priority: max_source_mtime (epoch of upstream table's last processed row)
+                #         → max_watermark_value (explicit watermark from prior run)
+                #         → timestamp (fallback to run timestamp)
+                _src_mtime = row["last_source_mtime"]
+                if _src_mtime is not None:
+                    # max_source_mtime is stored as epoch seconds (float/int)
+                    last_success = datetime.fromtimestamp(float(_src_mtime), tz=timezone.utc)
+                    logger.info(
+                        f"Pipeline log boundary from max_source_mtime: {last_success.isoformat()}"
+                    )
                 else:
-                    last_success = datetime.fromisoformat(str(last_success_str))
+                    last_success_str = row["last_watermark"] or row["last_success"]
+                    if last_success_str is None:
+                        raise ValueError(
+                            f"No successful run found in {log_table} for dataset={dataset!r} data_layer={data_layer!r}"
+                        )
+
+                    # timestamp is stored as ISO string in _run_logs
+                    if isinstance(last_success_str, str):
+                        last_success = datetime.fromisoformat(last_success_str.replace("Z", "+00:00"))
+                    elif isinstance(last_success_str, datetime):
+                        last_success = last_success_str
+                    else:
+                        last_success = datetime.fromisoformat(str(last_success_str))
 
                 from_dt = last_success + timedelta(seconds=1)
                 meta = {
                     "last_success": str(last_success),
+                    "source": "max_source_mtime" if _src_mtime is not None else "max_watermark_value",
                     "dataset": dataset,
                     "data_layer": data_layer or "",
                     "domain": domain or "",
@@ -1120,7 +1198,15 @@ class IncrementalBoundary:
         if strategy == "delta_version":
             tp = target_path or src.get("target_path", "")
             sp = src.get("path", "")
-            return cls.from_delta_version(sp, tp)
+            return cls.from_delta_version(
+                sp, 
+                tp,
+                dataset=src.get("dataset"),
+                data_layer=src.get("data_layer"),
+                domain=src.get("domain"),
+                system=src.get("system"),
+                log_table=src.get("pipeline_log_table", "pipeline_runs")
+            )
 
         tp = target_path or src.get("target_path", "")
         b = cls.from_max_target(tp, watermark_field=wm_field)
@@ -1204,6 +1290,11 @@ class IncrementalBoundary:
             return cls.from_delta_version(
                 cfg.get("path", ""),
                 cfg.get("target_path", ""),
+                dataset=cfg.get("dataset"),
+                data_layer=cfg.get("data_layer"),
+                domain=cfg.get("domain"),
+                system=cfg.get("system"),
+                log_table=cfg.get("pipeline_log_table", "pipeline_runs"),
             )
         b = cls.from_max_target(cfg.get("target_path", ""), watermark_field=wm_field)
         b.partition_filters = merged_pf
