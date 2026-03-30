@@ -9,7 +9,6 @@ from pydantic import (
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 from loguru import logger
-import warnings
 
 _QUALITY_CATEGORIES = {
     "correctness",
@@ -145,6 +144,7 @@ class SourceConfig(BaseModel):
     watermark_field: Optional[str] = None
     cdc_op_field: Optional[str] = None
     cdc_delete_values: List[str] = Field(default_factory=list)
+    cdc_timestamp_field: Optional[str] = None
 
     # Date-partitioned landing support
     partition: Optional[SourcePartition] = None
@@ -730,9 +730,8 @@ class QualityRule(BaseModel):
             return "correctness"
         text = _QUALITY_CATEGORY_SYNONYMS.get(text, text)
         if text not in _QUALITY_CATEGORIES:
-            warnings.warn(
-                f"Unknown quality rule category '{value}'. Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}.",
-                UserWarning,
+            logger.warning(
+                f"Unknown quality rule category '{value}'. Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}."
             )
         return text
 
@@ -822,11 +821,30 @@ class ServiceLevelObjective(BaseModel):
     field: Optional[str] = None
 
 
+class RowCountSLO(BaseModel):
+    """Row count SLO for individual contracts.
+
+    Validates that the output row count falls within expected bounds.
+    Checked against the field specified by check_field (default: counts_good).
+
+    When skip_reprocess_days is set and the reprocess date range exceeds that
+    threshold, SLO checks and counts_source computation are skipped entirely
+    to avoid expensive Spark wide-transformation actions on large backfills.
+    """
+
+    min_rows: Optional[int] = None  # Minimum expected rows (fail if below)
+    max_rows: Optional[int] = None  # Maximum expected rows (fail if above)
+    check_field: str = "counts_good"  # counts_good | counts_source | counts_total
+    skip_reprocess_days: int = 3  # Skip SLO + source count when reprocess range > N days (0 = never skip)
+    description: Optional[str] = None
+
+
 class ServiceLevel(BaseModel):
-    """Service-level settings for freshness and availability."""
+    """Service-level settings for freshness, availability, and row counts."""
 
     freshness: Optional[Union[str, ServiceLevelObjective]] = None
-    availability: Optional[Union[float, ServiceLevelObjective]] = None  # percentage e.g. 99.9
+    availability: Optional[Union[float, ServiceLevelObjective]] = None  # field completeness percentage e.g. 99.9
+    row_count: Optional[RowCountSLO] = None  # min/max row count bounds per contract
 
 
 class FieldDefinition(BaseModel):
@@ -850,6 +868,11 @@ class FieldDefinition(BaseModel):
     # At validation time, DataProcessor evaluates the corresponding referential_integrity rule.
     foreign_key: Optional[ForeignKeyRef] = None
 
+    # ── Kimball Dimensional Modelling ─────────────────────────────────────────
+    nullable: Optional[bool] = None  # Explicit nullability (critical for accumulating snapshot milestones)
+    milestone: bool = False  # Flag for accumulating snapshot milestone date columns
+    generated: bool = False  # Flag for auto-generated fields (surrogate keys, SCD2 validity columns)
+
     # ── PII Security Group Mapping ───────────────────────────────────────────
     # security_groups: list of group names that are allowed to see unmasked values.
     # If the current user is NOT in any of these groups, the masking strategy is applied.
@@ -871,6 +894,31 @@ class Model(BaseModel):
     """Schema model definition."""
 
     fields: List[FieldDefinition] = Field(default_factory=list)
+    grain: Optional[str] = None  # Human-readable grain description (e.g. "one row per order lifecycle")
+    grain_key: List[str] = Field(default_factory=list)  # Conceptual grain columns (subset of primary_key)
+
+
+class FactConfig(BaseModel):
+    """
+    Kimball Fact Table Automated Governance.
+
+    Automatically injects pipeline constraints based on the defined Fact Table architecture:
+    - accumulating_snapshot: ensures milestone dates are monotonically increasing
+    - transaction: lock strategy to append
+    - factless: asserts no metric columns exist
+
+    YAML example::
+        materialization:
+          strategy: merge
+          fact:
+            type: accumulating_snapshot
+            milestone_dates:
+              - placed_date
+              - shipped_date
+    """
+
+    type: str  # transaction | periodic_snapshot | accumulating_snapshot | factless | aggregate
+    milestone_dates: List[str] = Field(default_factory=list)
 
 
 class Materialization(BaseModel):
@@ -888,12 +936,29 @@ class Materialization(BaseModel):
         None  # External storage location for UC tables (e.g. abfss://container@account.dfs.core.windows.net/path/)
     )
     scd2: Optional[Dict[str, Any]] = None
+    fact: Optional[FactConfig] = None
     soft_delete_column: Optional[str] = None  # e.g. '_lakelogic_is_deleted'
     soft_delete_value: Any = True  # Value to set when deleted
     soft_delete_time_column: Optional[str] = None  # e.g. '_lakelogic_deleted_at'
     soft_delete_reason_column: Optional[str] = None  # e.g. '_lakelogic_delete_reason'
     table_properties: Optional[Dict[str, str]] = None  # e.g. {'delta.autoOptimize.optimizeWrite': 'true'}
     compaction: Optional[Dict[str, Any]] = None  # e.g. {'auto': True, 'vacuum_retention_hours': 168}
+    unknown_member: Optional[Dict[str, Any]] = None  # Kimball unknown member row for dimensions
+
+    @model_validator(mode="after")
+    def _validate_strategy_alignment(self) -> "Materialization":
+        """Warn when strategy and sub-config blocks are mismatched."""
+        if self.strategy == "scd2" and not self.scd2:
+            logger.warning(
+                "materialization.strategy is 'scd2' but no 'scd2:' config block is defined. "
+                "LakeLogic requires track_columns, timestamp_field, etc. in the scd2 block."
+            )
+        if self.scd2 and self.strategy != "scd2":
+            logger.warning(
+                f"materialization.scd2 block is defined but strategy is '{self.strategy}', not 'scd2'. "
+                "The scd2 block will be ignored."
+            )
+        return self
 
 
 class DownstreamConsumer(BaseModel):
@@ -1146,6 +1211,52 @@ class ExternalLogic(BaseModel):
     kernel_name: Optional[str] = None  # notebook kernel override
 
 
+def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert an Open Data Contract Standard (ODCS) dict into LakeLogic format."""
+    # Check if this is an ODCS contract (requires kind and apiVersion)
+    if data.get("kind") != "DataContract" or "apiVersion" not in data:
+        return data  # Not ODCS or already LakeLogic
+
+    lakelogic_data = {}
+
+    # 1. Map root properties
+    # LakeLogic requires a version. We'll use the ODCS apiVersion.
+    lakelogic_data["version"] = data.get("apiVersion", "v1")
+    if "dataset" in data:
+        lakelogic_data["info"] = {"title": data["dataset"]}
+
+    # 2. Map schema to model.fields
+    if "schema" in data and isinstance(data["schema"], list):
+        fields = []
+        for col in data["schema"]:
+            field = {
+                "name": col.get("name"),
+                "type": col.get("type", "string"),
+            }
+            if "description" in col:
+                field["description"] = col["description"]
+            if "required" in col:
+                field["required"] = col["required"]
+            if "pii" in col:
+                field["pii"] = col["pii"]
+            fields.append(field)
+        lakelogic_data["model"] = {"fields": fields}
+
+    # 3. Apply customProperties.lakelogic overrides (the execution instructions)
+    custom_props = data.get("customProperties", {}).get("lakelogic", {})
+    if isinstance(custom_props, dict):
+        for k, v in custom_props.items():
+            lakelogic_data[k] = v
+
+    # 4. Copy any missing properties for a best-effort merge
+    # This allows direct pass-through of things like `metadata`, `servers` if they happen to align.
+    for k, v in data.items():
+        if k not in ["kind", "apiVersion", "dataset", "schema", "customProperties"] and k not in lakelogic_data:
+            lakelogic_data[k] = v
+
+    return lakelogic_data
+
+
 class DataContract(BaseModel):
     """
     Finalized SQL-First Data Contract Model.
@@ -1153,6 +1264,14 @@ class DataContract(BaseModel):
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _odcs_interceptor(cls, data: Any) -> Any:
+        """Intercept and convert ODCS YAML into LakeLogic dict before Pydantic parses it."""
+        if isinstance(data, dict):
+            return _convert_odcs_to_lakelogic(data)
+        return data
 
     version: str
     info: Optional[Info] = None
@@ -1164,6 +1283,7 @@ class DataContract(BaseModel):
 
     dataset: Optional[str] = None
     primary_key: List[str] = Field(default_factory=list)
+    natural_key: List[str] = Field(default_factory=list)  # Business key for SCD2 (repeated across versions)
 
     # LINEAGE & OBSERVABILITY
     lineage: Optional[LineageConfig] = Field(default_factory=LineageConfig)
@@ -1278,7 +1398,6 @@ class DataContract(BaseModel):
         load_mode: cdc
            - cdc_op_field required
         """
-        import warnings
 
         source = getattr(self, "source", None)
         if source is None:
@@ -1290,20 +1409,16 @@ class DataContract(BaseModel):
             wm_field = getattr(source, "watermark_field", None)
             wm_strategy = getattr(source, "watermark_strategy", None)
             if not wm_field and not wm_strategy:
-                warnings.warn(
+                logger.warning(
                     "source.load_mode is 'incremental' but no watermark_field is set. "
                     "Defaulting to '_lakelogic_processed_at'. To silence this warning, "
-                    "add 'watermark_field: _lakelogic_processed_at' to the source block.",
-                    UserWarning,
-                    stacklevel=2,
+                    "add 'watermark_field: _lakelogic_processed_at' to the source block."
                 )
             # pipeline_log_table defaults to "pipeline_runs" at runtime
             # (see incremental.py), so no warning needed here.
             if wm_strategy == "lookback" and not getattr(source, "lookback", None):
-                warnings.warn(
-                    "watermark_strategy is 'lookback' but lookback duration is not set. Defaulting to '7 days'.",
-                    UserWarning,
-                    stacklevel=2,
+                logger.warning(
+                    "watermark_strategy is 'lookback' but lookback duration is not set. Defaulting to '7 days'."
                 )
 
         elif load_mode == "cdc":

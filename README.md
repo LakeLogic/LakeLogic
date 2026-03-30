@@ -8,21 +8,22 @@
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
-Catch breaking data changes before they reach production. One YAML contract. Any engine.
-Every row validated, quarantined, or promoted — automatically.
+Stop rewriting ingestion boilerplate. Define a contract — LakeLogic handles the rest.
+
+> LakeLogic automatically enforces schema, data quality, and SCD logic across your medallion architecture. The open-source alternative to Databricks DLT. dbt transformed SQL — LakeLogic does the same for ingestion and dimensional modelling. Powered by Spark, Polars, and DuckDB.
 
 ---
 
 ## 🌐 Data Mesh Alignment
 
-LakeLogic is built for the decentralized data estate, directly supporting the four pillars of Data Mesh:
+LakeLogic is the missing runtime layer for Data Mesh — where domain ownership and federated governance stop being principles and start being enforced.
 
 | Pillar | How LakeLogic Delivers |
 | :--- | :--- |
 | **Domain Ownership** | Contracts are owned and defined by domain teams (e.g., CRM, Finance) who know the data best. |
-| **Data as a Product** | Contracts serve as the explicit "product interface," guaranteeing quality for consumers. |
+| **Data as a Product** | The contract IS the product interface — a versioned, schema-enforced, SLA-backed guarantee that consuming teams can depend on. |
 | **Self-Serve Platform** | A standardized runtime that any team can use to deploy quality gates without infra silos. |
-| **Federated Governance** | Global standards (e.g., PII masking) are defined centrally but enforced locally at every layer. |
+| **Federated Governance** | PII masking rules, SLA thresholds, and schema standards defined once in a central registry — automatically enforced at every domain pipeline. |
 
 ---
 

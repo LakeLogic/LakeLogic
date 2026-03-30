@@ -165,9 +165,7 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
 
     writer.saveAsTable(table_name)
 
-    logger.info(
-        f"Wrote {rows_written} quarantined rows to Spark table {table_name} (format={table_format}, mode={mode})"
-    )
+    logger.info(f"Wrote {rows_written} quarantined rows to {table_name} (format={table_format}, mode={mode})")
     return {"target": table_name, "rows_written": rows_written, "format": table_format}
 
 
@@ -298,7 +296,7 @@ def _write_quarantine_table_sqlite(df: Any, contract, table_name: str, metadata:
         conn.close()
 
     rows_written = len(pdf)
-    logger.info(f"Wrote {rows_written} quarantined rows to SQLite table {table_name}")
+    logger.info(f"Wrote {rows_written} quarantined rows to {table_name}")
     return {
         "target": f"{db_path}:{table_name}",
         "rows_written": rows_written,
@@ -369,7 +367,7 @@ def _write_quarantine_table_snowflake(df: Any, contract, table_name: str, metada
 
     rows_written = len(pdf)
     target_full = ".".join([p for p in [params.get("database"), params.get("schema"), table_only] if p])
-    logger.info(f"Wrote {rows_written} quarantined rows to Snowflake table {target_full}")
+    logger.info(f"Wrote {rows_written} quarantined rows to {target_full}")
     return {"target": target_full, "rows_written": rows_written, "format": "snowflake"}
 
 
@@ -418,7 +416,7 @@ def _write_quarantine_table_bigquery(df: Any, contract, table_name: str, metadat
     job.result()
 
     rows_written = len(pdf)
-    logger.info(f"Wrote {rows_written} quarantined rows to BigQuery table {table_id}")
+    logger.info(f"Wrote {rows_written} quarantined rows to {table_id}")
     return {"target": table_id, "rows_written": rows_written, "format": "bigquery"}
 
 
@@ -662,7 +660,7 @@ def materialize_quarantine(
             write_deltalake(delta_path, pa.Table.from_pandas(pdf), mode=delta_write_mode)
             rows_written = len(pdf)
 
-        logger.info(f"Wrote {rows_written} quarantined rows to Delta table {delta_path} (mode={delta_write_mode})")
+        logger.info(f"Wrote {rows_written} quarantined rows to {delta_path} (mode={delta_write_mode})")
         return {
             "target": delta_path,
             "rows_written": rows_written,

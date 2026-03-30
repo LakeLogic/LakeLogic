@@ -6,6 +6,26 @@ Use this as a reference to understand what's possible, then create your own cont
 
 ---
 
+## The Versioning Architecture
+
+The industry gold standard for Data Contracts is a hybrid approach known as **"Major Pinning, Minor Floating"**.
+
+In LakeLogic, you mandate that all contracts use strict Semantic Versioning (e.g., `v1.2.0` -> `Major.Minor.Patch`):
+
+* **Major Changes (`v2.0`):** Breaking changes (deleting columns, altering core data types, rotating primary keys).
+* **Minor Changes (`v1.3`):** Additive changes (appending new optional columns, adding new metadata tags).
+
+Because Fact tables act as permanent systemic ledgers, your downstream contracts should pin their `foreign_key` validation pointers **only** to the Major version string:
+
+```yaml
+      foreign_key:
+        contract: "gold_sales_dim_accounts_v1"
+```
+
+This strategy strictly immunizes your data pipeline against destructive upstream changes (like an upstream domain deleting columns in `v2.0`), while dynamically floating those additive features (like a new `v1.3` attribute) straight into your data model safely!
+
+---
+
 ## Template Structure
 
 ```yaml
@@ -138,30 +158,62 @@ source:
   # OPTIONAL: File pattern filter
   # Business value: Select specific files from directory
 
+  format: "csv"
+  # OPTIONAL: Source file format (default: auto-detected from path/extension)
+  # Options: parquet | csv | json | delta | avro | orc | xml
+  # Business value: Explicit format when auto-detection isn't sufficient
+  
+  options:
+    header: "true"
+    inferSchema: "true"
+    recursiveFileLookup: "true"
+    multiLine: "true"
+    delimiter: ","
+  # OPTIONAL: Reader options passed directly to the engine (Spark, Pandas, etc.)
+  # Common CSV options: header, inferSchema, delimiter, quote, escape, encoding
+  # Common JSON options: multiLine, allowComments
+  # Common Parquet options: mergeSchema
+  # Business value: Fine-grained control over file parsing behavior
+
   cdc_op_field: "operation"
   # REQUIRED for cdc: Field indicating operation type
   # Business value: Change data capture support
   
   cdc_delete_values: ["D", "DELETE"]
   # Values indicating delete operations
-  # Business value: Handle deletes in CDC streams
+  # Business value: Handle deletes in CDC streams (see materialization.soft_delete_column for detail on Tombstone vs Hard Delete behavior)
+  
+  cdc_timestamp_field: "source_record_updated_at"
+  # OPTIONAL for cdc: Source column providing the exact event time for soft deletes.
+  # If specified, the engine will use this timestamp (coalescing to current time if null).
+  # Business value: High accuracy tracking of exactly when a record was deleted upstream.
+  
+  # ── CDC Example Usage ────────────────────────────────────────
+  # To enable CDC, set load_mode: cdc and map your source operation flags:
+  #
+  # Example:
+  #   source:
+  #     type: table
+  #     path: "{domain_catalog}.{bronze_layer}_{system}_events"
+  #     load_mode: cdc
+  #     cdc_op_field: "__START_AT"  # Or whatever column holds the CDC op
+  #     cdc_delete_values: ["D", "Delete", "Remove"]
+  #     cdc_timestamp_field: "_lakelogic_processed_at"
   
   watermark_strategy: "max_target"
   # Options: max_target (default), pipeline_log, manifest, lookback, date_range, delta_version
   # Business value: Flexible incremental boundary resolution
   #
-  # ── Strategy Comparison ───────────────────────────────────────────
+  # ── Strategy Comparison ──────────────────────────────────────
   #
-  # ┌────────────────┬─────────────────────────┬────────────────────────────────┬──────────────┐
-  # │ Strategy       │ Best For                │ State Stored In                │ Needs Spark? │
-  # ├────────────────┼─────────────────────────┼────────────────────────────────┼──────────────┤
-  # │ max_target     │ Most batch pipelines    │ Target table (self-healing)    │ Yes          │
-  # │ pipeline_log   │ Partial overwrites      │ _run_logs table (via run_log)  │ Yes          │
-  # │ lookback       │ Simple rolling windows  │ None (stateless)               │ No           │
-  # │ date_range     │ Backfills & widgets     │ None (explicit dates)          │ No           │
-  # │ manifest       │ Non-Spark pipelines     │ JSON manifest file             │ No           │
-  # │ delta_version  │ Large streaming tables  │ Target TBLPROPERTIES           │ Yes          │
-  # └────────────────┴─────────────────────────┴────────────────────────────────┴──────────────┘
+  #  Strategy        Best For                 State Stored In          Requires Spark?
+  #  ──────────────  ───────────────────────  ───────────────────────  ───────────────
+  #  max_target      Most batch pipelines     Target table (self-heal) Yes
+  #  pipeline_log    Partial overwrites       _run_logs table          Yes
+  #  lookback        Simple rolling windows   None (stateless)         No
+  #  date_range      Backfills & widgets      None (explicit dates)    No
+  #  manifest        Non-Spark pipelines      JSON manifest file       No
+  #  delta_version   Large streaming tables   Target TBLPROPERTIES     Yes
   #
   # ── Strategy 1: max_target (DEFAULT) ──────────────────────────────
   # Queries MAX(watermark_field) on the target Delta table.
@@ -316,9 +368,9 @@ source:
     
     lookback_days: 3
     # How many days back to scan from today. Default: 1.
-    # On FIRST RUN (no watermark), lookback is ignored — all partitions scanned.
+    # On FIRST RUN (no watermark), lookback is respected to prevent massive backfills.
     # Can be overridden at runtime: pipeline.run(lookback_days=30)
-    # Business value: Controls daily scan scope
+    # Business value: Controls daily scan scope and initial load bounds
     
     # start_date: "2026-01-01"
     # end_date: "2026-03-22"
@@ -433,11 +485,26 @@ primary_key:
   - "customer_id"
 # Business value: Uniqueness validation, merge operations
 
+# OPTIONAL: Business/natural key for SCD2 dimensions
+# In SCD2, primary_key is the surrogate (unique per row), while natural_key
+# is the business key that repeats across versions.
+natural_key:
+  - "customer_id"
+# Business value: Separates surrogate identity from business identity
+
 # ============================================================
 # 7. SCHEMA MODEL
 # ============================================================
 # OPTIONAL: Define expected schema with types and constraints
 model:
+  # OPTIONAL: Human-readable grain description
+  grain: "one row per customer"
+  # Business value: Self-documenting data contract — makes the conceptual unit explicit
+
+  # OPTIONAL: Columns that define the grain (subset of primary_key)
+  grain_key: ["customer_id"]
+  # Business value: LakeLogic can validate no duplicate grain rows are produced
+
   fields:
     - name: "customer_id"
       type: "long"
@@ -463,6 +530,21 @@ model:
         severity: "error"
       # Generator samples from PK pool of referenced contract
       # Business value: Referential integrity + synthetic data generation
+
+      # OPTIONAL: Kimball Dimensional Modelling flags
+      nullable: true
+      # Explicit nullability declaration — critical for accumulating snapshot milestones
+      # where dates start as null until that lifecycle stage is reached.
+      # Business value: Generates COALESCE merge logic for milestone columns
+
+      milestone: true
+      # Flag for accumulating snapshot milestone date columns.
+      # Business value: Signals that this column tracks a lifecycle stage
+
+      generated: true
+      # Flag for auto-generated fields (surrogate keys, SCD2 validity columns).
+      # Fields marked generated: true are produced by LakeLogic, not the source.
+      # Business value: Complete, honest description of the output table schema
       
       # OPTIONAL: Field-level quality rules
       rules:
@@ -579,7 +661,7 @@ transformations:
   
   # Deduplicate before validation
   - deduplicate:
-      on: ["customer_id"]
+      "on": ["customer_id"]
       sort_by: ["updated_at"]
       order: "desc"
     phase: "pre"
@@ -677,7 +759,7 @@ transformations:
   - lookup:
       field: "country_name"
       reference: "dim_countries"
-      on: "country_code"
+      "on": "country_code"
       key: "code"
       value: "name"
       default_value: "Unknown"
@@ -687,7 +769,7 @@ transformations:
   # Full join with multiple fields
   - join:
       reference: "dim_products"
-      on: "product_id"
+      "on": "product_id"
       key: "id"
       fields: ["product_name", "category", "price"]
       type: "left"
@@ -728,7 +810,7 @@ transformations:
       upstream_run_ids_column: "_upstream_lakelogic_run_ids"
       distinct: true
     phase: "post"
-    # Business value: Aggregation with full lineage
+    # Business value: Compute metrics (Pair with `fact: type: aggregate` below for auto-lineage!)
 
   # Pivot long metrics into wide columns
   - pivot:
@@ -1027,11 +1109,13 @@ quarantine:
 materialization:
   strategy: "merge"
   # Options: append, merge, scd2, overwrite
-  # append: Add new rows (fact tables)
-  # merge: Upsert based on primary key (SCD Type 1)
-  # scd2: Slowly Changing Dimension Type 2 (history tracking)
-  # overwrite: Replace all data (daily snapshots)
-  # Business value: Choose appropriate write pattern
+  # append: Add new rows (e.g. Bronze raw logs, Gold fact tables)
+  #         (Add fact: block below to enable Kimball auto-governance and structural validations)
+  # merge: Upsert based on primary key (e.g. Silver CDC, Gold dimensions)
+  #        (Add scd1: block below to enable SCD Type 1 auto-SK and Unknown Member)
+  # scd2: Slowly Changing Dimension Type 2 (history tracking - Configured via scd2: block below)
+  # overwrite: Replace all data (e.g. daily snapshots)
+  # Business value: Choose appropriate write pattern across all Medallion layers
   
   partition_by:
     - "country"
@@ -1058,11 +1142,31 @@ materialization:
   # Options: parquet, delta, iceberg, csv
   # Business value: Format selection
   
-  # SCD Type 2 specific configuration
-  scd2:
-    primary_key: "customer_id"
-    # Business key for the entity
+  # ── Fact Table Configuration (Auto-Governance) ───────────────
+  # OPTIONAL: Define the business purpose of this fact table.
+  # LakeLogic uses this to automatically enforce data quality rules 
+  # based on Kimball best practices, so you don't have to write them manually.
+  fact:
+    type: "accumulating_snapshot"  
+    # Options & Business Value (Pick One):
+    # - transaction: Immutable log of events (e.g. Sales, Clicks). Cannot be updated.
+    # - periodic_snapshot: State at a point in time (e.g. Daily Account Balances).
+    # - accumulating_snapshot: Tracks lifecycle of a process (e.g. Order Pipelines, SLAs).
+    # - factless: Tracks events that have no numeric metrics (e.g. Student Attendance).
+    # - aggregate: Pre-summarized metrics for dashboards (e.g. Monthly Revenue).
+    #   (Pair this with a `rollup:` transformation block below to compute the actual math!)
     
+    milestone_dates:
+      # Required ONLY for 'accumulating_snapshot'. 
+      # Tracks the progression of an entity through defined stages.
+      # LakeLogic automatically ensures these dates always flow sequentially
+      # (e.g. preventing 'shipped_date' from arriving before 'placed_date').
+      - "placed_date"
+      - "shipped_date"
+      - "delivered_date"
+
+  # ── SCD Type 2 specific configuration ────────────────────────
+  scd2:
     timestamp_field: "updated_at"
     # Field to determine record version
     
@@ -1075,13 +1179,12 @@ materialization:
     current_flag_field: "is_current"
     # Boolean flag for current record
     
+    start_date_default: "1900-01-01"
+    # Default value for initial load records
+
     end_date_default: "9999-12-31"
     # Default value for open-ended records
-    
-    hash_fields: ["email", "status", "age"]
-    # Fields to hash for change detection
-    # Business value: Full history tracking
-    
+
     track_columns: ["email", "status", "age"]
     # OPTIONAL: Only open a new version when one of these columns changes.
     # If omitted, any incoming row for a known key triggers a new version.
@@ -1115,17 +1218,64 @@ materialization:
     #   "email,status"   — comma-separated list of changed tracked fields
     #   "all"            — no track_columns specified (all changes trigger version)
     # Business value: Audit trail — why was a new version created?
-  
-  # OPTIONAL: Soft-delete support (mark deleted instead of removing)
+    
+    # ── Unknown Member Injection ───────────────────────────────
+    # Enabled by default. Provides an idempotently generated late-arriving fact fallback row.
+    unknown_member:
+      enabled: true
+      surrogate_key_value: "-1"
+      # OPTIONAL: Explicit default values to override lakelogic's auto-inference.
+      # If omitted or a column is left out, lakelogic automatically infers defaults 
+      # from schema data types (Numeric->-1, Boolean->False). 
+      # Strings default to "Unknown" but safely truncate to fit VARCHAR(N) constraints.
+      # Examples: VARCHAR(2) -> "Un", VARCHAR(4) -> "Unkn", VARCHAR(X) > 7 -> "Unknown".
+      # default_values:
+      #   customer_id: -1
+      #   email: "Unknown"
+      #   status: "Unknown"
+
+  # SCD Type 1 specific configuration (only applied if strategy: "merge")
+  scd1:
+    surrogate_key: "_sk"
+    # Auto-generates a Surrogate Key for the dimension (Hash of primary key)
+    # Business value: Fast integer/hash joins for downstream facts where history is not needed
+    
+    surrogate_key_strategy: "hash"
+    # Options: hash (default), uuid
+    # hash: SHA256(primary_key)[:16] — deterministic
+    
+    # ── Unknown Member Injection ───────────────────────────────
+    # Enabled by default. Provides an idempotently generated late-arriving fact fallback row even for SCD1.
+    unknown_member:
+      enabled: true
+      surrogate_key_value: "-1"
+      # OPTIONAL: Explicit default values to override lakelogic's auto-inference.
+      # If omitted or a column is left out, lakelogic automatically infers defaults 
+      # from schema data types (Numeric->-1, Boolean->False). 
+      # Strings default to "Unknown" but safely truncate to fit VARCHAR(N) constraints.
+      # Examples: VARCHAR(2) -> "Un", VARCHAR(4) -> "Unkn", VARCHAR(X) > 7 -> "Unknown".
+      # default_values:
+      #   customer_id: -1
+      #   email: "Unknown"
+      #   status: "Unknown"
+
+  # OPTIONAL: Soft-delete support (mark deleted instead of removing). 
+  # - If set (Tombstone): Deletes from CDC flip this flag to true and preserve the row. 
+  #   Late-arriving inserts for already deleted records will safely insert as tombstones.
+  # - If omitted (Hard Delete): Deletes from CDC physically remove the row from the target.
+  #
+  # ✨ NOTE: When `source.load_mode` is set to `cdc`, LakeLogic automatically 
+  # enables soft-deletes (Tombstone) by injecting the default columns below. 
+  # To force Hard Deletes during a CDC load, explicitly set `soft_delete_column: ""` (empty string).
   soft_delete_column: "_lakelogic_is_deleted"
   # Column name for soft-delete boolean flag
   soft_delete_value: true
   # Value to set when record is deleted
   soft_delete_time_column: "_lakelogic_deleted_at"
-  # Timestamp for when soft-delete occurred
+  # Timestamp for when soft-delete occurred (auto-filled on CDC deletes if empty)
   soft_delete_reason_column: "_lakelogic_delete_reason"
-  # Reason for deletion (e.g. "GDPR request", "duplicate")
-  # Business value: GDPR compliance — keep audit trail without hard deletes
+  # Reason for deletion (auto-filled to 'cdc_delete_signal' on CDC deletes if empty)
+  # Business value: GDPR compliance & Auditability — maintain history without hard deletes
   
   # OPTIONAL: External storage location for Unity Catalog tables
   location: "abfss://container@account.dfs.core.windows.net/silver/customers/"
@@ -1232,16 +1382,42 @@ lineage:
 service_levels:
   freshness:
     threshold: "24h"
-    # Data must be refreshed within 24 hours
+    # Data must be refreshed within 24 hours (supports: "30m", "6h", "1d")
     field: "updated_at"
-    # Field to check for freshness
+    # Field to check for freshness (MAX of this column vs current time)
     description: "Customer data must be updated daily"
     # Business value: Timeliness monitoring
 
   availability:
     threshold: 99.9
-    # Percentage of runs that must produce valid output
-    # Business value: Reliability tracking
+    # ── NOTE: This is FIELD COMPLETENESS, not uptime! ──
+    # Percentage of rows that must have a non-null value in the specified field.
+    # Example: 99.9 means <= 0.1% of rows can have a null value.
+    field: "customer_id"
+    # Field to measure non-null ratio against
+    description: "customer_id must be populated in 99.9% of rows"
+    # Business value: Data completeness monitoring
+
+  row_count:
+    min_rows: 100
+    # Minimum expected rows per pipeline run (fail if below)
+    max_rows: 10000000
+    # Maximum expected rows per pipeline run (fail if above — catches runaway cartesian joins)
+    check_field: "counts_source"
+    # Which run log count to validate against:
+    #   counts_source: rows received from upstream (default for Bronze)
+    #   counts_good:   rows after quality filtering (default)
+    #   counts_total:  good + quarantined before filtering
+    skip_reprocess_days: 3
+    # When the reprocess date range (reprocess_from → reprocess_to) exceeds
+    # this many days, SLO row count checks AND counts_source computation
+    # are skipped entirely — avoids expensive Spark wide-transformation
+    # actions on large backfills where thresholds don't apply.
+    # Default: 3 (skip for backfills > 3 days). Set to 0 to never skip.
+    description: "Revenue transactions must produce between 100 and 10M rows"
+    # Business value: Volumetric anomaly detection — catches empty loads AND data explosions
+    # NOTE: min_rows, max_rows, and check_field are captured in the run log
+    # at pipeline time for point-in-time auditability.
 
 # ============================================================
 # 15. EXTERNAL LOGIC
@@ -1664,20 +1840,25 @@ compliance:
 version: 1.0.0
 info:
   title: "Bronze CRM Contacts"
+  table_name: "{bronze_layer}_{system}_contacts"
   target_layer: "bronze"
 
+# ── The Reader: Defines WHAT and WHEN to read (State Tracking) ────
 source:
   type: "landing"
   path: "s3://landing/crm/*.csv"
   load_mode: "incremental"
   watermark_field: "file_modified_time"
 
+# ── The Adapter: Defines HOW to physically parse the raw payload ──
+# OPTIONAL: Only strictly needed if connecting to a DB, or if requiring 
+# raw format rules (like safely casting messy JSON/CSV to strings).
 server:
   type: "s3"
   path: "s3://bronze/crm_contacts"
   format: "parquet"
   mode: "ingest"
-  cast_to_string: true
+  cast_to_string: true    # Safety-net against schema crashes!
   schema_evolution: "append"
   allow_schema_drift: true
 
@@ -1700,7 +1881,14 @@ lineage:
 version: 1.0.0
 info:
   title: "Silver Customers"
+  table_name: "{silver_layer}_{system}_customers"
   target_layer: "silver"
+
+source:
+  type: "table"
+  path: "{domain_catalog}.{bronze_layer}_{system}_customers"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
 
 dataset: "customers"
 primary_key: ["customer_id"]
@@ -1719,11 +1907,27 @@ model:
       required: true
 
 transformations:
-  - deduplicate:
-      on: ["customer_id"]
-      sort_by: ["updated_at"]
-      order: "desc"
+  - sql: |
+      WITH ranked_data AS (
+        SELECT 
+          *,
+          ROW_NUMBER() OVER(PARTITION BY customer_id ORDER BY updated_at DESC) as _rn
+        FROM source
+      )
+      SELECT 
+        s.* EXCEPT(_rn),
+        COALESCE(p.marketing_opt_in, FALSE) AS is_opted_in 
+      FROM ranked_data s
+      LEFT JOIN {domain_catalog}.{silver_layer}_{system}_preferences p
+        ON s.customer_id = p.customer_id
+      WHERE s._rn = 1
     phase: "pre"
+  # ── Alternative YAML syntax:
+  # - deduplicate:
+  #     "on": ["customer_id"]
+  #     sort_by: ["updated_at"]
+  #     order: "desc"
+  #   phase: "pre"
 
 quality:
   enforce_required: true
@@ -1756,7 +1960,14 @@ materialization:
 version: 1.0.0
 info:
   title: "Gold Customer Metrics"
+  table_name: "{gold_layer}_{system}_customer_metrics"
   target_layer: "gold"
+
+source:
+  type: "table"
+  path: "{domain_catalog}.{silver_layer}_{system}_customers"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
 
 dataset: "silver_customers"
 
@@ -1773,47 +1984,385 @@ transformations:
       WHERE status = 'ACTIVE'
       GROUP BY customer_segment, country, month
     phase: "post"
+  # ── Alternative YAML syntax:
+  # - filter:
+  #     sql: "status = 'ACTIVE'"
+  #   phase: "post"
+  # - derive:
+  #     field: "month"
+  #     sql: "DATE_TRUNC('month', created_at)"
+  #   phase: "post"
+  # - rollup:
+  #     group_by: ["customer_segment", "country", "month"]
+  #     aggregations:
+  #       customer_count: "COUNT(*)"
+  #       avg_ltv: "AVG(lifetime_value)"
+  #       total_orders: "SUM(total_orders)"
+  #   phase: "post"
 
 materialization:
   strategy: "overwrite"
   partition_by: ["month"]
+  fact:
+    type: "aggregate"
 
 lineage:
   enabled: true
 ```
 
-### Use Case 4: SCD Type 2 (History Tracking)
+### Use Case 4: Gold Fact Table (Transaction Ledger)
+
+```yaml
+version: 1.0.0
+info:
+  title: "Gold Revenue Transactions"
+  table_name: "{gold_layer}_{system}_fact_revenue"
+  target_layer: "gold"
+
+source:
+  type: "table"
+  path: "{domain_catalog}.{silver_layer}_{system}_transactions"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
+
+dataset: "fact_revenue"
+primary_key: ["transaction_id"]
+
+model:
+  grain: "one row per revenue transaction"
+  grain_key: ["transaction_id"]
+  fields:
+    - name: "transaction_id"
+      type: "string"
+      primary_key: true
+    - name: "user_pseudo_id"
+      type: "string"
+      foreign_key:
+        contract: "gold_marketing_dim_users"
+        column: "user_pseudo_id"
+    - name: "revenue_amount"
+      type: "double"
+    - name: "user_surrogate_key"
+      type: "string"
+      generated: true
+      description: "Fetched dynamically from dim_users via SQL join"
+
+transformations:
+  - sql: |
+      -- Drive SQL-first point-in-time (SCD2) dimension lookups natively!
+      SELECT 
+        s.*,
+        COALESCE(d.user_key, '-1') AS user_surrogate_key
+      FROM source s
+      LEFT JOIN {domain_catalog}.{gold_layer}_marketing_dim_users d
+        ON s.user_pseudo_id = d.user_pseudo_id
+        AND s.transaction_date >= d.effective_from 
+        AND s.transaction_date < COALESCE(d.effective_to, '9999-12-31')
+    phase: "post"
+
+materialization:
+  strategy: "append"
+  partition_by: ["transaction_date"]
+  fact:
+    type: "transaction"
+```
+
+### Use Case 5: Gold Fact Table (Accumulating Snapshot)
+
+```yaml
+version: 1.0.0
+info:
+  title: "Gold Order Funnel"
+  table_name: "{gold_layer}_{system}_fact_order_timeline"
+  target_layer: "gold"
+
+source:
+  type: "table"
+  path: "{domain_catalog}.{silver_layer}_{system}_orders"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
+
+dataset: "fact_order_timeline"
+primary_key: ["order_id"]
+
+model:
+  grain: "one row per order lifecycle"
+  grain_key: ["order_id"]
+  fields:
+    - name: "order_id"
+      type: "string"
+      primary_key: true
+    - name: "customer_id"
+      type: "string"
+      foreign_key:
+        contract: "gold_sales_dim_customers"
+        column: "customer_id"
+    - name: "placed_date"
+      type: "timestamp"
+    - name: "shipped_date"
+      type: "timestamp"
+      nullable: true
+      milestone: true
+    - name: "delivered_date"
+      type: "timestamp"
+      nullable: true
+      milestone: true
+    - name: "customer_surrogate_key"
+      type: "string"
+      generated: true
+
+transformations:
+  - sql: |
+      SELECT 
+        o.*,
+        COALESCE(c.customer_key, '-1') AS customer_surrogate_key
+      FROM source o
+      LEFT JOIN {domain_catalog}.{gold_layer}_sales_dim_customers c
+        ON o.customer_id = c.customer_id
+        AND o.placed_date >= c.effective_from 
+        AND o.placed_date < COALESCE(c.effective_to, '9999-12-31')
+    phase: "post"
+
+materialization:
+  strategy: "merge"
+  fact:
+    type: "accumulating_snapshot"
+    milestone_dates:
+      - "placed_date"
+      - "shipped_date"
+      - "delivered_date"
+```
+
+### Use Case 6: Gold Fact Table (Periodic Snapshot)
+
+```yaml
+version: 1.0.0
+info:
+  title: "Gold Daily Account Balances"
+  table_name: "{gold_layer}_{system}_fact_account_balance"
+  target_layer: "gold"
+
+source:
+  type: "table"
+  path: "{domain_catalog}.{silver_layer}_{system}_accounts"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
+
+dataset: "fact_account_balance"
+primary_key: ["account_id", "snapshot_date"]
+
+model:
+  grain: "one row per account per snapshot date"
+  grain_key: ["account_id", "snapshot_date"]
+  fields:
+    - name: "account_id"
+      type: "string"
+      primary_key: true
+      foreign_key:
+        contract: "gold_sales_dim_accounts"
+        column: "account_id"
+    - name: "snapshot_date"
+      type: "date"
+      primary_key: true
+    - name: "ending_balance"
+      type: "double"
+    - name: "account_surrogate_key"
+      type: "string"
+      generated: true
+
+transformations:
+  - sql: |
+      SELECT 
+        b.*,
+        COALESCE(a.account_key, '-1') AS account_surrogate_key
+      FROM source b
+      LEFT JOIN {domain_catalog}.{gold_layer}_sales_dim_accounts a
+        ON b.account_id = a.account_id
+        AND b.snapshot_date >= a.effective_from 
+        AND b.snapshot_date < COALESCE(a.effective_to, '9999-12-31')
+    phase: "post"
+
+materialization:
+  strategy: "append"
+  partition_by: ["snapshot_date"]
+  fact:
+    type: "periodic_snapshot"
+```
+
+### Use Case 7: Gold Fact Table (Factless)
+
+```yaml
+version: 1.0.0
+info:
+  title: "Gold Student Attendance"
+  table_name: "{gold_layer}_{system}_fact_attendance"
+  target_layer: "gold"
+
+source:
+  type: "table"
+  path: "{domain_catalog}.{silver_layer}_{system}_events"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
+
+dataset: "fact_attendance"
+primary_key: ["student_id", "class_id", "date"]
+
+model:
+  grain: "one row per student-class-date attendance event"
+  grain_key: ["student_id", "class_id", "date"]
+  fields:
+    - name: "student_id"
+      type: "string"
+      foreign_key:
+        contract: "dim_students"
+        column: "student_id"
+    - name: "class_id"
+      type: "string"
+    - name: "date"
+      type: "date"
+    - name: "student_surrogate_key"
+      type: "string"
+      generated: true
+
+transformations:
+  - sql: |
+      SELECT 
+        e.*,
+        COALESCE(s.student_key, '-1') AS student_surrogate_key
+      FROM source e
+      LEFT JOIN {domain_catalog}.{gold_layer}_school_dim_students s
+        ON e.student_id = s.student_id
+        AND e.date >= s.effective_from 
+        AND e.date < COALESCE(s.effective_to, '9999-12-31')
+    phase: "post"
+
+materialization:
+  strategy: "append"
+  partition_by: ["date"]
+  fact:
+    type: "factless"
+    # LakeLogic automatically verifies no metric/numeric columns exist here!
+```
+
+### Use Case 8: SCD Type 1 (Upsert & Unknown Member)
+
+```yaml
+version: 1.0.0
+info:
+  title: "Silver Products (SCD1)"
+  table_name: "{silver_layer}_{system}_dim_products"
+  target_layer: "silver"
+
+source:
+  type: "table"
+  path: "{domain_catalog}.{bronze_layer}_{system}_products"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
+
+dataset: "dim_products"
+primary_key: ["product_id"]
+
+model:
+  grain: "one row per product (current state)"
+  grain_key: ["product_id"]
+  fields:
+    - name: "product_id"
+      type: "string"
+      primary_key: true
+    - name: "product_name"
+      type: "string"
+    - name: "category"
+      type: "string"
+    - name: "product_key"
+      type: "string"
+      generated: true
+      description: "Surrogate key - SHA2 hash of product_id"
+
+materialization:
+  strategy: "merge"
+  scd1:
+    surrogate_key: "product_key"
+    surrogate_key_strategy: "hash"
+    unknown_member: true
+    # Automatically generates a -1 hash record to catch late-arriving facts
+```
+
+### Use Case 9: SCD Type 2 (History Tracking)
 
 ```yaml
 version: 1.0.0
 info:
   title: "Silver Customer History (SCD2)"
+  table_name: "{silver_layer}_{system}_dim_customers"
   target_layer: "silver"
 
+source:
+  type: "table"
+  path: "{domain_catalog}.{bronze_layer}_{system}_customers"
+  load_mode: "incremental"
+  watermark_strategy: "pipeline_log"
+
 dataset: "customers"
-primary_key: ["customer_id"]
+primary_key: ["customer_key"]
+natural_key: ["customer_id"]
+
+model:
+  grain: "one row per customer per version (history tracked)"
+  grain_key: ["customer_id", "valid_from"]
+  fields:
+    - name: "customer_key"
+      type: "string"
+      primary_key: true
+      generated: true
+      description: "Surrogate key - SHA2 hash of customer_id + valid_from"
+    - name: "customer_id"
+      type: "string"
+    - name: "email"
+      type: "string"
+    - name: "status"
+      type: "string"
+    - name: "address"
+      type: "string"
+    - name: "updated_at"
+      type: "timestamp"
+    - name: "valid_from"
+      type: "timestamp"
+      generated: true
+    - name: "valid_to"
+      type: "timestamp"
+      generated: true
+      nullable: true
+    - name: "is_current"
+      type: "boolean"
+      generated: true
 
 materialization:
   strategy: "scd2"
   scd2:
-    primary_key: "customer_id"
     timestamp_field: "updated_at"
     start_date_field: "valid_from"
     end_date_field: "valid_to"
     current_flag_field: "is_current"
     end_date_default: "9999-12-31"
-    hash_fields: ["email", "status", "address"]
+    track_columns: ["email", "status", "address"]
 ```
 
-### Use Case 5: Marketing Data with Compliance (GDPR + EU AI Act)
+### Use Case 10: Marketing Data with Compliance (GDPR + EU AI Act)
 
 ```yaml
 version: 1.0.0
 info:
   title: "Bronze Marketing Events"
+  table_name: "{bronze_layer}_{system}_events"
   target_layer: "bronze"
   domain: "marketing"
   system: "klaviyo"
+
+source:
+  type: "landing"
+  path: "s3://landing/klaviyo/events/"
+  load_mode: "incremental"
+  watermark_strategy: "manifest"
 
 model:
   fields:
@@ -1987,6 +2536,7 @@ external_sources:
 ```
 
 **What this does:**
+
 - 🌐 External nodes appear in the DAG with dashed borders (teal) in an "EXTERNAL" column
 - Edges connect external sources → consuming contracts. Generic entity matches (e.g. `['events']`) automatically restrict to the Bronze layer to prevent duplicates, but you can explicitly map to other layers via ID (e.g. `['silver_events']`).
 - Metadata-only — LakeLogic does **not** orchestrate the external pipeline

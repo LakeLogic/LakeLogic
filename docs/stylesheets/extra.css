@@ -170,11 +170,39 @@
 
 /* --- Hero Section Styling --- */
 .hero-section {
-  text-align: left;
-  padding: 4rem 2rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 3rem;
+  padding: 2.5rem 2rem 4rem 2rem;
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(59, 130, 246, 0.05));
   border-radius: 12px;
-  margin: 2rem 0;
+  margin: 0 0 2rem 0;
+}
+
+.hero-content {
+  flex: 1;
+  text-align: left;
+}
+
+.hero-visual {
+  flex: 1;
+  max-width: 500px; /* Keep the code block from getting too wide */
+  /* Add a stylish shadow behind the code block specifically */
+  filter: drop-shadow(0 15px 25px rgba(0, 0, 0, 0.15));
+}
+
+@media screen and (max-width: 76.1875em) {
+  .hero-section {
+    flex-direction: column;
+    padding: 3rem 1.5rem;
+    gap: 2rem;
+  }
+  
+  .hero-visual {
+    width: 100%;
+    max-width: 100%;
+  }
 }
 
 .hero-title {
@@ -290,4 +318,30 @@ html {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* --- Cards Customization --- */
+.md-typeset .grid.cards > ul > li {
+  border-radius: 12px;
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  transition: all 0.3s ease;
+  background-color: var(--md-default-bg-color);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.1), 0 4px 6px -2px rgba(37, 99, 235, 0.05);
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
+/* Adjust the typography inside cards */
+.md-typeset .grid.cards > ul > li > hr {
+  margin: 0.8em 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li {
+  background-color: var(--md-code-bg-color);
+  border-color: rgba(255, 255, 255, 0.05);
 }
