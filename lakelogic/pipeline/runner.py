@@ -1286,10 +1286,9 @@ class LakehousePipeline:
             row_count = rows_good if rows_good is not None else "?"
 
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
-            mat_result = processor.materialize(df_good, df_bad)
+            processor.materialize(df_good, df_bad)
 
-            # logger.info(f"✅ Materialized {row_count} rows for {c.entity} -> {mat_result}")
-            logger.info(f"✅ Materialized {row_count} rows for {c.entity}")
+            logger.info(f"\u2705 Materialized {row_count} rows for {c.entity}")
             layers_with_new_data.add(layer)
             summary.append(
                 c.entity, layer, "success", rows=row_count, rows_raw=rows_raw, rows_good=rows_good, rows_bad=rows_bad
