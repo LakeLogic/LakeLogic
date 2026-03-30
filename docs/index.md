@@ -89,10 +89,10 @@ Powered by Spark, Polars, and DuckDB.
 
     **✅ `result.good` (Passed Quality Gate & PII Masked)**
     
-    | cus_id | email                  |
-    |--------|------------------------|
-    | C100   | ***@***.***            |
-    | C101   | ***@***.***            |
+    | cus_id | email                              |
+    |--------|------------------------------------|
+    | C100   | `enc:a1F3bG9nZ2VkQGV4...`          |
+    | C101   | `enc:dXNlcjEwMUBjb3Jw...`          |
     
     **🚨 `result.bad` (Quarantined by LakeLogic)**
     
