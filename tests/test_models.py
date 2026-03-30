@@ -156,17 +156,32 @@ def test_transformation_rename_mappings():
     assert rename is not None
     assert rename.iter_pairs() == [("old_a", "new_a"), ("old_b", "new_b")]
 
-def test_quality_rule_category_normalization_warns():
+def test_quality_rule_category_normalization_warns(caplog):
     """Unknown categories should warn and be normalized to lowercase."""
-    data = {
-        "version": "1.0.0",
-        "quality": {
-            "row_rules": [
-                {"name": "weird_cat", "sql": "id > 0", "category": "WeirdCategory"}
-            ]
+    import logging
+    from loguru import logger
+
+    # Enable loguru -> standard logging propagation for caplog
+    class PropagateHandler(logging.Handler):
+        def emit(self, record):
+            logging.getLogger(record.name).handle(record)
+
+    handler_id = logger.add(PropagateHandler(), format="{message}")
+    try:
+        data = {
+            "version": "1.0.0",
+            "quality": {
+                "row_rules": [
+                    {"name": "weird_cat", "sql": "id > 0", "category": "WeirdCategory"}
+                ]
+            }
         }
-    }
-    with pytest.warns(UserWarning):
-        contract = DataContract(**data)
-    rule = contract.quality.row_rules[0]
-    assert rule.category == "weirdcategory"
+        with caplog.at_level(logging.WARNING):
+            contract = DataContract(**data)
+        rule = contract.quality.row_rules[0]
+        assert rule.category == "weirdcategory"
+        assert any("Unknown quality rule category" in r.message for r in caplog.records)
+    finally:
+        logger.remove(handler_id)
+
+

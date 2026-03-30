@@ -586,7 +586,12 @@ class IncrementalBoundary:
                 logger.debug(f"No target property found for {target_name}. Attempting fallback to {log_table}...")
                 try:
                     import pyspark.sql.functions as F
-                    filt = (F.col("dataset") == dataset) & (F.col("stage") != "no_new_data") & (F.col("stage") != "reprocess")
+
+                    filt = (
+                        (F.col("dataset") == dataset)
+                        & (F.col("stage") != "no_new_data")
+                        & (F.col("stage") != "reprocess")
+                    )
                     if data_layer:
                         filt = filt & (F.col("data_layer") == data_layer)
                     if domain:
@@ -599,20 +604,26 @@ class IncrementalBoundary:
                         .filter(filt)
                         .agg(
                             F.max("max_watermark_value").alias("last_watermark"),
-                            F.max(F.get_json_object("report_json", "$.incremental_metadata.to_version").cast("int")).alias("last_json_version")
+                            F.max(
+                                F.get_json_object("report_json", "$.incremental_metadata.to_version").cast("int")
+                            ).alias("last_json_version"),
                         )
                         .collect()[0]
                     )
-                    
+
                     _wm_val = row["last_watermark"]
                     _json_val = row["last_json_version"]
-                    
+
                     if _wm_val is not None:
                         last_version = int(_wm_val)
-                        logger.info(f"Healed missing Delta property from {log_table}.max_watermark_value. Resuming from {last_version}.")
+                        logger.info(
+                            f"Healed missing Delta property from {log_table}.max_watermark_value. Resuming from {last_version}."
+                        )
                     elif _json_val is not None:
                         last_version = int(_json_val)
-                        logger.info(f"Healed missing Delta property from {log_table}.report_json. Resuming from {last_version}.")
+                        logger.info(
+                            f"Healed missing Delta property from {log_table}.report_json. Resuming from {last_version}."
+                        )
                 except Exception as log_exc:
                     logger.debug(f"Fallback to {log_table} failed for {dataset}: {log_exc}")
 
@@ -777,9 +788,7 @@ class IncrementalBoundary:
                 if _src_mtime is not None:
                     # max_source_mtime is stored as epoch seconds (float/int)
                     last_success = datetime.fromtimestamp(float(_src_mtime), tz=timezone.utc)
-                    logger.info(
-                        f"Pipeline log boundary from max_source_mtime: {last_success.isoformat()}"
-                    )
+                    logger.info(f"Pipeline log boundary from max_source_mtime: {last_success.isoformat()}")
                 else:
                     last_success_str = row["last_watermark"] or row["last_success"]
                     if last_success_str is None:
@@ -1199,13 +1208,13 @@ class IncrementalBoundary:
             tp = target_path or src.get("target_path", "")
             sp = src.get("path", "")
             return cls.from_delta_version(
-                sp, 
+                sp,
                 tp,
                 dataset=src.get("dataset"),
                 data_layer=src.get("data_layer"),
                 domain=src.get("domain"),
                 system=src.get("system"),
-                log_table=src.get("pipeline_log_table", "pipeline_runs")
+                log_table=src.get("pipeline_log_table", "pipeline_runs"),
             )
 
         tp = target_path or src.get("target_path", "")

@@ -1288,7 +1288,7 @@ class LakehousePipeline:
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
             mat_result = processor.materialize(df_good, df_bad)
 
-            #logger.info(f"✅ Materialized {row_count} rows for {c.entity} -> {mat_result}")
+            # logger.info(f"✅ Materialized {row_count} rows for {c.entity} -> {mat_result}")
             logger.info(f"✅ Materialized {row_count} rows for {c.entity}")
             layers_with_new_data.add(layer)
             summary.append(
@@ -1300,7 +1300,10 @@ class LakehousePipeline:
             _report["status"] = "succeeded"
             try:
                 from lakelogic.core.run_log import write_run_log
-                write_run_log(_report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode)
+
+                write_run_log(
+                    _report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode
+                )
             except Exception as log_exc:
                 logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
 
@@ -1311,15 +1314,22 @@ class LakehousePipeline:
             # Write run log with failed status so the failure is auditable
             try:
                 from lakelogic.core.run_log import write_run_log
+
                 _report = getattr(processor, "last_report", None) if "processor" in dir() else None
                 if _report:
                     _report["status"] = "failed"
                     _report["error_message"] = str(e)[:2000]
-                    write_run_log(_report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode)
+                    write_run_log(
+                        _report,
+                        processor.contract,
+                        engine_name=processor.engine_name,
+                        run_log_mode=processor._run_log_mode,
+                    )
                 else:
                     # Failure occurred before processor built a report — write minimal entry
                     from datetime import datetime, timezone
                     from uuid import uuid4
+
                     _minimal = {
                         "run_id": str(uuid4()),
                         "pipeline_run_id": self.run_id,

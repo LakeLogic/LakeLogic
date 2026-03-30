@@ -799,10 +799,12 @@ def _merge_frames(
         sk_column = scd1_cfg["surrogate_key"]
         sk_strategy = scd1_cfg.get("surrogate_key_strategy", "hash")
         import hashlib
+
         def _compute_sk(row):
             pk_val = "|".join(str(row.get(c, "")) for c in primary_key)
             if sk_strategy == "uuid":
                 import uuid
+
                 return uuid.uuid4().hex[:16]
             return hashlib.sha256(pk_val.encode("utf-8")).hexdigest()[:16]
 
@@ -812,9 +814,7 @@ def _merge_frames(
     if scd1_cfg:
         unknown_cfg = scd1_cfg.get("unknown_member", {})
         if unknown_cfg.get("enabled", True):
-            merged = _inject_unknown_member_pandas(
-                merged, primary_key, scd1_cfg, unknown_cfg
-            )
+            merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
 
     # ── Enforce SCD1 Column Ordering ─────────────────────────────
     if scd1_cfg and scd1_cfg.get("surrogate_key") and scd1_cfg["surrogate_key"] in merged.columns:
@@ -849,8 +849,16 @@ def _inject_unknown_member_pandas(
     effective_from = scd2_cfg.get("effective_from_field", "effective_from")
     effective_to = scd2_cfg.get("effective_to_field", "effective_to")
     current_flag = scd2_cfg.get("current_flag_field", "is_current")
-    effective_to_default = scd2_cfg.get("end_date_default") if "end_date_default" in scd2_cfg else scd2_cfg.get("effective_to_default", "9999-12-31")
-    effective_from_default = scd2_cfg.get("start_date_default") if "start_date_default" in scd2_cfg else scd2_cfg.get("effective_from_default", "1900-01-01")
+    effective_to_default = (
+        scd2_cfg.get("end_date_default")
+        if "end_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_to_default", "9999-12-31")
+    )
+    effective_from_default = (
+        scd2_cfg.get("start_date_default")
+        if "start_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_from_default", "1900-01-01")
+    )
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
@@ -882,6 +890,7 @@ def _inject_unknown_member_pandas(
             if val is None:
                 from pandas.api.types import is_string_dtype, is_numeric_dtype, is_bool_dtype, is_datetime64_any_dtype
                 import pandas as pd
+
                 dtype = df[col].dtype
                 if is_string_dtype(dtype):
                     val = "Unknown"
@@ -895,9 +904,7 @@ def _inject_unknown_member_pandas(
 
     unknown_df = pd.DataFrame([unknown_row])
     merged = pd.concat([df, unknown_df], ignore_index=True)
-    logger.info(
-        f"Injected unknown member row (SK={sk_value}) into dimension"
-    )
+    logger.info(f"Injected unknown member row (SK={sk_value}) into dimension")
     return merged
 
 
@@ -925,16 +932,22 @@ def _inject_unknown_member_spark(
     effective_from = scd2_cfg.get("effective_from_field", "effective_from")
     effective_to = scd2_cfg.get("effective_to_field", "effective_to")
     current_flag = scd2_cfg.get("current_flag_field", "is_current")
-    effective_to_default = scd2_cfg.get("end_date_default") if "end_date_default" in scd2_cfg else scd2_cfg.get("effective_to_default", "9999-12-31")
-    effective_from_default = scd2_cfg.get("start_date_default") if "start_date_default" in scd2_cfg else scd2_cfg.get("effective_from_default", "1900-01-01")
+    effective_to_default = (
+        scd2_cfg.get("end_date_default")
+        if "end_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_to_default", "9999-12-31")
+    )
+    effective_from_default = (
+        scd2_cfg.get("start_date_default")
+        if "start_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_from_default", "1900-01-01")
+    )
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
     # Check if unknown member already exists
     if sk_column in result.columns:
-        existing_count = result.filter(
-            F.col(sk_column).cast("string") == sk_value
-        ).count()
+        existing_count = result.filter(F.col(sk_column).cast("string") == sk_value).count()
         if existing_count > 0:
             return result
 
@@ -964,9 +977,10 @@ def _inject_unknown_member_spark(
                 if "string" in dt or "char" in dt:
                     val = "Unknown"
                     import re
-                    match = re.search(r'char\((\d+)\)', dt)
+
+                    match = re.search(r"char\((\d+)\)", dt)
                     if match:
-                        val = val[:int(match.group(1))]
+                        val = val[: int(match.group(1))]
                 elif "int" in dt or "long" in dt or "short" in dt or "byte" in dt:
                     val = -1
                 elif "float" in dt or "double" in dt or "decimal" in dt:
@@ -977,26 +991,18 @@ def _inject_unknown_member_spark(
                     val = effective_from_default
             unknown_row[col] = val
 
-    unknown_df = spark.createDataFrame(
-        [Row(**unknown_row)]
-    )
+    unknown_df = spark.createDataFrame([Row(**unknown_row)])
 
     # Align schema: cast columns to match result schema
     for field in result.schema:
         if field.name in unknown_df.columns:
-            unknown_df = unknown_df.withColumn(
-                field.name, F.col(field.name).cast(field.dataType)
-            )
+            unknown_df = unknown_df.withColumn(field.name, F.col(field.name).cast(field.dataType))
         else:
-            unknown_df = unknown_df.withColumn(
-                field.name, F.lit(None).cast(field.dataType)
-            )
+            unknown_df = unknown_df.withColumn(field.name, F.lit(None).cast(field.dataType))
     unknown_df = unknown_df.select(*[c.name for c in result.schema])
 
     result = result.union(unknown_df)
-    logger.info(
-        f"Injected unknown member row (SK={sk_value}) into dimension"
-    )
+    logger.info(f"Injected unknown member row (SK={sk_value}) into dimension")
     return result
 
 
@@ -1026,25 +1032,19 @@ def _inject_unknown_member_spark_table(
     try:
         existing = spark.table(table_name)
     except Exception:
-        logger.debug(
-            f"Table {table_name} not available for unknown member injection"
-        )
+        logger.debug(f"Table {table_name} not available for unknown member injection")
         return
 
     # Check if unknown member already exists
     if sk_column and sk_column in existing.columns:
-        count = existing.filter(
-            F.col(sk_column).cast("string") == sk_value
-        ).count()
+        count = existing.filter(F.col(sk_column).cast("string") == sk_value).count()
         if count > 0:
             return
     elif primary_key:
         # For merge without SCD2 SK, check by primary key sentinel
         pk_col = primary_key[0]
         pk_sentinel = defaults.get(pk_col, "_UNKNOWN")
-        count = existing.filter(
-            F.col(pk_col).cast("string") == str(pk_sentinel)
-        ).count()
+        count = existing.filter(F.col(pk_col).cast("string") == str(pk_sentinel)).count()
         if count > 0:
             return
 
@@ -1062,22 +1062,14 @@ def _inject_unknown_member_spark_table(
     unknown_df = spark.createDataFrame([Row(**unknown_row)])
     for field in existing.schema:
         if field.name in unknown_df.columns:
-            unknown_df = unknown_df.withColumn(
-                field.name, F.col(field.name).cast(field.dataType)
-            )
+            unknown_df = unknown_df.withColumn(field.name, F.col(field.name).cast(field.dataType))
         else:
-            unknown_df = unknown_df.withColumn(
-                field.name, F.lit(None).cast(field.dataType)
-            )
+            unknown_df = unknown_df.withColumn(field.name, F.lit(None).cast(field.dataType))
     unknown_df = unknown_df.select(*[c.name for c in existing.schema])
 
     # Append the unknown member row
-    unknown_df.write.format("delta").mode("append").saveAsTable(
-        table_name
-    )
-    logger.info(
-        f"Injected unknown member row (SK={sk_value}) into {table_name}"
-    )
+    unknown_df.write.format("delta").mode("append").saveAsTable(table_name)
+    logger.info(f"Injected unknown member row (SK={sk_value}) into {table_name}")
 
 
 def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str, Any]):
@@ -1122,8 +1114,16 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     change_date_field: str = ts_field or scd2_cfg.get("change_date_field", effective_from)
 
     # Default values for SCD2 fields
-    effective_to_default = scd2_cfg.get("end_date_default") if "end_date_default" in scd2_cfg else scd2_cfg.get("effective_to_default", "9999-12-31")
-    effective_from_default = scd2_cfg.get("start_date_default") if "start_date_default" in scd2_cfg else scd2_cfg.get("effective_from_default", "1900-01-01")
+    effective_to_default = (
+        scd2_cfg.get("end_date_default")
+        if "end_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_to_default", "9999-12-31")
+    )
+    effective_from_default = (
+        scd2_cfg.get("start_date_default")
+        if "start_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_from_default", "1900-01-01")
+    )
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
     # Timestamp for closing existing records (when a change occurs)
@@ -1140,11 +1140,12 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
             incoming[effective_from] = incoming[change_date_field]
         else:
             incoming[effective_from] = now_value
-            
+
     if effective_to not in incoming.columns:
         import pandas as pd
+
         incoming[effective_to] = effective_to_default if effective_to_default is not None else pd.NaT
-        
+
     if current_flag not in incoming.columns:
         incoming[current_flag] = True
 
@@ -1153,6 +1154,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         # For initial load, all incoming records are new and start from effective_from_default
         incoming[effective_from] = effective_from_default
         import pandas as pd
+
         incoming[effective_to] = effective_to_default if effective_to_default is not None else pd.NaT
         incoming[current_flag] = True
         if change_reason_col:
@@ -1163,14 +1165,17 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
         if sk_column:
             import hashlib
+
             def _compute_sk(row):
                 pk_val = "|".join(str(row.get(c, "")) for c in primary_key)
                 ef_val = str(row.get(effective_from, ""))
                 raw = f"{pk_val}|{ef_val}"
                 if sk_strategy == "uuid":
                     import uuid
+
                     return uuid.uuid4().hex[:16]
                 return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
             incoming[sk_column] = incoming.apply(_compute_sk, axis=1)
 
         # ── Version number injection ─────────────────────────────────
@@ -1185,9 +1190,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         # ── Unknown member injection (pandas/polars) ────────────────
         unknown_cfg = scd2_cfg.get("unknown_member")
         if unknown_cfg is not None and unknown_cfg.get("enabled", True):
-            incoming = _inject_unknown_member_pandas(
-                incoming, primary_key, scd2_cfg, unknown_cfg
-            )
+            incoming = _inject_unknown_member_pandas(incoming, primary_key, scd2_cfg, unknown_cfg)
 
         return incoming
 
@@ -1198,12 +1201,18 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         )
     if effective_to not in existing.columns:
         import pandas as pd
-        existing[effective_to] = effective_to_default if effective_to_default is not None else pd.NaT  # Assume existing current records end at default if not specified
+
+        existing[effective_to] = (
+            effective_to_default if effective_to_default is not None else pd.NaT
+        )  # Assume existing current records end at default if not specified
     if current_flag not in existing.columns:
         if effective_to_default is not None:
-            existing[current_flag] = existing[effective_to] == effective_to_default  # Infer current based on effective_to
+            existing[current_flag] = (
+                existing[effective_to] == effective_to_default
+            )  # Infer current based on effective_to
         else:
             import pandas as pd
+
             existing[current_flag] = pd.isna(existing[effective_to])
 
     # Cast SCD2 control columns so pandas can accept mixed-type writes
@@ -1332,9 +1341,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     # ── Unknown member injection (pandas/polars) ────────────────
     unknown_cfg = scd2_cfg.get("unknown_member")
     if unknown_cfg is not None and unknown_cfg.get("enabled", True):
-        merged = _inject_unknown_member_pandas(
-            merged, primary_key, scd2_cfg, unknown_cfg
-        )
+        merged = _inject_unknown_member_pandas(merged, primary_key, scd2_cfg, unknown_cfg)
 
     # ── Enforce SCD2 Column Ordering ─────────────────────────────
     front_cols = []
@@ -1426,8 +1433,7 @@ def _spark_merge_dataframe(
             if soft_delete_col not in incoming_df.columns:
                 incoming_df = incoming_df.withColumn(soft_delete_col, F.lit(None).cast("boolean"))
             incoming_df = incoming_df.withColumn(
-                soft_delete_col,
-                F.when(delete_cond, F.lit(soft_delete_val)).otherwise(F.col(soft_delete_col))
+                soft_delete_col, F.when(delete_cond, F.lit(soft_delete_val)).otherwise(F.col(soft_delete_col))
             )
 
             if soft_delete_time_col:
@@ -1437,7 +1443,9 @@ def _spark_merge_dataframe(
                 source_time_col = cdc_timestamp_field if cdc_timestamp_field else soft_delete_time_col
                 incoming_df = incoming_df.withColumn(
                     soft_delete_time_col,
-                    F.when(delete_cond, F.coalesce(F.col(source_time_col), now_str)).otherwise(F.col(soft_delete_time_col))
+                    F.when(delete_cond, F.coalesce(F.col(source_time_col), now_str)).otherwise(
+                        F.col(soft_delete_time_col)
+                    ),
                 )
 
             if soft_delete_reason_col:
@@ -1445,7 +1453,9 @@ def _spark_merge_dataframe(
                     incoming_df = incoming_df.withColumn(soft_delete_reason_col, F.lit(None).cast("string"))
                 incoming_df = incoming_df.withColumn(
                     soft_delete_reason_col,
-                    F.when(delete_cond, F.coalesce(F.col(soft_delete_reason_col), F.lit("cdc_delete_signal"))).otherwise(F.col(soft_delete_reason_col))
+                    F.when(
+                        delete_cond, F.coalesce(F.col(soft_delete_reason_col), F.lit("cdc_delete_signal"))
+                    ).otherwise(F.col(soft_delete_reason_col)),
                 )
 
         try:
@@ -1461,23 +1471,22 @@ def _spark_merge_dataframe(
                 insert_cols = {col: f"source.{col}" for col in incoming_df.columns}
 
                 merge_builder = delta_table.alias("target").merge(incoming_df.alias("source"), merge_condition)
-                
+
                 if is_hard_delete:
                     in_vals = ",".join([f"'{v}'" for v in cdc_delete_values])
                     delete_cond_str = f"source.{cdc_op_field} IN ({in_vals})"
                     insert_cond_str = f"source.{cdc_op_field} NOT IN ({in_vals})"
-                    
+
                     merge_builder = (
                         merge_builder.whenMatchedDelete(condition=delete_cond_str)
                         .whenMatchedUpdate(set=update_cols)
                         .whenNotMatchedInsert(condition=insert_cond_str, values=insert_cols)
                     )
                 else:
-                    merge_builder = (
-                        merge_builder.whenMatchedUpdate(set=update_cols)
-                        .whenNotMatchedInsert(values=insert_cols)
+                    merge_builder = merge_builder.whenMatchedUpdate(set=update_cols).whenNotMatchedInsert(
+                        values=insert_cols
                     )
-                    
+
                 merge_builder.execute()
 
                 rows_written = incoming_df.count()
@@ -1564,9 +1573,7 @@ def _spark_merge_dataframe(
     if scd1_cfg:
         unknown_cfg = scd1_cfg.get("unknown_member", {})
         if unknown_cfg.get("enabled", True):
-            merged = _inject_unknown_member_spark(
-                merged, primary_key, scd1_cfg, unknown_cfg
-            )
+            merged = _inject_unknown_member_spark(merged, primary_key, scd1_cfg, unknown_cfg)
 
     # ── Enforce SCD1 Column Ordering ─────────────────────────────
     if scd1_cfg and scd1_cfg.get("surrogate_key") and scd1_cfg["surrogate_key"] in merged.columns:
@@ -1622,8 +1629,16 @@ def _spark_scd2_dataframe(
 
     ts_field = scd2_cfg.get("timestamp_field")
     change_date_field: str = ts_field or scd2_cfg.get("change_date_field", effective_from)
-    effective_to_default = scd2_cfg.get("end_date_default") if "end_date_default" in scd2_cfg else scd2_cfg.get("effective_to_default", "9999-12-31")
-    effective_from_default = scd2_cfg.get("start_date_default") if "start_date_default" in scd2_cfg else scd2_cfg.get("effective_from_default", "1900-01-01")
+    effective_to_default = (
+        scd2_cfg.get("end_date_default")
+        if "end_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_to_default", "9999-12-31")
+    )
+    effective_from_default = (
+        scd2_cfg.get("start_date_default")
+        if "start_date_default" in scd2_cfg
+        else scd2_cfg.get("effective_from_default", "1900-01-01")
+    )
 
     now_value = scd2_cfg.get("default_effective_from")
     if not now_value:
@@ -1639,12 +1654,12 @@ def _spark_scd2_dataframe(
         incoming_df = incoming_df.withColumn(effective_from, F.col(change_date_field))
     else:
         incoming_df = incoming_df.withColumn(effective_from, F.to_timestamp(F.lit(now_value)))
-        
+
     if effective_to_default is None:
         incoming_df = incoming_df.withColumn(effective_to, F.lit(None).cast("timestamp"))
     else:
         incoming_df = incoming_df.withColumn(effective_to, F.to_timestamp(F.lit(effective_to_default)))
-        
+
     incoming_df = incoming_df.withColumn(current_flag, F.lit(True))
 
     # Try to read existing data
@@ -1696,7 +1711,9 @@ def _spark_scd2_dataframe(
         if effective_to_default is None:
             existing_df = existing_df.withColumn(current_flag, F.col(effective_to).isNull())
         else:
-            existing_df = existing_df.withColumn(current_flag, F.col(effective_to) == F.to_timestamp(F.lit(effective_to_default)))
+            existing_df = existing_df.withColumn(
+                current_flag, F.col(effective_to) == F.to_timestamp(F.lit(effective_to_default))
+            )
 
     # Get incoming keys
     incoming_keys = incoming_df.select(*primary_key).distinct()
@@ -1870,9 +1887,7 @@ def _spark_scd2_dataframe(
     # ── Unknown member injection (Spark) ─────────────────────────
     unknown_cfg = scd2_cfg.get("unknown_member") or {}
     if unknown_cfg.get("enabled", True):
-        result = _inject_unknown_member_spark(
-            result, primary_key, scd2_cfg, unknown_cfg
-        )
+        result = _inject_unknown_member_spark(result, primary_key, scd2_cfg, unknown_cfg)
 
     # ── Enforce SCD2 Column Ordering ─────────────────────────────
     front_cols = []
@@ -1970,20 +1985,32 @@ def _materialize_spark_dataframe(
             scd1_cfg["unknown_member"] = dict(unknown_member) if isinstance(unknown_member, dict) else {}
 
         cdc_op_field = getattr(contract.source, "cdc_op_field", None) if getattr(contract, "source", None) else None
-        cdc_delete_values = getattr(contract.source, "cdc_delete_values", None) if getattr(contract, "source", None) else None
-        cdc_timestamp_field = getattr(contract.source, "cdc_timestamp_field", None) if getattr(contract, "source", None) else None
+        cdc_delete_values = (
+            getattr(contract.source, "cdc_delete_values", None) if getattr(contract, "source", None) else None
+        )
+        cdc_timestamp_field = (
+            getattr(contract.source, "cdc_timestamp_field", None) if getattr(contract, "source", None) else None
+        )
         soft_delete_col = getattr(mat, "soft_delete_column", None)
         soft_delete_val = getattr(mat, "soft_delete_value", True)
         soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
         soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
 
         result = _spark_merge_dataframe(
-            spark, df, target_str, primary_key, output_format, 
-            location=location, scd1_cfg=scd1_cfg,
-            cdc_op_field=cdc_op_field, cdc_delete_values=cdc_delete_values,
+            spark,
+            df,
+            target_str,
+            primary_key,
+            output_format,
+            location=location,
+            scd1_cfg=scd1_cfg,
+            cdc_op_field=cdc_op_field,
+            cdc_delete_values=cdc_delete_values,
             cdc_timestamp_field=cdc_timestamp_field,
-            soft_delete_col=soft_delete_col, soft_delete_val=soft_delete_val,
-            soft_delete_time_col=soft_delete_time_col, soft_delete_reason_col=soft_delete_reason_col
+            soft_delete_col=soft_delete_col,
+            soft_delete_val=soft_delete_val,
+            soft_delete_time_col=soft_delete_time_col,
+            soft_delete_reason_col=soft_delete_reason_col,
         )
 
         if target_str.startswith("table:"):
@@ -2633,7 +2660,7 @@ def materialize_dataframe(
             unknown_member = getattr(mat, "unknown_member", None)
             if unknown_member and "unknown_member" not in scd1_cfg:
                 scd1_cfg["unknown_member"] = dict(unknown_member) if isinstance(unknown_member, dict) else {}
-                
+
             # If target doesn't exist, process it against an empty dataframe to inject SK/Unknown Member
             merged = _merge_frames(
                 _to_pandas(pdf)[:0],

@@ -336,9 +336,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         if _extra_fields:
             _run_log_schema = StructType(_run_log_schema.fields + _extra_fields)
 
-        from pyspark.sql import Row
-
-        # Pass dict directly so createDataFrame maps by key name, 
+        # Pass dict directly so createDataFrame maps by key name,
         # avoiding positional mapping errors that occur with Row(**kwargs).
         df = spark.createDataFrame([_typed_record], schema=_run_log_schema)
         merge_on_run_id = metadata.get("run_log_merge_on_run_id", True)

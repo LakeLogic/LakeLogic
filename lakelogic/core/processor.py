@@ -373,10 +373,10 @@ class DataProcessor:
             pk_cols = set(contract.primary_key or [])
             for field in contract.model.fields:
                 is_key = (
-                    field.name in pk_cols or 
-                    field.name.endswith("_sk") or 
-                    field.name.endswith("_id") or
-                    field.foreign_key is not None
+                    field.name in pk_cols
+                    or field.name.endswith("_sk")
+                    or field.name.endswith("_id")
+                    or field.foreign_key is not None
                 )
                 is_num = any(t in str(field.type).lower() for t in ["int", "float", "double", "decimal", "numeric"])
                 if is_num and not is_key:
@@ -388,30 +388,30 @@ class DataProcessor:
         # 3. Accumulating Snapshots -> Generate timestamp sequence rules
         if fact_type == "accumulating_snapshot" and fact_cfg.milestone_dates:
             from lakelogic.core.models import Quality, QualityRule
-            
+
             milestones = fact_cfg.milestone_dates
             if not contract.quality:
                 contract.quality = Quality()
-            
+
             for i in range(len(milestones) - 1):
                 start_col = milestones[i]
-                end_col = milestones[i+1]
+                end_col = milestones[i + 1]
                 rule_name = f"fact_milestone_{start_col}_to_{end_col}"
-                
+
                 # Check if user already defined this rule so we don't duplicate
                 existing = [r for r in contract.quality.row_rules if getattr(r, "name", "") == rule_name]
                 if not existing:
                     contract.quality.row_rules.insert(
-                        0, # Insert at the front so they run first!
+                        0,  # Insert at the front so they run first!
                         QualityRule(
                             name=rule_name,
                             sql=f"({end_col} IS NULL) OR ({end_col} >= {start_col})",
                             severity="error",
                             category="correctness",
-                            description=f"Auto-generated Fact milestone constraint: {end_col} must occur after {start_col}"
-                        )
+                            description=f"Auto-generated Fact milestone constraint: {end_col} must occur after {start_col}",
+                        ),
                     )
-        
+
         return contract
 
     def _apply_cdc_defaults(self, contract: DataContract) -> DataContract:
@@ -429,8 +429,9 @@ class DataProcessor:
             # merged yet if the contract was loaded directly (not via runner).
             if contract.materialization is None:
                 from lakelogic.core.models import Materialization
+
                 contract.materialization = Materialization()
-            
+
             # CDC processing inherently requires a merge strategy
             if getattr(contract.materialization, "strategy", None) in [None, "append"]:
                 contract.materialization.strategy = "merge"
@@ -757,7 +758,7 @@ class DataProcessor:
             derived_fields = set()
             rename_targets = set()  # new names (will appear after rename)
             rename_sources = set()  # old names (expected in source, removed after rename)
-            drop_columns = set()    # columns explicitly dropped (acknowledged, not drift)
+            drop_columns = set()  # columns explicitly dropped (acknowledged, not drift)
             if self.contract.transformations:
                 for t in self.contract.transformations:
                     t_dict = t if isinstance(t, dict) else (t.model_dump() if hasattr(t, "model_dump") else {})
@@ -801,14 +802,16 @@ class DataProcessor:
 
             # Remove rename sources, drop columns, internal columns, and framework lineage columns
             real_unknown = sorted(
-                c for c in set(unknown) - rename_sources - drop_columns - internal_cols if not c.startswith("_lakelogic_")
+                c
+                for c in set(unknown) - rename_sources - drop_columns - internal_cols
+                if not c.startswith("_lakelogic_")
             )
 
             # If SQL transformations exist, source columns are expected to
             # differ from model fields — suppress unknown column warnings.
             if has_sql_transforms:
                 real_unknown = []
-            
+
             # Update the drift dictionary to suppress these internal columns in the final run log
             if "missing_fields" in drift:
                 drift["missing_fields"] = real_missing
@@ -860,12 +863,22 @@ class DataProcessor:
         # Capture contract-level SLO row count thresholds for point-in-time auditability
         slo_cfg = getattr(self.contract, "service_levels", None)
         if slo_cfg:
-            rc = getattr(slo_cfg, "row_count", None) if hasattr(slo_cfg, "row_count") else (
-                slo_cfg.get("row_count") if isinstance(slo_cfg, dict) else None
+            rc = (
+                getattr(slo_cfg, "row_count", None)
+                if hasattr(slo_cfg, "row_count")
+                else (slo_cfg.get("row_count") if isinstance(slo_cfg, dict) else None)
             )
             if rc:
-                min_r = getattr(rc, "min_rows", None) if hasattr(rc, "min_rows") else (rc.get("min_rows") if isinstance(rc, dict) else None)
-                max_r = getattr(rc, "max_rows", None) if hasattr(rc, "max_rows") else (rc.get("max_rows") if isinstance(rc, dict) else None)
+                min_r = (
+                    getattr(rc, "min_rows", None)
+                    if hasattr(rc, "min_rows")
+                    else (rc.get("min_rows") if isinstance(rc, dict) else None)
+                )
+                max_r = (
+                    getattr(rc, "max_rows", None)
+                    if hasattr(rc, "max_rows")
+                    else (rc.get("max_rows") if isinstance(rc, dict) else None)
+                )
                 if min_r is not None:
                     self.last_report["slo_row_count_min"] = min_r
                 if max_r is not None:
@@ -944,10 +957,15 @@ class DataProcessor:
 
         total_duration_ms = (time.perf_counter() - start_time) * 1000
         end_time_utc = time.time()
-        
+
         import datetime
-        self.last_report["start_time"] = datetime.datetime.fromtimestamp(start_time_utc, tz=datetime.timezone.utc).isoformat()
-        self.last_report["end_time"] = datetime.datetime.fromtimestamp(end_time_utc, tz=datetime.timezone.utc).isoformat()
+
+        self.last_report["start_time"] = datetime.datetime.fromtimestamp(
+            start_time_utc, tz=datetime.timezone.utc
+        ).isoformat()
+        self.last_report["end_time"] = datetime.datetime.fromtimestamp(
+            end_time_utc, tz=datetime.timezone.utc
+        ).isoformat()
         self.last_report["run_duration_seconds"] = total_duration_ms / 1000.0
 
         trace = ExecutionTrace(
@@ -1597,7 +1615,7 @@ class DataProcessor:
                     _info = getattr(self.contract, "info", None)
                     _meta = getattr(self.contract, "metadata", None) or {}
                     _load_mode = getattr(_src_cfg, "load_mode", None)
-                    
+
                     # CDC table sources should default to pipeline_log, not max_target.
                     # max_target queries the SILVER table's timestamps which differ from
                     # the BRONZE timestamps we need to compare against.
@@ -1612,23 +1630,21 @@ class DataProcessor:
                     if _mat := getattr(self.contract, "materialization", None):
                         _tp = getattr(_mat, "target_path", "") or getattr(_mat, "path", "") or ""
                         if str(_tp).startswith("table:"):
-                            _tbl_full = str(_tp)[len("table:"):]
+                            _tbl_full = str(_tp)[len("table:") :]
                             _dataset = _tbl_full.split(".")[-1] if "." in _tbl_full else _tbl_full
-                    
+
                     if not _dataset:
                         _dataset = (
                             _meta.get("dataset")
                             or getattr(self.contract, "dataset", None)
                             or (getattr(_info, "title", None) if _info else None)
                         )
-                        
-                    _data_layer = _meta.get("data_layer") or (
-                        getattr(_info, "target_layer", None) if _info else None
-                    )
+
+                    _data_layer = _meta.get("data_layer") or (getattr(_info, "target_layer", None) if _info else None)
                     _domain = _meta.get("domain") or (getattr(_info, "domain", None) if _info else None)
                     _system = _meta.get("system") or (getattr(_info, "system", None) if _info else None)
                     _log_table = _meta.get("run_log_table")
-                    
+
                     if _dataset:
                         _src_overrides["dataset"] = _dataset
                     if _data_layer:
@@ -1651,7 +1667,9 @@ class DataProcessor:
                                     _catalog = _src_path.split(".")[0] if "." in _src_path else ""
                                     _target = f"{_catalog}.{_tbl}" if _catalog else _tbl
                             if _target:
-                                _src_overrides["target_path"] = _target if _target.startswith("table:") else f"table:{_target}"
+                                _src_overrides["target_path"] = (
+                                    _target if _target.startswith("table:") else f"table:{_target}"
+                                )
 
                 if df is None:
                     if path.startswith("table:"):
@@ -1677,7 +1695,9 @@ class DataProcessor:
                                     table_name = path[6:] if path.startswith("table:") else path
 
                                     if skip:
-                                        logger.info(f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read.")
+                                        logger.info(
+                                            f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read."
+                                        )
                                         df = spark.table(table_name).filter("1 = 0")
                                     else:
                                         logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
@@ -1722,7 +1742,7 @@ class DataProcessor:
 
                                 self._incremental_metadata = dict(boundary.metadata)
                                 self._incremental_metadata["strategy"] = boundary.strategy
-                                
+
                                 if boundary.strategy == "delta_version":
                                     _tv = boundary.metadata.get("to_version")
                                     if _tv is not None:
@@ -1736,6 +1756,7 @@ class DataProcessor:
                                 if self._source_max_mtime is None:
                                     try:
                                         from pyspark.sql import functions as F
+
                                         _ts_col = "_lakelogic_processed_at"
                                         if _ts_col in df.columns:
                                             _max_ts = df.select(
@@ -1757,7 +1778,11 @@ class DataProcessor:
                     else:
                         # File path or explicit format
                         _src_cfg = getattr(self.contract, "source", None)
-                        if _src_cfg and getattr(_src_cfg, "load_mode", None) in ("incremental", "cdc") and fmt == "delta":
+                        if (
+                            _src_cfg
+                            and getattr(_src_cfg, "load_mode", None) in ("incremental", "cdc")
+                            and fmt == "delta"
+                        ):
                             from lakelogic.core.incremental import IncrementalBoundary
 
                             try:
@@ -1771,7 +1796,9 @@ class DataProcessor:
                                     skip = boundary.metadata.get("skip_sync", False)
 
                                     if skip:
-                                        logger.info(f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read.")
+                                        logger.info(
+                                            f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read."
+                                        )
                                         df = spark.read.format("delta").load(path).filter("1 = 0")
                                     else:
                                         logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
