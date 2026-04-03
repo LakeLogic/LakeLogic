@@ -2598,7 +2598,7 @@ class DataProcessor:
         Uses dataset (target table name) + data_layer for precise filtering.
         """
         try:
-            from lakelogic.core.materialization import get_last_run_watermark
+            from lakelogic.core.run_log import get_last_run_watermark
         except Exception:
             return None
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")

@@ -125,14 +125,30 @@ def _cloud_list_json(cloud_dir: str, pattern: str = "run_*.json") -> List[str]:
         # Normalize trailing slash
         cloud_dir = cloud_dir.rstrip("/") + "/"
         opts = _build_cloud_opts(cloud_dir)
-        fs, _, _ = fsspec.core.url_to_fs(cloud_dir, **opts)
-        # Strip protocol for glob
-        base = cloud_dir.split("://", 1)
-        protocol = base[0] + "://"
-        path_part = base[1].rstrip("/")
-        matches = fs.glob(f"{path_part}/{pattern}")
-        # Re-attach protocol and sort newest first (UUID-based names)
-        return sorted([f"{protocol}{m}" for m in matches], reverse=True)
+        fs, fs_path = fsspec.core.url_to_fs(cloud_dir, **opts)
+        
+        fs_path = fs_path.rstrip("/")
+        matches = fs.glob(f"{fs_path}/{pattern}")
+        
+        def get_mtime(m):
+            try:
+                info = fs.info(m)
+                dt = (
+                    info.get("last_modified") 
+                    or info.get("LastModified")
+                    or info.get("updated") 
+                    or info.get("mtime") 
+                    or 0
+                )
+                if hasattr(dt, "timestamp"):
+                    return dt.timestamp()
+                return float(dt)
+            except Exception:
+                return 0
+
+        sorted_matches = sorted(matches, key=get_mtime, reverse=True)
+        # Reconstruct full URI. We know each match is just a file in cloud_dir.
+        return [f"{cloud_dir}{m.split('/')[-1]}" for m in sorted_matches]
     except Exception:
         return []
 
