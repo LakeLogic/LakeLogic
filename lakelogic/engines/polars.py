@@ -614,7 +614,7 @@ class PolarsAdapter(EngineAdapter):
             if trans.derive and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [Derive]: {trans.derive.field}")
                 field_name = trans.derive.field
-                derive_sql = self._normalize_sql(trans.derive.sql)
+                derive_sql = self._normalize_sql(self._transpile_derive_sql(trans.derive))
                 _resolved = False
                 try:
                     # Try Polars SQL first via a fresh context (avoids the
@@ -853,7 +853,8 @@ class PolarsAdapter(EngineAdapter):
             if trans.derive:
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 field_name = trans.derive.field
-                derive_sql = self._normalize_sql(trans.derive.sql)
+                # Auto-transpile Spark SQL → DuckDB via sqlglot (with sql_duckdb override)
+                derive_sql = self._normalize_sql(self._transpile_derive_sql(trans.derive))
                 if field_name in existing_cols:
                     _step_query = f"SELECT * EXCLUDE ({field_name}), ({derive_sql}) AS {field_name} FROM _step"
                 else:

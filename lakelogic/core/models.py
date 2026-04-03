@@ -11,6 +11,61 @@ from typing import List, Optional, Dict, Any, Union
 from loguru import logger
 import warnings
 
+
+def _warn_unknown_extra_keys(
+    instance: Any,
+    known_keys: set,
+    block_name: str,
+) -> None:
+    """Log a warning for each unrecognised key in a Pydantic model's extras.
+
+    Pydantic models with ``extra="allow"`` accept unknown keys silently.
+    This helper inspects ``__pydantic_extra__`` and uses fuzzy matching
+    (``difflib.get_close_matches``) to suggest corrections for likely
+    typos.  Called from ``model_validator(mode="after")`` on models
+    where mistypes are especially dangerous.
+
+    Parameters
+    ----------
+    instance : BaseModel
+        The constructed Pydantic model instance.
+    known_keys : set[str]
+        Set of valid key names for this model.
+    block_name : str
+        Human-readable block name for the log message (e.g. "source",
+        "materialization").
+    """
+    import os as _os
+
+    if _os.environ.get("LAKELOGIC_SKIP_KEY_WARNINGS", "").strip() not in ("", "0"):
+        return
+
+    extras = getattr(instance, "__pydantic_extra__", None) or {}
+    if not extras:
+        return
+
+    from difflib import get_close_matches
+
+    for key in extras:
+        if key.startswith("_"):
+            continue
+        if key in known_keys:
+            continue
+
+        matches = get_close_matches(key, known_keys, n=1, cutoff=0.6)
+        if matches:
+            logger.warning(
+                f"Unknown key '{key}' in '{block_name}' block — did you mean "
+                f"'{matches[0]}'? This key will be ignored by LakeLogic."
+            )
+        else:
+            logger.warning(
+                f"Unknown key '{key}' in '{block_name}' block — this key "
+                f"will be ignored by LakeLogic. "
+                f"Known keys: {', '.join(sorted(known_keys))}"
+            )
+
+
 _QUALITY_CATEGORIES = {
     "correctness",
     "completeness",
@@ -126,7 +181,7 @@ class SourcePartition(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     format: str  # strftime format, e.g. "y_%Y/m_%m/d_%d"
-    lookback_days: int = 1  # how many days back to scan
+    lookback_days: Optional[int] = None  # how many days back to scan; None = all partitions
     start_date: Optional[str] = None  # ISO date override for backfills
     end_date: Optional[str] = None  # ISO date override for backfills
     file_pattern: Optional[str] = None  # glob pattern; auto-derives from source.format
@@ -145,6 +200,7 @@ class SourceConfig(BaseModel):
     watermark_field: Optional[str] = None
     cdc_op_field: Optional[str] = None
     cdc_delete_values: List[str] = Field(default_factory=list)
+    cdc_timestamp_field: Optional[str] = None
 
     # Date-partitioned landing support
     partition: Optional[SourcePartition] = None
@@ -241,6 +297,22 @@ class SourceConfig(BaseModel):
     #     flatten_nested: [derived, pricing, location]
     flatten_nested: Union[bool, List[str]] = False
 
+    _SOURCE_KNOWN_KEYS: set = {
+        "type", "path", "format", "load_mode", "pattern",
+        "watermark_field", "cdc_op_field", "cdc_delete_values",
+        "cdc_timestamp_field", "partition", "options",
+        "watermark_strategy", "target_path", "lookback",
+        "from_date", "to_date", "pipeline_log_table",
+        "pipeline_name", "manifest_path",
+        "watermark_date_parts", "partition_filters",
+        "flatten_nested",
+    }
+
+    @model_validator(mode="after")
+    def _warn_unknown_keys(self) -> "SourceConfig":
+        _warn_unknown_extra_keys(self, self._SOURCE_KNOWN_KEYS, "source")
+        return self
+
 
 class SchemaPolicy(BaseModel):
     """Schema enforcement rules for unknown and evolving fields."""
@@ -280,10 +352,19 @@ class TransformationRename(BaseModel):
 
 
 class TransformationDerive(BaseModel):
-    """Derive a new field from a SQL expression."""
+    """Derive a new field from a SQL expression.
+
+    ``sql`` is the default/Spark expression.  When running on a different
+    engine you can supply an engine-specific override:
+
+    * ``sql_duckdb`` — used by the Polars and DuckDB adapters.
+    * ``sql_spark`` — explicit Spark override (falls back to ``sql``).
+    """
 
     field: str
     sql: str
+    sql_duckdb: Optional[str] = None
+    sql_spark: Optional[str] = None
 
 
 class TransformationLookup(BaseModel):
@@ -730,9 +811,8 @@ class QualityRule(BaseModel):
             return "correctness"
         text = _QUALITY_CATEGORY_SYNONYMS.get(text, text)
         if text not in _QUALITY_CATEGORIES:
-            warnings.warn(
-                f"Unknown quality rule category '{value}'. Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}.",
-                UserWarning,
+            logger.warning(
+                f"Unknown quality rule category '{value}'. Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}."
             )
         return text
 
@@ -822,11 +902,30 @@ class ServiceLevelObjective(BaseModel):
     field: Optional[str] = None
 
 
+class RowCountSLO(BaseModel):
+    """Row count SLO for individual contracts.
+
+    Validates that the output row count falls within expected bounds.
+    Checked against the field specified by check_field (default: counts_good).
+
+    When skip_reprocess_days is set and the reprocess date range exceeds that
+    threshold, SLO checks and counts_source computation are skipped entirely
+    to avoid expensive Spark wide-transformation actions on large backfills.
+    """
+
+    min_rows: Optional[int] = None  # Minimum expected rows (fail if below)
+    max_rows: Optional[int] = None  # Maximum expected rows (fail if above)
+    check_field: str = "counts_good"  # counts_good | counts_source | counts_total
+    skip_reprocess_days: int = 3  # Skip SLO + source count when reprocess range > N days (0 = never skip)
+    description: Optional[str] = None
+
+
 class ServiceLevel(BaseModel):
-    """Service-level settings for freshness and availability."""
+    """Service-level settings for freshness, availability, and row counts."""
 
     freshness: Optional[Union[str, ServiceLevelObjective]] = None
-    availability: Optional[Union[float, ServiceLevelObjective]] = None  # percentage e.g. 99.9
+    availability: Optional[Union[float, ServiceLevelObjective]] = None  # field completeness percentage e.g. 99.9
+    row_count: Optional[RowCountSLO] = None  # min/max row count bounds per contract
 
 
 class FieldDefinition(BaseModel):
@@ -850,15 +949,27 @@ class FieldDefinition(BaseModel):
     # At validation time, DataProcessor evaluates the corresponding referential_integrity rule.
     foreign_key: Optional[ForeignKeyRef] = None
 
+    # ── Kimball Dimensional Modelling ─────────────────────────────────────────
+    nullable: Optional[bool] = None  # Explicit nullability (critical for accumulating snapshot milestones)
+    milestone: bool = False  # Flag for accumulating snapshot milestone date columns
+    generated: bool = False  # Flag for auto-generated fields (surrogate keys, SCD2 validity columns)
+
     # ── PII Security Group Mapping ───────────────────────────────────────────
     # security_groups: list of group names that are allowed to see unmasked values.
     # If the current user is NOT in any of these groups, the masking strategy is applied.
     # Groups map to IAM/AD groups, Databricks UC groups, or custom group providers.
     security_groups: List[str] = Field(default_factory=list)
-    # Per-field default masking strategy: nullify | hash | redact | partial | tokenize | encrypt
+    # Per-field default masking strategy: nullify | hash | redact | partial | encrypt
     masking: Optional[str] = None
+    # Custom format template for 'partial' masking.
+    # Tokens: {first1}-{first9}, {last1}-{last9}, {domain} (email)
+    # Example: "{first1}***@{domain}" → j***@company.com
+    # Example: "***-***-{last4}"      → ***-***-1234
+    # Example: "{first2}** ***"       → SW** *** (postcode)
+    # If omitted, auto-detects email/phone/generic patterns.
+    masking_format: Optional[str] = None
     # Optional reference to an encrypted PII vault table for reversible unmasking.
-    # Format: "catalog.schema.table.column" or "vault://key-name"
+    # URI format: keyvault://vault-name/secret-name | databricks://scope/key | env://VAR
     pii_vault: Optional[str] = None
 
     # LLM extraction hints (used when field appears in extraction.output_schema)
@@ -871,6 +982,31 @@ class Model(BaseModel):
     """Schema model definition."""
 
     fields: List[FieldDefinition] = Field(default_factory=list)
+    grain: Optional[str] = None  # Human-readable grain description (e.g. "one row per order lifecycle")
+    grain_key: List[str] = Field(default_factory=list)  # Conceptual grain columns (subset of primary_key)
+
+
+class FactConfig(BaseModel):
+    """
+    Kimball Fact Table Automated Governance.
+
+    Automatically injects pipeline constraints based on the defined Fact Table architecture:
+    - accumulating_snapshot: ensures milestone dates are monotonically increasing
+    - transaction: lock strategy to append
+    - factless: asserts no metric columns exist
+
+    YAML example::
+        materialization:
+          strategy: merge
+          fact:
+            type: accumulating_snapshot
+            milestone_dates:
+              - placed_date
+              - shipped_date
+    """
+
+    type: str  # transaction | periodic_snapshot | accumulating_snapshot | factless | aggregate
+    milestone_dates: List[str] = Field(default_factory=list)
 
 
 class Materialization(BaseModel):
@@ -888,12 +1024,43 @@ class Materialization(BaseModel):
         None  # External storage location for UC tables (e.g. abfss://container@account.dfs.core.windows.net/path/)
     )
     scd2: Optional[Dict[str, Any]] = None
+    fact: Optional[FactConfig] = None
     soft_delete_column: Optional[str] = None  # e.g. '_lakelogic_is_deleted'
     soft_delete_value: Any = True  # Value to set when deleted
     soft_delete_time_column: Optional[str] = None  # e.g. '_lakelogic_deleted_at'
     soft_delete_reason_column: Optional[str] = None  # e.g. '_lakelogic_delete_reason'
     table_properties: Optional[Dict[str, str]] = None  # e.g. {'delta.autoOptimize.optimizeWrite': 'true'}
     compaction: Optional[Dict[str, Any]] = None  # e.g. {'auto': True, 'vacuum_retention_hours': 168}
+    unknown_member: Optional[Dict[str, Any]] = None  # Kimball unknown member row for dimensions
+
+    _MAT_KNOWN_KEYS: set = {
+        "strategy", "partition_by", "cluster_by", "reprocess_policy",
+        "reprocess_date_column", "target_path", "format", "location",
+        "scd2", "scd1", "fact",
+        "soft_delete_column", "soft_delete_value",
+        "soft_delete_time_column", "soft_delete_reason_column",
+        "table_properties", "compaction", "unknown_member",
+    }
+
+    @model_validator(mode="after")
+    def _validate_strategy_alignment(self) -> "Materialization":
+        """Warn when strategy and sub-config blocks are mismatched."""
+        if self.strategy == "scd2" and not self.scd2:
+            logger.warning(
+                "materialization.strategy is 'scd2' but no 'scd2:' config block is defined. "
+                "LakeLogic requires track_columns, timestamp_field, etc. in the scd2 block."
+            )
+        if self.scd2 and self.strategy != "scd2":
+            logger.warning(
+                f"materialization.scd2 block is defined but strategy is '{self.strategy}', not 'scd2'. "
+                "The scd2 block will be ignored."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_unknown_keys(self) -> "Materialization":
+        _warn_unknown_extra_keys(self, self._MAT_KNOWN_KEYS, "materialization")
+        return self
 
 
 class DownstreamConsumer(BaseModel):
@@ -1132,6 +1299,23 @@ class LineageConfig(BaseModel):
     upstream_prefix: str = "_upstream"
     run_id_source: str = "run_id"  # run_id | pipeline_run_id
 
+    _LINEAGE_KNOWN_KEYS: set = {
+        "enabled", "capture_source_path", "capture_timestamp",
+        "capture_run_id", "source_column_name", "timestamp_column_name",
+        "run_id_column_name", "capture_contract_name",
+        "contract_name_column_name", "capture_domain", "capture_system",
+        "domain_column_name", "system_column_name",
+        "capture_created_at", "created_at_column_name",
+        "capture_created_by", "created_by_column_name",
+        "created_by_override", "preserve_upstream",
+        "upstream_prefix", "run_id_source",
+    }
+
+    @model_validator(mode="after")
+    def _warn_unknown_keys(self) -> "LineageConfig":
+        _warn_unknown_extra_keys(self, self._LINEAGE_KNOWN_KEYS, "lineage")
+        return self
+
 
 class ExternalLogic(BaseModel):
     """External logic hook for advanced processing."""
@@ -1146,6 +1330,52 @@ class ExternalLogic(BaseModel):
     kernel_name: Optional[str] = None  # notebook kernel override
 
 
+def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert an Open Data Contract Standard (ODCS) dict into LakeLogic format."""
+    # Check if this is an ODCS contract (requires kind and apiVersion)
+    if data.get("kind") != "DataContract" or "apiVersion" not in data:
+        return data  # Not ODCS or already LakeLogic
+    
+    lakelogic_data = {}
+    
+    # 1. Map root properties
+    # LakeLogic requires a version. We'll use the ODCS apiVersion.
+    lakelogic_data["version"] = data.get("apiVersion", "v1")
+    if "dataset" in data:
+        lakelogic_data["info"] = {"title": data["dataset"]}
+        
+    # 2. Map schema to model.fields
+    if "schema" in data and isinstance(data["schema"], list):
+        fields = []
+        for col in data["schema"]:
+            field = {
+                "name": col.get("name"),
+                "type": col.get("type", "string"),
+            }
+            if "description" in col:
+                field["description"] = col["description"]
+            if "required" in col:
+                field["required"] = col["required"]
+            if "pii" in col:
+                field["pii"] = col["pii"]
+            fields.append(field)
+        lakelogic_data["model"] = {"fields": fields}
+        
+    # 3. Apply customProperties.lakelogic overrides (the execution instructions)
+    custom_props = data.get("customProperties", {}).get("lakelogic", {})
+    if isinstance(custom_props, dict):
+        for k, v in custom_props.items():
+            lakelogic_data[k] = v
+            
+    # 4. Copy any missing properties for a best-effort merge
+    # This allows direct pass-through of things like `metadata`, `servers` if they happen to align.
+    for k, v in data.items():
+        if k not in ["kind", "apiVersion", "dataset", "schema", "customProperties"] and k not in lakelogic_data:
+            lakelogic_data[k] = v
+            
+    return lakelogic_data
+
+
 class DataContract(BaseModel):
     """
     Finalized SQL-First Data Contract Model.
@@ -1153,6 +1383,62 @@ class DataContract(BaseModel):
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _odcs_interceptor(cls, data: Any) -> Any:
+        """Intercept and convert ODCS YAML into LakeLogic dict before Pydantic parses it."""
+        if isinstance(data, dict):
+            return _convert_odcs_to_lakelogic(data)
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _soft_deletes_interceptor(cls, data: Any) -> Any:
+        """Map the top-level ``soft_deletes:`` YAML block into materialization fields.
+
+        The contract YAML supports a user-friendly shorthand::
+
+            soft_deletes:
+              enabled: true
+              flag_field: "_is_deleted"
+              reason_field: "_delete_reason"
+              timestamp_field: "_deleted_at"
+
+        Internally the soft-delete behaviour is driven by
+        ``materialization.soft_delete_column``, ``soft_delete_time_column``,
+        and ``soft_delete_reason_column``.  This validator bridges the two
+        representations so users don't have to write the verbose form.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        sd = data.get("soft_deletes")
+        if not isinstance(sd, dict) or not sd.get("enabled", False):
+            return data
+
+        # Ensure materialization dict exists
+        mat = data.setdefault("materialization", {})
+        if not isinstance(mat, dict):
+            return data
+
+        # Map soft_deletes fields → materialization fields (user values take priority)
+        if sd.get("flag_field") and not mat.get("soft_delete_column"):
+            mat["soft_delete_column"] = sd["flag_field"]
+        if sd.get("timestamp_field") and not mat.get("soft_delete_time_column"):
+            mat["soft_delete_time_column"] = sd["timestamp_field"]
+        if sd.get("reason_field") and not mat.get("soft_delete_reason_column"):
+            mat["soft_delete_reason_column"] = sd["reason_field"]
+
+        # If enabled but no flag_field specified, set a sensible default
+        if not mat.get("soft_delete_column"):
+            mat["soft_delete_column"] = "_lakelogic_is_deleted"
+        if not mat.get("soft_delete_time_column"):
+            mat["soft_delete_time_column"] = "_lakelogic_deleted_at"
+        if not mat.get("soft_delete_reason_column"):
+            mat["soft_delete_reason_column"] = "_lakelogic_delete_reason"
+
+        return data
 
     version: str
     info: Optional[Info] = None
@@ -1164,6 +1450,7 @@ class DataContract(BaseModel):
 
     dataset: Optional[str] = None
     primary_key: List[str] = Field(default_factory=list)
+    natural_key: List[str] = Field(default_factory=list)  # Business key for SCD2 (repeated across versions)
 
     # LINEAGE & OBSERVABILITY
     lineage: Optional[LineageConfig] = Field(default_factory=LineageConfig)
@@ -1210,6 +1497,43 @@ class DataContract(BaseModel):
         return raw
 
     # ── Cross-field validation ─────────────────────────────────────────────────
+
+    # Known top-level contract keys — union of Pydantic fields + recognised
+    # shorthand blocks (soft_deletes) + ODCS aliases that the interceptors
+    # handle.  Keys in ``_PRIVATE_EXTRA_KEYS`` are silently allowed because
+    # they are injected at runtime by the processor / pipeline runner.
+    _KNOWN_KEYS: set = {
+        # Pydantic-declared fields
+        "version", "info", "metadata", "server", "source", "environments",
+        "links", "dataset", "primary_key", "natural_key", "lineage",
+        "materialization", "logic", "external_logic", "extraction",
+        "upstream", "downstream", "schedule", "schema_policy", "model",
+        "quality", "transformations", "service_levels", "quarantine",
+        "tier", "layer", "target_layer",
+        # Recognised shorthand blocks (handled by interceptors)
+        "soft_deletes",
+        # ODCS / alternative schema keys accepted by _odcs_interceptor
+        "schema", "tables", "columns", "properties", "fields",
+        "kind", "apiVersion", "type", "status", "description",
+        "datasetDomain", "quantumName", "datasetName",
+        "driver", "driverVersion", "servers",
+        "price", "stakeholders", "roles", "slaDefaultColumn",
+        "slaProperties", "tags", "customProperties",
+    }
+    _PRIVATE_EXTRA_KEYS: set = {
+        "_base_path", "_contract_path", "_resolved_by_pipeline",
+    }
+
+    @model_validator(mode="after")
+    def _warn_unknown_keys(self) -> "DataContract":
+        """Warn about unrecognised top-level contract keys."""
+        _warn_unknown_extra_keys(
+            self,
+            self._KNOWN_KEYS | self._PRIVATE_EXTRA_KEYS,
+            "contract",
+        )
+        return self
+
 
     @model_validator(mode="after")
     def _validate_incremental_requires_run_log(self) -> "DataContract":
@@ -1290,20 +1614,16 @@ class DataContract(BaseModel):
             wm_field = getattr(source, "watermark_field", None)
             wm_strategy = getattr(source, "watermark_strategy", None)
             if not wm_field and not wm_strategy:
-                warnings.warn(
+                logger.warning(
                     "source.load_mode is 'incremental' but no watermark_field is set. "
                     "Defaulting to '_lakelogic_processed_at'. To silence this warning, "
-                    "add 'watermark_field: _lakelogic_processed_at' to the source block.",
-                    UserWarning,
-                    stacklevel=2,
+                    "add 'watermark_field: _lakelogic_processed_at' to the source block."
                 )
             # pipeline_log_table defaults to "pipeline_runs" at runtime
             # (see incremental.py), so no warning needed here.
             if wm_strategy == "lookback" and not getattr(source, "lookback", None):
-                warnings.warn(
-                    "watermark_strategy is 'lookback' but lookback duration is not set. Defaulting to '7 days'.",
-                    UserWarning,
-                    stacklevel=2,
+                logger.warning(
+                    "watermark_strategy is 'lookback' but lookback duration is not set. Defaulting to '7 days'."
                 )
 
         elif load_mode == "cdc":
@@ -1555,13 +1875,31 @@ class DataContract(BaseModel):
                                 _opts: dict = {}
                                 if loc_str.startswith(("abfss://", "abfs://")):
                                     for _ek, _ok in [
+                                        ("AZURE_STORAGE_ACCOUNT_NAME", "account_name"),
                                         ("AZURE_STORAGE_ACCOUNT", "account_name"),
+                                        ("AZURE_STORAGE_ACCOUNT_KEY", "account_key"),
                                         ("AZURE_TENANT_ID", "tenant_id"),
                                         ("AZURE_CLIENT_ID", "client_id"),
                                         ("AZURE_CLIENT_SECRET", "client_secret"),
                                     ]:
                                         _v = _os2.getenv(_ek)
-                                        if _v:
+                                        if _v and _ok not in _opts:
+                                            _opts[_ok] = _v
+                                elif loc_str.startswith(("s3://", "s3a://")):
+                                    for _ek, _ok in [
+                                        ("AWS_ACCESS_KEY_ID", "key"),
+                                        ("AWS_SECRET_ACCESS_KEY", "secret"),
+                                        ("AWS_SESSION_TOKEN", "token"),
+                                    ]:
+                                        _v = _os2.getenv(_ek)
+                                        if _v and _ok not in _opts:
+                                            _opts[_ok] = _v
+                                elif loc_str.startswith(("gs://", "gcs://")):
+                                    for _ek, _ok in [
+                                        ("GOOGLE_APPLICATION_CREDENTIALS", "token"),
+                                    ]:
+                                        _v = _os2.getenv(_ek)
+                                        if _v and _ok not in _opts:
                                             _opts[_ok] = _v
 
                                 fs, path_part = fsspec.core.url_to_fs(loc_str, **_opts)

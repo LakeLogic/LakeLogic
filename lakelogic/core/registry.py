@@ -147,6 +147,7 @@ class DomainRegistry(BaseModel):
     cloud: CloudReporting = Field(default_factory=CloudReporting)
     environments: Dict[str, EnvironmentConfig] = Field(default_factory=dict)
     # System-level defaults — inherited by contracts that don't define their own
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     lineage: Dict[str, Any] = Field(default_factory=dict)
     quarantine: Dict[str, Any] = Field(default_factory=dict)
     materialization: Dict[str, Any] = Field(default_factory=dict)  # per-layer defaults
@@ -274,6 +275,16 @@ class DomainRegistry(BaseModel):
                             storage_vars[root_key] = path_val
 
                 c_dict = _resolve_placeholders(c_dict, storage_vars)
+
+                # Inject system-level metadata defaults (e.g. run_log_dir)
+                if registry.metadata:
+                    if not c_dict.get("metadata"):
+                        c_dict["metadata"] = dict(registry.metadata)
+                    else:
+                        for k, v in registry.metadata.items():
+                            c_dict["metadata"].setdefault(k, v)
+                    # Resolve any remaining placeholders in metadata values
+                    c_dict["metadata"] = _resolve_placeholders(c_dict["metadata"], storage_vars)
 
                 # Inject system-level materialization defaults
                 if registry.materialization and c.layer in registry.materialization:

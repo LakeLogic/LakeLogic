@@ -28,14 +28,30 @@ def _is_cloud_path(path: str) -> bool:
 
 
 def _build_cloud_opts(path: str) -> Dict[str, str]:
-    """Build fsspec storage_options from environment variables for a cloud path."""
+    """Build fsspec storage_options from environment variables for a cloud path.
+
+    For Azure ``abfss://container@account.dfs.core.windows.net/...`` URIs,
+    adlfs automatically extracts ``account_name`` from the URL.  We only
+    inject ``account_name`` when it cannot be inferred from the URI, and
+    always pass ``account_key`` when available.
+    """
     import os
 
     opts: Dict[str, str] = {}
     p = str(path).lower()
     if p.startswith(("abfss://", "abfs://")):
+        # Detect whether account_name is embedded in the URL
+        uri_has_account = "@" in p.split("//", 1)[-1].split("/", 1)[0]
+
+        acct = os.getenv("AZURE_STORAGE_ACCOUNT_NAME") or os.getenv("AZURE_STORAGE_ACCOUNT")
+        if acct and not uri_has_account:
+            opts["account_name"] = acct
+
+        acct_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
+        if acct_key:
+            opts["account_key"] = acct_key
+
         for env_key, opt_key in [
-            ("AZURE_STORAGE_ACCOUNT", "account_name"),
             ("AZURE_TENANT_ID", "tenant_id"),
             ("AZURE_CLIENT_ID", "client_id"),
             ("AZURE_CLIENT_SECRET", "client_secret"),
@@ -179,10 +195,20 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             return None
 
+    def _int(value):
+        """Coerce a value to int when possible."""
+        try:
+            return int(value) if value is not None else None
+        except Exception:
+            return None
+
     return {
-        "run_id": report.get("run_id"),
         "pipeline_run_id": report.get("pipeline_run_id"),
+        "run_id": report.get("run_id"),
         "timestamp": report.get("timestamp"),
+        "start_time": report.get("start_time"),
+        "end_time": report.get("end_time"),
+        "run_duration_seconds": _num(report.get("run_duration_seconds")),
         "engine": report.get("engine"),
         "contract": report.get("contract"),
         "contract_version": report.get("contract_version"),
@@ -191,6 +217,8 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "domain": report.get("domain"),
         "system": report.get("system"),
         "data_layer": report.get("data_layer"),
+        "status": report.get("status"),
+        "error_message": report.get("error_message"),
         "source_path": report.get("source_path"),
         "counts_source": counts.get("source"),
         "counts_total": counts.get("total"),
@@ -202,12 +230,14 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "max_source_mtime": report.get("max_source_mtime"),
         "max_watermark_value": report.get("max_watermark_value"),
         "source_files_json": json.dumps(report.get("source_files", []), default=str),
-        "freshness_seconds": _num(freshness.get("age_seconds")),
-        "freshness_pass": freshness.get("passed"),
-        "freshness_threshold_seconds": _num(freshness.get("threshold_seconds")),
-        "availability_ratio": _num(availability.get("ratio")),
-        "availability_pass": availability.get("passed"),
-        "availability_threshold": _num(availability.get("threshold")),
+        "slo_freshness_seconds": _num(freshness.get("age_seconds")),
+        "slo_freshness_pass": freshness.get("passed"),
+        "slo_freshness_threshold_seconds": _num(freshness.get("threshold_seconds")),
+        "slo_availability_ratio": _num(availability.get("ratio")),
+        "slo_availability_pass": availability.get("passed"),
+        "slo_availability_threshold": _num(availability.get("threshold")),
+        "slo_row_count_min": _int(report.get("slo_row_count_min")),
+        "slo_row_count_max": _int(report.get("slo_row_count_max")),
         "dataset_rules_json": json.dumps(report.get("dataset_rules", []), default=str),
         "row_rule_failures_json": json.dumps(report.get("row_rule_failures", []), default=str),
         "schema_drift_json": json.dumps(report.get("schema_drift", {}), default=str),
@@ -269,9 +299,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         _run_log_schema = StructType(
             [
-                StructField("run_id", StringType(), True),
                 StructField("pipeline_run_id", StringType(), True),
+                StructField("run_id", StringType(), True),
                 StructField("timestamp", StringType(), True),
+                StructField("start_time", StringType(), True),
+                StructField("end_time", StringType(), True),
+                StructField("run_duration_seconds", DoubleType(), True),
                 StructField("engine", StringType(), True),
                 StructField("contract", StringType(), True),
                 StructField("contract_version", StringType(), True),
@@ -280,6 +313,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("domain", StringType(), True),
                 StructField("system", StringType(), True),
                 StructField("data_layer", StringType(), True),
+                StructField("status", StringType(), True),
+                StructField("error_message", StringType(), True),
                 StructField("source_path", StringType(), True),
                 StructField("counts_source", LongType(), True),
                 StructField("counts_total", LongType(), True),
@@ -291,12 +326,14 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("max_source_mtime", DoubleType(), True),
                 StructField("max_watermark_value", StringType(), True),
                 StructField("source_files_json", StringType(), True),
-                StructField("freshness_seconds", DoubleType(), True),
-                StructField("freshness_pass", BooleanType(), True),
-                StructField("freshness_threshold_seconds", DoubleType(), True),
-                StructField("availability_ratio", DoubleType(), True),
-                StructField("availability_pass", BooleanType(), True),
-                StructField("availability_threshold", DoubleType(), True),
+                StructField("slo_freshness_seconds", DoubleType(), True),
+                StructField("slo_freshness_pass", BooleanType(), True),
+                StructField("slo_freshness_threshold_seconds", DoubleType(), True),
+                StructField("slo_availability_ratio", DoubleType(), True),
+                StructField("slo_availability_pass", BooleanType(), True),
+                StructField("slo_availability_threshold", DoubleType(), True),
+                StructField("slo_row_count_min", LongType(), True),
+                StructField("slo_row_count_max", LongType(), True),
                 StructField("dataset_rules_json", StringType(), True),
                 StructField("row_rule_failures_json", StringType(), True),
                 StructField("schema_drift_json", StringType(), True),
@@ -317,7 +354,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         from pyspark.sql import Row
 
-        df = spark.createDataFrame([Row(**_typed_record)], schema=_run_log_schema)
+        # Pass dict directly so createDataFrame maps by key name, 
+        # avoiding positional mapping errors that occur with Row(**kwargs).
+        df = spark.createDataFrame([_typed_record], schema=_run_log_schema)
         merge_on_run_id = metadata.get("run_log_merge_on_run_id", True)
         table_format = metadata.get("run_log_table_format") or "delta"
 
@@ -344,6 +383,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 missing_cols = []
                 for col_name, col_type in [
                     ("pipeline_run_id", "STRING"),
+                    ("start_time", "STRING"),
+                    ("end_time", "STRING"),
+                    ("run_duration_seconds", "DOUBLE"),
                     ("stage", "STRING"),
                     ("dataset", "STRING"),
                     ("domain", "STRING"),
@@ -358,6 +400,19 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     ("max_source_mtime", "DOUBLE"),
                     ("max_watermark_value", "STRING"),
                     ("source_files_json", "STRING"),
+                    ("status", "STRING"),
+                    ("error_message", "STRING"),
+                    ("slo_freshness_seconds", "DOUBLE"),
+                    ("slo_freshness_pass", "BOOLEAN"),
+                    ("slo_freshness_threshold_seconds", "DOUBLE"),
+                    ("slo_availability_ratio", "DOUBLE"),
+                    ("slo_availability_pass", "BOOLEAN"),
+                    ("slo_availability_threshold", "DOUBLE"),
+                    ("dataset_rules_json", "STRING"),
+                    ("row_rule_failures_json", "STRING"),
+                    ("schema_drift_json", "STRING"),
+                    ("slo_row_count_min", "BIGINT"),
+                    ("slo_row_count_max", "BIGINT"),
                 ]:
                     if col_name not in existing_cols:
                         missing_cols.append(f"{col_name} {col_type}")
@@ -429,9 +484,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             full_table = table_only
         con.execute(f"""
             CREATE TABLE IF NOT EXISTS {full_table} (
-                run_id VARCHAR,
                 pipeline_run_id VARCHAR,
+                run_id VARCHAR,
                 timestamp VARCHAR,
+                start_time VARCHAR,
+                end_time VARCHAR,
+                run_duration_seconds DOUBLE,
                 engine VARCHAR,
                 contract VARCHAR,
                 stage VARCHAR,
@@ -439,6 +497,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 domain VARCHAR,
                 system VARCHAR,
                 data_layer VARCHAR,
+                status VARCHAR,
+                error_message VARCHAR,
                 source_path VARCHAR,
                 counts_source BIGINT,
                 counts_total BIGINT,
@@ -450,12 +510,14 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 max_source_mtime DOUBLE,
                 max_watermark_value VARCHAR,
                 source_files_json VARCHAR,
-                freshness_seconds DOUBLE,
-                freshness_pass BOOLEAN,
-                freshness_threshold_seconds DOUBLE,
-                availability_ratio DOUBLE,
-                availability_pass BOOLEAN,
-                availability_threshold DOUBLE,
+                slo_freshness_seconds DOUBLE,
+                slo_freshness_pass BOOLEAN,
+                slo_freshness_threshold_seconds DOUBLE,
+                slo_availability_ratio DOUBLE,
+                slo_availability_pass BOOLEAN,
+                slo_availability_threshold DOUBLE,
+                slo_row_count_min BIGINT,
+                slo_row_count_max BIGINT,
                 dataset_rules_json VARCHAR,
                 row_rule_failures_json VARCHAR,
                 schema_drift_json VARCHAR,
@@ -464,6 +526,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         """)
         try:
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS pipeline_run_id VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS start_time VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS end_time VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS run_duration_seconds DOUBLE")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS stage VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS dataset VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS domain VARCHAR")
@@ -481,9 +546,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         except Exception:
             pass
         columns = [
-            "run_id",
             "pipeline_run_id",
+            "run_id",
             "timestamp",
+            "start_time",
+            "end_time",
+            "run_duration_seconds",
             "engine",
             "contract",
             "stage",
@@ -491,6 +559,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "domain",
             "system",
             "data_layer",
+            "status",
+            "error_message",
             "source_path",
             "counts_source",
             "counts_total",
@@ -502,12 +572,14 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "max_source_mtime",
             "max_watermark_value",
             "source_files_json",
-            "freshness_seconds",
-            "freshness_pass",
-            "freshness_threshold_seconds",
-            "availability_ratio",
-            "availability_pass",
-            "availability_threshold",
+            "slo_freshness_seconds",
+            "slo_freshness_pass",
+            "slo_freshness_threshold_seconds",
+            "slo_availability_ratio",
+            "slo_availability_pass",
+            "slo_availability_threshold",
+            "slo_row_count_min",
+            "slo_row_count_max",
             "dataset_rules_json",
             "row_rule_failures_json",
             "schema_drift_json",
@@ -535,9 +607,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         con = sqlite3.connect(str(db_path))
         con.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
-                run_id TEXT,
                 pipeline_run_id TEXT,
+                run_id TEXT,
                 timestamp TEXT,
+                start_time TEXT,
+                end_time TEXT,
+                run_duration_seconds REAL,
                 engine TEXT,
                 contract TEXT,
                 stage TEXT,
@@ -545,6 +620,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 domain TEXT,
                 system TEXT,
                 data_layer TEXT,
+                status TEXT,
+                error_message TEXT,
                 source_path TEXT,
                 counts_source INTEGER,
                 counts_total INTEGER,
@@ -556,12 +633,14 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 max_source_mtime REAL,
                 max_watermark_value TEXT,
                 source_files_json TEXT,
-                freshness_seconds REAL,
-                freshness_pass INTEGER,
-                freshness_threshold_seconds REAL,
-                availability_ratio REAL,
-                availability_pass INTEGER,
-                availability_threshold REAL,
+                slo_freshness_seconds REAL,
+                slo_freshness_pass INTEGER,
+                slo_freshness_threshold_seconds REAL,
+                slo_availability_ratio REAL,
+                slo_availability_pass INTEGER,
+                slo_availability_threshold REAL,
+                slo_row_count_min INTEGER,
+                slo_row_count_max INTEGER,
                 dataset_rules_json TEXT,
                 row_rule_failures_json TEXT,
                 schema_drift_json TEXT,
@@ -573,6 +652,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             if "pipeline_run_id" not in cols:
                 con.execute(f"ALTER TABLE {table_name} ADD COLUMN pipeline_run_id TEXT")
             for col_name, col_type in [
+                ("start_time", "TEXT"),
+                ("end_time", "TEXT"),
+                ("run_duration_seconds", "REAL"),
                 ("stage", "TEXT"),
                 ("dataset", "TEXT"),
                 ("domain", "TEXT"),
@@ -593,9 +675,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         except Exception:
             pass
         columns = [
-            "run_id",
             "pipeline_run_id",
+            "run_id",
             "timestamp",
+            "start_time",
+            "end_time",
+            "run_duration_seconds",
             "engine",
             "contract",
             "stage",
@@ -603,6 +688,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "domain",
             "system",
             "data_layer",
+            "status",
+            "error_message",
             "source_path",
             "counts_source",
             "counts_total",
@@ -614,12 +701,14 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "max_source_mtime",
             "max_watermark_value",
             "source_files_json",
-            "freshness_seconds",
-            "freshness_pass",
-            "freshness_threshold_seconds",
-            "availability_ratio",
-            "availability_pass",
-            "availability_threshold",
+            "slo_freshness_seconds",
+            "slo_freshness_pass",
+            "slo_freshness_threshold_seconds",
+            "slo_availability_ratio",
+            "slo_availability_pass",
+            "slo_availability_threshold",
+            "slo_row_count_min",
+            "slo_row_count_max",
             "dataset_rules_json",
             "row_rule_failures_json",
             "schema_drift_json",
@@ -627,10 +716,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         ]
         values = []
         for col in columns:
-            if col == "freshness_pass":
+            if col == "slo_freshness_pass":
                 value = record.get(col)
                 values.append(1 if value else 0 if value is not None else None)
-            elif col == "availability_pass":
+            elif col == "slo_availability_pass":
                 value = record.get(col)
                 values.append(1 if value else 0 if value is not None else None)
             else:
@@ -662,9 +751,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         # Convert flat record to Arrow table
         schema = pa.schema(
             [
-                ("run_id", pa.string()),
                 ("pipeline_run_id", pa.string()),
+                ("run_id", pa.string()),
                 ("timestamp", pa.string()),
+                ("start_time", pa.string()),
+                ("end_time", pa.string()),
+                ("run_duration_seconds", pa.float64()),
                 ("engine", pa.string()),
                 ("contract", pa.string()),
                 ("stage", pa.string()),
@@ -672,6 +764,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("domain", pa.string()),
                 ("system", pa.string()),
                 ("data_layer", pa.string()),
+                ("status", pa.string()),
+                ("error_message", pa.string()),
                 ("source_path", pa.string()),
                 ("counts_source", pa.int64()),
                 ("counts_total", pa.int64()),
@@ -682,12 +776,14 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("quarantine_ratio", pa.float64()),
                 ("max_source_mtime", pa.float64()),
                 ("source_files_json", pa.string()),
-                ("freshness_seconds", pa.float64()),
-                ("freshness_pass", pa.bool_()),
-                ("freshness_threshold_seconds", pa.float64()),
-                ("availability_ratio", pa.float64()),
-                ("availability_pass", pa.bool_()),
-                ("availability_threshold", pa.float64()),
+                ("slo_freshness_seconds", pa.float64()),
+                ("slo_freshness_pass", pa.bool_()),
+                ("slo_freshness_threshold_seconds", pa.float64()),
+                ("slo_availability_ratio", pa.float64()),
+                ("slo_availability_pass", pa.bool_()),
+                ("slo_availability_threshold", pa.float64()),
+                ("slo_row_count_min", pa.int64()),
+                ("slo_row_count_max", pa.int64()),
                 ("dataset_rules_json", pa.string()),
                 ("row_rule_failures_json", pa.string()),
                 ("schema_drift_json", pa.string()),

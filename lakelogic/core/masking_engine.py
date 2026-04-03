@@ -3,10 +3,10 @@ Security-group-aware PII masking engine for LakeLogic.
 
 Extends the existing ``gdpr.py`` masking with:
 - **Security group mapping**: per-field ``security_groups`` + ``masking`` strategy
-- **New strategies**: ``partial``, ``tokenize``, ``encrypt`` (in addition to nullify/hash/redact)
+- **Strategies**: ``nullify``, ``hash``, ``redact``, ``partial``, ``encrypt``
 - **User context**: caller passes their groups; only fields they lack access to are masked
 - **Databricks UC mask generation**: auto-generate ``CREATE FUNCTION`` + ``ALTER TABLE`` SQL
-- **PII vault extraction**: identify fields that need dual-write to encrypted vault
+- **Vault integration**: ``pii_vault`` URI resolves keys from Azure Key Vault, Databricks, etc.
 
 Usage::
 
@@ -50,7 +50,9 @@ from lakelogic.core.models import DataContract, FieldDefinition
 
 # ── Masking Strategy Constants ───────────────────────────────────────────────
 
-VALID_MASKING_STRATEGIES = {"nullify", "hash", "redact", "partial", "tokenize", "encrypt"}
+VALID_MASKING_STRATEGIES = {"nullify", "hash", "redact", "partial", "encrypt"}
+# Deprecated: "tokenize" — use "encrypt" instead (reversible via Key Vault)
+_DEPRECATED_STRATEGIES = {"tokenize": "encrypt"}
 DEFAULT_STRATEGY = "redact"
 
 
@@ -92,33 +94,99 @@ class TokenStore:
 # ── Masking Functions ────────────────────────────────────────────────────────
 
 
-def _apply_partial(value: Any, field_name: str = "") -> Optional[str]:
-    """
-    Partially mask a value, preserving structure for support/debugging.
+def _apply_partial_format(value: Any, fmt: str) -> Optional[str]:
+    """Apply a custom partial masking format template.
 
-    - Email: ``j***@domain.com``
-    - Phone: ``***-***-1234``
-    - General string: first char + ``***`` + last char
+    Supported tokens:
+        ``{first1}`` – ``{first9}``: first N characters
+        ``{last1}``  – ``{last9}``:  last N characters
+        ``{domain}``:                email domain (after @)
+
+    Everything else in the format string is kept as literal text.
+
+    Examples::
+
+        _apply_partial_format("john@company.com", "{first1}***@{domain}")
+        # → "j***@company.com"
+
+        _apply_partial_format("+44 7700 900123", "***-***-{last4}")
+        # → "***-***-0123"
+
+        _apply_partial_format("SW1A 2AA", "{first2}** ***")
+        # → "SW** ***"
     """
-    if value is None:
+    if value is None or str(value) == "None":
         return None
     text = str(value)
     if not text:
         return text
 
-    # Email pattern
+    result = fmt
+
+    # Resolve {domain} — email domain
+    if "{domain}" in result:
+        if "@" in text:
+            domain = text.rsplit("@", 1)[1]
+        else:
+            domain = "***"
+        result = result.replace("{domain}", domain)
+
+    # Resolve {firstN}
+    for n in range(1, 10):
+        token = f"{{first{n}}}"
+        if token in result:
+            result = result.replace(token, text[:n] if len(text) >= n else text)
+
+    # Resolve {lastN}
+    for n in range(1, 10):
+        token = f"{{last{n}}}"
+        if token in result:
+            # For phone numbers, extract digits for {last4} etc
+            digits = re.sub(r"[^0-9]", "", text)
+            if digits and len(digits) >= n:
+                result = result.replace(token, digits[-n:])
+            elif len(text) >= n:
+                result = result.replace(token, text[-n:])
+            else:
+                result = result.replace(token, text)
+
+    return result
+
+
+def _apply_partial(value: Any, field_name: str = "", fmt: Optional[str] = None) -> Optional[str]:
+    """
+    Partially mask a value, preserving structure for support/debugging.
+
+    If ``fmt`` is provided, uses the custom template (see ``_apply_partial_format``).
+    Otherwise auto-detects the value type:
+
+    - Email: ``j***@domain.com``
+    - Phone: ``***-***-1234``
+    - General string: first char + ``***`` + last char
+    """
+    if value is None or str(value) == "None":
+        return None
+    text = str(value)
+    if not text:
+        return text
+
+    # Custom format template
+    if fmt:
+        return _apply_partial_format(value, fmt)
+
+    # Auto-detect: Email
     if "@" in text:
         local, domain = text.rsplit("@", 1)
         if len(local) > 1:
             return f"{local[0]}***@{domain}"
         return f"***@{domain}"
 
-    # Numeric / phone pattern (preserve last 4 digits)
+    # Auto-detect: Phone (7+ digits)
     digits = re.sub(r"[^0-9]", "", text)
     if len(digits) >= 7:
         return f"***-***-{digits[-4:]}"
 
-    # General string
+    # Auto-detect: General string
     if len(text) > 2:
         return f"{text[0]}{'*' * (len(text) - 2)}{text[-1]}"
     return "*" * len(text)
@@ -231,8 +299,21 @@ class MaskingEngine:
             # else: user IS in an allowed group → skip (unmasked)
         return result
 
-    def _mask_value(self, value: Any, strategy: str, field_name: str = "") -> Any:
+    def _mask_value(self, value: Any, strategy: str, field_name: str = "", masking_format: Optional[str] = None) -> Any:
         """Apply a masking strategy to a single value."""
+        # Guard: null values pass through unchanged
+        if value is None or (isinstance(value, str) and value == "None"):
+            return None
+
+        # Handle deprecated strategies
+        if strategy in _DEPRECATED_STRATEGIES:
+            resolved = _DEPRECATED_STRATEGIES[strategy]
+            logger.warning(
+                f"Masking strategy '{strategy}' is deprecated — "
+                f"using '{resolved}' instead. Update your contract."
+            )
+            strategy = resolved
+
         if strategy == "nullify":
             return None
         elif strategy == "hash":
@@ -240,9 +321,7 @@ class MaskingEngine:
         elif strategy == "redact":
             return "***REDACTED***" if value is not None else None
         elif strategy == "partial":
-            return _apply_partial(value, field_name)
-        elif strategy == "tokenize":
-            return self.token_store.tokenize(value)
+            return _apply_partial(value, field_name, fmt=masking_format)
         elif strategy == "encrypt":
             return _apply_encrypt(value, self.encryption_key)
         else:
@@ -277,11 +356,31 @@ class MaskingEngine:
             logger.info("User has access to all PII fields — no masking applied.")
             return df
 
-        field_strategies = {f.name: strategy_override or f.masking or DEFAULT_STRATEGY for f in fields_to_mask}
+        # Separate fields with explicit masking from those that only have pii: true
+        fields_with_masking = [f for f in fields_to_mask if strategy_override or f.masking]
+        fields_without_masking = [f for f in fields_to_mask if not strategy_override and not f.masking]
+
+        if fields_without_masking:
+            names = ", ".join(f.name for f in fields_without_masking)
+            logger.warning(
+                f"PII fields detected without masking strategy: [{names}]. "
+                f"Set 'masking:' (nullify|hash|redact|partial|encrypt) "
+                f"in your contract to enable masking for these fields."
+            )
+
+        if not fields_with_masking:
+            logger.info("No PII fields with explicit masking strategy — skipping masking.")
+            return df
+
+        # {field_name: (strategy, masking_format_or_None)}
+        field_strategies = {
+            f.name: (strategy_override or f.masking, getattr(f, "masking_format", None))
+            for f in fields_with_masking
+        }
 
         logger.info(
-            f"PII masking: {len(fields_to_mask)} field(s) for user_groups={user_groups or '(none)'}: "
-            f"{', '.join(f'{k}→{v}' for k, v in field_strategies.items())}"
+            f"PII masking: {len(fields_with_masking)} field(s) for user_groups={user_groups or '(none)'}: "
+            f"{', '.join(f'{k}→{v[0]}' for k, v in field_strategies.items())}"
         )
 
         # Dispatch by DataFrame type
@@ -301,6 +400,15 @@ class MaskingEngine:
         except ImportError:
             pass
 
+        # Spark DataFrame
+        try:
+            from pyspark.sql import DataFrame as SparkDataFrame
+
+            if isinstance(df, SparkDataFrame):
+                return self._apply_spark(df, field_strategies)
+        except ImportError:
+            pass
+
         if hasattr(df, "fetchdf"):
             import duckdb
             import pandas as pd
@@ -311,14 +419,14 @@ class MaskingEngine:
 
         raise TypeError(f"Unsupported dataframe type: {type(df)}")
 
-    def _apply_polars(self, df: Any, field_strategies: Dict[str, str]) -> Any:
+    def _apply_polars(self, df: Any, field_strategies: Dict[str, tuple]) -> Any:
         """Apply masking to a Polars DataFrame."""
         import polars as pl
 
         if isinstance(df, pl.LazyFrame):
             df = df.collect()
 
-        for col_name, strategy in field_strategies.items():
+        for col_name, (strategy, fmt) in field_strategies.items():
             if col_name not in df.columns:
                 continue
 
@@ -336,18 +444,19 @@ class MaskingEngine:
                     pl.col(col_name)
                     .cast(pl.Utf8)
                     .map_elements(
-                        lambda v, _s=strategy, _n=col_name: self._mask_value(v, _s, _n),
+                        lambda v, _s=strategy, _n=col_name, _f=fmt: self._mask_value(v, _s, _n, _f),
                         return_dtype=pl.Utf8,
+                        skip_nulls=True,
                     )
                     .alias(col_name)
                 )
 
         return df
 
-    def _apply_pandas(self, df: Any, field_strategies: Dict[str, str]) -> Any:
+    def _apply_pandas(self, df: Any, field_strategies: Dict[str, tuple]) -> Any:
         """Apply masking to a Pandas DataFrame."""
         df = df.copy()
-        for col_name, strategy in field_strategies.items():
+        for col_name, (strategy, fmt) in field_strategies.items():
             if col_name not in df.columns:
                 continue
 
@@ -356,7 +465,97 @@ class MaskingEngine:
             elif strategy == "redact":
                 df.loc[df[col_name].notna(), col_name] = "***REDACTED***"
             elif strategy in ("hash", "partial", "tokenize", "encrypt"):
-                df[col_name] = df[col_name].apply(lambda v, _s=strategy, _n=col_name: self._mask_value(v, _s, _n))
+                df[col_name] = df[col_name].apply(
+                    lambda v, _s=strategy, _n=col_name, _f=fmt: self._mask_value(v, _s, _n, _f)
+                )
+
+        return df
+
+    def _apply_spark(self, df: Any, field_strategies: Dict[str, tuple]) -> Any:
+        """Apply masking to a PySpark DataFrame using native SQL expressions."""
+        from pyspark.sql import functions as F
+
+        for col_name, (strategy, fmt) in field_strategies.items():
+            if col_name not in df.columns:
+                continue
+
+            if strategy == "nullify":
+                df = df.withColumn(col_name, F.lit(None).cast("string"))
+
+            elif strategy == "redact":
+                df = df.withColumn(
+                    col_name,
+                    F.when(F.col(col_name).isNotNull(), F.lit("***REDACTED***")).otherwise(F.lit(None)),
+                )
+
+            elif strategy == "hash":
+                salt = self.hash_salt
+                if salt:
+                    df = df.withColumn(col_name, F.sha2(F.concat(F.lit(salt), F.col(col_name).cast("string")), 256))
+                else:
+                    df = df.withColumn(col_name, F.sha2(F.col(col_name).cast("string"), 256))
+
+            elif strategy == "partial":
+                if fmt:
+                    # Custom format — use UDF for template flexibility
+                    from pyspark.sql.types import StringType
+
+                    @F.udf(StringType())
+                    def _partial_mask_udf(val, _fmt=fmt):
+                        return _apply_partial(val, fmt=_fmt)
+
+                    df = df.withColumn(col_name, _partial_mask_udf(F.col(col_name).cast("string")))
+                else:
+                    # Auto-detect: Email → j***@domain.com, General → first + *** + last
+                    df = df.withColumn(
+                        col_name,
+                        F.when(
+                            F.col(col_name).contains("@"),
+                            F.concat(
+                                F.substring(F.col(col_name), 1, 1),
+                                F.lit("***@"),
+                                F.element_at(F.split(F.col(col_name), "@"), 2),
+                            ),
+                        ).otherwise(
+                            F.when(
+                                F.length(F.col(col_name)) > 2,
+                                F.concat(
+                                    F.substring(F.col(col_name), 1, 1),
+                                    F.lit("***"),
+                                    F.substring(F.col(col_name), F.length(F.col(col_name)), 1),
+                                ),
+                            ).otherwise(F.lit("**"))
+                        ),
+                    )
+
+            elif strategy == "encrypt":
+                # Use Spark's native aes_encrypt if available, fall back to sha2
+                try:
+                    key = self.encryption_key or "default-key"
+                    # Pad key to 16 bytes for AES-128
+                    padded_key = (key * ((16 // len(key)) + 1))[:16]
+                    df = df.withColumn(
+                        col_name,
+                        F.concat(
+                            F.lit("enc:"),
+                            F.base64(F.expr(f"aes_encrypt(CAST(`{col_name}` AS STRING), '{padded_key}')")),
+                        ),
+                    )
+                except Exception:
+                    # Fallback: deterministic hash for environments without aes_encrypt
+                    logger.warning(f"aes_encrypt not available for '{col_name}', falling back to sha2")
+                    df = df.withColumn(col_name, F.sha2(F.col(col_name).cast("string"), 256))
+
+            elif strategy == "tokenize":
+                # Deprecated: tokenize → encrypt. Keep for backward compat.
+                logger.warning(
+                    f"Masking strategy 'tokenize' is deprecated for field '{col_name}' — "
+                    f"use 'encrypt' instead. Falling back to sha2-based token."
+                )
+                df = df.withColumn(
+                    col_name,
+                    F.concat(F.lit("tok_"), F.substring(F.sha2(F.col(col_name).cast("string"), 256), 1, 12)),
+                )
 
         return df
 
@@ -484,9 +683,10 @@ class MaskingEngine:
                 if field.name.lower() in ("email", "email_address"):
                     mask_expr = "regexp_replace(CAST(val AS STRING), '(.).*(@.*)', '$1***$2')"
                 else:
-                    mask_expr = "concat(left(CAST(val AS STRING), 1), '***', right(CAST(val AS STRING), 1))"
+                    mask_expr = "concat(left(CAST(val AS STRING), 1, '***', right(CAST(val AS STRING), 1))"
             elif strategy == "tokenize":
-                mask_expr = "sha2(concat('tok_', CAST(val AS STRING)), 256)"
+                # Deprecated: map to encrypt
+                mask_expr = "base64(aes_encrypt(CAST(val AS STRING), secret('pii-vault', 'encryption-key')))"
             elif strategy == "encrypt":
                 mask_expr = "base64(aes_encrypt(CAST(val AS STRING), secret('pii-vault', 'encryption-key')))"
             else:
@@ -532,7 +732,7 @@ class MaskingEngine:
                     "masking_strategy": strategy,
                     "user_has_access": has_access,
                     "action": "unmasked" if has_access else f"masked ({strategy})",
-                    "reversible": strategy in ("tokenize", "encrypt"),
+                    "reversible": strategy == "encrypt",
                     "pii_vault": field.pii_vault,
                 }
             )

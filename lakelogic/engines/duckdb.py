@@ -866,6 +866,9 @@ class DuckDBAdapter(EngineAdapter):
                 derive_view = f"post_view_{uuid4().hex[:8]}"
                 current_rel.create_view(derive_view)
 
+                # Auto-transpile Spark SQL → DuckDB via sqlglot (with sql_duckdb override)
+                _derive_expr = self._transpile_derive_sql(trans.derive)
+
                 # Check if field exists to avoid DuplicateError
                 field_name = trans.derive.field
                 existing_cols = []
@@ -877,10 +880,10 @@ class DuckDBAdapter(EngineAdapter):
                 if field_name in existing_cols:
                     # Replace existing column
                     excl = self._quote_ident(field_name)
-                    query = f"SELECT * EXCLUDE ({excl}), ({trans.derive.sql}) AS {excl} FROM {derive_view}"
+                    query = f"SELECT * EXCLUDE ({excl}), ({_derive_expr}) AS {excl} FROM {derive_view}"
                 else:
                     # Add new column
-                    query = f"SELECT *, ({trans.derive.sql}) AS {self._quote_ident(field_name)} FROM {derive_view}"
+                    query = f"SELECT *, ({_derive_expr}) AS {self._quote_ident(field_name)} FROM {derive_view}"
 
                 current_rel = con.query(query)
             elif trans.bucket and trans_phase != "pre":

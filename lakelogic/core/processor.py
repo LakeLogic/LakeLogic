@@ -304,11 +304,14 @@ class DataProcessor:
             Loaded DataContract.
         """
         if isinstance(contract, DataContract):
-            loaded = contract
-            return self._apply_stage_overrides(loaded)
+            loaded = self._apply_stage_overrides(contract)
+            loaded = self._apply_fact_governance(loaded)
+            return self._apply_cdc_defaults(loaded)
         if isinstance(contract, dict):
             loaded = DataContract(**contract)
-            return self._apply_stage_overrides(loaded)
+            loaded = self._apply_stage_overrides(loaded)
+            loaded = self._apply_fact_governance(loaded)
+            return self._apply_cdc_defaults(loaded)
 
         path = Path(contract)
         if not path.exists():
@@ -343,7 +346,102 @@ class DataProcessor:
                 contract._contract_path = path
             except Exception:
                 pass
-            return self._apply_stage_overrides(contract)
+            loaded = self._apply_stage_overrides(contract)
+            loaded = self._apply_fact_governance(loaded)
+            return self._apply_cdc_defaults(loaded)
+
+    def _apply_fact_governance(self, contract: DataContract) -> DataContract:
+        """
+        Auto-injects Kimball governance rules based on `materialization.fact` config.
+        """
+        if not contract.materialization or not contract.materialization.fact:
+            return contract
+
+        fact_cfg = contract.materialization.fact
+        fact_type = str(fact_cfg.type).strip().lower()
+
+        # 1. Transaction Facts -> Must be immutable append-only ledgers
+        if fact_type == "transaction":
+            if contract.materialization.strategy != "append":
+                raise ValueError(
+                    f"Fact table type 'transaction' requires strategy 'append'. "
+                    f"Found '{contract.materialization.strategy}'."
+                )
+
+        # 2. Factless Facts -> Must contain no metric columns (only keys)
+        if fact_type == "factless" and contract.model and contract.model.fields:
+            pk_cols = set(contract.primary_key or [])
+            for field in contract.model.fields:
+                is_key = (
+                    field.name in pk_cols or 
+                    field.name.endswith("_sk") or 
+                    field.name.endswith("_id") or
+                    field.foreign_key is not None
+                )
+                is_num = any(t in str(field.type).lower() for t in ["int", "float", "double", "decimal", "numeric"])
+                if is_num and not is_key:
+                    logger.warning(
+                        f"Factless Fact Warning: Column '{field.name}' appears to be a metric "
+                        f"but fact type is 'factless'."
+                    )
+
+        # 3. Accumulating Snapshots -> Generate timestamp sequence rules
+        if fact_type == "accumulating_snapshot" and fact_cfg.milestone_dates:
+            from lakelogic.core.models import Quality, QualityRule
+            
+            milestones = fact_cfg.milestone_dates
+            if not contract.quality:
+                contract.quality = Quality()
+            
+            for i in range(len(milestones) - 1):
+                start_col = milestones[i]
+                end_col = milestones[i+1]
+                rule_name = f"fact_milestone_{start_col}_to_{end_col}"
+                
+                # Check if user already defined this rule so we don't duplicate
+                existing = [r for r in contract.quality.row_rules if getattr(r, "name", "") == rule_name]
+                if not existing:
+                    contract.quality.row_rules.insert(
+                        0, # Insert at the front so they run first!
+                        QualityRule(
+                            name=rule_name,
+                            sql=f"({end_col} IS NULL) OR ({end_col} >= {start_col})",
+                            severity="error",
+                            category="correctness",
+                            description=f"Auto-generated Fact milestone constraint: {end_col} must occur after {start_col}"
+                        )
+                    )
+        
+        return contract
+
+    def _apply_cdc_defaults(self, contract: DataContract) -> DataContract:
+        """
+        Auto-injects soft-delete column configuration when load_mode is 'cdc'
+        and the user hasn't explicitly configured a hard-delete behavior.
+        """
+        if contract.source and str(getattr(contract.source, "load_mode", "")).lower() == "cdc":
+            # Change watermark strategy to pipeline_log to correctly utilize CDC timestamps
+            c_strat = getattr(contract.source, "watermark_strategy", None)
+            if c_strat in [None, "max_target"]:
+                contract.source.watermark_strategy = "pipeline_log"
+
+            # Ensure materialization exists — system defaults may not have been
+            # merged yet if the contract was loaded directly (not via runner).
+            if contract.materialization is None:
+                from lakelogic.core.models import Materialization
+                contract.materialization = Materialization()
+            
+            # CDC processing inherently requires a merge strategy
+            if getattr(contract.materialization, "strategy", None) in [None, "append"]:
+                contract.materialization.strategy = "merge"
+
+            if contract.materialization.soft_delete_column is None:
+                contract.materialization.soft_delete_column = "_lakelogic_is_deleted"
+                if contract.materialization.soft_delete_time_column is None:
+                    contract.materialization.soft_delete_time_column = "_lakelogic_deleted_at"
+                if contract.materialization.soft_delete_reason_column is None:
+                    contract.materialization.soft_delete_reason_column = "_lakelogic_delete_reason"
+        return contract
 
     def _apply_stage_overrides(self, contract: DataContract) -> DataContract:
         """
@@ -437,6 +535,7 @@ class DataProcessor:
             self.last_run_id = str(_uuid4())
 
         start_time = time.perf_counter()
+        start_time_utc = time.time()
 
         # Capture source_path for run report
         if source_path and not self.last_source_path:
@@ -522,6 +621,69 @@ class DataProcessor:
             )
         )
 
+        # ── PII Masking ──────────────────────────────────────────────────
+        # Apply per-field masking strategies defined in the contract model.
+        # This runs AFTER lineage injection so lineage columns are preserved,
+        # and BEFORE materialization so masked data is what gets written.
+        pii_fields = []
+        if self.contract.model and self.contract.model.fields:
+            pii_fields = [f for f in self.contract.model.fields if f.pii]
+
+        if pii_fields and good_df is not None:
+            step_start_mask = time.perf_counter()
+            try:
+                from lakelogic.core.masking_engine import MaskingEngine
+                from lakelogic.core.vault_resolver import resolve_encryption_key_from_contract
+
+                # Resolve user groups from environment or contract metadata
+                user_groups_raw = os.environ.get("LAKELOGIC_USER_GROUPS", "")
+                user_groups = [g.strip() for g in user_groups_raw.split(",") if g.strip()] or None
+
+                # Resolve encryption key from pii_vault URI (Azure Key Vault,
+                # Databricks Secret Scope, etc.) or fall back to env var.
+                encryption_key = resolve_encryption_key_from_contract(self.contract)
+
+                engine = MaskingEngine(
+                    self.contract,
+                    encryption_key=encryption_key,
+                    hash_salt=os.environ.get("LAKELOGIC_PII_SALT", ""),
+                )
+                good_df = engine.apply(good_df, user_groups=user_groups)
+
+                # Extract PII vault DataFrame for dual-write if any fields
+                # specify pii_vault
+                vault_fields = engine.get_vault_fields()
+                if vault_fields:
+                    logger.info(
+                        f"PII vault fields detected: {[f.name for f in vault_fields]}. "
+                        f"Vault extraction available via MaskingEngine.extract_vault_df()."
+                    )
+
+                self._active_trace_steps.append(
+                    TraceStep(
+                        step="PII Masking",
+                        timestamp=time.time(),
+                        duration_ms=(time.perf_counter() - step_start_mask) * 1000,
+                        status="ok",
+                        details={
+                            "fields_masked": len(engine.get_fields_to_mask(user_groups)),
+                            "strategies": {f.name: f.masking or "redact" for f in pii_fields},
+                            "user_groups": user_groups,
+                        },
+                    )
+                )
+            except Exception as mask_exc:
+                logger.warning(f"PII masking failed ({mask_exc}), proceeding without masking")
+                self._active_trace_steps.append(
+                    TraceStep(
+                        step="PII Masking",
+                        timestamp=time.time(),
+                        duration_ms=(time.perf_counter() - step_start_mask) * 1000,
+                        status="error",
+                        details={"error": str(mask_exc)},
+                    )
+                )
+
         # Summary logging
         counts = self._compute_counts(df, good_df, bad_df)
         source_total = counts.get("source")
@@ -563,23 +725,19 @@ class DataProcessor:
             _dropped_display = f", Pre-Transform Dropped: {dropped}" if dropped is not None else ""  # noqa: F841
             _source_display = f"Source: {source_total}, " if source_total is not None else ""  # noqa: F841
             if quality_enabled:
-                _dropped_line = f"\n    Pre-Transform Dropped: {dropped}" if dropped is not None else ""
+                _dropped_line = f" | Pre-Transform Dropped: {dropped}" if dropped is not None else ""
                 logger.info(
-                    f"Run complete — {_target_name}{tags_display}"
-                    f"\n    Source:               {source_total if source_total is not None else 'n/a'}"
-                    f"\n    Total (post-transform):{total}"
-                    f"\n    Good:                 {counts.get('good')}"
-                    f"\n    Quarantined:          {bad}"
-                    f"{_dropped_line}"
-                    f"\n    Quarantine Ratio:     {ratio_display}"
+                    f"Run complete{tags_display} | "
+                    f"Source: {source_total if source_total is not None else 'n/a'} | "
+                    f"Total: {total} | Good: {counts.get('good')} | Quarantine: {bad}{_dropped_line} | "
+                    f"Ratio: {ratio_display}"
                 )
             else:
-                _dropped_line = f"\n    Pre-Transform Dropped: {dropped}" if dropped is not None else ""
+                _dropped_line = f" | Pre-Transform Dropped: {dropped}" if dropped is not None else ""
                 logger.info(
-                    f"Run complete — {_target_name}{tags_display}"
-                    f"\n    Source: {source_total if source_total is not None else 'n/a'}"
-                    f"\n    Total:  {total}"
-                    f"{_dropped_line}"
+                    f"Run complete{tags_display} | "
+                    f"Source: {source_total if source_total is not None else 'n/a'} | "
+                    f"Total: {total}{_dropped_line}"
                 )
 
             if bad > 0:
@@ -604,6 +762,7 @@ class DataProcessor:
             derived_fields = set()
             rename_targets = set()  # new names (will appear after rename)
             rename_sources = set()  # old names (expected in source, removed after rename)
+            drop_columns = set()    # columns explicitly dropped (acknowledged, not drift)
             if self.contract.transformations:
                 for t in self.contract.transformations:
                     t_dict = t if isinstance(t, dict) else (t.model_dump() if hasattr(t, "model_dump") else {})
@@ -617,6 +776,11 @@ class DataProcessor:
                     for src, tgt in mappings.items():
                         rename_sources.add(src)
                         rename_targets.add(tgt)
+                    # Drop columns — explicitly removed by the contract
+                    drop = t_dict.get("drop") or {}
+                    drop_cols = drop.get("columns") or []
+                    for col in drop_cols:
+                        drop_columns.add(col)
 
             # Filter out false alarms
             missing = drift.get("missing_fields", [])
@@ -626,10 +790,35 @@ class DataProcessor:
             internal_cols = {"_source_file"}
             real_missing = sorted(set(missing) - derived_fields - rename_targets)
 
-            # Remove rename sources, internal columns, and any framework lineage columns
+            # Check if the contract has SQL transformations (post-phase).
+            # When SQL transforms exist, the source DataFrame columns are
+            # intermediate inputs consumed by SQL — they are NOT drift.
+            # e.g. bronze has 'event_params_json' which is transformed to
+            # 'ga_session_id' in silver. Without this, every bronze column
+            # that isn't in the silver model gets flagged as "unknown".
+            has_sql_transforms = False
+            if self.contract.transformations:
+                for t in self.contract.transformations:
+                    t_dict = t if isinstance(t, dict) else (t.model_dump() if hasattr(t, "model_dump") else {})
+                    if t_dict.get("sql"):
+                        has_sql_transforms = True
+                        break
+
+            # Remove rename sources, drop columns, internal columns, and framework lineage columns
             real_unknown = sorted(
-                c for c in set(unknown) - rename_sources - internal_cols if not c.startswith("_lakelogic_")
+                c for c in set(unknown) - rename_sources - drop_columns - internal_cols if not c.startswith("_lakelogic_")
             )
+
+            # If SQL transformations exist, source columns are expected to
+            # differ from model fields — suppress unknown column warnings.
+            if has_sql_transforms:
+                real_unknown = []
+            
+            # Update the drift dictionary to suppress these internal columns in the final run log
+            if "missing_fields" in drift:
+                drift["missing_fields"] = real_missing
+            if "unknown_fields" in drift:
+                drift["unknown_fields"] = real_unknown
 
             allow = drift.get("allow_schema_drift", True)
             if real_missing or real_unknown:
@@ -673,7 +862,22 @@ class DataProcessor:
         if "max_watermark_value" in inc_meta:
             self.last_report["max_watermark_value"] = inc_meta["max_watermark_value"]
 
-        write_run_log(self.last_report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
+        # Capture contract-level SLO row count thresholds for point-in-time auditability
+        slo_cfg = getattr(self.contract, "service_levels", None)
+        if slo_cfg:
+            rc = getattr(slo_cfg, "row_count", None) if hasattr(slo_cfg, "row_count") else (
+                slo_cfg.get("row_count") if isinstance(slo_cfg, dict) else None
+            )
+            if rc:
+                min_r = getattr(rc, "min_rows", None) if hasattr(rc, "min_rows") else (rc.get("min_rows") if isinstance(rc, dict) else None)
+                max_r = getattr(rc, "max_rows", None) if hasattr(rc, "max_rows") else (rc.get("max_rows") if isinstance(rc, dict) else None)
+                if min_r is not None:
+                    self.last_report["slo_row_count_min"] = min_r
+                if max_r is not None:
+                    self.last_report["slo_row_count_max"] = max_r
+
+        # Run log is written by the pipeline runner after materialize()
+        # so it can capture the final status (succeeded/failed).
 
         # Optional external logic hook (python/notebook)
         from lakelogic.core.external_logic import apply_external_logic
@@ -743,10 +947,18 @@ class DataProcessor:
                 "🛡️  View deep quarantine analysis & historical drift on Lineage Logic: https://lineagelogic.com"
             )
 
+        total_duration_ms = (time.perf_counter() - start_time) * 1000
+        end_time_utc = time.time()
+        
+        import datetime
+        self.last_report["start_time"] = datetime.datetime.fromtimestamp(start_time_utc, tz=datetime.timezone.utc).isoformat()
+        self.last_report["end_time"] = datetime.datetime.fromtimestamp(end_time_utc, tz=datetime.timezone.utc).isoformat()
+        self.last_report["run_duration_seconds"] = total_duration_ms / 1000.0
+
         trace = ExecutionTrace(
             run_id=self.last_run_id,
             steps=self._active_trace_steps,
-            total_duration_ms=(time.perf_counter() - start_time) * 1000,
+            total_duration_ms=total_duration_ms,
         )
         # Clear active trace steps after run
         self._active_trace_steps = []
@@ -902,17 +1114,32 @@ class DataProcessor:
                 watermark = self._get_last_source_watermark()
                 if watermark is None:
                     _is_initial_load = True
-                    logger.info(
-                        "Initial load detected (no prior watermark) — "
-                        "scanning all partitions regardless of lookback_days"
-                    )
+                    # If lookback_days is explicitly set (runtime or contract),
+                    # respect it even on initial load — this lets users limit
+                    # the first ingest to X days instead of scanning everything.
+                    _effective_lookback = lookback_days or getattr(partition_cfg, "lookback_days", None)
+                    if _effective_lookback:
+                        logger.info(
+                            f"Initial load detected (no prior watermark) — "
+                            f"using lookback_days={_effective_lookback} to limit partition scan"
+                        )
+                    else:
+                        logger.info(
+                            "Initial load detected (no prior watermark) — "
+                            "scanning all partitions (set lookback_days to limit)"
+                        )
 
             if _is_initial_load:
-                # First run: scan everything via standard glob (no date restriction)
-                source_files = self._expand_source_files(path + "/**/*")
-                if not source_files:
-                    # Fall back: try non-recursive glob
-                    source_files = self._expand_source_files(path)
+                _effective_lookback = lookback_days or getattr(partition_cfg, "lookback_days", None)
+                if _effective_lookback:
+                    # Use the partition scanner with the lookback constraint
+                    effective_cfg = partition_cfg.model_copy(update={"lookback_days": _effective_lookback})
+                    source_files = self._expand_partitioned_paths(path, effective_cfg)
+                else:
+                    # No lookback constraint — scan everything
+                    source_files = self._expand_source_files(path + "/**/*")
+                    if not source_files:
+                        source_files = self._expand_source_files(path)
             else:
                 # Apply runtime lookback_days override if provided
                 effective_cfg = partition_cfg
@@ -984,17 +1211,28 @@ class DataProcessor:
                     )
 
                     if file_paths:
+                        # Build storage_options for cloud paths (Polars uses
+                        # its own object-store backend, not fsspec)
+                        _pl_sopts = self._get_cloud_storage_options(path) if self._is_uri_path(path) else None
+                        _scan_kw: dict = {}
+                        if _pl_sopts:
+                            _scan_kw["storage_options"] = _pl_sopts
+
                         if _scannable:
-                            # Lazy: scan each file and concat lazily
+                            # Lazy: scan each file and concat lazily.
+                            # Use diagonal_relaxed so type-inference differences
+                            # across CSV files (e.g. Int64 vs Float64) are
+                            # coerced to a common supertype automatically.
+                            _concat_how = "diagonal_relaxed"
                             if source_fmt == "parquet" or path.endswith(".parquet"):
-                                lf = pl.scan_parquet(file_paths if len(file_paths) > 1 else file_paths[0])
+                                lf = pl.scan_parquet(file_paths if len(file_paths) > 1 else file_paths[0], **_scan_kw)
                             elif source_fmt == "ndjson" or path.endswith((".ndjson", ".jsonl")):
-                                lf = pl.concat([pl.scan_ndjson(p) for p in file_paths])
+                                lf = pl.concat([pl.scan_ndjson(p, **_scan_kw) for p in file_paths], how=_concat_how)
                             else:  # CSV
                                 if len(file_paths) == 1:
-                                    lf = pl.scan_csv(file_paths[0])
+                                    lf = pl.scan_csv(file_paths[0], **_scan_kw)
                                 else:
-                                    lf = pl.concat([pl.scan_csv(p) for p in file_paths])
+                                    lf = pl.concat([pl.scan_csv(p, **_scan_kw) for p in file_paths], how=_concat_how)
                             df = lf.collect()
                         else:
                             # Eager fallback — JSON, XML, Excel (no scan_* support)
@@ -1204,8 +1442,15 @@ class DataProcessor:
                 def _pandas_read_json_flat(filepath: str) -> "pd.DataFrame":
                     """Read a .json file, serialise nested objects to JSON
                     strings so columns stay flat — consistent with the Polars
-                    and DuckDB branches."""
-                    raw = _json_pd.loads(Path(filepath).read_text(encoding="utf-8"))
+                    and DuckDB branches.  Supports cloud URIs via fsspec."""
+                    if self._is_uri_path(filepath):
+                        import fsspec
+                        _sopts = self._get_cloud_storage_options(filepath)
+                        with fsspec.open(filepath, "r", **_sopts) as f:
+                            text = f.read()
+                        raw = _json_pd.loads(text)
+                    else:
+                        raw = _json_pd.loads(Path(filepath).read_text(encoding="utf-8"))
                     rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
                     flat = [
                         {
@@ -1236,18 +1481,24 @@ class DataProcessor:
                         or ""
                     ).lower()
 
+                    # Build storage_options for cloud paths (Pandas uses fsspec)
+                    _pd_sopts = self._get_cloud_storage_options(path) if self._is_uri_path(path) else None
+                    _pd_kw: dict = {}
+                    if _pd_sopts:
+                        _pd_kw["storage_options"] = _pd_sopts
+
                     def _pd_read_single(filepath: str) -> "pd.DataFrame":
                         """Read a single file using source_fmt or file extension."""
                         if source_fmt == "parquet" or filepath.endswith(".parquet"):
-                            return pd.read_parquet(filepath)
+                            return pd.read_parquet(filepath, **_pd_kw)
                         elif source_fmt == "json" or filepath.endswith(".json"):
                             return _pandas_read_json_flat(filepath)
                         elif source_fmt == "xml" or filepath.endswith(".xml"):
-                            return pd.read_xml(filepath)
+                            return pd.read_xml(filepath, **_pd_kw)
                         elif source_fmt in ("excel", "xlsx") or filepath.endswith((".xlsx", ".xls")):
                             return pd.read_excel(filepath)
                         else:
-                            return pd.read_csv(filepath)
+                            return pd.read_csv(filepath, **_pd_kw)
 
                     if file_paths:
                         frames = [_pd_read_single(f) for f in file_paths]
@@ -1278,7 +1529,13 @@ class DataProcessor:
                         paths = [paths]
                     frames = []
                     for fp in paths:
-                        raw = _json_duck.loads(Path(fp).read_text(encoding="utf-8"))
+                        if self._is_uri_path(fp):
+                            import fsspec
+                            _sopts = self._get_cloud_storage_options(fp)
+                            with fsspec.open(fp, "r", **_sopts) as f:
+                                raw = _json_duck.loads(f.read())
+                        else:
+                            raw = _json_duck.loads(Path(fp).read_text(encoding="utf-8"))
                         rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
                         flat = [
                             {
@@ -1313,6 +1570,34 @@ class DataProcessor:
                         )
                         or ""
                     ).lower()
+
+                    # Configure DuckDB cloud auth (httpfs / azure) when needed
+                    if self._is_uri_path(path):
+                        _p_lower = path.lower()
+                        if _p_lower.startswith(("abfss://", "az://")):
+                            try:
+                                duckdb.install_extension("azure")
+                                duckdb.load_extension("azure")
+                            except Exception:
+                                pass  # extension may already be loaded
+                            acct = os.getenv("AZURE_STORAGE_ACCOUNT_NAME") or os.getenv("AZURE_STORAGE_ACCOUNT")
+                            acct_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
+                            if acct:
+                                duckdb.execute(f"SET azure_storage_account_name = '{acct}'")
+                            if acct_key:
+                                duckdb.execute(f"SET azure_storage_account_key = '{acct_key}'")
+                        elif _p_lower.startswith("s3://"):
+                            try:
+                                duckdb.install_extension("httpfs")
+                                duckdb.load_extension("httpfs")
+                            except Exception:
+                                pass
+                            key = os.getenv("AWS_ACCESS_KEY_ID")
+                            secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+                            if key:
+                                duckdb.execute(f"SET s3_access_key_id = '{key}'")
+                            if secret:
+                                duckdb.execute(f"SET s3_secret_access_key = '{secret}'")
 
                     def _duck_read(targets):
                         """Read using source_fmt or file extension."""
@@ -1363,57 +1648,83 @@ class DataProcessor:
                     )
                 ).lower()
 
+                # Pre-calculate source overrides for incremental loads
+                _src_overrides = {}
+                _src_cfg = getattr(self.contract, "source", None)
+                if (
+                    _src_cfg
+                    and getattr(_src_cfg, "load_mode", None) in ("incremental", "cdc")
+                    and not os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK")
+                ):
+                    _wm_strategy = getattr(_src_cfg, "watermark_strategy", None)
+                    _info = getattr(self.contract, "info", None)
+                    _meta = getattr(self.contract, "metadata", None) or {}
+                    _load_mode = getattr(_src_cfg, "load_mode", None)
+                    
+                    # CDC table sources should default to pipeline_log, not max_target.
+                    # max_target queries the SILVER table's timestamps which differ from
+                    # the BRONZE timestamps we need to compare against.
+                    # pipeline_log uses max_source_mtime from _run_logs — the correct
+                    # upstream boundary.
+                    if _load_mode == "cdc" and _wm_strategy is None:
+                        _wm_strategy = "pipeline_log"
+                        _src_overrides["watermark_strategy"] = "pipeline_log"
+
+                    # Resolve dataset identically to how report logging resolves it
+                    _dataset = None
+                    if _mat := getattr(self.contract, "materialization", None):
+                        _tp = getattr(_mat, "target_path", "") or getattr(_mat, "path", "") or ""
+                        if str(_tp).startswith("table:"):
+                            _tbl_full = str(_tp)[len("table:"):]
+                            _dataset = _tbl_full.split(".")[-1] if "." in _tbl_full else _tbl_full
+                    
+                    if not _dataset:
+                        _dataset = (
+                            _meta.get("dataset")
+                            or getattr(self.contract, "dataset", None)
+                            or (getattr(_info, "title", None) if _info else None)
+                        )
+                        
+                    _data_layer = _meta.get("data_layer") or (
+                        getattr(_info, "target_layer", None) if _info else None
+                    )
+                    _domain = _meta.get("domain") or (getattr(_info, "domain", None) if _info else None)
+                    _system = _meta.get("system") or (getattr(_info, "system", None) if _info else None)
+                    _log_table = _meta.get("run_log_table")
+                    
+                    if _dataset:
+                        _src_overrides["dataset"] = _dataset
+                    if _data_layer:
+                        _src_overrides["data_layer"] = _data_layer
+                    if _domain:
+                        _src_overrides["domain"] = _domain
+                    if _system:
+                        _src_overrides["system"] = _system
+                    if _log_table:
+                        _src_overrides["pipeline_log_table"] = _log_table
+
+                    if _wm_strategy in (None, "max_target", "delta_version"):
+                        if getattr(_src_cfg, "target_path", None) is None:
+                            _mat = getattr(self.contract, "materialization", None)
+                            _target = getattr(_mat, "target", None) if _mat else None
+                            if not _target:
+                                _tbl = getattr(_info, "table_name", None) if _info else None
+                                if _tbl:
+                                    _src_path = getattr(_src_cfg, "path", "") or ""
+                                    _catalog = _src_path.split(".")[0] if "." in _src_path else ""
+                                    _target = f"{_catalog}.{_tbl}" if _catalog else _tbl
+                            if _target:
+                                _src_overrides["target_path"] = _target if _target.startswith("table:") else f"table:{_target}"
+
                 if df is None:
                     if path.startswith("table:"):
                         df = spark.table(path[6:])
 
                         # ── Incremental watermark for Spark table sources ─────
-                        _src_cfg = getattr(self.contract, "source", None)
-                        if (
-                            _src_cfg
-                            and getattr(_src_cfg, "load_mode", None) == "incremental"
-                            and not os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK")
-                        ):
+                        if _src_overrides or getattr(_src_cfg, "load_mode", None) in ("incremental", "cdc"):
                             from lakelogic.core.incremental import IncrementalBoundary
 
-                            # Enrich source config with contract context so
-                            # pipeline_log strategy can query _run_logs by dataset
-                            _wm_strategy = getattr(_src_cfg, "watermark_strategy", None)
                             try:
-                                _src_overrides = {}
-                                if _wm_strategy == "pipeline_log":
-                                    _info = getattr(self.contract, "info", None)
-                                    _meta = getattr(self.contract, "metadata", None) or {}
-                                    # Resolve dataset: target table name written to _run_logs
-                                    _dataset = (
-                                        _meta.get("dataset")
-                                        or (getattr(_info, "table_name", None) if _info else None)
-                                        or getattr(self.contract, "dataset", None)
-                                    )
-                                    _data_layer = _meta.get("data_layer") or (
-                                        getattr(_info, "target_layer", None) if _info else None
-                                    )
-                                    _domain = _meta.get("domain") or (getattr(_info, "domain", None) if _info else None)
-                                    _system = _meta.get("system") or (getattr(_info, "system", None) if _info else None)
-                                    _log_table = _meta.get("run_log_table")
-                                    # Inject into source config for from_source_config()
-                                    if _dataset:
-                                        _src_overrides["dataset"] = _dataset
-                                    if _data_layer:
-                                        _src_overrides["data_layer"] = _data_layer
-                                    if _domain:
-                                        _src_overrides["domain"] = _domain
-                                    if _system:
-                                        _src_overrides["system"] = _system
-                                    if _log_table:
-                                        _src_overrides["pipeline_log_table"] = _log_table
-                                elif _wm_strategy in ("max_target", "delta_version"):
-                                    # Auto-inject target_path if materialization is defined
-                                    if getattr(_src_cfg, "target_path", None) is None:
-                                        _mat = getattr(self.contract, "materialization", None)
-                                        if _mat and getattr(_mat, "target", None):
-                                            _src_overrides["target_path"] = _mat.target
-
                                 if _src_overrides:
                                     boundary = IncrementalBoundary.from_source_config(_src_cfg, **_src_overrides)
                                 else:
@@ -1422,24 +1733,37 @@ class DataProcessor:
                                 if boundary.strategy == "delta_version":
                                     fv = boundary.metadata.get("from_version")
                                     tv = boundary.metadata.get("to_version")
-                                    logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
-                                    # Reload with version options
+                                    skip = boundary.metadata.get("skip_sync", False)
+
+                                    # Store metadata so materialization can write back the version
+                                    self._incremental_metadata = boundary.metadata
                                     table_name = path[6:] if path.startswith("table:") else path
-                                    df = (
-                                        spark.read.format("delta")
-                                        .option("startingVersion", fv)
-                                        .option("endingVersion", tv)
-                                        .table(table_name)
-                                    )
+
+                                    if skip:
+                                        logger.info(f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read.")
+                                        df = spark.table(table_name).filter("1 = 0")
+                                    else:
+                                        logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
+                                        # Reload with version options
+                                        df = (
+                                            spark.read.format("delta")
+                                            .option("readChangeFeed", "true")
+                                            .option("startingVersion", fv)
+                                            .option("endingVersion", tv)
+                                            .table(table_name)
+                                        )
                                 else:
                                     # Standard watermark filter
                                     _wm_field = getattr(_src_cfg, "watermark_field", None)
                                     # Default to the lineage timestamp when no watermark is configured.
+                                    # For CDC mode, prefer cdc_timestamp_field as the watermark
+                                    # since it's the user's declared timestamp for change tracking.
                                     # Bronze records are stamped with _lakelogic_processed_at,
                                     # making it a natural high-water mark for silver reads.
                                     if not _wm_field:
-                                        _wm_field = "_lakelogic_processed_at"
-                                        logger.info(f"No watermark_field configured — defaulting to '{_wm_field}'")
+                                        _cdc_ts = getattr(_src_cfg, "cdc_timestamp_field", None)
+                                        _wm_field = _cdc_ts or "_lakelogic_processed_at"
+                                        logger.debug(f"No watermark_field configured — defaulting to '{_wm_field}'")
                                     df = df.filter(boundary.spark_filter(_wm_field))
                                     logger.info(
                                         f"Incremental load (Spark): applied "
@@ -1462,9 +1786,36 @@ class DataProcessor:
                                         except Exception as wm_exc:
                                             logger.debug(f"Failed to compute max_watermark_value: {wm_exc}")
 
-                                # Store metadata for materialization stage (saving the new high-water mark)
                                 self._incremental_metadata = dict(boundary.metadata)
                                 self._incremental_metadata["strategy"] = boundary.strategy
+                                
+                                if boundary.strategy == "delta_version":
+                                    _tv = boundary.metadata.get("to_version")
+                                    if _tv is not None:
+                                        self._incremental_metadata["max_watermark_value"] = str(_tv)
+
+                                # ── Capture max source timestamp for table sources ──
+                                # For file sources, _source_max_mtime is set from file
+                                # mtimes. For table sources we derive it from the
+                                # resolved watermark field (cdc_timestamp_field or
+                                # _lakelogic_processed_at) so the run_log entry
+                                # reflects the latest consumed source record.
+                                if self._source_max_mtime is None:
+                                    try:
+                                        from pyspark.sql import functions as F
+                                        _ts_col = _wm_field if _wm_field else "_lakelogic_processed_at"
+                                        if _ts_col in df.columns:
+                                            _max_ts = df.select(
+                                                F.max(F.unix_timestamp(F.col(_ts_col))).alias("mx")
+                                            ).collect()[0]["mx"]
+                                            if _max_ts is not None:
+                                                self._source_max_mtime = float(_max_ts)
+                                                logger.debug(
+                                                    f"Captured table source max mtime: {self._source_max_mtime}"
+                                                )
+                                    except Exception as _mtime_err:
+                                        logger.debug(f"Failed to capture table source mtime: {_mtime_err}")
+
                             except Exception as _wm_err:
                                 logger.debug(
                                     f"Incremental boundary resolution failed (falling back to full): {_wm_err}"
@@ -1473,23 +1824,36 @@ class DataProcessor:
                     else:
                         # File path or explicit format
                         _src_cfg = getattr(self.contract, "source", None)
-                        if _src_cfg and getattr(_src_cfg, "load_mode", None) == "incremental" and fmt == "delta":
+                        if _src_cfg and getattr(_src_cfg, "load_mode", None) in ("incremental", "cdc") and fmt == "delta":
                             from lakelogic.core.incremental import IncrementalBoundary
 
                             try:
-                                boundary = IncrementalBoundary.from_source_config(_src_cfg)
+                                if _src_overrides:
+                                    boundary = IncrementalBoundary.from_source_config(_src_cfg, **_src_overrides)
+                                else:
+                                    boundary = IncrementalBoundary.from_source_config(_src_cfg)
                                 if boundary.strategy == "delta_version":
                                     fv = boundary.metadata.get("from_version")
                                     tv = boundary.metadata.get("to_version")
-                                    logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
-                                    df = (
-                                        spark.read.format("delta")
-                                        .option("readChangeFeed", "true")
-                                        .option("startingVersion", fv)
-                                        .option("endingVersion", tv)
-                                        .load(path)
-                                    )
-                                    self._incremental_metadata = boundary.metadata
+                                    skip = boundary.metadata.get("skip_sync", False)
+
+                                    if skip:
+                                        logger.info(f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read.")
+                                        df = spark.read.format("delta").load(path).filter("1 = 0")
+                                    else:
+                                        logger.info(f"Incremental load (Delta Versions): {fv} -> {tv}")
+                                        df = (
+                                            spark.read.format("delta")
+                                            .option("readChangeFeed", "true")
+                                            .option("startingVersion", fv)
+                                            .option("endingVersion", tv)
+                                            .load(path)
+                                        )
+
+                                    self._incremental_metadata = dict(boundary.metadata)
+                                    self._incremental_metadata["strategy"] = boundary.strategy
+                                    if tv is not None:
+                                        self._incremental_metadata["max_watermark_value"] = str(tv)
                                     # If using CDF, we don't need a normal load
                                     return self.run(df, source_path=path, reset_trace=False)
                             except Exception as _cdf_err:
@@ -2067,7 +2431,31 @@ class DataProcessor:
                         mtime = mtime.timestamp()
                     results.append({"path": full_uri, "mtime": mtime})
                 return results or None
+            except FileNotFoundError:
+                # Path genuinely does not exist — no files to process
+                return None
+            except ImportError:
+                logger.warning("Cloud glob requires 'fsspec' and a provider package (e.g. adlfs). "
+                               "Install with: pip install fsspec adlfs")
+                return None
             except Exception as e:
+                err_msg = str(e).lower()
+                # Detect auth / permission / connectivity errors and let them
+                # propagate so the pipeline fails loudly instead of silently
+                # reporting "no new rows".
+                _fatal_keywords = (
+                    "forbidden", "unauthorized", "403", "401",
+                    "permission", "access denied", "authentication",
+                    "account_name", "account_key", "credential",
+                    "name or service not known", "connection",
+                    "multiple values",
+                )
+                if any(kw in err_msg for kw in _fatal_keywords):
+                    raise RuntimeError(
+                        f"Cloud storage access failed for {path}: {e}"
+                    ) from e
+                # For anything else (e.g. empty glob, transient issues),
+                # log a warning and let the caller decide.
                 logger.warning(f"Cloud glob expansion failed for {path}: {e}")
                 return None
         # Delta table directories (and other table formats) — no glob expansion.
@@ -2139,10 +2527,10 @@ class DataProcessor:
             end = date.today()
         elif eff_end:
             end = date.fromisoformat(eff_end)
-            start = end - timedelta(days=partition_cfg.lookback_days)
+            start = end - timedelta(days=partition_cfg.lookback_days or 30)
         else:
             end = date.today()
-            start = end - timedelta(days=partition_cfg.lookback_days)
+            start = end - timedelta(days=partition_cfg.lookback_days or 30)
 
         file_pattern = partition_cfg.file_pattern
         if not file_pattern:
@@ -2182,7 +2570,7 @@ class DataProcessor:
                 f"Date-partitioned scan: no files found in {(end - start).days + 1} partitions ({start} to {end})"
             )
 
-        return all_files or None
+        return all_files if all_files else []
 
     def _get_last_source_watermark(self) -> Optional[float]:
         """
@@ -2231,6 +2619,7 @@ class DataProcessor:
             report = self._build_report(contract_title, empty_counts)
             # Override stage to indicate no new data (don't affect watermark)
             report["stage"] = stage
+            report["status"] = stage  # e.g. "no_new_data"
             report["max_source_mtime"] = None
             write_run_log(report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
         except Exception as e:
@@ -2276,13 +2665,28 @@ class DataProcessor:
         """
         Build storage_options dict for fsspec/adlfs from environment variables.
         Supports Azure (abfss://), AWS (s3://), and GCP (gs://).
+
+        For Azure ``abfss://container@account.dfs.core.windows.net/...`` URIs,
+        adlfs automatically extracts ``account_name`` from the URL.  We therefore
+        only inject ``account_name`` when it **cannot** be inferred from the URI
+        (e.g. ``az://container/path``), and always pass ``account_key`` when
+        available so that key-based auth works out of the box.
         """
         opts: Dict[str, str] = {}
         p = str(path).lower()
         if p.startswith("abfss://") or p.startswith("az://"):
-            acct = os.getenv("AZURE_STORAGE_ACCOUNT")
-            if acct:
+            # Determine whether the URI already embeds the account name
+            # (``abfss://container@account.dfs.core.windows.net/...``).
+            uri_has_account = "@" in p.split("//", 1)[-1].split("/", 1)[0]
+
+            acct = os.getenv("AZURE_STORAGE_ACCOUNT_NAME") or os.getenv("AZURE_STORAGE_ACCOUNT")
+            if acct and not uri_has_account:
                 opts["account_name"] = acct
+
+            acct_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
+            if acct_key:
+                opts["account_key"] = acct_key
+
             tenant = os.getenv("AZURE_TENANT_ID")
             if tenant:
                 opts["tenant_id"] = tenant

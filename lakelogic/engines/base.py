@@ -14,7 +14,7 @@ from lakelogic.core.models import (
     RowRuleLifecycleWindow,
     RowRuleNotNull,
     RowRuleRange,
-    RowRuleReferentialIntegrity,
+    RowRuleReferentialIntegrity, 
     RowRuleRegexMatch,
 )
 
@@ -229,6 +229,73 @@ class EngineAdapter(ABC):
         except Exception:
             # Fallback: return original SQL if transpilation fails
             return sql
+
+    def _transpile_derive_sql(self, derive) -> str:
+        """
+        Resolve the best SQL expression for a derive transform.
+
+        Resolution order:
+          1. Engine-specific override (``sql_duckdb`` / ``sql_spark``) — always wins.
+          2. Auto-transpile ``sql`` from Spark dialect → engine dialect via sqlglot.
+          3. Fall back to raw ``sql`` if transpilation fails.
+
+        Contracts are authored in **Spark SQL** (the most widely known dialect).
+        When running on Polars or DuckDB, sqlglot auto-converts standard functions.
+        For Spark-specific functions missing in sqlglot (e.g. try_to_date, timestamp_micros),
+        we apply regex polyfills before transpilation.
+
+        Args:
+            derive: TransformationDerive instance with .sql, .sql_duckdb, .sql_spark.
+
+        Returns:
+            SQL expression string ready for the current engine.
+        """
+        target = self._resolve_dialect()
+
+        # 1. Explicit engine override wins
+        if target in ("duckdb",) and getattr(derive, "sql_duckdb", None):
+            return derive.sql_duckdb
+        if target in ("spark", "databricks") and getattr(derive, "sql_spark", None):
+            return derive.sql_spark
+
+        # 2. Auto-transpile from Spark → target dialect
+        raw_sql = derive.sql
+        if target not in ("spark", "databricks"):
+            try:
+                import re
+
+                # Polyfill: Spark-specific functions to DuckDB equivalents
+                if target == "duckdb":
+                    # timestamp_micros(x) -> make_timestamp(CAST(x AS BIGINT))
+                    raw_sql = re.sub(
+                        r"timestamp_micros\s*\((.*?)\)",
+                        r"make_timestamp(CAST(\1 AS BIGINT))",
+                        raw_sql,
+                        flags=re.IGNORECASE,
+                    )
+
+                    # try_to_date(x, 'yyyyMMdd') -> strptime(x, '%Y%m%d')::date
+                    def _date_repl(m):
+                        arg1, fmt = m.group(1), m.group(2)
+                        fmt = fmt.replace("yyyy", "%Y").replace("MM", "%m").replace("dd", "%d")
+                        return f"strptime({arg1}, '{fmt}')::DATE"
+
+                    raw_sql = re.sub(
+                        r"try_to_date\s*\(\s*(.*?)\s*,\s*'(.*?)'\s*\)",
+                        _date_repl,
+                        raw_sql,
+                        flags=re.IGNORECASE,
+                    )
+
+                transpiled = sqlglot.transpile(raw_sql, read="spark", write=target)
+                if transpiled and transpiled[0] != derive.sql:
+                    logger.debug(f"Auto-transpiled derive SQL: {derive.sql!r} → {transpiled[0]!r}")
+                    return transpiled[0]
+            except Exception as e:
+                logger.debug(f"sqlglot transpile failed for derive: {derive.sql!r} → {target}: {e}")
+
+        # 3. Fallback: return raw SQL as-is
+        return raw_sql
 
     def _format_literal(self, value: Any) -> str:
         """

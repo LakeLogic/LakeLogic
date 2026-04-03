@@ -287,7 +287,8 @@ class SparkAdapter(EngineAdapter):
 
             elif trans.derive and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [Derive]: {trans.derive.field}")
-                current_df = current_df.withColumn(trans.derive.field, F.expr(trans.derive.sql))
+                _derive_expr = self._transpile_derive_sql(trans.derive)
+                current_df = current_df.withColumn(trans.derive.field, F.expr(_derive_expr))
                 existing = set(current_df.columns)
 
             elif trans.pivot and trans_phase == "pre":
@@ -544,7 +545,8 @@ class SparkAdapter(EngineAdapter):
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 from pyspark.sql import functions as F
 
-                current_df = current_df.withColumn(trans.derive.field, F.expr(trans.derive.sql))
+                _derive_expr = self._transpile_derive_sql(trans.derive)
+                current_df = current_df.withColumn(trans.derive.field, F.expr(_derive_expr))
             elif trans.bucket:
                 logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
                 # For bucket, we use the existing _build_bucket_sql but extract the expression

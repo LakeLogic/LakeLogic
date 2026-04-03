@@ -109,6 +109,14 @@ class LakehousePipeline:
             except ImportError:
                 pass
 
+        if self.spark:
+            try:
+                # Force strictly OSS-compatible Delta tables to ensure Polars interoperability
+                self.spark.conf.set("spark.databricks.delta.properties.defaults.enableDeletionVectors", "false")
+                logger.debug("Disabled DeletionVectors by default in Spark session for OSS compatibility.")
+            except Exception as e:
+                logger.debug(f"Could not disable DeletionVectors on Spark session: {e}")
+
     # ── Run log mode auto-detection ────────────────────────────────────────────
 
     def _resolve_run_log_mode(self, contract_dict: dict, explicit_mode: Optional[str] = None) -> Optional[str]:
@@ -201,18 +209,32 @@ class LakehousePipeline:
                     logger.warning("Direct mode with GCS — GOOGLE_APPLICATION_CREDENTIALS may be needed.")
 
         if table_name and storage:
+            # ── Layer-aware root resolution ────────────────────────────────
+            # In direct mode, prefer the layer-specific path (bronze_path,
+            # silver_path, gold_path) over the generic external_location_root.
+            # This lets users set one root per layer in _system.yaml:
+            #   bronze_path: "abfss://.../{bronze_layer}"
+            #   silver_path: "abfss://.../{silver_layer}"
+            # and have each contract auto-resolve to the correct layer path.
+            _layer_path_map = {
+                "bronze": getattr(storage, "bronze_path", None),
+                "silver": getattr(storage, "silver_path", None),
+                "gold": getattr(storage, "gold_path", None),
+            }
+            _layer_root = _layer_path_map.get(target_layer) or storage.external_location_root
+
             # Materialization
             mat = contract_dict.setdefault("materialization", {})
             if _is_direct:
-                if not mat.get("target_path") and storage.external_location_root:
-                    mat["target_path"] = f"{storage.external_location_root}/{table_name}"
+                if not mat.get("target_path") and _layer_root:
+                    mat["target_path"] = f"{_layer_root}/{table_name}"
                 if not mat.get("format"):
                     mat["format"] = "delta"
             else:
                 if not mat.get("target_path") and storage.domain_catalog:
                     mat["target_path"] = f"{storage.domain_catalog}.{table_name}"
-            if not mat.get("location") and storage.external_location_root:
-                mat["location"] = f"{storage.external_location_root}/{table_name}"
+            if not mat.get("location") and _layer_root:
+                mat["location"] = f"{_layer_root}/{table_name}"
 
             # Quarantine — inherit system-level defaults first so that
             # quar.get("enabled") is truthful before we derive the target.
@@ -225,10 +247,10 @@ class LakehousePipeline:
             # different domains don't collide in the shared quarantine schema.
             quar = contract_dict.get("quarantine") or {}
             if _is_direct:
-                if quar.get("enabled") and not quar.get("target") and storage.external_location_root:
+                if quar.get("enabled") and not quar.get("target") and _layer_root:
                     _domain = info.get("domain", "")
                     _q_table = f"{_domain}_{table_name}" if _domain else table_name
-                    quar["target"] = f"{storage.external_location_root}/_quarantine/{_q_table}"
+                    quar["target"] = f"{_layer_root}/_quarantine/{_q_table}"
                     contract_dict["quarantine"] = quar
             else:
                 if quar.get("enabled") and not quar.get("target") and storage.quarantine_root:
@@ -247,8 +269,8 @@ class LakehousePipeline:
             if target_layer in ("silver", "gold"):
                 source = contract_dict.get("source") or {}
                 if _is_direct:
-                    if not source.get("path") and storage.external_location_root:
-                        source["path"] = f"{storage.external_location_root}/{table_name}"
+                    if not source.get("path") and _layer_root:
+                        source["path"] = f"{_layer_root}/{table_name}"
                         source.setdefault("type", "landing")
                         source.setdefault("format", "delta")
                         contract_dict["source"] = source
@@ -1178,13 +1200,11 @@ class LakehousePipeline:
     ) -> None:
         """Process a single contract: resolve UC paths, run source, materialize."""
         # Log contract + target for observability
-        _mat = (c.contract_dict or {}).get("materialization", {})
-        _target = _mat.get("location") or _mat.get("target_path") or "n/a"
         _title = (c.contract_dict or {}).get("info", {}).get("title", c.entity)
         _version = (c.contract_dict or {}).get("version", "")
-        logger.info("  ─────────────────────────────────────────────────────────")
         _ver_str = f" v{_version}" if _version else ""
-        logger.info(f"  📄 [{layer}] {c.entity}\n    Contract: {_title}{_ver_str}\n    Target:   {_target}")
+        logger.info("  ─────────────────────────────────────────────────────────")
+        logger.info(f"  📄 [{layer}] {c.entity} | Contract: {_title}{_ver_str}")
 
         if dry_run:
             logger.info(f"DRY RUN - skipping {c.entity}")
@@ -1276,15 +1296,58 @@ class LakehousePipeline:
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
             mat_result = processor.materialize(df_good, df_bad)
 
-            logger.info(f"✅ Materialized {row_count} rows for {c.entity} -> {mat_result}")
+            #logger.info(f"✅ Materialized {row_count} rows for {c.entity} -> {mat_result}")
+            logger.info(f"✅ Materialized {row_count} rows for {c.entity}")
             layers_with_new_data.add(layer)
             summary.append(
                 c.entity, layer, "success", rows=row_count, rows_raw=rows_raw, rows_good=rows_good, rows_bad=rows_bad
             )
 
+            # Write run log with final succeeded status
+            _report = getattr(processor, "last_report", None) or {}
+            _report["status"] = "succeeded"
+            try:
+                from lakelogic.core.run_log import write_run_log
+                write_run_log(_report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode)
+            except Exception as log_exc:
+                logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
+
         except Exception as e:
             logger.error(f"❌ Failed to process {c.entity}: {e}")
             summary.append(c.entity, layer, "failed", error=str(e))
+
+            # Write run log with failed status so the failure is auditable
+            try:
+                from lakelogic.core.run_log import write_run_log
+                _report = getattr(processor, "last_report", None) if "processor" in dir() else None
+                if _report:
+                    _report["status"] = "failed"
+                    _report["error_message"] = str(e)[:2000]
+                    write_run_log(_report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode)
+                else:
+                    # Failure occurred before processor built a report — write minimal entry
+                    from datetime import datetime, timezone
+                    from uuid import uuid4
+                    _minimal = {
+                        "run_id": str(uuid4()),
+                        "pipeline_run_id": self.run_id,
+                        "engine": self.engine,
+                        "contract": c.entity,
+                        "dataset": c.entity,
+                        "data_layer": layer,
+                        "domain": getattr(self.registry, "domain", None),
+                        "system": getattr(self.registry, "system", None),
+                        "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                        "status": "failed",
+                        "error_message": str(e)[:2000],
+                    }
+                    # Try to resolve run_log config from the contract dict
+                    _dc = DataContract.from_dict(c.contract_dict) if c.contract_dict else None
+                    if _dc:
+                        write_run_log(_minimal, _dc, engine_name=self.engine)
+            except Exception as log_exc:
+                logger.debug(f"Could not write failure run log for {c.entity}: {log_exc}")
+
             raise  # Fail fast for orchestrator auto-retries
 
     def _execute_wave_parallel(
