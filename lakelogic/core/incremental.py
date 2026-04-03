@@ -40,553 +40,12 @@ the processor defaults to ``_lakelogic_processed_at`` (stamped by lineage).
 
 Choosing a strategy
 ~~~~~~~~~~~~~~~~~~~
-==============  ===================  ==========================================
-Strategy        Best for             Notes
-==============  ===================  ==========================================
-max_target      Most batch pipelines Self-healing; safe with external edits
-pipeline_log    Partial overwrites   Needs a log table; most reliable
-manifest        No-Spark pipelines   Lightweight JSON; good for Polars/Pandas
-date_range      Backfills & widgets  Explicit control; not automated
-delta_version   Large streaming      Fastest; Spark-only; gap-free capture
-==============  ===================  ==========================================
 
-Usage
------
-::
-
-    from lakelogic.core.incremental import IncrementalBoundary
-
-    # Strategy 1 — watermark on target table (DEFAULT)
-    boundary = IncrementalBoundary.from_max_target(
-        target_path="abfss://silver@.../listings",
-        watermark_field="_lakelogic_processed_at",
-    )
-
-    # Strategy 2 — pipeline log
-    boundary = IncrementalBoundary.from_pipeline_log(
-        log_table="pipeline_runs",
-        pipeline_name="bronze_to_silver_zoopla_listings",
-    )
-
-    # Strategy 3 — manifest file
-    boundary = IncrementalBoundary.from_manifest(
-        manifest_path="abfss://meta@.../manifests/bronze_to_silver.json",
-        partition_field="_snapshot_date",
-    )
-
-    # Strategy 4a — explicit date range
-    boundary = IncrementalBoundary.from_date_range(
-        from_date="2024-03-01",
-        to_date="2024-03-31",
-    )
-
-    # Strategy 4b — lookback string
-    boundary = IncrementalBoundary.from_lookback("7 days")
-    boundary = IncrementalBoundary.from_lookback("3 hours")
-    boundary = IncrementalBoundary.from_lookback("1 month")
-
-    # Strategy 5 — Delta table version tracking
-    boundary = IncrementalBoundary.from_delta_version(
-        source_path="table:catalog.bronze.sessions",
-        target_path="table:catalog.silver.sessions",
-    )
-    # First run:  reads all versions from 0
-    # Next runs:  reads only versions > last stored version
-    # State:      stored in target TBLPROPERTIES('lakelogic.last_source_version')
-    # Safeguards: detects source rollback (from_v > to_v) and auto-resets
-
-    # Use the boundary to filter source data
-    bronze_df = (
-        spark.read.format("delta").load(BRONZE_ROOT)
-             .filter(boundary.spark_filter("_lakelogic_processed_at"))
-    )
-"""
-
-from __future__ import annotations
-
-import json
-import re
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-import logging
-
-logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Boundary dataclass — unified output of all strategies
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Boundary:
-    """
-    Resolved incremental processing window.
-
-    Attributes
-    ----------
-    from_dt : datetime
-        Inclusive start of the window (UTC).
-    to_dt : datetime
-        Inclusive end of the window (UTC).
-    strategy : str
-        Name of the strategy that resolved this boundary.
-    partition_filters : dict
-        Static (non-temporal) partition values to AND into every filter.
-        Example: ``{"country": "GB", "region": "south"}``
-    metadata : dict
-        Strategy-specific metadata (watermark value found, manifest entries, etc.)
-    """
-
-    from_dt: datetime
-    to_dt: datetime
-    strategy: str
-    partition_filters: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    # Convenience properties
-    @property
-    def from_date(self) -> date:
-        return self.from_dt.date()
-
-    @property
-    def to_date(self) -> date:
-        return self.to_dt.date()
-
-    @property
-    def from_iso(self) -> str:
-        return self.from_dt.isoformat()
-
-    @property
-    def to_iso(self) -> str:
-        return self.to_dt.isoformat()
-
-    # ------------------------------------------------------------------
-    # Spark filter helpers
-    # ------------------------------------------------------------------
-
-    def spark_filter(
-        self,
-        field: Optional[str] = None,
-        *,
-        date_parts: Optional[Union[List[str], Dict[str, str]]] = None,
-    ) -> str:
-        """
-        Return a Spark SQL filter string covering the resolved time window.
-
-        Supports three field layouts — pick the one that matches your table:
-
-        **Single date/timestamp column** (most common)::
-
-            # Table has: _snapshot_date DATE
-            df.filter(boundary.spark_filter("_snapshot_date"))
-            # → "_snapshot_date >= '2024-03-01' AND _snapshot_date <= '2024-03-31'"
-
-        **Split date-part columns as a list** (year, month, day)::
-
-            # Table has: year INT, month INT, day INT
-            df.filter(boundary.spark_filter(date_parts=["year", "month", "day"]))
-            # → "MAKE_DATE(year, month, day) >= '2024-03-01'
-            #    AND MAKE_DATE(year, month, day) <= '2024-03-31'"
-
-        **Split date-part columns as a dict** (custom column names)::
-
-            # Table has: partition_year INT, partition_month INT, partition_day INT
-            df.filter(boundary.spark_filter(date_parts={
-                "year": "partition_year",
-                "month": "partition_month",
-                "day": "partition_day",
-            }))
-
-        **Mixed: static + temporal partitions**::
-
-            # source.partition_filters: {country: GB}
-            boundary = IncrementalBoundary.from_lookback(
-                "7 days",
-                partition_filters={"country": "GB"},
-            )
-            df.filter(boundary.spark_filter("_snapshot_date"))
-            # → "country = 'GB' AND _snapshot_date >= '2024-...' AND ..."
-
-        Parameters
-        ----------
-        field : str, optional
-            Single date/timestamp column name.
-        date_parts : list of str or dict, optional
-            Split date columns.  List → ``[year_col, month_col, day_col]``.
-            Dict → ``{"year": col, "month": col, "day": col}``.
-        """
-        parts: List[str] = []
-
-        # ── Static partition filters (non-temporal) ───────────────────────────
-        for col, val in self.partition_filters.items():
-            if isinstance(val, str):
-                parts.append(f"{col} = '{val}'")
-            else:
-                parts.append(f"{col} = {val}")
-
-        # ── Temporal filter ───────────────────────────────────────────────────
-        if field is not None:
-            parts.append(f"{field} >= '{self.from_iso}'")
-            parts.append(f"{field} <= '{self.to_iso}'")
-
-        elif date_parts is not None:
-            # Normalise to dict
-            if isinstance(date_parts, list):
-                if len(date_parts) == 3:
-                    dp = {
-                        "year": date_parts[0],
-                        "month": date_parts[1],
-                        "day": date_parts[2],
-                    }
-                elif len(date_parts) == 2:
-                    dp = {"year": date_parts[0], "month": date_parts[1]}
-                else:
-                    raise ValueError(
-                        f"date_parts list must have 2 or 3 elements [year, month, day], "
-                        f"got {len(date_parts)}: {date_parts}"
+                    filt = (
+                        (F.col("dataset") == dataset)
+                        & (F.col("stage") != "no_new_data")
+                        & (F.col("stage") != "reprocess")
                     )
-            else:
-                dp = date_parts
-
-            if "day" in dp:
-                make_date = f"MAKE_DATE({dp['year']}, {dp['month']}, {dp['day']})"
-                parts.append(f"{make_date} >= '{self.from_date}'")
-                parts.append(f"{make_date} <= '{self.to_date}'")
-            elif "month" in dp:
-                # Year+month only — match whole months in range
-                y_col, m_col = dp["year"], dp["month"]
-                parts.append(
-                    f"({y_col} > {self.from_date.year} OR "
-                    f"({y_col} = {self.from_date.year} AND {m_col} >= {self.from_date.month}))"
-                )
-                parts.append(
-                    f"({y_col} < {self.to_date.year} OR "
-                    f"({y_col} = {self.to_date.year} AND {m_col} <= {self.to_date.month}))"
-                )
-            else:
-                raise ValueError("date_parts must include at least 'year' and 'month' keys")
-
-        else:
-            raise ValueError("Provide either field='col_name' or date_parts=['year','month','day']")
-
-        return " AND ".join(parts)
-
-    # ------------------------------------------------------------------
-    # Polars filter helpers
-    # ------------------------------------------------------------------
-
-    def polars_filter(
-        self,
-        field: Optional[str] = None,
-        *,
-        date_parts: Optional[Union[List[str], Dict[str, str]]] = None,
-    ):
-        """
-        Return a Polars boolean expression covering the resolved time window.
-
-        Mirrors :meth:`spark_filter` but returns a Polars expression rather than
-        a SQL string.
-
-        Examples::
-
-            # Single date column
-            df.filter(boundary.polars_filter("_snapshot_date"))
-
-            # Split date parts
-            df.filter(boundary.polars_filter(date_parts=["year", "month", "day"]))
-
-            # Custom column names
-            df.filter(boundary.polars_filter(date_parts={
-                "year": "partition_year", "month": "partition_month", "day": "partition_day"
-            }))
-        """
-        import polars as pl
-
-        expr = pl.lit(True)
-
-        # ── Static partition filters ──────────────────────────────────────────
-        for col, val in self.partition_filters.items():
-            expr = expr & (pl.col(col) == val)
-
-        # ── Temporal filter ───────────────────────────────────────────────────
-        if field is not None:
-            expr = expr & (pl.col(field).cast(pl.Date) >= self.from_date)
-            expr = expr & (pl.col(field).cast(pl.Date) <= self.to_date)
-
-        elif date_parts is not None:
-            if isinstance(date_parts, list):
-                if len(date_parts) == 3:
-                    dp = {
-                        "year": date_parts[0],
-                        "month": date_parts[1],
-                        "day": date_parts[2],
-                    }
-                elif len(date_parts) == 2:
-                    dp = {"year": date_parts[0], "month": date_parts[1]}
-                else:
-                    raise ValueError(f"date_parts list must have 2 or 3 elements, got {len(date_parts)}")
-            else:
-                dp = date_parts
-
-            if "day" in dp:
-                # Reconstruct date: year*10000 + month*100 + day as integer key
-                # Polars doesn't have MAKE_DATE directly — use date arithmetic
-                y, m, d = pl.col(dp["year"]), pl.col(dp["month"]), pl.col(dp["day"])
-                # Integer key: YYYYMMDD — faithful date ordering without MAKE_DATE
-                date_key = y * 10_000 + m * 100 + d
-                from_key = self.from_date.year * 10_000 + self.from_date.month * 100 + self.from_date.day
-                to_key = self.to_date.year * 10_000 + self.to_date.month * 100 + self.to_date.day
-                expr = expr & (date_key >= from_key) & (date_key <= to_key)
-            elif "month" in dp:
-                y_col, m_col = pl.col(dp["year"]), pl.col(dp["month"])
-                ym_key = y_col * 100 + m_col
-                from_ym = self.from_date.year * 100 + self.from_date.month
-                to_ym = self.to_date.year * 100 + self.to_date.month
-                expr = expr & (ym_key >= from_ym) & (ym_key <= to_ym)
-            else:
-                raise ValueError("date_parts must include at least 'year' and 'month' keys")
-
-        else:
-            raise ValueError("Provide either field='col_name' or date_parts=['year','month','day']")
-
-        return expr
-
-    def __repr__(self) -> str:
-        pf = f", partition_filters={self.partition_filters}" if self.partition_filters else ""
-        return f"Boundary(strategy={self.strategy!r}, from={self.from_date}, to={self.to_date}{pf})"
-
-
-# ---------------------------------------------------------------------------
-# Lookback parser
-# ---------------------------------------------------------------------------
-
-_LOOKBACK_UNITS = {
-    "second": 1,
-    "seconds": 1,
-    "sec": 1,
-    "secs": 1,
-    "minute": 60,
-    "minutes": 60,
-    "min": 60,
-    "mins": 60,
-    "hour": 3600,
-    "hours": 3600,
-    "hr": 3600,
-    "hrs": 3600,
-    "day": 86400,
-    "days": 86400,
-    "week": 604800,
-    "weeks": 604800,
-    # Months and years are approximate
-    "month": 86400 * 30,
-    "months": 86400 * 30,
-    "year": 86400 * 365,
-    "years": 86400 * 365,
-}
-
-
-def _parse_lookback(lookback: str) -> timedelta:
-    """
-    Parse a human-readable lookback string into a ``timedelta``.
-
-    Supported formats::
-
-        "15 minutes"  "3 hours"  "7 days"  "2 weeks"  "1 month"  "1 year"
-        "30mins"      "6hrs"     "90"      (bare integer → seconds)
-
-    Parameters
-    ----------
-    lookback : str
-        Human-readable duration string.
-
-    Returns
-    -------
-    timedelta
-    """
-    lookback = lookback.strip().lower()
-
-    # Bare integer → seconds
-    if lookback.isdigit():
-        return timedelta(seconds=int(lookback))
-
-    m = re.match(r"^(\d+(?:\.\d+)?)\s*([a-z]+)$", lookback)
-    if not m:
-        raise ValueError(
-            f"Cannot parse lookback string: {lookback!r}. Expected e.g. '7 days', '3 hours', '30 mins', '1 month'."
-        )
-    amount = float(m.group(1))
-    unit = m.group(2)
-
-    if unit not in _LOOKBACK_UNITS:
-        raise ValueError(
-            f"Unknown time unit {unit!r} in lookback {lookback!r}. Supported: {sorted(set(_LOOKBACK_UNITS.values()))}."
-        )
-    return timedelta(seconds=amount * _LOOKBACK_UNITS[unit])
-
-
-# ---------------------------------------------------------------------------
-# IncrementalBoundary — factory class for all 4 strategies
-# ---------------------------------------------------------------------------
-
-
-class IncrementalBoundary:
-    """
-    Factory class that resolves incremental processing windows.
-
-    All ``from_*`` class methods return a :class:`Boundary` object.
-
-    Design decision — why a single ``Boundary`` output?
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Every strategy answers the same question: "process source data where
-    ``watermark_field`` is between X and Y".  By normalising to a ``Boundary``
-    dataclass, the pipeline code stays the same regardless of strategy:
-
-    ::
-
-        boundary  = IncrementalBoundary.from_max_target(...)   # or any other
-        source_df = spark.read.format("delta").load(BRONZE_PATH) \\
-                         .filter(boundary.spark_filter("_snapshot_date"))
-    """
-
-    # ── Strategy 1: Max watermark on the target table ─────────────────────────
-
-    @classmethod
-    def from_max_target(
-        cls,
-        target_path: str,
-        watermark_field: str,
-        *,
-        to_dt: Optional[datetime] = None,
-        default_from: Optional[Union[datetime, str]] = None,
-    ) -> Boundary:
-        """
-        Strategy: query ``MAX(watermark_field)`` from the target Delta table.
-
-        Processes source data where ``watermark_field > max_value_in_target``.
-        If the target table is empty or doesn't exist, uses ``default_from``
-        (or 90 days ago as a safe fallback).
-
-        Parameters
-        ----------
-        target_path : str
-            Delta table path (ADLS / local).
-        watermark_field : str
-            Column name to take MAX of (e.g. ``_snapshot_date``).
-        to_dt : datetime, optional
-            Upper bound — defaults to NOW (UTC).
-        default_from : datetime or ISO string, optional
-            Fallback lower bound when target is empty. Default: 90 days ago.
-
-        Example
-        -------
-        ::
-
-            boundary = IncrementalBoundary.from_max_target(
-                target_path="abfss://silver@acct.dfs.core.windows.net/zoopla/listings",
-                watermark_field="_snapshot_date",
-            )
-            # If Silver has data up to 2024-03-05 →
-            # boundary.from_date == date(2024, 3, 6)
-            # boundary.to_date   == date.today()
-        """
-        try:
-            from pyspark.sql import SparkSession
-            import pyspark.sql.functions as F
-
-            spark = SparkSession.getActiveSession()
-            if spark is None:
-                raise RuntimeError("No active Spark session")
-
-            if str(target_path).startswith("table:"):
-                df = spark.table(target_path[6:])
-            else:
-                df = spark.read.format("delta").load(target_path)
-            max_val = df.agg(F.max(watermark_field)).collect()[0][0]
-
-            if max_val is None:
-                raise ValueError("Target table is empty")
-
-            # Convert to datetime
-            if isinstance(max_val, datetime):
-                from_dt = max_val + timedelta(seconds=1)
-            elif isinstance(max_val, date):
-                from_dt = datetime(max_val.year, max_val.month, max_val.day) + timedelta(days=1)
-            else:
-                from_dt = datetime.fromisoformat(str(max_val)) + timedelta(days=1)
-
-            meta = {"watermark_value": str(max_val), "target_path": target_path}
-
-        except Exception as exc:
-            # Target missing / empty — use default_from
-            if default_from is not None:
-                from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
-            else:
-                from_dt = datetime.now(timezone.utc) - timedelta(days=90)
-            meta = {"fallback_reason": str(exc), "target_path": target_path}
-
-        _to = to_dt or datetime.now(timezone.utc)
-        return Boundary(from_dt=from_dt, to_dt=_to, strategy="max_target", metadata=meta)
-
-    # ── Strategy 1b: Delta Table Version (Snapshot) ───────────────────────────
-
-    @classmethod
-    def from_delta_version(
-        cls,
-        source_path: str,
-        target_path: str,
-        *,
-        to_version: Optional[int] = None,
-        default_version: int = 0,
-        dataset: Optional[str] = None,
-        data_layer: Optional[str] = None,
-        domain: Optional[str] = None,
-        system: Optional[str] = None,
-        log_table: str = "pipeline_runs",
-    ) -> Boundary:
-        """
-        Strategy: query processing window based on Delta table versions.
-
-        Retrieves the 'lakelogic.last_source_version' from the target Delta
-        table's properties.  If not found, starts from `default_version`.
-
-        Parameters
-        ----------
-        source_path : str
-            Source Delta table path.
-        target_path : str
-            Target Delta table path (where we store the state).
-        to_version : int, optional
-            Upper bound — defaults to the current source version.
-        default_version : int, optional
-            Fallback version if no state is found. Default: 0.
-        """
-        try:
-            from pyspark.sql import SparkSession
-
-            spark = SparkSession.getActiveSession()
-            if spark is None:
-                raise RuntimeError("No active Spark session")
-
-            # 1. Resolve starting version from target properties
-            try:
-                # We use SHOW TBLPROPERTIES which is standard in Spark/Databricks
-                target_name = target_path[6:] if target_path.startswith("table:") else f"delta.`{target_path}`"
-                props_df = spark.sql(f"SHOW TBLPROPERTIES {target_name}")
-                props = {row["key"]: row["value"] for row in props_df.collect()}
-                last_ver_str = props.get("lakelogic.last_source_version")
-                last_version = int(last_ver_str) if last_ver_str else None
-            except Exception as e:
-                logger.debug(f"Failed to read Delta property for target {target_name}: {e}")
-                last_version = None
-
-            if last_version is None and dataset is not None:
-                logger.debug(f"No target property found for {target_name}. Attempting fallback to {log_table}...")
-                try:
-                    import pyspark.sql.functions as F
-                    filt = (F.col("dataset") == dataset) & (F.col("stage") != "no_new_data") & (F.col("stage") != "reprocess")
                     if data_layer:
                         filt = filt & (F.col("data_layer") == data_layer)
                     if domain:
@@ -599,20 +58,26 @@ class IncrementalBoundary:
                         .filter(filt)
                         .agg(
                             F.max("max_watermark_value").alias("last_watermark"),
-                            F.max(F.get_json_object("report_json", "$.incremental_metadata.to_version").cast("int")).alias("last_json_version")
+                            F.max(
+                                F.get_json_object("report_json", "$.incremental_metadata.to_version").cast("int")
+                            ).alias("last_json_version"),
                         )
                         .collect()[0]
                     )
-                    
+
                     _wm_val = row["last_watermark"]
                     _json_val = row["last_json_version"]
-                    
+
                     if _wm_val is not None:
                         last_version = int(_wm_val)
-                        logger.info(f"Healed missing Delta property from {log_table}.max_watermark_value. Resuming from {last_version}.")
+                        logger.info(
+                            f"Healed missing Delta property from {log_table}.max_watermark_value. Resuming from {last_version}."
+                        )
                     elif _json_val is not None:
                         last_version = int(_json_val)
-                        logger.info(f"Healed missing Delta property from {log_table}.report_json. Resuming from {last_version}.")
+                        logger.info(
+                            f"Healed missing Delta property from {log_table}.report_json. Resuming from {last_version}."
+                        )
                 except Exception as log_exc:
                     logger.debug(f"Fallback to {log_table} failed for {dataset}: {log_exc}")
 
@@ -777,9 +242,7 @@ class IncrementalBoundary:
                 if _src_mtime is not None:
                     # max_source_mtime is stored as epoch seconds (float/int)
                     last_success = datetime.fromtimestamp(float(_src_mtime), tz=timezone.utc)
-                    logger.info(
-                        f"Pipeline log boundary from max_source_mtime: {last_success.isoformat()}"
-                    )
+                    logger.info(f"Pipeline log boundary from max_source_mtime: {last_success.isoformat()}")
                 else:
                     last_success_str = row["last_watermark"] or row["last_success"]
                     if last_success_str is None:
@@ -1199,13 +662,13 @@ class IncrementalBoundary:
             tp = target_path or src.get("target_path", "")
             sp = src.get("path", "")
             return cls.from_delta_version(
-                sp, 
+                sp,
                 tp,
                 dataset=src.get("dataset"),
                 data_layer=src.get("data_layer"),
                 domain=src.get("domain"),
                 system=src.get("system"),
-                log_table=src.get("pipeline_log_table", "pipeline_runs")
+                log_table=src.get("pipeline_log_table", "pipeline_runs"),
             )
 
         tp = target_path or src.get("target_path", "")

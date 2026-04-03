@@ -9,7 +9,6 @@ from pydantic import (
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 from loguru import logger
-import warnings
 
 
 def _warn_unknown_extra_keys(
@@ -1042,6 +1041,7 @@ class Materialization(BaseModel):
         "table_properties", "compaction", "unknown_member",
     }
 
+
     @model_validator(mode="after")
     def _validate_strategy_alignment(self) -> "Materialization":
         """Warn when strategy and sub-config blocks are mismatched."""
@@ -1335,15 +1335,16 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
     # Check if this is an ODCS contract (requires kind and apiVersion)
     if data.get("kind") != "DataContract" or "apiVersion" not in data:
         return data  # Not ODCS or already LakeLogic
-    
+
     lakelogic_data = {}
-    
+
+
     # 1. Map root properties
     # LakeLogic requires a version. We'll use the ODCS apiVersion.
     lakelogic_data["version"] = data.get("apiVersion", "v1")
     if "dataset" in data:
         lakelogic_data["info"] = {"title": data["dataset"]}
-        
+
     # 2. Map schema to model.fields
     if "schema" in data and isinstance(data["schema"], list):
         fields = []
@@ -1360,19 +1361,19 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
                 field["pii"] = col["pii"]
             fields.append(field)
         lakelogic_data["model"] = {"fields": fields}
-        
+
     # 3. Apply customProperties.lakelogic overrides (the execution instructions)
     custom_props = data.get("customProperties", {}).get("lakelogic", {})
     if isinstance(custom_props, dict):
         for k, v in custom_props.items():
             lakelogic_data[k] = v
-            
+
     # 4. Copy any missing properties for a best-effort merge
     # This allows direct pass-through of things like `metadata`, `servers` if they happen to align.
     for k, v in data.items():
         if k not in ["kind", "apiVersion", "dataset", "schema", "customProperties"] and k not in lakelogic_data:
             lakelogic_data[k] = v
-            
+
     return lakelogic_data
 
 
@@ -1602,7 +1603,6 @@ class DataContract(BaseModel):
         load_mode: cdc
            - cdc_op_field required
         """
-        import warnings
 
         source = getattr(self, "source", None)
         if source is None:

@@ -165,9 +165,7 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
 
     writer.saveAsTable(table_name)
 
-    logger.info(
-        f"Wrote {rows_written} quarantined rows to {table_name} (format={table_format}, mode={mode})"
-    )
+    logger.info(f"Wrote {rows_written} quarantined rows to {table_name} (format={table_format}, mode={mode})")
     return {"target": table_name, "rows_written": rows_written, "format": table_format}
 
 

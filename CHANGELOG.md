@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.10.0] — 2026-03-30
+
+### Added
+
+- Implement core pipeline framework including materialization, incremental processing, masking, and run logging with documentation.
 ## [1.9.0] — 2026-03-27
 
 ### Added
@@ -175,6 +180,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.10.0]: https://github.com/lakelogic/LakeLogic/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/lakelogic/LakeLogic/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/lakelogic/LakeLogic/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.7.0

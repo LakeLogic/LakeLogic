@@ -364,7 +364,7 @@ class MaskingEngine:
             names = ", ".join(f.name for f in fields_without_masking)
             logger.warning(
                 f"PII fields detected without masking strategy: [{names}]. "
-                f"Set 'masking:' (nullify|hash|redact|partial|encrypt) "
+                f"Set 'masking:' (nullify|hash|redact|partial|tokenize|encrypt) "
                 f"in your contract to enable masking for these fields."
             )
 
@@ -372,15 +372,11 @@ class MaskingEngine:
             logger.info("No PII fields with explicit masking strategy — skipping masking.")
             return df
 
-        # {field_name: (strategy, masking_format_or_None)}
-        field_strategies = {
-            f.name: (strategy_override or f.masking, getattr(f, "masking_format", None))
-            for f in fields_with_masking
-        }
+        field_strategies = {f.name: strategy_override or f.masking for f in fields_with_masking}
 
         logger.info(
             f"PII masking: {len(fields_with_masking)} field(s) for user_groups={user_groups or '(none)'}: "
-            f"{', '.join(f'{k}→{v[0]}' for k, v in field_strategies.items())}"
+            f"{', '.join(f'{k}→{v}' for k, v in field_strategies.items())}"
         )
 
         # Dispatch by DataFrame type
@@ -552,6 +548,81 @@ class MaskingEngine:
                     f"Masking strategy 'tokenize' is deprecated for field '{col_name}' — "
                     f"use 'encrypt' instead. Falling back to sha2-based token."
                 )
+                df = df.withColumn(
+                    col_name,
+                    F.concat(F.lit("tok_"), F.substring(F.sha2(F.col(col_name).cast("string"), 256), 1, 12)),
+                )
+
+        return df
+
+    def _apply_spark(self, df: Any, field_strategies: Dict[str, str]) -> Any:
+        """Apply masking to a PySpark DataFrame using native SQL expressions."""
+        from pyspark.sql import functions as F
+
+        for col_name, strategy in field_strategies.items():
+            if col_name not in df.columns:
+                continue
+
+            if strategy == "nullify":
+                df = df.withColumn(col_name, F.lit(None).cast("string"))
+
+            elif strategy == "redact":
+                df = df.withColumn(
+                    col_name,
+                    F.when(F.col(col_name).isNotNull(), F.lit("***REDACTED***")).otherwise(F.lit(None)),
+                )
+
+            elif strategy == "hash":
+                salt = self.hash_salt
+                if salt:
+                    df = df.withColumn(col_name, F.sha2(F.concat(F.lit(salt), F.col(col_name).cast("string")), 256))
+                else:
+                    df = df.withColumn(col_name, F.sha2(F.col(col_name).cast("string"), 256))
+
+            elif strategy == "partial":
+                # Email: j***@domain.com
+                # General: first_char + *** + last_char
+                df = df.withColumn(
+                    col_name,
+                    F.when(
+                        F.col(col_name).contains("@"),
+                        F.concat(
+                            F.substring(F.col(col_name), 1, 1),
+                            F.lit("***@"),
+                            F.element_at(F.split(F.col(col_name), "@"), 2),
+                        ),
+                    ).otherwise(
+                        F.when(
+                            F.length(F.col(col_name)) > 2,
+                            F.concat(
+                                F.substring(F.col(col_name), 1, 1),
+                                F.lit("***"),
+                                F.substring(F.col(col_name), F.length(F.col(col_name)), 1),
+                            ),
+                        ).otherwise(F.lit("**"))
+                    ),
+                )
+
+            elif strategy == "encrypt":
+                # Use Spark's native aes_encrypt if available, fall back to sha2
+                try:
+                    key = self.encryption_key or "default-key"
+                    # Pad key to 16 bytes for AES-128
+                    padded_key = (key * ((16 // len(key)) + 1))[:16]
+                    df = df.withColumn(
+                        col_name,
+                        F.concat(
+                            F.lit("enc:"),
+                            F.base64(F.expr(f"aes_encrypt(CAST(`{col_name}` AS STRING), '{padded_key}')")),
+                        ),
+                    )
+                except Exception:
+                    # Fallback: deterministic hash for environments without aes_encrypt
+                    logger.warning(f"aes_encrypt not available for '{col_name}', falling back to sha2")
+                    df = df.withColumn(col_name, F.sha2(F.col(col_name).cast("string"), 256))
+
+            elif strategy == "tokenize":
+                # Deterministic token based on sha2 prefix
                 df = df.withColumn(
                     col_name,
                     F.concat(F.lit("tok_"), F.substring(F.sha2(F.col(col_name).cast("string"), 256), 1, 12)),
