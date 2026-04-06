@@ -3237,17 +3237,17 @@ def materialize_dataframe(
             _write_frame(pdf, target_file, resolved_format)
             rows_written = len(pdf)
     elif strategy == "merge":
+        # Extract CDC and Soft Delete settings (needed by both branches below)
+        cdc_op_field = getattr(contract.source, "cdc_op_field", None) if contract.source else None
+        cdc_delete_values = getattr(contract.source, "cdc_delete_values", None) if contract.source else None
+        cdc_timestamp_field = getattr(contract.source, "cdc_timestamp_field", None) if contract.source else None
+        soft_delete_col = getattr(mat, "soft_delete_column", None)
+        soft_delete_val = getattr(mat, "soft_delete_value", True)
+        soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
+        soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
+
         if target_file.exists():
             existing = _read_frame(target_file, resolved_format)
-
-            # Extract CDC and Soft Delete settings
-            cdc_op_field = getattr(contract.source, "cdc_op_field", None) if contract.source else None
-            cdc_delete_values = getattr(contract.source, "cdc_delete_values", None) if contract.source else None
-            cdc_timestamp_field = getattr(contract.source, "cdc_timestamp_field", None) if contract.source else None
-            soft_delete_col = getattr(mat, "soft_delete_column", None)
-            soft_delete_val = getattr(mat, "soft_delete_value", True)
-            soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
-            soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
 
             scd1_cfg = getattr(mat, "scd1", None)
             scd1_cfg = dict(scd1_cfg) if isinstance(scd1_cfg, dict) else {}
