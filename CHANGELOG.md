@@ -6,30 +6,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
-## [1.10.0] — 2026-03-30
+## [1.11.0] — 2026-04-06
 
 ### Added
 
+- Implement core data contract engine with multi-engine support, CLI, and documentation
+- Implement incremental processing boundary resolution and tracking logic
+- Add quickstart example with YAML contract and hello world notebook
+- Add quickstart notebook examples for basic data processing and dbt-based quality workflows
+- Implement pipeline runner and add medallion architecture quickstart examples
 - Implement core pipeline framework including materialization, incremental processing, masking, and run logging with documentation.
-## [1.9.0] — 2026-03-27
-
-### Added
-
+- Implement core Lakelogic framework including registry management, pipeline execution, multi-engine support, and documentation styling.
 - Add LakehousePipeline engine for declarative data mesh execution.
-## [1.8.0] — 2026-03-27
-
-### Added
-
 - Add `lakelogic/core/constants.py` and pin `anyio` to `3.7.1` and `google-genai` to `1.4.0` in `uv.lock`.
+- Add Polars, Snowflake, and DuckDB execution engines, and core pipeline components.
 
 ### Build
 
 - Update project configuration and dependencies.
-## [1.7.0] — 2026-03-27
 
-### Added
+### Documentation
 
-- Add Polars, Snowflake, and DuckDB execution engines, and core pipeline components.
+- Add project landing page and contract configuration documentation
+
+### Fixed
+
+- **docs**: Force overwrite of downloaded files in colab setup
+- **docs**: Resolve colab spark lazy execution and fix github raw urls
+- **tests**: Skip deprecated DuckDB tests, fix merge soft_delete scope, fix unknown_member test
+- **tests**: Correct quarantine path assertion and mkdir ordering
+- **tests**: Resolve collection failures, obsolete execution engines, and windows path limits
 ## [1.6.1] — 2026-03-27
 
 ### Added
@@ -180,10 +186,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.10.0]: https://github.com/lakelogic/LakeLogic/compare/v1.9.0...v1.10.0
-[1.9.0]: https://github.com/lakelogic/LakeLogic/compare/v1.8.0...v1.9.0
-[1.8.0]: https://github.com/lakelogic/LakeLogic/compare/v1.7.0...v1.8.0
-[1.7.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.7.0
+[1.11.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.11.0
 [1.6.1]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.6.1
 [1.4.0]: https://github.com/lakelogic/LakeLogic/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.3.0

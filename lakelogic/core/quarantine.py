@@ -639,7 +639,7 @@ def materialize_quarantine(
 
     if not is_cloud:
         target_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
     resolved_format = resolved_format or "parquet"
 
     # ── Spark engine ──────────────────────────────────────────────────────────
