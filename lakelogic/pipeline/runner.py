@@ -65,11 +65,13 @@ class PipelineRunSummary:
         rows_raw: Any = None,
         rows_good: Any = None,
         rows_bad: Any = None,
+        table_name: str = "",
     ):
         self.results.append(
             {
                 "contract": contract,
                 "layer": layer,
+                "table_name": table_name,
                 "status": status,
                 "rows": rows,
                 "rows_raw": rows_raw,
@@ -562,17 +564,20 @@ class LakehousePipeline:
         LIKE-based matching.
         """
         _rl_table = contract_dict.get("metadata", {}).get("run_log_table")
-        if not _rl_table or not self.spark:
+        if not _rl_table:
             return
 
         # Resolve the target table name (dataset column in run_log)
         mat_cfg = contract_dict.get("materialization", {})
         _target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
+        info = contract_dict.get("info", {})
+        metadata = contract_dict.get("metadata", {})
+
         if str(_target).startswith("table:"):
             _table_full = str(_target)[len("table:") :]
             dataset_val = _table_full.split(".")[-1] if "." in _table_full else _table_full
         else:
-            dataset_val = None
+            dataset_val = info.get("table_name") or contract_dict.get("dataset") or info.get("title")
 
         # Resolve domain, system, data_layer from info/metadata
         info = contract_dict.get("info", {})
@@ -604,12 +609,34 @@ class LakehousePipeline:
 
         where_clause = " AND ".join(conditions)
         try:
-            # Check if the run_log table exists before attempting DELETE
-            if self.spark.catalog.tableExists(_rl_table):
-                self.spark.sql(f"DELETE FROM {_rl_table} WHERE {where_clause}")
-                logger.info(f"  Cleared run log entries ({', '.join(params_desc)}) from {_rl_table}")
+            if self.spark:
+                # Check if the run_log table exists before attempting DELETE
+                if self.spark.catalog.tableExists(_rl_table):
+                    self.spark.sql(f"DELETE FROM {_rl_table} WHERE {where_clause}")
+                    logger.info(f"  Cleared run log entries ({', '.join(params_desc)}) from {_rl_table}")
+                else:
+                    logger.debug(f"  Run log table {_rl_table} does not exist yet; nothing to clear")
             else:
-                logger.debug(f"  Run log table {_rl_table} does not exist yet; nothing to clear")
+                # Polars / non-Spark fallback using delta-rs
+                try:
+                    from deltalake import DeltaTable
+
+                    from lakelogic.core.run_log import _build_cloud_opts
+
+                    storage_opts = _build_cloud_opts(_rl_table)
+                    try:
+                        dt = DeltaTable(_rl_table, storage_options=storage_opts)
+                        dt.delete(predicate=where_clause)
+                        logger.info(
+                            f"  Cleared run log entries ({', '.join(params_desc)}) from {_rl_table} via delta-rs"
+                        )
+                    except Exception as e:
+                        if "No table" in str(e) or "Not a Delta table" in str(e) or "is not a Delta table" in str(e):
+                            logger.debug(f"  Run log table {_rl_table} does not exist yet; nothing to clear")
+                        else:
+                            raise e
+                except ImportError:
+                    logger.debug("deltalake not installed, skipping run log delete")
         except Exception as _rl_exc:
             logger.warning(f"  Could not clear run log for '{entity_name}': {_rl_exc}")
 
@@ -694,11 +721,48 @@ class LakehousePipeline:
                         except Exception as _qp_exc:
                             logger.warning(f"  Could not delete quarantine cloud path {q_cloud_path}: {_qp_exc}")
 
-                elif q_cfg.get("enabled"):
-                    logger.warning(
-                        f"  Quarantine is enabled for {name} but no 'table:' target resolved "
-                        f"(target='{q_target}'). Quarantine table was NOT dropped."
+                elif q_cfg.get("enabled") and q_target:
+                    # Quarantine target is not a table: prefix — try cloud (fsspec) deletion
+                    _q_deleted = False
+                    _is_cloud_q = any(
+                        q_target.startswith(pfx)
+                        for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
                     )
+                    if _is_cloud_q:
+                        try:
+                            import os as _os_q
+
+                            import fsspec
+
+                            _q_opts: dict = {}
+                            if q_target.startswith(("abfss://", "abfs://")):
+                                for _ek, _ok in [
+                                    ("AZURE_STORAGE_ACCOUNT_NAME", "account_name"),
+                                    ("AZURE_STORAGE_ACCOUNT", "account_name"),
+                                    ("AZURE_STORAGE_ACCOUNT_KEY", "account_key"),
+                                    ("AZURE_TENANT_ID", "tenant_id"),
+                                    ("AZURE_CLIENT_ID", "client_id"),
+                                    ("AZURE_CLIENT_SECRET", "client_secret"),
+                                ]:
+                                    _v = _os_q.getenv(_ek)
+                                    if _v and _ok not in _q_opts:
+                                        _q_opts[_ok] = _v
+                            fs, q_path_part = fsspec.core.url_to_fs(q_target, **_q_opts)
+                            if fs.exists(q_path_part):
+                                fs.rm(q_path_part, recursive=True)
+                                logger.info(f"  Reset: deleted quarantine cloud path {q_target}")
+                            else:
+                                logger.info(f"  Reset: quarantine cloud path {q_target} does not exist")
+                            _q_deleted = True
+                        except ImportError:
+                            logger.debug("  fsspec not available for quarantine cloud deletion")
+                        except Exception as _q_exc:
+                            logger.warning(f"  Could not delete quarantine cloud path {q_target}: {_q_exc}")
+                    if not _q_deleted:
+                        logger.warning(
+                            f"  Quarantine is enabled for {name} but could not resolve/delete "
+                            f"target '{q_target}'. Quarantine data was NOT dropped."
+                        )
 
                 # Clear run log entries using precise multi-column filter
                 self._delete_run_log_entries(contract_dict, name, layer)
@@ -717,6 +781,16 @@ class LakehousePipeline:
                             logger.info(f"  Truncated {table_name}")
                         except Exception as e:
                             logger.warning(f"  Could not truncate {table_name}: {e}")
+                elif mat_target:
+                    if not dry_run:
+                        try:
+                            # Use internal data contract wipe mechanism (supports fsspec now)
+                            DataProcessor(
+                                contract=contract_dict, engine=self.engine, pipeline_run_id=self.run_id
+                            ).reset(targets=["materialization"])
+                            logger.info(f"  Truncated (deleted files) {mat_target}")
+                        except Exception as e:
+                            logger.warning(f"  Could not truncate files at {mat_target}: {e}")
 
                 q_cfg = contract_dict.get("quarantine", {})
                 q_target = q_cfg.get("target", "")
@@ -728,6 +802,15 @@ class LakehousePipeline:
                             logger.info(f"  Truncated quarantine {q_table}")
                         except Exception as e:
                             logger.warning(f"  Could not truncate {q_table}: {e}")
+                elif q_target and q_cfg.get("enabled", False):
+                    if not dry_run:
+                        try:
+                            DataProcessor(
+                                contract=contract_dict, engine=self.engine, pipeline_run_id=self.run_id
+                            ).reset(targets=["quarantine"])
+                            logger.info(f"  Truncated quarantine (deleted files) {q_target}")
+                        except Exception as e:
+                            logger.warning(f"  Could not truncate quarantine files at {q_target}: {e}")
 
                 # Clear run log entries using precise multi-column filter
                 if not dry_run:
@@ -1203,12 +1286,21 @@ class LakehousePipeline:
         _title = (c.contract_dict or {}).get("info", {}).get("title", c.entity)
         _version = (c.contract_dict or {}).get("version", "")
         _ver_str = f" v{_version}" if _version else ""
+        # Resolve output table name from info.table_name or materialization.target_path
+        _info = (c.contract_dict or {}).get("info", {})
+        _mat = (c.contract_dict or {}).get("materialization", {})
+        _table_name = (
+            _info.get("table_name", "")
+            or _mat.get("target_path", "").replace("table:", "")
+            or _mat.get("location", "")
+            or ""
+        )
         logger.info("  ─────────────────────────────────────────────────────────")
         logger.info(f"  📄 [{layer}] {c.entity} | Contract: {_title}{_ver_str}")
 
         if dry_run:
             logger.info(f"DRY RUN - skipping {c.entity}")
-            summary.append(c.entity, layer, "dry_run")
+            summary.append(c.entity, layer, "dry_run", table_name=_table_name)
             return
 
         try:
@@ -1229,16 +1321,25 @@ class LakehousePipeline:
             )
 
             df_good = result.good
-            is_empty = (
+            df_bad = getattr(result, "bad", None)
+
+            is_good_empty = (
                 df_good is None
                 or (isinstance(df_good, list) and len(df_good) == 0)
                 or (hasattr(df_good, "is_empty") and df_good.is_empty())
                 or (hasattr(df_good, "__len__") and len(df_good) == 0)
             )
 
-            if is_empty:
+            is_bad_empty = (
+                df_bad is None
+                or (isinstance(df_bad, list) and len(df_bad) == 0)
+                or (hasattr(df_bad, "is_empty") and df_bad.is_empty())
+                or (hasattr(df_bad, "__len__") and len(df_bad) == 0)
+            )
+
+            if is_good_empty and is_bad_empty:
                 logger.info(f"No new rows for {c.entity} - incremental load is up to date.")
-                summary.append(c.entity, layer, "no_new_rows")
+                summary.append(c.entity, layer, "no_new_rows", table_name=_table_name)
                 return
 
             # Spark compatibility layer: if the adapter already returned
@@ -1296,10 +1397,17 @@ class LakehousePipeline:
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
             processor.materialize(df_good, df_bad)
 
-            logger.info(f"✅ Materialized {row_count} rows for {c.entity}")
+            logger.debug(f"✅ Materialized {row_count} rows for {c.entity}")
             layers_with_new_data.add(layer)
             summary.append(
-                c.entity, layer, "success", rows=row_count, rows_raw=rows_raw, rows_good=rows_good, rows_bad=rows_bad
+                c.entity,
+                layer,
+                "success",
+                rows=row_count,
+                rows_raw=rows_raw,
+                rows_good=rows_good,
+                rows_bad=rows_bad,
+                table_name=_table_name,
             )
 
             # Write run log with final succeeded status
@@ -1307,6 +1415,7 @@ class LakehousePipeline:
             _report["status"] = "succeeded"
             try:
                 from lakelogic.core.run_log import write_run_log
+
                 write_run_log(
                     _report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode
                 )
@@ -1314,8 +1423,24 @@ class LakehousePipeline:
                 logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
 
         except Exception as e:
-            logger.error(f"❌ Failed to process {c.entity}: {e}")
-            summary.append(c.entity, layer, "failed", error=str(e))
+            # Enrich auth/permission errors with the active identity so
+            # operators immediately know *which* principal was rejected.
+            _identity_hint = ""
+            if "403" in str(e) or "AuthorizationPermission" in str(e):
+                import os as _os
+
+                _cid = _os.getenv("AZURE_CLIENT_ID") or _os.getenv("ARM_CLIENT_ID")
+                _tid = _os.getenv("AZURE_TENANT_ID") or _os.getenv("ARM_TENANT_ID")
+                if _cid:
+                    _identity_hint = f" | identity: SP client_id={_cid}, tenant_id={_tid or 'unknown'}"
+                elif _os.getenv("AZURE_STORAGE_ACCOUNT_KEY"):
+                    _identity_hint = " | identity: account-key"
+                elif _os.getenv("AZURE_STORAGE_SAS_TOKEN"):
+                    _identity_hint = " | identity: SAS token"
+                else:
+                    _identity_hint = " | identity: DefaultAzureCredential (az login / managed identity)"
+            logger.error(f"❌ Failed to process {c.entity}: {e}{_identity_hint}")
+            summary.append(c.entity, layer, "failed", error=str(e), table_name=_table_name)
 
             # Write run log with failed status so the failure is auditable
             try:
@@ -1349,10 +1474,25 @@ class LakehousePipeline:
                         "status": "failed",
                         "error_message": str(e)[:2000],
                     }
-                    # Try to resolve run_log config from the contract dict
-                    _dc = DataContract.from_dict(c.contract_dict) if c.contract_dict else None
+                    # Use processor.contract if available (already constructed);
+                    # fall back to building a minimal contract from the raw dict.
+                    _dc = None
+                    if "processor" in dir() and processor is not None:
+                        _dc = processor.contract
+                    if _dc is None and c.contract_dict:
+                        try:
+                            _dc = DataContract(**c.contract_dict)
+                        except Exception:
+                            pass  # Contract itself is invalid — can't construct
                     if _dc:
-                        write_run_log(_minimal, _dc, engine_name=self.engine)
+                        write_run_log(
+                            _minimal,
+                            _dc,
+                            engine_name=self.engine,
+                            run_log_mode=getattr(processor, "_run_log_mode", None) if "processor" in dir() else None,
+                        )
+                    else:
+                        logger.debug(f"Could not write failure run log for {c.entity}: no valid contract available")
             except Exception as log_exc:
                 logger.debug(f"Could not write failure run log for {c.entity}: {log_exc}")
 

@@ -21,7 +21,19 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class SLOFreshnessConfig(BaseModel):
     max_delay_minutes: int
     check_column: Union[str, List[str]] = "_lakelogic_loaded_at"
+    max_source_delay_minutes: Optional[int] = None  # source-time freshness
     exclude_tables: List[str] = Field(default_factory=list)
+
+
+class SLORowCountAnomalyConfig(BaseModel):
+    """Anomaly detection against historical run log baselines."""
+
+    enabled: bool = False
+    lookback_runs: int = 14
+    min_ratio: float = 0.5
+    max_ratio: float = 2.0
+    method: str = "median"  # "median" | "rolling_average"
+    min_runs_before_enforcement: int = 5
 
 
 class SLORowCountConfig(BaseModel):
@@ -30,17 +42,38 @@ class SLORowCountConfig(BaseModel):
     min_rows: Optional[int] = None
     max_rows: Optional[int] = None
     check_field: str = "counts_good"  # run log column to check
+    warn_only: bool = False  # true = log warning instead of failing
+    anomaly: Optional[SLORowCountAnomalyConfig] = None
     exclude_tables: List[str] = Field(default_factory=list)
+
+
+class SLOQualitySeverityThreshold(BaseModel):
+    min_good_ratio: float = 0.95
 
 
 class SLOQualityConfig(BaseModel):
     min_good_ratio: float = 0.95
     max_quarantine_ratio: float = 0.05
+    by_severity: Dict[str, SLOQualitySeverityThreshold] = Field(default_factory=dict)
 
 
 class SLOScheduleConfig(BaseModel):
     expected_completion_utc: str = "06:00"
+    expected_start_utc: Optional[str] = None
+    expected_duration_minutes: Optional[int] = None
+    warn_if_duration_exceeds_minutes: Optional[int] = None
+    timezone: str = "UTC"
+    environments: List[str] = Field(default_factory=list)  # empty = all environments
     pipeline_cron: Optional[str] = None
+
+
+class SLOAlertingConfig(BaseModel):
+    """SLO alerting — emits events through the existing notifications system."""
+
+    emit_events: bool = True
+    min_severity: str = "medium"  # only emit events for this severity and above
+    suppress_duplicate_alerts_minutes: int = 30
+    notify_on_recovery: bool = True
 
 
 class RegistrySLO(BaseModel):
@@ -48,6 +81,7 @@ class RegistrySLO(BaseModel):
     row_count: Dict[str, SLORowCountConfig] = Field(default_factory=dict)
     quality: Optional[SLOQualityConfig] = None
     schedule: Optional[SLOScheduleConfig] = None
+    alerting: Optional[SLOAlertingConfig] = None
 
 
 class RegistryStorage(BaseModel):
@@ -70,6 +104,7 @@ class RegistryStorage(BaseModel):
     silver_path: Optional[str] = None
     gold_path: Optional[str] = None
     log_path: Optional[str] = None
+    quarantine_path: Optional[str] = None
 
 
 class RegistryContract(BaseModel):
@@ -102,6 +137,8 @@ class CloudReporting(BaseModel):
 
 
 class EnvironmentConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     catalog: str
     storage_account: Optional[str] = None
 
@@ -114,13 +151,10 @@ def _resolve_placeholders(obj: Any, vars_map: Dict[str, str]) -> Any:
     Unresolvable placeholders (no matching key) are left as-is.
     """
     if isinstance(obj, str) and "{" in obj:
-        try:
-            return obj.format_map(defaultdict(lambda: None, **vars_map)) if "{" in obj else obj
-        except (KeyError, ValueError, IndexError):
-            # Partial format — replace what we can, leave the rest
-            for k, v in vars_map.items():
-                obj = obj.replace(f"{{{k}}}", str(v))
-            return obj
+        # Partial format — replace only known keys, leave unknown {placeholders} as-is
+        for k, v in vars_map.items():
+            obj = obj.replace(f"{{{k}}}", str(v))
+        return obj
     elif isinstance(obj, dict):
         return {k: _resolve_placeholders(v, vars_map) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -151,6 +185,7 @@ class DomainRegistry(BaseModel):
     lineage: Dict[str, Any] = Field(default_factory=dict)
     quarantine: Dict[str, Any] = Field(default_factory=dict)
     materialization: Dict[str, Any] = Field(default_factory=dict)  # per-layer defaults
+    notifications: List[Dict[str, Any]] = Field(default_factory=list)  # system-wide notification channels
     server_defaults: Dict[str, Any] = Field(default_factory=dict)  # per-layer server config
     # Cross-domain lineage: upstream tables not managed by this registry
     external_sources: List[Dict[str, Any]] = Field(default_factory=list)
@@ -195,11 +230,20 @@ class DomainRegistry(BaseModel):
             sub_map = env_config.model_dump(exclude_none=True)
 
         # 2. Inject environment tokens + registry-level vars into storage paths
-        sub_map["domain"] = registry.domain
-        sub_map["system"] = registry.system
-        sub_map["bronze_layer"] = registry.bronze_layer
-        sub_map["silver_layer"] = registry.silver_layer
-        sub_map["gold_layer"] = registry.gold_layer
+        sub_map.setdefault("domain", registry.domain)
+        sub_map.setdefault("system", registry.system)
+        sub_map.setdefault("bronze_layer", registry.bronze_layer)
+        sub_map.setdefault("silver_layer", registry.silver_layer)
+        sub_map.setdefault("gold_layer", registry.gold_layer)
+
+        # Self-resolve: allow env values to reference each other,
+        # e.g. storage_root: "abfss://nondelta@{storage_account}.dfs..."
+        #      data_root:    "abfss://{domain}@{storage_account}.dfs..."
+        for _pass in range(2):  # two passes handles chained refs
+            sub_map = {
+                k: v.format_map(defaultdict(lambda: None, **sub_map)) if isinstance(v, str) and "{" in v else v
+                for k, v in sub_map.items()
+            }
         if sub_map:
             for field, val in registry.storage.model_dump().items():
                 if isinstance(val, str) and "{" in val:
@@ -208,6 +252,20 @@ class DomainRegistry(BaseModel):
                         setattr(registry.storage, field, new_val)
                     except KeyError as e:
                         logger.warning(f"Could not resolve template var {e} in storage.{field}: {val}")
+
+        # 2b. Resolve template vars in system-level quarantine, metadata, lineage
+        #     These may reference resolved storage fields (e.g. {quarantine_path}).
+        _full_vars = dict(sub_map)
+        for field, val in registry.storage.model_dump().items():
+            if val is not None:
+                _full_vars[field] = val
+        for section_name in ("quarantine", "metadata", "lineage"):
+            section = getattr(registry, section_name, None)
+            if section and isinstance(section, dict):
+                setattr(registry, section_name, _resolve_placeholders(section, _full_vars))
+        # Resolve notifications list (URLs may contain placeholders)
+        if registry.notifications:
+            registry.notifications = _resolve_placeholders(registry.notifications, _full_vars)
 
         # 3. Resolve actual DataContracts and absolute paths
         for c in registry.contracts:
@@ -255,6 +313,12 @@ class DomainRegistry(BaseModel):
                 storage_vars["bronze_layer"] = registry.bronze_layer
                 storage_vars["silver_layer"] = registry.silver_layer
                 storage_vars["gold_layer"] = registry.gold_layer
+                # Inject lineage column names so contracts can reference them
+                # as {timestamp_column_name}, {source_column_name}, etc.
+                if registry.lineage:
+                    for lk, lv in registry.lineage.items():
+                        if isinstance(lv, str):
+                            storage_vars.setdefault(lk, lv)
                 storage_vars.update(sub_map)  # env vars (catalog, storage_account, etc.)
                 # In "direct" mode (Azure Functions / non-Spark), override UC
                 # _root variables with their ADLS _path equivalents so that

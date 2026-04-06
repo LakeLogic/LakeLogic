@@ -16,7 +16,7 @@ good_df, bad_df = processor.run(df)
 
 ### Constructor
 
-- `engine` (str): `polars`, `pandas`, `duckdb`, `spark`, `snowflake`, or `bigquery`
+- `engine` (str): `polars`, `spark`, `snowflake`, or `bigquery`
 - `contract` (str | Path | dict | DataContract): YAML path or dict
 - `stage` (str | None): Apply contract stage overrides (e.g., `bronze`, `silver`)
 

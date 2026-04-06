@@ -309,8 +309,7 @@ class MaskingEngine:
         if strategy in _DEPRECATED_STRATEGIES:
             resolved = _DEPRECATED_STRATEGIES[strategy]
             logger.warning(
-                f"Masking strategy '{strategy}' is deprecated — "
-                f"using '{resolved}' instead. Update your contract."
+                f"Masking strategy '{strategy}' is deprecated — using '{resolved}' instead. Update your contract."
             )
             strategy = resolved
 
@@ -364,7 +363,7 @@ class MaskingEngine:
             names = ", ".join(f.name for f in fields_without_masking)
             logger.warning(
                 f"PII fields detected without masking strategy: [{names}]. "
-                f"Set 'masking:' (nullify|hash|redact|partial|tokenize|encrypt) "
+                f"Set 'masking:' (nullify|hash|redact|partial|encrypt) "
                 f"in your contract to enable masking for these fields."
             )
 

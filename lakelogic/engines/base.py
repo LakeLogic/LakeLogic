@@ -14,7 +14,7 @@ from lakelogic.core.models import (
     RowRuleLifecycleWindow,
     RowRuleNotNull,
     RowRuleRange,
-    RowRuleReferentialIntegrity, 
+    RowRuleReferentialIntegrity,
     RowRuleRegexMatch,
 )
 

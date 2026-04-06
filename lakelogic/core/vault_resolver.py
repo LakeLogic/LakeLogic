@@ -46,7 +46,6 @@ from __future__ import annotations
 
 import os
 from typing import Any, Dict, Optional
-from functools import lru_cache
 
 from loguru import logger
 
@@ -106,23 +105,16 @@ def resolve_encryption_key(pii_vault_uri: Optional[str] = None) -> str:
         if key:
             _KEY_CACHE[uri] = key
             # Log success without revealing the key
-            logger.info(
-                f"Resolved encryption key from '{_safe_uri(uri)}' "
-                f"({len(key)} chars)"
-            )
+            logger.info(f"Resolved encryption key from '{_safe_uri(uri)}' ({len(key)} chars)")
             return key
         else:
             logger.warning(
-                f"Vault resolver returned empty key for '{_safe_uri(uri)}' "
-                f"— falling back to ${_ENV_FALLBACK_VAR}"
+                f"Vault resolver returned empty key for '{_safe_uri(uri)}' — falling back to ${_ENV_FALLBACK_VAR}"
             )
             return os.environ.get(_ENV_FALLBACK_VAR, "")
 
     except Exception as exc:
-        logger.warning(
-            f"Failed to resolve key from '{_safe_uri(uri)}': {exc} "
-            f"— falling back to ${_ENV_FALLBACK_VAR}"
-        )
+        logger.warning(f"Failed to resolve key from '{_safe_uri(uri)}': {exc} — falling back to ${_ENV_FALLBACK_VAR}")
         return os.environ.get(_ENV_FALLBACK_VAR, "")
 
 
@@ -232,10 +224,7 @@ def _resolve_azure_keyvault(uri: str) -> Optional[str]:
     path = uri.split("://", 1)[1] if "://" in uri else uri
     parts = path.split("/")
     if len(parts) < 2:
-        raise ValueError(
-            f"Invalid keyvault URI: '{uri}'. "
-            f"Expected: keyvault://vault-name/secret-name"
-        )
+        raise ValueError(f"Invalid keyvault URI: '{uri}'. Expected: keyvault://vault-name/secret-name")
 
     vault_name = parts[0]
     secret_name = parts[1]
@@ -253,18 +242,13 @@ def _resolve_azure_keyvault(uri: str) -> Optional[str]:
         from azure.identity import DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
     except ImportError:
-        raise ImportError(
-            "Azure Key Vault integration requires: "
-            "pip install azure-identity azure-keyvault-secrets"
-        )
+        raise ImportError("Azure Key Vault integration requires: pip install azure-identity azure-keyvault-secrets")
 
     credential = DefaultAzureCredential()
     client = SecretClient(vault_url=vault_url, credential=credential)
 
     secret = client.get_secret(secret_name, version=version)
-    logger.debug(
-        f"Fetched secret '{secret_name}' from Azure Key Vault '{vault_url}'"
-    )
+    logger.debug(f"Fetched secret '{secret_name}' from Azure Key Vault '{vault_url}'")
     return secret.value
 
 
@@ -282,10 +266,7 @@ def _resolve_databricks(uri: str) -> Optional[str]:
     path = uri.split("://", 1)[1] if "://" in uri else uri
     parts = path.split("/")
     if len(parts) < 2:
-        raise ValueError(
-            f"Invalid databricks URI: '{uri}'. "
-            f"Expected: databricks://scope-name/key-name"
-        )
+        raise ValueError(f"Invalid databricks URI: '{uri}'. Expected: databricks://scope-name/key-name")
 
     scope = parts[0]
     key_name = parts[1]
@@ -322,8 +303,7 @@ def _resolve_databricks(uri: str) -> Optional[str]:
 
         if dbutils is None:
             raise RuntimeError(
-                "dbutils not available — Databricks secret scopes only work "
-                "inside a Databricks notebook or job."
+                "dbutils not available — Databricks secret scopes only work inside a Databricks notebook or job."
             )
 
         value = dbutils.secrets.get(scope=scope, key=key_name)
@@ -331,9 +311,7 @@ def _resolve_databricks(uri: str) -> Optional[str]:
         return value
 
     except Exception as exc:
-        raise RuntimeError(
-            f"Failed to fetch Databricks secret '{scope}/{key_name}': {exc}"
-        ) from exc
+        raise RuntimeError(f"Failed to fetch Databricks secret '{scope}/{key_name}': {exc}") from exc
 
 
 # ── Environment Variable ───────────────────────────────────────────────────
@@ -367,10 +345,7 @@ def _resolve_hashicorp(uri: str) -> Optional[str]:
     try:
         import hvac
     except ImportError:
-        logger.warning(
-            f"HashiCorp Vault integration requires: pip install hvac. "
-            f"Falling back to environment variable."
-        )
+        logger.warning("HashiCorp Vault integration requires: pip install hvac. Falling back to environment variable.")
         return None
 
     vault_addr = os.environ.get("VAULT_ADDR")
@@ -413,10 +388,7 @@ def _resolve_aws(uri: str) -> Optional[str]:
     try:
         import boto3
     except ImportError:
-        logger.warning(
-            f"AWS integration requires: pip install boto3. "
-            f"Falling back to environment variable."
-        )
+        logger.warning("AWS integration requires: pip install boto3. Falling back to environment variable.")
         return None
 
     try:

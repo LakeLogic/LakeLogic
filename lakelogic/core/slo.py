@@ -19,14 +19,24 @@ from lakelogic.core.registry import DomainRegistry
 class SLOCheckResult(BaseModel):
     layer: str
     entity: str
+    check_type: str = "freshness"  # freshness | row_count | quality | schedule
     status: str
     passed: bool
+    severity: str = "fail"  # "pass" | "warn" | "fail"
     latest_ts: Optional[str] = None
     delay_minutes: Optional[float] = None
     slo_max_minutes: Optional[int] = None
     row_count: Optional[int] = None
     slo_min_rows: Optional[int] = None
     slo_max_rows: Optional[int] = None
+    # Anomaly detection
+    anomaly_ratio: Optional[float] = None  # actual / baseline
+    anomaly_baseline: Optional[float] = None  # median/avg of lookback
+    # Quality
+    quality_ratio: Optional[float] = None
+    quality_severity: Optional[str] = None  # highest failing severity
+    # Duration
+    duration_seconds: Optional[float] = None
 
 
 class SLOReport(BaseModel):
@@ -282,42 +292,224 @@ class SLOValidator:
 
         return results
 
-    def check_schedule(self) -> Optional[SLOCheckResult]:
+    def check_schedule(self, environment: Optional[str] = None) -> List[SLOCheckResult]:
         """
-        Check if the pipeline completed before the expected UTC deadline.
+        Check schedule SLOs: completion deadline, start-time, and duration.
+
+        Respects ``schedule.environments`` — if the current environment is not
+        in the list, checks are skipped.
         """
+        results = []
         now = datetime.datetime.now(datetime.timezone.utc)
         schedule = self.registry.slo.schedule
 
-        if not schedule or not schedule.expected_completion_utc:
+        if not schedule:
+            return results
+
+        # Environment filter
+        if schedule.environments and environment:
+            if environment not in schedule.environments:
+                return results
+
+        # Completion deadline
+        if schedule.expected_completion_utc:
+            try:
+                expected_hour, expected_min = map(int, schedule.expected_completion_utc.split(":"))
+                deadline = now.replace(hour=expected_hour, minute=expected_min, second=0, microsecond=0)
+
+                if now <= deadline:
+                    results.append(
+                        SLOCheckResult(
+                            layer="schedule",
+                            entity="pipeline",
+                            check_type="schedule",
+                            status="✅ ON TIME",
+                            passed=True,
+                            severity="pass",
+                            delay_minutes=round((now - deadline).total_seconds() / 60, 1),
+                        )
+                    )
+                else:
+                    results.append(
+                        SLOCheckResult(
+                            layer="schedule",
+                            entity="pipeline",
+                            check_type="schedule",
+                            status=f"❌ LATE by {(now - deadline).total_seconds() / 60:.0f} min",
+                            passed=False,
+                            severity="fail",
+                            delay_minutes=round((now - deadline).total_seconds() / 60, 1),
+                        )
+                    )
+            except Exception as e:
+                logger.error(f"Failed to parse schedule SLO: {e}")
+
+        # Start-time check
+        if schedule.expected_start_utc:
+            try:
+                sh, sm = map(int, schedule.expected_start_utc.split(":"))
+                start_deadline = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                if now > start_deadline:
+                    # Pipeline should have started by now — check via run log
+                    results.append(
+                        SLOCheckResult(
+                            layer="schedule",
+                            entity="pipeline_start",
+                            check_type="schedule",
+                            status="⚠️ Check if pipeline has started",
+                            passed=True,
+                            severity="warn",
+                        )
+                    )
+            except Exception:
+                pass
+
+        return results
+
+    def check_quality(self, report: Optional[Dict[str, Any]] = None) -> List[SLOCheckResult]:
+        """
+        Evaluate quality SLOs using quarantine ratios and severity-weighted thresholds.
+        """
+        results = []
+        quality = self.registry.slo.quality
+        if not quality or not report:
+            return results
+
+        counts = report.get("counts", {}) or {}
+        total = counts.get("total") or counts.get("source") or 0
+        good = counts.get("good") or 0
+        quarantined = counts.get("quarantined") or 0
+
+        if total == 0:
+            return results
+
+        good_ratio = good / total
+        quarantine_ratio = quarantined / total if total > 0 else 0.0
+
+        # Top-level quality check
+        passed = good_ratio >= quality.min_good_ratio and quarantine_ratio <= quality.max_quarantine_ratio
+        status = (
+            f"✅ OK (good={good_ratio:.1%})"
+            if passed
+            else f"❌ QUALITY ({good_ratio:.1%} good, {quarantine_ratio:.1%} quarantined)"
+        )
+
+        results.append(
+            SLOCheckResult(
+                layer="quality",
+                entity="pipeline",
+                check_type="quality",
+                status=status,
+                passed=passed,
+                severity="pass" if passed else "fail",
+                quality_ratio=round(good_ratio, 4),
+            )
+        )
+
+        # Severity-weighted checks
+        if quality.by_severity and report.get("rule_failures_by_severity"):
+            failures_by_severity = report["rule_failures_by_severity"]
+            highest_failing = None
+            for sev in ["critical", "high", "medium", "low"]:
+                threshold = quality.by_severity.get(sev)
+                if not threshold:
+                    continue
+                sev_failures = failures_by_severity.get(sev, 0)
+                sev_total = total
+                sev_good_ratio = (sev_total - sev_failures) / sev_total if sev_total > 0 else 1.0
+                if sev_good_ratio < threshold.min_good_ratio:
+                    highest_failing = sev
+                    results.append(
+                        SLOCheckResult(
+                            layer="quality",
+                            entity=f"severity_{sev}",
+                            check_type="quality",
+                            status=f"❌ {sev.upper()} quality breach ({sev_good_ratio:.1%} < {threshold.min_good_ratio:.1%})",
+                            passed=False,
+                            severity="fail" if sev in ("critical", "high") else "warn",
+                            quality_ratio=round(sev_good_ratio, 4),
+                            quality_severity=sev,
+                        )
+                    )
+
+        return results
+
+    def check_row_count_anomaly(
+        self, entity: str, layer: str, actual_count: int, anomaly_cfg
+    ) -> Optional[SLOCheckResult]:
+        """
+        Compare actual row count against historical baseline from run logs.
+        """
+        if not anomaly_cfg or not anomaly_cfg.enabled:
             return None
 
-        time_str = schedule.expected_completion_utc
+        if not self.spark:
+            return None
+
+        storage = self.registry.storage
+        run_log_table = storage.run_log_table
+        if not run_log_table:
+            return None
+
+        run_log_clean = run_log_table.replace("`", "")
+
         try:
-            expected_hour, expected_min = map(int, time_str.split(":"))
-            deadline = now.replace(hour=expected_hour, minute=expected_min, second=0, microsecond=0)
-
-            if now <= deadline:
-                return SLOCheckResult(
-                    layer="schedule",
-                    entity="pipeline",
-                    status="✅ ON TIME",
-                    passed=True,
-                    delay_minutes=round((now - deadline).total_seconds() / 60, 1),
-                )
-            else:
-                return SLOCheckResult(
-                    layer="schedule",
-                    entity="pipeline",
-                    status=f"❌ LATE by {(now - deadline).total_seconds() / 60:.0f} min",
-                    passed=False,
-                    delay_minutes=round((now - deadline).total_seconds() / 60, 1),
-                )
+            rows = self.spark.sql(f"""
+                SELECT {anomaly_cfg.check_field if hasattr(anomaly_cfg, "check_field") else "counts_good"} as cnt
+                FROM {run_log_clean}
+                WHERE data_layer = '{layer}'
+                  AND dataset = '{entity}'
+                  AND stage NOT IN ('no_new_data', 'reprocess')
+                ORDER BY timestamp DESC
+                LIMIT {anomaly_cfg.lookback_runs}
+            """).collect()
         except Exception as e:
-            logger.error(f"Failed to parse or evaluate schedule SLO: {e}")
+            logger.debug(f"Anomaly check query failed for {entity}: {e}")
             return None
 
-    def run_checks(self) -> SLOReport:
+        historical = [r["cnt"] for r in rows if r["cnt"] is not None]
+
+        if len(historical) < anomaly_cfg.min_runs_before_enforcement:
+            logger.debug(
+                f"Anomaly check skipped for {entity}: only {len(historical)} "
+                f"runs (need {anomaly_cfg.min_runs_before_enforcement})"
+            )
+            return None
+
+        # Compute baseline
+        if anomaly_cfg.method == "median":
+            sorted_h = sorted(historical)
+            mid = len(sorted_h) // 2
+            baseline = sorted_h[mid] if len(sorted_h) % 2 == 1 else (sorted_h[mid - 1] + sorted_h[mid]) / 2
+        else:  # rolling_average
+            baseline = sum(historical) / len(historical)
+
+        if baseline == 0:
+            return None
+
+        ratio = actual_count / baseline
+        passed = anomaly_cfg.min_ratio <= ratio <= anomaly_cfg.max_ratio
+
+        if passed:
+            status = f"✅ OK (ratio={ratio:.2f}x vs {anomaly_cfg.method})"
+        elif ratio < anomaly_cfg.min_ratio:
+            status = f"❌ VOLUME DROP ({ratio:.2f}x < {anomaly_cfg.min_ratio}x baseline)"
+        else:
+            status = f"❌ VOLUME SPIKE ({ratio:.2f}x > {anomaly_cfg.max_ratio}x baseline)"
+
+        return SLOCheckResult(
+            layer=layer,
+            entity=entity,
+            check_type="row_count",
+            status=status,
+            passed=passed,
+            severity="pass" if passed else "warn",
+            row_count=actual_count,
+            anomaly_ratio=round(ratio, 4),
+            anomaly_baseline=round(baseline, 1),
+        )
+
+    def run_checks(self, environment: Optional[str] = None, report: Optional[Dict[str, Any]] = None) -> SLOReport:
         """
         Run all configured SLO checks and return a unified report.
         """
@@ -330,9 +522,11 @@ class SLOValidator:
         if self.registry.slo.row_count:
             results.extend(self.check_row_counts())
 
-        schedule_res = self.check_schedule()
-        if schedule_res:
-            results.append(schedule_res)
+        schedule_results = self.check_schedule(environment=environment)
+        results.extend(schedule_results)
+
+        quality_results = self.check_quality(report=report)
+        results.extend(quality_results)
 
         failures = [r for r in results if not r.passed]
 
@@ -465,12 +659,33 @@ def _compute_freshness(good_df: Any, freshness_obj: Any, engine_name: str) -> Di
     delay_secs = (now - max_ts).total_seconds()
     passed = delay_secs <= threshold_secs
 
-    return {
+    result = {
         "field": field,
         "threshold": str(threshold),
         "delay_seconds": round(delay_secs, 1),
         "passed": passed,
     }
+
+    # Source-time freshness (if configured at contract level)
+    source_field = (
+        freshness_obj.get("source_field")
+        if isinstance(freshness_obj, dict)
+        else getattr(freshness_obj, "source_field", None)
+    )
+    source_threshold = (
+        freshness_obj.get("source_threshold")
+        if isinstance(freshness_obj, dict)
+        else getattr(freshness_obj, "source_threshold", None)
+    )
+    if source_field:
+        source_ts = _get_max_timestamp(good_df, source_field, engine_name)
+        source_threshold_secs = _parse_duration_seconds(source_threshold)
+        if source_ts is not None and source_threshold_secs is not None:
+            source_delay = (now - source_ts).total_seconds()
+            result["source_age_seconds"] = round(source_delay, 1)
+            result["source_passed"] = source_delay <= source_threshold_secs
+
+    return result
 
 
 def _compute_availability(
@@ -511,28 +726,76 @@ def _compute_availability(
     }
 
 
+def _merge_slo_config(system_slo: Optional[Dict[str, Any]], contract_slo: Any) -> Dict[str, Any]:
+    """Merge contract-level SLOs over system-level defaults (deep merge).
+
+    Contract-level values take precedence. If a contract doesn't define
+    a specific SLO section, the system default applies.
+    """
+    merged: Dict[str, Any] = {}
+    if system_slo:
+        merged.update(system_slo)
+    if contract_slo is None:
+        return merged
+    contract_dict = (
+        contract_slo
+        if isinstance(contract_slo, dict)
+        else (contract_slo.model_dump() if hasattr(contract_slo, "model_dump") else {})
+    )
+    for k, v in contract_dict.items():
+        if v is None:
+            continue
+        if isinstance(v, dict) and k in merged and isinstance(merged[k], dict):
+            merged[k] = {**merged[k], **v}
+        else:
+            merged[k] = v
+    return merged
+
+
 def compute_slos(
     contract: Any,
     good_df: Any,
     counts: Dict[str, Optional[int]],
     engine_name: str,
+    registry_slo: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Compute per-contract SLO scores (freshness + availability).
+    """Compute per-contract SLO scores (freshness + availability + quality).
 
     This is the lightweight, per-run variant used by ``DataProcessor.run()``.
     For domain-wide SLO checks, use :class:`SLOValidator`.
+
+    Parameters
+    ----------
+    contract : DataContract
+        The contract being processed.
+    good_df : DataFrame
+        The good (non-quarantined) output dataframe.
+    counts : dict
+        Row counts dict (source, good, quarantined, total).
+    engine_name : str
+        Engine name (polars, pandas, spark, duckdb).
+    registry_slo : RegistrySLO, optional
+        System-level SLO config from the registry. Used as defaults when
+        the contract doesn't define its own ``service_levels``.
     """
-    slo_cfg = getattr(contract, "service_levels", None)
-    if slo_cfg is None:
+    contract_slo = getattr(contract, "service_levels", None)
+
+    # Merge contract-level overrides with system-level defaults
+    system_slo_dict = None
+    if registry_slo:
+        system_slo_dict = registry_slo.model_dump() if hasattr(registry_slo, "model_dump") else {}
+    slo_cfg = _merge_slo_config(system_slo_dict, contract_slo)
+
+    if not slo_cfg:
         return {}
 
     result: Dict[str, Any] = {}
 
-    freshness = slo_cfg.get("freshness") if isinstance(slo_cfg, dict) else getattr(slo_cfg, "freshness", None)
+    freshness = slo_cfg.get("freshness")
     if freshness:
         result["freshness"] = _compute_freshness(good_df, freshness, engine_name)
 
-    availability = slo_cfg.get("availability") if isinstance(slo_cfg, dict) else getattr(slo_cfg, "availability", None)
+    availability = slo_cfg.get("availability")
     if availability:
         result["availability"] = _compute_availability(good_df, counts, availability, engine_name)
 

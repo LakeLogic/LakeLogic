@@ -118,8 +118,8 @@ class DeltaAdapter:
         self._ensure_delta_available()
         from deltalake import DeltaTable
 
+        from lakelogic.engines.catalog_resolver import resolve_catalog_path
         from lakelogic.engines.cloud_credentials import resolve_storage_options
-        from lakelogic.engines.unity_catalog import resolve_catalog_path
 
         # Resolve catalog table names (Unity Catalog, Fabric, Synapse)
         resolved_path = resolve_catalog_path(path)
@@ -138,7 +138,9 @@ class DeltaAdapter:
 
         # Convert to DataFrame
         if as_polars:
-            df = dt.to_polars()
+            import polars as pl
+
+            df = pl.from_arrow(dt.to_pyarrow_table())
             if columns:
                 df = df.select(columns)
             return df
@@ -194,6 +196,8 @@ class DeltaAdapter:
             storage_options = resolve_storage_options(path, storage_options)
 
         # Write Delta table
+        # The pyarrow engine does not support schema_mode='merge'; use rust engine.
+        write_engine = "rust" if schema_mode == "merge" else "pyarrow"
         write_deltalake(
             path,
             df,
@@ -201,6 +205,7 @@ class DeltaAdapter:
             storage_options=storage_options,
             partition_by=partition_by,
             schema_mode=schema_mode,
+            engine=write_engine,
         )
 
     def merge(

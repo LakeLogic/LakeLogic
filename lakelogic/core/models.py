@@ -297,13 +297,27 @@ class SourceConfig(BaseModel):
     flatten_nested: Union[bool, List[str]] = False
 
     _SOURCE_KNOWN_KEYS: set = {
-        "type", "path", "format", "load_mode", "pattern",
-        "watermark_field", "cdc_op_field", "cdc_delete_values",
-        "cdc_timestamp_field", "partition", "options",
-        "watermark_strategy", "target_path", "lookback",
-        "from_date", "to_date", "pipeline_log_table",
-        "pipeline_name", "manifest_path",
-        "watermark_date_parts", "partition_filters",
+        "type",
+        "path",
+        "format",
+        "load_mode",
+        "pattern",
+        "watermark_field",
+        "cdc_op_field",
+        "cdc_delete_values",
+        "cdc_timestamp_field",
+        "partition",
+        "options",
+        "watermark_strategy",
+        "target_path",
+        "lookback",
+        "from_date",
+        "to_date",
+        "pipeline_log_table",
+        "pipeline_name",
+        "manifest_path",
+        "watermark_date_parts",
+        "partition_filters",
         "flatten_nested",
     }
 
@@ -1031,16 +1045,29 @@ class Materialization(BaseModel):
     table_properties: Optional[Dict[str, str]] = None  # e.g. {'delta.autoOptimize.optimizeWrite': 'true'}
     compaction: Optional[Dict[str, Any]] = None  # e.g. {'auto': True, 'vacuum_retention_hours': 168}
     unknown_member: Optional[Dict[str, Any]] = None  # Kimball unknown member row for dimensions
+    merge_dedup_guard: Optional[bool] = False
 
     _MAT_KNOWN_KEYS: set = {
-        "strategy", "partition_by", "cluster_by", "reprocess_policy",
-        "reprocess_date_column", "target_path", "format", "location",
-        "scd2", "scd1", "fact",
-        "soft_delete_column", "soft_delete_value",
-        "soft_delete_time_column", "soft_delete_reason_column",
-        "table_properties", "compaction", "unknown_member",
+        "strategy",
+        "partition_by",
+        "cluster_by",
+        "reprocess_policy",
+        "reprocess_date_column",
+        "target_path",
+        "format",
+        "location",
+        "scd2",
+        "scd1",
+        "fact",
+        "soft_delete_column",
+        "soft_delete_value",
+        "soft_delete_time_column",
+        "soft_delete_reason_column",
+        "table_properties",
+        "compaction",
+        "unknown_member",
+        "merge_dedup_guard",
     }
-
 
     @model_validator(mode="after")
     def _validate_strategy_alignment(self) -> "Materialization":
@@ -1300,15 +1327,27 @@ class LineageConfig(BaseModel):
     run_id_source: str = "run_id"  # run_id | pipeline_run_id
 
     _LINEAGE_KNOWN_KEYS: set = {
-        "enabled", "capture_source_path", "capture_timestamp",
-        "capture_run_id", "source_column_name", "timestamp_column_name",
-        "run_id_column_name", "capture_contract_name",
-        "contract_name_column_name", "capture_domain", "capture_system",
-        "domain_column_name", "system_column_name",
-        "capture_created_at", "created_at_column_name",
-        "capture_created_by", "created_by_column_name",
-        "created_by_override", "preserve_upstream",
-        "upstream_prefix", "run_id_source",
+        "enabled",
+        "capture_source_path",
+        "capture_timestamp",
+        "capture_run_id",
+        "source_column_name",
+        "timestamp_column_name",
+        "run_id_column_name",
+        "capture_contract_name",
+        "contract_name_column_name",
+        "capture_domain",
+        "capture_system",
+        "domain_column_name",
+        "system_column_name",
+        "capture_created_at",
+        "created_at_column_name",
+        "capture_created_by",
+        "created_by_column_name",
+        "created_by_override",
+        "preserve_upstream",
+        "upstream_prefix",
+        "run_id_source",
     }
 
     @model_validator(mode="after")
@@ -1337,7 +1376,6 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
         return data  # Not ODCS or already LakeLogic
 
     lakelogic_data = {}
-
 
     # 1. Map root properties
     # LakeLogic requires a version. We'll use the ODCS apiVersion.
@@ -1505,24 +1543,64 @@ class DataContract(BaseModel):
     # they are injected at runtime by the processor / pipeline runner.
     _KNOWN_KEYS: set = {
         # Pydantic-declared fields
-        "version", "info", "metadata", "server", "source", "environments",
-        "links", "dataset", "primary_key", "natural_key", "lineage",
-        "materialization", "logic", "external_logic", "extraction",
-        "upstream", "downstream", "schedule", "schema_policy", "model",
-        "quality", "transformations", "service_levels", "quarantine",
-        "tier", "layer", "target_layer",
+        "version",
+        "info",
+        "metadata",
+        "server",
+        "source",
+        "environments",
+        "links",
+        "dataset",
+        "primary_key",
+        "natural_key",
+        "lineage",
+        "materialization",
+        "logic",
+        "external_logic",
+        "extraction",
+        "upstream",
+        "downstream",
+        "schedule",
+        "schema_policy",
+        "model",
+        "quality",
+        "transformations",
+        "service_levels",
+        "quarantine",
+        "tier",
+        "layer",
+        "target_layer",
         # Recognised shorthand blocks (handled by interceptors)
         "soft_deletes",
         # ODCS / alternative schema keys accepted by _odcs_interceptor
-        "schema", "tables", "columns", "properties", "fields",
-        "kind", "apiVersion", "type", "status", "description",
-        "datasetDomain", "quantumName", "datasetName",
-        "driver", "driverVersion", "servers",
-        "price", "stakeholders", "roles", "slaDefaultColumn",
-        "slaProperties", "tags", "customProperties",
+        "schema",
+        "tables",
+        "columns",
+        "properties",
+        "fields",
+        "kind",
+        "apiVersion",
+        "type",
+        "status",
+        "description",
+        "datasetDomain",
+        "quantumName",
+        "datasetName",
+        "driver",
+        "driverVersion",
+        "servers",
+        "price",
+        "stakeholders",
+        "roles",
+        "slaDefaultColumn",
+        "slaProperties",
+        "tags",
+        "customProperties",
     }
     _PRIVATE_EXTRA_KEYS: set = {
-        "_base_path", "_contract_path", "_resolved_by_pipeline",
+        "_base_path",
+        "_contract_path",
+        "_resolved_by_pipeline",
     }
 
     @model_validator(mode="after")
@@ -1534,7 +1612,6 @@ class DataContract(BaseModel):
             "contract",
         )
         return self
-
 
     @model_validator(mode="after")
     def _validate_incremental_requires_run_log(self) -> "DataContract":
@@ -1627,14 +1704,22 @@ class DataContract(BaseModel):
                 )
 
         elif load_mode == "cdc":
-            if not getattr(source, "cdc_op_field", None):
+            has_op_field = bool(getattr(source, "cdc_op_field", None))
+            has_ts_field = bool(getattr(source, "cdc_timestamp_field", None))
+            if not has_op_field and not has_ts_field:
                 raise ValueError(
-                    "source.load_mode is 'cdc' but cdc_op_field is not set. "
-                    "This field must specify the column indicating the CDC operation type.\n\n"
-                    "  source:\n"
-                    "    load_mode: cdc\n"
-                    "    cdc_op_field: _operation\n"
-                    '    cdc_delete_values: ["D", "DELETE"]'
+                    "source.load_mode is 'cdc' but neither cdc_op_field nor "
+                    "cdc_timestamp_field is set. At least one is required.\n\n"
+                    "  For full CDC (with operation flags):\n"
+                    "    source:\n"
+                    "      load_mode: cdc\n"
+                    "      cdc_op_field: _operation\n"
+                    '      cdc_delete_values: ["D", "DELETE"]\n'
+                    "      cdc_timestamp_field: _lakelogic_processed_at\n\n"
+                    "  For timestamp-only incremental (table-to-table):\n"
+                    "    source:\n"
+                    "      load_mode: cdc\n"
+                    "      cdc_timestamp_field: _lakelogic_processed_at"
                 )
 
         return self
@@ -1780,8 +1865,25 @@ class DataContract(BaseModel):
                 p = _P(_base) / p
             return p
 
-        def _delete(p: "Path") -> bool:
+        def _delete(p: "Path", raw: str) -> bool:
             """Delete file or directory tree. Returns True if something was removed."""
+            if "://" in raw and not raw.startswith("file://"):
+                try:
+                    import fsspec
+
+                    fs, fs_path = fsspec.core.url_to_fs(raw)
+                    if fs.exists(fs_path):
+                        fs.rm(fs_path, recursive=True)
+                        return True
+                    return False
+                except ImportError:
+                    pass  # Fall back to local pathlib if fsspec missing
+                except Exception as e:
+                    import logging
+
+                    logging.getLogger(__name__).warning(f"Could not delete cloud URI {raw}: {e}")
+                    return False
+
             if not p.exists():
                 return False
             if p.is_dir():
@@ -1807,9 +1909,9 @@ class DataContract(BaseModel):
                         "dry_run": True,
                     }
                 else:
-                    deleted = _delete(p)
+                    deleted = _delete(p, mat_path)
                     report["materialization"] = {
-                        "path": str(p),
+                        "path": str(mat_path),
                         "deleted": deleted,
                         "dry_run": False,
                     }
@@ -1909,6 +2011,7 @@ class DataContract(BaseModel):
                                     _deleted = True
                                     logger.info(f"Reset: deleted {path_part}")
                                 else:
+                                    _deleted = True
                                     logger.info(f"Reset: cloud path {path_part} does not exist")
                             except Exception as _fs_exc:
                                 logger.debug(f"Reset: fsspec delete failed: {_fs_exc}")
@@ -1958,9 +2061,9 @@ class DataContract(BaseModel):
                         "dry_run": True,
                     }
                 else:
-                    deleted = _delete(p)
+                    deleted = _delete(p, q_target)
                     report["quarantine"] = {
-                        "path": str(p),
+                        "path": str(q_target),
                         "deleted": deleted,
                         "dry_run": False,
                     }

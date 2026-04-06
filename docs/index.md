@@ -463,7 +463,7 @@ With LakeLogic, your **Data Contract is the Source of Truth**.
 | Feature | Description |
 | :--- | :--- |
 | **Declarative Contracts** | Human-readable YAML defines schema, rules, and transforms. |
-| **Engine Agnostic** | Auto-discovers and optimizes for Spark, Polars, DuckDB, or Pandas. |
+| **Engine Agnostic** | Auto-discovers and optimizes for Spark or Polars. |
 | **SQL-First Rules** | Use standard SQL for Completeness, Correctness, and Consistency checks. |
 | **Safe Quarantine** | Isolate bad rows without crashing the pipeline, with built-in reason codes. |
 | **Lineage Injection** | Automatically audit every record with Run IDs, Timestamps, and Source paths. |

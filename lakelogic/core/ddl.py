@@ -523,7 +523,9 @@ def generate_ddl(
         props_dict = dict(table_props)
         if "delta.enableDeletionVectors" not in props_dict:
             props_dict["delta.enableDeletionVectors"] = "false"
-        props = ", ".join(f"'{k}' = {v if str(v).lower() in ('true', 'false') else f'{v}'}" for k, v in props_dict.items())
+        props = ", ".join(
+            f"'{k}' = {v if str(v).lower() in ('true', 'false') else f'{v}'}" for k, v in props_dict.items()
+        )
         ddl += f"\nTBLPROPERTIES ({props})"
 
     # LOCATION (Spark/Databricks external tables)

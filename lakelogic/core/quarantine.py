@@ -23,7 +23,6 @@ from lakelogic.core.materialization import (
     _write_frame,
     _read_frame,
     _is_polars_frame,
-    _row_count,
     _frame_has_columns,
     _append_without_pandas,
     _pandas_available,
@@ -537,6 +536,25 @@ def materialize_quarantine(
     if not _already_stamped:
         df = _stamp_quarantine_lineage(df, contract)
 
+    # ── Empty row guard (skip writing altogether to avoid writer crashes) ──
+    try:
+        from lakelogic.core.materialization import _row_count
+
+        _rc = _row_count(df)
+        if _rc is None and hasattr(df, "collect"):
+            _rc = int(df.collect().height)
+
+        if _rc == 0:
+            logger.info("Quarantine materialization skipped: 0 bad rows.")
+            _qtarget = contract.quarantine.target if contract.quarantine else "quarantine"
+            return {
+                "target": str(target_path or _qtarget),
+                "rows_written": 0,
+                "format": output_format or "unknown",
+            }
+    except Exception:
+        pass
+
     mode = (quarantine_mode or "path").lower().strip()
     q = contract.quarantine
 
@@ -560,6 +578,15 @@ def materialize_quarantine(
 
     base_path = getattr(contract, "_base_path", None)
     raw_target = str(target_path or contract.quarantine.target)
+
+    # Guard: reject unresolved or invalid targets — quarantine data loss is
+    # a data integrity issue, so we fail hard rather than silently skipping.
+    if not raw_target or raw_target == "None" or "{" in raw_target:
+        raise ValueError(
+            f"Quarantine target not fully resolved: '{raw_target}'. "
+            f"Check that quarantine.target template variables (e.g. {{quarantine_path}}) "
+            f"are defined in _system.yaml storage and environments."
+        )
 
     if raw_target.startswith("table:"):
         table_name = raw_target[len("table:") :]
@@ -588,13 +615,19 @@ def materialize_quarantine(
     write_mode = (getattr(q, "write_mode", None) or metadata.get("quarantine_table_mode") or "append").lower()
 
     # ── Resolve target path / extension ──────────────────────────────────────
-    is_cloud = any(
-        raw_target.startswith(p) for p in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
-    )
+    is_cloud = any(raw_target.startswith(p) for p in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://"))
     if not is_cloud:
         quarantine_target.parent.mkdir(parents=True, exist_ok=True)
-        
+
     target_file = quarantine_target
+
+    # Auto-append dataset name to the path to ensure table isolation
+    dataset_name = contract.dataset or (getattr(contract.info, "table_name", None) if contract.info else None)
+    if dataset_name and not raw_target.startswith("table:"):
+        _target_str = str(target_file).replace("\\", "/")
+        if not _target_str.endswith(f"/{dataset_name}"):
+            target_file = target_file / dataset_name
+
     if target_file.suffix == "":
         resolved_format = resolved_format or "parquet"
         if resolved_format == "delta":
@@ -657,6 +690,7 @@ def materialize_quarantine(
                 collected.to_arrow(),
                 mode=delta_write_mode,
                 schema_mode="merge",
+                engine="rust",
             )
             rows_written = collected.height
         elif hasattr(df, "write"):

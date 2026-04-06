@@ -10,7 +10,7 @@
 
 Stop rewriting ingestion boilerplate. Define a contract — LakeLogic handles the rest.
 
-> LakeLogic automatically enforces schema, data quality, and SCD logic across your medallion architecture. The open-source alternative to Databricks DLT. dbt transformed SQL — LakeLogic does the same for ingestion and dimensional modelling. Powered by Spark, Polars, and DuckDB.
+> LakeLogic automatically enforces schema, data quality, and SCD logic across your medallion architecture. The open-source alternative to Databricks DLT. dbt transformed SQL — LakeLogic does the same for ingestion and dimensional modelling. Powered by Spark and Polars.
 
 ---
 
@@ -232,7 +232,7 @@ Each layer uses its own contract:
 
 | Benefit | Detail |
 | :--- | :--- |
-| **Cut Compute Spend by 80%** | Not every job needs Spark. Run maintenance tasks on Polars or DuckDB locally. |
+| **Cut Compute Spend by 80%** | Not every job needs Spark. Run maintenance tasks on Polars locally. |
 | **Guaranteed Integrity** | Dirty data goes to quarantine — dashboards are never poisoned. |
 | **Full Transparency** | Trace any KPI back to raw source records and the contract that validated them. |
 | **Parallel Development** | Two engineers work on two tables simultaneously without touching the same file. |
@@ -274,7 +274,7 @@ The [examples](https://github.com/LakeLogic/LakeLogic/tree/main/examples) direct
 
 ## Technical Capabilities
 
-- **Engine Agnostic** — Auto-optimizes for Spark, Polars, DuckDB, or Pandas
+- **Engine Agnostic** — Auto-optimizes for Spark or Polars
 - **Incremental-First** — Built-in watermarking, CDC, and file-mtime tracking
 - **SQL-First Rules** — Define business logic in the language your team already speaks
 - **Automatic Lineage** — Every row stamped with Run IDs and source paths

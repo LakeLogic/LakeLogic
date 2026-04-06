@@ -1,12 +1,13 @@
 from pathlib import Path
 
-import pandas as pd
+import pytest
+pd = pytest.importorskip("pandas")
 import yaml
 
 from lakelogic.cli import driver
 
 
-def test_driver_end_to_end_pipeline(tmp_path: Path) -> None:
+def test_e2e_full(tmp_path: Path) -> None:
     data_dir = tmp_path / "landing"
     ref_dir = tmp_path / "reference"
     out_dir = tmp_path / "out"
@@ -142,7 +143,7 @@ def test_driver_end_to_end_pipeline(tmp_path: Path) -> None:
     assert (out_dir / "silver_quarantine.parquet").exists()
 
 
-def test_driver_incremental_window_selection(tmp_path: Path) -> None:
+def test_e2e_inc(tmp_path: Path) -> None:
     import os
     # The incremental validator requires a run-log backend in production.
     # This test exercises file-window selection only — bypass the check.
@@ -191,7 +192,7 @@ def _run_incremental_window_selection(tmp_path: Path) -> None:
     assert df.iloc[0]["policy_id"] == "P-1"
 
 
-def test_driver_reprocess_overwrite_partition_safe(tmp_path: Path) -> None:
+def test_e2e_reproc(tmp_path: Path) -> None:
     data_dir = tmp_path / "landing"
     out_dir = tmp_path / "out"
     data_dir.mkdir()

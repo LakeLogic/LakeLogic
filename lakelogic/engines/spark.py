@@ -759,7 +759,7 @@ class SparkAdapter(EngineAdapter):
         from pyspark.sql import functions as F
 
         if not self.contract.model or not self.contract.model.fields:
-            if self.contract.server and self.contract.server.mode == "ingest" and self.contract.server.cast_to_string:
+            if self.contract.server and self.contract.server.cast_to_string:
                 for col in df.columns:
                     df = df.withColumn(col, F.col(col).cast("string"))
             return df, []
@@ -777,7 +777,7 @@ class SparkAdapter(EngineAdapter):
         cast_to_string = False
         allow_schema_drift = True
 
-        if server and server.mode == "ingest":
+        if server:
             evolution = (server.schema_evolution or "strict").lower()
             cast_to_string = bool(server.cast_to_string)
             allow_schema_drift = bool(server.allow_schema_drift)

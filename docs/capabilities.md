@@ -6,9 +6,7 @@ This matrix summarizes what each engine supports in the OSS runtime. When a feat
 
 | Engine | File Sources | Table Sources | File Outputs | Table Outputs | Quarantine Targets | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Polars | CSV, Parquet, Delta¹ | Delta tables¹ | CSV, Parquet, Delta¹, Iceberg² | Delta tables¹ | DuckDB/SQLite table, Delta¹ file | Delta-RS provides Spark-free lakehouse table support. |
-| Pandas | CSV, Parquet, Delta¹ | Delta tables¹ | CSV, Parquet, Delta¹, Iceberg² | Delta tables¹ | DuckDB/SQLite table, Delta¹ file | Uses DuckDB for SQL execution. |
-| DuckDB | CSV, Parquet, Delta¹ | Delta tables¹ | CSV, Parquet, Delta¹, Iceberg² | DuckDB + Delta tables¹ | DuckDB/SQLite table, Delta¹ file | Table outputs are DuckDB or Delta tables. |
+| Polars | CSV, Parquet, Delta¹ | Delta tables¹ | CSV, Parquet, Delta¹, Iceberg² | Delta tables¹ | Delta¹ file | Delta-RS provides Spark-free lakehouse table support. |
 | Spark | CSV, Parquet, Delta, Iceberg, JSON | Spark tables | CSV, Parquet, Delta, Iceberg, JSON | Spark tables | Spark tables (Delta/Iceberg) | Recommended for lakehouse catalogs (Unity Catalog/Fabric). |
 | Snowflake | Table-only | Table-only | Table writes (Snowflake) | Snowflake tables | Snowflake tables | Requires `snowflake-connector-python` and credentials. |
 | BigQuery | Table-only | Table-only | Table writes (BigQuery) | BigQuery tables | BigQuery tables | Requires `google-cloud-bigquery` and credentials. |
@@ -19,18 +17,18 @@ This matrix summarizes what each engine supports in the OSS runtime. When a feat
 
 ## Materialization Strategies
 
-| Strategy | Polars | Pandas | DuckDB | Spark |
-| --- | --- | --- | --- | --- |
-| `overwrite` | Native | Native | Native | Native |
-| `append` | Native | Native | Native | Native |
-| `merge` | Native (Delta via delta-rs) / pandas (CSV/Parquet) | Native | Native (Delta via delta-rs) / pandas (CSV/Parquet) | Native (distributed) |
-| `scd2` | Via pandas | Native | Via pandas | Native (distributed) |
+| Strategy | Polars | Spark |
+| --- | --- | --- |
+| `overwrite` | Native | Native |
+| `append` | Native | Native |
+| `merge` | Native (Delta via delta-rs) | Native (distributed) |
+| `scd2` | Native | Native (distributed) |
 
 **Spark advantage:** Merge and SCD2 operations run natively using distributed DataFrame operations, avoiding driver memory bottlenecks. For Delta Lake tables, LakeLogic uses `MERGE INTO` when available.
 
-**Delta merge via delta-rs:** When the output format is Delta, Polars and DuckDB use `DeltaTable.merge()` from delta-rs for atomic merge operations — no pandas conversion needed. This uses the same MERGE INTO semantics as Spark Delta but runs without JVM.
+**Delta merge via delta-rs:** When the output format is Delta, Polars uses `DeltaTable.merge()` from delta-rs for atomic merge operations. This uses the same MERGE INTO semantics as Spark Delta but runs without a JVM.
 
-**Non-Delta merge/SCD2:** For CSV/Parquet targets, Polars and DuckDB fall back to pandas for merge and SCD2 operations. This works well for moderate data volumes but may hit driver memory limits at scale — use Spark or Delta format for large datasets.
+**Non-Delta merge/SCD2:** For CSV/Parquet targets, Polars utilizes native DataFrame operations without driver memory bottlenecks — however, use Spark or Delta format for exceptionally large datasets.
 
 ## Format Defaults
 
@@ -58,7 +56,7 @@ Preprocessing supports PDF (OCR), image, audio (Whisper), and video inputs.
 
 ## Lakehouse Catalog Notes (Unity Catalog / Fabric)
 
-- **Unity Catalog external tables work with Polars/Pandas.** LakeLogic resolves 3-part table names (`catalog.schema.table`) to storage paths via the Databricks API, then reads/writes via delta-rs. No Spark needed.
+- **Unity Catalog external tables work with Polars.** LakeLogic resolves 3-part table names (`catalog.schema.table`) to storage paths via the Databricks API, then reads/writes via delta-rs. No Spark needed.
 - **UC managed tables require Spark.** Managed tables don't expose a direct storage path — if resolution returns no `storage_location`, Spark is required.
 - **Iceberg tables in a catalog require Spark.** File-based Iceberg output is not the same as a catalog-managed table.
 - **Delta via delta-rs** is used automatically by LakeLogic for read, write, merge, vacuum, and time travel on any Delta table accessible via path. A standalone `DeltaAdapter` class is also available for ad-hoc use outside the pipeline.

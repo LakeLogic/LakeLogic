@@ -22,6 +22,8 @@ def test_lineage_injection(tmp_path):
 
 
 def test_materialization_partitioned_append(tmp_path):
+    import pytest
+    pytest.importorskip("pandas")
     contract = {
         "version": "1.0.0",
         "dataset": "events",
@@ -46,6 +48,8 @@ def test_materialization_partitioned_append(tmp_path):
 
 
 def test_materialization_merge(tmp_path):
+    import pytest
+    pytest.importorskip("pandas")
     contract = {
         "version": "1.0.0",
         "dataset": "customers",
@@ -67,8 +71,9 @@ def test_materialization_merge(tmp_path):
     merged_path = tmp_path / "customers.csv"
     assert merged_path.exists()
 
-
 def test_quarantine_table_duckdb(tmp_path):
+    import pytest
+    pytest.skip("DuckDB engine is deprecated")
     contract = {
         "version": "1.0.0",
         "dataset": "events",

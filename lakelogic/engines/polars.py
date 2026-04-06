@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import polars as pl
 from loguru import logger
@@ -158,14 +158,52 @@ class PolarsAdapter(EngineAdapter):
             if cols_to_drop:
                 lf = lf.drop(list(cols_to_drop))
 
+        # Normalize Spark SQL dialect quirks (e.g. CAST(x AS STRING) → VARCHAR)
+        sql = self._normalize_sql(sql)
+
+        # ── Pre-load cloud Delta tables referenced in SQL ─────────────────
+        # Scan for cloud URI paths (abfss://, s3://, gs://) in the SQL.
+        # Pre-read them as Delta tables using authenticated storage options
+        # and register them as named relations so JOINs work transparently.
+        _cloud_tables: Dict[str, pl.LazyFrame] = {}
+        _cloud_pattern = _re.compile(r'["\']?((?:abfss|s3|gs|az)://[^"\'\s,)]+)["\']?')
+        for _m in _cloud_pattern.finditer(sql):
+            _uri = _m.group(1).rstrip("/")
+            if _uri in _cloud_tables:
+                continue
+            try:
+                from deltalake import DeltaTable as _DT
+                from lakelogic.core.processor import DataProcessor as _DP
+
+                _dummy_proc = _DP.__new__(_DP)
+                _sopts = _dummy_proc._get_cloud_storage_options(_uri)
+                _dt = _DT(_uri, storage_options=_sopts)
+                _cloud_lf = pl.from_arrow(_dt.to_pyarrow_table()).lazy()
+                # Create a safe alias from the URI path segments
+                _alias = _uri.rstrip("/").split("/")[-1]
+                _cloud_tables[_uri] = _cloud_lf
+                # Replace the full URI in the SQL with the short alias
+                sql = sql.replace(f'"{_uri}"', _alias).replace(f"'{_uri}'", _alias).replace(_uri, _alias)
+                logger.debug(f"Pre-loaded cloud Delta table '{_uri}' as '{_alias}' ({_cloud_lf.collect().height} rows)")
+            except Exception as _e:
+                logger.debug(f"Could not pre-load cloud path '{_uri}': {_e}")
+
         ctx = pl.SQLContext()
         ctx.register("source", lf)
         if self.contract.dataset:
             ctx.register(self.contract.dataset, lf)
         self._register_links(ctx)
+        for _alias_name, _cloud_lf in _cloud_tables.items():
+            _safe_alias = _alias_name.rstrip("/").split("/")[-1]
+            ctx.register(_safe_alias, _cloud_lf)
         try:
             return ctx.execute(sql)
         except Exception as exc:
+            import os
+
+            if os.environ.get("LAKELOGIC_STRICT_POLARS", "0").lower() in ("1", "true", "yes"):
+                raise exc
+
             try:
                 import duckdb
             except Exception:
@@ -176,6 +214,10 @@ class PolarsAdapter(EngineAdapter):
             con.register("source", df)
             if self.contract.dataset:
                 con.register(self.contract.dataset, df)
+            # Register pre-loaded cloud tables in DuckDB context
+            for _uri_key, _cloud_lf in _cloud_tables.items():
+                _safe_alias = _uri_key.rstrip("/").split("/")[-1]
+                con.register(_safe_alias, _cloud_lf.collect().to_pandas())
             for link in self.contract.links:
                 try:
                     if link.table or (link.type and link.type.lower() == "table"):
@@ -213,13 +255,20 @@ class PolarsAdapter(EngineAdapter):
     @staticmethod
     def _normalize_sql(sql: str) -> str:
         """
-        Replace standard SQL temporal functions that Polars SQL does not
-        support with equivalent inline literals evaluated at plan-build time.
+        Normalize Spark SQL dialect quirks into ANSI / DuckDB-compatible SQL.
 
         Substitutions (case-insensitive):
+
+        **Temporal constants:**
           CURRENT_TIMESTAMP / NOW()  →  TIMESTAMP 'YYYY-MM-DD HH:MM:SS'
           CURRENT_DATE               →  DATE 'YYYY-MM-DD'
           CURRENT_TIME               →  TIME 'HH:MM:SS'
+
+        **Spark type aliases in CAST:**
+          CAST(x AS STRING)  →  CAST(x AS VARCHAR)
+          CAST(x AS LONG)    →  CAST(x AS BIGINT)
+          CAST(x AS SHORT)   →  CAST(x AS SMALLINT)
+          CAST(x AS BYTE)    →  CAST(x AS TINYINT)
         """
         import datetime as _dt
         import re as _re
@@ -238,7 +287,111 @@ class PolarsAdapter(EngineAdapter):
         )
         sql = _re.sub(r"\bCURRENT_DATE\b", f"DATE '{today_str}'", sql, flags=_re.IGNORECASE)
         sql = _re.sub(r"\bCURRENT_TIME\b", f"TIME '{time_str}'", sql, flags=_re.IGNORECASE)
+
+        # ── Spark type aliases → ANSI equivalents in CAST() ──────────────
+        # Only replace inside "AS <type>" patterns to avoid clobbering
+        # column names or aliases that happen to match.
+        _SPARK_TYPE_MAP = {
+            "STRING": "VARCHAR",
+            "TEXT": "VARCHAR",  # sqlglot Spark→DuckDB emits TEXT
+            "LONG": "BIGINT",
+            "SHORT": "SMALLINT",
+            "BYTE": "TINYINT",
+        }
+        for spark_type, ansi_type in _SPARK_TYPE_MAP.items():
+            sql = _re.sub(
+                rf"\bAS\s+{spark_type}\b",
+                f"AS {ansi_type}",
+                sql,
+                flags=_re.IGNORECASE,
+            )
+
         return sql
+
+    def _try_native_polars_derive(self, raw_sql: str, field_name: str, lf: pl.LazyFrame) -> Optional[pl.LazyFrame]:
+        """
+        Attempt to resolve a derive SQL expression using native Polars expressions.
+
+        Matches common Spark SQL functions that have clean Polars equivalents,
+        bypassing SQL contexts and DuckDB entirely.
+
+        Supported patterns:
+          - try_to_date(CAST(col AS STRING), 'yyyyMMdd')
+            → pl.col(col).cast(Utf8).str.to_date(format="%Y%m%d", strict=False)
+          - timestamp_micros(col)
+            → pl.col(col).cast(Datetime(time_unit="us", time_zone="UTC"))
+
+        Args:
+            raw_sql: The original (un-transpiled) derive SQL from the contract.
+            field_name: Output column name.
+            lf: Current LazyFrame.
+
+        Returns:
+            LazyFrame with the derived column added, or None if no pattern matched.
+        """
+        import re as _re
+
+        sql = raw_sql.strip()
+
+        # ── Pattern 1: try_to_date(CAST(col AS STRING), 'fmt') ───────────────
+        m = _re.match(
+            r"try_to_date\s*\(\s*CAST\s*\(\s*(\w+)\s+AS\s+STRING\s*\)\s*,\s*'([^']+)'\s*\)",
+            sql,
+            _re.IGNORECASE,
+        )
+        if m:
+            col_name, spark_fmt = m.group(1), m.group(2)
+            # Convert Spark format tokens → Python strftime tokens
+            py_fmt = spark_fmt.replace("yyyy", "%Y").replace("MM", "%m").replace("dd", "%d")
+            logger.debug(f"Native Polars derive: try_to_date({col_name}, '{spark_fmt}') → str.to_date('{py_fmt}')")
+            return lf.with_columns(
+                pl.col(col_name).cast(pl.Utf8, strict=False).str.to_date(format=py_fmt, strict=False).alias(field_name)
+            )
+
+        # ── Pattern 2: timestamp_micros(col) ─────────────────────────────────
+        m = _re.match(
+            r"timestamp_micros\s*\(\s*(\w+)\s*\)",
+            sql,
+            _re.IGNORECASE,
+        )
+        if m:
+            col_name = m.group(1)
+            logger.debug(f"Native Polars derive: timestamp_micros({col_name}) → cast(Datetime(us, UTC))")
+            return lf.with_columns(
+                pl.col(col_name).cast(pl.Datetime(time_unit="us", time_zone="UTC"), strict=False).alias(field_name)
+            )
+
+        # ── Pattern 3: CONCAT(col, 'literal', CAST(col AS VARCHAR)) ──────────
+        # Matches: CONCAT(transaction_id, '||', CAST(conversion_timestamp As varchar))
+        # Or: CONCAT(col1, 'str', col2)
+        m = _re.match(r"^CONCAT\s*\((.*?)\)$", sql, _re.IGNORECASE | _re.DOTALL)
+        if m:
+            args_str = m.group(1)
+            # Simple split by comma (doesn't handle commas inside nested parens perfectly,
+            # but good enough for our standard derivation patterns)
+            args = [a.strip() for a in args_str.split(",")]
+            exprs = []
+            valid = True
+            for a in args:
+                if a.startswith("'") and a.endswith("'"):
+                    exprs.append(pl.lit(a[1:-1]))
+                elif a.startswith('"') and a.endswith('"'):
+                    exprs.append(pl.lit(a[1:-1]))
+                else:
+                    # check for CAST(x AS type)
+                    cm = _re.match(r"CAST\s*\(\s*(\w+)\s+AS\s+\w+\s*\)", a, _re.IGNORECASE)
+                    if cm:
+                        exprs.append(pl.col(cm.group(1)).cast(pl.Utf8, strict=False))
+                    elif _re.match(r"^\w+$", a):  # pure column name
+                        exprs.append(pl.col(a).cast(pl.Utf8, strict=False))
+                    else:
+                        valid = False
+                        break
+            if valid and len(exprs) > 0:
+                logger.debug("Native Polars derive: CONCAT(...) → concat_str(...)")
+                return lf.with_columns(pl.concat_str(exprs).alias(field_name))
+
+        return None
 
     def _to_polars_dtype(self, type_name: str):
         """
@@ -307,7 +460,7 @@ class PolarsAdapter(EngineAdapter):
         cast_to_string = False
         allow_schema_drift = True
 
-        if server and server.mode == "ingest":
+        if server:
             evolution = (server.schema_evolution or "strict").lower()
             cast_to_string = bool(server.cast_to_string)
             allow_schema_drift = bool(server.allow_schema_drift)
@@ -614,28 +767,43 @@ class PolarsAdapter(EngineAdapter):
             if trans.derive and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [Derive]: {trans.derive.field}")
                 field_name = trans.derive.field
-                derive_sql = self._normalize_sql(self._transpile_derive_sql(trans.derive))
                 _resolved = False
-                try:
-                    # Try Polars SQL first via a fresh context (avoids the
-                    # idempotency-guard regex bug in _apply_sql_transformation).
-                    _ctx = pl.SQLContext()
-                    _ctx.register("source", current_lf)
-                    if self.contract.dataset:
-                        _ctx.register(self.contract.dataset, current_lf)
-                    tbl = "source"
-                    if field_name in existing:
-                        query = f"SELECT * EXCLUDE ({field_name}), ({derive_sql}) AS {field_name} FROM {tbl}"
-                    else:
-                        query = f"SELECT *, ({derive_sql}) AS {field_name} FROM {tbl}"
-                    current_lf = _ctx.execute(query)
+
+                # ── 1st attempt: Native Polars expressions (zero SQL, zero DuckDB) ──
+                native_result = self._try_native_polars_derive(trans.derive.sql, field_name, current_lf)
+                if native_result is not None:
+                    current_lf = native_result
                     existing = set(current_lf.collect_schema().names())
                     _resolved = True
-                except Exception as e:
-                    logger.warning(
-                        f"Pre-Transform [Derive] '{field_name}' Polars SQL failed ({e}); trying DuckDB fallback."
-                    )
-                # DuckDB fallback (mirrors post-derive logic)
+
+                # ── 2nd attempt: Polars SQL via fresh SQLContext ─────────────────────
+                if not _resolved:
+                    derive_sql = self._normalize_sql(self._transpile_derive_sql(trans.derive))
+                    # Materialize to break Polars SQLContext graph cycles
+                    try:
+                        current_lf = current_lf.collect().lazy()
+                    except Exception as e_mat:
+                        logger.debug(f"Pre-Transform [Derive] failed to pre-materialize: {e_mat}")
+
+                    try:
+                        _ctx = pl.SQLContext()
+                        _ctx.register("source", current_lf)
+                        if self.contract.dataset:
+                            _ctx.register(self.contract.dataset, current_lf)
+                        tbl = "source"
+                        if field_name in existing:
+                            query = f"SELECT * EXCLUDE ({field_name}), ({derive_sql}) AS {field_name} FROM {tbl}"
+                        else:
+                            query = f"SELECT *, ({derive_sql}) AS {field_name} FROM {tbl}"
+                        current_lf = _ctx.execute(query)
+                        existing = set(current_lf.collect_schema().names())
+                        _resolved = True
+                    except Exception as e:
+                        logger.warning(
+                            f"Pre-Transform [Derive] '{field_name}' Polars SQL failed ({e}); trying DuckDB fallback."
+                        )
+
+                # ── 3rd attempt: DuckDB fallback ────────────────────────────────────
                 if not _resolved:
                     try:
                         if field_name in existing:
@@ -815,6 +983,10 @@ class PolarsAdapter(EngineAdapter):
         # on ctx.execute() results in some Polars versions.
         existing_cols = set(current_lf.collect_schema().names())
 
+        # Keep references to all intermediate SQLContexts to prevent GC from
+        # invalidating lazy plan nodes produced by ctx.execute()
+        _ctx_refs = []
+
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
             # Re-register both aliases so queries can use either table name
@@ -826,6 +998,9 @@ class PolarsAdapter(EngineAdapter):
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
                 sql = trans.sql.replace("{dataset}", tbl_name).replace("{source}", tbl_name)
                 sql = self._normalize_sql(sql)
+                # Materialize once before final SQL to collapse nested lazy plans
+                # from derive steps — prevents SQLContext GC invalidation
+                current_lf = current_lf.collect().lazy()
                 current_lf = self._apply_sql_transformation(current_lf, sql)
                 continue
             if trans.rollup and trans_phase != "pre":
@@ -853,45 +1028,68 @@ class PolarsAdapter(EngineAdapter):
             if trans.derive:
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 field_name = trans.derive.field
-                # Auto-transpile Spark SQL → DuckDB via sqlglot (with sql_duckdb override)
+                _pre_derive_lf = current_lf
+                _resolved = False
+
+                # Always compute the normalized SQL upfront so all fallback attempts have access
                 derive_sql = self._normalize_sql(self._transpile_derive_sql(trans.derive))
                 if field_name in existing_cols:
                     _step_query = f"SELECT * EXCLUDE ({field_name}), ({derive_sql}) AS {field_name} FROM _step"
                 else:
                     _step_query = f"SELECT *, ({derive_sql}) AS {field_name} FROM _step"
-                # ── Root-cause fix: materialize → fresh SQLContext ───────────────────
-                # Re-registering a ctx.execute() result into the SAME ctx creates a
-                # self-referential lazy plan.  collect_schema() reports the column as
-                # present but it is silently lost during later query planning.
-                # Collecting to a concrete DataFrame + a fresh ctx breaks the cycle.
-                _pre_derive_lf = current_lf
-                _resolved = False
-                try:
-                    _snap_df = current_lf.collect()
-                    _fresh = pl.SQLContext()
-                    _fresh.register("_step", _snap_df)
-                    _fresh.register("source", _snap_df)
-                    if tbl_name not in ("_step", "source"):
-                        _fresh.register(tbl_name, _snap_df)
-                    self._register_links(_fresh)
-                    current_lf = _fresh.execute(_step_query)
+
+                # ── 1st attempt: Native Polars expressions (zero SQL, zero DuckDB) ──
+                native_result = self._try_native_polars_derive(trans.derive.sql, field_name, current_lf)
+                if native_result is not None:
+                    current_lf = native_result
                     existing_cols = set(current_lf.collect_schema().names())
                     _resolved = True
-                except Exception as e:
-                    current_lf = _pre_derive_lf
-                    logger.warning(f"Post-Transform [Derive] '{field_name}' Polars SQL failed ({e}); trying DuckDB")
+                    # print(f"  ✓ {field_name} resolved via Attempt 1 (Native Polars)")
+
+                # ── 2nd attempt: Polars SQL via fresh SQLContext ─────────────────────
                 if not _resolved:
-                    _dq = _step_query.replace("FROM _step", "FROM source")
                     try:
-                        current_lf = self._apply_sql_transformation(current_lf, _dq)
+                        _fresh = pl.SQLContext()
+                        # Register as LazyFrame — SQLContext holds a strong ref, no GC issue
+                        _fresh.register("_step", current_lf)
+                        _fresh.register("source", current_lf)
+                        if tbl_name not in ("_step", "source"):
+                            _fresh.register(tbl_name, current_lf)
+                        self._register_links(_fresh)
+                        current_lf = _fresh.execute(_step_query)
+                        _ctx_refs.append(_fresh)  # prevent GC
+                        # Validate schema is readable (forces plan check without full eval)
                         existing_cols = set(current_lf.collect_schema().names())
                         _resolved = True
+                        # print(f"  ✓ {field_name} resolved via Attempt 2 (Polars SQL)")
+                    except Exception as e:
+                        current_lf = _pre_derive_lf
+                        logger.warning(
+                            f"Post-Transform [Derive] '{field_name}' Polars SQL failed: {e}. SQL: {_step_query}"
+                        )
+
+                # ── 3rd attempt: DuckDB — requires materialization ───────────────────
+                if not _resolved:
+                    try:
+                        import duckdb
+
+                        _dq = _step_query  # already uses _step alias
+                        _snap_df = current_lf.collect()
+                        con = duckdb.connect(database=":memory:")
+                        con.register("_step", _snap_df)
+                        con.register("source", _snap_df)
+                        _snap_result = con.execute(_dq).pl()
+                        current_lf = _snap_result.lazy()
+                        existing_cols = set(current_lf.collect_schema().names())
+                        _resolved = True
+                        # print(f"  ✓ {field_name} resolved via Attempt 3 (DuckDB)")
                     except Exception as e2:
                         current_lf = _pre_derive_lf
                         logger.warning(
-                            f"Post-Transform [Derive] '{field_name}' DuckDB failed ({e2}); trying Polars expr"
+                            f"Post-Transform [Derive] '{field_name}' DuckDB failed: {e2}. SQL: {_step_query}"
                         )
 
+                # ── 4th attempt: regex-based Polars expr fallback ────────────────────
                 if not _resolved:
                     import re as _re2
                     import warnings
@@ -933,11 +1131,17 @@ class PolarsAdapter(EngineAdapter):
                             except Exception as e4:
                                 logger.debug(f"Polars extract fallback: {e4}")
                     if not _resolved:
+                        import warnings
+
                         warnings.warn(
                             f"[LakeLogic] Post-Transform Derive '{field_name}' FAILED all engines. SQL: {derive_sql}",
                             stacklevel=2,
                         )
-                        logger.error(f"Post-Transform [Derive] '{field_name}' all engines failed")
+                        logger.error(f"Post-Transform [Derive] '{field_name}' all engines failed. Injecting NULL.")
+                        print(f"  ✗ {field_name} FAILED ALL ENGINES — injecting NULL")
+                        current_lf = current_lf.with_columns(pl.lit(None).alias(field_name))
+                        existing_cols = set(current_lf.collect_schema().names())
+                continue
             elif trans.bucket:
                 logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
                 field_name = trans.bucket.field

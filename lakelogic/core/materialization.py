@@ -14,7 +14,18 @@ from loguru import logger
 def _is_remote_path(path) -> bool:
     """Return True if the path is a cloud storage URI (ADLS, S3, GCS)."""
     s = str(path)
-    return s.startswith(("abfss://", "az://", "s3://", "gs://", "wasbs://"))
+    return s.startswith(
+        (
+            "abfss://",
+            "abfs://",
+            "az://",
+            "wasbs://",  # Azure
+            "s3://",
+            "s3a://",  # AWS
+            "gs://",
+            "gcs://",  # GCP
+        )
+    )
 
 
 class URIPath:
@@ -86,37 +97,44 @@ def _build_storage_options(
     storage_options: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, str]]:
     """
-    Build Azure storage_options from environment variables if not provided.
+    Build cloud storage_options from environment variables if not provided.
 
-    Environment variables used:
-        AZURE_STORAGE_ACCOUNT  — storage account name
-        AZURE_CLIENT_ID        — service principal app/client ID
-        AZURE_CLIENT_SECRET    — service principal secret
-        AZURE_TENANT_ID        — Azure AD tenant ID
+    Supports three cloud providers:
+
+    **Azure ADLS** (abfss://, abfs://):
+        AZURE_STORAGE_ACCOUNT      — storage account name
+        AZURE_CLIENT_ID            — service principal app/client ID
+        AZURE_CLIENT_SECRET        — service principal secret
+        AZURE_TENANT_ID            — Azure AD tenant ID
+        AZURE_STORAGE_ACCOUNT_KEY  — (alternative) account key auth
+
+    **AWS S3** (s3://, s3a://):
+        AWS_ACCESS_KEY_ID      — IAM access key
+        AWS_SECRET_ACCESS_KEY  — IAM secret key
+        AWS_SESSION_TOKEN      — (optional) STS session token
+        AWS_REGION             — (optional) AWS region
+
+    **Google Cloud Storage** (gs://, gcs://):
+        GOOGLE_SERVICE_ACCOUNT_KEY     — path to JSON service account key file
+        GOOGLE_APPLICATION_CREDENTIALS — (alternative) path to JSON key file
 
     If ``storage_options`` is already provided, it is returned as-is.
     If required env vars are missing, returns None (local mode).
-
-    Usage::
-
-        opts = _build_storage_options()
-        # opts = {
-        #     "account_name": "stlakelogicprod001",
-        #     "client_id":  "...",
-        #     "client_secret": "...",
-        #     "tenant_id": "...",
-        # }
     """
     if storage_options:
         return storage_options
 
+    opts: Dict[str, str] = {}
+
+    # ── Azure ADLS ────────────────────────────────────────────────
     account = os.getenv("AZURE_STORAGE_ACCOUNT")
     client = os.getenv("AZURE_CLIENT_ID")
     secret = os.getenv("AZURE_CLIENT_SECRET")
     tenant = os.getenv("AZURE_TENANT_ID")
+    account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
 
     if client and secret and tenant:
-        opts: Dict[str, str] = {
+        opts = {
             "client_id": client,
             "client_secret": secret,
             "tenant_id": tenant,
@@ -124,6 +142,32 @@ def _build_storage_options(
         if account:
             opts["account_name"] = account
         return opts
+    if account_key:
+        opts = {"account_key": account_key}
+        if account:
+            opts["account_name"] = account
+        return opts
+
+    # ── AWS S3 ────────────────────────────────────────────────────
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+    if aws_key and aws_secret:
+        opts = {
+            "AWS_ACCESS_KEY_ID": aws_key,
+            "AWS_SECRET_ACCESS_KEY": aws_secret,
+        }
+        aws_token = os.getenv("AWS_SESSION_TOKEN")
+        if aws_token:
+            opts["AWS_SESSION_TOKEN"] = aws_token
+        aws_region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+        if aws_region:
+            opts["AWS_REGION"] = aws_region
+        return opts
+
+    # ── Google Cloud Storage ──────────────────────────────────────
+    gcs_key = os.getenv("GOOGLE_SERVICE_ACCOUNT_KEY") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if gcs_key:
+        return {"service_account_key": gcs_key}
 
     return None
 
@@ -763,8 +807,7 @@ def _seed_soft_delete_columns_spark(
         delete_cond = F.col(cdc_op_field).isin(cdc_delete_values)
 
         df = df.withColumn(
-            soft_delete_col,
-            F.when(delete_cond, F.lit(soft_delete_val)).otherwise(F.col(soft_delete_col))
+            soft_delete_col, F.when(delete_cond, F.lit(soft_delete_val)).otherwise(F.col(soft_delete_col))
         )
 
         if soft_delete_time_col:
@@ -772,17 +815,18 @@ def _seed_soft_delete_columns_spark(
             source_col = cdc_timestamp_field if cdc_timestamp_field else soft_delete_time_col
             df = df.withColumn(
                 soft_delete_time_col,
-                F.when(delete_cond, F.coalesce(F.col(source_col), now_str)).otherwise(F.col(soft_delete_time_col))
+                F.when(delete_cond, F.coalesce(F.col(source_col), now_str)).otherwise(F.col(soft_delete_time_col)),
             )
 
         if soft_delete_reason_col:
             df = df.withColumn(
                 soft_delete_reason_col,
-                F.when(delete_cond, F.coalesce(F.col(soft_delete_reason_col), F.lit("cdc_delete_signal"))).otherwise(F.col(soft_delete_reason_col))
+                F.when(delete_cond, F.coalesce(F.col(soft_delete_reason_col), F.lit("cdc_delete_signal"))).otherwise(
+                    F.col(soft_delete_reason_col)
+                ),
             )
 
     return df
-
 
 
 def _merge_frames(
@@ -797,6 +841,7 @@ def _merge_frames(
     cdc_delete_values: Optional[List[Any]] = None,
     cdc_timestamp_field: Optional[str] = None,
     scd1_cfg: Optional[Dict[str, Any]] = None,
+    merge_dedup_guard: bool = False,
 ):
     """
     Merge incoming rows into existing rows using a primary key.
@@ -823,6 +868,17 @@ def _merge_frames(
 
     existing = existing.copy()
     incoming = incoming.copy()
+
+    # ── Dedup guard: deduplicate incoming by PK before MERGE ──
+    if merge_dedup_guard:
+        _pre_count = len(incoming)
+        incoming = incoming.drop_duplicates(subset=primary_key, keep="last")
+        _post_count = len(incoming)
+        if _pre_count != _post_count:
+            logger.warning(
+                f"Merge dedup guard: {_pre_count} → {_post_count} rows "
+                f"(dropped {_pre_count - _post_count} duplicate PKs). "
+            )
 
     # 1. Handle CDC Deletes
     deletes = pd.DataFrame()
@@ -920,11 +976,8 @@ def _merge_frames(
 
         merged[sk_column] = merged.apply(_compute_sk, axis=1)
 
-    # ── SCD1 Unknown Member Injection ────────────────────────────
-    if scd1_cfg:
-        unknown_cfg = scd1_cfg.get("unknown_member", {})
-        if unknown_cfg.get("enabled", True):
-            merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
+    # NOTE: SCD1 Unknown member injection is NOT done here because _merge_frames
+    # can be called per-partition. The caller injects it once on the combined result.
 
     # ── Enforce SCD1 Column Ordering ─────────────────────────────
     if scd1_cfg and scd1_cfg.get("surrogate_key") and scd1_cfg["surrogate_key"] in merged.columns:
@@ -978,6 +1031,22 @@ def _inject_unknown_member_pandas(
         if not existing_unknown.empty:
             return df
 
+    # Extract lineage column values from first row so the unknown member
+    # gets the same run metadata as the rest of the batch.
+    _lineage_cols = {
+        "_lakelogic_processed_at",
+        "_lakelogic_run_id",
+        "_lakelogic_created_at",
+        "_lakelogic_created_by",
+        "_lakelogic_contract_name",
+    }
+    _lineage_values: Dict[str, Any] = {"_lakelogic_source": "Unknown"}
+    if not df.empty:
+        first_row = df.iloc[0]
+        for lc in _lineage_cols:
+            if lc in df.columns:
+                _lineage_values[lc] = first_row[lc]
+
     # Build the unknown row from column defaults
     unknown_row = {}
     for col in df.columns:
@@ -995,6 +1064,8 @@ def _inject_unknown_member_pandas(
             unknown_row[col] = 0
         elif col == change_reason_col:
             unknown_row[col] = "unknown_member"
+        elif col in _lineage_values:
+            unknown_row[col] = _lineage_values[col]
         else:
             val = defaults.get(col)
             if val is None:
@@ -1061,6 +1132,23 @@ def _inject_unknown_member_spark(
         if existing_count > 0:
             return result
 
+    # Extract lineage column values from the first row so the unknown member
+    # gets the same run metadata as the rest of the batch.
+    _lineage_cols = {
+        "_lakelogic_processed_at",
+        "_lakelogic_run_id",
+        "_lakelogic_created_at",
+        "_lakelogic_created_by",
+        "_lakelogic_contract_name",
+    }
+    _lineage_values: Dict[str, Any] = {"_lakelogic_source": "Unknown"}
+    if result.count() > 0:
+        first_row = result.first()
+        if first_row:
+            for lc in _lineage_cols:
+                if lc in result.columns:
+                    _lineage_values[lc] = first_row[lc]
+
     # Build the unknown row dict
     spark = result.sparkSession
     unknown_row = {}
@@ -1080,6 +1168,8 @@ def _inject_unknown_member_spark(
             unknown_row[col] = 0
         elif col == change_reason_col:
             unknown_row[col] = "unknown_member"
+        elif col in _lineage_values:
+            unknown_row[col] = _lineage_values[col]
         else:
             val = defaults.get(col)
             if val is None:
@@ -1158,6 +1248,23 @@ def _inject_unknown_member_spark_table(
         if count > 0:
             return
 
+    # Extract lineage column values from the first row so the unknown member
+    # gets the same run metadata as the rest of the table.
+    _lineage_cols = {
+        "_lakelogic_processed_at",
+        "_lakelogic_run_id",
+        "_lakelogic_created_at",
+        "_lakelogic_created_by",
+        "_lakelogic_contract_name",
+    }
+    _lineage_values = {"_lakelogic_source": "Unknown"}
+    if existing.count() > 0:
+        first_row = existing.first()
+        if first_row:
+            for lc in _lineage_cols:
+                if lc in existing.columns:
+                    _lineage_values[lc] = first_row[lc]
+
     # Build the unknown row
     unknown_row = {}
     for field in existing.schema:
@@ -1166,6 +1273,8 @@ def _inject_unknown_member_spark_table(
             unknown_row[col] = sk_value
         elif col in defaults:
             unknown_row[col] = defaults[col]
+        elif col in _lineage_values:
+            unknown_row[col] = _lineage_values[col]
         else:
             unknown_row[col] = None
 
@@ -1207,6 +1316,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
             - effective_to_default (str): sentinel for current rows (default "9999-12-31").
             - effective_from_default (str): origin date for initial loads / first
               appearances (default "1900-01-01").
+            - merge_dedup_guard (bool): if true, deduplicate incoming by PK (latest wins).
 
     Returns:
         Updated dataframe with SCD2 semantics.
@@ -1240,6 +1350,20 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     now_value = scd2_cfg.get("default_effective_from")
     if not now_value:
         now_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    # ── Dedup guard: deduplicate incoming by PK before SCD2 processing ──
+    if scd2_cfg.get("merge_dedup_guard"):
+        _pre_count = len(incoming)
+        # Sort by change_date_field to ensure 'last' is the latest change
+        if change_date_field in incoming.columns:
+            incoming = incoming.sort_values(primary_key + [change_date_field])
+        incoming = incoming.drop_duplicates(subset=primary_key, keep="last")
+        _post_count = len(incoming)
+        if _pre_count != _post_count:
+            logger.warning(
+                f"SCD2 merge dedup guard: {_pre_count} → {_post_count} rows "
+                f"(dropped {_pre_count - _post_count} duplicate PKs). "
+            )
 
     existing = existing.copy()
     incoming = incoming.copy()
@@ -1297,10 +1421,14 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
             # Need a stable order anyway
             incoming = incoming.sort_values(primary_key + [effective_from])
 
-        # ── Unknown member injection (pandas/polars) ────────────────
-        unknown_cfg = scd2_cfg.get("unknown_member")
-        if unknown_cfg is not None and unknown_cfg.get("enabled", True):
-            incoming = _inject_unknown_member_pandas(incoming, primary_key, scd2_cfg, unknown_cfg)
+        # ── Fix is_current for duplicate primary keys ────────────────
+        # Only the highest version per primary key should be current.
+        # Older versions get is_current=False and effective_to chained.
+        if version_column and version_column in incoming.columns:
+            max_version = incoming.groupby(primary_key)[version_column].transform("max")
+            incoming[current_flag] = incoming[version_column] == max_version
+            # Chain effective_to: older versions point to the next version's effective_from
+            incoming.loc[~incoming[current_flag], effective_to] = now_value
 
         return incoming
 
@@ -1448,10 +1576,8 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         merged = merged.sort_values(primary_key + [effective_from])
         merged[version_column] = merged.groupby(primary_key).cumcount() + 1
 
-    # ── Unknown member injection (pandas/polars) ────────────────
-    unknown_cfg = scd2_cfg.get("unknown_member")
-    if unknown_cfg is not None and unknown_cfg.get("enabled", True):
-        merged = _inject_unknown_member_pandas(merged, primary_key, scd2_cfg, unknown_cfg)
+    # NOTE: Unknown member injection is NOT done here because _scd2_frames
+    # is called per-partition. The caller injects it once on the combined result.
 
     # ── Enforce SCD2 Column Ordering ─────────────────────────────
     front_cols = []
@@ -1508,6 +1634,7 @@ def _spark_merge_dataframe(
     soft_delete_val: Any = True,
     soft_delete_time_col: Optional[str] = None,
     soft_delete_reason_col: Optional[str] = None,
+    merge_dedup_guard: bool = False,
 ) -> Dict[str, Any]:
     """
     Perform a native Spark merge (upsert) without collecting to pandas.
@@ -1577,6 +1704,26 @@ def _spark_merge_dataframe(
                 )
                 merge_condition = " AND ".join([f"target.{col} = source.{col}" for col in primary_key])
 
+                # ── Dedup guard: deduplicate incoming by PK before MERGE ──
+                # Disabled by default. Enable via merge_dedup_guard: true.
+                if merge_dedup_guard:
+                    from pyspark.sql.window import Window as _W
+
+                    _dedup_w = _W.partitionBy(*primary_key).orderBy(F.monotonically_increasing_id().desc())
+                    _pre_count = incoming_df.count()
+                    incoming_df = (
+                        incoming_df.withColumn("_dedup_rn", F.row_number().over(_dedup_w))
+                        .filter(F.col("_dedup_rn") == 1)
+                        .drop("_dedup_rn")
+                    )
+                    _post_count = incoming_df.count()
+                    if _pre_count != _post_count:
+                        logger.warning(
+                            f"Spark merge dedup guard: {_pre_count} → {_post_count} rows "
+                            f"(dropped {_pre_count - _post_count} duplicate PKs). "
+                            f"Consider adding explicit dedup in your contract SQL."
+                        )
+
                 update_cols = {col: f"source.{col}" for col in incoming_df.columns if col not in primary_key}
                 insert_cols = {col: f"source.{col}" for col in incoming_df.columns}
 
@@ -1621,8 +1768,14 @@ def _spark_merge_dataframe(
             # No existing data — seed soft-delete columns before first write
             # so the table schema includes them from creation.
             incoming_df = _seed_soft_delete_columns_spark(
-                incoming_df, soft_delete_col, soft_delete_time_col, soft_delete_reason_col,
-                cdc_op_field, cdc_delete_values, soft_delete_val, cdc_timestamp_field,
+                incoming_df,
+                soft_delete_col,
+                soft_delete_time_col,
+                soft_delete_reason_col,
+                cdc_op_field,
+                cdc_delete_values,
+                soft_delete_val,
+                cdc_timestamp_field,
             )
             writer = incoming_df.write.format(output_format)
             if is_table:
@@ -1639,8 +1792,14 @@ def _spark_merge_dataframe(
     except Exception:
         # Target doesn't exist yet — seed soft-delete columns before first write
         incoming_df = _seed_soft_delete_columns_spark(
-            incoming_df, soft_delete_col, soft_delete_time_col, soft_delete_reason_col,
-            cdc_op_field, cdc_delete_values, soft_delete_val, cdc_timestamp_field,
+            incoming_df,
+            soft_delete_col,
+            soft_delete_time_col,
+            soft_delete_reason_col,
+            cdc_op_field,
+            cdc_delete_values,
+            soft_delete_val,
+            cdc_timestamp_field,
         )
         writer = incoming_df.write.format(output_format)
         if is_table:
@@ -1658,6 +1817,19 @@ def _spark_merge_dataframe(
     # Perform merge via anti-join + union
     # 1. Find rows in existing that DON'T match incoming (to keep unchanged)
     # 2. Union with all incoming rows (which are updates or inserts)
+
+    # ── Dedup guard for DataFrame-based merge fallback ───────────
+    # Disabled by default. Enable via merge_dedup_guard: true.
+    if merge_dedup_guard:
+        from pyspark.sql.window import Window as _W
+
+        _dedup_w = _W.partitionBy(*primary_key).orderBy(F.monotonically_increasing_id().desc())
+        incoming_df = (
+            incoming_df.withColumn("_dedup_rn", F.row_number().over(_dedup_w))
+            .filter(F.col("_dedup_rn") == 1)
+            .drop("_dedup_rn")
+        )
+
     _join_condition = [existing_df[col] == incoming_df[col] for col in primary_key]
 
     # Get non-matching existing rows (rows not being updated)
@@ -1723,6 +1895,7 @@ def _spark_scd2_dataframe(
     scd2_cfg: Dict[str, Any],
     output_format: str,
     location: Optional[str] = None,
+    merge_dedup_guard: bool = False,
 ) -> Dict[str, Any]:
     """
     Perform native Spark SCD2 (Slowly Changing Dimension Type 2) without collecting to pandas.
@@ -1763,6 +1936,25 @@ def _spark_scd2_dataframe(
     if not now_value:
         now_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
+    # ── Dedup guard: deduplicate incoming by PK before SCD2 processing ──
+    if merge_dedup_guard:
+        from pyspark.sql.window import Window as _W
+
+        _pre_count = incoming_df.count()
+        # Order by change_date_field to keep latest
+        _dedup_w = _W.partitionBy(*primary_key).orderBy(F.col(change_date_field).desc())
+        incoming_df = (
+            incoming_df.withColumn("_dedup_rn", F.row_number().over(_dedup_w))
+            .filter(F.col("_dedup_rn") == 1)
+            .drop("_dedup_rn")
+        )
+        _post_count = incoming_df.count()
+        if _pre_count != _post_count:
+            logger.warning(
+                f"Spark SCD2 merge dedup guard: {_pre_count} → {_post_count} rows "
+                f"(dropped {_pre_count - _post_count} duplicate PKs). "
+            )
+
     is_table = target.startswith("table:")
     table_or_path = target[6:] if is_table else target
 
@@ -1786,7 +1978,8 @@ def _spark_scd2_dataframe(
     try:
         if is_table and spark.catalog.tableExists(table_or_path):
             existing_df = spark.table(table_or_path)
-        elif not is_table and Path(table_or_path).exists():
+        elif not is_table:
+            # Probe via Spark for both local AND cloud paths (abfss://, s3://, etc.)
             existing_df = spark.read.format(output_format).load(table_or_path)
     except Exception:
         pass
@@ -2008,19 +2201,34 @@ def _spark_scd2_dataframe(
     if unknown_cfg.get("enabled", True):
         result = _inject_unknown_member_spark(result, primary_key, scd2_cfg, unknown_cfg)
 
-    # ── Enforce SCD2 Column Ordering ─────────────────────────────
-    front_cols = []
-    if sk_column and sk_column in result.columns:
-        front_cols.append(sk_column)
+    # ── Enforce SCD2 Column Ordering (Spark / Kimball convention) ──
+    # Surrogate key → natural keys / attributes → SCD2 control → internal metadata
+    scd2_control_cols = []
     if effective_from in result.columns:
-        front_cols.append(effective_from)
+        scd2_control_cols.append(effective_from)
     if effective_to in result.columns:
-        front_cols.append(effective_to)
+        scd2_control_cols.append(effective_to)
     if current_flag in result.columns:
-        front_cols.append(current_flag)
+        scd2_control_cols.append(current_flag)
+    if version_column and version_column in result.columns:
+        scd2_control_cols.append(version_column)
+    if change_reason_col and change_reason_col in result.columns:
+        scd2_control_cols.append(change_reason_col)
 
-    other_cols = [c for c in result.columns if c not in front_cols]
-    result = result.select(*front_cols, *other_cols)
+    sk_head = [sk_column] if sk_column and sk_column in result.columns else []
+    internal_tail = [c for c in result.columns if c.startswith("_lakelogic_")]
+    tail_set = set(scd2_control_cols + internal_tail + sk_head)
+    body = [c for c in result.columns if c not in tail_set]
+
+    ordered_cols = sk_head + body + scd2_control_cols + internal_tail
+    # Deduplicate while preserving order
+    seen = set()
+    ordered_dedup = []
+    for c in ordered_cols:
+        if c not in seen:
+            seen.add(c)
+            ordered_dedup.append(c)
+    result = result.select(*ordered_dedup)
 
     writer = result.write.format(output_format)
     if is_table:
@@ -2130,6 +2338,7 @@ def _materialize_spark_dataframe(
             soft_delete_val=soft_delete_val,
             soft_delete_time_col=soft_delete_time_col,
             soft_delete_reason_col=soft_delete_reason_col,
+            merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
         )
 
         if target_str.startswith("table:"):
@@ -2153,6 +2362,7 @@ def _materialize_spark_dataframe(
             scd2_cfg,
             output_format,
             location=location,
+            merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
         )
         if target_str.startswith("table:"):
             table_name = target_str[6:]
@@ -2314,7 +2524,17 @@ def _partition_aware_merge(
             )
 
         target_str = str(base_dir)
-        table_exists = base_dir.joinpath("_delta_log").exists()
+        # Build storage_options for cloud targets (ADLS, S3, GCS)
+        _part_opts = _build_storage_options() if _is_remote_path(target_str) else None
+        # Detect existing Delta table — local Path check won't work for cloud
+        if _is_remote_path(target_str):
+            try:
+                DeltaTable(target_str, storage_options=_part_opts)
+                table_exists = True
+            except Exception:
+                table_exists = False
+        else:
+            table_exists = base_dir.joinpath("_delta_log").exists()
 
         # Pre-merge all incoming partitions into their final state first,
         # then write in a single pass to minimise Delta log transactions.
@@ -2327,9 +2547,12 @@ def _partition_aware_merge(
             if strategy in ("merge", "scd2") and table_exists:
                 existing = pd.DataFrame(columns=group.columns)
                 try:
-                    dt = DeltaTable(target_str)
+                    dt = DeltaTable(target_str, storage_options=_part_opts)
                     part_filter = [(col, "=", str(val)) for col, val in part_values.items()]
                     existing = dt.to_pandas(filters=part_filter)
+                    logger.debug(
+                        f"Partition-aware {strategy}: read {len(existing)} existing rows for partition {part_values}"
+                    )
                 except Exception as exc:
                     logger.warning(f"Could not read existing Delta partition for merge/scd2: {exc}")
 
@@ -2345,16 +2568,30 @@ def _partition_aware_merge(
                         cdc_op_field=cdc_op_field,
                         cdc_delete_values=cdc_delete_values,
                         cdc_timestamp_field=cdc_timestamp_field,
+                        merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
                     )
                 else:
                     merged = _scd2_frames(existing, group, primary_key, scd2_cfg)
             else:
-                # First write or plain append — seed soft-delete columns
-                # so the schema includes them from table creation.
-                merged = _seed_soft_delete_columns_pandas(
-                    group, soft_delete_col, soft_delete_time_col, soft_delete_reason_col,
-                    cdc_op_field, cdc_delete_values, soft_delete_val, cdc_timestamp_field,
-                )
+                if strategy == "scd2":
+                    # First write with SCD2 — route through _scd2_frames so
+                    # control columns (effective_from, effective_to, is_current,
+                    # surrogate key, _version) are populated on initial load.
+                    empty_existing = pd.DataFrame(columns=group.columns)
+                    merged = _scd2_frames(empty_existing, group, primary_key, scd2_cfg)
+                else:
+                    # First write or plain append — seed soft-delete columns
+                    # so the schema includes them from table creation.
+                    merged = _seed_soft_delete_columns_pandas(
+                        group,
+                        soft_delete_col,
+                        soft_delete_time_col,
+                        soft_delete_reason_col,
+                        cdc_op_field,
+                        cdc_delete_values,
+                        soft_delete_val,
+                        cdc_timestamp_field,
+                    )
 
             if not merged.empty:
                 merged_parts.append(merged)
@@ -2368,6 +2605,44 @@ def _partition_aware_merge(
             }
 
         combined = pd.concat(merged_parts, ignore_index=True)
+
+        # ── Unknown member injection (once, after all partitions merged) ──
+        if strategy == "scd2" and scd2_cfg:
+            unknown_cfg = scd2_cfg.get("unknown_member")
+            if unknown_cfg is not None and unknown_cfg.get("enabled", True):
+                combined = _inject_unknown_member_pandas(combined, primary_key, scd2_cfg, unknown_cfg)
+
+        # Spark / Kimball convention: surrogate key → natural keys →
+        # dimension attributes → SCD2 control columns → internal metadata.
+        if strategy == "scd2" and scd2_cfg:
+            _sk = scd2_cfg.get("surrogate_key", "_sk")
+            _ef = scd2_cfg.get("effective_from_field", "effective_from")
+            _et = scd2_cfg.get("effective_to_field", "effective_to")
+            _cf = scd2_cfg.get("current_flag_field", "is_current")
+            _vc = scd2_cfg.get("version_column", "_version")
+            _cr = scd2_cfg.get("change_reason_column", "_change_reason")
+
+            # SCD2 control columns in canonical order
+            scd2_tail = [c for c in [_ef, _et, _cf, _vc, _cr] if c in combined.columns]
+            # Internal/lineage columns always last
+            internal_tail = [c for c in combined.columns if c.startswith("_lakelogic_")]
+            # Surrogate key first
+            sk_head = [_sk] if _sk in combined.columns else []
+
+            tail_set = set(scd2_tail + internal_tail + sk_head)
+            body = [c for c in combined.columns if c not in tail_set]
+
+            # Final order: SK → natural keys / attributes → SCD2 control → lineage
+            ordered = sk_head + body + scd2_tail + internal_tail
+            # Deduplicate while preserving order
+            seen = set()
+            ordered_dedup = []
+            for c in ordered:
+                if c not in seen:
+                    seen.add(c)
+                    ordered_dedup.append(c)
+            combined = combined[ordered_dedup]
+
         arrow_table = pa.Table.from_pandas(combined, preserve_index=False)
         arrow_table = _sanitize_arrow_nulls(arrow_table)  # Delta rejects Arrow Null type
         total_rows = len(combined)
@@ -2380,12 +2655,38 @@ def _partition_aware_merge(
                 partition_by=partition_by,
                 mode="overwrite",
                 schema_mode="merge",
+                engine="rust",
+                storage_options=_part_opts,
+            )
+        elif strategy == "scd2":
+            # ── SCD2: partition-scoped overwrite ──────────────────────────
+            # _scd2_frames returns the FULL desired state per partition
+            # (existing + closed records + new versions).  We cannot use
+            # Delta MERGE because a single PK can have multiple rows
+            # (v1 closed + v2 current) which violates MERGE's unique-key
+            # requirement.  Instead, build a partition predicate and
+            # overwrite only the affected partitions.
+            affected_parts = combined[partition_by].drop_duplicates()
+            part_predicates = []
+            for _, row in affected_parts.iterrows():
+                clause = " AND ".join(f"{col} = '{row[col]}'" for col in partition_by)
+                part_predicates.append(f"({clause})")
+            partition_predicate = " OR ".join(part_predicates) if part_predicates else None
+
+            write_deltalake(
+                target_str,
+                arrow_table,
+                mode="overwrite",
+                predicate=partition_predicate,
+                schema_mode="merge",
+                engine="rust",
+                storage_options=_part_opts,
             )
         elif primary_key:
             # ── Subsequent writes: MERGE INTO via DeltaTable.merge() ─────
             # Stable across all deltalake versions; no partition_filters API.
             pk_predicate = " AND ".join(f"source.{pk} = target.{pk}" for pk in primary_key)
-            dt = DeltaTable(target_str)
+            dt = DeltaTable(target_str, storage_options=_part_opts)
             (
                 dt.merge(
                     source=arrow_table,
@@ -2405,6 +2706,8 @@ def _partition_aware_merge(
                 partition_by=partition_by,
                 mode="append",
                 schema_mode="merge",
+                engine="rust",
+                storage_options=_part_opts,
             )
 
         logger.info(f"Partition-aware {strategy} (delta): materialized {total_rows} rows → {base_dir}")
@@ -2443,9 +2746,14 @@ def _partition_aware_merge(
                 soft_delete_reason_col=soft_delete_reason_col,
                 cdc_op_field=cdc_op_field,
                 cdc_delete_values=cdc_delete_values,
+                merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
             )
         elif strategy == "scd2":
             merged = _scd2_frames(existing, group, primary_key, scd2_cfg)
+            # Inject unknown member once (non-delta partition loop)
+            unknown_cfg = scd2_cfg.get("unknown_member") if scd2_cfg else None
+            if unknown_cfg is not None and unknown_cfg.get("enabled", True):
+                merged = _inject_unknown_member_pandas(merged, primary_key, scd2_cfg, unknown_cfg)
         else:
             merged = group
 
@@ -2659,26 +2967,161 @@ def materialize_dataframe(
 
         arrow_data = _sanitize_arrow_nulls(arrow_data)  # Delta rejects Arrow Null type
 
-        # strategy → delta mode
+        resolved_target.mkdir(parents=True, exist_ok=True)
+        target_str = str(resolved_target)
+        try:
+            from deltalake import DeltaTable as _DT
+
+            _dt_opts = _build_storage_options() if _is_remote_path(target_str) else None
+            _DT(target_str, storage_options=_dt_opts)
+            table_exists = True
+        except Exception:
+            table_exists = False
+        # ── Merge / SCD2 strategy for non-partitioned Delta tables ────────
+        if strategy in ("merge", "scd2") and primary_key:
+            if table_exists:
+                from deltalake import DeltaTable
+
+                if strategy == "scd2":
+                    # SCD2: apply full frame logic then overwrite
+                    scd2_cfg_local = getattr(mat, "scd2", None)
+                    scd2_cfg_local = dict(scd2_cfg_local) if isinstance(scd2_cfg_local, dict) else {}
+                    # Pass the dedup guard flag into the local cfg
+                    scd2_cfg_local["merge_dedup_guard"] = bool(getattr(mat, "merge_dedup_guard", False))
+                    dt = DeltaTable(target_str, storage_options=_dt_opts)
+                    existing = dt.to_pandas()
+                    logger.info(f"SCD2 merge: existing={len(existing)} rows, incoming={len(_to_pandas(pdf))} rows")
+                    merged = _scd2_frames(existing, _to_pandas(pdf), primary_key, scd2_cfg_local)
+                    # Inject unknown member once (non-partitioned delta SCD2)
+                    _um_cfg = scd2_cfg_local.get("unknown_member")
+                    if _um_cfg is not None and _um_cfg.get("enabled", True):
+                        merged = _inject_unknown_member_pandas(merged, primary_key, scd2_cfg_local, _um_cfg)
+                    logger.info(f"SCD2 merge result: {len(merged)} rows (existing {len(existing)} + changes)")
+                    arrow_data = pa.Table.from_pandas(merged, preserve_index=False)
+                    arrow_data = _sanitize_arrow_nulls(arrow_data)
+                    write_deltalake(
+                        target_str,
+                        arrow_data,
+                        mode="overwrite",
+                        schema_mode="merge",
+                        engine="rust",
+                        storage_options=_dt_opts,
+                    )
+                    rows_written = len(merged)
+                else:
+                    # Merge: use DeltaTable.merge() for upsert
+                    # ── Dedup guard: incoming batch must not contain duplicate PKs ──
+                    # Disabled by default. Enable via merge_dedup_guard: true.
+                    _dedup_enabled = bool(getattr(mat, "merge_dedup_guard", False))
+                    if _dedup_enabled:
+                        _incoming_pdf = arrow_data.to_pandas()
+                        _pre_dedup = len(_incoming_pdf)
+                        _incoming_pdf = _incoming_pdf.drop_duplicates(subset=primary_key, keep="last")
+                        _post_dedup = len(_incoming_pdf)
+                        if _pre_dedup != _post_dedup:
+                            logger.warning(
+                                f"Merge dedup guard: {_pre_dedup} → {_post_dedup} rows "
+                                f"(dropped {_pre_dedup - _post_dedup} duplicate PKs). "
+                                f"Consider adding explicit dedup in your contract SQL."
+                            )
+                            arrow_data = pa.Table.from_pandas(_incoming_pdf, preserve_index=False)
+                            arrow_data = _sanitize_arrow_nulls(arrow_data)
+                    pk_predicate = " AND ".join(f"source.{pk} = target.{pk}" for pk in primary_key)
+                    dt = DeltaTable(target_str, storage_options=_dt_opts)
+                    (
+                        dt.merge(
+                            source=arrow_data,
+                            predicate=pk_predicate,
+                            source_alias="source",
+                            target_alias="target",
+                        )
+                        .when_matched_update_all()
+                        .when_not_matched_insert_all()
+                        .execute()
+                    )
+                    rows_written = len(arrow_data)
+            else:
+                # First write — seed the table
+                if strategy == "scd2":
+                    scd2_cfg_local = getattr(mat, "scd2", None)
+                    scd2_cfg_local = dict(scd2_cfg_local) if isinstance(scd2_cfg_local, dict) else {}
+                    import pandas as _pd
+
+                    empty_existing = _pd.DataFrame(columns=_to_pandas(pdf).columns)
+                    merged = _scd2_frames(empty_existing, _to_pandas(pdf), primary_key, scd2_cfg_local)
+                    # Inject unknown member once (initial load delta SCD2)
+                    _um_cfg = scd2_cfg_local.get("unknown_member")
+                    if _um_cfg is not None and _um_cfg.get("enabled", True):
+                        merged = _inject_unknown_member_pandas(merged, primary_key, scd2_cfg_local, _um_cfg)
+                    arrow_data = pa.Table.from_pandas(merged, preserve_index=False)
+                    arrow_data = _sanitize_arrow_nulls(arrow_data)
+                    rows_written = len(merged)
+                else:
+                    rows_written = len(arrow_data)
+                write_deltalake(
+                    target_str,
+                    arrow_data,
+                    mode="overwrite",
+                    schema_mode="merge",
+                    engine="rust",
+                    storage_options=_dt_opts,
+                )
+
+            logger.info(
+                f"Materialized {rows_written} rows to Delta table: {resolved_target} "
+                f"(strategy={strategy}, pk={primary_key})"
+            )
+            _maybe_compact_delta(target_str, contract)
+            return {
+                "target": target_str,
+                "rows_written": rows_written,
+                "format": "delta",
+            }
+
+        # ── Append / Overwrite strategy ───────────────────────────────────
         delta_mode = "overwrite" if strategy == "overwrite" else "append"
         delta_partition_by = partition_by if partition_by else None
 
-        resolved_target.mkdir(parents=True, exist_ok=True)
+        # ── Diagnostic: log pre-write row count ──
+        _pre_write_count = None
+        if table_exists and delta_mode == "append":
+            try:
+                from deltalake import DeltaTable as _DT_pre
+
+                _dt_pre_opts = _build_storage_options() if _is_remote_path(target_str) else None
+                _dt_pre = _DT_pre(target_str, storage_options=_dt_pre_opts)
+                _pre_write_count = len(_dt_pre.to_pyarrow_table())
+                logger.info(
+                    f"Delta pre-write state: {_pre_write_count} rows in {target_str} "
+                    f"(appending {len(arrow_data)} new rows)"
+                )
+            except Exception as _pre_err:
+                logger.debug(f"Could not read pre-write row count: {_pre_err}")
+
+        # Build storage_options for cloud targets
+        _write_opts = _build_storage_options() if _is_remote_path(target_str) else None
+        _write_kwargs = {
+            "mode": delta_mode,
+            "partition_by": delta_partition_by,
+            "schema_mode": "merge",  # schema evolution: new columns auto-added
+            "engine": "rust",
+        }
+        if _write_opts:
+            _write_kwargs["storage_options"] = _write_opts
+
         try:
             write_deltalake(
-                str(resolved_target),
+                target_str,
                 arrow_data,
-                mode=delta_mode,
-                partition_by=delta_partition_by,
-                schema_mode="merge",  # schema evolution: new columns auto-added
+                **_write_kwargs,
             )
         except Exception as e:
             err_msg = str(e)
             if "DeletionVectors" in err_msg or "reader features required" in err_msg:
                 raise RuntimeError(
-                    f"\n{'='*80}\n"
+                    f"\n{'=' * 80}\n"
                     f"❌ ENGINE INCOMPATIBILITY ERROR: DELTA PROTOCOL v3\n"
-                    f"{'='*80}\n"
+                    f"{'=' * 80}\n"
                     f"LakeLogic (Polars/Delta-RS) failed to write to the Delta table at:\n"
                     f"  {resolved_target}\n\n"
                     f"REASON:\n"
@@ -2692,18 +3135,38 @@ def materialize_dataframe(
                     f"  Option 2 (Databricks) : Run this SQL in Databricks to downgrade the table:\n"
                     f"           ALTER TABLE <your-table> SET TBLPROPERTIES ('delta.enableDeletionVectors' = false);\n"
                     f"           REORG TABLE <your-table> APPLY (PURGE);\n"
-                    f"{'='*80}"
+                    f"{'=' * 80}"
                 ) from e
             raise
 
         rows_written = len(arrow_data)
+
+        # ── Diagnostic: log post-write row count ──
+        if delta_mode == "append":
+            try:
+                from deltalake import DeltaTable as _DT_post
+
+                _dt_post_opts = _build_storage_options() if _is_remote_path(target_str) else None
+                _dt_post = _DT_post(target_str, storage_options=_dt_post_opts)
+                _post_write_count = len(_dt_post.to_pyarrow_table())
+                logger.info(
+                    f"Delta post-write state: {_post_write_count} rows in {target_str} "
+                    f"(was {_pre_write_count}, wrote {rows_written})"
+                )
+                if _pre_write_count is not None and _post_write_count < _pre_write_count:
+                    logger.error(
+                        f"⚠️ DATA LOSS DETECTED: table went from {_pre_write_count} to "
+                        f"{_post_write_count} rows after mode=append write!"
+                    )
+            except Exception as _post_err:
+                logger.debug(f"Could not read post-write row count: {_post_err}")
         logger.info(
             f"Materialized {rows_written} rows to Delta table: {resolved_target} "
             f"(mode={delta_mode}, partitions={delta_partition_by})"
         )
-        _maybe_compact_delta(str(resolved_target), contract)
+        _maybe_compact_delta(target_str, contract)
         return {
-            "target": str(resolved_target),
+            "target": target_str,
             "rows_written": rows_written,
             "format": "delta",
         }
@@ -2804,6 +3267,10 @@ def materialize_dataframe(
                 cdc_delete_values=cdc_delete_values,
                 scd1_cfg=scd1_cfg,
             )
+            # Inject unknown member once
+            unknown_cfg = scd1_cfg.get("unknown_member", {})
+            if unknown_cfg.get("enabled", True):
+                merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
         else:
             scd1_cfg = getattr(mat, "scd1", None)
             scd1_cfg = dict(scd1_cfg) if isinstance(scd1_cfg, dict) else {}
@@ -2816,8 +3283,18 @@ def materialize_dataframe(
                 _to_pandas(pdf)[:0],
                 pdf,
                 primary_key,
+                soft_delete_col=soft_delete_col,
+                soft_delete_val=soft_delete_val,
+                soft_delete_time_col=soft_delete_time_col,
+                soft_delete_reason_col=soft_delete_reason_col,
+                cdc_op_field=cdc_op_field,
+                cdc_delete_values=cdc_delete_values,
                 scd1_cfg=scd1_cfg,
             )
+            # Inject unknown member once
+            unknown_cfg = scd1_cfg.get("unknown_member", {})
+            if unknown_cfg.get("enabled", True):
+                merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
         _write_frame(merged, target_file, resolved_format)
         rows_written = len(merged)
     elif strategy == "scd2":
@@ -2826,6 +3303,10 @@ def materialize_dataframe(
             merged = _scd2_frames(existing, pdf, primary_key, scd2_cfg)
         else:
             merged = _scd2_frames(_to_pandas(pdf)[:0], pdf, primary_key, scd2_cfg)
+        # Inject unknown member once (non-partitioned file-based SCD2)
+        unknown_cfg = scd2_cfg.get("unknown_member") if scd2_cfg else None
+        if unknown_cfg is not None and unknown_cfg.get("enabled", True):
+            merged = _inject_unknown_member_pandas(merged, primary_key, scd2_cfg, unknown_cfg)
         _write_frame(merged, target_file, resolved_format)
         rows_written = len(merged)
     else:

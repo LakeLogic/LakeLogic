@@ -223,28 +223,25 @@ Same Contract YAML → Multiple Execution Engines
 │  └──────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────┘
                         │
-        ┌───────────────┼───────────────┬───────────────┐
-        │               │               │               │
-        ▼               ▼               ▼               ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│   Polars     │ │    Spark     │ │   DuckDB     │ │   Pandas     │
-│   Adapter    │ │   Adapter    │ │   Adapter    │ │   Adapter    │
-├──────────────┤ ├──────────────┤ ├──────────────┤ ├──────────────┤
-│              │ │              │ │              │ │              │
-│ • Fast local │ │ • Distributed│ │ • Analytical │ │ • Universal  │
-│ • LazyFrame  │ │ • Delta Lake │ │ • SQL-first  │ │ • Fallback   │
-│ • Rust core  │ │ • Unity Cat  │ │ • OLAP       │ │ • Compatible │
-│              │ │              │ │              │ │              │
-│ Use Case:    │ │ Use Case:    │ │ Use Case:    │ │ Use Case:    │
-│ Dev/Testing  │ │ Production   │ │ Analytics    │ │ Prototyping  │
-└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
+             ┌──────────┴──────────┐
+             ▼                     ▼
+      ┌──────────────┐      ┌──────────────┐
+      │   Polars     │      │    Spark     │
+      │   Adapter    │      │   Adapter    │
+      ├──────────────┤      ├──────────────┤
+      │              │      │              │
+      │ • Fast local │      │ • Distributed│
+      │ • LazyFrame  │      │ • Delta Lake │
+      │ • Rust core  │      │ • Unity Cat  │
+      │              │      │              │
+      │ Use Case:    │      │ Use Case:    │
+      │ Dev/Testing  │      │ Production   │
+      └──────────────┘      └──────────────┘
 
 Auto-Discovery Priority:
 1. LAKELOGIC_ENGINE env var (manual override)
 2. Spark (if in Databricks/Synapse)
 3. Polars (preferred for single-node)
-4. DuckDB (fast analytical alternative)
-5. Pandas (universal fallback)
 ```
 
 ## Key Architecture Principles
