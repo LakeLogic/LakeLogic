@@ -616,8 +616,6 @@ def materialize_quarantine(
 
     # ── Resolve target path / extension ──────────────────────────────────────
     is_cloud = any(raw_target.startswith(p) for p in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://"))
-    if not is_cloud:
-        quarantine_target.parent.mkdir(parents=True, exist_ok=True)
 
     target_file = quarantine_target
 
@@ -639,6 +637,9 @@ def materialize_quarantine(
         if resolved_format is None:
             resolved_format = target_file.suffix.lstrip(".").lower()
 
+    if not is_cloud:
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        
     resolved_format = resolved_format or "parquet"
 
     # ── Spark engine ──────────────────────────────────────────────────────────

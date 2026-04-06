@@ -140,7 +140,7 @@ def test_e2e_full(tmp_path: Path) -> None:
     assert (out_dir / "bronze_policies" / "data.csv").exists()
     assert (out_dir / "silver_policies" / "data.csv").exists()
     assert (out_dir / "gold_policy_counts" / "data.csv").exists()
-    assert (out_dir / "silver_quarantine.parquet").exists()
+    assert (out_dir / "silver_quarantine" / "silver_policies.parquet").exists()
 
 
 def test_e2e_inc(tmp_path: Path) -> None:
