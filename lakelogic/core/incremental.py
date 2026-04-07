@@ -220,14 +220,14 @@ class Boundary:
         """
         parts: List[str] = []
 
-        # â”€â”€ Static partition filters (non-temporal) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # â”€â”€ Static partition filters (non-temporal) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         for col, val in self.partition_filters.items():
             if isinstance(val, str):
                 parts.append(f"{col} = '{val}'")
             else:
                 parts.append(f"{col} = {val}")
 
-        # â”€â”€ Temporal filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # â”€â”€ Temporal filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if field is not None:
             parts.append(f"{field} >= '{self.from_iso}'")
             parts.append(f"{field} <= '{self.to_iso}'")
@@ -307,11 +307,11 @@ class Boundary:
 
         expr = pl.lit(True)
 
-        # â”€â”€ Static partition filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # â”€â”€ Static partition filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         for col, val in self.partition_filters.items():
             expr = expr & (pl.col(col) == val)
 
-        # â”€â”€ Temporal filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # â”€â”€ Temporal filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if field is not None:
             expr = expr & (pl.col(field).cast(pl.Date) >= self.from_date)
             expr = expr & (pl.col(field).cast(pl.Date) <= self.to_date)
@@ -451,7 +451,7 @@ class IncrementalBoundary:
                          .filter(boundary.spark_filter("_snapshot_date"))
     """
 
-    # â”€â”€ Strategy 1: Max watermark on the target table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Strategy 1: Max watermark on the target table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â
 
     @classmethod
     def from_max_target(
@@ -530,7 +530,7 @@ class IncrementalBoundary:
         _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="max_target", metadata=meta)
 
-    # â”€â”€ Strategy 1b: Delta Table Version (Snapshot) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Strategy 1b: Delta Table Version (Snapshot) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @classmethod
     def from_delta_version(
@@ -617,7 +617,8 @@ class IncrementalBoundary:
                     if _wm_val is not None:
                         last_version = int(_wm_val)
                         logger.info(
-                            f"Healed missing Delta property from {log_table}.max_watermark_value. Resuming from {last_version}."
+                            f"Healed missing Delta property from "
+                            f"{log_table}.max_watermark_value. Resuming from {last_version}."
                         )
                     elif _json_val is not None:
                         last_version = int(_json_val)
@@ -632,7 +633,8 @@ class IncrementalBoundary:
                     f"INCREMENTAL RESET: No Delta version state for [{dataset}]. Full load from v{default_version}."
                 )
                 logger.warning(
-                    f"INCREMENTAL RESET context: domain={domain}, system={system}, data_layer={data_layer}, log_table={log_table}"
+                    f"INCREMENTAL RESET context: domain={domain}, "
+                    f"system={system}, data_layer={data_layer}, log_table={log_table}"
                 )
 
             # 2. Resolve target version from source history
@@ -655,7 +657,8 @@ class IncrementalBoundary:
                 if from_v > to_v:
                     logger.warning(
                         f"Target version ({last_version}) > current source version ({curr_version}). "
-                        f"Source table may have been dropped or re-created. Resetting to FULL reload from version {default_version}."
+                        f"Source table may have been dropped or re-created. "
+                        f"Resetting to FULL reload from version {default_version}."
                     )
                     from_v = default_version
                     to_v = curr_version
@@ -687,7 +690,7 @@ class IncrementalBoundary:
                 metadata={"error": str(exc), "from_version": 0},
             )
 
-    # â”€â”€ Strategy 2: Pipeline log / audit table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Strategy 2: Pipeline log / audit table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_pipeline_log(
@@ -846,7 +849,7 @@ class IncrementalBoundary:
         _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="pipeline_log", metadata=meta)
 
-    # â”€â”€ Strategy 3: Manifest file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Strategy 3: Manifest file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @classmethod
     def from_manifest(
@@ -971,7 +974,7 @@ class IncrementalBoundary:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    # â”€â”€ Strategy 4a: Explicit date range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Strategy 4a: Explicit date range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_date_range(
@@ -1031,7 +1034,7 @@ class IncrementalBoundary:
             metadata={"from_date": str(from_date), "to_date": str(to_date or "now")},
         )
 
-    # â”€â”€ Strategy 4b: Lookback string â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Strategy 4b: Lookback string â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @classmethod
     def from_lookback(
@@ -1095,7 +1098,7 @@ class IncrementalBoundary:
             metadata={"lookback": lookback, "delta_seconds": delta.total_seconds()},
         )
 
-    # â”€â”€ Convenience: resolve from contract SourceConfig â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Convenience: resolve from contract SourceConfig â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_contract(
@@ -1222,7 +1225,7 @@ class IncrementalBoundary:
         b.partition_filters = merged_pf
         return b
 
-    # â”€â”€ Convenience: resolve from SourceConfig model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â”€â”€ Convenience: resolve from SourceConfig model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_source_config(cls, source_config, **overrides) -> Boundary:

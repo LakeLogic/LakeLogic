@@ -409,7 +409,6 @@ class SLOValidator:
         # Severity-weighted checks
         if quality.by_severity and report.get("rule_failures_by_severity"):
             failures_by_severity = report["rule_failures_by_severity"]
-            highest_failing = None
             for sev in ["critical", "high", "medium", "low"]:
                 threshold = quality.by_severity.get(sev)
                 if not threshold:
@@ -418,13 +417,15 @@ class SLOValidator:
                 sev_total = total
                 sev_good_ratio = (sev_total - sev_failures) / sev_total if sev_total > 0 else 1.0
                 if sev_good_ratio < threshold.min_good_ratio:
-                    highest_failing = sev
                     results.append(
                         SLOCheckResult(
                             layer="quality",
                             entity=f"severity_{sev}",
                             check_type="quality",
-                            status=f"❌ {sev.upper()} quality breach ({sev_good_ratio:.1%} < {threshold.min_good_ratio:.1%})",
+                            status=(
+                                f"❌ {sev.upper()} quality breach "
+                                f"({sev_good_ratio:.1%} < {threshold.min_good_ratio:.1%})"
+                            ),
                             passed=False,
                             severity="fail" if sev in ("critical", "high") else "warn",
                             quality_ratio=round(sev_good_ratio, 4),

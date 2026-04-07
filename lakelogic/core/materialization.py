@@ -3240,7 +3240,6 @@ def materialize_dataframe(
         # Extract CDC and Soft Delete settings (needed by both branches below)
         cdc_op_field = getattr(contract.source, "cdc_op_field", None) if contract.source else None
         cdc_delete_values = getattr(contract.source, "cdc_delete_values", None) if contract.source else None
-        cdc_timestamp_field = getattr(contract.source, "cdc_timestamp_field", None) if contract.source else None
         soft_delete_col = getattr(mat, "soft_delete_column", None)
         soft_delete_val = getattr(mat, "soft_delete_value", True)
         soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)

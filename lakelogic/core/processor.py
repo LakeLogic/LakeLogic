@@ -389,7 +389,9 @@ class DataProcessor:
                             sql=f"({end_col} IS NULL) OR ({end_col} >= {start_col})",
                             severity="error",
                             category="correctness",
-                            description=f"Auto-generated Fact milestone constraint: {end_col} must occur after {start_col}",
+                            description=(
+                                f"Auto-generated Fact milestone constraint: {end_col} must occur after {start_col}"
+                            ),
                         ),
                     )
 
@@ -1741,7 +1743,8 @@ class DataProcessor:
 
                                     if skip:
                                         logger.info(
-                                            f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read."
+                                            f"Incremental load (Delta Versions): "
+                                            f"Source version is unchanged ({tv}). Skipping read."
                                         )
                                         df = spark.table(table_name).filter("1 = 0")
                                     else:
@@ -1849,7 +1852,8 @@ class DataProcessor:
 
                                     if skip:
                                         logger.info(
-                                            f"Incremental load (Delta Versions): Source version is unchanged ({tv}). Skipping read."
+                                            f"Incremental load (Delta Versions): "
+                                            f"Source version is unchanged ({tv}). Skipping read."
                                         )
                                         df = spark.read.format("delta").load(path).filter("1 = 0")
                                     else:
@@ -3047,7 +3051,7 @@ class DataProcessor:
         # Don't regress the watermark with older files during reprocessing
         _max_mtime = None if _is_reprocess else self._source_max_mtime
 
-        return {
+        report = {
             "run_id": self.last_run_id,
             "pipeline_run_id": self.pipeline_run_id,
             "engine": self.engine_name,
