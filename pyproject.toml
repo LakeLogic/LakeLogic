@@ -124,6 +124,8 @@ integrations = [
     "google-cloud-pubsub>=2.18.0",  # GCP Pub/Sub
 ]
 api = ["requests>=2.31.0"]
+# dlt — declarative API ingestion driven by Data Contracts
+dlt = ["dlt[parquet]>=1.0", "pyarrow>=14.0.0"]
 sftp = ["paramiko>=3.4.0"]
 azure_messaging = ["azure-servicebus>=7.11.0", "azure-eventgrid>=4.17.0", "azure-identity>=1.15.0"]
 aws_messaging = ["boto3>=1.28.0"]

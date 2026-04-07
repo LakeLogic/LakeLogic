@@ -1142,6 +1142,10 @@ class DataProcessor:
 
         self._is_reprocess = bool(reprocess_from or reprocess_to or (resolved_reprocess_column and reprocess_values))
 
+        # ── dlt source: contract-driven API ingestion ─────────────────────────
+        if self.contract.source and self.contract.source.type == "dlt":
+            return self._run_dlt_source()
+
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
@@ -3457,6 +3461,37 @@ class DataProcessor:
             strategy=strategy,
             hash_salt=hash_salt,
             columns=columns,
+        )
+
+    # ── dlt source integration ────────────────────────────────────────────
+
+    def _run_dlt_source(self) -> "ValidationResult":
+        """Extract data via dlt, convert to Polars, run validation.
+
+        Called by :meth:`run_source` when ``source.type == "dlt"``.
+        The contract's ``dlt`` block drives extraction; the contract's
+        ``model.fields`` enforces the schema.
+        """
+        try:
+            from lakelogic.adapters.dlt_adapter import DltAdapter
+        except ImportError:
+            raise ImportError("dlt integration requires the dlt package. Install with: pip install lakelogic[dlt]")
+
+        contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "dlt_source")
+        logger.info(f"Running dlt source for contract: {contract_title}")
+
+        adapter = DltAdapter(self.contract.source, contract_title)
+        arrow_table = adapter.extract()
+
+        import polars as pl
+
+        df = pl.from_arrow(arrow_table)
+        logger.info(f"dlt: loaded {df.height} rows, {df.width} columns into Polars")
+
+        # Feed into the existing validation pipeline
+        return self.run(
+            df,
+            source_path=f"dlt://{self.contract.source.dlt.pipeline or self.contract.source.dlt.base_url}",
         )
 
     # ── Polars Streaming ─────────────────────────────────────────────────

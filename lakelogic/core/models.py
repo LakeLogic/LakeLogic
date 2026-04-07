@@ -186,12 +186,77 @@ class SourcePartition(BaseModel):
     file_pattern: Optional[str] = None  # glob pattern; auto-derives from source.format
 
 
-class SourceConfig(BaseModel):
-    """Source acquisition settings for landing/stream/table inputs."""
+class DltEndpointConfig(BaseModel):
+    """Single REST API endpoint configuration for dlt."""
 
     model_config = ConfigDict(extra="allow")
 
-    type: str  # landing | stream | table
+    name: str
+    path: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+    paginator: Optional[str] = None  # json_link | page_number | offset | cursor | null
+
+
+class DltSourceConfig(BaseModel):
+    """DLT-specific source configuration, embedded in SourceConfig.
+
+    Supports two modes:
+
+    Mode 1 — Verified Source::
+
+        source:
+          type: dlt
+          dlt:
+            pipeline: stripe_analytics
+            resource: charges
+            credentials:
+              api_key: ${STRIPE_API_KEY}
+
+    Mode 2 — Declarative REST API::
+
+        source:
+          type: dlt
+          dlt:
+            base_url: https://api.example.com/v1/
+            credentials:
+              api_key: ${API_KEY}
+            endpoints:
+              - name: users
+                path: users
+                params:
+                  limit: 100
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    # Mode 1: Verified Source (e.g., stripe_analytics, google_analytics)
+    pipeline: Optional[str] = None
+    resource: Optional[str] = None
+
+    # Mode 2: REST API (fully declarative)
+    base_url: Optional[str] = None
+    endpoints: Optional[List[DltEndpointConfig]] = None
+
+    # Shared settings
+    credentials: Dict[str, str] = Field(default_factory=dict)
+    write_disposition: str = "replace"  # replace | append | merge
+    max_table_nesting: int = 1  # flatten depth (0 = no nesting)
+
+    @model_validator(mode="after")
+    def _validate_mode(self) -> "DltSourceConfig":
+        if not self.pipeline and not self.base_url:
+            raise ValueError(
+                "dlt source must specify either 'pipeline' (verified source) or 'base_url' (REST API mode)"
+            )
+        return self
+
+
+class SourceConfig(BaseModel):
+    """Source acquisition settings for landing/stream/table/dlt inputs."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str  # landing | stream | table | dlt
     path: Optional[str] = None
     format: Optional[str] = None
     load_mode: str = "full"  # full | incremental | cdc
@@ -200,6 +265,9 @@ class SourceConfig(BaseModel):
     cdc_op_field: Optional[str] = None
     cdc_delete_values: List[str] = Field(default_factory=list)
     cdc_timestamp_field: Optional[str] = None
+
+    # DLT source configuration (populated when type == "dlt")
+    dlt: Optional[DltSourceConfig] = None
 
     # Date-partitioned landing support
     partition: Optional[SourcePartition] = None
@@ -319,6 +387,7 @@ class SourceConfig(BaseModel):
         "watermark_date_parts",
         "partition_filters",
         "flatten_nested",
+        "dlt",
     }
 
     @model_validator(mode="after")
