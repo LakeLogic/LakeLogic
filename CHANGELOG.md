@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.11.1] — 2026-04-07
+
+### Fixed
+
+- Resolve ruff lint errors (F821 undefined report, F841 unused vars, E501 long lines)
 ## [1.11.0] — 2026-04-06
 
 ### Added
@@ -186,6 +191,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.11.1]: https://github.com/lakelogic/LakeLogic/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.11.0
 [1.6.1]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.6.1
 [1.4.0]: https://github.com/lakelogic/LakeLogic/compare/v1.3.0...v1.4.0
