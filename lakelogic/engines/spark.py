@@ -287,7 +287,8 @@ class SparkAdapter(EngineAdapter):
 
             elif trans.derive and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [Derive]: {trans.derive.field}")
-                current_df = current_df.withColumn(trans.derive.field, F.expr(trans.derive.sql))
+                _derive_expr = self._transpile_derive_sql(trans.derive)
+                current_df = current_df.withColumn(trans.derive.field, F.expr(_derive_expr))
                 existing = set(current_df.columns)
 
             elif trans.pivot and trans_phase == "pre":
@@ -544,7 +545,8 @@ class SparkAdapter(EngineAdapter):
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 from pyspark.sql import functions as F
 
-                current_df = current_df.withColumn(trans.derive.field, F.expr(trans.derive.sql))
+                _derive_expr = self._transpile_derive_sql(trans.derive)
+                current_df = current_df.withColumn(trans.derive.field, F.expr(_derive_expr))
             elif trans.bucket:
                 logger.debug(f"Post-Transform [Bucket]: {trans.bucket.field}")
                 # For bucket, we use the existing _build_bucket_sql but extract the expression
@@ -757,7 +759,7 @@ class SparkAdapter(EngineAdapter):
         from pyspark.sql import functions as F
 
         if not self.contract.model or not self.contract.model.fields:
-            if self.contract.server and self.contract.server.mode == "ingest" and self.contract.server.cast_to_string:
+            if self.contract.server and self.contract.server.cast_to_string:
                 for col in df.columns:
                     df = df.withColumn(col, F.col(col).cast("string"))
             return df, []
@@ -775,7 +777,7 @@ class SparkAdapter(EngineAdapter):
         cast_to_string = False
         allow_schema_drift = True
 
-        if server and server.mode == "ingest":
+        if server:
             evolution = (server.schema_evolution or "strict").lower()
             cast_to_string = bool(server.cast_to_string)
             allow_schema_drift = bool(server.allow_schema_drift)

@@ -7,26 +7,26 @@ Given a source layer (e.g. Bronze) that may have accumulated multiple days of
 partitions, this module answers: **which partitions have NOT yet been processed
 into the target layer (Silver / Gold)?**
 
-Five strategies — all produce the same ``Boundary(from_dt, to_dt)`` output:
+Five strategies â€” all produce the same ``Boundary(from_dt, to_dt)`` output:
 
-  1. ``max_target`` *(default)* — query MAX(watermark_field) from the target
+  1. ``max_target`` *(default)* â€” query MAX(watermark_field) from the target
                          Delta table.  Processes everything newer than that
                          high-water mark.  Self-healing: if silver is manually
                          modified, the next run re-reads based on the timestamp
                          boundary, not a version pointer.
 
-  2. ``pipeline_log``  — query a pipeline audit log table for the last
+  2. ``pipeline_log``  â€” query a pipeline audit log table for the last
                          successful run.  More reliable than watermark when the
                          target table can be partially overwritten.
 
-  3. ``manifest``      — read a JSON manifest file listing already-processed
+  3. ``manifest``      â€” read a JSON manifest file listing already-processed
                          partition values.  Lightweight, no Spark required.
 
-  4. ``date_range``    — explicit from/to dates or a human-readable lookback
+  4. ``date_range``    â€” explicit from/to dates or a human-readable lookback
                          string (e.g. ``"7 days"``, ``"3 hours"``).
                          Useful for ad-hoc backfills and Databricks Widgets.
 
-  5. ``delta_version`` — use Delta transaction log versions to identify new
+  5. ``delta_version`` â€” use Delta transaction log versions to identify new
                          commits.  Fastest for large tables: reads only the
                          specific Parquet files added/changed between versions.
                          State is stored in target table TBLPROPERTIES
@@ -56,36 +56,36 @@ Usage
 
     from lakelogic.core.incremental import IncrementalBoundary
 
-    # Strategy 1 — watermark on target table (DEFAULT)
+    # Strategy 1 â€” watermark on target table (DEFAULT)
     boundary = IncrementalBoundary.from_max_target(
         target_path="abfss://silver@.../listings",
         watermark_field="_lakelogic_processed_at",
     )
 
-    # Strategy 2 — pipeline log
+    # Strategy 2 â€” pipeline log
     boundary = IncrementalBoundary.from_pipeline_log(
         log_table="pipeline_runs",
         pipeline_name="bronze_to_silver_zoopla_listings",
     )
 
-    # Strategy 3 — manifest file
+    # Strategy 3 â€” manifest file
     boundary = IncrementalBoundary.from_manifest(
         manifest_path="abfss://meta@.../manifests/bronze_to_silver.json",
         partition_field="_snapshot_date",
     )
 
-    # Strategy 4a — explicit date range
+    # Strategy 4a â€” explicit date range
     boundary = IncrementalBoundary.from_date_range(
         from_date="2024-03-01",
         to_date="2024-03-31",
     )
 
-    # Strategy 4b — lookback string
+    # Strategy 4b â€” lookback string
     boundary = IncrementalBoundary.from_lookback("7 days")
     boundary = IncrementalBoundary.from_lookback("3 hours")
     boundary = IncrementalBoundary.from_lookback("1 month")
 
-    # Strategy 5 — Delta table version tracking
+    # Strategy 5 â€” Delta table version tracking
     boundary = IncrementalBoundary.from_delta_version(
         source_path="table:catalog.bronze.sessions",
         target_path="table:catalog.silver.sessions",
@@ -116,7 +116,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Boundary dataclass — unified output of all strategies
+# Boundary dataclass â€” unified output of all strategies
 # ---------------------------------------------------------------------------
 
 
@@ -176,19 +176,19 @@ class Boundary:
         """
         Return a Spark SQL filter string covering the resolved time window.
 
-        Supports three field layouts — pick the one that matches your table:
+        Supports three field layouts â€” pick the one that matches your table:
 
         **Single date/timestamp column** (most common)::
 
             # Table has: _snapshot_date DATE
             df.filter(boundary.spark_filter("_snapshot_date"))
-            # → "_snapshot_date >= '2024-03-01' AND _snapshot_date <= '2024-03-31'"
+            # â†’ "_snapshot_date >= '2024-03-01' AND _snapshot_date <= '2024-03-31'"
 
         **Split date-part columns as a list** (year, month, day)::
 
             # Table has: year INT, month INT, day INT
             df.filter(boundary.spark_filter(date_parts=["year", "month", "day"]))
-            # → "MAKE_DATE(year, month, day) >= '2024-03-01'
+            # â†’ "MAKE_DATE(year, month, day) >= '2024-03-01'
             #    AND MAKE_DATE(year, month, day) <= '2024-03-31'"
 
         **Split date-part columns as a dict** (custom column names)::
@@ -208,26 +208,26 @@ class Boundary:
                 partition_filters={"country": "GB"},
             )
             df.filter(boundary.spark_filter("_snapshot_date"))
-            # → "country = 'GB' AND _snapshot_date >= '2024-...' AND ..."
+            # â†’ "country = 'GB' AND _snapshot_date >= '2024-...' AND ..."
 
         Parameters
         ----------
         field : str, optional
             Single date/timestamp column name.
         date_parts : list of str or dict, optional
-            Split date columns.  List → ``[year_col, month_col, day_col]``.
-            Dict → ``{"year": col, "month": col, "day": col}``.
+            Split date columns.  List â†’ ``[year_col, month_col, day_col]``.
+            Dict â†’ ``{"year": col, "month": col, "day": col}``.
         """
         parts: List[str] = []
 
-        # ── Static partition filters (non-temporal) ───────────────────────────
+        # â”€â”€ Static partition filters (non-temporal) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         for col, val in self.partition_filters.items():
             if isinstance(val, str):
                 parts.append(f"{col} = '{val}'")
             else:
                 parts.append(f"{col} = {val}")
 
-        # ── Temporal filter ───────────────────────────────────────────────────
+        # â”€â”€ Temporal filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if field is not None:
             parts.append(f"{field} >= '{self.from_iso}'")
             parts.append(f"{field} <= '{self.to_iso}'")
@@ -256,7 +256,7 @@ class Boundary:
                 parts.append(f"{make_date} >= '{self.from_date}'")
                 parts.append(f"{make_date} <= '{self.to_date}'")
             elif "month" in dp:
-                # Year+month only — match whole months in range
+                # Year+month only â€” match whole months in range
                 y_col, m_col = dp["year"], dp["month"]
                 parts.append(
                     f"({y_col} > {self.from_date.year} OR "
@@ -307,11 +307,11 @@ class Boundary:
 
         expr = pl.lit(True)
 
-        # ── Static partition filters ──────────────────────────────────────────
+        # â”€â”€ Static partition filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         for col, val in self.partition_filters.items():
             expr = expr & (pl.col(col) == val)
 
-        # ── Temporal filter ───────────────────────────────────────────────────
+        # â”€â”€ Temporal filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if field is not None:
             expr = expr & (pl.col(field).cast(pl.Date) >= self.from_date)
             expr = expr & (pl.col(field).cast(pl.Date) <= self.to_date)
@@ -333,9 +333,9 @@ class Boundary:
 
             if "day" in dp:
                 # Reconstruct date: year*10000 + month*100 + day as integer key
-                # Polars doesn't have MAKE_DATE directly — use date arithmetic
+                # Polars doesn't have MAKE_DATE directly â€” use date arithmetic
                 y, m, d = pl.col(dp["year"]), pl.col(dp["month"]), pl.col(dp["day"])
-                # Integer key: YYYYMMDD — faithful date ordering without MAKE_DATE
+                # Integer key: YYYYMMDD â€” faithful date ordering without MAKE_DATE
                 date_key = y * 10_000 + m * 100 + d
                 from_key = self.from_date.year * 10_000 + self.from_date.month * 100 + self.from_date.day
                 to_key = self.to_date.year * 10_000 + self.to_date.month * 100 + self.to_date.day
@@ -395,7 +395,7 @@ def _parse_lookback(lookback: str) -> timedelta:
     Supported formats::
 
         "15 minutes"  "3 hours"  "7 days"  "2 weeks"  "1 month"  "1 year"
-        "30mins"      "6hrs"     "90"      (bare integer → seconds)
+        "30mins"      "6hrs"     "90"      (bare integer â†’ seconds)
 
     Parameters
     ----------
@@ -408,7 +408,7 @@ def _parse_lookback(lookback: str) -> timedelta:
     """
     lookback = lookback.strip().lower()
 
-    # Bare integer → seconds
+    # Bare integer â†’ seconds
     if lookback.isdigit():
         return timedelta(seconds=int(lookback))
 
@@ -428,7 +428,7 @@ def _parse_lookback(lookback: str) -> timedelta:
 
 
 # ---------------------------------------------------------------------------
-# IncrementalBoundary — factory class for all 4 strategies
+# IncrementalBoundary â€” factory class for all 4 strategies
 # ---------------------------------------------------------------------------
 
 
@@ -438,7 +438,7 @@ class IncrementalBoundary:
 
     All ``from_*`` class methods return a :class:`Boundary` object.
 
-    Design decision — why a single ``Boundary`` output?
+    Design decision â€” why a single ``Boundary`` output?
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Every strategy answers the same question: "process source data where
     ``watermark_field`` is between X and Y".  By normalising to a ``Boundary``
@@ -451,7 +451,7 @@ class IncrementalBoundary:
                          .filter(boundary.spark_filter("_snapshot_date"))
     """
 
-    # ── Strategy 1: Max watermark on the target table ─────────────────────────
+    # â”€â”€ Strategy 1: Max watermark on the target table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â
 
     @classmethod
     def from_max_target(
@@ -476,7 +476,7 @@ class IncrementalBoundary:
         watermark_field : str
             Column name to take MAX of (e.g. ``_snapshot_date``).
         to_dt : datetime, optional
-            Upper bound — defaults to NOW (UTC).
+            Upper bound â€” defaults to NOW (UTC).
         default_from : datetime or ISO string, optional
             Fallback lower bound when target is empty. Default: 90 days ago.
 
@@ -488,7 +488,7 @@ class IncrementalBoundary:
                 target_path="abfss://silver@acct.dfs.core.windows.net/zoopla/listings",
                 watermark_field="_snapshot_date",
             )
-            # If Silver has data up to 2024-03-05 →
+            # If Silver has data up to 2024-03-05 â†’
             # boundary.from_date == date(2024, 3, 6)
             # boundary.to_date   == date.today()
         """
@@ -520,7 +520,7 @@ class IncrementalBoundary:
             meta = {"watermark_value": str(max_val), "target_path": target_path}
 
         except Exception as exc:
-            # Target missing / empty — use default_from
+            # Target missing / empty â€” use default_from
             if default_from is not None:
                 from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
@@ -530,7 +530,7 @@ class IncrementalBoundary:
         _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="max_target", metadata=meta)
 
-    # ── Strategy 1b: Delta Table Version (Snapshot) ───────────────────────────
+    # â”€â”€ Strategy 1b: Delta Table Version (Snapshot) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @classmethod
     def from_delta_version(
@@ -559,7 +559,7 @@ class IncrementalBoundary:
         target_path : str
             Target Delta table path (where we store the state).
         to_version : int, optional
-            Upper bound — defaults to the current source version.
+            Upper bound â€” defaults to the current source version.
         default_version : int, optional
             Fallback version if no state is found. Default: 0.
         """
@@ -617,7 +617,8 @@ class IncrementalBoundary:
                     if _wm_val is not None:
                         last_version = int(_wm_val)
                         logger.info(
-                            f"Healed missing Delta property from {log_table}.max_watermark_value. Resuming from {last_version}."
+                            f"Healed missing Delta property from "
+                            f"{log_table}.max_watermark_value. Resuming from {last_version}."
                         )
                     elif _json_val is not None:
                         last_version = int(_json_val)
@@ -632,7 +633,8 @@ class IncrementalBoundary:
                     f"INCREMENTAL RESET: No Delta version state for [{dataset}]. Full load from v{default_version}."
                 )
                 logger.warning(
-                    f"INCREMENTAL RESET context: domain={domain}, system={system}, data_layer={data_layer}, log_table={log_table}"
+                    f"INCREMENTAL RESET context: domain={domain}, "
+                    f"system={system}, data_layer={data_layer}, log_table={log_table}"
                 )
 
             # 2. Resolve target version from source history
@@ -655,7 +657,8 @@ class IncrementalBoundary:
                 if from_v > to_v:
                     logger.warning(
                         f"Target version ({last_version}) > current source version ({curr_version}). "
-                        f"Source table may have been dropped or re-created. Resetting to FULL reload from version {default_version}."
+                        f"Source table may have been dropped or re-created. "
+                        f"Resetting to FULL reload from version {default_version}."
                     )
                     from_v = default_version
                     to_v = curr_version
@@ -687,7 +690,7 @@ class IncrementalBoundary:
                 metadata={"error": str(exc), "from_version": 0},
             )
 
-    # ── Strategy 2: Pipeline log / audit table ────────────────────────────────
+    # â”€â”€ Strategy 2: Pipeline log / audit table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_pipeline_log(
@@ -719,7 +722,7 @@ class IncrementalBoundary:
         Parameters
         ----------
         pipeline_name : str
-            Registered name of the pipeline — used only in legacy fallback.
+            Registered name of the pipeline â€” used only in legacy fallback.
         log_table : str
             Spark/Databricks table name for the run log (e.g.
             ``"`catalog`.domain._run_logs"``).
@@ -733,7 +736,7 @@ class IncrementalBoundary:
         system : str, optional
             System filter (e.g. ``"google_analytics"``).
         to_dt : datetime, optional
-            Upper bound — defaults to NOW (UTC).
+            Upper bound â€” defaults to NOW (UTC).
         default_from : datetime or ISO string, optional
             Fallback when no successful run exists.
 
@@ -759,7 +762,7 @@ class IncrementalBoundary:
                 raise RuntimeError("No active Spark session")
 
             if dataset:
-                # ── Modern path: query _run_logs by dataset column ────────
+                # â”€â”€ Modern path: query _run_logs by dataset column â”€â”€â”€â”€â”€â”€â”€â”€
                 filt = (
                     (F.col("dataset") == dataset) & (F.col("stage") != "no_new_data") & (F.col("stage") != "reprocess")
                 )
@@ -782,8 +785,8 @@ class IncrementalBoundary:
                 )
 
                 # Priority: max_source_mtime (epoch of upstream table's last processed row)
-                #         → max_watermark_value (explicit watermark from prior run)
-                #         → timestamp (fallback to run timestamp)
+                #         â†’ max_watermark_value (explicit watermark from prior run)
+                #         â†’ timestamp (fallback to run timestamp)
                 _src_mtime = row["last_source_mtime"]
                 if _src_mtime is not None:
                     # max_source_mtime is stored as epoch seconds (float/int)
@@ -815,7 +818,7 @@ class IncrementalBoundary:
                     "log_table": log_table,
                 }
             else:
-                # ── Legacy path: query pipeline_runs by pipeline_name ─────
+                # â”€â”€ Legacy path: query pipeline_runs by pipeline_name â”€â”€â”€â”€â”€
                 row = (
                     spark.table(log_table)
                     .filter((F.col("pipeline_name") == pipeline_name) & (F.col("status") == "success"))
@@ -846,7 +849,7 @@ class IncrementalBoundary:
         _to = to_dt or datetime.now(timezone.utc)
         return Boundary(from_dt=from_dt, to_dt=_to, strategy="pipeline_log", metadata=meta)
 
-    # ── Strategy 3: Manifest file ─────────────────────────────────────────────
+    # â”€â”€ Strategy 3: Manifest file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @classmethod
     def from_manifest(
@@ -877,9 +880,9 @@ class IncrementalBoundary:
             For cloud paths: pass a local temp path after downloading with your
             cloud SDK, or use ``dbutils.fs.cp`` on Databricks.
         partition_field : str
-            For documentation only — not used at runtime (manifest stores the values).
+            For documentation only â€” not used at runtime (manifest stores the values).
         to_dt : datetime, optional
-            Upper bound — defaults to NOW (UTC).
+            Upper bound â€” defaults to NOW (UTC).
 
         Example manifest file
         ---------------------
@@ -971,7 +974,7 @@ class IncrementalBoundary:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    # ── Strategy 4a: Explicit date range ─────────────────────────────────────
+    # â”€â”€ Strategy 4a: Explicit date range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_date_range(
@@ -1011,7 +1014,7 @@ class IncrementalBoundary:
                 partition_filters={"country": "GB"},
             )
             df.filter(boundary.spark_filter(date_parts=["year", "month", "day"]))
-            # → "country = 'GB' AND MAKE_DATE(year,month,day) BETWEEN ..."
+            # â†’ "country = 'GB' AND MAKE_DATE(year,month,day) BETWEEN ..."
         """
 
         def _to_dt(v) -> datetime:
@@ -1031,7 +1034,7 @@ class IncrementalBoundary:
             metadata={"from_date": str(from_date), "to_date": str(to_date or "now")},
         )
 
-    # ── Strategy 4b: Lookback string ─────────────────────────────────────────
+    # â”€â”€ Strategy 4b: Lookback string â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @classmethod
     def from_lookback(
@@ -1079,7 +1082,7 @@ class IncrementalBoundary:
                 partition_filters={"country": "GB"},
             )
             df.filter(boundary.spark_filter(date_parts=["year", "month", "day"]))
-            # → "country = 'GB' AND MAKE_DATE(year, month, day) >= '...' AND ..."
+            # â†’ "country = 'GB' AND MAKE_DATE(year, month, day) >= '...' AND ..."
 
             # Near-real-time micro-batch
             boundary = IncrementalBoundary.from_lookback("30 mins")
@@ -1095,7 +1098,7 @@ class IncrementalBoundary:
             metadata={"lookback": lookback, "delta_seconds": delta.total_seconds()},
         )
 
-    # ── Convenience: resolve from contract SourceConfig ────────────────────────
+    # â”€â”€ Convenience: resolve from contract SourceConfig â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_contract(
@@ -1128,14 +1131,14 @@ class IncrementalBoundary:
         -----------------------------
         ::
 
-            # Pattern A — country-specific contract (one YAML per country)
+            # Pattern A â€” country-specific contract (one YAML per country)
             #   bronze_listings_gb.yaml: partition_filters: {country: GB}
             boundary = IncrementalBoundary.from_contract(
                 "contracts/bronze_listings_gb.yaml",
                 lookback="7 days",
             )
 
-            # Pattern B — generic contract, country at runtime
+            # Pattern B â€” generic contract, country at runtime
             for country in ["GB", "DE", "FR", "ES"]:
                 boundary = IncrementalBoundary.from_contract(
                     "contracts/bronze_listings.yaml",
@@ -1148,7 +1151,7 @@ class IncrementalBoundary:
                     .save(f"{SILVER_ROOT}/{country}")
                 )
 
-            # Pattern C — Databricks Widgets
+            # Pattern C â€” Databricks Widgets
             boundary = IncrementalBoundary.from_contract(
                 CONTRACT_PATH,
                 lookback=dbutils.widgets.get("lookback"),
@@ -1222,7 +1225,7 @@ class IncrementalBoundary:
         b.partition_filters = merged_pf
         return b
 
-    # ── Convenience: resolve from SourceConfig model ────────────────────────
+    # â”€â”€ Convenience: resolve from SourceConfig model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
 
     @classmethod
     def from_source_config(cls, source_config, **overrides) -> Boundary:
@@ -1252,7 +1255,7 @@ class IncrementalBoundary:
         """
         cfg = source_config.model_dump() if hasattr(source_config, "model_dump") else vars(source_config)
 
-        # Extract partition_filters separately — needs merge, not plain replace
+        # Extract partition_filters separately â€” needs merge, not plain replace
         runtime_pf: Dict[str, Any] = overrides.pop("partition_filters", None) or {}
         cfg.update({k: v for k, v in overrides.items() if v is not None})
 

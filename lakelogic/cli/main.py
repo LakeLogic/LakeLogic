@@ -51,7 +51,7 @@ def run(
         "polars",
         "--engine",
         "-e",
-        help="Execution engine (polars, pandas, duckdb, spark, snowflake, bigquery).",
+        help="Execution engine (polars, spark, snowflake, bigquery).",
     ),
     stage: Optional[str] = typer.Option(
         None, "--stage", help="Apply contract stage overrides (e.g., bronze or silver)."
@@ -276,9 +276,16 @@ def setup_oss():
 
     # Setup DuckDB extensions
     try:
-        from lakelogic.engines.duckdb import DuckDBAdapter
+        import duckdb
 
-        DuckDBAdapter.setup_extensions()
+        # DuckDB is used as an internal query compiler, ensure its cloud extensions exist
+        for ext in ("httpfs", "azure"):
+            try:
+                duckdb.install_extension(ext)
+                duckdb.load_extension(ext)
+            except Exception as ext_e:
+                logger.debug(f"Could not load duckdb extension {ext}: {ext_e}")
+
         logger.info("✅ DuckDB extensions setup complete.")
     except Exception as e:
         logger.error(f"❌ Failed to setup DuckDB extensions: {e}")

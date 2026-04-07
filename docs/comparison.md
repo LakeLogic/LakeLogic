@@ -8,7 +8,7 @@ Choosing the right tool for your data platform depends on your specific needs. L
 | :--- | :--- | :--- | :--- |
 | **Primary Focus** | Runtime Data Contracts | Transformation & Warehouse Testing | Data Observability & Profiling |
 | **Execution Point** | **During** Data Movement (ETL/ELT) | **After** Data Loading (Warehouse) | **Validation Reports** (Post-Process) |
-| **Engine Support** | Polars, Spark, DuckDB, Pandas | SQL Warehouse (Snowflake, BQ, etc.) | Python-based |
+| **Engine Support** | Polars, Spark | SQL Warehouse (Snowflake, BQ, etc.) | Python-based |
 | **Handling Failures** | **Quarantine**: Detours bad rows in real-time | Fails the build or logs the error | Generates comprehensive quality reports |
 | **Best Workflow** | **Prevention**: Shift-left data quality | **Transformation**: Model-driven testing | **Observability**: Long-term data health |
 

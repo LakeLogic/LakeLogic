@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import yaml
-
+import pytest
+typer = pytest.importorskip("typer")
 from lakelogic.cli import main as cli_main_module  # noqa: F811 — avoid shadowed name
 from lakelogic.cli.main import bootstrap
 

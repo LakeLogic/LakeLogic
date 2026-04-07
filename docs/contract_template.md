@@ -151,7 +151,8 @@ source:
   # ── Load Mode Validation ─────────────────────────────────────
   # The pipeline validates required properties per load_mode:
   #   incremental → watermark_field recommended (defaults to _lakelogic_processed_at)
-  #   cdc         → cdc_op_field REQUIRED (raises error if missing)
+  #   cdc         → at least ONE of: cdc_op_field, cdc_timestamp_field
+  #                 (both optional individually, but at least one required)
   #   full        → no additional requirements
   
   pattern: "*.parquet"
@@ -169,7 +170,7 @@ source:
     recursiveFileLookup: "true"
     multiLine: "true"
     delimiter: ","
-  # OPTIONAL: Reader options passed directly to the engine (Spark, Pandas, etc.)
+  # OPTIONAL: Reader options passed directly to the engine (Spark, Polars, etc.)
   # Common CSV options: header, inferSchema, delimiter, quote, escape, encoding
   # Common JSON options: multiLine, allowComments
   # Common Parquet options: mergeSchema
@@ -206,14 +207,19 @@ source:
   #
   # ── Strategy Comparison ──────────────────────────────────────
   #
-  #  Strategy        Best For                 State Stored In          Requires Spark?
-  #  ──────────────  ───────────────────────  ───────────────────────  ───────────────
-  #  max_target      Most batch pipelines     Target table (self-heal) Yes
-  #  pipeline_log    Partial overwrites       _run_logs table          Yes
-  #  lookback        Simple rolling windows   None (stateless)         No
-  #  date_range      Backfills & widgets      None (explicit dates)    No
-  #  manifest        Non-Spark pipelines      JSON manifest file       No
-  #  delta_version   Large streaming tables   Target TBLPROPERTIES     Yes
+  #  Strategy        Best For                 Source Type     State Stored In          Requires Spark?
+  #  ──────────────  ───────────────────────  ──────────────  ───────────────────────  ───────────────
+  #  max_target      Most batch pipelines     Table only      Target table (self-heal) Yes
+  #  pipeline_log    File-based incremental   File only ⚠️    _run_logs table          No
+  #  lookback        Simple rolling windows   File or Table   None (stateless)         No
+  #  date_range      Backfills & widgets      File or Table   None (explicit dates)    No
+  #  manifest        Non-Spark pipelines      File only       JSON manifest file       No
+  #  delta_version   Large streaming tables   Table only ⚠️   Target TBLPROPERTIES     Yes
+  #
+  # ⚠️ CROSS-VALIDATION (enforced at runtime):
+  #   - pipeline_log on a table source → raises ValueError (no file mtimes to compare)
+  #   - delta_version on a file source → raises ValueError (no Delta transaction log)
+  #   Use load_mode: 'cdc' with cdc_timestamp_field for table-to-table incremental loads.
   #
   # ── Strategy 1: max_target (DEFAULT) ──────────────────────────────
   # Queries MAX(watermark_field) on the target Delta table.
@@ -233,19 +239,24 @@ source:
   #
   # ── Strategy 2: pipeline_log ──────────────────────────────────────
   # Queries the _run_logs table (written by LakeLogic after each run)
-  # for the last successful run of this dataset.
-  # Uses MAX(timestamp) from _run_logs filtered by dataset column.
+  # for the last successful max_source_mtime of this dataset.
+  # Compares file modification times against the watermark.
+  #
+  # ⚠️ FILE SOURCES ONLY — raises ValueError on table sources
+  #    (tables have no file mtimes to compare).
+  #    For table-to-table incremental, use load_mode: 'cdc' with
+  #    cdc_timestamp_field or watermark_strategy: 'delta_version'.
   #
   # Example:
   #   source:
-  #     type: table
-  #     path: "{domain_catalog}.{bronze_layer}_{system}_events"
+  #     type: landing
+  #     path: "abfss://landing@acct.dfs.core.windows.net/events/"
   #     load_mode: incremental
   #     watermark_strategy: pipeline_log
   #   # State: _run_logs table (configured via metadata.run_log_table)
   #   # Filters by: dataset (target table name), data_layer, domain, system
-  #   # Uses watermark_field: YES — to filter source after boundary resolved
-  #   # Fallback: if no prior runs, uses NOW - 90 days
+  #   # Excludes: failed runs, no_new_data runs, reprocess runs
+  #   # Fallback: if no prior runs, scans all files (initial load)
   #
   # ── Strategy 3: lookback ──────────────────────────────────────────
   # Sliding window: processes everything from NOW - duration to NOW.
@@ -292,7 +303,7 @@ source:
   #
   # ── Strategy 5: manifest ──────────────────────────────────────────
   # Reads a JSON manifest file listing already-processed partitions.
-  # Lightweight alternative for non-Spark environments (Polars, Pandas, Azure Functions).
+  # Lightweight alternative for non-Spark environments (Polars, Azure Functions).
   #
   # Example:
   #   source:
@@ -312,6 +323,9 @@ source:
   # Uses Delta transaction log versions instead of timestamp columns.
   # Reads only the specific Parquet files added/changed between versions.
   # Fastest strategy for large tables — no column scanning required.
+  #
+  # ⚠️ TABLE SOURCES ONLY — raises ValueError on file sources
+  #    (files have no Delta transaction log).
   #
   # Example:
   #   source:
@@ -567,14 +581,73 @@ model:
       # Business value: Role-based data masking per field
       masking: "partial"
       # Default mask when user NOT in security_groups.
-      # Options: nullify | hash | redact | partial | tokenize | encrypt
-      # partial → j***@company.com  (preserves structure)
-      # Business value: Configurable masking strategy per field
-      pii_vault: "vault://pii-encryption-key"
-      # Optional: encrypted vault table for reversible unmasking.
-      # When set, pipeline dual-writes: masked output + encrypted PII vault.
-      # Authorized users can rejoin vault to reconstruct unmasked data.
-      # Business value: Reversible masking for authorized re-identification
+      # Options: nullify | hash | redact | partial | encrypt
+      #
+      # ── Masking Strategies ──────────────────────────────
+      #
+      # nullify → NULL
+      #   Joinable: No | Reversible: No | GDPR: ✓
+      #   Hard removal — value gone forever.
+      #   Use for GDPR Art.17 erasure writes.
+      #
+      # hash → a3f8b2c1d4... (SHA-256)
+      #   Joinable: Yes | Reversible: No | GDPR: ✓
+      #   One-way pseudonymisation. Analytics teams
+      #   can COUNT DISTINCT and JOIN across tables
+      #   without seeing real values.
+      #
+      # redact → ***REDACTED***
+      #   Joinable: No | Reversible: No | GDPR: ✓
+      #   Visible marker that data existed. Audit-
+      #   friendly — shows masking was applied
+      #   (vs NULL which is ambiguous).
+      #
+      # partial → j***@company.com | ***-***-1234
+      #   Joinable: No | Reversible: No | GDPR: ✗
+      #   Preserves structure for support/debug.
+      #   NOT suitable for erasure — still leaks
+      #   enough to narrow identification.
+      #
+      # encrypt → enc:gAAAAABh... (AES-256)
+      #   Joinable: Yes | Reversible: Yes | GDPR: ✓
+      #   Reversible for authorised users via Key
+      #   Vault. Delete the key = crypto-shredding.
+      #   Best for regulated environments
+      #   (healthcare, finance, GDPR Art.17).
+      #
+      pii_vault: "keyvault://mycompany-pii/lakelogic-pii-key"
+      # Encryption key for 'encrypt' strategy.
+      # Fetched once at pipeline start (cached).
+      #
+      # ── Vault Providers ─────────────────────────────────
+      #
+      # keyvault://vault-name/secret-name
+      #   → Azure Key Vault (DefaultAzureCredential)
+      #
+      # databricks://scope-name/key-name
+      #   → Databricks Secret Scope
+      #
+      # env://VARIABLE_NAME
+      #   → Environment variable
+      #
+      # vault://path/to/secret
+      #   → HashiCorp Vault
+      #
+      # aws-kms://secret-name
+      #   → AWS Secrets Manager
+      #
+      # No key is stored in code or env vars.
+      # Business value: Reversible masking via KMS
+      masking_format: "{first1}***@{domain}"
+      # Custom format for 'partial' strategy.
+      # Tokens: {first1}-{first9}, {last1}-{last9}, {domain}
+      # If omitted, auto-detects email/phone/generic.
+      #
+      # Examples:
+      # "{first1}***@{domain}"  → j***@company.com
+      # "***-***-{last4}"       → ***-***-1234
+      # "{first2}** ***"        → SW** *** (postcode)
+      # "GB**-****-{last4}"     → GB**-****-7890 (IBAN)
       rules:
         - name: "email_format"
           sql: "email RLIKE '^[^@]+@[^@]+\\.[^@]+$'"
@@ -1062,48 +1135,78 @@ quarantine:
   # append: add bad records to existing quarantine data
   # overwrite: replace quarantine target on every run
   # Business value: Control quarantine growth vs freshness
-  
-  # ──────────────────────────────────────────────────────
-  # NOTIFICATION CHANNELS
-  # ──────────────────────────────────────────────────────
-  notifications:
-    # Default notification via Apprise (auto-detects channel from URL)
-    - target: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
-      on_events: ["quarantine", "failure", "schema_drift"]
-      subject_template: "[{{ event | upper }}] {{ contract.title }}"
-      message_template: "Run={{ run_id }}\nMessage={{ message }}"
-      # type defaults to "apprise" — auto-detects Slack, Teams, email etc.
-      # Events: quarantine, failure, schema_drift, dataset_rule_failed
-      # Business value: Real-time alerting
-    
-    # Microsoft Teams notification
-    - type: "teams"
-      channel: "https://outlook.office.com/webhook/YOUR/WEBHOOK/URL"
-      on_events: ["quarantine", "failure"]
-    
-    # Email notification
-    - type: "email"
-      to: "data-platform@company.com"
-      subject_template_file: "templates/alerts/failure_subject.j2"
-      message_template_file: "templates/alerts/failure_body.j2"
-      on_events: ["failure", "dataset_rule_failed"]
-      # Requires SMTP configuration
-    
-    # Generic webhook
-    - type: "webhook"
-      url: "https://api.company.com/data-quality/alerts"
-      on_events: ["quarantine", "failure", "schema_drift"]
-      # Business value: Integration with custom systems
-    
-    # Multi-channel fan-out (send to multiple URLs at once)
-    - targets:
-        - "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
-        - "https://outlook.office.com/webhook/YOUR/WEBHOOK/URL"
-      on_events: ["failure"]
-      # Business value: Broadcast critical alerts to multiple channels
 
 # ============================================================
-# 12. MATERIALIZATION
+# 12. NOTIFICATION CHANNELS
+# ============================================================
+# OPTIONAL: Pipeline event notifications via Apprise.
+# Handles ALL event types — not just quarantine.
+# Each entry uses a `target:` URL — Apprise auto-detects the channel
+# from the URL scheme (mailto://, slack://, msteams://, etc.).
+#
+# `target:` MUST be a full Apprise URL with a scheme.
+# ❌ Wrong:  target: "to=alerts@company.com"
+# ✅ Right:  target: "mailto://user:pass@smtp.co.com?to=alerts@company.com"
+#
+# Also accepts `type:` for legacy built-in adapters (slack, teams, webhook).
+# `channel:`, `url:`, `to:` are aliases for `target:`.
+#
+# Supported events: quarantine, failure, schema_drift, dataset_rule_failed,
+#                   slo_breach, slo_recovery
+#
+# Secrets in URLs: use env:VAR_NAME, keyvault:secret-name, etc.
+# Full Apprise reference: https://github.com/caronc/apprise/wiki
+notifications:
+
+  # ── Slack (via webhook URL) ──────────────────────────────
+  - target: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    on_events: ["quarantine", "failure", "schema_drift", "slo_breach", "slo_recovery"]
+    subject_template: "[{{ event | upper }}] {{ contract.title }}"
+    message_template: "Run={{ run_id }}\nMessage={{ message }}"
+    # Apprise auto-detects Slack from the hooks.slack.com domain.
+    # Business value: Real-time alerting
+
+  # ── Microsoft Teams (via webhook URL) ────────────────────
+  - target: "https://outlook.office.com/webhook/YOUR/WEBHOOK/URL"
+    on_events: ["quarantine", "failure"]
+    # Apprise auto-detects Teams from the outlook.office.com domain.
+    # Legacy alternative: type: "teams" + channel: "https://..."
+
+  # ── Email via SMTP (Gmail) ──────────────────────────────
+  # SMTP credentials are embedded in the URL. No server config needed.
+  - target: "mailto://user:app_password@gmail.com?to=data-platform@company.com"
+    on_events: ["failure", "dataset_rule_failed"]
+    subject_template: "[{{ event | upper }}] {{ contract.title }}"
+    # Other SMTP providers:
+    #   O365:     mailto://user:pass@outlook.com?to=team@co.com
+    #   Custom:   mailtos://user:pass@smtp.company.com:587?to=alerts@co.com
+    #   Multiple: mailto://user:pass@smtp.co.com?to=a@co.com,b@co.com
+    # With secrets: mailto://env:SMTP_USER:env:SMTP_PASS@smtp.co.com?to=alerts@co.com
+
+  # ── Email via SendGrid API (no SMTP needed) ─────────────
+  # Uses SendGrid's HTTP API — faster and more reliable than SMTP.
+  - target: "sendgrid://apikey:env:SENDGRID_API_KEY@company.com/data-platform@company.com"
+    on_events: ["failure", "slo_breach"]
+    subject_template: "[{{ event | upper }}] {{ contract.title }}"
+
+  # ── Generic Webhook ─────────────────────────────────────
+  - target: "json://api.company.com/data-quality/alerts"
+    on_events: ["quarantine", "failure", "schema_drift", "slo_breach"]
+    # json:// sends a JSON POST to any HTTP endpoint.
+    # Alternatives: xml://, form://
+    # Business value: Integration with custom monitoring systems
+
+  # ── Multi-channel fan-out ───────────────────────────────
+  # Send the same alert to multiple channels at once.
+  - targets:
+      - "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+      - "mailto://user:pass@smtp.co.com?to=data-platform@company.com"
+      - "sendgrid://apikey:env:SENDGRID_API_KEY@co.com/alerts@co.com"
+    on_events: ["failure"]
+    # Business value: Broadcast critical alerts to multiple channels
+
+# ============================================================
+# 13. MATERIALIZATION
 # ============================================================
 # OPTIONAL: How to write output data
 materialization:
@@ -1111,8 +1214,17 @@ materialization:
   # Options: append, merge, scd2, overwrite
   # append: Add new rows (e.g. Bronze raw logs, Gold fact tables)
   #         (Add fact: block below to enable Kimball auto-governance and structural validations)
+  # strategy: merge
   # merge: Upsert based on primary key (e.g. Silver CDC, Gold dimensions)
   #        (Add scd1: block below to enable SCD Type 1 auto-SK and Unknown Member)
+  # materialization:
+  #   strategy: merge
+  #   merge_dedup_guard: true
+  #   # OPTIONAL: If true, deduplicates the incoming batch by primary key 
+  #   # before merging. This prevents MERGE_CARDINALITY_VIOLATION errors 
+  #   # if the source contains duplicate keys. 
+  #   # Business value: Production stability against dirty source data.
+  #   # Default: false (fail loudly on duplicate PKs).
   # scd2: Slowly Changing Dimension Type 2 (history tracking - Configured via scd2: block below)
   # overwrite: Replace all data (e.g. daily snapshots)
   # Business value: Choose appropriate write pattern across all Medallion layers
@@ -1296,7 +1408,7 @@ materialization:
   # Business value: Automated storage optimization
 
 # ============================================================
-# 13. LINEAGE & OBSERVABILITY
+# 14. LINEAGE & OBSERVABILITY
 # ============================================================
 # OPTIONAL: Lineage capture configuration.
 # When enabled, up to 8 lineage columns are injected into every output row.
@@ -1376,9 +1488,26 @@ lineage:
   # Use pipeline_run_id for cross-contract correlation
 
 # ============================================================
-# 14. SERVICE LEVEL OBJECTIVES
+# 15. SERVICE LEVEL OBJECTIVES
 # ============================================================
-# OPTIONAL: SLO definitions for monitoring
+# OPTIONAL: Contract-level SLO overrides.
+# These merge with system-level SLOs defined in _system.yaml.
+# Contract values take precedence (deep merge — field by field).
+# If a contract doesn't define a specific SLO section, the
+# system default applies automatically.
+#
+# SLO results are captured in the run log for every pipeline run.
+# - Load-time freshness:   slo_freshness_seconds / slo_freshness_pass
+# - Source-time freshness: slo_source_freshness_seconds / slo_source_freshness_pass
+# - Availability:          slo_availability_ratio / slo_availability_pass
+# - Row count:             slo_row_count_min / slo_row_count_max
+# - Row count anomaly:     slo_row_count_anomaly_pass / _ratio
+# - Quality:               slo_quality_pass / _ratio / _severity
+# - Schedule:              slo_schedule_pass / slo_duration_seconds
+#
+# SLO breaches emit "slo_breach" notification events that route
+# through the existing notifications system (Apprise/webhook/email).
+
 service_levels:
   freshness:
     threshold: "24h"
@@ -1387,6 +1516,16 @@ service_levels:
     # Field to check for freshness (MAX of this column vs current time)
     description: "Customer data must be updated daily"
     # Business value: Timeliness monitoring
+    
+    # ── Source-Time Freshness (optional) ─────────────────────
+    # Checks the actual data age, not just when the pipeline ran.
+    # Catches the case where the pipeline runs on time but
+    # processes stale upstream data.
+    source_field: "event_timestamp"
+    # Column containing the upstream source timestamp
+    source_threshold: "2h"
+    # Max age for source data (separate from load-time freshness)
+    # Business value: Distinguish "pipeline is slow" from "upstream data is stale"
 
   availability:
     threshold: 99.9
@@ -1418,9 +1557,43 @@ service_levels:
     # Business value: Volumetric anomaly detection — catches empty loads AND data explosions
     # NOTE: min_rows, max_rows, and check_field are captured in the run log
     # at pipeline time for point-in-time auditability.
+    
+    warn_only: false
+    # If true, SLO breach logs a warning instead of failing the pipeline.
+    # Useful during onboarding to observe thresholds before enforcing them.
+    # Business value: Risk-free SLO rollout
+    
+    # ── Anomaly Detection (optional) ─────────────────────────
+    # Compares current run count against historical baseline from
+    # the run log. Catches silent data drops or volume spikes
+    # that static min/max thresholds miss.
+    anomaly:
+      enabled: true
+      lookback_runs: 14
+      # Number of historical runs to compute baseline from.
+      # 14 gives a stable baseline; 7 is more sensitive to trends.
+      min_ratio: 0.5
+      # Alert if row count is <50% of historical baseline
+      max_ratio: 2.0
+      # Alert if row count is >200% of historical baseline
+      method: "median"
+      # Options: median (default, robust to outliers), rolling_average
+      # median: single spike doesn't permanently inflate baseline
+      # rolling_average: more sensitive but skews after anomalies
+      min_runs_before_enforcement: 5
+      # Skip anomaly checks until at least N historical runs exist.
+      # Prevents false positives during initial pipeline setup.
+      # Business value: Catches silent data drops (e.g. upstream went quiet)
+
+  # ── Quality (optional — overrides system-level) ───────────
+  # Contract-level quality override. If omitted, system-level
+  # quality config from _system.yaml applies.
+  # quality:
+  #   min_good_ratio: 0.99          # stricter than system default (0.95)
+  #   max_quarantine_ratio: 0.01
 
 # ============================================================
-# 15. EXTERNAL LOGIC
+# 16. EXTERNAL LOGIC
 # ============================================================
 # OPTIONAL: Custom Python/Notebook processing
 external_logic:
@@ -1437,9 +1610,9 @@ external_logic:
   # def build_gold(df, *, contract, engine, **kwargs):
   #     """
   #     Args:
-  #         df:       Validated good DataFrame (Polars/Pandas/Spark)
+  #         df:       Validated good DataFrame (Polars/Spark)
   #         contract: DataContract instance (read-only)
-  #         engine:   Engine name ("polars", "pandas", "spark", etc.)
+  #         engine:   Engine name ("polars", "spark")
   #         **kwargs: Values from args: below (e.g. apply_ml_scoring)
   #
   #     Returns:
@@ -1478,7 +1651,7 @@ external_logic:
   # Jupyter kernel for notebook execution
 
 # ============================================================
-# 16. ORCHESTRATION & DEPENDENCIES
+# 17. ORCHESTRATION & DEPENDENCIES
 # ============================================================
 # OPTIONAL: Pipeline orchestration metadata
 upstream:
@@ -1492,7 +1665,7 @@ schedule: "0 2 * * *"
 # Business value: Automated execution timing
 
 # ============================================================
-# 17. TIER / LAYER
+# 18. TIER / LAYER
 # ============================================================
 # OPTIONAL: Explicit medallion tier for single-contract mode
 tier: "silver"
@@ -1504,7 +1677,7 @@ tier: "silver"
 # Business value: Automatic tier-aware defaults and classification
 
 # ============================================================
-# 18. DOWNSTREAM CONSUMERS
+# 19. DOWNSTREAM CONSUMERS
 # ============================================================
 # OPTIONAL: Declare what uses this contract's output
 downstream:
@@ -1533,7 +1706,7 @@ downstream:
     # Types: dashboard, report, api, ml_model, application, notebook, export
 
 # ============================================================
-# 19. LLM EXTRACTION (Unstructured → Structured)
+# 20. LLM EXTRACTION (Unstructured → Structured)
 # ============================================================
 # OPTIONAL: Extract structured data from unstructured text via LLM
 extraction:
@@ -1632,7 +1805,7 @@ extraction:
     # Business value: Process PDFs, images, audio, video into structured data
 
 # ============================================================
-# 20. CLOUD REPORTING (Registry-Level)
+# 21. CLOUD REPORTING (Registry-Level)
 # ============================================================
 # OPTIONAL: Send run reports to LakeLogic Cloud for centralized
 # observability, trend detection, and ops intelligence.
@@ -1672,7 +1845,7 @@ cloud:
 #   - Domain, system, data_layer metadata
 
 # ============================================================
-# 21. COMPLIANCE — Regulatory Metadata
+# 22. COMPLIANCE — Regulatory Metadata
 # ============================================================
 # OPTIONAL: Multi-framework compliance metadata for automated
 # compliance reporting in LakeLogic Cloud. Supports GDPR, EU AI Act,
@@ -1951,6 +2124,7 @@ quarantine:
 
 materialization:
   strategy: "merge"
+  merge_dedup_guard: true
   partition_by: ["country"]
 ```
 
@@ -2029,8 +2203,6 @@ dataset: "fact_revenue"
 primary_key: ["transaction_id"]
 
 model:
-  grain: "one row per revenue transaction"
-  grain_key: ["transaction_id"]
   fields:
     - name: "transaction_id"
       type: "string"
@@ -2086,8 +2258,6 @@ dataset: "fact_order_timeline"
 primary_key: ["order_id"]
 
 model:
-  grain: "one row per order lifecycle"
-  grain_key: ["order_id"]
   fields:
     - name: "order_id"
       type: "string"
@@ -2152,8 +2322,6 @@ dataset: "fact_account_balance"
 primary_key: ["account_id", "snapshot_date"]
 
 model:
-  grain: "one row per account per snapshot date"
-  grain_key: ["account_id", "snapshot_date"]
   fields:
     - name: "account_id"
       type: "string"
@@ -2208,8 +2376,6 @@ dataset: "fact_attendance"
 primary_key: ["student_id", "class_id", "date"]
 
 model:
-  grain: "one row per student-class-date attendance event"
-  grain_key: ["student_id", "class_id", "date"]
   fields:
     - name: "student_id"
       type: "string"
@@ -2263,8 +2429,6 @@ dataset: "dim_products"
 primary_key: ["product_id"]
 
 model:
-  grain: "one row per product (current state)"
-  grain_key: ["product_id"]
   fields:
     - name: "product_id"
       type: "string"
@@ -2307,8 +2471,6 @@ primary_key: ["customer_key"]
 natural_key: ["customer_id"]
 
 model:
-  grain: "one row per customer per version (history tracked)"
-  grain_key: ["customer_id", "valid_from"]
   fields:
     - name: "customer_key"
       type: "string"
@@ -2450,6 +2612,13 @@ log_root: "abfss://logs@acct.dfs.core.windows.net"
 
 # Catalog
 domain_catalog: "retail_marketing"
+
+# Materialization Defaults
+materialization:
+  silver:
+    strategy: merge
+    format: delta
+    merge_dedup_guard: true    # Enable safety guard for all silver contracts in this domain
 ```
 
 ### Placeholder Usage in Contracts

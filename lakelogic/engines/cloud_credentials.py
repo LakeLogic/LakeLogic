@@ -130,39 +130,56 @@ class CloudCredentialResolver:
         4. Azure AD (DefaultAzureCredential — covers az login, managed identity, workload identity)
         """
         # ── Priority 1: explicit user-supplied credential ────────────────────
-        if "BEARER_TOKEN" in options or "AZURE_STORAGE_ACCOUNT_KEY" in options:
+        if (
+            "bearer_token" in options
+            or "account_key" in options
+            or "BEARER_TOKEN" in options
+            or "AZURE_STORAGE_ACCOUNT_KEY" in options
+        ):
             logger.debug("Using user-provided Azure token/account-key credential")
+            # Normalize to delta-rs keys
+            if "BEARER_TOKEN" in options:
+                options["bearer_token"] = options.pop("BEARER_TOKEN")
+            if "AZURE_STORAGE_ACCOUNT_KEY" in options:
+                options["account_key"] = options.pop("AZURE_STORAGE_ACCOUNT_KEY")
             return options
 
-        if "AZURE_STORAGE_SAS_TOKEN" in options:
+        if "sas_token" in options or "AZURE_STORAGE_SAS_TOKEN" in options:
             logger.debug("Using user-provided Azure SAS token")
+            if "AZURE_STORAGE_SAS_TOKEN" in options:
+                options["sas_token"] = options.pop("AZURE_STORAGE_SAS_TOKEN")
             return options
 
         # Check for SAS token in env var
         sas_token = os.getenv("AZURE_STORAGE_SAS_TOKEN")
         if sas_token:
             logger.debug("Using Azure SAS token from environment")
-            options["AZURE_STORAGE_SAS_TOKEN"] = sas_token
+            options["sas_token"] = sas_token
             return options
 
         # Propagate account name (needed by some Delta-RS backends)
-        account_name = options.get("AZURE_STORAGE_ACCOUNT_NAME") or os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
+        account_name = (
+            options.get("account_name")
+            or options.get("AZURE_STORAGE_ACCOUNT_NAME")
+            or os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
+        )
         if account_name:
-            options["AZURE_STORAGE_ACCOUNT_NAME"] = account_name
+            options["account_name"] = account_name
+            options.pop("AZURE_STORAGE_ACCOUNT_NAME", None)
 
-        # ── Priority 2: service principal (client_id + client_secret + tenant_id) ──
-        if self._azure_client_id and self._azure_client_secret and self._azure_tenant_id:
-            token = self._get_sp_token()
-            if token:
-                options["BEARER_TOKEN"] = token
-                return options
-
-        # ── Priority 3: account key from env var ─────────────────────────────
+        # ── Priority 2: account key from env var ─────────────────────────────
         account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
         if account_key:
             logger.debug("Using Azure account key from environment")
-            options["AZURE_STORAGE_ACCOUNT_KEY"] = account_key
+            options["account_key"] = account_key
             return options
+
+        # ── Priority 3: service principal (client_id + client_secret + tenant_id) ──
+        if self._azure_client_id and self._azure_client_secret and self._azure_tenant_id:
+            token = self._get_sp_token()
+            if token:
+                options["bearer_token"] = token
+                return options
 
         # ── Priority 4: DefaultAzureCredential (az login / managed identity) ─
         try:
@@ -174,7 +191,7 @@ class CloudCredentialResolver:
                 if self._azure_token and self._azure_token_expiry:
                     if datetime.now() < self._azure_token_expiry:
                         logger.debug("Using cached Azure AD token (DefaultAzureCredential)")
-                        options["BEARER_TOKEN"] = self._azure_token
+                        options["bearer_token"] = self._azure_token
                         return options
 
                 logger.debug("Acquiring Azure AD token via DefaultAzureCredential")
@@ -184,7 +201,7 @@ class CloudCredentialResolver:
                 self._azure_token = token.token
                 self._azure_token_expiry = datetime.now() + timedelta(minutes=50)
 
-            options["BEARER_TOKEN"] = self._azure_token
+            options["bearer_token"] = self._azure_token
             logger.info("✅ Azure AD authentication successful (DefaultAzureCredential)")
             return options
 

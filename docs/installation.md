@@ -31,8 +31,6 @@ pip install "lakelogic[all]"
 | :--- | :--- | :--- |
 | `[all]` | Engines + Delta + notifications + databases + streaming | **Most users start here** — fast, conflict-free. |
 | `[polars]` | Polars engine + Delta | High-speed local processing. |
-| `[pandas]` | Pandas + DuckDB | For data science teams. |
-| `[duckdb]` | DuckDB native | Fast analytical SQL in-memory. |
 
 ### Platform-Specific
 
@@ -57,16 +55,13 @@ Selecting the right engine depends on your data source and operating system:
 
 * **Polars (Default)**: Best for remote URLs (`https://`), local files (CSV/Parquet), and high-speed local processing.
 * **Spark**: Best for large-scale Lakehouse jobs and distributed data. **Note**: Spark on Windows does not natively support reading directly from `https://` URLs for CSV/Parquet. Download remote files locally first if you must use Spark on Windows.
-* **DuckDB**: Best for complex SQL analysis and native Iceberg/Delta support on local machines.
 
 **Materialization notes:**
 
 * **Spark engine**: Supports `append`, `overwrite`, `merge`, and `scd2` strategies natively. Uses distributed DataFrame operations for merge/SCD2, avoiding driver memory bottlenecks at scale. Delta Lake `MERGE INTO` is used when available.
-* **DuckDB engine**: Full support for local and cloud data lakes. Supports `iceberg` and `delta` formats natively.
 * **Polars engine**: Supports `delta` format natively via `deltalake`.
-* **Pandas engine**: Full materialization support.
 
-Install `[duckdb]` or `[polars]` for high-performance OSS processing. After installing, it is recommended to "warm" your environment for modern formats:
+Install `[polars]` for high-performance OSS processing. After installing, it is recommended to "warm" your environment for modern formats:
 
 ```bash
 
@@ -74,7 +69,7 @@ lakelogic setup-oss
 
 ```
 
-This command pre-installs the necessary DuckDB extensions (Iceberg, Delta, Cloud Drivers) so they are available offline and during runtime.
+This command pre-loads necessary OSS extensions (such as Delta) so they are available offline and during runtime.
 
 ---
 

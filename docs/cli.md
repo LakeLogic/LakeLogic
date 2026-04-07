@@ -66,7 +66,7 @@ lakelogic run \
 |:-----|:------|:------------|
 | `--contract` | `-c` | Path to the YAML contract |
 | `--source` | `-s` | Input file (CSV / Parquet) or table name for warehouse engines |
-| `--engine` | `-e` | Engine: `polars`, `pandas`, `duckdb`, `spark`, `snowflake`, `bigquery` |
+| `--engine` | `-e` | Engine: `polars`, `spark`, `snowflake`, `bigquery` |
 | `--stage` | | Apply stage overrides from the contract's `stages` block (e.g., `bronze`, `silver`) |
 | `--output-good` | | Save good records to CSV / Parquet |
 | `--output-bad` | | Save quarantined records to CSV / Parquet |
@@ -187,7 +187,7 @@ lakelogic generate --contract orders.yaml --rows 1000 --output sample.parquet
 | `--rows` | `-n` | Number of rows to generate (default 100) |
 | `--output` | `-o` | Output file path (CSV / Parquet / JSON) |
 | `--format` | `-f` | Output format: `parquet`, `csv`, `json` (default `parquet`) |
-| `--engine` | `-e` | DataFrame engine: `polars`, `pandas` (default `polars`) |
+| `--engine` | `-e` | DataFrame engine: `polars` (default `polars`) |
 | `--invalid-ratio` | | Fraction of rows that intentionally break rules (0.0–1.0) |
 | `--seed` | | Random seed for reproducibility |
 | `--preview` | | Rows to print to console (default 5; `0` = silent) |
@@ -202,9 +202,9 @@ lakelogic generate --contract orders.yaml --rows 1000 --output sample.parquet
 lakelogic generate --contract orders.yaml --rows 500 \
   --invalid-ratio 0.1 --format csv --output orders_with_errors.csv
 
-# 200 rows with Pandas, print 10 preview rows, reproducible
-lakelogic generate --contract orders.yaml \
-  --rows 200 --engine pandas --seed 42 --preview 10
+# 200 rows with Polars, print 10 preview rows, reproducible
+lakelogic generate --contract contracts/events.yaml \
+  --rows 200 --engine polars --seed 42 --preview 10
 
 # Dry-run without saving — just print to console
 lakelogic generate --contract orders.yaml --rows 50 --preview 50

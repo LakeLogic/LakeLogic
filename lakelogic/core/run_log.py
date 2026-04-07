@@ -28,14 +28,30 @@ def _is_cloud_path(path: str) -> bool:
 
 
 def _build_cloud_opts(path: str) -> Dict[str, str]:
-    """Build fsspec storage_options from environment variables for a cloud path."""
+    """Build fsspec storage_options from environment variables for a cloud path.
+
+    For Azure ``abfss://container@account.dfs.core.windows.net/...`` URIs,
+    adlfs automatically extracts ``account_name`` from the URL.  We only
+    inject ``account_name`` when it cannot be inferred from the URI, and
+    always pass ``account_key`` when available.
+    """
     import os
 
     opts: Dict[str, str] = {}
     p = str(path).lower()
     if p.startswith(("abfss://", "abfs://")):
+        # Detect whether account_name is embedded in the URL
+        uri_has_account = "@" in p.split("//", 1)[-1].split("/", 1)[0]
+
+        acct = os.getenv("AZURE_STORAGE_ACCOUNT_NAME") or os.getenv("AZURE_STORAGE_ACCOUNT")
+        if acct and not uri_has_account:
+            opts["account_name"] = acct
+
+        acct_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
+        if acct_key:
+            opts["account_key"] = acct_key
+
         for env_key, opt_key in [
-            ("AZURE_STORAGE_ACCOUNT", "account_name"),
             ("AZURE_TENANT_ID", "tenant_id"),
             ("AZURE_CLIENT_ID", "client_id"),
             ("AZURE_CLIENT_SECRET", "client_secret"),
@@ -109,14 +125,30 @@ def _cloud_list_json(cloud_dir: str, pattern: str = "run_*.json") -> List[str]:
         # Normalize trailing slash
         cloud_dir = cloud_dir.rstrip("/") + "/"
         opts = _build_cloud_opts(cloud_dir)
-        fs, _, _ = fsspec.core.url_to_fs(cloud_dir, **opts)
-        # Strip protocol for glob
-        base = cloud_dir.split("://", 1)
-        protocol = base[0] + "://"
-        path_part = base[1].rstrip("/")
-        matches = fs.glob(f"{path_part}/{pattern}")
-        # Re-attach protocol and sort newest first (UUID-based names)
-        return sorted([f"{protocol}{m}" for m in matches], reverse=True)
+        fs, fs_path = fsspec.core.url_to_fs(cloud_dir, **opts)
+
+        fs_path = fs_path.rstrip("/")
+        matches = fs.glob(f"{fs_path}/{pattern}")
+
+        def get_mtime(m):
+            try:
+                info = fs.info(m)
+                dt = (
+                    info.get("last_modified")
+                    or info.get("LastModified")
+                    or info.get("updated")
+                    or info.get("mtime")
+                    or 0
+                )
+                if hasattr(dt, "timestamp"):
+                    return dt.timestamp()
+                return float(dt)
+            except Exception:
+                return 0
+
+        sorted_matches = sorted(matches, key=get_mtime, reverse=True)
+        # Reconstruct full URI. We know each match is just a file in cloud_dir.
+        return [f"{cloud_dir}{m.split('/')[-1]}" for m in sorted_matches]
     except Exception:
         return []
 
@@ -161,6 +193,14 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
     """
     Flatten a run report into a row-oriented structure for table logging.
 
+    The schema is intentionally compact (~22 top-level columns).  SLO
+    metrics are consolidated into a single ``slo_json`` column, and
+    rarely-queried detail fields are folded into ``report_json``.
+
+    Top-level columns are reserved for fields that are frequently
+    filtered, grouped, or joined on (identity, status, counts,
+    watermark).  Everything else lives in JSON for drill-down.
+
     Args:
         report: Run report dict.
 
@@ -186,13 +226,46 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             return None
 
+    # ── SLO metrics → single JSON column ──────────────────────────────
+    slo_obj = {
+        "freshness": {
+            "seconds": _num(freshness.get("age_seconds")),
+            "pass": freshness.get("passed"),
+            "threshold_seconds": _num(freshness.get("threshold_seconds")),
+            "source_seconds": _num(freshness.get("source_age_seconds")),
+            "source_pass": freshness.get("source_passed"),
+        },
+        "availability": {
+            "ratio": _num(availability.get("ratio")),
+            "pass": availability.get("passed"),
+            "threshold": _num(availability.get("threshold")),
+        },
+        "row_count": {
+            "min": _int(report.get("slo_row_count_min")),
+            "max": _int(report.get("slo_row_count_max")),
+            "anomaly_pass": report.get("slo_row_count_anomaly_pass"),
+            "anomaly_ratio": _num(report.get("slo_row_count_anomaly_ratio")),
+        },
+        "quality": {
+            "pass": report.get("slo_quality_pass"),
+            "ratio": _num(report.get("slo_quality_ratio")),
+            "severity": report.get("slo_quality_severity"),
+        },
+        "schedule": {
+            "pass": report.get("slo_schedule_pass"),
+            "duration_seconds": _num(report.get("slo_duration_seconds")),
+        },
+    }
+
     return {
+        # ── Identity ──────────────────────────────────────────────────
         "pipeline_run_id": report.get("pipeline_run_id"),
         "run_id": report.get("run_id"),
         "timestamp": report.get("timestamp"),
         "start_time": report.get("start_time"),
         "end_time": report.get("end_time"),
         "run_duration_seconds": _num(report.get("run_duration_seconds")),
+        # ── Context ───────────────────────────────────────────────────
         "engine": report.get("engine"),
         "contract": report.get("contract"),
         "contract_version": report.get("contract_version"),
@@ -204,27 +277,17 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "status": report.get("status"),
         "error_message": report.get("error_message"),
         "source_path": report.get("source_path"),
+        # ── Counts (high-frequency dashboard metrics) ─────────────────
         "counts_source": counts.get("source"),
         "counts_total": counts.get("total"),
         "counts_good": counts.get("good"),
         "counts_quarantined": counts.get("quarantined"),
-        "counts_pre_transform_dropped": counts.get("pre_transform_dropped"),
-        "pre_transform_filter": report.get("pre_transform_filter"),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
+        # ── Watermark (critical for incremental loads) ────────────────
         "max_source_mtime": report.get("max_source_mtime"),
         "max_watermark_value": report.get("max_watermark_value"),
-        "source_files_json": json.dumps(report.get("source_files", []), default=str),
-        "slo_freshness_seconds": _num(freshness.get("age_seconds")),
-        "slo_freshness_pass": freshness.get("passed"),
-        "slo_freshness_threshold_seconds": _num(freshness.get("threshold_seconds")),
-        "slo_availability_ratio": _num(availability.get("ratio")),
-        "slo_availability_pass": availability.get("passed"),
-        "slo_availability_threshold": _num(availability.get("threshold")),
-        "slo_row_count_min": _int(report.get("slo_row_count_min")),
-        "slo_row_count_max": _int(report.get("slo_row_count_max")),
-        "dataset_rules_json": json.dumps(report.get("dataset_rules", []), default=str),
-        "row_rule_failures_json": json.dumps(report.get("row_rule_failures", []), default=str),
-        "schema_drift_json": json.dumps(report.get("schema_drift", {}), default=str),
+        # ── Consolidated JSON columns ─────────────────────────────────
+        "slo_json": json.dumps(slo_obj, default=str),
         "report_json": json.dumps(report, default=str),
     }
 
@@ -278,7 +341,6 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             StringType,
             LongType,
             DoubleType,
-            BooleanType,
         )
 
         _run_log_schema = StructType(
@@ -304,23 +366,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("counts_total", LongType(), True),
                 StructField("counts_good", LongType(), True),
                 StructField("counts_quarantined", LongType(), True),
-                StructField("counts_pre_transform_dropped", LongType(), True),
-                StructField("pre_transform_filter", StringType(), True),
                 StructField("quarantine_ratio", DoubleType(), True),
                 StructField("max_source_mtime", DoubleType(), True),
                 StructField("max_watermark_value", StringType(), True),
-                StructField("source_files_json", StringType(), True),
-                StructField("slo_freshness_seconds", DoubleType(), True),
-                StructField("slo_freshness_pass", BooleanType(), True),
-                StructField("slo_freshness_threshold_seconds", DoubleType(), True),
-                StructField("slo_availability_ratio", DoubleType(), True),
-                StructField("slo_availability_pass", BooleanType(), True),
-                StructField("slo_availability_threshold", DoubleType(), True),
-                StructField("slo_row_count_min", LongType(), True),
-                StructField("slo_row_count_max", LongType(), True),
-                StructField("dataset_rules_json", StringType(), True),
-                StructField("row_rule_failures_json", StringType(), True),
-                StructField("schema_drift_json", StringType(), True),
+                StructField("slo_json", StringType(), True),
                 StructField("report_json", StringType(), True),
             ]
         )
@@ -376,25 +425,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     ("counts_source", "BIGINT"),
                     ("counts_good", "BIGINT"),
                     ("counts_quarantined", "BIGINT"),
-                    ("counts_pre_transform_dropped", "BIGINT"),
-                    ("pre_transform_filter", "STRING"),
                     ("quarantine_ratio", "DOUBLE"),
                     ("max_source_mtime", "DOUBLE"),
                     ("max_watermark_value", "STRING"),
-                    ("source_files_json", "STRING"),
                     ("status", "STRING"),
                     ("error_message", "STRING"),
-                    ("slo_freshness_seconds", "DOUBLE"),
-                    ("slo_freshness_pass", "BOOLEAN"),
-                    ("slo_freshness_threshold_seconds", "DOUBLE"),
-                    ("slo_availability_ratio", "DOUBLE"),
-                    ("slo_availability_pass", "BOOLEAN"),
-                    ("slo_availability_threshold", "DOUBLE"),
-                    ("dataset_rules_json", "STRING"),
-                    ("row_rule_failures_json", "STRING"),
-                    ("schema_drift_json", "STRING"),
-                    ("slo_row_count_min", "BIGINT"),
-                    ("slo_row_count_max", "BIGINT"),
+                    ("slo_json", "STRING"),
                 ]:
                     if col_name not in existing_cols:
                         missing_cols.append(f"{col_name} {col_type}")
@@ -486,23 +522,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_total BIGINT,
                 counts_good BIGINT,
                 counts_quarantined BIGINT,
-                counts_pre_transform_dropped BIGINT,
-                pre_transform_filter STRING,
                 quarantine_ratio DOUBLE,
                 max_source_mtime DOUBLE,
                 max_watermark_value VARCHAR,
-                source_files_json VARCHAR,
-                slo_freshness_seconds DOUBLE,
-                slo_freshness_pass BOOLEAN,
-                slo_freshness_threshold_seconds DOUBLE,
-                slo_availability_ratio DOUBLE,
-                slo_availability_pass BOOLEAN,
-                slo_availability_threshold DOUBLE,
-                slo_row_count_min BIGINT,
-                slo_row_count_max BIGINT,
-                dataset_rules_json VARCHAR,
-                row_rule_failures_json VARCHAR,
-                schema_drift_json VARCHAR,
+                slo_json VARCHAR,
                 report_json VARCHAR
             )
         """)
@@ -519,12 +542,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_source BIGINT")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_good BIGINT")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_quarantined BIGINT")
-            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_pre_transform_dropped BIGINT")
-            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS pre_transform_filter STRING")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS quarantine_ratio DOUBLE")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_source_mtime DOUBLE")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_watermark_value VARCHAR")
-            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS source_files_json VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS slo_json VARCHAR")
         except Exception:
             pass
         columns = [
@@ -548,23 +569,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_total",
             "counts_good",
             "counts_quarantined",
-            "counts_pre_transform_dropped",
-            "pre_transform_filter",
             "quarantine_ratio",
             "max_source_mtime",
             "max_watermark_value",
-            "source_files_json",
-            "slo_freshness_seconds",
-            "slo_freshness_pass",
-            "slo_freshness_threshold_seconds",
-            "slo_availability_ratio",
-            "slo_availability_pass",
-            "slo_availability_threshold",
-            "slo_row_count_min",
-            "slo_row_count_max",
-            "dataset_rules_json",
-            "row_rule_failures_json",
-            "schema_drift_json",
+            "slo_json",
             "report_json",
         ]
         values = [record.get(col) for col in columns]
@@ -609,23 +617,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_total INTEGER,
                 counts_good INTEGER,
                 counts_quarantined INTEGER,
-                counts_pre_transform_dropped INTEGER,
-                pre_transform_filter TEXT,
                 quarantine_ratio REAL,
                 max_source_mtime REAL,
                 max_watermark_value TEXT,
-                source_files_json TEXT,
-                slo_freshness_seconds REAL,
-                slo_freshness_pass INTEGER,
-                slo_freshness_threshold_seconds REAL,
-                slo_availability_ratio REAL,
-                slo_availability_pass INTEGER,
-                slo_availability_threshold REAL,
-                slo_row_count_min INTEGER,
-                slo_row_count_max INTEGER,
-                dataset_rules_json TEXT,
-                row_rule_failures_json TEXT,
-                schema_drift_json TEXT,
+                slo_json TEXT,
                 report_json TEXT
             )
         """)
@@ -645,12 +640,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("counts_source", "INTEGER"),
                 ("counts_good", "INTEGER"),
                 ("counts_quarantined", "INTEGER"),
-                ("counts_pre_transform_dropped", "INTEGER"),
-                ("pre_transform_filter", "TEXT"),
                 ("quarantine_ratio", "REAL"),
                 ("max_source_mtime", "REAL"),
                 ("max_watermark_value", "TEXT"),
-                ("source_files_json", "TEXT"),
+                ("slo_json", "TEXT"),
             ]:
                 if col_name not in cols:
                     con.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
@@ -677,35 +670,13 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_total",
             "counts_good",
             "counts_quarantined",
-            "counts_pre_transform_dropped",
-            "pre_transform_filter",
             "quarantine_ratio",
             "max_source_mtime",
             "max_watermark_value",
-            "source_files_json",
-            "slo_freshness_seconds",
-            "slo_freshness_pass",
-            "slo_freshness_threshold_seconds",
-            "slo_availability_ratio",
-            "slo_availability_pass",
-            "slo_availability_threshold",
-            "slo_row_count_min",
-            "slo_row_count_max",
-            "dataset_rules_json",
-            "row_rule_failures_json",
-            "schema_drift_json",
+            "slo_json",
             "report_json",
         ]
-        values = []
-        for col in columns:
-            if col == "slo_freshness_pass":
-                value = record.get(col)
-                values.append(1 if value else 0 if value is not None else None)
-            elif col == "slo_availability_pass":
-                value = record.get(col)
-                values.append(1 if value else 0 if value is not None else None)
-            else:
-                values.append(record.get(col))
+        values = [record.get(col) for col in columns]
         placeholders = ", ".join(["?"] * len(columns))
         con.execute(
             f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})",
@@ -724,6 +695,15 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             logger.warning(
                 f"Run log table backend 'delta' requires 'deltalake' and 'pyarrow'. "
                 f"Install with: pip install deltalake pyarrow. Error: {exc}"
+            )
+            return None
+
+        # Guard: reject unresolved or invalid table paths
+        if not table_name or table_name == "None" or "{" in table_name:
+            logger.warning(
+                f"Run log table path not fully resolved: '{table_name}'. "
+                f"Check that metadata.run_log_table template variables (e.g. {{log_path}}) "
+                f"are defined in _system.yaml storage and environments."
             )
             return None
 
@@ -753,22 +733,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("counts_total", pa.int64()),
                 ("counts_good", pa.int64()),
                 ("counts_quarantined", pa.int64()),
-                ("counts_pre_transform_dropped", pa.int64()),
-                ("pre_transform_filter", pa.string()),
                 ("quarantine_ratio", pa.float64()),
                 ("max_source_mtime", pa.float64()),
-                ("source_files_json", pa.string()),
-                ("slo_freshness_seconds", pa.float64()),
-                ("slo_freshness_pass", pa.bool_()),
-                ("slo_freshness_threshold_seconds", pa.float64()),
-                ("slo_availability_ratio", pa.float64()),
-                ("slo_availability_pass", pa.bool_()),
-                ("slo_availability_threshold", pa.float64()),
-                ("slo_row_count_min", pa.int64()),
-                ("slo_row_count_max", pa.int64()),
-                ("dataset_rules_json", pa.string()),
-                ("row_rule_failures_json", pa.string()),
-                ("schema_drift_json", pa.string()),
+                ("max_watermark_value", pa.string()),
+                ("slo_json", pa.string()),
                 ("report_json", pa.string()),
             ]
         )
@@ -782,7 +750,17 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         merge_on_run_id = metadata.get("run_log_merge_on_run_id", True)
 
         try:
-            if DeltaTable.is_deltatable(table_name, storage_options=storage_options):
+            from deltalake import DeltaTable, write_deltalake
+
+            # Handle different deltalake versions
+            def check_is_deltatable(target, storage_options=None):
+                try:
+                    DeltaTable(target, storage_options=storage_options)
+                    return True
+                except Exception:
+                    return False
+
+            if check_is_deltatable(table_name, storage_options=storage_options):
                 if merge_on_run_id:
                     dt = DeltaTable(table_name, storage_options=storage_options)
                     (
@@ -803,6 +781,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                         mode="append",
                         storage_options=storage_options,
                         schema_mode="merge",
+                        engine="rust",
                     )
             else:
                 write_deltalake(
@@ -865,7 +844,10 @@ def write_run_log(
     if (path_value or dir_value) and _write_file:
         raw = str(path_value or dir_value)
 
-        if _is_cloud_path(raw):
+        # Guard: skip if path contains unresolved template vars
+        if "{" in raw:
+            logger.warning(f"Run log path not fully resolved: '{raw}'. Check _system.yaml storage and environments.")
+        elif _is_cloud_path(raw):
             # ── Cloud storage (ADLS / S3 / GCS) via fsspec ──
             if path_value:
                 cloud_target = str(path_value)
@@ -957,13 +939,13 @@ def get_last_run_watermark(
             else:
                 full_table = table_name
             if _use_precise:
-                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
                 params = [dataset]
                 if data_layer:
                     where += " AND data_layer = ?"
                     params.append(data_layer)
             else:
-                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
                 params = [contract_title]
                 if data_layer:
                     where += " AND data_layer = ?"
@@ -993,13 +975,13 @@ def get_last_run_watermark(
         try:
             table_name = _prepare_table_name(table_value, backend)
             if _use_precise:
-                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
                 params = (dataset,)
                 if data_layer:
                     where += " AND data_layer = ?"
                     params = (dataset, data_layer)
             else:
-                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess'"
+                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
                 params = (contract_title,)
                 if data_layer:
                     where += " AND data_layer = ?"
@@ -1026,7 +1008,10 @@ def get_last_run_watermark(
             df = spark.table(table_value)
             if _use_precise:
                 filt = (
-                    (F.col("dataset") == dataset) & (F.col("stage") != "no_new_data") & (F.col("stage") != "reprocess")
+                    (F.col("dataset") == dataset)
+                    & (F.col("stage") != "no_new_data")
+                    & (F.col("stage") != "reprocess")
+                    & (F.col("status") != "failed")
                 )
                 if data_layer:
                     filt = filt & (F.col("data_layer") == data_layer)
@@ -1035,6 +1020,7 @@ def get_last_run_watermark(
                     (F.col("contract") == contract_title)
                     & (F.col("stage") != "no_new_data")
                     & (F.col("stage") != "reprocess")
+                    & (F.col("status") != "failed")
                 )
                 if data_layer:
                     filt = filt & (F.col("data_layer") == data_layer)
@@ -1050,9 +1036,14 @@ def get_last_run_watermark(
         except ImportError:
             return None
         storage_options = _build_cloud_opts(table_value) if _is_cloud_path(table_value) else None
+
+        # Check if table exists
         try:
-            if not DeltaTable.is_deltatable(table_value, storage_options=storage_options):
-                return None
+            DeltaTable(table_value, storage_options=storage_options)
+        except Exception:
+            return None
+
+        try:
             dt = DeltaTable(table_value, storage_options=storage_options)
             if _use_precise:
                 filters = [("dataset", "=", dataset)]
@@ -1064,18 +1055,22 @@ def get_last_run_watermark(
                 ]
                 if data_layer:
                     filters.append(("data_layer", "=", data_layer))
+
             df = dt.to_pyarrow_table(
-                columns=["max_source_mtime", "stage"],
+                columns=["max_source_mtime", "stage", "status"],
                 filters=filters,
             )
             if len(df) == 0:
                 return None
-            # Exclude reprocess and no_new_data entries
+            # Exclude reprocess, no_new_data, and failed entries
             import pyarrow.compute as pc
 
             mask = pc.and_(
-                pc.not_equal(df.column("stage"), "no_new_data"),
-                pc.not_equal(df.column("stage"), "reprocess"),
+                pc.and_(
+                    pc.not_equal(df.column("stage"), "no_new_data"),
+                    pc.not_equal(df.column("stage"), "reprocess"),
+                ),
+                pc.not_equal(df.column("status"), "failed"),
             )
             df = df.filter(mask)
             if len(df) == 0:

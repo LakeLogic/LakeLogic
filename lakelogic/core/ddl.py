@@ -436,10 +436,32 @@ def generate_ddl(
             _sys_cols.append((getattr(lineage_cfg, "domain_column_name", "_lakelogic_domain"), "string"))
         if getattr(lineage_cfg, "capture_system", True):
             _sys_cols.append((getattr(lineage_cfg, "system_column_name", "_lakelogic_system"), "string"))
+        if getattr(lineage_cfg, "capture_created_at", True):
+            _sys_cols.append((getattr(lineage_cfg, "created_at_column_name", "_lakelogic_created_at"), "timestamp"))
+        if getattr(lineage_cfg, "capture_created_by", True):
+            _sys_cols.append((getattr(lineage_cfg, "created_by_column_name", "_lakelogic_created_by"), "string"))
 
         # Deduplicate against user-defined fields
         existing_names = {f.name for f in fields}
         for col_name, col_type in _sys_cols:
+            if col_name not in existing_names:
+                sql_type = _resolve_type(col_type, backend)
+                col_defs.append(f"  {col_name} {sql_type}")
+
+    # ── Soft-delete system columns ──────────────────────────────────────────
+    if mat:
+        existing_names = {f.name for f in fields}
+        _sd_cols = []
+        sd_col = getattr(mat, "soft_delete_column", None)
+        sd_time_col = getattr(mat, "soft_delete_time_column", None)
+        sd_reason_col = getattr(mat, "soft_delete_reason_column", None)
+        if sd_col:
+            _sd_cols.append((sd_col, "boolean"))
+        if sd_time_col:
+            _sd_cols.append((sd_time_col, "string"))
+        if sd_reason_col:
+            _sd_cols.append((sd_reason_col, "string"))
+        for col_name, col_type in _sd_cols:
             if col_name not in existing_names:
                 sql_type = _resolve_type(col_type, backend)
                 col_defs.append(f"  {col_name} {sql_type}")
@@ -497,8 +519,13 @@ def generate_ddl(
 
     # TBLPROPERTIES (Spark/Databricks)
     table_props = getattr(mat, "table_properties", None) or {}
-    if table_props and backend in ("spark", "databricks"):
-        props = ", ".join(f"'{k}' = '{v}'" for k, v in table_props.items())
+    if backend in ("spark", "databricks"):
+        props_dict = dict(table_props)
+        if "delta.enableDeletionVectors" not in props_dict:
+            props_dict["delta.enableDeletionVectors"] = "false"
+        props = ", ".join(
+            f"'{k}' = {v if str(v).lower() in ('true', 'false') else f'{v}'}" for k, v in props_dict.items()
+        )
         ddl += f"\nTBLPROPERTIES ({props})"
 
     # LOCATION (Spark/Databricks external tables)
