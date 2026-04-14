@@ -6,7 +6,7 @@ Extends the existing ``gdpr.py`` masking with:
 - **Strategies**: ``nullify``, ``hash``, ``redact``, ``partial``, ``encrypt``
 - **User context**: caller passes their groups; only fields they lack access to are masked
 - **Databricks UC mask generation**: auto-generate ``CREATE FUNCTION`` + ``ALTER TABLE`` SQL
-- **Vault integration**: ``pii_vault`` URI resolves keys from Azure Key Vault, Databricks, etc.
+- **Variable-driven Encryption**: pass data encryption keys directly via environment variables (e.g. injected via Azure Key Vault)
 
 Usage::
 
@@ -33,8 +33,7 @@ Contract YAML::
           type: string
           pii: true
           security_groups: ["hr-admins"]
-          masking: "redact"
-          pii_vault: "vault://pii-encryption-key"
+          masking: "encrypt"
 """
 
 from __future__ import annotations
@@ -192,38 +191,49 @@ def _apply_partial(value: Any, field_name: str = "", fmt: Optional[str] = None) 
     return "*" * len(text)
 
 
+def _prepare_fernet_key(key: str) -> bytes:
+    import base64
+    import hashlib
+    # Fernet requires a 32-byte url-safe base64-encoded key
+    # We hash the provided string key to ensure it's exactly 32 bytes, then base64 encode it.
+    key_bytes = key.encode("utf-8") if key else b"default-lakelogic-encryption-key"
+    hashed = hashlib.sha256(key_bytes).digest()
+    return base64.urlsafe_b64encode(hashed)
+
 def _apply_encrypt(value: Any, key: str = "") -> Optional[str]:
     """
-    Simple symmetric encryption placeholder.
-
-    In production, use ``cryptography.fernet`` or cloud KMS.
-    This implementation uses a keyed HMAC for demonstration —
-    it's deterministic and reversible with the key.
+    Symmetric Fernet encryption using the provided key.
     """
     if value is None:
         return None
-    import base64
+    
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        raise ImportError("The 'cryptography' package is required for the 'encrypt' strategy. Please install it.")
 
-    raw = str(value).encode("utf-8")
-    key_bytes = (key or "default-key").encode("utf-8")
-    # XOR-based reversible encoding (for demonstration)
-    # Production: replace with Fernet.encrypt()
-    extended_key = (key_bytes * ((len(raw) // len(key_bytes)) + 1))[: len(raw)]
-    encrypted = bytes(a ^ b for a, b in zip(raw, extended_key))
-    return f"enc:{base64.b64encode(encrypted).decode('ascii')}"
+    fern = Fernet(_prepare_fernet_key(key))
+    encrypted = fern.encrypt(str(value).encode("utf-8"))
+    return f"enc:{encrypted.decode('ascii')}"
 
 
 def _apply_decrypt(encrypted_value: str, key: str = "") -> Optional[str]:
-    """Reverse the XOR encryption from _apply_encrypt."""
+    """Reverse the Fernet encryption from _apply_encrypt."""
     if not encrypted_value or not encrypted_value.startswith("enc:"):
         return encrypted_value
-    import base64
+        
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        raise ImportError("The 'cryptography' package is required for decryption.")
 
-    encrypted = base64.b64decode(encrypted_value[4:])
-    key_bytes = (key or "default-key").encode("utf-8")
-    extended_key = (key_bytes * ((len(encrypted) // len(key_bytes)) + 1))[: len(encrypted)]
-    decrypted = bytes(a ^ b for a, b in zip(encrypted, extended_key))
-    return decrypted.decode("utf-8")
+    fern = Fernet(_prepare_fernet_key(key))
+    try:
+        decrypted = fern.decrypt(encrypted_value[4:].encode("ascii"))
+        return decrypted.decode("utf-8")
+    except Exception:
+        # Invalid key or tampered payload
+        return None
 
 
 def _apply_hash(value: Any, salt: str = "") -> Optional[str]:
@@ -371,11 +381,20 @@ class MaskingEngine:
             logger.info("No PII fields with explicit masking strategy — skipping masking.")
             return df
 
-        field_strategies = {f.name: strategy_override or f.masking for f in fields_with_masking}
+        VALID_STRATEGIES = {'nullify', 'hash', 'redact', 'partial', 'encrypt'}
+        field_strategies = {}
+        for f in fields_with_masking:
+            strategy = strategy_override or f.masking
+            if strategy and strategy.lower() not in VALID_STRATEGIES:
+                logger.warning(
+                    f"Invalid masking strategy '{strategy}' for field '{f.name}'. "
+                    f"Valid options are: nullify, hash, redact, partial, encrypt."
+                )
+            field_strategies[f.name] = (strategy, getattr(f, 'masking_format', None))
 
         logger.info(
             f"PII masking: {len(fields_with_masking)} field(s) for user_groups={user_groups or '(none)'}: "
-            f"{', '.join(f'{k}→{v}' for k, v in field_strategies.items())}"
+            f"{', '.join(f'{k}→{v[0]}' for k, v in field_strategies.items())}"
         )
 
         # Dispatch by DataFrame type
@@ -554,80 +573,7 @@ class MaskingEngine:
 
         return df
 
-    def _apply_spark(self, df: Any, field_strategies: Dict[str, str]) -> Any:
-        """Apply masking to a PySpark DataFrame using native SQL expressions."""
-        from pyspark.sql import functions as F
 
-        for col_name, strategy in field_strategies.items():
-            if col_name not in df.columns:
-                continue
-
-            if strategy == "nullify":
-                df = df.withColumn(col_name, F.lit(None).cast("string"))
-
-            elif strategy == "redact":
-                df = df.withColumn(
-                    col_name,
-                    F.when(F.col(col_name).isNotNull(), F.lit("***REDACTED***")).otherwise(F.lit(None)),
-                )
-
-            elif strategy == "hash":
-                salt = self.hash_salt
-                if salt:
-                    df = df.withColumn(col_name, F.sha2(F.concat(F.lit(salt), F.col(col_name).cast("string")), 256))
-                else:
-                    df = df.withColumn(col_name, F.sha2(F.col(col_name).cast("string"), 256))
-
-            elif strategy == "partial":
-                # Email: j***@domain.com
-                # General: first_char + *** + last_char
-                df = df.withColumn(
-                    col_name,
-                    F.when(
-                        F.col(col_name).contains("@"),
-                        F.concat(
-                            F.substring(F.col(col_name), 1, 1),
-                            F.lit("***@"),
-                            F.element_at(F.split(F.col(col_name), "@"), 2),
-                        ),
-                    ).otherwise(
-                        F.when(
-                            F.length(F.col(col_name)) > 2,
-                            F.concat(
-                                F.substring(F.col(col_name), 1, 1),
-                                F.lit("***"),
-                                F.substring(F.col(col_name), F.length(F.col(col_name)), 1),
-                            ),
-                        ).otherwise(F.lit("**"))
-                    ),
-                )
-
-            elif strategy == "encrypt":
-                # Use Spark's native aes_encrypt if available, fall back to sha2
-                try:
-                    key = self.encryption_key or "default-key"
-                    # Pad key to 16 bytes for AES-128
-                    padded_key = (key * ((16 // len(key)) + 1))[:16]
-                    df = df.withColumn(
-                        col_name,
-                        F.concat(
-                            F.lit("enc:"),
-                            F.base64(F.expr(f"aes_encrypt(CAST(`{col_name}` AS STRING), '{padded_key}')")),
-                        ),
-                    )
-                except Exception:
-                    # Fallback: deterministic hash for environments without aes_encrypt
-                    logger.warning(f"aes_encrypt not available for '{col_name}', falling back to sha2")
-                    df = df.withColumn(col_name, F.sha2(F.col(col_name).cast("string"), 256))
-
-            elif strategy == "tokenize":
-                # Deterministic token based on sha2 prefix
-                df = df.withColumn(
-                    col_name,
-                    F.concat(F.lit("tok_"), F.substring(F.sha2(F.col(col_name).cast("string"), 256), 1, 12)),
-                )
-
-        return df
 
     # ── PII Vault Helpers ────────────────────────────────────────────────────
 
@@ -695,6 +641,8 @@ class MaskingEngine:
         *,
         function_schema: str = "security",
         table_name: Optional[str] = None,
+        uc_secret_scope: str = "lakelogic-secrets",
+        uc_secret_key: str = "pii-encryption-key",
     ) -> str:
         """
         Generate Databricks Unity Catalog column masking SQL.
@@ -756,9 +704,9 @@ class MaskingEngine:
                     mask_expr = "concat(left(CAST(val AS STRING), 1, '***', right(CAST(val AS STRING), 1))"
             elif strategy == "tokenize":
                 # Deprecated: map to encrypt
-                mask_expr = "base64(aes_encrypt(CAST(val AS STRING), secret('pii-vault', 'encryption-key')))"
+                mask_expr = f"base64(aes_encrypt(CAST(val AS STRING), secret('{uc_secret_scope}', '{uc_secret_key}')))"
             elif strategy == "encrypt":
-                mask_expr = "base64(aes_encrypt(CAST(val AS STRING), secret('pii-vault', 'encryption-key')))"
+                mask_expr = f"base64(aes_encrypt(CAST(val AS STRING), secret('{uc_secret_scope}', '{uc_secret_key}')))"
             else:
                 mask_expr = "'***REDACTED***'"
 

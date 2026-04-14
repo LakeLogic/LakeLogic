@@ -273,6 +273,7 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "dataset": report.get("dataset"),
         "domain": report.get("domain"),
         "system": report.get("system"),
+        "environment": report.get("environment"),
         "data_layer": report.get("data_layer"),
         "status": report.get("status"),
         "error_message": report.get("error_message"),
@@ -283,10 +284,15 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "counts_good": counts.get("good"),
         "counts_quarantined": counts.get("quarantined"),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
+        # ── Cost observability ────────────────────────────────────────
+        "estimated_cost": _num(report.get("estimated_cost")),
+        "cost_currency": report.get("cost_currency"),
+        "cost_confidence": report.get("cost_confidence"),
         # ── Watermark (critical for incremental loads) ────────────────
         "max_source_mtime": report.get("max_source_mtime"),
         "max_watermark_value": report.get("max_watermark_value"),
         # ── Consolidated JSON columns ─────────────────────────────────
+        "dlt_state_json": report.get("dlt_state_json"),
         "slo_json": json.dumps(slo_obj, default=str),
         "report_json": json.dumps(report, default=str),
     }
@@ -358,6 +364,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("dataset", StringType(), True),
                 StructField("domain", StringType(), True),
                 StructField("system", StringType(), True),
+                StructField("environment", StringType(), True),
                 StructField("data_layer", StringType(), True),
                 StructField("status", StringType(), True),
                 StructField("error_message", StringType(), True),
@@ -367,8 +374,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("counts_good", LongType(), True),
                 StructField("counts_quarantined", LongType(), True),
                 StructField("quarantine_ratio", DoubleType(), True),
+                StructField("estimated_cost", DoubleType(), True),
+                StructField("cost_currency", StringType(), True),
+                StructField("cost_confidence", StringType(), True),
                 StructField("max_source_mtime", DoubleType(), True),
                 StructField("max_watermark_value", StringType(), True),
+                StructField("dlt_state_json", StringType(), True),
                 StructField("slo_json", StringType(), True),
                 StructField("report_json", StringType(), True),
             ]
@@ -421,15 +432,20 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     ("dataset", "STRING"),
                     ("domain", "STRING"),
                     ("system", "STRING"),
+                    ("environment", "STRING"),
                     ("data_layer", "STRING"),
                     ("counts_source", "BIGINT"),
                     ("counts_good", "BIGINT"),
                     ("counts_quarantined", "BIGINT"),
                     ("quarantine_ratio", "DOUBLE"),
+                    ("estimated_cost", "DOUBLE"),
+                    ("cost_currency", "STRING"),
+                    ("cost_confidence", "STRING"),
                     ("max_source_mtime", "DOUBLE"),
                     ("max_watermark_value", "STRING"),
                     ("status", "STRING"),
                     ("error_message", "STRING"),
+                    ("dlt_state_json", "STRING"),
                     ("slo_json", "STRING"),
                 ]:
                     if col_name not in existing_cols:
@@ -514,6 +530,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 dataset VARCHAR,
                 domain VARCHAR,
                 system VARCHAR,
+                environment VARCHAR,
                 data_layer VARCHAR,
                 status VARCHAR,
                 error_message VARCHAR,
@@ -523,8 +540,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_good BIGINT,
                 counts_quarantined BIGINT,
                 quarantine_ratio DOUBLE,
+                estimated_cost DOUBLE,
+                cost_currency VARCHAR,
+                cost_confidence VARCHAR,
                 max_source_mtime DOUBLE,
                 max_watermark_value VARCHAR,
+                dlt_state_json VARCHAR,
                 slo_json VARCHAR,
                 report_json VARCHAR
             )
@@ -538,13 +559,18 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS dataset VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS domain VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS system VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS environment VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS data_layer VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_source BIGINT")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_good BIGINT")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS counts_quarantined BIGINT")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS quarantine_ratio DOUBLE")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS estimated_cost DOUBLE")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS cost_currency VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS cost_confidence VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_source_mtime DOUBLE")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_watermark_value VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS dlt_state_json VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS slo_json VARCHAR")
         except Exception:
             pass
@@ -561,6 +587,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "dataset",
             "domain",
             "system",
+            "environment",
             "data_layer",
             "status",
             "error_message",
@@ -570,8 +597,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_good",
             "counts_quarantined",
             "quarantine_ratio",
+            "estimated_cost",
+            "cost_currency",
+            "cost_confidence",
             "max_source_mtime",
             "max_watermark_value",
+            "dlt_state_json",
             "slo_json",
             "report_json",
         ]
@@ -609,6 +640,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 dataset TEXT,
                 domain TEXT,
                 system TEXT,
+                environment TEXT,
                 data_layer TEXT,
                 status TEXT,
                 error_message TEXT,
@@ -618,8 +650,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_good INTEGER,
                 counts_quarantined INTEGER,
                 quarantine_ratio REAL,
+                estimated_cost REAL,
+                cost_currency TEXT,
+                cost_confidence TEXT,
                 max_source_mtime REAL,
                 max_watermark_value TEXT,
+                dlt_state_json TEXT,
                 slo_json TEXT,
                 report_json TEXT
             )
@@ -636,13 +672,18 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("dataset", "TEXT"),
                 ("domain", "TEXT"),
                 ("system", "TEXT"),
+                ("environment", "TEXT"),
                 ("data_layer", "TEXT"),
                 ("counts_source", "INTEGER"),
                 ("counts_good", "INTEGER"),
                 ("counts_quarantined", "INTEGER"),
                 ("quarantine_ratio", "REAL"),
+                ("estimated_cost", "REAL"),
+                ("cost_currency", "TEXT"),
+                ("cost_confidence", "TEXT"),
                 ("max_source_mtime", "REAL"),
                 ("max_watermark_value", "TEXT"),
+                ("dlt_state_json", "TEXT"),
                 ("slo_json", "TEXT"),
             ]:
                 if col_name not in cols:
@@ -662,6 +703,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "dataset",
             "domain",
             "system",
+            "environment",
             "data_layer",
             "status",
             "error_message",
@@ -671,8 +713,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_good",
             "counts_quarantined",
             "quarantine_ratio",
+            "estimated_cost",
+            "cost_currency",
+            "cost_confidence",
             "max_source_mtime",
             "max_watermark_value",
+            "dlt_state_json",
             "slo_json",
             "report_json",
         ]
@@ -688,6 +734,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         return f"{db_path}:{table_name}"
 
     if backend == "delta":
+        # Normalize to POSIX separators — table_name is a logical/URI path,
+        # not an OS filesystem path, so backslashes from Windows must be fixed.
+        table_name = table_name.replace("\\", "/")
+
         try:
             import pyarrow as pa
             from deltalake import DeltaTable, write_deltalake
@@ -725,6 +775,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("dataset", pa.string()),
                 ("domain", pa.string()),
                 ("system", pa.string()),
+                ("environment", pa.string()),
                 ("data_layer", pa.string()),
                 ("status", pa.string()),
                 ("error_message", pa.string()),
@@ -734,8 +785,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("counts_good", pa.int64()),
                 ("counts_quarantined", pa.int64()),
                 ("quarantine_ratio", pa.float64()),
+                ("estimated_cost", pa.float64()),
+                ("cost_currency", pa.string()),
+                ("cost_confidence", pa.string()),
                 ("max_source_mtime", pa.float64()),
                 ("max_watermark_value", pa.string()),
+                ("dlt_state_json", pa.string()),
                 ("slo_json", pa.string()),
                 ("report_json", pa.string()),
             ]
@@ -751,6 +806,19 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         try:
             from deltalake import DeltaTable, write_deltalake
+
+            def _safe_write_deltalake(target, data, **kwargs):
+                if hasattr(data, "__len__") and len(data) == 0:
+                    kwargs.pop("schema_mode", None)
+                    kwargs.pop("engine", None)
+                    
+                import inspect
+                sig = inspect.signature(write_deltalake)
+                if "engine" in sig.parameters and kwargs.get("schema_mode") == "merge":
+                    kwargs["engine"] = "rust"
+                elif "engine" not in sig.parameters and "engine" in kwargs:
+                    del kwargs["engine"]
+                write_deltalake(target, data, **kwargs)
 
             # Handle different deltalake versions
             def check_is_deltatable(target, storage_options=None):
@@ -775,16 +843,15 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                         .execute()
                     )
                 else:
-                    write_deltalake(
+                    _safe_write_deltalake(
                         table_name,
                         arrow_table,
                         mode="append",
                         storage_options=storage_options,
                         schema_mode="merge",
-                        engine="rust",
                     )
             else:
-                write_deltalake(
+                _safe_write_deltalake(
                     table_name,
                     arrow_table,
                     mode="overwrite",
@@ -1136,5 +1203,195 @@ def get_last_run_watermark(
                         return data.get("max_source_mtime")
                 except Exception:
                     return None
+
+    return None
+
+
+def get_last_run_dlt_state(
+    contract,
+    contract_title: str,
+    stage: str,
+    engine_name: Optional[str] = None,
+    dataset: Optional[str] = None,
+    data_layer: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Fetch the last dlt_state_json for a contract from run logs.
+    Ordered by timestamp DESC to get the latest state.
+    """
+    if not contract:
+        return None
+
+    metadata = contract.metadata or {}
+    table_value = metadata.get("run_log_table")
+    backend = (metadata.get("run_log_backend") or "").lower()
+    if table_value and not backend:
+        backend = "spark" if engine_name == "spark" else "delta"
+
+    _use_precise = bool(dataset)
+
+    if table_value and backend == "duckdb":
+        try:
+            import duckdb
+        except Exception:
+            return None
+        base_path = getattr(contract, "_base_path", None)
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
+        db_path = _resolve_path(str(db_path), base_path)
+        if not Path(db_path).exists():
+            return None
+        try:
+            con = duckdb.connect(database=str(db_path), read_only=True)
+        except Exception:
+            try:
+                con = duckdb.connect(database=str(db_path))
+            except Exception:
+                return None
+        try:
+            table_name = _prepare_table_name(table_value, backend)
+            parts = table_name.split(".")
+            if len(parts) >= 2:
+                full_table = f"{parts[-2]}.{parts[-1]}"
+            else:
+                full_table = table_name
+            if _use_precise:
+                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                params = [dataset]
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params.append(data_layer)
+            else:
+                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                params = [contract_title]
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params.append(data_layer)
+            res = con.execute(
+                f"SELECT dlt_state_json FROM {full_table} WHERE {where} AND dlt_state_json IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
+                params,
+            ).fetchone()
+            return res[0] if res and res[0] is not None else None
+        except Exception:
+            return None
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+    if table_value and backend == "sqlite":
+        import sqlite3
+
+        base_path = getattr(contract, "_base_path", None)
+        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
+        db_path = _resolve_path(str(db_path), base_path)
+        if not Path(db_path).exists():
+            return None
+        con = sqlite3.connect(str(db_path))
+        try:
+            table_name = _prepare_table_name(table_value, backend)
+            if _use_precise:
+                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                params = [dataset]
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params.append(data_layer)
+            else:
+                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                params = [contract_title]
+                if data_layer:
+                    where += " AND data_layer = ?"
+                    params.append(data_layer)
+            cursor = con.execute(
+                f"SELECT dlt_state_json FROM {table_name} WHERE {where} AND dlt_state_json IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
+                params,
+            )
+            res = cursor.fetchone()
+            return res[0] if res and res[0] is not None else None
+        except Exception:
+            return None
+        finally:
+            con.close()
+
+    if table_value and backend == "spark":
+        try:
+            from pyspark.sql import SparkSession
+            from pyspark.sql import functions as F
+        except Exception:
+            return None
+        try:
+            spark = SparkSession.builder.getOrCreate()
+            df = spark.table(table_value)
+            if _use_precise:
+                filt = (
+                    (F.col("dataset") == dataset)
+                    & (F.col("stage") != "no_new_data")
+                    & (F.col("stage") != "reprocess")
+                    & (F.col("status") != "failed")
+                    & (F.col("dlt_state_json").isNotNull())
+                )
+                if data_layer:
+                    filt = filt & (F.col("data_layer") == data_layer)
+            else:
+                filt = (
+                    (F.col("contract") == contract_title)
+                    & (F.col("stage") != "no_new_data")
+                    & (F.col("stage") != "reprocess")
+                    & (F.col("status") != "failed")
+                    & (F.col("dlt_state_json").isNotNull())
+                )
+                if data_layer:
+                    filt = filt & (F.col("data_layer") == data_layer)
+            # Take highest timestamp
+            res = df.filter(filt).orderBy(F.col("timestamp").desc()).limit(1).collect()
+            if res:
+                return res[0]["dlt_state_json"]
+        except Exception:
+            return None
+
+    if table_value and backend == "delta":
+        try:
+            from deltalake import DeltaTable
+            import pyarrow.compute as pc
+        except ImportError:
+            return None
+        storage_options = _build_cloud_opts(table_value) if _is_cloud_path(table_value) else None
+        try:
+            dt = DeltaTable(table_value, storage_options=storage_options)
+            if _use_precise:
+                filters = [("dataset", "=", dataset)]
+                if data_layer:
+                    filters.append(("data_layer", "=", data_layer))
+            else:
+                filters = [("contract", "=", contract_title)]
+                if data_layer:
+                    filters.append(("data_layer", "=", data_layer))
+
+            df = dt.to_pyarrow_table(
+                columns=["dlt_state_json", "stage", "status", "timestamp"],
+                filters=filters,
+            )
+            if len(df) == 0:
+                return None
+
+            mask = pc.and_(
+                pc.and_(
+                    pc.not_equal(df.column("stage"), "no_new_data"),
+                    pc.not_equal(df.column("stage"), "reprocess"),
+                ),
+                pc.and_(pc.not_equal(df.column("status"), "failed"), pc.is_valid(df.column("dlt_state_json"))),
+            )
+            df = df.filter(mask)
+            if len(df) == 0:
+                return None
+
+            # Sort by timestamp decending and get first
+            import pyarrow.compute as pc
+
+            indices = pc.sort_indices(df, sort_keys=[("timestamp", "descending")])
+            sorted_df = df.take(indices)
+            return sorted_df.column("dlt_state_json")[0].as_py()
+        except Exception:
+            return None
 
     return None

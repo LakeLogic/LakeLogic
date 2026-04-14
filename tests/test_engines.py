@@ -94,7 +94,7 @@ def test_schema_policy_drop_unknown_fields():
     """Unknown fields are dropped when policy is 'drop'."""
     contract = DataContract(
         version="1.0.0",
-        schema_policy={"unknown_fields": "drop"},
+        server={"type": "local", "path": "x", "schema_policy": {"unknown_fields": "drop"}},
         model={"fields": [{"name": "id", "type": "integer"}]}
     )
     df = pl.DataFrame({"id": [1, 2], "extra": ["x", "y"]})
@@ -107,7 +107,7 @@ def test_schema_policy_quarantine_unknown_fields():
     """Unknown fields are quarantined when policy is 'quarantine'."""
     contract = DataContract(
         version="1.0.0",
-        schema_policy={"unknown_fields": "quarantine"},
+        server={"type": "local", "path": "x", "schema_policy": {"unknown_fields": "quarantine"}},
         model={"fields": [{"name": "id", "type": "integer"}]}
     )
     df = pl.DataFrame({"id": [1], "extra": ["x"]})

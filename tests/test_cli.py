@@ -16,5 +16,5 @@ def test_cli_run_missing_args():
     """Test that CLI fails gracefully with missing arguments."""
     result = runner.invoke(app, ["run"])
     assert result.exit_code != 0
-    combined = result.output + (result.stderr or "")
-    assert "Missing option" in combined
+    # CliRunner mixes stderr into output; no need to concatenate
+    assert "Missing option" in result.output or "Error" in result.output

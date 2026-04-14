@@ -1,33 +1,15 @@
-# Pipelines, Dependencies, and Parallelism
+# Pipelines & Parallelism
 
-> Note: The OSS release focuses on contract execution. Use your orchestrator to schedule DAGs. The `upstream` field defines dependencies.
+> **Think of your data pipeline like a car assembly line.**
+> You can't install seats before the chassis is built. LakeLogic defines the dependency order (chassis → body → seats), while your orchestrator runs each station as fast as possible.
 
-Data engineering is a network of tables. LakeLogic helps you define the network, while your orchestrator runs it safely.
+LakeLogic helps you define the network of table dependencies. Your orchestrator (Airflow, Dagster, Prefect, Databricks Workflows) handles the scheduling and execution.
 
-## 1. Contract Registry (Source of Truth)
+---
 
-Store all contracts in a single registry so dependencies are discoverable.
+## Contract Dependencies
 
-Example structure:
-
-```
-contracts/
-  bronze/
-    bronze_crm_customers.yaml
-    bronze_erp_products.yaml
-    bronze_pos_orders.yaml
-  silver/
-    silver_crm_customers.yaml
-    silver_erp_products.yaml
-    silver_pos_orders.yaml
-  gold/
-    gold_dim_customers.yaml
-    gold_dim_products.yaml
-    gold_fact_sales.yaml
-    gold_sales_mart.yaml
-```
-
-Each contract should declare a unique `dataset` and optional layer metadata:
+Each contract declares its `upstream` dependencies, creating a clear lineage graph:
 
 ```yaml
 info:
@@ -39,51 +21,65 @@ upstream:
   - bronze_crm_customers
 ```
 
-## 2. Layered Pipeline Strategy (Bronze -> Silver -> Gold)
+**Why this matters:** When `bronze_crm_customers` fails, your orchestrator automatically holds back `silver_crm_customers` — no stale downstream data, no manual intervention.
 
-Recommended pattern:
+---
 
-- **Bronze**: raw ingestion, schema gate, quarantine bad rows.
-- **Silver**: cleansed, standardized entities (layer_system_entity naming like `silver_crm_customers`, `silver_pos_orders`).
-- **Gold**: shared dimensions/facts across systems (e.g., `gold_dim_customers`, `gold_fact_sales`), plus optional marts/aggregates.
+## Layered Pipeline Strategy
 
-Example dependency graph (explicit layers):
+Organize your pipeline by medallion layers:
 
 ```text
   BRONZE                   SILVER                   GOLD
-  ------                   ------                   ----
-  bronze_crm_customers --> silver_crm_customers --> gold_dim_customers --+
-  bronze_erp_products  --> silver_erp_products  --> gold_dim_products  --+--> gold_fact_sales --> gold_sales_mart
-  bronze_pos_orders    --> silver_pos_orders    -------------------------+
+  ──────                   ──────                   ────
+  bronze_crm_customers ──→ silver_crm_customers ──→ gold_dim_customers ─┐
+  bronze_erp_products  ──→ silver_erp_products  ──→ gold_dim_products  ─┼─→ gold_fact_sales
+  bronze_pos_orders    ──→ silver_pos_orders    ────────────────────────┘
 ```
 
-In practice, this lets you run all Bronze contracts in parallel, then all Silver entity cleanses in parallel, then Gold dimensions/facts, and finally Gold marts/aggregates.
+| Layer | What happens | Parallelism |
+|:---|:---|:---|
+| **Bronze** | Raw ingestion, schema gate | ✅ All Bronze contracts run in parallel |
+| **Silver** | Clean, validate, standardize | ✅ All Silver contracts run in parallel |
+| **Gold** | Aggregate, join, enrich | Dimensions first, then facts |
 
-## 3. Parallelism
+**Why this matters:** Bronze and Silver contracts within the same layer have no dependencies on each other — run them all at once and cut your pipeline time dramatically.
 
-- Orchestrators handle task-level parallelism.
-- LakeLogic engines are multi-threaded by default (Polars and DuckDB) so each task is efficient.
+---
 
-## 4. Missing Upstreams and Log Tables
+## Naming Convention
 
-When `--window last_success` is used, LakeLogic checks the run log table for upstream freshness.
+Use a consistent `{layer}_{system}_{entity}` naming pattern:
 
-- **Missing log table/entry**: The driver logs a warning and falls back to a full load.
-- **Missing upstream**: The driver skips the downstream contract and records the reason in the run summary.
+| Contract | Meaning |
+|:---|:---|
+| `bronze_crm_customers` | Raw CRM customer data |
+| `silver_crm_customers` | Validated, cleansed CRM customers |
+| `gold_dim_customers` | Analytics-ready customer dimension |
+| `gold_fact_sales` | Aggregated sales facts |
 
-This keeps pipelines safe by default without silently producing stale Gold data.
+**Why this matters:** Anyone can read a contract name and instantly know its layer, source system, and entity — no documentation lookup needed.
 
-## 5. Gating Rules (When to Block Downstream)
+---
 
-Common policy:
+## Parallelism
 
-- **Block** downstream if dataset rules fail.
-- **Block** downstream if quarantine ratio exceeds a threshold.
-- **Continue** if only row-level quarantines exist and the threshold is acceptable.
+- **Orchestrators** handle task-level parallelism (running multiple contracts at once)
+- **LakeLogic engines** are multi-threaded by default — Polars and DuckDB maximize your hardware on each task
 
-Use the run log table to enforce this logic in your orchestrator.
+You get parallelism at two levels: across contracts (orchestrator) and within each contract (engine).
 
-## 6. Example Orchestrator Flow (Pseudo)
+---
+
+## Gating Rules
+
+Use quality results to decide whether downstream contracts should run:
+
+| Condition | Action |
+|:---|:---|
+| Dataset rules fail | ❌ Block downstream — something is fundamentally wrong |
+| Quarantine ratio > threshold | ❌ Block downstream — too much bad data |
+| Only a few row quarantines | ✅ Continue — within acceptable tolerance |
 
 ```text
 registry = load_all_contracts("contracts/")
@@ -95,11 +91,24 @@ for node in topo_sort(DAG):
         stop_downstream(node)
 ```
 
-You can implement this flow in Airflow, Dagster, Prefect, or any workflow engine you already use.
+**Why this matters:** Your pipeline self-heals by stopping before bad data cascades into Gold tables and dashboards.
 
-See `Job Templates` for concrete examples across Databricks, Synapse, Fabric, AWS, and more.
+---
 
-## 7. Run Summaries
+## Missing Upstreams
 
-Use `--summary-path` to write a JSON file with per-run metrics and per-contract statuses.
-This is useful for dashboards, alerting, and audit trails.
+When using `--window last_success`, LakeLogic checks the run log for upstream freshness:
+
+| Scenario | Behaviour |
+|:---|:---|
+| Missing log table | Warning + falls back to full load |
+| Missing upstream entry | Skips the downstream contract, records the reason |
+
+This keeps pipelines safe by default — no silently stale Gold data.
+
+---
+
+## What's Next?
+
+- **[Reprocessing & Partitioning](reprocessing.md)** — Handling late data and backfills
+- **[Deployment Patterns](deployment_patterns.md)** — CI/CD and production deployment

@@ -54,6 +54,7 @@ dependencies = [
     "Jinja2>=3.1.0",
     "sqlglot>=20.0.0",
     "polars>=0.20.0",
+    "typer>=0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -171,7 +172,17 @@ dev = [
     "commitizen>=3.0.0",
     "git-cliff>=2.0.0",
 ]
-all = []  # Backwards compat — base install now includes everything
+all = [
+    "typer>=0.9.0",
+    "polars>=0.20.0",
+    "pandas>=2.0.0",
+    "duckdb>=0.9.0",
+    "pyarrow>=14.0.0",
+    "deltalake>=0.15.0",
+    "sqlglot>=20.0.0",
+    "lxml>=4.9.0",
+    "openpyxl>=3.1.0",
+]
 # Heavy extras — opt-in only (may have numpy/platform conflicts)
 cloud = [
     "snowflake-connector-python>=3.5.0",

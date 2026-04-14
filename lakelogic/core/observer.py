@@ -76,6 +76,12 @@ class RemoteObserver:
             "slos": slos,
             # Duration
             "duration_ms": report.get("duration_ms"),
+            # Cost observability
+            "cost": {
+                "estimated": report.get("estimated_cost"),
+                "currency": report.get("cost_currency"),
+                "confidence": report.get("cost_confidence"),
+            },
         }
 
         try:

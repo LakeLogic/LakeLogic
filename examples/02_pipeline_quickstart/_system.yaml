@@ -32,8 +32,8 @@ contracts:
     depends_on: [clean_employees]
     enabled: true
 
-# ── Server Defaults (per-layer) ────────────────────────────────────────────
-server_defaults:
+# ── Server (per-layer defaults, contract overrides) ────────────────────────
+server:
   bronze:
     schema_evolution: append
   silver:

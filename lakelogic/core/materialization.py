@@ -12,20 +12,12 @@ from loguru import logger
 
 
 def _is_remote_path(path) -> bool:
-    """Return True if the path is a cloud storage URI (ADLS, S3, GCS)."""
-    s = str(path)
-    return s.startswith(
-        (
-            "abfss://",
-            "abfs://",
-            "az://",
-            "wasbs://",  # Azure
-            "s3://",
-            "s3a://",  # AWS
-            "gs://",
-            "gcs://",  # GCP
-        )
-    )
+    """Return True if the path is a cloud storage URI (ADLS, S3, GCS).
+
+    Delegates to :func:`lakelogic.core.paths.is_uri_path`.
+    """
+    from lakelogic.core.paths import is_uri_path
+    return is_uri_path(str(path))
 
 
 class URIPath:
@@ -147,6 +139,30 @@ def _build_storage_options(
         if account:
             opts["account_name"] = account
         return opts
+
+
+def _get_pyarrow_schema(dt) -> Any:
+    """Robustly extract a native PyArrow Schema from a DeltaTable across all deltalake versions.
+    
+    - deltalake < 0.18: dt.schema().to_pyarrow() returns native pyarrow types.
+    - deltalake >= 0.18: dt.schema().to_pyarrow() returns incompatible arro3 types,
+      but dt.schema() implements the PyCapsule API (__arrow_c_schema__) so pa.schema() works.
+    - dt.to_pyarrow_dataset().schema works in all versions but requires fsspec setup for remote.
+    """
+    import pyarrow as pa
+    raw = dt.schema()
+    
+    if hasattr(raw, "to_pyarrow"):
+        s = raw.to_pyarrow()
+        if s and getattr(s.field(0).type, "__module__", "").startswith("pyarrow"):
+            return s
+            
+    try:
+        return pa.schema(raw)
+    except TypeError:
+        pass
+        
+    return dt.to_pyarrow_dataset().schema
 
     # ── AWS S3 ────────────────────────────────────────────────────
     aws_key = os.getenv("AWS_ACCESS_KEY_ID")
@@ -396,7 +412,7 @@ def _resolve_target(contract, override_path: Optional[Path] = None) -> Tuple[Opt
 
     base_path = getattr(contract, "_base_path", None)
     target_str = str(target)
-    if target_str.startswith("table:") or "://" in target_str:
+    if target_str.startswith("table:") or _is_remote_path(target_str):
         # Don't wrap cloud URIs or table: paths in Path() — it corrupts
         # forward slashes to backslashes on Windows.
         target_path = URIPath(target_str)
@@ -451,6 +467,126 @@ def _to_pandas(df: Any) -> Any:
             return collected.to_pandas()
     raise TypeError(f"Unsupported dataframe type for materialization: {type(df)}")
 
+
+def _safe_write_deltalake(path, data, **kwargs):
+    """Safely execute write_deltalake handling across v0.17+ and v1.0+ engine signatures."""
+    try:
+        from deltalake import write_deltalake
+    except ImportError as e:
+        raise ImportError("Delta materialization requires the deltalake package: pip install deltalake") from e
+    
+    # Empty dataframes initialized into new Delta tables do not need schema merging
+    # and dropping it prevents 'rust' engine errors in older deltalake versions.
+    if hasattr(data, "__len__") and len(data) == 0:
+        kwargs.pop("schema_mode", None)
+        kwargs.pop("engine", None)
+
+    # Strip schema_mode=None — passing None explicitly can cause unexpected
+    # behaviour in some deltalake versions; omitting the arg entirely lets
+    # Delta-RS enforce strict schema matching (the desired default).
+    if "schema_mode" in kwargs and kwargs["schema_mode"] is None:
+        del kwargs["schema_mode"]
+        
+    import inspect
+    sig = inspect.signature(write_deltalake)
+    if "engine" in sig.parameters:
+        if kwargs.get("schema_mode") == "merge":
+            kwargs["engine"] = "rust"
+    elif "engine" in kwargs:
+        del kwargs["engine"]
+        
+    try:
+        return write_deltalake(path, data, **kwargs)
+    except Exception as e:
+        err_msg = str(e).lower()
+
+        # Handle "Cannot merge types X and Y" — PyArrow raises this during schema
+        # unification when schema_mode='merge' is requested but column types conflict
+        # (e.g. existing=string, incoming=int64/long). Cast incoming columns to match
+        # the committed table schema and retry.
+        if "cannot merge types" in err_msg:
+            try:
+                from deltalake import DeltaTable
+                import pyarrow as pa
+                dt = DeltaTable(path, storage_options=kwargs.get("storage_options"))
+                existing_schema = _get_pyarrow_schema(dt)
+                if hasattr(data, "schema"):
+                    new_arrays = []
+                    new_fields = []
+                    cast_log = []
+                    for i in range(len(data.schema)):
+                        field = data.schema.field(i)
+                        existing_idx = existing_schema.get_field_index(field.name)
+                        if existing_idx >= 0 and field.type != existing_schema.field(existing_idx).type:
+                            target_type = existing_schema.field(existing_idx).type
+                            try:
+                                new_arrays.append(data.column(i).cast(target_type))
+                                new_fields.append(existing_schema.field(existing_idx))
+                                cast_log.append(f"'{field.name}': {field.type}→{target_type}")
+                            except (pa.ArrowInvalid, pa.ArrowNotImplementedError) as cast_err:
+                                raise ValueError(
+                                    f"Schema merge failed: column '{field.name}' has type "
+                                    f"{field.type} in incoming data but {target_type} in the "
+                                    f"existing table, and the cast is not safe. "
+                                    f"Fix the source data or update schema_policy.evolution. "
+                                    f"Cast error: {cast_err}"
+                                ) from e
+                        else:
+                            new_arrays.append(data.column(i))
+                            new_fields.append(field)
+                    if cast_log:
+                        logger.debug(
+                            f"Schema merge type conflict auto-resolved by casting: {', '.join(cast_log)}"
+                        )
+                        data = pa.table(
+                            {f.name: arr for f, arr in zip(new_fields, new_arrays)},
+                            schema=pa.schema(new_fields),
+                        )
+                        return write_deltalake(path, data, **kwargs)
+            except ValueError:
+                raise
+            except Exception:
+                pass  # Fall through to original error if resolution itself fails
+
+        if "schema" in err_msg and ("mismatch" in err_msg or "does not match" in err_msg):
+            try:
+                from deltalake import DeltaTable
+                dt = DeltaTable(path, storage_options=kwargs.get("storage_options"))
+                existing_schema = _get_pyarrow_schema(dt)
+                existing_cols = {f.name: str(f.type) for f in existing_schema}
+
+                incoming_cols = {}
+                if hasattr(data, "schema"):
+                    for field in data.schema:
+                        incoming_cols[field.name] = str(field.type)
+
+                if incoming_cols and existing_cols:
+                    new_cols = [c for c in incoming_cols if c not in existing_cols]
+                    dropped_cols = [c for c in existing_cols if c not in incoming_cols]
+                    type_mismatches = [
+                        f"{c} (table: {existing_cols[c]}, data: {incoming_cols[c]})"
+                        for c in incoming_cols if c in existing_cols and existing_cols[c] != incoming_cols[c]
+                    ]
+
+                    diff_parts = []
+                    if new_cols:
+                        diff_parts.append(f"New columns in data not in table: {', '.join(new_cols)}")
+                    if dropped_cols:
+                        diff_parts.append(f"Columns in table missing from data: {', '.join(dropped_cols)}")
+                    if type_mismatches:
+                        diff_parts.append(f"Type mismatches: {', '.join(type_mismatches)}")
+
+                    if diff_parts:
+                        friendly_msg = " | ".join(diff_parts)
+                        raise ValueError(
+                            f"Schema Evolution Blocked (policy=strict): {friendly_msg}. "
+                            f"Original error: {str(e)}"
+                        ) from e
+            except ValueError:
+                raise  # Re-raise our enriched error
+            except Exception:
+                pass  # Fallback to original error if diff parsing itself fails
+        raise e
 
 def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[str, str]] = None) -> None:
     """
@@ -578,6 +714,43 @@ def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[st
             raise ValueError("Delta materialization requires 'deltalake' installed (pip install deltalake).")
         except Exception as e:
             raise ValueError(f"Delta materialization failed: {e}")
+    elif output_format == "duckdb":
+        try:
+            import duckdb
+            import re
+
+            db_path = str(path_str) if not is_remote else path_str
+            # Use path.stem as table name, stripping non-alphanumeric
+            table_name = re.sub(r'[^a-zA-Z0-9_]', '_', Path(path).stem)
+            if not table_name:
+                table_name = "data"
+
+            owns_connection = False
+            if hasattr(df, "connection") and hasattr(df, "sql_query"):
+                con = df.connection
+            else:
+                con = duckdb.connect()
+                owns_connection = True
+
+            try:
+                # If path doesn't exist, duckdb creates it when we connect. Here we attach.
+                con.execute(f"ATTACH '{db_path}' AS target_db")
+                if hasattr(df, "sql_query"):
+                    con.execute(f"CREATE OR REPLACE TABLE target_db.{table_name} AS SELECT * FROM ({df.sql_query()})")
+                else:
+                    con.register("incoming_df", df)
+                    con.execute(f"CREATE OR REPLACE TABLE target_db.{table_name} AS SELECT * FROM incoming_df")
+            finally:
+                try:
+                    con.execute("DETACH target_db")
+                except Exception:
+                    pass
+                if owns_connection and con is not None:
+                    con.close()
+        except ImportError:
+            raise ValueError("DuckDB materialization requires 'duckdb' installed.")
+        except Exception as e:
+            raise ValueError(f"DuckDB materialization failed: {e}")
     else:
         raise ValueError(f"Unsupported output format: {output_format}")
 
@@ -716,8 +889,21 @@ def _read_frame(path: Path, output_format: str):
         con = duckdb.connect()
         con.execute("INSTALL iceberg; LOAD iceberg; INSTALL httpfs; LOAD httpfs;")
         return con.execute(f"SELECT * FROM iceberg_scan('{path}')").to_df()
-    raise ValueError(f"Unsupported output format: {output_format}")
+    if output_format == "duckdb":
+        import duckdb
+        import re
 
+        db_path = str(path)
+        table_name = re.sub(r'[^a-zA-Z0-9_]', '_', path.stem)
+        if not table_name:
+            table_name = "data"
+
+        con = duckdb.connect(db_path, read_only=True)
+        try:
+            return con.execute(f"SELECT * FROM {table_name}").df()
+        finally:
+            con.close()
+    raise ValueError(f"Unsupported output format: {output_format}")
 
 def _seed_soft_delete_columns_pandas(
     df,
@@ -2376,13 +2562,29 @@ def _materialize_spark_dataframe(
     # Standard append/overwrite
     writer = df.write.format(output_format)
     if partition_by:
+        # Prune partition columns not present in data — allows _system.yaml
+        # to define a superset shared across multiple contracts.
+        _spark_cols = set(df.columns)
+        _missing_parts = [c for c in partition_by if c not in _spark_cols]
+        if _missing_parts:
+            logger.warning(
+                f"Partition columns not present in data (pruned): {', '.join(_missing_parts)}. "
+                f"This is expected when _system.yaml defines a superset of partition columns "
+                f"shared across multiple contracts."
+            )
+            partition_by = [c for c in partition_by if c not in _missing_parts]
+    if partition_by:
         writer = writer.partitionBy(*partition_by)
 
-    # Delta schema evolution — driven by contract server.schema_evolution
+    # Delta schema evolution — driven by contract server.schema_policy
     if output_format == "delta" and contract:
         server = contract.effective_server() if hasattr(contract, "effective_server") else None
-        evolution = getattr(server, "schema_evolution", "strict") if server else "strict"
-        if evolution in ("append", "merge"):
+        from lakelogic.core.models import SchemaPolicy as _SP
+        _default_evo = _SP().evolution
+        evolution = _default_evo
+        if server and getattr(server, "schema_policy", None):
+            evolution = getattr(server.schema_policy, "evolution", _default_evo) or _default_evo
+        if evolution in ("append", "merge", "compatible", "allow"):
             writer = writer.option("mergeSchema", "true")
         elif evolution == "overwrite":
             writer = writer.option("overwriteSchema", "true")
@@ -2442,6 +2644,26 @@ def _partition_aware_merge(
     mat,
     scd2_cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
+    _delta_schema_mode = None
+    if contract:
+        _srv = contract.effective_server() if hasattr(contract, "effective_server") else None
+        _evo = None
+        if _srv and getattr(_srv, "schema_policy", None):
+            _evo = getattr(_srv.schema_policy, "evolution", None)
+        # Fallback: check _server_layer_defaults injected by runner from _system.yaml
+        if _evo is None and hasattr(contract, "metadata") and contract.metadata:
+            _layer_defaults = contract.metadata.get("_server_layer_defaults", {})
+            _schema_policy = _layer_defaults.get("schema_policy", {})
+            if isinstance(_schema_policy, dict):
+                _evo = _schema_policy.get("evolution")
+            if _evo is None:
+                from lakelogic.core.models import SchemaPolicy as _SP
+                _evo = _layer_defaults.get("schema_evolution", _SP().evolution)
+        _evo = _evo or "allow"
+        if _evo in ("append", "merge", "compatible", "allow"):
+            _delta_schema_mode = "merge"
+        elif _evo == "overwrite":
+            _delta_schema_mode = "overwrite"
     """
     Perform merge or SCD2 within each affected partition independently.
 
@@ -2489,7 +2711,12 @@ def _partition_aware_merge(
 
     missing_parts = [c for c in partition_by if c not in pdf.columns]
     if missing_parts:
-        raise ValueError(f"Partition columns missing from data: {', '.join(missing_parts)}")
+        logger.warning(
+            f"Partition columns not present in data (pruned): {', '.join(missing_parts)}. "
+            f"This is expected when _system.yaml defines a superset of partition columns "
+            f"shared across multiple contracts."
+        )
+        partition_by = [c for c in partition_by if c not in missing_parts]
     missing_pk = [c for c in primary_key if c not in pdf.columns]
     if missing_pk:
         raise ValueError(f"Primary key columns missing from data: {', '.join(missing_pk)}")
@@ -2649,13 +2876,12 @@ def _partition_aware_merge(
 
         if not table_exists:
             # ── First write: create the root Delta table ──────────────────
-            write_deltalake(
+            _safe_write_deltalake(
                 target_str,
                 arrow_table,
                 partition_by=partition_by,
                 mode="overwrite",
-                schema_mode="merge",
-                engine="rust",
+                schema_mode=_delta_schema_mode,
                 storage_options=_part_opts,
             )
         elif strategy == "scd2":
@@ -2673,13 +2899,12 @@ def _partition_aware_merge(
                 part_predicates.append(f"({clause})")
             partition_predicate = " OR ".join(part_predicates) if part_predicates else None
 
-            write_deltalake(
+            _safe_write_deltalake(
                 target_str,
                 arrow_table,
                 mode="overwrite",
                 predicate=partition_predicate,
-                schema_mode="merge",
-                engine="rust",
+                schema_mode=_delta_schema_mode,
                 storage_options=_part_opts,
             )
         elif primary_key:
@@ -2705,8 +2930,7 @@ def _partition_aware_merge(
                 arrow_table,
                 partition_by=partition_by,
                 mode="append",
-                schema_mode="merge",
-                engine="rust",
+                schema_mode=_delta_schema_mode,
                 storage_options=_part_opts,
             )
 
@@ -2797,6 +3021,26 @@ def materialize_dataframe(
 
     mat = contract.materialization
     resolved_target, resolved_format = _resolve_target(contract, target_path)
+    _delta_schema_mode = None
+    if contract:
+        _srv = contract.effective_server() if hasattr(contract, "effective_server") else None
+        _evo = None
+        if _srv and getattr(_srv, "schema_policy", None):
+            _evo = getattr(_srv.schema_policy, "evolution", None)
+        # Fallback: check _server_layer_defaults injected by runner from _system.yaml
+        if _evo is None and hasattr(contract, "metadata") and contract.metadata:
+            _layer_defaults = contract.metadata.get("_server_layer_defaults", {})
+            _schema_policy = _layer_defaults.get("schema_policy", {})
+            if isinstance(_schema_policy, dict):
+                _evo = _schema_policy.get("evolution")
+            if _evo is None:
+                _evo = _layer_defaults.get("schema_evolution", "strict")
+        _evo = _evo or "strict"
+        if _evo in ("append", "merge", "compatible", "allow"):
+            _delta_schema_mode = "merge"
+        elif _evo == "overwrite":
+            _delta_schema_mode = "overwrite"
+
     if output_format:
         resolved_format = output_format
     if resolved_format:
@@ -2927,17 +3171,35 @@ def materialize_dataframe(
 
     # Empty-frame guard — nothing to write, avoid partition-column validation errors
     if pdf.empty:
-        logger.info("materialize: empty DataFrame — no rows to write, skipping materialization.")
-        return {
-            "target": str(target_file),
-            "rows_written": 0,
-            "format": resolved_format,
-        }
+        is_delta_init = False
+        if resolved_format == "delta":
+            try:
+                from deltalake import DeltaTable
+                target_str = str(target_file)
+                _dt_opts = _build_storage_options() if _is_remote_path(target_str) else None
+                DeltaTable(target_str, storage_options=_dt_opts)
+            except Exception:
+                is_delta_init = True
+                
+        if is_delta_init:
+            logger.info(f"materialize: empty DataFrame, but falling through to initialize empty Delta table schema at {target_file}")
+        else:
+            logger.info("materialize: empty DataFrame — target exists or not Delta, skipping write.")
+            return {
+                "target": str(target_file),
+                "rows_written": 0,
+                "format": resolved_format,
+            }
 
     if partition_by:
         missing = [col for col in partition_by if col not in pdf.columns]
         if missing:
-            raise ValueError(f"Partition columns missing from data: {', '.join(missing)}")
+            logger.warning(
+                f"Partition columns not present in data (pruned): {', '.join(missing)}. "
+                f"This is expected when _system.yaml defines a superset of partition columns "
+                f"shared across multiple contracts."
+            )
+            partition_by = [col for col in partition_by if col not in missing]
 
     if strategy in ["merge", "scd2"]:
         missing_pk = [col for col in primary_key if col not in pdf.columns]
@@ -2962,21 +3224,116 @@ def materialize_dataframe(
             arrow_data = (pdf.collect() if hasattr(pdf, "collect") else pdf).to_arrow()
         elif hasattr(pdf, "to_arrow"):
             arrow_data = pdf.to_arrow()
+        elif hasattr(pdf, "arrow"):
+            arrow_data = pdf.arrow()  # DuckDB relations
         else:
             arrow_data = pa.Table.from_pandas(pdf if hasattr(pdf, "columns") else _to_pandas(pdf))
 
         arrow_data = _sanitize_arrow_nulls(arrow_data)  # Delta rejects Arrow Null type
 
+        # ── Cast DataFrame schema to match target Delta table precisely ──
+        # Polars defaults ints to Int64 and timestamps to strings, but the Delta
+        # table (initialized by DDL_ONLY) expects exact types. This pre-write cast
+        # aligns the arrow_data schema with the physical Delta schema, covering
+        # both contract fields AND injected system lineage columns.
         resolved_target.mkdir(parents=True, exist_ok=True)
         target_str = str(resolved_target)
+
+        # Check if target Delta table already exists
         try:
             from deltalake import DeltaTable as _DT
 
             _dt_opts = _build_storage_options() if _is_remote_path(target_str) else None
-            _DT(target_str, storage_options=_dt_opts)
+            _existing_dt = _DT(target_str, storage_options=_dt_opts)
             table_exists = True
         except Exception:
+            _existing_dt = None
             table_exists = False
+
+        # Phase 1: Try to cast against existing Delta table schema (most accurate)
+        if _existing_dt is not None:
+            try:
+                import pyarrow as pa
+                import pyarrow.compute as pc
+
+                delta_schema = _get_pyarrow_schema(_existing_dt)
+                delta_type_map = {f.name: f.type for f in delta_schema}
+                cast_count = 0
+
+                for i, f in enumerate(arrow_data.schema):
+                    if f.name not in delta_type_map:
+                        continue
+                    target_type = delta_type_map[f.name]
+                    if f.type == target_type:
+                        continue
+
+                    try:
+                        col = arrow_data.column(i)
+                        # Handle string → timestamp specially
+                        if (pa.types.is_string(f.type) or pa.types.is_large_string(f.type)) and pa.types.is_timestamp(target_type):
+                            # Strategy: use pandas to parse ISO timestamps (handles all tz formats)
+                            import pandas as pd
+                            pd_series = col.to_pandas()
+                            pd_ts = pd.to_datetime(pd_series, utc=True)
+                            if target_type.tz is None:
+                                # Strip timezone for timestamp[us] (no tz)
+                                pd_ts = pd_ts.dt.tz_localize(None)
+                            col = pa.array(pd_ts, type=target_type)
+                            arrow_data = arrow_data.set_column(i, pa.field(f.name, target_type), col)
+                            cast_count += 1
+                            continue
+
+                        # General cast for numeric / other types
+                        casted_col = col.cast(target_type)
+                        arrow_data = arrow_data.set_column(i, pa.field(f.name, target_type), casted_col)
+                        cast_count += 1
+                    except Exception as col_err:
+                        logger.warning(
+                            f"Could not cast column '{f.name}' from {f.type} to {target_type}: {col_err}"
+                        )
+
+                if cast_count:
+                    logger.info(f"Cast {cast_count} column(s) to match existing Delta table schema")
+            except Exception as e:
+                logger.warning(f"Could not cast arrow schema to Delta table schema: {e}")
+        else:
+            # Phase 2: No existing table — cast using contract field types only
+            _srv = contract.effective_server() if hasattr(contract, "effective_server") else None
+            _cast_to_string = getattr(_srv, "cast_to_string", False) if _srv else False
+            
+            if not _cast_to_string:
+                try:
+                    import pyarrow as pa
+                    from lakelogic.core.ddl import _resolve_arrow_type, _get_fields
+
+                    contract_fields = _get_fields(contract)
+                    if contract_fields:
+                        field_types = {f.name: _resolve_arrow_type(f.type) for f in contract_fields}
+                        new_fields = []
+                        for f in arrow_data.schema:
+                            if f.name in field_types:
+                                target_type = field_types[f.name]
+                                if isinstance(target_type, pa.DataType) and f.type != target_type:
+                                    f = pa.field(f.name, target_type)
+                            new_fields.append(f)
+
+                        target_schema = pa.schema(new_fields)
+                        if target_schema != arrow_data.schema:
+                            diffs_count = sum(1 for a, b in zip(arrow_data.schema, target_schema) if a.type != b.type)
+                            msg_lines = [
+                                f"Casting {diffs_count} column(s) to match contract types before Delta write (new table):",
+                                f"{'Column Name':<35} | {'From Type':<15} | {'To Type':<15}",
+                                "-" * 71
+                            ]
+                            for a, b in zip(arrow_data.schema, target_schema):
+                                if a.type != b.type:
+                                    msg_lines.append(f"{a.name:<35} | {str(a.type):<15} | {str(b.type):<15}")
+                            
+                            logger.info("\n" + "\n".join(msg_lines))
+                            arrow_data = arrow_data.cast(target_schema)
+                except Exception as e:
+                    logger.warning(f"Could not cast arrow schema to contract types: {e}")
+
         # ── Merge / SCD2 strategy for non-partitioned Delta tables ────────
         if strategy in ("merge", "scd2") and primary_key:
             if table_exists:
@@ -2999,12 +3356,11 @@ def materialize_dataframe(
                     logger.info(f"SCD2 merge result: {len(merged)} rows (existing {len(existing)} + changes)")
                     arrow_data = pa.Table.from_pandas(merged, preserve_index=False)
                     arrow_data = _sanitize_arrow_nulls(arrow_data)
-                    write_deltalake(
+                    _safe_write_deltalake(
                         target_str,
                         arrow_data,
                         mode="overwrite",
-                        schema_mode="merge",
-                        engine="rust",
+                        schema_mode=_delta_schema_mode,
                         storage_options=_dt_opts,
                     )
                     rows_written = len(merged)
@@ -3058,12 +3414,11 @@ def materialize_dataframe(
                     rows_written = len(merged)
                 else:
                     rows_written = len(arrow_data)
-                write_deltalake(
+                _safe_write_deltalake(
                     target_str,
                     arrow_data,
                     mode="overwrite",
-                    schema_mode="merge",
-                    engine="rust",
+                    schema_mode=_delta_schema_mode,
                     storage_options=_dt_opts,
                 )
 
@@ -3089,8 +3444,13 @@ def materialize_dataframe(
                 from deltalake import DeltaTable as _DT_pre
 
                 _dt_pre_opts = _build_storage_options() if _is_remote_path(target_str) else None
+                import pyarrow.compute as pc
                 _dt_pre = _DT_pre(target_str, storage_options=_dt_pre_opts)
-                _pre_write_count = len(_dt_pre.to_pyarrow_table())
+                _actions = _dt_pre.get_add_actions(flatten=True)
+                if "num_records" in _actions.column_names:
+                    _pre_write_count = pc.sum(_actions["num_records"]).as_py()
+                else:
+                    _pre_write_count = _dt_pre.to_pyarrow_dataset().scanner().count_rows()
                 logger.info(
                     f"Delta pre-write state: {_pre_write_count} rows in {target_str} "
                     f"(appending {len(arrow_data)} new rows)"
@@ -3103,14 +3463,13 @@ def materialize_dataframe(
         _write_kwargs = {
             "mode": delta_mode,
             "partition_by": delta_partition_by,
-            "schema_mode": "merge",  # schema evolution: new columns auto-added
-            "engine": "rust",
+            "schema_mode": _delta_schema_mode,  # schema evolution: new columns auto-added
         }
         if _write_opts:
             _write_kwargs["storage_options"] = _write_opts
 
         try:
-            write_deltalake(
+            _safe_write_deltalake(
                 target_str,
                 arrow_data,
                 **_write_kwargs,
@@ -3149,10 +3508,7 @@ def materialize_dataframe(
                 _dt_post_opts = _build_storage_options() if _is_remote_path(target_str) else None
                 _dt_post = _DT_post(target_str, storage_options=_dt_post_opts)
                 _post_write_count = len(_dt_post.to_pyarrow_table())
-                logger.info(
-                    f"Delta post-write state: {_post_write_count} rows in {target_str} "
-                    f"(was {_pre_write_count}, wrote {rows_written})"
-                )
+
                 if _pre_write_count is not None and _post_write_count < _pre_write_count:
                     logger.error(
                         f"⚠️ DATA LOSS DETECTED: table went from {_pre_write_count} to "
@@ -3160,9 +3516,10 @@ def materialize_dataframe(
                     )
             except Exception as _post_err:
                 logger.debug(f"Could not read post-write row count: {_post_err}")
+
         logger.info(
             f"Materialized {rows_written} rows to Delta table: {resolved_target} "
-            f"(mode={delta_mode}, partitions={delta_partition_by})"
+            f"(strategy={strategy}, mode={delta_mode})"
         )
         _maybe_compact_delta(target_str, contract)
         return {

@@ -1,4 +1,5 @@
 @echo off
+REM mkdocs serve --dev-addr 127.0.0.1:9000
 REM -- LakeLogic Release Script ------------------------------------------
 REM Usage:   release.bat           (auto-detect bump: patch/minor/major)
 REM          release.bat minor     (force minor bump)

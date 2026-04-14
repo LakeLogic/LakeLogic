@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SLOFreshnessConfig(BaseModel):
@@ -141,6 +141,28 @@ class EnvironmentConfig(BaseModel):
 
     catalog: str
     storage_account: Optional[str] = None
+    region: Optional[str] = None
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Recursively merge *override* into *base*.  Override values win on conflicts.
+    Lists are replaced (not concatenated) — the override list takes precedence.
+
+    Used to layer ``_domain.yaml`` defaults underneath ``_system.yaml`` values
+    so that the system always wins while inheriting unset domain-level config.
+    """
+    merged = dict(base)
+    for key, val in override.items():
+        if (
+            key in merged
+            and isinstance(merged[key], dict)
+            and isinstance(val, dict)
+        ):
+            merged[key] = _deep_merge(merged[key], val)
+        else:
+            merged[key] = val
+    return merged
 
 
 def _resolve_placeholders(obj: Any, vars_map: Dict[str, str]) -> Any:
@@ -181,17 +203,33 @@ class DomainRegistry(BaseModel):
     cloud: CloudReporting = Field(default_factory=CloudReporting)
     environments: Dict[str, EnvironmentConfig] = Field(default_factory=dict)
     # System-level defaults — inherited by contracts that don't define their own
+    compliance: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     lineage: Dict[str, Any] = Field(default_factory=dict)
     quarantine: Dict[str, Any] = Field(default_factory=dict)
     materialization: Dict[str, Any] = Field(default_factory=dict)  # per-layer defaults
+    notifications_enabled: bool = True  # global switch to disable all system/domain/contract notifications
     notifications: List[Dict[str, Any]] = Field(default_factory=list)  # system-wide notification channels
-    server_defaults: Dict[str, Any] = Field(default_factory=dict)  # per-layer server config
+    server: Dict[str, Any] = Field(default_factory=dict)  # per-layer server config
+    cost: Dict[str, Any] = Field(default_factory=dict)  # cost observability config
     # Cross-domain lineage: upstream tables not managed by this registry
     external_sources: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Internal state
     _registry_dir: Optional[Path] = None
+
+    @model_validator(mode="after")
+    def validate_unique_entities(self) -> "DomainRegistry":
+        entity_layers = {}
+        for c in self.contracts:
+            if c.entity in entity_layers:
+                raise ValueError(
+                    f"Duplicate contract entity found: '{c.entity}'. "
+                    f"Entities must be globally unique across the contract list. "
+                    f"Found in layer '{entity_layers[c.entity]}' and '{c.layer}'."
+                )
+            entity_layers[c.entity] = c.layer
+        return self
 
     @classmethod
     def from_yaml(cls, path: str, environment: str = "dev", storage_mode: str = "uc") -> "DomainRegistry":
@@ -215,6 +253,103 @@ class DomainRegistry(BaseModel):
 
         with open(yaml_path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f)
+
+        # ── Domain-level inheritance ──────────────────────────────────────
+        # Walk up from the _system.yaml directory to discover a sibling
+        # _domain.yaml in the parent.  Domain-level keys provide defaults;
+        # system-level keys override (child wins).
+        #
+        # Inheritance hierarchy:
+        #   _domain.yaml  (domain defaults)  ← base
+        #   _system.yaml  (system overrides) ← wins on conflict
+        #
+        # Inheritable keys: slo, ownership, notifications, quarantine,
+        #                   lineage, materialization, server
+        _DOMAIN_INHERITABLE_KEYS = [
+            "slo", "ownership", "notifications", "quarantine",
+            "compliance", "lineage", "materialization", "server",
+            "cost",
+        ]
+        # Scalar keys: inherit only if the system doesn't define them
+        _DOMAIN_SCALAR_KEYS = [
+            "domain", "bronze_layer", "silver_layer", "gold_layer",
+            "notifications_enabled",
+        ]
+        domain_yaml_path = yaml_path.parent.parent / "_domain.yaml"
+        if domain_yaml_path.exists():
+            with open(domain_yaml_path, "r", encoding="utf-8") as df:
+                domain_raw = yaml.safe_load(df) or {}
+            logger.info(f"Domain config inherited from {domain_yaml_path}")
+            for key in _DOMAIN_INHERITABLE_KEYS:
+                if key not in domain_raw:
+                    continue
+                domain_val = domain_raw[key]
+                system_val = raw.get(key)
+                if system_val is None:
+                    # System didn't define this key — inherit wholesale
+                    merged_val = domain_val
+                elif isinstance(system_val, dict) and isinstance(domain_val, dict):
+                    # Deep merge: domain provides base, system overrides
+                    merged_val = _deep_merge(domain_val, system_val)
+                elif isinstance(system_val, list) and isinstance(domain_val, list):
+                    # Lists: concatenate domain + system (system appends)
+                    merged_val = domain_val + system_val
+                else:
+                    # system value wins outright (scalar override)
+                    continue
+
+                # Validate: trial-parse the merged value through Pydantic
+                # to ensure the domain schema shape is compatible.
+                _trial = dict(raw)
+                _trial[key] = merged_val
+                try:
+                    cls.model_validate(_trial)
+                    raw[key] = merged_val
+                    logger.trace(f"  Inherited domain key '{key}'")
+                except Exception as exc:
+                    logger.warning(
+                        f"  Skipped domain key '{key}': incompatible schema "
+                        f"({exc.__class__.__name__}). System value retained."
+                    )
+
+            # Scalar keys: inherit if system doesn't define them,
+            # warn on mismatches when both define the same key.
+            for key in _DOMAIN_SCALAR_KEYS:
+                domain_val = domain_raw.get(key)
+                if domain_val is None:
+                    continue
+                system_val = raw.get(key)
+                if system_val is None:
+                    # System didn't define it — inherit from domain
+                    raw[key] = domain_val
+                    logger.trace(f"  Inherited domain scalar '{key}' = {domain_val}")
+                elif system_val != domain_val:
+                    # Both defined but different — flag the mismatch
+                    logger.warning(
+                        f"  ⚠ Config mismatch: _system.yaml has {key}='{system_val}' "
+                        f"but _domain.yaml has {key}='{domain_val}'. "
+                        f"Domain value takes precedence for consistency."
+                    )
+                    raw[key] = domain_val
+
+            # ── Cost currency mismatch check ──────────────────────────────
+            # The domain's cost.currency is the authoritative reporting
+            # currency for budget enforcement and Observatory roll-ups.
+            # If the system defines a different currency, warn and enforce
+            # the domain value to prevent mixed-currency aggregations.
+            domain_cost = domain_raw.get("cost") or {}
+            system_cost = raw.get("cost") or {}
+            domain_currency = domain_cost.get("currency")
+            system_currency = system_cost.get("currency")
+            if domain_currency and system_currency and domain_currency != system_currency:
+                logger.warning(
+                    f"  ⚠ Cost currency mismatch: _system.yaml has cost.currency='{system_currency}' "
+                    f"but _domain.yaml has cost.currency='{domain_currency}'. "
+                    f"Domain currency '{domain_currency}' will be used for roll-ups and budget enforcement. "
+                    f"System rates will still be applied, but reported in {domain_currency}."
+                )
+                if "cost" in raw and isinstance(raw["cost"], dict):
+                    raw["cost"]["currency"] = domain_currency
 
         # Parse into typed model
         registry = cls.model_validate(raw)
@@ -259,7 +394,7 @@ class DomainRegistry(BaseModel):
         for field, val in registry.storage.model_dump().items():
             if val is not None:
                 _full_vars[field] = val
-        for section_name in ("quarantine", "metadata", "lineage"):
+        for section_name in ("quarantine", "metadata", "lineage", "compliance"):
             section = getattr(registry, section_name, None)
             if section and isinstance(section, dict):
                 setattr(registry, section_name, _resolve_placeholders(section, _full_vars))
@@ -339,6 +474,23 @@ class DomainRegistry(BaseModel):
                             storage_vars[root_key] = path_val
 
                 c_dict = _resolve_placeholders(c_dict, storage_vars)
+
+                # Inject system-level compliance defaults and validate residency
+                if registry.compliance:
+                    if not c_dict.get("compliance"):
+                        c_dict["compliance"] = dict(registry.compliance)
+                    else:
+                        c_dict["compliance"] = _deep_merge(dict(registry.compliance), c_dict["compliance"])
+                
+                # Check data residency against environment region
+                c_compliance = c_dict.get("compliance", {})
+                c_residency = c_compliance.get("data_residency")
+                if c_residency and env_config and getattr(env_config, "region", None):
+                    if c_residency.upper() != env_config.region.upper():
+                        logger.warning(
+                            f"⚠ Compliance Violation [{c.entity}]: Requires '{c_residency.upper()}' data residency, "
+                            f"but target environment '{environment}' is '{env_config.region.upper()}'."
+                        )
 
                 # Inject system-level metadata defaults (e.g. run_log_dir)
                 if registry.metadata:

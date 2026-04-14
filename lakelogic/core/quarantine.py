@@ -606,9 +606,12 @@ def materialize_quarantine(
 
     metadata = contract.metadata or {}
 
-    # ── Format resolution (precedence: arg → quarantine.format → metadata → extension → default) ──
+    # ── Format resolution (precedence: arg → quarantine.format → metadata → materialization.format → extension → default) ──
     q = contract.quarantine
-    explicit_format = output_format or getattr(q, "format", None) or metadata.get("quarantine_format")
+    _mat_format = None
+    if contract.materialization:
+        _mat_format = getattr(contract.materialization, "format", None)
+    explicit_format = output_format or getattr(q, "format", None) or metadata.get("quarantine_format") or _mat_format
     resolved_format = str(explicit_format).lower() if explicit_format else None
 
     # ── Write-mode resolution (quarantine.write_mode → metadata → default append) ──
@@ -676,34 +679,159 @@ def materialize_quarantine(
     if resolved_format == "delta":
         try:
             from deltalake.writer import write_deltalake
+
+            def _safe_write_deltalake(path, data, **kwargs):
+                if hasattr(data, "__len__") and len(data) == 0:
+                    kwargs.pop("schema_mode", None)
+                    kwargs.pop("engine", None)
+                    
+                import inspect
+                sig = inspect.signature(write_deltalake)
+                if "engine" in sig.parameters and kwargs.get("schema_mode") == "merge":
+                    kwargs["engine"] = "rust"
+                elif "engine" not in sig.parameters and "engine" in kwargs:
+                    del kwargs["engine"]
+                return write_deltalake(path, data, **kwargs)
+
         except ImportError as exc:
             raise ImportError("Delta quarantine format requires the deltalake package: pip install deltalake") from exc
 
         delta_path = str(target_file)
         delta_write_mode = "overwrite" if write_mode == "overwrite" else "append"
 
-        if _is_polars_frame(df):
-            collected = df.collect() if hasattr(df, "collect") else df
-            # schema_mode="merge" enables schema evolution — new columns from
-            # evolving contracts are added to the Delta table automatically.
-            write_deltalake(
-                delta_path,
-                collected.to_arrow(),
-                mode=delta_write_mode,
-                schema_mode="merge",
-                engine="rust",
-            )
-            rows_written = collected.height
-        elif hasattr(df, "write"):
-            # Spark DataFrame passed but engine_name not set — fall through to Spark
+        if hasattr(df, "write") and not _is_polars_frame(df):
+            # Spark DataFrame passed
             df.write.format("delta").mode(delta_write_mode).save(delta_path)
             rows_written = int(df.count())
         else:
-            pdf = _to_pandas(df)
-            import pyarrow as pa
+            if _is_polars_frame(df):
+                collected = df.collect() if hasattr(df, "collect") else df
+                arrow_data = collected.to_arrow()
+                rows_written = collected.height
+            else:
+                pdf = _to_pandas(df)
+                import pyarrow as pa
+                arrow_data = pa.Table.from_pandas(pdf)
+                rows_written = len(pdf)
 
-            write_deltalake(delta_path, pa.Table.from_pandas(pdf), mode=delta_write_mode)
-            rows_written = len(pdf)
+            # ── Align Arrow schema to existing Delta table schema ──────────
+            # Quarantine tables may have been written by a different engine
+            # (e.g. DuckDB → Polars switch), causing type divergence.
+            # We rebuild the Arrow table to EXACTLY match the Delta schema,
+            # casting columns where possible and null-filling the rest.
+            try:
+                from deltalake import DeltaTable as _DT
+                from lakelogic.core.materialization import _build_storage_options, _is_remote_path, _get_pyarrow_schema
+                import pyarrow as pa
+
+                _dt_opts = _build_storage_options() if _is_remote_path(delta_path) else None
+                _existing_dt = _DT(delta_path, storage_options=_dt_opts)
+                # Use the robust helper to extract a native PyArrow Schema
+                delta_schema = _get_pyarrow_schema(_existing_dt)
+
+                # Case-insensitive lookup: incoming column name → index
+                incoming_by_name = {
+                    f.name.lower(): i for i, f in enumerate(arrow_data.schema)
+                }
+
+                result_columns = []
+                result_fields = []
+                cast_count = 0
+
+                # Phase 1: Emit all Delta-schema columns in Delta order
+                for delta_field in delta_schema:
+                    key = delta_field.name.lower()
+                    if key in incoming_by_name:
+                        idx = incoming_by_name[key]
+                        col = arrow_data.column(idx)
+
+                        if col.type == delta_field.type:
+                            result_columns.append(col)
+                            result_fields.append(delta_field)
+                        else:
+                            # Cast incoming column to Delta type
+                            try:
+                                is_str = pa.types.is_string(col.type) or pa.types.is_large_string(col.type)
+                                tgt_type = delta_field.type
+
+                                # Handle string -> numeric cast by coercing errors to Null
+                                if is_str and (pa.types.is_integer(tgt_type) or pa.types.is_floating(tgt_type)):
+                                    import pandas as pd
+                                    pd_series = col.to_pandas()
+                                    pd_num = pd.to_numeric(pd_series, errors='coerce').astype("Int64" if pa.types.is_integer(tgt_type) else "Float64")
+                                    casted = pa.array(pd_num, type=tgt_type)
+
+                                # Handle string -> timestamp cast
+                                elif is_str and pa.types.is_timestamp(tgt_type):
+                                    import pandas as pd
+                                    pd_series = col.to_pandas()
+                                    pd_ts = pd.to_datetime(pd_series, errors='coerce', utc=True)
+                                    if getattr(tgt_type, "tz", None) is None:
+                                        pd_ts = pd_ts.dt.tz_localize(None)
+                                    casted = pa.array(pd_ts, type=tgt_type)
+
+                                # Handle string -> date cast
+                                elif is_str and pa.types.is_date(tgt_type):
+                                    import pandas as pd
+                                    pd_series = col.to_pandas()
+                                    pd_dt = pd.to_datetime(pd_series, errors='coerce').dt.date
+                                    casted = pa.array(pd_dt, type=tgt_type)
+
+                                else:
+                                    # Standard strict casting (e.g. int -> string, or string -> string)
+                                    casted = col.cast(tgt_type)
+
+                                result_columns.append(casted)
+                                result_fields.append(delta_field)
+                                cast_count += 1
+                            except Exception:
+                                # Cast failed — null-fill with the Delta type
+                                logger.debug(
+                                    f"Quarantine: casting '{delta_field.name}' "
+                                    f"({col.type} -> {delta_field.type}) failed, null-filling"
+                                )
+                                result_columns.append(
+                                    pa.nulls(len(arrow_data), type=delta_field.type)
+                                )
+                                result_fields.append(delta_field)
+                                cast_count += 1
+                    else:
+                        # Column in Delta but not in incoming — null-fill
+                        result_columns.append(
+                            pa.nulls(len(arrow_data), type=delta_field.type)
+                        )
+                        result_fields.append(delta_field)
+
+                # Phase 2: Append any NEW columns (not in Delta schema)
+                delta_names_lower = {f.name.lower() for f in delta_schema}
+                for i, field in enumerate(arrow_data.schema):
+                    if field.name.lower() not in delta_names_lower:
+                        result_columns.append(arrow_data.column(i))
+                        result_fields.append(field)
+
+                arrow_data = pa.table(
+                    result_columns, schema=pa.schema(result_fields)
+                )
+
+                if cast_count > 0:
+                    logger.info(
+                        f"Aligned {cast_count} quarantine column(s) to match "
+                        f"existing Delta table schema"
+                    )
+
+            except Exception as e:
+                err_str = str(e).lower()
+                if "no log files" in err_str or "doesn't exist" in err_str:
+                    logger.debug(f"Quarantine table does not exist yet at {delta_path}. Skipping alignment.")
+                else:
+                    logger.warning(f"Quarantine schema alignment failed: {e}")
+
+            _safe_write_deltalake(
+                delta_path,
+                arrow_data,
+                mode=delta_write_mode,
+                schema_mode="merge",
+            )
 
         logger.info(f"Wrote {rows_written} quarantined rows to {delta_path} (mode={delta_write_mode})")
         return {

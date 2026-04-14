@@ -27,8 +27,9 @@ source:
 server:
   mode: ingest
   cast_to_string: true
-  schema_evolution: append
-  allow_schema_drift: true
+  schema_policy:
+    evolution: append
+    unknown_fields: "allow"
 
 # ── Schema Model ──────────────────────────────────────────────
 model:

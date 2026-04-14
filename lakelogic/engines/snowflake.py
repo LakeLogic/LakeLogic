@@ -556,19 +556,17 @@ class SnowflakeAdapter(EngineAdapter):
         unknown = unknown - self._lineage_columns()
 
         server = self.contract.server
-        evolution = None
-        policy = self.contract.schema_policy.unknown_fields if self.contract.schema_policy else "allow"
+        from lakelogic.core.models import SchemaPolicy as _SP
+        _sp_defaults = _SP()
+        evolution = _sp_defaults.evolution
+        policy = _sp_defaults.unknown_fields
         cast_to_string = False
-        allow_schema_drift = True
 
         if server and server.mode == "ingest":
-            evolution = (server.schema_evolution or "strict").lower()
             cast_to_string = bool(server.cast_to_string)
-            allow_schema_drift = bool(server.allow_schema_drift)
-            if evolution in ["append", "merge", "overwrite"]:
-                policy = "allow"
-            else:
-                policy = "quarantine"
+            if server.schema_policy:
+                evolution = (server.schema_policy.evolution or _sp_defaults.evolution).lower()
+                policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
 
         select_exprs = []
         for field in self.contract.model.fields:
@@ -608,7 +606,6 @@ class SnowflakeAdapter(EngineAdapter):
             "unknown_fields": sorted(unknown),
             "policy": policy,
             "evolution": evolution or "",
-            "allow_schema_drift": allow_schema_drift,
         }
 
         return schema_table, schema_errors
@@ -714,17 +711,23 @@ class SnowflakeAdapter(EngineAdapter):
                 val = cursor.fetchone()[0] if cursor.rowcount != 0 else None
 
                 passed = True
-                if rule.must_be_between:
+                expected = ""
+                if val is None:
+                    passed = False
+                elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
+                    expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"
                 elif rule.must_be_less_than is not None:
                     passed = val < rule.must_be_less_than
+                    expected = f"(expected < {rule.must_be_less_than})"
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
+                    expected = f"(expected > {rule.must_be_greater_than})"
 
                 self.dataset_rule_results.append(
                     {
                         "name": rule.name,
-                        "value": val,
+                        "value": f"{val} {expected}".strip(),
                         "passed": passed,
                         "description": rule.description,
                     }

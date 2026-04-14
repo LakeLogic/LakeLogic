@@ -141,6 +141,25 @@ class DataProcessor:
         self._source_max_mtime: Optional[float] = None
         self._run_log_mode: Optional[str] = run_log_mode
 
+        # ── Resolve contract context once ─────────────────────────────
+        # These are used by notify(), _notification_template_context(),
+        # _build_report(), and run() — resolved once to avoid fragmentation.
+        _metadata = getattr(self.contract, "metadata", {}) or {}
+        _info = getattr(self.contract, "info", None)
+        self._resolved_domain = _metadata.get("domain") or (getattr(_info, "domain", None) if _info else None)
+        self._resolved_system = _metadata.get("system") or (getattr(_info, "system", None) if _info else None)
+        self._resolved_environment = (
+            _metadata.get("environment")
+            or os.environ.get("ENVIRONMENT")
+            or os.environ.get("ENV")
+            or "local"
+        )
+        self._resolved_data_layer = (
+            _metadata.get("data_layer")
+            or (getattr(_info, "data_layer", None) if _info else None)
+            or (getattr(_info, "target_layer", None) if _info else None)
+        )
+
     # ------------------------------------------------------------------
     # Alternative constructors
     # ------------------------------------------------------------------
@@ -271,6 +290,10 @@ class DataProcessor:
             from lakelogic.engines.bigquery import BigQueryAdapter
 
             return BigQueryAdapter(self.contract)
+        elif self.engine_name == "duckdb":
+            from lakelogic.engines.duckdb import DuckDBAdapter
+
+            return DuckDBAdapter(self.contract)
         else:
             raise ValueError(f"Unsupported engine: {self.engine_name}")
 
@@ -584,19 +607,25 @@ class DataProcessor:
             self._active_trace_steps.extend(self.adapter.trace)
 
         # ── INTERNALLY ENFORCE SQL FIELD LIST ────────────────────────────────
-        # If the user defined an explicit model and wants strict schema
-        # (allow_schema_drift is False AND schema_evolution is strict), prune undocumented columns.
+        # If the user defined an explicit model and wants unknown_fields dropped,
+        # prune undocumented columns.
         if good_df is not None and self.contract.model and self.contract.model.fields:
-            allow_schema_drift = True
-            schema_evolution = "strict"
+            # Resolve unknown_fields policy: server.schema_policy > contract.schema_policy > SchemaPolicy default
+            from lakelogic.core.models import SchemaPolicy as _SP
+            policy = _SP().unknown_fields  # Use the model default
 
+            # Check root-level schema_policy first
+            root_sp = getattr(self.contract, "schema_policy", None)
+            if root_sp and getattr(root_sp, "unknown_fields", None):
+                policy = root_sp.unknown_fields.lower()
+
+            # Server-level schema_policy takes priority
             server = getattr(self.contract, "server", None)
-            if server:
-                allow_schema_drift = getattr(server, "allow_schema_drift", True)
-                schema_evolution = getattr(server, "schema_evolution", "strict") or "strict"
+            if server and getattr(server, "schema_policy", None):
+                policy = (server.schema_policy.unknown_fields or policy).lower()
 
-            # If evolution is append/merge, or drift is explicitly allowed, do NOT prune.
-            if not allow_schema_drift and schema_evolution.lower() == "strict":
+            # If policy is 'drop', prune unknown columns.
+            if policy == "drop":
                 expected_cols = [f.name for f in self.contract.model.fields]
 
                 # Polars Engine
@@ -730,9 +759,9 @@ class DataProcessor:
                 has_dataset_rules = bool(getattr(quality_cfg, "dataset_rules", []))
             quality_enabled = enforce_required or has_row_rules or has_dataset_rules
             metadata = getattr(self.contract, "metadata", {}) or {}
-            domain = metadata.get("domain")
-            system = metadata.get("system")
-            data_layer = metadata.get("data_layer")
+            domain = self._resolved_domain
+            system = self._resolved_system
+            data_layer = self._resolved_data_layer
             # Resolve a human-readable target identifier for parallel-mode logs
             _info = getattr(self.contract, "info", None)
             _target_name = (
@@ -771,9 +800,58 @@ class DataProcessor:
                 )
 
             if bad > 0:
+                reason_summary = ""
+                if bad_df is not None:
+                    error_col = getattr(self.adapter, "ERROR_COLUMN", "_lakelogic_errors")
+                    reasons = []
+                    try:
+                        import polars as pl
+
+                        if isinstance(bad_df, pl.DataFrame) and error_col in bad_df.columns:
+                            s = bad_df.get_column(error_col).explode().drop_nulls()
+                            if len(s) > 0:
+                                counts_df = s.value_counts(sort=True)
+                                reasons = [f"{row[0]} ({row[1]})" for row in counts_df.iter_rows() if row[0]]
+                    except Exception:
+                        pass
+
+                    if not reasons:
+                        try:
+                            import pandas as pd
+
+                            if isinstance(bad_df, pd.DataFrame) and error_col in bad_df.columns:
+                                counts = bad_df[error_col].explode().dropna().value_counts()
+                                reasons = [f"{k} ({v})" for k, v in counts.items() if k]
+                        except Exception:
+                            pass
+
+                    if not reasons and hasattr(bad_df, "select") and hasattr(bad_df, "groupBy"):
+                        try:
+                            from pyspark.sql.functions import col, explode_outer
+
+                            if error_col in bad_df.columns:
+                                counts = (
+                                    bad_df.select(explode_outer(col(error_col)).alias("err"))
+                                    .filter(col("err").isNotNull())
+                                    .groupBy("err")
+                                    .count()
+                                    .orderBy(col("count").desc())
+                                    .limit(10)
+                                    .collect()
+                                )
+                                reasons = [f"{row['err']} ({row['count']})" for row in counts if row["err"]]
+                        except Exception:
+                            pass
+
+                    if reasons:
+                        top_reasons = reasons[:10]
+                        if len(reasons) > 10:
+                            top_reasons.append(f"...and {len(reasons) - 10} more")
+                        reason_summary = "\n\nRule Failure Breakdown (records can fail multiple rules):\n- " + "\n- ".join(top_reasons)
+
                 msg = (
                     f"LakeLogic Alert: {bad} records quarantined in '{contract_title}'. "
-                    f"Total (post-transform): {total} (ratio {ratio_display})"
+                    f"Total (post-transform): {total} (ratio {ratio_display}){reason_summary}"
                 )
                 self.notify(event="quarantine", message=msg)
 
@@ -782,8 +860,13 @@ class DataProcessor:
             failures = [r for r in self.adapter.dataset_rule_results if not r.get("passed")]
             if failures:
                 details = "; ".join([f"{r.get('name')}={r.get('value')}" for r in failures])
-                msg = f"LakeLogic dataset rule failures in '{contract_title}': {details}"
-                self.notify(event="failure", message=msg)
+                msg = f"LakeLogic Dataset Quality Check failed in '{contract_title}': {details}"
+                self.notify(event="dataset_quality_check", message=msg)
+
+                # Halt pipeline if configured
+                halt_on_fail = getattr(self.contract.quality, "fail_pipeline_on_dataset_error", False)
+                if halt_on_fail:
+                    raise ValueError(f"Pipeline halted: Dataset Quality rules failed in '{contract_title}'. Details: {details}")
 
         # Schema drift detection (ingest mode)
         drift = getattr(self.adapter, "schema_drift", {}) or {}
@@ -898,19 +981,32 @@ class DataProcessor:
             if "unknown_fields" in drift:
                 drift["unknown_fields"] = real_unknown
 
-            allow = drift.get("allow_schema_drift", True)
+            from lakelogic.core.models import SchemaPolicy as _SP
+            _default_policy = _SP().unknown_fields
+            policy = drift.get("policy", _default_policy)
             if real_missing or real_unknown:
                 drift_msg = (
                     f"Schema drift detected for '{contract_title}': missing={real_missing}, unknown={real_unknown}"
                 )
                 logger.warning(drift_msg)
-                if not allow:
+                if policy == "quarantine":
                     self.notify(event="schema_drift", message=drift_msg)
+
+        # Extract validation failure details early so both fail-fast paths can surface them
+        row_rule_failures = self._extract_row_rule_failures(bad_df)
 
         # Fail-fast if quarantine is disabled
         if self.contract.quarantine and not self.contract.quarantine.enabled:
             if bad and bad > 0:
-                raise ValueError(f"Quarantine disabled but {bad} records failed validation for '{contract_title}'.")
+                _detail_lines = []
+                for f in row_rule_failures[:10]:
+                    _msg = f.get("message") or f.get("name") or str(f)
+                    _detail_lines.append(f"  • {_msg}")
+                _detail_str = "\n".join(_detail_lines) if _detail_lines else "  (no rule details captured)"
+                raise ValueError(
+                    f"Quarantine disabled but {bad} record(s) failed validation for '{contract_title}'.\n"
+                    f"Validation failures:\n{_detail_str}"
+                )
 
         # Build run report and optionally write a log
         try:
@@ -921,7 +1017,6 @@ class DataProcessor:
             # compute_slos was removed; SLOValidator uses a DomainRegistry now.
             # Per-contract SLO checks are deferred to the pipeline level.
             slos = []
-        row_rule_failures = self._extract_row_rule_failures(bad_df)
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
 
         # Extract pre-transform filter string for run log
@@ -939,6 +1034,11 @@ class DataProcessor:
         inc_meta = getattr(self, "_incremental_metadata", {})
         if "max_watermark_value" in inc_meta:
             self.last_report["max_watermark_value"] = inc_meta["max_watermark_value"]
+
+        # Attach dlt extraction state for persistence in run log
+        _dlt_state = getattr(self, "_pending_dlt_state_json", None)
+        if _dlt_state:
+            self.last_report["dlt_state_json"] = _dlt_state
 
         # Capture contract-level SLO row count thresholds for point-in-time auditability
         slo_cfg = getattr(self.contract, "service_levels", None)
@@ -963,6 +1063,52 @@ class DataProcessor:
                     self.last_report["slo_row_count_min"] = min_r
                 if max_r is not None:
                     self.last_report["slo_row_count_max"] = max_r
+
+        # ── SLO breach notification dispatch ──────────────────────────
+        # Check computed SLO results for failures and fire slo_breach
+        # events through the existing notification system.
+        # Skip config-mismatch failures (inherited SLO referencing fields
+        # that don't exist on this contract's schema).
+        _SLO_SKIP_REASONS = {"no_data", "no_data_or_threshold"}
+        if slos and isinstance(slos, dict):
+            breaches = []
+            for check_name, check_result in slos.items():
+                if isinstance(check_result, dict) and check_result.get("passed") is False:
+                    reason = check_result.get("reason", "")
+                    if reason in _SLO_SKIP_REASONS:
+                        logger.debug(
+                            f"SLO {check_name} skipped for '{contract_title}': "
+                            f"field={check_result.get('field', '?')} ({reason})"
+                        )
+                        continue
+                    detail_parts = []
+                    if check_result.get("field"):
+                        detail_parts.append(f"field={check_result['field']}")
+                    if check_result.get("delay_seconds") is not None:
+                        delay_min = round(check_result["delay_seconds"] / 60, 1)
+                        detail_parts.append(f"delay={delay_min}min")
+                    if check_result.get("threshold"):
+                        detail_parts.append(f"threshold={check_result['threshold']}")
+                    if check_result.get("actual_pct") is not None:
+                        detail_parts.append(f"actual={check_result['actual_pct']}%")
+                    if check_result.get("reason"):
+                        detail_parts.append(check_result["reason"])
+                    breaches.append({
+                        "check": check_name,
+                        "detail": ", ".join(detail_parts) if detail_parts else "failed",
+                    })
+
+            if breaches:
+                breach_lines = [f"  • {b['check']}: {b['detail']}" for b in breaches]
+                breach_msg = (
+                    f"SLO breach detected for '{contract_title}':\n"
+                    + "\n".join(breach_lines)
+                )
+                logger.warning(breach_msg)
+                try:
+                    self.notify(event="slo_breach", message=breach_msg)
+                except Exception as e:
+                    logger.debug(f"SLO breach notification failed: {e}")
 
         # Run log is written by the pipeline runner after materialize()
         # so it can capture the final status (succeeded/failed).
@@ -1010,6 +1156,32 @@ class DataProcessor:
             end_time_utc, tz=datetime.timezone.utc
         ).isoformat()
         self.last_report["run_duration_seconds"] = total_duration_ms / 1000.0
+
+        # ── Cost estimation ───────────────────────────────────────────
+        try:
+            from lakelogic.core.cost_provider import resolve_cost_provider
+
+            cost_config = None
+            metadata = getattr(self.contract, "metadata", {}) or {}
+            cost_config = metadata.get("cost")
+            cost_provider = resolve_cost_provider(cost_config)
+            _counts = self.last_report.get("counts", {})
+            cost_estimate = cost_provider.estimate(
+                run_id=self.last_run_id or "",
+                duration_seconds=total_duration_ms / 1000.0,
+                rows=_counts.get("total", 0) if isinstance(_counts, dict) else 0,
+                domain=metadata.get("domain", ""),
+                system=metadata.get("system", ""),
+                layer=metadata.get("data_layer", ""),
+            )
+            self.last_report["estimated_cost"] = cost_estimate.estimated_cost
+            self.last_report["cost_currency"] = cost_estimate.currency
+            self.last_report["cost_confidence"] = cost_estimate.confidence
+        except Exception as _cost_exc:
+            logger.debug(f"Cost estimation skipped: {_cost_exc}")
+            self.last_report["estimated_cost"] = None
+            self.last_report["cost_currency"] = None
+            self.last_report["cost_confidence"] = "none"
 
         trace = ExecutionTrace(
             run_id=self.last_run_id,
@@ -1210,6 +1382,7 @@ class DataProcessor:
             # first run → skip lookback and scan ALL partitions via full glob.
             load_mode = getattr(self.contract.source, "load_mode", "full") if self.contract.source else "full"
             _is_initial_load = False
+            watermark = None
             if load_mode == "incremental" and not _is_reprocess:
                 watermark = self._get_last_source_watermark()
                 if watermark is None:
@@ -1301,7 +1474,7 @@ class DataProcessor:
         file_paths = [f["path"] for f in source_files] if source_files else None
 
         with self.trace_step("Load Source", path=str(path)):
-            if self.engine_name == "polars":
+            if self.engine_name in ("polars", "duckdb"):
                 import polars as pl
 
                 if df is None:
@@ -1346,16 +1519,58 @@ class DataProcessor:
                             # across CSV files (e.g. Int64 vs Float64) are
                             # coerced to a common supertype automatically.
                             _concat_how = "diagonal_relaxed"
+                            # On Windows, Polars' internal path resolver can
+                            # mangle drive-letter paths (C:) even with
+                            # glob=False.  For local file paths (non-URI),
+                            # use eager read to bypass path handling entirely.
+                            _is_local = not self._is_uri_path(path)
+                            _scan_kw["glob"] = False
+                            # Tag each file with its source path so
+                            # _lakelogic_source shows actual filenames
+                            # rather than just the parent directory.
+                            _tag_source = len(file_paths) > 1
+
                             if source_fmt == "parquet" or path.endswith(".parquet"):
-                                lf = pl.scan_parquet(file_paths if len(file_paths) > 1 else file_paths[0], **_scan_kw)
-                            elif source_fmt == "ndjson" or path.endswith((".ndjson", ".jsonl")):
-                                lf = pl.concat([pl.scan_ndjson(p, **_scan_kw) for p in file_paths], how=_concat_how)
-                            else:  # CSV
-                                if len(file_paths) == 1:
-                                    lf = pl.scan_csv(file_paths[0], **_scan_kw)
+                                if _tag_source:
+                                    df = pl.concat(
+                                        [pl.read_parquet(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                        how=_concat_how,
+                                    )
                                 else:
-                                    lf = pl.concat([pl.scan_csv(p, **_scan_kw) for p in file_paths], how=_concat_how)
-                            df = lf.collect()
+                                    lf = pl.scan_parquet(file_paths[0], **_scan_kw)
+                                    df = lf.collect()
+                            elif source_fmt == "ndjson" or path.endswith((".ndjson", ".jsonl")):
+                                if _tag_source:
+                                    df = pl.concat(
+                                        [pl.read_ndjson(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                        how=_concat_how,
+                                    )
+                                else:
+                                    _ndjson_kw = _scan_kw.copy()
+                                    _ndjson_kw.pop("glob", None)
+                                    lf = pl.scan_ndjson(file_paths[0], **_ndjson_kw)
+                                    df = lf.collect()
+                            else:  # CSV
+                                if _is_local:
+                                    # Eager read — bypasses Polars' internal
+                                    # path canonicalisation which breaks on
+                                    # Windows drive-letter paths.
+                                    if _tag_source:
+                                        df = pl.concat(
+                                            [pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                            how=_concat_how,
+                                        )
+                                    else:
+                                        df = pl.read_csv(file_paths[0])
+                                else:
+                                    if _tag_source:
+                                        df = pl.concat(
+                                            [pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                            how=_concat_how,
+                                        )
+                                    else:
+                                        lf = pl.scan_csv(file_paths[0], **_scan_kw)
+                                        df = lf.collect()
                         else:
                             # Eager fallback — JSON, XML, Excel (no scan_* support)
                             import json as _json
@@ -1411,7 +1626,7 @@ class DataProcessor:
                                         frames.append(_read_json_flat(fp))
                                     else:
                                         frames.append(pl.read_csv(fp))
-                                df = pl.concat(frames, how="diagonal")  # diagonal tolerates missing cols
+                                df = pl.concat(frames, how="diagonal_relaxed")  # coerce type conflicts across files
 
                     else:
                         # No glob expansion — single path or table directory
@@ -1570,13 +1785,60 @@ class DataProcessor:
                             elif fmt == "csv" and not path.endswith(".csv"):
                                 path = f"{path.rstrip('/')}/*.csv"
 
-                            if path.endswith(".parquet") or fmt == "parquet":
-                                lf = pl.scan_parquet(path)
-                            elif path.endswith((".ndjson", ".jsonl")):
-                                lf = pl.scan_ndjson(path)
+                            # On Windows, Polars' internal glob misinterprets
+                            # drive-letter colons (C:) as URI schemes, producing
+                            # malformed paths like "*.csv://C:/.../data.csv".
+                            # Pre-expand globs via Python's glob module and pass
+                            # resolved file paths instead.
+                            _needs_pre_glob = (
+                                not self._is_uri_path(path)
+                                and any(ch in path for ch in ["*", "?", "["])
+                            )
+                            if _needs_pre_glob:
+                                from glob import glob as _glob
+
+                                _resolved = sorted(_glob(path, recursive=True))
+                                _resolved = [f for f in _resolved if Path(f).is_file()]
+                                if _resolved:
+                                    if path.endswith(".parquet") or fmt == "parquet":
+                                        lf = pl.scan_parquet(_resolved if len(_resolved) > 1 else _resolved[0])
+                                        df = lf.collect()
+                                    elif path.endswith((".ndjson", ".jsonl")):
+                                        lf = pl.concat(
+                                            [pl.scan_ndjson(p) for p in _resolved],
+                                            how="diagonal_relaxed",
+                                        )
+                                        df = lf.collect()
+                                    else:
+                                        # CSV — use eager read for local paths
+                                        # to bypass Polars' path canonicalisation
+                                        # that breaks on Windows drive letters.
+                                        if not self._is_uri_path(path):
+                                            df = pl.concat(
+                                                [pl.read_csv(p) for p in _resolved],
+                                                how="diagonal_relaxed",
+                                            )
+                                        else:
+                                            lf = pl.concat(
+                                                [pl.scan_csv(p, glob=False) for p in _resolved],
+                                                how="diagonal_relaxed",
+                                            )
+                                            df = lf.collect()
+                                else:
+                                    logger.warning(f"Glob pattern matched 0 files: {path}")
                             else:
-                                lf = pl.scan_csv(path)
-                            df = lf.collect()
+                                if path.endswith(".parquet") or fmt == "parquet":
+                                    lf = pl.scan_parquet(path)
+                                    df = lf.collect()
+                                elif path.endswith((".ndjson", ".jsonl")):
+                                    lf = pl.scan_ndjson(path)
+                                    df = lf.collect()
+                                else:
+                                    if not self._is_uri_path(path):
+                                        df = pl.read_csv(path)
+                                    else:
+                                        lf = pl.scan_csv(path, glob=False)
+                                        df = lf.collect()
                         else:
                             import json as _json
 
@@ -2606,7 +2868,7 @@ class DataProcessor:
         else:
             _info_table = getattr(info, "table_name", None) if info else None
             dataset = _info_table or getattr(self.contract, "dataset", None) or (info.title if info else None)
-        data_layer = metadata.get("data_layer") or (getattr(info, "target_layer", None) if info else None)
+        data_layer = self._resolved_data_layer
 
         return get_last_run_watermark(
             self.contract,
@@ -2660,9 +2922,9 @@ class DataProcessor:
         Check if a path is a URI (abfss://, s3://, gs://, file://, etc.).
         Also handles URIs that have been Windows-formatted (abfss:\) by pathlib.Path.
         """
-        p = str(path)
-        # Second pattern matches Windows-mangled URIs like abfss:\...
-        return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", p)) or bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:\\", p))
+        # Delegates to centralized lakelogic.core.paths module
+        from lakelogic.core.paths import is_uri_path
+        return is_uri_path(str(path))
 
     def _get_cloud_storage_options(self, path: str) -> Dict[str, str]:
         """
@@ -2762,41 +3024,169 @@ class DataProcessor:
 
     def notify(self, event: str, message: str):
         """
-        Dispatches notifications based on contract config.
+        Dispatches notifications based on contract config, registry config,
+        and domain ownership contacts.
+
+        Notification sources (all are dispatched, in this order):
+
+        1. **Contract-level** — ``contract.quarantine.notifications``
+        2. **Registry-level** — ``_notifications`` (from ``_system.yaml`` /
+           ``_domain.yaml``, injected by the pipeline runner)
+        3. **Ownership contacts** — ``_ownership.contacts`` (auto-resolved
+           from domain config: email → email adapter, slack → slack adapter)
 
         Args:
             event: Event name triggering the notification.
             message: Notification body.
         """
-        q = self.contract.quarantine
-        if not q or not q.enabled or not q.notifications:
+        global_enabled = getattr(self, "_notifications_enabled", True)
+        contract_enabled = getattr(self.contract.quarantine, "notifications_enabled", True) if getattr(self.contract, "quarantine", None) else True
+
+        if not global_enabled or not contract_enabled:
+            logger.debug(f"Notifications disabled (global_enabled={global_enabled}, contract_enabled={contract_enabled}). Skipping event: {event}")
             return
 
-        for notif in q.notifications:
-            if event in notif.on_events or (event == "failure" and "dataset_rule_failed" in notif.on_events):
+        from lakelogic.notifications.base import resolve_ownership_contacts
+
+        env = self._resolved_environment.upper()
+        domain = self._resolved_domain
+        system = self._resolved_system
+
+        # Build prefix — only include domain/system if known
+        scope = "/".join(filter(None, [domain, system]))
+        prefix = f"[{env}] {scope}:" if scope else f"[{env}]"
+
+        _EVENT_SUBJECTS = {
+            "dataset_quality_check": f"{prefix} Dataset Quality Check Alert",
+            "slo_breach": f"{prefix} SLO Breach Alert",
+        }
+        default_subject = _EVENT_SUBJECTS.get(event, f"{prefix} {event.capitalize()} Alert")
+        template_context = self._notification_template_context(
+            event=event,
+            message=message,
+            subject=default_subject,
+            notification_type="auto",
+        )
+
+        dispatched_targets = set()  # Deduplicate across sources
+
+        # ── 1. Contract-level notifications (quarantine config) ───────
+        q = self.contract.quarantine
+        if q and q.enabled and q.notifications:
+            for notif in q.notifications:
+                if event in notif.on_events or (event == "dataset_quality_check" and "failure" in notif.on_events) or (event == "failure" and "dataset_rule_failed" in notif.on_events):
+                    try:
+                        target = getattr(notif, "target", None) or ""
+                        
+                        if target in dispatched_targets:
+                            continue
+                            
+                        config = notif.model_dump(by_alias=True)
+                        if hasattr(self.contract, "_base_path"):
+                            config["_base_path"] = str(self.contract._base_path)
+                        adapter = get_notification_adapter(notif.type, config)
+                        rendered_message, rendered_subject = render_notification_content(
+                            adapter.config,
+                            message=message,
+                            subject=default_subject,
+                            context=template_context,
+                        )
+                        adapter.send(rendered_message, subject=rendered_subject)
+                        
+                        # Add to deduplication set only if it's hashable
+                        try:
+                            dispatched_targets.add(target)
+                        except TypeError:
+                            pass # If unhashable (like a list), we still successfully dispatched it, just can't dedupe it later
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to send notification: {e}")
+                        if getattr(q, "strict_notifications", True):
+                            raise RuntimeError(f"Notification error: {e}") from e
+
+        # ── 2. Registry-level notifications (system/domain config) ────
+        registry_notifs = getattr(self, "_notifications", None) or []
+        for notif_cfg in registry_notifs:
+            on_events = notif_cfg.get("on_events", [])
+            # Backward compat: dataset_quality_check fires to channels subscribed to "failure"
+            _event_match = event in on_events or (event == "dataset_quality_check" and "failure" in on_events)
+            if not _event_match:
+                continue
+            try:
+                target = notif_cfg.get("target", "")
+                
+                if target in dispatched_targets:
+                    continue
+                    
+                notif_type = notif_cfg.get("type", "")
+                # Auto-detect type from target URL when not explicitly set
+                if not notif_type:
+                    if "hooks.slack.com" in target:
+                        notif_type = "slack"
+                    elif "webhook.office.com" in target or "teams" in target.lower():
+                        notif_type = "teams"
+                    elif "@" in target:
+                        notif_type = "email"
+                    else:
+                        notif_type = "webhook"
+                config = dict(notif_cfg)
+                config["type"] = notif_type
+                adapter = get_notification_adapter(notif_type, config)
+                rendered_message, rendered_subject = render_notification_content(
+                    adapter.config,
+                    message=message,
+                    subject=default_subject,
+                    context=template_context,
+                )
+                adapter.send(rendered_message, subject=rendered_subject)
+                
                 try:
-                    config = notif.model_dump(by_alias=True)
-                    if hasattr(self.contract, "_base_path"):
-                        config["_base_path"] = str(self.contract._base_path)
-                    adapter = get_notification_adapter(notif.type, config)
-                    default_subject = f"LakeLogic {event.capitalize()} Alert"
-                    template_context = self._notification_template_context(
-                        event=event,
-                        message=message,
-                        subject=default_subject,
-                        notification_type=notif.type,
-                    )
+                    dispatched_targets.add(target)
+                except TypeError:
+                    pass
+                    
+            except Exception as e:
+                logger.warning(f"Registry notification failed ({notif_cfg.get('target', 'unknown')}): {e}")
+
+        # ── 3. Ownership contacts (domain config, auto-resolved) ──────
+        ownership = getattr(self, "_ownership", None) or {}
+        if ownership:
+            contact_channels = resolve_ownership_contacts(ownership, event)
+            for ch in contact_channels:
+                on_events = ch.get("on_events", [])
+                _event_match = event in on_events or (event == "dataset_quality_check" and "failure" in on_events)
+                if not _event_match:
+                    continue
+                try:
+                    target = ch.get("target", "")
+                    
+                    if target in dispatched_targets:
+                        continue
+                        
+                    adapter = get_notification_adapter(ch["type"], ch)
                     rendered_message, rendered_subject = render_notification_content(
-                        adapter.config,
+                        ch,
                         message=message,
                         subject=default_subject,
                         context=template_context,
                     )
                     adapter.send(rendered_message, subject=rendered_subject)
+                    
+                    try:
+                        dispatched_targets.add(target)
+                    except TypeError:
+                        pass
+                        
+                    logger.debug(f"  Notified ownership contact: {ch.get('_source', target)}")
                 except Exception as e:
-                    logger.error(f"Failed to send notification: {e}")
-                    if getattr(q, "strict_notifications", True):
-                        raise
+                    # Missing infrastructure config (smtp_host, etc.) is a
+                    # config gap, not a runtime error — log at DEBUG level.
+                    err_str = str(e)
+                    target_str = ch.get('_source', ch.get('target', 'unknown'))
+                    if "missing required fields" in err_str:
+                        logger.debug(f"Ownership notification skipped ({target_str}): {e}")
+                    else:
+                        logger.warning(f"Ownership notification failed ({target_str}): {e}")
 
     def _notification_template_context(
         self,
@@ -2822,6 +3212,18 @@ class DataProcessor:
         metadata = getattr(self.contract, "metadata", {}) or {}
         title = getattr(info, "title", None) or getattr(self.contract, "dataset", None) or "unknown"
 
+        # Resolve dataset using the same chain as _build_report
+        mat_obj = getattr(self.contract, "materialization", None)
+        _target_path = ""
+        if mat_obj:
+            _target_path = getattr(mat_obj, "target_path", "") or getattr(mat_obj, "path", "") or ""
+        if str(_target_path).startswith("table:"):
+            _table_full = str(_target_path)[len("table:"):]
+            _dataset = _table_full.split(".")[-1] if "." in _table_full else _table_full
+        else:
+            _info_table = getattr(info, "table_name", None) if info else None
+            _dataset = _info_table or getattr(self.contract, "dataset", None) or title
+
         return {
             "event": event,
             "message": message,
@@ -2832,16 +3234,20 @@ class DataProcessor:
             "run_id": self.last_run_id,
             "pipeline_run_id": self.pipeline_run_id,
             "source_path": self.last_source_path,
+            "environment": self._resolved_environment,
             "contract": {
                 "title": title,
                 "version": getattr(info, "version", None),
                 "owner": getattr(info, "owner", None),
-                "dataset": getattr(self.contract, "dataset", None),
-                "domain": metadata.get("domain"),
-                "system": metadata.get("system"),
-                "layer": metadata.get("data_layer"),
+                "dataset": _dataset,
+                "domain": self._resolved_domain,
+                "system": self._resolved_system,
+                "layer": self._resolved_data_layer,
             },
             "metadata": metadata,
+            "ownership": getattr(self, "_ownership", {}) or {},
+            "domain": self._resolved_domain,
+            "system": self._resolved_system,
         }
 
     def materialize(
@@ -2877,7 +3283,14 @@ class DataProcessor:
         )
 
         if bad_df is not None and self.contract.quarantine and self.contract.quarantine.target:
-            materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name)
+            try:
+                materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name)
+            except Exception as q_err:
+                logger.warning(
+                    f"⚠️ Quarantine write failed (pipeline continues): {q_err}. "
+                    f"Bad records were validated but could not be persisted to the quarantine target. "
+                    f"Consider resetting the quarantine Delta table if schema has diverged."
+                )
 
         return result
 
@@ -3001,20 +3414,13 @@ class DataProcessor:
             Run report dict.
         """
         # ── Resolve metadata fields ─────────────────────────────────────────────
-        # Priority: metadata block → info block (where infer_contract stores them)
+        # Use centralized _resolved_* attributes from __init__
         metadata = getattr(self.contract, "metadata", {}) or {}
         info = getattr(self.contract, "info", None)
 
-        def _meta_or_info(key: str) -> Optional[str]:
-            """Check metadata first, fall back to info block."""
-            val = metadata.get(key)
-            if val:
-                return val
-            return getattr(info, key, None) if info else None
-
-        domain = _meta_or_info("domain")
-        system = _meta_or_info("system")
-        data_layer = _meta_or_info("data_layer") or (getattr(info, "target_layer", None) if info else None)
+        domain = self._resolved_domain
+        system = self._resolved_system
+        data_layer = self._resolved_data_layer
 
         # ── Resolve dataset ─────────────────────────────────────────────────────
         # Prefer actual target table name for easier filtering in run_log queries.
@@ -3065,6 +3471,7 @@ class DataProcessor:
             "dataset": dataset,
             "domain": domain,
             "system": system,
+            "environment": self._resolved_environment,
             "data_layer": data_layer,
             "source_path": source_path,
             "source_files": self._source_files or [],
@@ -3289,11 +3696,16 @@ class DataProcessor:
         try:
             import polars as pl
 
-            if isinstance(bad_df, pl.DataFrame) and error_col in bad_df.columns:
-                series = bad_df.select(pl.col(error_col)).to_series()
-                for item in series:
-                    if item:
-                        errors.extend(item)
+            if isinstance(bad_df, pl.DataFrame):
+                logger.debug(f"_extract_row_rule_failures: Polars DF with columns={bad_df.columns}, rows={len(bad_df)}")
+                if error_col in bad_df.columns:
+                    # Explode the list column into individual error strings
+                    exploded = bad_df.select(pl.col(error_col)).explode(error_col).drop_nulls()
+                    if not exploded.is_empty():
+                        errors.extend(exploded.to_series().to_list())
+                    logger.debug(f"_extract_row_rule_failures: extracted {len(errors)} error(s)")
+                else:
+                    logger.debug(f"_extract_row_rule_failures: '{error_col}' not in columns")
         except Exception as exc:
             logger.debug(f"Polars error extraction failed: {exc}")
 
@@ -3477,11 +3889,26 @@ class DataProcessor:
         except ImportError:
             raise ImportError("dlt integration requires the dlt package. Install with: pip install lakelogic[dlt]")
 
+        from lakelogic.core.run_log import get_last_run_dlt_state
+
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "dlt_source")
         logger.info(f"Running dlt source for contract: {contract_title}")
 
+        # Fetch the previous state from run log
+        previous_state = get_last_run_dlt_state(
+            self.contract,
+            contract_title=contract_title,
+            stage="validate",
+            engine_name=self.engine_name,
+            dataset=self.contract.dataset,  # use dataset directly so we map back to the right trace
+            data_layer=self._resolved_data_layer,
+        )
+
         adapter = DltAdapter(self.contract.source, contract_title)
-        arrow_table = adapter.extract()
+        arrow_table = adapter.extract(previous_state=previous_state)
+
+        # Save state so run() can embed it into the log and the materialize phase
+        self._pending_dlt_state_json = getattr(adapter, "dlt_state_json", None)
 
         import polars as pl
 
@@ -3491,7 +3918,7 @@ class DataProcessor:
         # Feed into the existing validation pipeline
         return self.run(
             df,
-            source_path=f"dlt://{self.contract.source.dlt.pipeline or self.contract.source.dlt.base_url}",
+            source_path=f"dlt://{self.contract.source.dlt.source or self.contract.source.dlt.base_url}",
         )
 
     # ── Polars Streaming ─────────────────────────────────────────────────

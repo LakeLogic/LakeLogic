@@ -1,454 +1,195 @@
-# LakeLogic Architecture: Medallion with Quality Gates
+# Architecture Overview
 
-This diagram illustrates how LakeLogic enforces data contracts as **quality gates** across the medallion architecture (Bronze → Silver → Gold).
+> **Think of LakeLogic as a quality inspector on a factory floor.**
+> Raw materials (data) arrive at the loading dock (Bronze), get inspected and cleaned on the assembly line (Silver), and are packaged into finished goods (Gold) for customers (dashboards, ML models, APIs). At every stage, defective items are pulled aside for review — nothing is silently thrown away.
 
 ## High-Level Lifecycle
 
 ![LakeLogic High-Level Architecture](assets/lakelogic_architecture.png)
+
 ---
 
-## Detailed Medallion Flow
+## The Three Layers
 
-### 🟤 BRONZE LAYER: Raw Capture
+### 🟤 Bronze — The Loading Dock
 
-**Goal**: 100% preservation of source data with zero silent drops.
+**Goal:** Capture 100% of what arrives. No filtering, no cleaning, no opinions.
 
-```text
-+----------------------------------------------------------+
-|            "Capture Everything Raw (No Validation)"       |
-+----------------------------------------------------------+
-|                                                           |
-|  [Contract] bronze_contract.yaml                          |
-|  +----------------------------------------------------+  |
-|  | # No quality rules in Bronze                       |  |
-|  | # Goal is 100% capture of source data              |  |
-|  +----------------------------------------------------+  |
-|                                                           |
-|  Strategy: overwrite or append                            |
-|  Output:   bronze_customers.parquet                       |
-+----------------------------+------------------------------+
-                             |
-                             v
-+----------------------------+    +--------------------------+
-| QUALITY GATE:              |    | QUARANTINE ZONE          |
-| Bronze -> Silver           |    +--------------------------+
-|                            |    | quarantine/              |
-| [1] Pre-Processing         |    |   bronze_bad.parquet     |
-|   - rename columns         |    |                          |
-|   - filter invalid rows    |    | Error Reasons:           |
-|   - deduplicate            |    |   - email_format         |
-|   - trim, lower, cast      |    |   - age_positive         |
-|                            |    |   - missing_id           |
-| [2] Schema Enforcement     |    |                          |
-|   - Type validation        |    | Correction Loop:         |
-|   - Required fields        |    |   1. Fix source data     |
-|   - Unknown field policy   |    |   2. Reprocess           |
-|                            |    |   3. Flow to Silver      |
-| [3] Quality Rules          |    +--------------------------+
-|   - Row: not_null, regex   |
-|   - Dataset: unique        |
-|                            |
-| [4] Post-Processing        |
-|   - derive fields          |
-|   - lookup/join dims       |
-+----------------------------+
-```
+Think of Bronze as your security camera footage — you record everything exactly as it happened, even if it's messy. This gives you an immutable audit trail to go back to when something goes wrong downstream.
 
-### ⚪ SILVER LAYER: Business Validation
-**Goal**: Trusted, cleaned, and queryable data for bulk analytics.
+| What happens | Why it matters |
+|:---|:---|
+| Raw data is stored as-is | You can always replay from the original source |
+| No quality rules applied | Zero ingestion failures, zero silent drops |
+| Schema evolution allowed | New columns don't break your pipeline |
+
+---
+
+### ⚪ Silver — The Assembly Line
+
+**Goal:** Validated, cleaned, and queryable data that business teams can trust.
+
+This is where the real work happens. LakeLogic acts as a **quality gate** — every row must pass your rules or it gets quarantined with a clear reason code.
 
 ```text
-+----------------------------------------------------------+
-|          "Validated, Cleaned, Business-Ready"             |
-+----------------------------------------------------------+
-|                                                           |
-|  [Contract] silver_contract.yaml                          |
-|  +----------------------------------------------------+  |
-|  | transformations:                                    |  |
-|  |   - deduplicate:                                    |  |
-|  |       on: ["customer_id"]                           |  |
-|  |                                                      |  |
-|  | quality:                                             |  |
-|  |   row_rules:             # Full validation          |  |
-|  |     - not_null: email                               |  |
-|  |     - regex_match:                                  |  |
-|  |         field: email                                |  |
-|  |         pattern: "^[^@]+@[^@]+\\.[^@]+$"            |  |
-|  +----------------------------------------------------+  |
-|                                                           |
-|  Output: silver_customers.parquet / Delta / Iceberg       |
-+--------+--------------------------------------+----------+
-         |                                      |
-         | PASSED                                | FAILED
-         |                                      |
-         v                                      v
-+----------------------------+    +--------------------------+
-| QUALITY GATE:              |    | QUARANTINE ZONE          |
-| Silver -> Gold             |    +--------------------------+
-|                            |    | quarantine/              |
-| Contract Enforcement:      |    |   silver_bad.parquet     |
-|   - Schema validation      |    |                          |
-|   - Business rules         |    | Reason codes logged      |
-|   - Referential integrity  |    +--------------------------+
-|   - Statistical checks     |
-+----------------------------+
+                  ┌─────────────────┐
+  Bronze Data ──▶ │  QUALITY GATE   │ ──▶ Silver (Good)
+                  │                 │
+                  │ 1. Pre-process  │
+                  │    rename, trim │
+                  │    dedup, cast  │
+                  │                 │
+                  │ 2. Schema check │
+                  │    types, nulls │
+                  │                 │
+                  │ 3. Quality rules│
+                  │    business     │
+                  │    validations  │
+                  │                 │
+                  │ 4. Post-process │
+                  │    enrich, join │
+                  └────────┬────────┘
+                           │
+                    Failed rows
+                           ▼
+                  ┌─────────────────┐
+                  │  QUARANTINE     │
+                  │  with error     │
+                  │  reasons        │
+                  └─────────────────┘
 ```
 
-### 🟡 GOLD LAYER: Aggregated & Enrich
+| What happens | Why it matters |
+|:---|:---|
+| Row-level validation | Bad data is caught before it reaches reports |
+| Error reason codes | Data owners know exactly what to fix |
+| 100% reconciliation | `source_count = good_count + bad_count` — nothing lost |
 
-**Goal**: Business-ready aggregations, KPIs, and analytics datasets.
+---
+
+### 🟡 Gold — Finished Goods
+
+**Goal:** Business-ready aggregations, KPIs, and data products.
+
+Gold tables are what your stakeholders actually consume. These are curated datasets optimized for a specific business purpose — like a monthly revenue summary or a customer segmentation model.
+
+| What happens | Why it matters |
+|:---|:---|
+| Aggregations and KPIs | Dashboards load fast, numbers are pre-calculated |
+| Dimension joins | Enrich facts with customer names, product categories |
+| ML feature engineering | Data scientists get clean, ready-to-use features |
+
+You can build Gold tables using **SQL in the contract**, **external Python scripts**, or **Jupyter notebooks** — whatever fits your team's workflow.
+
+---
+
+## Write Once, Run Anywhere
+
+LakeLogic separates **what** you want (the contract) from **how** it runs (the engine). The same YAML contract runs on your laptop during development and on a Spark cluster in production — zero code changes.
 
 ```text
-+----------------------------------------------------------+
-|     "Aggregated, Business KPIs, Analytics-Ready"          |
-+----------------------------------------------------------+
-|                                                           |
-|  [Contract] gold_contract.yaml                            |
-|  +----------------------------------------------------+  |
-|  | # OPTION 1: SQL-Based Aggregation                  |  |
-|  | transformations:                                    |  |
-|  |   - sql: |                                          |  |
-|  |       SELECT                                        |  |
-|  |         customer_segment,                           |  |
-|  |         DATE_TRUNC('month', sale_date) AS month,    |  |
-|  |         SUM(revenue) AS total_revenue,              |  |
-|  |         COUNT(DISTINCT customer_id) AS customers    |  |
-|  |       FROM silver_sales                             |  |
-|  |       GROUP BY customer_segment, month              |  |
-|  |     phase: post                                     |  |
-|  |                                                      |  |
-|  | # OPTION 2: External Python Logic                  |  |
-|  | external_logic:                                     |  |
-|  |   type: python                                      |  |
-|  |   path: ./gold/build_sales_gold.py                  |  |
-|  |   entrypoint: build_gold                            |  |
-|  |   args:                                             |  |
-|  |     apply_ml_scoring: true                          |  |
-|  |                                                      |  |
-|  | # OPTION 3: Jupyter Notebook                        |  |
-|  | external_logic:                                     |  |
-|  |   type: notebook                                    |  |
-|  |   path: ./gold/sales_analytics.ipynb                |  |
-|  |   output_path: output/gold_fact_sales.parquet       |  |
-|  +----------------------------------------------------+  |
-|                                                           |
-|  Output: gold_fact_sales.parquet / Delta / Iceberg        |
-+----------------------------+------------------------------+
-                             |
-                             v
-              +--------------------------+
-              | Business Use             |
-              +--------------------------+
-              |  - Dashboards            |
-              |  - ML Models             |
-              |  - APIs                  |
-              |  - Data Products         |
-              +--------------------------+
+  ┌─────────────────────────┐
+  │  customer_contract.yaml │
+  │                         │
+  │  quality:               │
+  │    - email LIKE '%@%'   │
+  └───────────┬─────────────┘
+              │
+    ┌─────────┼─────────┐
+    ▼         ▼         ▼
+ Polars     Spark    DuckDB
+ (laptop)  (cluster) (CI/CD)
 ```
 
-## External Python Logic Detail
+**Why this matters:** Your data engineer writes a contract once, tests it locally with Polars in seconds, then deploys it to Databricks on Spark — same rules, same results, different scale.
 
-```text
-+----------------------------------------------------------+
-|     EXTERNAL PYTHON LOGIC FOR GOLD LAYER                  |
-|          (Advanced Transformations)                       |
-+----------------------------------------------------------+
+### Engine Auto-Discovery
+
+LakeLogic picks the best available engine automatically:
+
+1. `LAKELOGIC_ENGINE` env var (your explicit choice)
+2. **Spark** — if running inside Databricks or Synapse
+3. **Polars** — preferred for single-node (fastest)
+4. **DuckDB** — lightweight alternative
+
+Snowflake and BigQuery are available for table-only processing (`engine="snowflake"` or `engine="bigquery"`).
+
+---
+
+## The Reconciliation Guarantee
+
+> **Every row that reaches the quality gate is accounted for.** No exceptions.
+
+```
+validated_count = good_count + bad_count
 ```
 
-**API Call (Spark-Oriented):**
+- ✅ **Good rows** → flow to the next layer
+- ✅ **Bad rows** → quarantined with error reasons attached
+- ❌ **Nothing** is silently dropped at the validation stage
 
-```python
-# Pass a Spark DataFrame to the contract
-contract = DataContract("build_sales_gold.yaml")
-good_df, bad_df = contract.run(spark_df, engine="spark")
-```
+### What About Dedup and Filters?
 
-**Example Gold Processor:**
+Pre-processing steps like `deduplicate` and `filter` are **declared reductions** — they run *before* the quality gate, and they're part of your contract, not silent drops. Think of it like a mail room: junk mail is sorted out before the security scan, but it's logged in the intake ledger.
 
-```text
-Input: silver_sales (Spark DataFrame)
-   |
-   v
-+----------------------------------------------------------+
-|  gold/build_sales_gold.py                                 |
-+----------------------------------------------------------+
-```
+The run log captures both sides:
 
-```python
-from pyspark.sql import functions as F
+| Run log field | What it tracks |
+|:---|:---|
+| `counts_source` | Total rows from the source (before any transformations) |
+| `counts_total` | Rows after pre-processing (dedup, filter) |
+| `counts_good` | Rows that passed validation |
+| `counts_bad` | Rows that failed validation (quarantined) |
 
-def build_gold(df, **kwargs):
-    """Spark-oriented business logic for Gold"""
-    return (
-        df
-        # Dynamic partitions / ML scoring
-        .withColumn("churn_risk", predict_udf("id"))
-        .withColumn("amount_tax", F.col("amt") * 1.1)
-        .withColumn("month", F.month("sale_date"))
+This means you always have full traceability: `counts_source` shows what arrived, `counts_total` shows what reached the gate, and `good + bad = total`.
 
-        # Filter out outliers
-        .filter("amt > 100")
+Deduplicated and filtered rows are **not quarantined** — they're expected reductions, not quality failures. Quarantine is reserved for rows that are genuinely broken and need fixing.
 
-        # Distributed aggregations
-        .groupBy("segment", "month")
-        .agg(
-            F.sum("amount_tax").alias("total_rev"),
-            F.count("id").alias("txn_count")
-        )
-    )
-```
+Crucially, **duplicate rows are always retained in Bronze**. Deduplication only happens at the Bronze → Silver gate, so you can always go back to the raw layer and replay from the original source. Nothing is ever truly lost.
 
-```text
-Output: gold_fact_sales.parquet (ML-enriched, aggregated)
-```
+---
 
-## Multi-Engine Support
+## Key Principles
 
-```text
-┌──────────────────────────────────────────────────────────┐
-│          LAKELOGIC MULTI-ENGINE ARCHITECTURE              │
-└──────────────────────────────────────────────────────────┘
+| Principle | What it means |
+|:---|:---|
+| **Separation of Concerns** | Bronze captures, Silver validates, Gold aggregates — each layer has one job |
+| **Contract-Driven** | Rules live in YAML, not scattered across Python scripts |
+| **Engine-Agnostic** | Same contract, different execution engine |
+| **Zero Silent Drops** | Every row is either promoted, quarantined, or explicitly reduced by a declared transformation |
+| **Full Traceability** | Run logs capture source counts, post-transform counts, and validation results |
 
-Same Contract YAML → Multiple Execution Engines
+---
 
-┌────────────────────────────────────────────────────────┐
-│  📋 customer_contract.yaml                             │
-│  ┌──────────────────────────────────────────────────┐ │
-│  │ version: 1.0.0                                    │ │
-│  │ dataset: customers                                │ │
-│  │ quality:                                          │ │
-│  │   row_rules:                                      │ │
-│  │     - name: "email_valid"                         │ │
-│  │       sql: "email LIKE '%@%'"                     │ │
-│  └──────────────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────┘
-                        │
-             ┌──────────┴──────────┐
-             ▼                     ▼
-      ┌──────────────┐      ┌──────────────┐
-      │   Polars     │      │    Spark     │
-      │   Adapter    │      │   Adapter    │
-      ├──────────────┤      ├──────────────┤
-      │              │      │              │
-      │ • Fast local │      │ • Distributed│
-      │ • LazyFrame  │      │ • Delta Lake │
-      │ • Rust core  │      │ • Unity Cat  │
-      │              │      │              │
-      │ Use Case:    │      │ Use Case:    │
-      │ Dev/Testing  │      │ Production   │
-      └──────────────┘      └──────────────┘
+## Environment Overrides
 
-Auto-Discovery Priority:
-1. LAKELOGIC_ENGINE env var (manual override)
-2. Spark (if in Databricks/Synapse)
-3. Polars (preferred for single-node)
-```
+Deploy the same contract across dev, staging, and production with environment-specific paths:
 
-## Key Architecture Principles
-
-### 1. Separation of Concerns
-
-```text
-┌──────────────────────────────────────────────────────────┐
-│                  LAYER RESPONSIBILITIES                   │
-└──────────────────────────────────────────────────────────┘
-
-🟤 BRONZE: Capture & Preserve
-   • No validation (Capture 100% of raw data)
-   • No quarantine (No silent drops)
-   • Schema evolution: append/merge
-   • Goal: Immutable Raw Record
-
-⚪ SILVER: Validate & Standardize (Latest Version)
-   • Full schema enforcement
-   • Business rule validation
-   • Deduplication / SCD Type 1
-   • Type casting
-   • Goal: Trusted, queryable data
-
-🟡 GOLD: Aggregate & Enrich (Snapshots/SCD2)
-   • Business KPIs
-   • ML feature engineering
-   • Dimension joins (SCD Type 2)
-   • Goal: Analytics-ready datasets
-```
-
-### 2. 100% Reconciliation Guarantee
-
-```text
-Mathematical Guarantee:
-source_count = good_count + bad_count
-
-Every input row is accounted for:
-• Good rows → Next layer
-• Bad rows → Quarantine (with error reasons)
-• Nothing is silently dropped
-```
-
-### 3. Workflow Patterns
-
-```text
-┌──────────────────────────────────────────────────────────┐
-│                  COMMON WORKFLOWS                         │
-└──────────────────────────────────────────────────────────┘
-
-Pattern 1: Bronze as Strings
-─────────────────────────────
-Bronze: Cast all columns to string (zero failures)
-Silver: Type casting + validation (quarantine bad types)
-Gold: Business logic on clean data
-
-Pattern 2: Incremental Loading
-───────────────────────────────
-source:
-  load_mode: incremental
-  watermark_field: updated_at
-
-Pattern 3: SCD Type 2 History
-──────────────────────────────
-materialization:
-  strategy: scd2
-  scd2:
-    primary_key: customer_id
-    timestamp_field: updated_at
-    start_date_field: valid_from
-    end_date_field: valid_to
-
-Pattern 4: External ML Scoring
-───────────────────────────────
-external_logic:
-  type: python
-  path: ./ml/score_customers.py
-  entrypoint: predict_churn
-```
-
-## Environment Override
-
-```text
-┌──────────────────────────────────────────────────────────┐
-│            ENVIRONMENT-SPECIFIC OVERRIDES                 │
-└──────────────────────────────────────────────────────────┘
-
-Contract with environment overrides:
-
+```yaml
 server:
   type: s3
   path: s3://prod-bucket/data/customers
-  format: delta
 
 environments:
   dev:
     path: s3://dev-bucket/data/customers
     format: parquet
-  staging:
-    path: s3://staging-bucket/data/customers
-    format: delta
   prod:
     path: s3://prod-bucket/data/customers
     format: delta
-
-Usage:
-  export LAKELOGIC_ENV=dev
-  python run_pipeline.py
 ```
 
-## Observability & Lineage
-
-```text
-┌──────────────────────────────────────────────────────────┐
-│              LINEAGE CAPTURE EXAMPLE                      │
-└──────────────────────────────────────────────────────────┘
-
-Input Record:
-{
-  "customer_id": 123,
-  "email": "user@example.com",
-  "age": 25
-}
-
-After LakeLogic Processing (lineage enabled):
-{
-  "customer_id": 123,
-  "email": "user@example.com",
-  "age": 25,
-  "_lakelogic_source": "s3://bucket/raw/customers.parquet",
-  "_lakelogic_processed_at": "2026-02-09T10:05:33Z",
-  "_lakelogic_run_id": "a3b8d1b6-0b3b-4b1a-9c1a-1a2b3c4d5e6f",
-  "_lakelogic_domain": "sales",
-  "_lakelogic_system": "crm"
-}
-
-Quarantine Record (if failed):
-{
-  "customer_id": 123,
-  "email": "invalid-email",
-  "age": -5,
-  "_lakelogic_errors": [
-    "Rule failed: email_format (email LIKE '%@%')",
-    "Rule failed: age_positive (age >= 0)"
-  ],
-  "_lakelogic_categories": ["correctness", "correctness"],
-  "quarantine_state": "active",
-  "quarantine_reprocessed": false
-}
+```bash
+export LAKELOGIC_ENV=dev
+python run_pipeline.py
 ```
 
-## Best Practices
-
-### 1. Contract Organization
-
-```text
-contracts/
-├── bronze/
-│   ├── crm_contacts.yaml
-│   ├── web_events.yaml
-│   └── payment_transactions.yaml
-├── silver/
-│   ├── customers.yaml
-│   ├── orders.yaml
-│   └── products.yaml
-└── gold/
-    ├── customer_metrics.yaml
-    └── revenue_summary.yaml
-```
-
-### 2. Quality Rule Categories
-
-Use standard categories for consistency:
-
-- `completeness`: Not null, required fields
-- `correctness`: Data type, format, range
-- `consistency`: Referential integrity, cross-field validation
-- `validity`: Business rule compliance
-- `accuracy`: Statistical checks, anomaly detection
-- `timeliness`: Freshness, staleness
-- `uniqueness`: Duplicate detection
-- `integrity`: Foreign key constraints
-
-### 3. Error Handling
-
-```python
-from lakelogic import DataProcessor
-
-try:
-    proc = DataProcessor(contract="contract.yaml")
-    source, good, bad = proc.run_source("data.parquet")
-    
-    # Check quarantine threshold
-    quarantine_ratio = len(bad) / (len(good) + len(bad))
-    if quarantine_ratio > 0.10:  # 10% threshold
-        raise ValueError(
-            f"Quarantine ratio {quarantine_ratio:.2%} "
-            "exceeds threshold"
-        )
-    
-    proc.materialize(good, bad)
-    
-except Exception as e:
-    notify_team(f"Pipeline failed: {e}")
-    raise
-```
+**Why this matters:** One contract, multiple environments. No copy-paste, no drift between dev and prod configurations.
 
 ---
 
-*For more details, see the [LakeLogic Documentation](https://lakelogic.org)*
+## What's Next?
+
+- **[How it Works](concepts.md)** — Deep dive into transformations, validation, and materialization
+- **[Contract Organization](organization.md)** — Structuring contracts for enterprise scale
+- **[Tutorials & Examples](examples/01_hello_world.ipynb)** — Get hands-on in 5 minutes

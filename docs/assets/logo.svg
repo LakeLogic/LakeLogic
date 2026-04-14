@@ -1,15 +1,15 @@
-<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- LakeLogic Logo: Wave mark matching lakelogic.org branding -->
+<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width="48" height="48">
 
-  <!-- Background circle -->
-  <circle cx="24" cy="24" r="22" fill="#0EA5E9" />
+  <!-- Background -->
+  <rect width="48" height="48" rx="10" fill="#0D1117"/>
+  <rect x="2" y="2" width="44" height="44" rx="8" fill="none" stroke="#1F6FEB" stroke-width="0.75" opacity="0.4"/>
 
-  <!-- Upper wave -->
-  <path d="M8 28 Q24 12 40 28" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" />
+  <!-- L normal - white - vertical stroke left, horizontal stroke bottom -->
+  <rect x="10" y="10" width="5" height="28" rx="1.5" fill="#ffffff"/>
+  <rect x="10" y="33" width="19" height="5" rx="1.5" fill="#ffffff"/>
 
-  <!-- Lower wave (lighter) -->
-  <path d="M8 36 Q24 20 40 36" stroke="rgba(255,255,255,0.5)" stroke-width="3" stroke-linecap="round" fill="none" />
+  <!-- Reversed L - blue - vertical stroke right, horizontal stroke top -->
+  <rect x="33" y="10" width="5" height="28" rx="1.5" fill="#1F6FEB"/>
+  <rect x="19" y="10" width="19" height="5" rx="1.5" fill="#1F6FEB"/>
 
-  <!-- Dot -->
-  <circle cx="24" cy="16" r="4" fill="white" />
 </svg>

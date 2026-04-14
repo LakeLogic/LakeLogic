@@ -1,28 +1,23 @@
 # Complete Contract Template Reference
 
+> [!NOTE]
+> **Looking for focused, topic-specific guides?** This is the full kitchen-sink reference (2,700+ lines).
+> For faster navigation, use the modular documentation:
+>
+> | Topic | Page |
+> |---|---|
+> | Domain ownership, SLOs, governance | [Domain Config →](contracts/domain_config.md) |
+> | Storage, environments, placeholders | [System Config →](contracts/system_config.md) |
+> | Your first data product contract | [Data Product Contracts →](contracts/data_product_contracts/index.md) |
+> | Ingestion, watermarks, transforms, quality | [Sub-pages →](contracts/data_product_contracts/ingestion.md) |
+> | SCD2 dimensions, fact tables | [Dimensional Modeling →](contracts/data_product_contracts/dimensional_modeling.md) |
+> | PII masking, schema, lineage | [Schema & Model →](contracts/schema_model.md) |
+> | Notifications & alerting | [Notifications →](contracts/notifications.md) |
+> | GDPR, EU AI Act compliance | [Compliance →](contracts/compliance.md) |
+
 This is a **fully annotated contract template** showing every available configuration option with detailed comments explaining business value and use case scenarios.
 
 Use this as a reference to understand what's possible, then create your own contracts by copying only the sections you need.
-
----
-
-## The Versioning Architecture
-
-The industry gold standard for Data Contracts is a hybrid approach known as **"Major Pinning, Minor Floating"**.
-
-In LakeLogic, you mandate that all contracts use strict Semantic Versioning (e.g., `v1.2.0` -> `Major.Minor.Patch`):
-
-* **Major Changes (`v2.0`):** Breaking changes (deleting columns, altering core data types, rotating primary keys).
-* **Minor Changes (`v1.3`):** Additive changes (appending new optional columns, adding new metadata tags).
-
-Because Fact tables act as permanent systemic ledgers, your downstream contracts should pin their `foreign_key` validation pointers **only** to the Major version string:
-
-```yaml
-      foreign_key:
-        contract: "gold_sales_dim_accounts_v1"
-```
-
-This strategy strictly immunizes your data pipeline against destructive upstream changes (like an upstream domain deleting columns in `v2.0`), while dynamically floating those additive features (like a new `v1.3` attribute) straight into your data model safely!
 
 ---
 
@@ -93,8 +88,8 @@ metadata:
   pii_present: true
   # Business value: Privacy compliance tracking
   
-  retention_days: 2555
-  # Business value: Data retention policy (7 years)
+  retention_period: "P7Y"
+  # ISO 8601 duration — data retention policy (7 years)
   
   cost_center: "CC-1234"
   # Business value: Chargeback and cost allocation
@@ -418,19 +413,21 @@ server:
   # Options: validate (quality gate), ingest (raw capture)
   # Business value: Bronze uses "ingest", Silver/Gold use "validate"
   
-  schema_evolution: "strict"
-  # Options: strict, append, merge, overwrite
-  # strict: Fail on schema changes (production safety)
-  # append: Allow new fields (flexible ingestion)
-  # merge: Merge new fields into schema (smart evolution)
-  # overwrite: Replace schema completely (reprocessing)
-  # Business value: Control schema change behavior
-  
-  allow_schema_drift: false
-  # If true, allow undocumented columns to pass through the pipeline.
-  # If false (and schema_evolution is strict), the pipeline automatically prunes any
-  # unmapped columns from the final table, strictly enforcing the contract exactly.
-  # Business value: Monitoring vs strict contract enforcement
+  schema_policy:
+    evolution: "strict"
+    # Options: strict, append, merge, overwrite, compatible, allow
+    # strict: Fail on schema changes (production safety)
+    # append: Allow new fields (flexible ingestion)
+    # merge: Merge new fields into schema (smart evolution)
+    # overwrite: Replace schema completely (reprocessing)
+    # Business value: Control schema change behavior
+    
+    unknown_fields: "quarantine"
+    # Options: drop, quarantine, allow
+    # drop: Prune undocumented columns from the final table.
+    # quarantine: Log/alert and send to dead-letter queue.
+    # allow: Pass unknown columns through.
+    # Business value: Monitoring vs strict contract enforcement
   
   cast_to_string: false
   # If true, cast all columns to string (Bronze "all strings" pattern)
@@ -511,13 +508,6 @@ natural_key:
 # ============================================================
 # OPTIONAL: Define expected schema with types and constraints
 model:
-  # OPTIONAL: Human-readable grain description
-  grain: "one row per customer"
-  # Business value: Self-documenting data contract — makes the conceptual unit explicit
-
-  # OPTIONAL: Columns that define the grain (subset of primary_key)
-  grain_key: ["customer_id"]
-  # Business value: LakeLogic can validate no duplicate grain rows are produced
 
   fields:
     - name: "customer_id"
@@ -615,29 +605,9 @@ model:
       #   Best for regulated environments
       #   (healthcare, finance, GDPR Art.17).
       #
-      pii_vault: "keyvault://mycompany-pii/lakelogic-pii-key"
-      # Encryption key for 'encrypt' strategy.
-      # Fetched once at pipeline start (cached).
-      #
-      # ── Vault Providers ─────────────────────────────────
-      #
-      # keyvault://vault-name/secret-name
-      #   → Azure Key Vault (DefaultAzureCredential)
-      #
-      # databricks://scope-name/key-name
-      #   → Databricks Secret Scope
-      #
-      # env://VARIABLE_NAME
-      #   → Environment variable
-      #
-      # vault://path/to/secret
-      #   → HashiCorp Vault
-      #
-      # aws-kms://secret-name
-      #   → AWS Secrets Manager
-      #
-      # No key is stored in code or env vars.
-      # Business value: Reversible masking via KMS
+      # The encryption key is injected via the LAKELOGIC_PII_KEY 
+      # environment variable, which your orchestrator can pull 
+      # from Azure Key Vault or AWS KMS before running the pipeline.
       masking_format: "{first1}***@{domain}"
       # Custom format for 'partial' strategy.
       # Tokens: {first1}-{first9}, {last1}-{last9}, {domain}
@@ -1113,6 +1083,15 @@ quarantine:
   # If false, pipeline fails on any quality rule failure
   # Business value: Fail-fast vs graceful degradation
   
+  notifications_enabled: true
+  # If false, mutes all alerts specifically for this contract
+  # overrides domain/system settings if set to false
+  
+  fail_on_quarantine: true
+  # If true, deliberately crush and fail the pipeline immediately upon 
+  # quarantining ANY bad records instead of allowing good records to flow.
+  # Business value: Aggressive data quality enforcement
+  
   target: "s3://quarantine-bucket/customers"
   # Where to write quarantined records
   # Business value: Centralized bad data repository
@@ -1182,10 +1161,16 @@ notifications:
     #   Custom:   mailtos://user:pass@smtp.company.com:587?to=alerts@co.com
     #   Multiple: mailto://user:pass@smtp.co.com?to=a@co.com,b@co.com
     # With secrets: mailto://env:SMTP_USER:env:SMTP_PASS@smtp.co.com?to=alerts@co.com
+    # Global Fallback: Setting the LAKELOGIC_SMTP_URI environment variable 
+    # lets you use bare emails (target: "alerts@co.com") directly.
 
   # ── Email via SendGrid API (no SMTP needed) ─────────────
-  # Uses SendGrid's HTTP API — faster and more reliable than SMTP.
-  - target: "sendgrid://apikey:env:SENDGRID_API_KEY@company.com/data-platform@company.com"
+  # Uses SendGrid's native API integration for precise environment variable mapping
+  - type: sendgrid
+    target: "data-platform@company.com"
+    api_key: "env:SENDGRID_API_KEY"
+    from_email: "env:EMAIL_FROM_ADDRESS"
+    from_name: "env:EMAIL_FROM_NAME"
     on_events: ["failure", "slo_breach"]
     subject_template: "[{{ event | upper }}] {{ contract.title }}"
 
@@ -1805,201 +1790,25 @@ extraction:
     # Business value: Process PDFs, images, audio, video into structured data
 
 # ============================================================
-# 21. CLOUD REPORTING (Registry-Level)
-# ============================================================
-# OPTIONAL: Send run reports to LakeLogic Cloud for centralized
-# observability, trend detection, and ops intelligence.
-#
-# This is typically set at the REGISTRY level (_registry.yaml)
-# so all contracts in a domain share the same config.
-# It can also be set per-contract if needed.
-#
-# The cloud block maps to RemoteObserver env vars:
-#   cloud.enabled    → LAKELOGIC_REMOTE_OBSERVER
-#   cloud.report_url → LINEAGELOGIC_REPORT_URL
-#   cloud.api_key    → LINEAGELOGIC_API_KEY
-#
-# Supports ${ENV_VAR} syntax for secrets.
-cloud:
-  enabled: true
-  # Toggle remote reporting (default: false)
-
-  report_url: "${LINEAGELOGIC_REPORT_URL}"
-  # API endpoint for run report ingestion
-  # Resolved from environment variable at runtime
-
-  api_key: "${LAKELOGIC_API_KEY}"
-  # Auth key — identifies your tenant
-  # Resolved from environment variable at runtime
-  # Business value: Centralized quality dashboards, SLO trend
-  # detection, quarantine spike alerts, cross-contract intelligence
-
-# ── What gets reported ─────────────────────────────────────
-# Each run sends (no raw data — metadata only):
-#   - Contract name, dataset, stage, engine, timestamp
-#   - Row counts: source, total, good, quarantined
-#   - Per-rule failure breakdown
-#   - Schema drift events
-#   - SLO scores (freshness, availability)
-#   - Duration (ms)
-#   - Domain, system, data_layer metadata
-
-# ============================================================
 # 22. COMPLIANCE — Regulatory Metadata
 # ============================================================
-# OPTIONAL: Multi-framework compliance metadata for automated
-# compliance reporting in LakeLogic Cloud. Supports GDPR, EU AI Act,
-# CCPA/CPRA, HIPAA, SOX, PIPEDA, LGPD, and Basel/BCBS 239.
+# OPTIONAL: Multi-framework compliance metadata.
+# Supports GDPR, EU AI Act, CCPA, HIPAA, SOX, PIPEDA, LGPD,
+# and BCBS 239. Inherits from _domain.yaml → _system.yaml.
 #
-# This section enables LakeLogic Cloud to generate audit-ready
-# compliance reports from your data contract registry.
+# → Full reference with examples: contracts/compliance.md
 
 compliance:
-
-  # ── GDPR (EU) 2016/679 ──────────────────────────────────
   gdpr:
     applicable: true
-    # Whether GDPR applies to this dataset
-    # Business value: Scope determination
-
     legal_basis: "legitimate_interest"
-    # Options: consent, contract, legitimate_interest,
-    #          legal_obligation, public_interest, vital_interest
-    # GDPR Art. 6(1) — lawful basis for processing
-    # Business value: Art. 30 RoPA mandatory field
-
-    legal_basis_detail: >
-      Processing based on legitimate interest for direct
-      marketing under Art. 6(1)(f). Data subjects can object
-      via unsubscribe mechanism at any time.
-    # Business value: Detailed justification for DPO review
-
-    purpose: "Customer engagement tracking and marketing analytics"
-    # Purpose of processing (Art. 5(1)(b))
-    # Business value: Purpose limitation compliance
-
-    retention_period: "24 months"
-    # How long data is retained (Art. 5(1)(e))
-    # Options: any human-readable duration string
-    # Business value: Storage limitation compliance
-
-    retention_basis: "Marketing consent validity"
-    # Why this retention period was chosen
-    # Business value: Audit justification
-
-    consent_type: "opt_in"
-    # Options: opt_in, opt_out, implied, none
-    # Business value: Consent management tracking
-
-    withdrawal_mechanism: true
-    # Whether data subjects can withdraw consent
-    # Business value: Art. 7(3) compliance
-
-    dpia_required: false
-    # Whether a Data Protection Impact Assessment is needed
-    # Business value: Art. 35 compliance
-
-    dpia_status: "not_required"
-    # Options: not_required, not_started, in_progress, completed
-    # Business value: Track DPIA progress
-
-    data_subject_categories:
-      - "retail_customers"
-      - "newsletter_subscribers"
-    # Categories of people whose data is processed
-    # Business value: Art. 30 RoPA field
-
-    cross_border_transfer: true
-    # Whether data crosses EU/EEA borders
-    # Business value: Chapter V transfer obligations
-
-    transfer_mechanism: "SCCs"
-    # Options: SCCs, adequacy, BCRs, derogation
-    # Business value: Transfer safeguards (Art. 46)
-
-    shared_with:
-      - name: "Klaviyo Inc."
-        role: "processor"         # processor or joint_controller
-        country: "US"
-        agreement: "DPA"          # DPA, BAA, SCC, joint_controller
-        mechanism: "SCCs"
-      - name: "Shopify Inc."
-        role: "joint_controller"
-        country: "CA"
-        agreement: "DPA"
-        mechanism: "SCCs"
-    # Data sharing agreements
-    # Business value: Art. 28 processor contracts, Art. 30 disclosures
-
-  # ── EU AI Act (Reg. 2024/1689) ─────────────────────────
+    consent_type: "opt_in"             # opt_in | opt_out | implicit | not_required
+    retention_period: "P24M"            # ISO 8601 duration
+    dpia_status: "not_required"         # not_required | planned | in_progress | completed
   eu_ai_act:
     applicable: true
-    # Whether the EU AI Act applies (data feeds AI systems)
-    # Business value: Scope determination
-
-    risk_tier: "limited"
-    # Options: prohibited, high, gpai, limited, minimal
-    # Art. 6 + Annex III risk classification
-    # Business value: Determines obligation level
-
-    risk_tier_rationale: >
-      Marketing automation data classified as LIMITED RISK
-      under Art. 50. Transparency obligations apply. Would
-      escalate to HIGH RISK if used for credit scoring or
-      HR decisions under Annex III.
-    # Business value: Documented risk assessment
-
-    ai_system_purpose: "Marketing automation and personalisation"
-    # What the AI system does with this data
-    # Business value: Art. 11 technical documentation
-
-    ai_systems_using_data:
-      - name: "send_time_optimisation"
-        risk_tier: "limited"
-        description: "ML model predicting optimal email send time"
-      - name: "churn_prediction"
-        risk_tier: "limited"
-        description: "Model predicting likelihood of unsubscribe"
-    # AI systems that consume this dataset
-    # Business value: AI system inventory (Art. 6)
-
-    training_data_provenance: true
-    # Whether training data origin is documented
-    # Business value: Art. 10 — data governance for training
-
-    bias_examination: false
-    # Whether bias examination has been conducted
-    # Business value: Art. 10(2)(f) — bias detection
-
-    transparency_disclosure: true
-    # Whether users are informed about AI processing
-    # Business value: Art. 13 + Art. 50 transparency
-
-    human_oversight: true
-    # Whether human oversight mechanisms exist
-    # Business value: Art. 14 — human-in-the-loop
-
-    logging_enabled: true
-    # Whether AI operations are logged
-    # Business value: Art. 12 — automatic logging
-
-  # ── Other Frameworks (coming soon) ─────────────────────
-  # Supported but detailed section not yet available:
-  ccpa:
-    applicable: true
-    status: "coming_soon"
-  hipaa:
-    applicable: false
-  sox:
-    applicable: false
-  pipeda:
-    applicable: true
-    status: "coming_soon"
-  lgpd:
-    applicable: true
-    status: "coming_soon"
-  bcbs_239:
-    applicable: false
+    risk_tier: "limited"               # prohibited | high | gpai | limited | minimal
+  # ccpa, hipaa, sox, pipeda, lgpd, bcbs_239 — see compliance docs
 
 ```
 
@@ -2169,9 +1978,9 @@ transformations:
   # - rollup:
   #     group_by: ["customer_segment", "country", "month"]
   #     aggregations:
-  #       customer_count: "COUNT(*)"
-  #       avg_ltv: "AVG(lifetime_value)"
-  #       total_orders: "SUM(total_orders)"
+  #       customer_count: "COUNT(*)"              # → output column: customer_count
+  #       avg_ltv: "AVG(lifetime_value)"          # → output column: avg_ltv
+  #       total_orders: "SUM(total_orders)"       # → output column: total_orders
   #   phase: "post"
 
 materialization:
@@ -2563,25 +2372,11 @@ compliance:
     applicable: true
     legal_basis: "legitimate_interest"
     purpose: "Marketing campaign analytics"
-    retention_period: "24 months"
-    consent_type: "opt_in"
-    dpia_required: false
-    cross_border_transfer: true
-    transfer_mechanism: "SCCs"
-    shared_with:
-      - name: "Klaviyo Inc."
-        role: "processor"
-        country: "US"
-        agreement: "DPA"
+    retention_period: "P24M"             # ISO 8601 duration
+    consent_type: "opt_in"               # opt_in | opt_out | implicit | not_required
   eu_ai_act:
     applicable: true
-    risk_tier: "limited"
-    ai_system_purpose: "Marketing automation"
-    training_data_provenance: true
-    human_oversight: true
-  ccpa:
-    applicable: true
-    status: "coming_soon"
+    risk_tier: "limited"                 # prohibited | high | gpai | limited | minimal
 ```
 
 ---

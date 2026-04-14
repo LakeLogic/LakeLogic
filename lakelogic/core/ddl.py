@@ -228,6 +228,99 @@ _DEFAULT_FORMATS = {
     "databricks": "DELTA",
 }
 
+# ── Safe Type Widening ───────────────────────────────────────────────────────
+# Defines lossless type promotions that can be auto-applied without data loss.
+# Keys are normalised base types; values are sets of safe target types.
+
+_SAFE_WIDENINGS: Dict[str, set] = {
+    "tinyint": {"smallint", "int", "integer", "bigint", "long", "float", "double"},
+    "smallint": {"int", "integer", "bigint", "long", "float", "double"},
+    "int": {"bigint", "long", "double"},
+    "integer": {"bigint", "long", "double"},
+    "bigint": {"double"},
+    "long": {"double"},
+    "float": {"double"},
+    "boolean": {"int", "integer", "bigint", "long", "string", "varchar", "text"},
+    "bool": {"int", "integer", "bigint", "long", "string", "varchar", "text"},
+    "date": {"timestamp", "timestamp_ntz", "timestamp_tz"},
+    "varchar": {"text", "string"},
+    "char": {"varchar", "text", "string"},
+}
+
+
+def _normalize_base_type(sql_type: str) -> str:
+    """
+    Extract the base type name from a potentially parameterised SQL type
+    and map it to a canonical synonym for comparison.
+
+    Examples:
+        VARCHAR(255) → varchar
+        STRING → varchar
+        DECIMAL(10,2) → decimal
+        INT → integer
+    """
+    import re
+    m = re.match(r"^(\w+)", sql_type.strip())
+    base = m.group(1).lower() if m else sql_type.strip().lower()
+
+    _synonyms = {
+        "string": "varchar",
+        "text": "varchar",
+        "int": "integer",
+        "int4": "integer",
+        "int8": "bigint",
+        "long": "bigint",
+        "float4": "float",
+        "float8": "double",
+        "bool": "boolean",
+    }
+    return _synonyms.get(base, base)
+
+
+def _extract_varchar_length(sql_type: str) -> Optional[int]:
+    """Extract length from VARCHAR(N) / CHAR(N). Returns None if unbounded."""
+    import re
+    m = re.match(r"^(?:var)?char\s*\((\d+)\)", sql_type.strip(), re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+def is_safe_widening(from_type: str, to_type: str) -> bool:
+    """
+    Check whether a type change is a safe (lossless) widening.
+
+    Handles both base type promotions (int → bigint) and
+    parameterised widenings (varchar(50) → varchar(255)).
+
+    Args:
+        from_type: Current SQL type (e.g. 'INT', 'VARCHAR(50)').
+        to_type: Desired SQL type (e.g. 'BIGINT', 'VARCHAR(255)').
+
+    Returns:
+        True if the change is lossless.
+    """
+    from_base = _normalize_base_type(from_type)
+    to_base = _normalize_base_type(to_type)
+
+    # Same base type — check parameterised widening (varchar(50) → varchar(255))
+    if from_base == to_base:
+        if from_base in ("varchar", "char"):
+            from_len = _extract_varchar_length(from_type)
+            to_len = _extract_varchar_length(to_type)
+            # Unbounded → unbounded is a no-op; bounded → unbounded is safe
+            if from_len is None and to_len is None:
+                return True  # no-op
+            if from_len is None and to_len is not None:
+                return False  # restricting an unbounded string is a narrowing!
+            if to_len is None:
+                return True  # removing length constraint is safe
+            return to_len >= from_len
+        # Same base, same type — no change needed
+        return True
+
+    # Check the widening map
+    allowed = _SAFE_WIDENINGS.get(from_base, set())
+    return to_base in allowed
+
 
 def _resolve_type(contract_type: str, backend: str) -> str:
     """
@@ -277,7 +370,7 @@ def _resolve_type(contract_type: str, backend: str) -> str:
                 "bigquery": "STRING",
                 "postgresql": "VARCHAR",
             }.get(backend, "VARCHAR")
-            if backend in ("spark", "databricks", "sqlite", "bigquery"):
+            if backend in ("spark", "databricks", "sqlite", "bigquery", "polars", "pandas", "python"):
                 return backend_base  # These ignore length constraints
             return f"{backend_base}({params})"
 
@@ -298,7 +391,12 @@ def _resolve_table_name(contract: DataContract) -> Optional[str]:
     """
     Extract the target table name from the contract.
 
-    Looks at materialization.target_path (table:...) then server.path.
+    Resolution order:
+      1. materialization.target_path (table:...)
+      2. server.path (table:...)
+      3. info.table_name (explicit table name from contract)
+      4. dataset (contract dataset identifier)
+      5. info.title (sanitised fallback)
 
     Args:
         contract: DataContract instance.
@@ -317,13 +415,17 @@ def _resolve_table_name(contract: DataContract) -> Optional[str]:
         if target.startswith("table:"):
             return target[6:]
 
-    # Fallback: use dataset name or info title
+    # info.table_name — explicit table name (may have been template-resolved)
+    if contract.info and getattr(contract.info, "table_name", None):
+        return contract.info.table_name
+
+    # Fallback: use dataset name
     if contract.dataset:
         return contract.dataset
-    if contract.info and contract.info.title:
-        # Sanitize title for table name
-        import re
 
+    # Last resort: sanitize title for table name
+    if contract.info and contract.info.title:
+        import re
         return re.sub(r"[^a-zA-Z0-9_]", "_", contract.info.title).lower()
 
     return None
@@ -416,7 +518,7 @@ def generate_ddl(
             elif backend in ("spark", "databricks"):
                 pass  # Already has a comment
             else:
-                col_def += "  -- PII"
+                col_def += " /* PII */"
 
         col_defs.append(col_def)
 
@@ -589,19 +691,31 @@ def generate_alter_ddl(
     backend: str,
     existing_columns: List[str],
     *,
+    existing_column_types: Optional[Dict[str, str]] = None,
     table_name: Optional[str] = None,
 ) -> List[str]:
     """
-    Generate ALTER TABLE statements for schema evolution (adding new columns).
+    Generate ALTER TABLE statements for schema evolution.
+
+    Handles three categories of schema change:
+
+    1. **New columns** — emits ``ALTER TABLE ADD COLUMN``.
+    2. **Safe type widenings** — emits ``ALTER COLUMN TYPE`` for lossless
+       promotions (e.g. INT → BIGINT, VARCHAR(50) → VARCHAR(255)).
+    3. **Unsafe type changes** — logs a WARNING and skips.
+    4. **Removed columns** — logs an INFO and skips (physical column stays;
+       runtime ``schema_policy`` handles pruning).
 
     Args:
         contract: DataContract with updated schema.
         backend: Target backend.
         existing_columns: List of column names already in the table.
+        existing_column_types: Optional mapping of column name → current SQL
+            type string. When provided, enables type-change detection.
         table_name: Override table name.
 
     Returns:
-        List of ALTER TABLE SQL statements.
+        List of ALTER TABLE SQL statements (safe operations only).
     """
     backend = backend.lower()
     fields = _get_fields(contract)
@@ -610,23 +724,363 @@ def generate_alter_ddl(
         raise ValueError("Cannot generate ALTER DDL: no table name resolved.")
 
     existing_set = {c.lower() for c in existing_columns}
-    statements = []
+    expected_set = {f.name.lower() for f in fields}
+    existing_types_lower = (
+        {k.lower(): v for k, v in existing_column_types.items()}
+        if existing_column_types
+        else {}
+    )
+    statements: List[str] = []
 
+    # ── Resolve Evolution Policy ──────────────────────────────────────────
+    server = contract.effective_server() if hasattr(contract, "effective_server") else None
+    from lakelogic.core.models import SchemaPolicy as _SP
+    _default_evo = _SP().evolution
+    evolution = _default_evo
+    if server and getattr(server, "schema_policy", None):
+        evolution = getattr(server.schema_policy, "evolution", _default_evo) or _default_evo
+    evolution = str(evolution).lower()
+
+    # ── 1. New columns ────────────────────────────────────────────────────
     for field in fields:
         if field.name.lower() not in existing_set:
+            if evolution == "strict":
+                raise ValueError(
+                    f"Schema evolution error: New column '{field.name}' detected in contract "
+                    f"but not in target table '{resolved_table}'. "
+                    f"Schema evolution policy is 'strict'."
+                )
+            
             sql_type = _resolve_type(field.type, backend)
             if backend in ("duckdb",):
-                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN IF NOT EXISTS {field.name} {sql_type};")
-            elif backend == "bigquery":
-                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};")
+                statements.append(
+                    f"ALTER TABLE {resolved_table} ADD COLUMN IF NOT EXISTS {field.name} {sql_type};"
+                )
             else:
-                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};")
+                statements.append(
+                    f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};"
+                )
+            logger.info(
+                f"Schema evolution: ADD COLUMN {field.name} {sql_type} → {resolved_table}"
+            )
+
+    # ── 2. Type changes (requires existing_column_types) ──────────────────
+    if existing_types_lower:
+        for field in fields:
+            col_lower = field.name.lower()
+            if col_lower not in existing_types_lower:
+                continue  # new column — already handled above
+
+            current_sql_type = existing_types_lower[col_lower]
+            desired_sql_type = _resolve_type(field.type, backend)
+
+            # Intelligent type equivalence check
+            # Treat synonyms with identical parameters (like VARCHAR / STRING) as equal
+            base_cur = _normalize_base_type(current_sql_type)
+            base_des = _normalize_base_type(desired_sql_type)
+
+            # Strip base to compare parameters, e.g. "(10,2)" vs "(10,2)"
+            import re
+            p_cur = re.sub(r"^[a-zA-Z0-9_]+", "", current_sql_type.strip()).replace(" ", "")
+            p_des = re.sub(r"^[a-zA-Z0-9_]+", "", desired_sql_type.strip()).replace(" ", "")
+
+            is_identical = False
+            if current_sql_type.upper().strip() == desired_sql_type.upper().strip():
+                is_identical = True
+            elif base_cur == base_des and p_cur == p_des:
+                is_identical = True
+            # Delta/PyArrow backends don't enforce string lengths — treat
+            # VARCHAR vs VARCHAR(N) as identical when targeting Delta tables.
+            elif base_cur == base_des and base_cur in ("varchar", "char", "string", "text"):
+                if backend in ("polars", "pandas", "python", "duckdb"):
+                    is_identical = True
+
+            if is_identical:
+                continue  # Types are identical (or synonymous) — skip DDL generation
+
+            if evolution == "strict":
+                raise ValueError(
+                    f"Schema evolution error: Type mismatch for '{field.name}' "
+                    f"({current_sql_type} → {desired_sql_type}) in target table '{resolved_table}'. "
+                    f"Schema evolution policy is 'strict'."
+                )
+
+            if is_safe_widening(current_sql_type, desired_sql_type):
+                # Generate ALTER COLUMN TYPE for safe widenings
+                if backend in ("spark", "databricks"):
+                    # Spark/Databricks: ALTER TABLE ... ALTER COLUMN ... TYPE ...
+                    statements.append(
+                        f"ALTER TABLE {resolved_table} ALTER COLUMN {field.name} TYPE {desired_sql_type};"
+                    )
+                elif backend == "snowflake":
+                    statements.append(
+                        f"ALTER TABLE {resolved_table} MODIFY COLUMN {field.name} {desired_sql_type};"
+                    )
+                elif backend == "bigquery":
+                    # BigQuery doesn't support ALTER COLUMN TYPE directly;
+                    # widening happens automatically for compatible types.
+                    logger.info(
+                        f"Schema evolution: BigQuery auto-widens {field.name} "
+                        f"{current_sql_type} → {desired_sql_type} (no DDL needed)"
+                    )
+                    continue
+                elif backend in ("duckdb",):
+                    statements.append(
+                        f"ALTER TABLE {resolved_table} ALTER COLUMN {field.name} TYPE {desired_sql_type};"
+                    )
+                elif backend == "postgresql":
+                    statements.append(
+                        f"ALTER TABLE {resolved_table} ALTER COLUMN {field.name} TYPE {desired_sql_type};"
+                    )
+                else:
+                    statements.append(
+                        f"ALTER TABLE {resolved_table} ALTER COLUMN {field.name} TYPE {desired_sql_type};"
+                    )
+                logger.info(
+                    f"Schema evolution: SAFE WIDENING {field.name} "
+                    f"{current_sql_type} → {desired_sql_type} → {resolved_table}"
+                )
+            else:
+                # Unsafe type change — warn but do NOT generate DDL
+                logger.warning(
+                    f"Schema evolution: UNSAFE type change detected for "
+                    f"{resolved_table}.{field.name}: {current_sql_type} → {desired_sql_type}. "
+                    f"This change may cause data loss and must be applied manually. "
+                    f"Consider using a migration script or 'overwriteSchema' option."
+                )
+
+    # ── 3. Removed columns (in table but no longer in contract) ───────────
+    # Exclude lineage/system columns from the removed check
+    _system_prefixes = ("_lakelogic_", "_rule_", "quarantine_")
+    for col in sorted(existing_set - expected_set):
+        if any(col.startswith(p) for p in _system_prefixes):
+            continue
+        logger.info(
+            f"Schema evolution: Column '{col}' exists in {resolved_table} but is "
+            f"no longer in the contract. Physical column retained; runtime "
+            f"schema_policy controls whether it is pruned from output."
+        )
 
     return statements
 
 
 # ── Execution helpers ────────────────────────────────────────────────────────
 
+# Contract type → PyArrow type mapping for Delta table initialization
+_CONTRACT_TO_ARROW: Dict[str, str] = {
+    "string": "string", "varchar": "string", "text": "string", "char": "string",
+    "int": "int32", "integer": "int32",
+    "bigint": "int64", "long": "int64",
+    "smallint": "int16", "tinyint": "int8",
+    "float": "float32", "double": "float64",
+    "boolean": "bool", "bool": "bool",
+    "date": "date32", "timestamp": "timestamp[us]",
+    "timestamp_ntz": "timestamp[us]", "timestamp_tz": "timestamp[us, tz=UTC]",
+    "binary": "binary",
+    "json": "string", "array": "string",
+}
+
+
+def _resolve_arrow_type(contract_type: str):
+    """Map a contract field type string to a PyArrow data type."""
+    import re
+    import pyarrow as pa
+
+    lower = contract_type.strip().lower()
+
+    # Parameterised types: decimal(10,2), varchar(255)
+    param_match = re.match(r"^(\w+)\((.+)\)$", lower)
+    if param_match:
+        base = param_match.group(1)
+        params = param_match.group(2)
+        if base in ("decimal", "numeric"):
+            parts = [int(p.strip()) for p in params.split(",")]
+            return pa.decimal128(parts[0], parts[1] if len(parts) > 1 else 0)
+        if base in ("varchar", "char"):
+            return pa.string()  # Arrow strings are unbounded
+
+    # Direct lookup
+    arrow_key = _CONTRACT_TO_ARROW.get(lower, "string")
+    if arrow_key == "string":
+        return pa.string()
+    elif arrow_key == "int8":
+        return pa.int8()
+    elif arrow_key == "int16":
+        return pa.int16()
+    elif arrow_key == "int32":
+        return pa.int32()
+    elif arrow_key == "int64":
+        return pa.int64()
+    elif arrow_key == "float32":
+        return pa.float32()
+    elif arrow_key == "float64":
+        return pa.float64()
+    elif arrow_key == "bool":
+        return pa.bool_()
+    elif arrow_key == "date32":
+        return pa.date32()
+    elif arrow_key.startswith("timestamp"):
+        return pa.timestamp("us")
+    elif arrow_key == "binary":
+        return pa.binary()
+    else:
+        return pa.string()
+
+
+def _init_delta_table_from_contract(contract: DataContract) -> None:
+    """Initialize a Delta table with correct schema using an empty write.
+
+    Builds a PyArrow schema from the contract model fields and writes an
+    empty (zero-row) table via ``write_deltalake``.  This creates the
+    ``_delta_log/`` metadata folder and records the schema without
+    materializing any data rows.
+
+    If the Delta table already exists at the target path, this is a no-op.
+
+    Args:
+        contract: DataContract with model fields and materialization target.
+    """
+    fields = _get_fields(contract)
+    if not fields:
+        logger.warning(
+            "Cannot initialize Delta table: contract has no model.fields. "
+            "Table will be created on first data write."
+        )
+        return
+
+    mat = contract.materialization
+    if not mat or not mat.target_path:
+        logger.info(
+            "No materialization.target_path configured — "
+            "Delta table will be created on first data write."
+        )
+        return
+
+    target = str(mat.target_path)
+    if target.startswith("table:"):
+        # Catalog-managed table — Delta init not applicable
+        logger.info(
+            f"Target '{target}' is a catalog table reference — "
+            "DDL must be applied via the catalog engine (Spark/Databricks)."
+        )
+        return
+
+    try:
+        import pyarrow as pa
+        from deltalake import write_deltalake, DeltaTable
+    except ImportError:
+        logger.warning(
+            "deltalake and pyarrow are required for Delta DDL init. "
+            "Install them: pip install deltalake pyarrow"
+        )
+        return
+
+    # Build storage options for cloud paths
+    storage_opts = None
+    if any(target.startswith(p) for p in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")):
+        from lakelogic.core.materialization import _build_storage_options
+        storage_opts = _build_storage_options()
+        if not storage_opts:
+            logger.warning(
+                f"Cloud path detected ({target[:30]}...) but no storage credentials "
+                "found in environment. Set AZURE_*/AWS_*/GOOGLE_* env vars."
+            )
+            return
+
+    # Check if already initialized
+    try:
+        DeltaTable(target, storage_options=storage_opts)
+        table_label = _resolve_table_name(contract) or target
+        logger.info(
+            f"Delta table already exists at {table_label} — schema evolution "
+            "will be applied during the next data write."
+        )
+        return
+    except Exception:
+        pass  # Table doesn't exist yet — proceed with creation
+
+    # Build PyArrow schema from contract fields
+    pa_fields = []
+    for field in fields:
+        arrow_type = _resolve_arrow_type(field.type)
+        pa_fields.append(pa.field(field.name, arrow_type, nullable=not field.required))
+
+    # Add lineage system columns if enabled
+    lineage_cfg = getattr(contract, "lineage", None)
+    if lineage_cfg and getattr(lineage_cfg, "enabled", False):
+        _sys_defs = [
+            ("capture_source_path", "source_column_name", "_lakelogic_source", pa.string()),
+            ("capture_timestamp", "timestamp_column_name", "_lakelogic_processed_at", pa.timestamp("us")),
+            ("capture_run_id", "run_id_column_name", "_lakelogic_run_id", pa.string()),
+            ("capture_domain", "domain_column_name", "_lakelogic_domain", pa.string()),
+            ("capture_system", "system_column_name", "_lakelogic_system", pa.string()),
+            ("capture_created_at", "created_at_column_name", "_lakelogic_created_at", pa.timestamp("us")),
+            ("capture_created_by", "created_by_column_name", "_lakelogic_created_by", pa.string()),
+        ]
+        existing_names = {f.name for f in fields}
+        for flag_attr, name_attr, default_name, arrow_t in _sys_defs:
+            if getattr(lineage_cfg, flag_attr, True):
+                col_name = getattr(lineage_cfg, name_attr, default_name)
+                if col_name not in existing_names:
+                    pa_fields.append(pa.field(col_name, arrow_t, nullable=True))
+
+    schema = pa.schema(pa_fields)
+
+    # Resolve partition columns
+    partition_by = list(mat.partition_by or [])
+    # Prune partition columns not in the schema
+    schema_names = set(schema.names)
+    partition_by = [c for c in partition_by if c in schema_names]
+
+    table_label = _resolve_table_name(contract) or target
+
+    try:
+        # Prefer DeltaTable.create() — purpose-built for schema-only init
+        create_kwargs: Dict[str, Any] = {
+            "table_uri": target,
+            "schema": schema,
+        }
+        if partition_by:
+            create_kwargs["partition_by"] = partition_by
+        if storage_opts:
+            create_kwargs["storage_options"] = storage_opts
+
+        DeltaTable.create(**create_kwargs)
+
+        logger.info(
+            f"Initialized Delta table schema for {table_label} "
+            f"({len(fields)} columns, 0 rows) at {target}"
+        )
+    except TypeError:
+        # Older deltalake versions may not have DeltaTable.create()
+        # Fall back to write_deltalake with an empty table
+        try:
+            empty_table = pa.table(
+                {f.name: pa.array([], type=f.type) for f in schema},
+                schema=schema,
+            )
+            wdl_kwargs: Dict[str, Any] = {"mode": "overwrite"}
+            if partition_by:
+                wdl_kwargs["partition_by"] = partition_by
+            if storage_opts:
+                wdl_kwargs["storage_options"] = storage_opts
+
+            write_deltalake(target, empty_table, **wdl_kwargs)
+
+            logger.info(
+                f"Initialized Delta table schema for {table_label} "
+                f"({len(fields)} columns, 0 rows) at {target}"
+            )
+        except Exception as fallback_err:
+            logger.warning(
+                f"Could not initialize Delta table at {target}: {fallback_err}. "
+                "Table will be created on first data write."
+            )
+    except Exception as e:
+        logger.warning(
+            f"Could not initialize Delta table at {target}: {e}. "
+            "Table will be created on first data write."
+        )
 
 def create_table(
     contract: DataContract,
@@ -660,6 +1114,12 @@ def create_table(
     backend = backend.lower()
 
     if backend in ("duckdb",):
+        mat = contract.materialization
+        is_delta = mat and str(mat.format or "").lower() == "delta"
+        if is_delta:
+            _init_delta_table_from_contract(contract)
+            return ddl
+
         import duckdb
 
         con = connection or duckdb.connect(database=str(db_path or ":memory:"))
@@ -668,7 +1128,9 @@ def create_table(
                 statement = statement.strip()
                 if statement:
                     con.execute(statement)
-            logger.info(f"Created table via DuckDB: {ddl.splitlines()[0]}")
+            # Print a cleaner summary instead of just the first line
+            table_lbl = table_name or _resolve_table_name(contract)
+            logger.info(f"Created table {table_lbl} via DuckDB")
         finally:
             if not connection:
                 con.close()
@@ -689,6 +1151,16 @@ def create_table(
                 con.close()
 
     elif backend in ("spark", "databricks"):
+        # If Spark is targeting direct storage (not a catalog table), use
+        # the empty-DataFrame Delta init — spark.sql("CREATE TABLE ...") would
+        # register a managed table in the default catalog, not at the path.
+        mat = contract.materialization
+        target_str = str(mat.target_path) if mat and mat.target_path else ""
+        is_direct_storage = target_str and not target_str.startswith("table:")
+        if is_direct_storage:
+            _init_delta_table_from_contract(contract)
+            return ddl
+
         try:
             from pyspark.sql import SparkSession
 
@@ -752,6 +1224,9 @@ def create_table(
             logger.info(f"Created table via PostgreSQL: {ddl.splitlines()[0]}")
         finally:
             cursor.close()
+
+    elif backend in ("polars", "pandas", "python"):
+        _init_delta_table_from_contract(contract)
 
     else:
         raise ValueError(f"Unsupported backend for table creation: {backend}")
