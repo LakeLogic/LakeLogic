@@ -196,7 +196,7 @@ class DeltaAdapter:
             storage_options = resolve_storage_options(path, storage_options)
 
         # Write Delta table
-        # The pyarrow engine does not support schema_mode='merge' in older deltalake versions; use rust engine if available.
+        # The pyarrow engine does not support schema_mode='merge' in older deltalake versions; use rust engine if available.  # noqa: E501
         kwargs = {
             "mode": mode,
             "storage_options": storage_options,

@@ -3560,12 +3560,12 @@ class DataGenerator:
         # ── 2. Invalid rows manifest (metadata preserved) ─────────────────
         if isinstance(df, pl.DataFrame):
             if "_is_invalid" in df.columns:
-                invalid_df = df.filter(pl.col("_is_invalid") == True)
+                invalid_df = df.filter(pl.col("_is_invalid"))
             else:
                 invalid_df = pl.DataFrame()
         else:
             if "_is_invalid" in df.columns:
-                invalid_df = df[df["_is_invalid"] == True]
+                invalid_df = df[df["_is_invalid"]]
             else:
                 invalid_df = df.iloc[0:0]
 

@@ -2871,7 +2871,7 @@ class DataProcessor:
         if mat:
             _target_path = getattr(mat, "target_path", "") or getattr(mat, "path", "") or ""
         dataset = None
-        metadata = getattr(self.contract, "metadata", {}) or {}
+        getattr(self.contract, "metadata", {}) or {}
         info = getattr(self.contract, "info", None)
 
         if str(_target_path).startswith("table:"):
@@ -3061,7 +3061,7 @@ class DataProcessor:
 
         if not global_enabled or not contract_enabled:
             logger.debug(
-                f"Notifications disabled (global_enabled={global_enabled}, contract_enabled={contract_enabled}). Skipping event: {event}"
+                f"Notifications disabled (global_enabled={global_enabled}, contract_enabled={contract_enabled}). Skipping event: {event}"  # noqa: E501
             )
             return
 
@@ -3120,7 +3120,7 @@ class DataProcessor:
                         try:
                             dispatched_targets.add(target)
                         except TypeError:
-                            pass  # If unhashable (like a list), we still successfully dispatched it, just can't dedupe it later
+                            pass  # If unhashable (like a list), we still successfully dispatched it, just can't dedupe it later  # noqa: E501
 
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
@@ -3438,7 +3438,7 @@ class DataProcessor:
         """
         # ── Resolve metadata fields ─────────────────────────────────────────────
         # Use centralized _resolved_* attributes from __init__
-        metadata = getattr(self.contract, "metadata", {}) or {}
+        getattr(self.contract, "metadata", {}) or {}
         info = getattr(self.contract, "info", None)
 
         domain = self._resolved_domain

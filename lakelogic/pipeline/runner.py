@@ -1663,7 +1663,6 @@ class LakehousePipeline:
                 entity_label = getattr(c, "entity", str(c))
 
                 # Use a thread with join(timeout) — works on all platforms
-                result_holder = [None]
                 error_holder = [None]
 
                 def _target():

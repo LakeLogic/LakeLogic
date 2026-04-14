@@ -1268,7 +1268,7 @@ def get_last_run_dlt_state(
                     where += " AND data_layer = ?"
                     params.append(data_layer)
             res = con.execute(
-                f"SELECT dlt_state_json FROM {full_table} WHERE {where} AND dlt_state_json IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
+                f"SELECT dlt_state_json FROM {full_table} WHERE {where} AND dlt_state_json IS NOT NULL ORDER BY timestamp DESC LIMIT 1",  # noqa: E501
                 params,
             ).fetchone()
             return res[0] if res and res[0] is not None else None
@@ -1304,7 +1304,7 @@ def get_last_run_dlt_state(
                     where += " AND data_layer = ?"
                     params.append(data_layer)
             cursor = con.execute(
-                f"SELECT dlt_state_json FROM {table_name} WHERE {where} AND dlt_state_json IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
+                f"SELECT dlt_state_json FROM {table_name} WHERE {where} AND dlt_state_json IS NOT NULL ORDER BY timestamp DESC LIMIT 1",  # noqa: E501
                 params,
             )
             res = cursor.fetchone()

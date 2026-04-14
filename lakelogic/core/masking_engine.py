@@ -6,7 +6,8 @@ Extends the existing ``gdpr.py`` masking with:
 - **Strategies**: ``nullify``, ``hash``, ``redact``, ``partial``, ``encrypt``
 - **User context**: caller passes their groups; only fields they lack access to are masked
 - **Databricks UC mask generation**: auto-generate ``CREATE FUNCTION`` + ``ALTER TABLE`` SQL
-- **Variable-driven Encryption**: pass data encryption keys directly via environment variables (e.g. injected via Azure Key Vault)
+- **Variable-driven Encryption**: pass data encryption keys directly via environment
+  variables (e.g. injected via Azure Key Vault)
 
 Usage::
 
