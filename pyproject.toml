@@ -321,6 +321,7 @@ ignore = []
 "lakelogic/cli/driver.py" = ["I001", "E402"]
 "lakelogic/cli/main.py" = ["I001"]
 "examples/**/*.ipynb" = ["I001", "E402", "E712", "E501"]
+"docs/examples/**/*.ipynb" = ["I001", "E402", "E712", "E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["lakelogic"]
