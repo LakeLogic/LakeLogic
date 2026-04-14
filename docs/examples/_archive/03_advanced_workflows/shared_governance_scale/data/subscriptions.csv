@@ -1,0 +1,5 @@
+subscription_id,user_id,plan,status,updated_at
+sub1,u1,basic,ACTIVE,2026-02-01T09:00:00Z
+sub2,u2,pro,active,2026-02-01T10:00:00Z
+sub2,u2,pro,active,2026-02-02T10:00:00Z
+sub3,,basic,active,2026-02-02T11:00:00Z

@@ -1,0 +1,4 @@
+ticket_id,user_id,status,created_at
+t1,u1,OPEN,2026-02-01T09:30:00Z
+t2,u2,closed,2026-02-01T10:30:00Z
+t3,,open,2026-02-01T11:30:00Z

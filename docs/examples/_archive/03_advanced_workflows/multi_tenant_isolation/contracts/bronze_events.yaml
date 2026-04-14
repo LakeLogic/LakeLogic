@@ -1,0 +1,89 @@
+version: "1.0.0"
+
+info:
+  title: "Tenant Clickstream Events (Bronze)"
+  version: "1.0.0"
+  description: |
+    Raw in-app clickstream events from the SaaS platform. One pipeline run per tenant.
+    Path isolation enforced via LAKELOGIC_ENV={env}-{tenant}.
+  owner: "Platform Data Engineering"
+  target_layer: "bronze"
+  status: active
+
+# Production fallback (used when no env override matches)
+server:
+  type: adls
+  format: parquet
+  path: "abfss://events@myaccount.dfs.core.windows.net/prod/default/bronze/"
+  mode: validate
+
+# Per-environment, per-tenant path overrides
+environments:
+  # ── DEV (local CSV, no credentials needed) ──────────────────────────────────
+  dev-acme:
+    path: "./data/dev/acme/events_raw.csv"
+    format: csv
+  dev-globex:
+    path: "./data/dev/globex/events_raw.csv"
+    format: csv
+  # ── TEST (shared test ADLS, test service principal) ──────────────────────────
+  test-acme:
+    path: "abfss://events@myaccount.dfs.core.windows.net/test/acme/bronze/"
+  test-globex:
+    path: "abfss://events@myaccount.dfs.core.windows.net/test/globex/bronze/"
+  # ── PROD (tenant-namespaced ADLS, prod service principal) ────────────────────
+  prod-acme:
+    path: "abfss://events@myaccount.dfs.core.windows.net/prod/acme/bronze/"
+  prod-globex:
+    path: "abfss://events@myaccount.dfs.core.windows.net/prod/globex/bronze/"
+
+dataset: bronze_events
+primary_key: ["event_id"]
+
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+
+model:
+  fields:
+    - name: event_id
+      type: string
+    - name: tenant_id
+      type: string
+      description: "Tenant namespace — must match the pipeline's active tenant"
+    - name: user_id
+      type: string
+      pii: true
+    - name: session_id
+      type: string
+    - name: event_type
+      type: string
+      description: "page_view | click | form_submit | purchase | logout"
+    - name: page_url
+      type: string
+    - name: event_ts
+      type: timestamp
+
+quality:
+  row_rules:
+    - name: event_id_not_null
+      sql: "event_id IS NOT NULL"
+      category: completeness
+
+    - name: valid_event_type
+      sql: "event_type IN ('page_view','click','form_submit','purchase','logout')"
+      category: validity
+
+    - name: event_ts_not_null
+      sql: "event_ts IS NOT NULL"
+      category: completeness
+
+  dataset_rules:
+    - name: no_duplicate_events
+      sql: "SELECT COUNT(*) - COUNT(DISTINCT event_id) FROM bronze_events"
+      must_be_less_than: 1
+
+quarantine:
+  enabled: true
+  include_error_reason: true
+  target: "./data/quarantine/bronze_events/"

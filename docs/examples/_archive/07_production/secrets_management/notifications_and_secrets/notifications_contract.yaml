@@ -1,0 +1,15 @@
+version: 1.0.0
+dataset: notifications_example
+info:
+  title: Notifications and Secrets
+  description: Notification and secret resolution example
+notifications:
+  on_quarantine:
+    enabled: true
+    threshold: 0.05
+  on_failure:
+    enabled: true
+secrets:
+  providers:
+    - env
+    - keyvault

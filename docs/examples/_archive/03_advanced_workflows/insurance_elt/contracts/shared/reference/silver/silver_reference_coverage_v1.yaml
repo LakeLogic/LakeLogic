@@ -1,0 +1,51 @@
+version: 1.0.0
+info:
+  title: Reference Coverage Types (Silver)
+  version: 1.0.0
+  description: Coverage code reference.
+  owner: Shared Reference Data
+  status: active
+  classification: Public
+metadata:
+  run_log_path: ../../../../output/run_logs/ref_coverage.json
+  run_log_table: lakelogic.run_logs
+  run_log_backend: duckdb
+  run_log_database: ../../../../output/run_logs/lakelogic_run_logs.duckdb
+server:
+  type: local
+  path: ../../../../data/reference/coverage_types.csv
+  format: csv
+environments:
+  dev:
+    path: ../../../../data/reference/coverage_types.csv
+    format: csv
+dataset: silver_reference_coverage
+primary_key:
+- coverage_code
+model:
+  fields:
+  - name: coverage_code
+    type: string
+    required: true
+  - name: coverage_type
+    type: string
+quality:
+  row_rules:
+  - not_null: coverage_code
+  dataset_rules:
+  - unique: coverage_code
+lineage:
+  enabled: true
+materialization:
+  strategy: overwrite
+  target_path: ../../../../output/silver/reference_coverage
+  format: parquet
+quarantine:
+  enabled: true
+  include_error_reason: true
+  target: ../../../../output/quarantine/reference_coverage
+source:
+  type: landing
+  path: ../../../../data/reference
+  load_mode: full
+  pattern: coverage_types*.csv

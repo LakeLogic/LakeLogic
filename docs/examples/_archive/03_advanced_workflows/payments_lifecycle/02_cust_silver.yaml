@@ -1,0 +1,27 @@
+version: "1.0.0"
+upstream: ["01_cust_bronze"]
+
+info:
+  title: "Cleaned Customers (Silver)"
+  version: 1.0.0
+  description: "Deduplicated and typed customer records."
+  target_layer: "silver"
+
+server:
+  type: "local"
+  format: "parquet"
+  path: "data/bronze_customers.parquet"
+
+transformations:
+  - derive:
+      field: "updated_at_ts"
+      sql: "CAST(updated_at AS TIMESTAMP)"
+  - deduplicate:
+      on: ["customer_id"]
+      sort_by: ["updated_at_ts"]
+      order: "desc"
+
+materialization:
+  strategy: "overwrite"
+  format: "parquet"
+  target_path: "data/silver_customers.parquet"

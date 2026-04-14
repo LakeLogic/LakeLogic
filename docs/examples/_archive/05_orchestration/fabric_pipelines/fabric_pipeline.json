@@ -1,0 +1,83 @@
+{
+  "name": "lakelogic_fabric_pipeline",
+  "properties": {
+    "activities": [
+      {
+        "name": "RunReference",
+        "type": "SparkJob",
+        "dependsOn": [],
+        "typeProperties": {
+          "file": "abfss://code@fabriclakehouse.dfs.core.windows.net/tools/lakelogic_driver.py",
+          "args": [
+            "--registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/_registry.yaml",
+            "--reference-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+            "--gold-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+            "--layers", "reference",
+            "--window", "last_success",
+            "--summary-table", "lakelogic.pipeline_runs",
+            "--summary-backend", "duckdb",
+            "--summary-database", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
+            "--metrics-path", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
+          ]
+        }
+      },
+      {
+        "name": "RunBronze",
+        "type": "SparkJob",
+        "dependsOn": [{"activity": "RunReference", "dependencyConditions": ["Succeeded"]}],
+        "typeProperties": {
+          "file": "abfss://code@fabriclakehouse.dfs.core.windows.net/tools/lakelogic_driver.py",
+          "args": [
+            "--registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/_registry.yaml",
+            "--reference-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+            "--gold-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+            "--layers", "bronze",
+            "--window", "last_success",
+            "--summary-table", "lakelogic.pipeline_runs",
+            "--summary-backend", "duckdb",
+            "--summary-database", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
+            "--metrics-path", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
+          ]
+        }
+      },
+      {
+        "name": "RunSilver",
+        "type": "SparkJob",
+        "dependsOn": [{"activity": "RunBronze", "dependencyConditions": ["Succeeded"]}],
+        "typeProperties": {
+          "file": "abfss://code@fabriclakehouse.dfs.core.windows.net/tools/lakelogic_driver.py",
+          "args": [
+            "--registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/_registry.yaml",
+            "--reference-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+            "--gold-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+            "--layers", "silver",
+            "--window", "last_success",
+            "--summary-table", "lakelogic.pipeline_runs",
+            "--summary-backend", "duckdb",
+            "--summary-database", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
+            "--metrics-path", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
+          ]
+        }
+      },
+      {
+        "name": "RunGold",
+        "type": "SparkJob",
+        "dependsOn": [{"activity": "RunSilver", "dependencyConditions": ["Succeeded"]}],
+        "typeProperties": {
+          "file": "abfss://code@fabriclakehouse.dfs.core.windows.net/tools/lakelogic_driver.py",
+          "args": [
+            "--registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/_registry.yaml",
+            "--reference-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/shared/reference/_registry.yaml",
+            "--gold-registry", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml",
+            "--layers", "gold",
+            "--window", "last_success",
+            "--summary-table", "lakelogic.pipeline_runs",
+            "--summary-backend", "duckdb",
+            "--summary-database", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/lakelogic_pipeline_runs.duckdb",
+            "--metrics-path", "abfss://code@fabriclakehouse.dfs.core.windows.net/examples/insurance_elt/output/run_logs/pipeline_metrics.json"
+          ]
+        }
+      }
+    ]
+  }
+}

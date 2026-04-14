@@ -1,0 +1,4 @@
+customer_id,name,email,plan,updated_at
+cust_1,Alice,alice@example.com,pro,2024-01-01 00:00:00
+cust_2,Bob,bob@example.com,basic,2024-01-01 00:00:00
+cust_3,Charlie,charlie@example.com,free,2024-01-01 00:00:00

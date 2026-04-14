@@ -1,0 +1,4 @@
+purchase_id,user_id,amount,currency,purchase_ts
+p1,u1,12.5,USD,2026-02-01T10:15:00Z
+p2, u2,99.0,USD,2026-02-01T11:20:00Z
+p3,,5.0,USD,2026-02-01T11:25:00Z

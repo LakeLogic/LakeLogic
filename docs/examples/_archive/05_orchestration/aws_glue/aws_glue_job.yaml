@@ -1,0 +1,4 @@
+version: 1.0.0
+platform: aws_glue
+job: lakelogic_glue_job
+command: lakelogic-driver --registry contracts/_registry.yaml --layers bronze,silver

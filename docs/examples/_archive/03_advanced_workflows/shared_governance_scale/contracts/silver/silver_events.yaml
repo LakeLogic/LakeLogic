@@ -1,0 +1,126 @@
+version: 1.0.0
+metadata:
+  owner: data-platform@company.com
+  policy_pack: shared_standard
+  domain: growth
+  system: app_events
+  soft_delete_applied: !!bool 'true'
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+quality:
+  enforce_required: !!bool 'true'
+  dataset_rules:
+  - row_count_between:
+      min: 1
+      max: 1000000000
+  row_rules:
+  - accepted_values:
+      field: operation
+      values:
+      - i
+      - u
+      - d
+      - insert
+      - update
+      - delete
+      - upsert
+      - merge
+lineage:
+  enabled: !!bool 'true'
+  capture_domain: !!bool 'true'
+  capture_system: !!bool 'true'
+materialization:
+  strategy: append
+  format: parquet
+  target_path: ../../output/silver/events
+info:
+  title: Silver Events
+  version: 1.0.0
+  target_layer: silver
+dataset: silver_events
+source:
+  type: landing
+  path: ../../data/events.csv
+  load_mode: full
+model:
+  fields:
+  - name: event_id
+    type: string
+    required: !!bool 'true'
+  - name: user_id
+    type: string
+    required: !!bool 'true'
+  - name: event_type
+    type: string
+  - name: amount
+    type: double
+  - name: event_ts
+    type: timestamp
+  - name: operation
+    type: string
+  - name: deleted_at
+    type: timestamp
+  - name: is_deleted
+    type: boolean
+transformations:
+- lower:
+    fields:
+    - operation
+  phase: pre
+- map_values:
+    field: operation
+    mapping:
+      i: !!bool 'true'
+      u: !!bool 'true'
+      d: !!bool 'true'
+      insert: !!bool 'true'
+      update: !!bool 'true'
+      delete: !!bool 'true'
+      upsert: !!bool 'true'
+      merge: !!bool 'true'
+    default: !!bool 'false'
+    output: __op_delete
+  phase: pre
+- filter:
+    sql: __op_delete IS NOT TRUE
+  phase: pre
+- sql: SELECT *, CASE WHEN deleted_at IS NOT NULL THEN TRUE ELSE FALSE END AS __deleted_at_flag
+    FROM source
+  phase: pre
+- map_values:
+    field: is_deleted
+    mapping:
+      'true': !!bool 'true'
+      'false': !!bool 'false'
+      t: !!bool 'true'
+      f: !!bool 'false'
+      yes: !!bool 'true'
+      no: !!bool 'false'
+      y: !!bool 'true'
+      n: !!bool 'false'
+      '1': !!bool 'true'
+      '0': !!bool 'false'
+      deleted: !!bool 'true'
+      delete: !!bool 'true'
+    default: !!bool 'false'
+    output: __is_deleted_flag
+  phase: pre
+- coalesce:
+    field: is_deleted
+    sources:
+    - __is_deleted_flag
+    - __deleted_at_flag
+    - __op_delete
+    default: !!bool 'false'
+    output: is_deleted
+  phase: pre
+- drop:
+    columns:
+    - __op_delete
+    - __deleted_at_flag
+    - __is_deleted_flag
+  phase: pre
+- filter:
+    sql: amount IS NULL OR amount >= 0
+  phase: pre

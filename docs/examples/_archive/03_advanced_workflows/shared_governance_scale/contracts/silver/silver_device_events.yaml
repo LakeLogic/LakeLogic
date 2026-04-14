@@ -1,0 +1,44 @@
+version: 1.0.0
+metadata:
+  owner: data-platform@company.com
+  policy_pack: shared_standard
+  domain: growth
+  system: app_events
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+quality:
+  enforce_required: !!bool 'true'
+  dataset_rules:
+  - row_count_between:
+      min: 1
+      max: 1000000000
+lineage:
+  enabled: !!bool 'true'
+  capture_domain: !!bool 'true'
+  capture_system: !!bool 'true'
+materialization:
+  strategy: append
+  format: parquet
+  target_path: ../../output/silver/device_events
+info:
+  title: Silver Device Events
+  version: 1.0.0
+  target_layer: silver
+dataset: silver_device_events
+source:
+  type: landing
+  path: ../../data/device_events.csv
+  load_mode: full
+model:
+  fields:
+  - name: device_event_id
+    type: string
+    required: !!bool 'true'
+  - name: user_id
+    type: string
+    required: !!bool 'true'
+  - name: device_id
+    type: string
+  - name: event_ts
+    type: timestamp

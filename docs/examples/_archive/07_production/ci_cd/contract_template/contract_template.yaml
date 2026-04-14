@@ -1,0 +1,5 @@
+version: 1.0.0
+dataset: contract_template_example
+info:
+  title: Contract Template
+  description: Production-ready template with schemas, rules, and SLAs

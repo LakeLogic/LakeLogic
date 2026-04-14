@@ -1,0 +1,22 @@
+version: 1.0.0
+dataset: github_webhooks
+description: Receive GitHub events via webhooks
+source:
+  type: stream
+  connector: webhook
+  port: 8080
+  path: /github-webhook
+model:
+  fields:
+  - name: action
+    type: string
+  - name: repository
+    type: struct
+  - name: sender
+    type: struct
+materialization:
+  bronze:
+    enabled: true
+    path: ./data/bronze/github_webhooks/
+    format: delta
+    mode: append
