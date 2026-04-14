@@ -1,0 +1,5 @@
+version: 1.0.0
+platform: airflow
+job: lakelogic_pipeline
+schedule: '@daily'
+command: lakelogic-driver --registry contracts/_registry.yaml --layers bronze,silver

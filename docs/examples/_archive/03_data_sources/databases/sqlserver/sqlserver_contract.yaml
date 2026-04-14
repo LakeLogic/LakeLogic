@@ -1,0 +1,35 @@
+version: 1.0.0
+dataset: bronze_sqlserver_orders
+description: SQL Server extraction example
+source:
+  type: database
+  connector: sqlserver
+  connection:
+    host: localhost
+    port: 1433
+    database: operations_db
+    username: env:SQLSERVER_USER
+    password: env:SQLSERVER_PASSWORD
+  table: dbo.orders
+model:
+  fields:
+  - name: order_id
+    type: integer
+  - name: customer_id
+    type: integer
+  - name: order_date
+    type: date
+  - name: total_amount
+    type: decimal
+quality:
+  row_rules:
+  - not_null:
+      field: order_id
+      name: order_id_not_null
+      severity: error
+materialization:
+  good:
+    enabled: true
+    path: s3://datalake/bronze/sqlserver_orders/
+    format: delta
+    mode: append

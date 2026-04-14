@@ -1,0 +1,6 @@
+raw_id,customer_id,gateway,amount_str,event_ts
+tx_001,cust_1,stripe,100.50,2024-02-01 10:00:00
+tx_002,cust_2,paypal,45.00,2024-02-01 11:30:00
+tx_003,cust_1,stripe,200.00,2024-02-02 09:15:00
+tx_004,cust_3,square,12.99,2024-02-02 14:00:00
+bad_id,cust_99,unknown,abc,now

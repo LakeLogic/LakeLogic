@@ -1,0 +1,121 @@
+version: 1.0.0
+dataset: bronze_api_customers
+description: Bronze layer customer data from REST API (OAuth2 with automatic pagination)
+source:
+  type: api
+  connector: rest
+  base_url: https://api.example.com
+  endpoint: /v1/customers
+  auth:
+    type: oauth2
+    client_id: ${OAUTH_CLIENT_ID}
+    client_secret: ${OAUTH_CLIENT_SECRET}
+    token_url: https://api.example.com/oauth/token
+  pagination:
+    type: offset
+    page_size: 100
+    max_pages: null
+  params:
+    status: active
+    include_metadata: true
+  rate_limit: 10
+  retry:
+    attempts: 3
+    delay: 1
+model:
+  fields:
+  - name: id
+    type: integer
+    description: Customer ID from API
+  - name: email
+    type: string
+    description: Customer email
+  - name: first_name
+    type: string
+    description: First name
+  - name: last_name
+    type: string
+    description: Last name
+  - name: phone
+    type: string
+    description: Phone number
+  - name: company
+    type: string
+    description: Company name
+  - name: country
+    type: string
+    description: Country code
+  - name: created_at
+    type: timestamp
+    description: Account creation timestamp
+  - name: updated_at
+    type: timestamp
+    description: Last update timestamp
+  - name: subscription_tier
+    type: string
+    description: Subscription tier (free, basic, premium, enterprise)
+transformations:
+- name: full_name
+  expression: first_name + ' ' + last_name
+  output_column: full_name
+- name: email_domain
+  expression: email.split('@')[1]
+  output_column: email_domain
+- name: is_enterprise
+  expression: subscription_tier == 'enterprise'
+  output_column: is_enterprise
+quality:
+  row_rules:
+  - not_null:
+      field: id
+      name: id_not_null
+      severity: error
+  - not_null:
+      field: email
+      name: email_not_null
+      severity: error
+  - regex_match:
+      field: email
+      pattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+      name: email_valid_format
+      severity: warning
+  - accepted_values:
+      field: subscription_tier
+      values:
+      - free
+      - basic
+      - premium
+      - enterprise
+      name: subscription_tier_valid
+      severity: error
+  - regex_match:
+      field: phone
+      pattern: ^\+?[1-9]\d{1,14}$
+      name: phone_format
+      severity: warning
+  dataset_rules:
+  - unique: id
+  - unique: email
+materialization:
+  good:
+    enabled: true
+    path: main.bronze.api_customers
+    format: delta
+    mode: append
+  quarantine:
+    enabled: true
+    path: main.quarantine.api_customers
+    format: delta
+    mode: append
+lineage:
+  inject_source_path: true
+  inject_run_id: true
+  inject_processing_timestamp: true
+  source_system: Customer API
+  data_domain: CRM
+notifications:
+  on_quarantine:
+    enabled: true
+    threshold: 0.02
+  on_failure:
+    enabled: true

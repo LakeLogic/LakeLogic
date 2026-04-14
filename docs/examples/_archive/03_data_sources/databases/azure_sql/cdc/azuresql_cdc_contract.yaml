@@ -1,0 +1,125 @@
+version: 1.0.0
+dataset: bronze_orders
+description: Bronze layer orders from Azure SQL Database (CDC with automatic Azure
+  AD auth)
+source:
+  type: database
+  connector: azuresql
+  server: myserver.database.windows.net
+  database: production_db
+  table: dbo.orders
+  cdc:
+    enabled: true
+    watermark_column: updated_at
+    watermark_type: timestamp
+model:
+  fields:
+  - name: order_id
+    type: integer
+    description: Unique order identifier
+  - name: customer_id
+    type: integer
+    description: Customer identifier
+  - name: order_date
+    type: date
+    description: Order placement date
+  - name: total_amount
+    type: decimal
+    description: Total order amount
+  - name: status
+    type: string
+    description: Order status (pending, confirmed, shipped, delivered, cancelled)
+  - name: payment_method
+    type: string
+    description: Payment method (credit_card, debit_card, paypal, bank_transfer)
+  - name: shipping_address
+    type: string
+    description: Shipping address
+  - name: created_at
+    type: timestamp
+    description: Record creation timestamp
+  - name: updated_at
+    type: timestamp
+    description: Record last update timestamp (CDC watermark)
+transformations:
+- derive:
+    field: order_value_band
+    sql: "CASE WHEN total_amount >= 100 THEN 'high' WHEN total_amount >= 50 THEN 'mid' ELSE 'low' END"
+- derive:
+    field: is_repeat_customer
+    sql: customer_id >= 50
+quality:
+  row_rules:
+  - not_null:
+      field: order_id
+      name: order_id_not_null
+      severity: error
+  - not_null:
+      field: customer_id
+      name: customer_id_not_null
+      severity: error
+  - name: total_amount_positive
+    sql: total_amount > 0
+    category: correctness
+    severity: error
+  - accepted_values:
+      field: status
+      values:
+      - pending
+      - confirmed
+      - shipped
+      - delivered
+      - cancelled
+      name: status_valid
+      severity: error
+  - accepted_values:
+      field: payment_method
+      values:
+      - credit_card
+      - debit_card
+      - paypal
+      - bank_transfer
+      name: payment_method_valid
+      severity: error
+  - name: order_date_not_future
+    sql: order_date <= CAST(updated_at AS DATE)
+    category: correctness
+    severity: error
+  - name: updated_at_after_created_at
+    sql: updated_at >= created_at
+    category: correctness
+    severity: warning
+  dataset_rules:
+  - unique: order_id
+  - row_count_between:
+      min: 1
+materialization:
+  good:
+    enabled: true
+    path: s3://datalake/bronze/orders/
+    format: delta
+    mode: append
+    partition_by:
+    - order_date
+  quarantine:
+    enabled: true
+    path: s3://datalake/quarantine/orders/
+    format: delta
+    mode: append
+lineage:
+  inject_source_path: true
+  inject_run_id: true
+  inject_processing_timestamp: true
+  source_system: Azure SQL - Production DB
+  data_domain: Sales
+notifications:
+  on_quarantine:
+    enabled: true
+    threshold: 0.05
+  on_failure:
+    enabled: true
+metadata:
+  owner: Data Engineering Team
+  contact: data-eng@company.com
+  sla_hours: 24
+  retention_days: 90

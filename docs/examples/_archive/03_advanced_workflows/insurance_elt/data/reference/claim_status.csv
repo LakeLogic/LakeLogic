@@ -1,0 +1,4 @@
+claim_status,status_group
+OPEN,Active
+CLOSED,Resolved
+DENIED,Resolved

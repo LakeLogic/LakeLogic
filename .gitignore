@@ -195,8 +195,6 @@ examples/colab/landing/
 examples/colab/dag_demo/
 examples/colab/dlt_pipelines/
 
-# Docs-side colab copy (synced from examples/colab before mkdocs build)
-docs/examples/colab/
 
 # LakeGuard state files
 _lakelogic_state/
@@ -263,7 +261,6 @@ build/
 
 # Documentation build
 docs/_build/
-docs/examples/
 site/
 
 # Temporary test files

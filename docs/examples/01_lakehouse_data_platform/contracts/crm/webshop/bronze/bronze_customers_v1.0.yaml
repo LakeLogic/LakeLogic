@@ -1,0 +1,58 @@
+version: 1.0.0
+dataset: bronze_customers
+
+info:
+  title: Webshop Customers (Bronze)
+  table_name: "{bronze_layer}_{system}_customers"
+  description: "Raw customer master data with PII fields demonstrating masking."
+  target_layer: bronze
+  domain: crm
+  system: webshop
+
+model:
+  fields:
+    - name: customer_id
+      type: string
+      required: true
+    - name: name
+      type: string
+      required: true
+      pii: true
+      masking: redact
+      description: "Customer full name (PII — redacted in output)."
+    - name: email
+      type: string
+      pii: true
+      masking: hash
+      description: "Customer email (PII — hashed in output)."
+    - name: phone
+      type: string
+      pii: true
+      masking: partial
+      description: "Phone number (PII — partially masked, e.g. ***-***-1234)."
+    - name: country
+      type: string
+    - name: segment
+      type: string
+      description: "Customer segment: premium, standard, new."
+    - name: signup_date
+      type: string
+
+source:
+  type: landing
+  path: "landing_crm/webshop/customers"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  partition:
+    format: "y_%Y/m_%m/d_%d"
+
+quality:
+  row_rules:
+    - name: has_customer_id
+      sql: "customer_id IS NOT NULL"
+      category: completeness
+    - name: valid_email
+      sql: "email IS NULL OR email LIKE '%@%'"
+      category: validity

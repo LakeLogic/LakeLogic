@@ -1,0 +1,110 @@
+version: 1.0.0
+dataset: gold_daily_revenue
+
+info:
+  title: Daily Revenue (Gold)
+  table_name: "{gold_layer}_{system}_daily_revenue"
+  description: >
+    Daily revenue fact aggregation by channel, category, and customer
+    dimension surrogate key. Joins against dim_customers (current row)
+    to resolve the SCD2 surrogate key for star-schema consumption.
+  target_layer: gold
+  domain: crm
+  system: webshop
+
+primary_key:
+  - order_date
+  - channel
+  - category
+  - customer_sk
+
+model:
+  fields:
+    - name: order_date
+      type: string
+      required: true
+    - name: channel
+      type: string
+      required: true
+    - name: category
+      type: string
+    - name: customer_sk
+      type: string
+      description: "SCD2 surrogate key from dim_customers (current version)."
+    - name: customer_segment
+      type: string
+    - name: total_orders
+      type: integer
+      description: "Count of distinct orders."
+    - name: total_items
+      type: integer
+      description: "Sum of quantities sold."
+    - name: gross_revenue
+      type: double
+      description: "Sum of line_total (after discounts)."
+    - name: avg_order_value
+      type: double
+      description: "Average line_total per order."
+
+source:
+  type: landing
+  path: "lakehouse/{domain}/{silver_layer}_{system}_orders_enriched"
+  format: delta
+
+transformations:
+  - phase: pre
+    sql: >
+      SELECT
+        o.order_date,
+        o.channel,
+        COALESCE(o.category, 'uncategorized') AS category,
+        COALESCE(d.customer_sk, 'UNKNOWN')    AS customer_sk,
+        COALESCE(d.segment, o.customer_segment, 'unknown') AS customer_segment,
+        COUNT(DISTINCT o.order_id) AS total_orders,
+        SUM(o.quantity)            AS total_items,
+        ROUND(SUM(o.line_total), 2) AS gross_revenue,
+        ROUND(AVG(o.line_total), 2) AS avg_order_value
+      FROM source o
+      LEFT JOIN dim_customers d
+        ON o.customer_id = d.customer_id
+        AND CAST(o.order_date AS DATE) >= CAST(d.effective_from AS DATE)
+        AND CAST(o.order_date AS DATE) <  CAST(d.effective_to   AS DATE)
+      GROUP BY o.order_date, o.channel, category, d.customer_sk, d.segment, customer_segment
+
+# Link to dim_customers for the SCD2 surrogate key lookup
+links:
+  - name: dim_customers
+    path: "lakehouse/{domain}/{gold_layer}_{system}_dim_customers"
+    type: delta
+    columns: [customer_sk, customer_id, segment, effective_from, effective_to]
+
+quality:
+  row_rules:
+    - name: positive_revenue
+      sql: "gross_revenue >= 0"
+      category: validity
+    - name: has_customer_sk
+      sql: "customer_sk IS NOT NULL"
+      category: completeness
+  dataset_rules:
+    - name: has_rows
+      sql: "SELECT COUNT(*) FROM {dataset}"
+      must_be_greater_than: 0
+
+materialization:
+  strategy: overwrite
+
+
+downstream:
+  - type: table
+    name: "gold_marketing_funnel"
+    platform: duckdb
+    owner: "analytics-team"
+    managed: false                          # NOT managed by this _system.yaml
+    
+  - type: dashboard
+    name: "Daily Revenue"
+    platform: power_bi
+    url: "https://app.powerbi.com/..."
+    owner: "analytics-team"
+    

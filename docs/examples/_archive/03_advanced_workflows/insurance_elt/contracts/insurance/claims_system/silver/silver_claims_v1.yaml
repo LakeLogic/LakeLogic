@@ -1,0 +1,119 @@
+version: 1.0.0
+info:
+  title: Claims (Silver)
+  version: 1.0.0
+  description: Cleansed claims with policy and status enrichment.
+  owner: Claims Data Team
+  status: active
+  classification: PII
+metadata:
+  run_log_path: ../../../../output/run_logs/claims_silver.json
+  run_log_table: lakelogic.run_logs
+  run_log_backend: duckdb
+  run_log_database: ../../../../output/run_logs/lakelogic_run_logs.duckdb
+server:
+  type: local
+  path: ../../../../output/bronze/claims.parquet
+  format: parquet
+environments:
+  dev:
+    path: ../../../../output/bronze/claims.parquet
+    format: parquet
+links:
+- name: ref_claim_status
+  type: parquet
+  path: ../../../../output/silver/reference_claim_status.parquet
+- name: silver_policies
+  type: parquet
+  path: ../../../../output/silver/policies.parquet
+dataset: silver_claims
+primary_key:
+- claim_id
+schema_policy:
+  evolution: strict
+  unknown_fields: quarantine
+model:
+  fields:
+  - name: claim_id
+    type: string
+    required: true
+  - name: policy_id
+    type: string
+    required: true
+  - name: claim_number
+    type: string
+  - name: claim_date
+    type: date
+  - name: claim_amount
+    type: double
+  - name: claim_status
+    type: string
+  - name: status_group
+    type: string
+  - name: loss_cause
+    type: string
+  - name: updated_at
+    type: timestamp
+transformations:
+- filter:
+    sql: op <> 'D'
+  phase: pre
+- deduplicate:
+    on:
+    - claim_id
+    sort_by:
+    - updated_at
+    order: desc
+  phase: pre
+- drop:
+    columns:
+    - op
+- join:
+    reference: ref_claim_status
+    on: claim_status
+    key: claim_status
+    fields:
+    - status_group
+    type: left
+  phase: post
+quality:
+  row_rules:
+  - not_null: claim_id
+  - accepted_values:
+      field: claim_status
+      values:
+      - OPEN
+      - CLOSED
+      - DENIED
+  - referential_integrity:
+      field: policy_id
+      reference: silver_policies
+      key: policy_id
+  dataset_rules:
+  - unique: claim_id
+lineage:
+  enabled: true
+materialization:
+  strategy: overwrite
+  target_path: ../../../../output/silver/claims
+  format: parquet
+quarantine:
+  enabled: true
+  strict_notifications: false
+  include_error_reason: true
+  target: ../../../../output/quarantine/claims_silver
+  notifications:
+  - type: webhook
+    target: env:LAKELOGIC_ALERT_WEBHOOK
+    on_events:
+    - quarantine
+    - failure
+source:
+  type: landing
+  path: ../../../../output/bronze
+  load_mode: incremental
+  pattern: claims*.parquet
+  watermark_field: updated_at
+upstream:
+- silver_policies
+- silver_reference_claim_status

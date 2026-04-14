@@ -1,0 +1,96 @@
+version: 1.0.0
+dataset: silver_customers
+
+info:
+  title: Customers Cleansed (Silver)
+  table_name: "{silver_layer}_{system}_customers"
+  description: >
+    Cleansed and standardised customer master data. Normalises segments,
+    trims whitespace, and applies data quality rules. PII fields carry
+    through with masking annotations for downstream consumption.
+  target_layer: silver
+  domain: crm
+  system: webshop
+
+primary_key:
+  - customer_id
+
+model:
+  fields:
+    - name: customer_id
+      type: string
+      required: true
+      primary_key: true
+    - name: name
+      type: string
+      required: true
+      description: "Customer full name (PII — redacted)."
+    - name: email
+      type: string
+      description: "Customer email (PII — hashed)."
+    - name: phone
+      type: string
+      description: "Phone number (PII — partially masked)."
+    - name: country
+      type: string
+    - name: segment
+      type: string
+      description: "Normalised customer segment."
+    - name: signup_date
+      type: string
+
+source:
+  type: landing
+  path: "lakehouse/{domain}/{bronze_layer}_{system}_customers"
+  format: delta
+
+transformations:
+
+  - phase: pre
+    description: "Remove duplicate customers"
+    sql: >
+      select * from (
+        SELECT *, row_number() OVER (PARTITION BY customer_id ORDER BY signup_date desc) as rn
+        FROM source
+      ) where rn = 1  
+
+  # Normalise segments and trim whitespace
+  - phase: pre
+    sql: >
+      SELECT
+        TRIM(customer_id)           AS customer_id,
+        TRIM(name)                  AS name,
+        LOWER(TRIM(email))          AS email,
+        phone,
+        COALESCE(TRIM(country), 'Unknown') AS country,
+        CASE
+          WHEN LOWER(TRIM(segment)) IN ('premium', 'vip')   THEN 'premium'
+          WHEN LOWER(TRIM(segment)) IN ('standard', 'regular') THEN 'standard'
+          WHEN LOWER(TRIM(segment)) IN ('new', 'trial')     THEN 'new'
+          WHEN LOWER(TRIM(segment)) IN ('churned', 'inactive', 'at_risk', 'win_back', 'low_value') THEN 'at_risk'
+          ELSE 'unknown'
+        END AS segment,
+        signup_date
+      FROM source
+      WHERE customer_id IS NOT NULL
+
+quality:
+  row_rules:
+    - name: has_customer_id
+      sql: "customer_id IS NOT NULL AND TRIM(customer_id) <> ''"
+      category: completeness
+    - name: has_name
+      sql: "name IS NOT NULL AND TRIM(name) <> ''"
+      category: completeness
+    - name: email not null
+      sql: "email IS NOT NULL"
+    - name: phone number present
+      sql: "phone IS NOT NULL"
+    - name: country not null
+      sql: "country IS NOT NULL"
+    - name: signup_date not null
+      sql: "signup_date IS NOT NULL"
+      category: validity
+    - name: known_segment
+      sql: "segment IN ('premium', 'standard', 'new', 'at_risk', 'unknown')"
+      category: consistency
