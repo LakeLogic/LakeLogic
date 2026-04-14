@@ -112,7 +112,7 @@ Write once. Run on [Spark](https://spark.apache.org/){: target="_blank" }, [Pola
 pip install "lakelogic"
 ```
 
-> **Next step:** Jump straight into the **[LakeLogic — 5 Minute Quickstart](examples/colab/00_quickstart.ipynb)** — run your first pipeline in 5 minutes (no local files required, it downloads sample data automatically).
+> **Next step:** Jump straight into the **[LakeLogic — 5 Minute Quickstart](examples/colab/00_quickstart.html)** — run your first pipeline in 5 minutes (no local files required, it downloads sample data automatically).
 
 ---
 
@@ -178,11 +178,15 @@ LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file
 - **SLO Monitoring & Anomaly Detection** — Native freshness, row count, and statistical anomaly detection with automatic multi-channel alerting when thresholds breach
 - **Schema Drift Protection** — Configurable `schema_policy` controls how the pipeline reacts to unknown columns and schema evolution — default `"allow"` for frictionless prototyping, opt in to `"strict"` / `"quarantine"` to lock down production contracts
 
+[ :simple-googlecolab: Run the Data Quality & Trust Guide in Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/01_data_quality_trust.ipynb){: target="_blank" .md-button }
+
 ### 📜 Compliance & Governance
 
 - **GDPR & HIPAA Compliance** — Contract-driven `forget_subjects()` with nullify, hash, or redact strategies and immutable audit trail
 - **Automatic Lineage** — Every row stamped with Run IDs and source paths — traceable from landing zone to Gold layer
 - **Pipeline Cost Intelligence** — Per-entity compute cost attribution with domain-level budget governance, autoscaling-aware estimation, and Databricks Unity Catalog billing integration
+
+[ :simple-googlecolab: Run the Compliance & Governance Guide in Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb){: target="_blank" .md-button }
 
 ### ⚡ Engine & Scale
 
@@ -193,6 +197,8 @@ LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file
 - **Backfill & Reprocessing** — Targeted late-arriving data reprocessing with partition-aware filters — no full reload required
 - **External Logic** — Plug in custom Python scripts or notebooks for complex Gold-layer transformations while preserving full contract validation and lineage
 - **Production Resilience** — Built-in exponential-backoff retries, per-entity timeouts, and circuit-breaker thresholds (`max_consecutive_failures`) — pipelines self-heal transient failures without operator intervention
+
+[ :simple-googlecolab: Run the Engine & Scale Guide in Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/03_engine_scale.ipynb){: target="_blank" .md-button }
 
 ### 🔧 Developer Experience
 
@@ -214,6 +220,8 @@ LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file
 
 - **[dbt](https://www.getdbt.com/){: target="_blank" } Adapter** — Import dbt `schema.yml` models and sources as LakeLogic contracts — reuse existing dbt definitions without rewriting
 - **[dlt](https://dlthub.com/){: target="_blank" } (Data Load Tool)** — Native `DltAdapter` supporting 100+ verified sources (Stripe, Shopify, SQL databases, Google Analytics, and more) plus declarative REST API ingestion — all with contract-driven quality gates on arrival
+
+[ :simple-googlecolab: Run the Integrations Guide in Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb){: target="_blank" .md-button }
 
 ---
 
@@ -359,4 +367,4 @@ Here's how to get the most out of it:
 
 ---
 
-[Quickstart](examples/colab/00_quickstart.ipynb) | [How It Works](concepts.md) | [Patterns](deployment_patterns.md) | [CLI Usage](cli.md)
+[Quickstart](examples/colab/00_quickstart.html) | [How It Works](concepts.md) | [Patterns](deployment_patterns.md) | [CLI Usage](cli.md)

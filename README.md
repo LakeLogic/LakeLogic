@@ -55,11 +55,15 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 - **SQL-First Rules** — Define business logic in the language your team already speaks — no SDK, no custom DSL
 - **SLO Monitoring & Anomaly Detection** — Native freshness, row count, and statistical anomaly detection with automatic multi-channel alerting when thresholds breach
 
+> **[✏️ Try it out in Colab: Data Quality & Trust](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/01_data_quality_trust.ipynb)**
+
 ### 📜 Compliance & Governance
 
 - **GDPR & HIPAA Compliance** — Contract-driven `forget_subjects()` with nullify, hash, or redact strategies and immutable audit trail
 - **Automatic Lineage** — Every row stamped with Run IDs and source paths — traceable from landing zone to Gold layer
 - **Pipeline Cost Intelligence** — Per-entity compute cost attribution with domain-level budget governance, autoscaling-aware estimation, and Databricks Unity Catalog billing integration
+
+> **[✏️ Try it out in Colab: Compliance & Governance](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb)**
 
 ### ⚡ Engine & Scale
 
@@ -70,6 +74,8 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 - **Backfill & Reprocessing** — Targeted late-arriving data reprocessing with partition-aware filters — no full reload required
 - **External Logic** — Plug in custom Python scripts or notebooks for complex Gold-layer transformations while preserving full contract validation and lineage
 - **Production Resilience** — Built-in exponential-backoff retries, per-entity timeouts, and circuit-breaker thresholds (`max_consecutive_failures`) — pipelines self-heal transient failures without operator intervention
+
+> **[✏️ Try it out in Colab: Engine & Scale](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/03_engine_scale.ipynb)**
 
 ### 🔧 Developer Experience
 
@@ -91,6 +97,8 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 
 - **[dbt](https://www.getdbt.com/) Adapter** — Import dbt `schema.yml` models and sources as LakeLogic contracts — reuse existing dbt definitions without rewriting
 - **[dlt](https://dlthub.com/) (Data Load Tool)** — Native `DltAdapter` supporting 100+ verified sources (Stripe, Shopify, SQL databases, Google Analytics, and more) plus declarative REST API ingestion — all with contract-driven quality gates on arrival
+
+> **[✏️ Try it out in Colab: Integrations](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb)**
 
 ---
 
@@ -172,120 +180,17 @@ Each layer uses its own contract:
 
 **Key Guarantee:** `source_count = good_count + bad_count` — 100% reconciliation, always.
 
----
 
-## 🧪 Test Data Generation
-
-LakeLogic includes a built-in `DataGenerator` that produces schema-aware synthetic data directly from your contracts. No external seed files, Faker scripts, or manual mocking required.
-
-```python
-from lakelogic import DataGenerator
-
-# Generate 1,000 rows that conform to your contract schema
-gen = DataGenerator("contracts/bronze_events.yaml")
-df  = gen.generate(rows=1_000, invalid_ratio=0.1)
-```
-
-### Streaming Simulation
-
-Simulate continuous data flow with time-partitioned batches — perfect for testing freshness SLOs and incremental pipelines:
-
-```python
-for ws, we, df in gen.generate_stream(
-    output_dir="landing/events",
-    batches=12,
-    interval_minutes=5,
-):
-    print(f"Batch {ws:%H:%M} → {we:%H:%M}: {len(df)} rows")
-```
-
-### Key Features
-
-| Feature | Description |
-| :--- | :--- |
-| **Contract-Aware** | Reads field types, accepted values, regex patterns, and FK references |
-| **Time-Windowed** | `window_start` / `window_end` constrain all temporal fields to a specific range |
-| **Streaming Simulation** | `generate_stream()` produces successive partitioned batches |
-| **Referential Integrity** | `generate_related()` auto-sorts parent/child contracts and injects FK pools |
-| **Invalid Injection** | `invalid_ratio=0.1` injects intentionally broken rows for quarantine testing |
-| **AI-Enhanced** | Optional LLM-powered value pools for realistic domain-specific data |
-
----
-
-## 📄 Unstructured Data Processing
-
-Extract structured data from PDFs, images, audio, and free text using LLM providers — with the same contract-driven quality rules, lineage, and materialization as any other table.
-
-```yaml
-extraction:
-  provider: "openai"
-  model: "gpt-4o"
-  preprocessing:
-    content_type: "pdf"
-    ocr:
-      enabled: true
-      engine: "azure_di"
-  output_schema:
-    - name: "invoice_number"
-      type: "string"
-      extraction_task: "extraction"
-    - name: "total_amount"
-      type: "float"
-  confidence:
-    enabled: true
-    method: "field_completeness"
-  max_cost_per_run: 25.00
-  redact_pii_before_llm: true
-```
-
-**Supports:** PDF (OCR), Images, Audio (Whisper), Video, HTML, Email, Free text. **Providers:** OpenAI, Anthropic, Azure OpenAI, Google Gemini, Bedrock, Ollama (local).
-
----
-
-## Business Impact
-
-| Benefit | Detail |
-| :--- | :--- |
-| **Cut Compute Spend by 80%** | Not every job needs Spark. Run maintenance tasks on Polars locally. |
-| **Guaranteed Integrity** | Dirty data goes to quarantine — dashboards are never poisoned. |
-| **Full Transparency** | Trace any KPI back to raw source records and the contract that validated them. |
-| **Parallel Development** | Two engineers work on two tables simultaneously without touching the same file. |
-| **Easier Debugging** | Logs tell you exactly which module failed — no searching through monster scripts. |
-
----
-
-## Data Mesh Alignment
-
-LakeLogic directly supports the four pillars of **Data Mesh**:
-
-- **Domain Ownership** — Contracts are owned by the teams who know the data best.
-- **Data as a Product** — Contracts serve as the explicit "product interface" guaranteeing quality.
-- **Self-Serve Platform** — Any team can deploy quality gates without infra silos.
-- **Federated Governance** — Global standards defined centrally, enforced locally at every layer.
-
----
 
 ## Examples
 
-The [examples](https://github.com/LakeLogic/LakeLogic/tree/main/examples) directory contains runnable notebooks:
-
-| Folder | What You'll Learn |
-| :--- | :--- |
-| [`01_quickstart/`](examples/01_quickstart/) | Remote CSV ingestion, database governance |
-| [`02_core_patterns/`](examples/02_core_patterns/) | Bronze quality gate, medallion architecture, SCD2, deduplication, soft deletes |
-| [`03_compliance_governance/`](examples/03_compliance_governance/) | HIPAA & GDPR Policy Packs, automated PII masking, audit-ready quarantine |
+For a complete list of runnable guides and end-to-end notebooks, please visit the **[Examples section of our Documentation](https://lakelogic.github.io/LakeLogic/examples/colab/00_quickstart.html)**.
 
 ---
 
 ## Documentation
 
-- **[Full Docs](https://LakeLogic.github.io/LakeLogic)** — Guides and API reference
-- **[Architecture Overview](docs/architecture_diagram.md)** — Medallion with Quality Gates
-- **[Contract Reference](docs/contract_template.md)** — Full YAML field reference
-- **[Synthetic Data Generation](docs/tutorials/synthetic_data.md)** — Test data, streaming simulation, and time-windowed output
-- **[Governance at Scale](docs/organization.md)** — Organizing 1,000s of contracts
-- **[CLI Reference](https://LakeLogic.github.io/LakeLogic/cli/)** — Command-line usage
-- **[Changelog](https://github.com/LakeLogic/LakeLogic/blob/main/CHANGELOG.md)** — Release history
+For full guides, API references, tutorials, and contract templates, please visit the **[LakeLogic Documentation Site](https://lakelogic.github.io/LakeLogic/)**.
 
 ## Contributing
 

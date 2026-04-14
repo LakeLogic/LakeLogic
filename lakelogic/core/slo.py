@@ -109,7 +109,7 @@ class SLOValidator:
         now = datetime.datetime.now(datetime.timezone.utc)
         results = []
         logger.info(
-            f"🔍 SLO Freshness Check: scanning {len(self.registry.get_active_contracts())} contracts in {self.registry.domain}/{self.registry.system}"
+            f"🔍 SLO Freshness Check: scanning {len(self.registry.get_active_contracts())} contracts in {self.registry.domain}/{self.registry.system}"  # noqa: E501
         )
 
         freshness_config = self.registry.slo.freshness
@@ -198,7 +198,7 @@ class SLOValidator:
                                 latest_ts = df.select(pl.col(col).max()).item()
                             except Exception as parquet_e:
                                 raise Exception(
-                                    f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                                    f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."  # noqa: E501
                                 ) from delta_e
 
                     found_col = col
@@ -277,7 +277,7 @@ class SLOValidator:
         for r in results:
             if r.passed:
                 logger.info(
-                    f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min)"
+                    f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min)"  # noqa: E501
                 )
             else:
                 logger.warning(f"   ❌ [{r.layer}] {r.entity}: {r.status}")
@@ -308,7 +308,7 @@ class SLOValidator:
             return []
 
         # Strip backticks for Spark SQL compatibility
-        run_log_table_clean = run_log_table.replace("`", "")
+        run_log_table.replace("`", "")
         # Engine-specific SQL references via centralized paths module
         spark_table_ref = resolve_run_log_ref(run_log_table, "spark")
         duckdb_table_ref = resolve_run_log_ref(run_log_table, "duckdb")
@@ -367,7 +367,7 @@ class SLOValidator:
                             df = pl.read_parquet(run_log_table, storage_options=storage_opts)
                         except Exception as parquet_e:
                             raise Exception(
-                                f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                                f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."  # noqa: E501
                             ) from delta_e
 
                     filtered = (
@@ -604,7 +604,7 @@ class SLOValidator:
         if not run_log_table:
             return None
 
-        run_log_clean = run_log_table.replace("`", "")
+        run_log_table.replace("`", "")
 
         try:
             check_field_name = anomaly_cfg.check_field if hasattr(anomaly_cfg, "check_field") else "counts_good"
@@ -642,7 +642,7 @@ class SLOValidator:
                         df = pl.read_parquet(run_log_table, storage_options=storage_opts)
                     except Exception as parquet_e:
                         raise Exception(
-                            f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                            f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."  # noqa: E501
                         ) from delta_e
 
                 filtered = (
@@ -797,7 +797,7 @@ class SLOValidator:
                         channel_count += 1
                     else:
                         logger.warning(
-                            f"Email contact '{email}' is not a valid Apprise URI. Emails require full SMTP configuration schema (e.g. mailto://...) or the LAKELOGIC_SMTP_URI environment variable. Skipping this target."
+                            f"Email contact '{email}' is not a valid Apprise URI. Emails require full SMTP configuration schema (e.g. mailto://...) or the LAKELOGIC_SMTP_URI environment variable. Skipping this target."  # noqa: E501
                         )
 
         if channel_count == 0:

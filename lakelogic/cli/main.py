@@ -326,7 +326,7 @@ def bootstrap(
     ai_provider: Optional[str] = typer.Option(
         None,
         "--ai-provider",
-        help="AI provider: openai | azure | anthropic | ollama (Requires OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_* env vars).",
+        help="AI provider: openai | azure | anthropic | ollama (Requires OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_* env vars).",  # noqa: E501
     ),
     ai_model: Optional[str] = typer.Option(
         None,

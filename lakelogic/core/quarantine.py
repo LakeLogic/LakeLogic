@@ -606,7 +606,7 @@ def materialize_quarantine(
 
     metadata = contract.metadata or {}
 
-    # ── Format resolution (precedence: arg → quarantine.format → metadata → materialization.format → extension → default) ──
+    # ── Format resolution (precedence: arg → quarantine.format → metadata → materialization.format → extension → default) ──  # noqa: E501
     q = contract.quarantine
     _mat_format = None
     if contract.materialization:

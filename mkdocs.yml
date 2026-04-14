@@ -18,19 +18,20 @@ theme:
     text: "Inter"
     code: "JetBrains Mono"
   palette:
-    # Dark mode (default — Snowflake style)
+    # Dark mode (Default)
     - scheme: slate
       primary: custom
       accent: light blue
       toggle:
-        icon: material/brightness-4
+        icon: material/brightness-7
         name: Switch to light mode
-    # Light mode
+        
+    # Light mode (Optional Toggle)
     - scheme: default
       primary: custom
       accent: light blue
       toggle:
-        icon: material/brightness-7
+        icon: material/brightness-4
         name: Switch to dark mode
   features:
     - navigation.instant        # Instant loading (SPA-like)

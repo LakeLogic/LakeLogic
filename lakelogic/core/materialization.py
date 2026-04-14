@@ -3191,7 +3191,7 @@ def materialize_dataframe(
 
         if is_delta_init:
             logger.info(
-                f"materialize: empty DataFrame, but falling through to initialize empty Delta table schema at {target_file}"
+                f"materialize: empty DataFrame, but falling through to initialize empty Delta table schema at {target_file}"  # noqa: E501
             )
         else:
             logger.info("materialize: empty DataFrame — target exists or not Delta, skipping write.")
@@ -3223,7 +3223,7 @@ def materialize_dataframe(
     # to write_deltalake, not via directory-per-partition file writes.
     if resolved_format == "delta":
         try:
-            from deltalake import write_deltalake
+            from deltalake import write_deltalake  # noqa: F401
             import pyarrow as pa
         except ImportError as exc:
             raise ImportError("Delta materialization requires the deltalake package: pip install deltalake") from exc
@@ -3332,7 +3332,7 @@ def materialize_dataframe(
                         if target_schema != arrow_data.schema:
                             diffs_count = sum(1 for a, b in zip(arrow_data.schema, target_schema) if a.type != b.type)
                             msg_lines = [
-                                f"Casting {diffs_count} column(s) to match contract types before Delta write (new table):",
+                                f"Casting {diffs_count} column(s) to match contract types before Delta write (new table):",  # noqa: E501
                                 f"{'Column Name':<35} | {'From Type':<15} | {'To Type':<15}",
                                 "-" * 71,
                             ]
