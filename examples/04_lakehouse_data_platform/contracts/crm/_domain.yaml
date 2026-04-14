@@ -1,0 +1,31 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# CRM Domain Configuration
+#
+# Domain-level settings that apply to ALL systems within the CRM domain
+# (e.g. webshop, loyalty_app, support_portal).
+#
+# Hierarchy:  _domain.yaml → _system.yaml → contract.yaml
+# ══════════════════════════════════════════════════════════════════════════════
+
+domain: crm
+description: "Customer Relationship Management — customer master data, orders, and engagement"
+owner: crm-data-team@retailco.com
+
+# ── Service Level Objectives ──────────────────────────────────────────────
+# SLOs apply to all datasets across all systems in this domain.
+# Individual contracts or systems can override when justified.
+slo:
+  freshness:
+    max_delay_hours: 4            # data must arrive within 4 hours of source event
+    alert_channel: "#crm-data-alerts"
+  quality:
+    min_valid_row_pct: 95.0       # at least 95% of rows must pass quality rules
+    min_completeness_pct: 98.0    # at least 98% of required fields must be non-null
+  availability:
+    uptime_pct: 99.5              # pipeline must succeed 99.5% of scheduled runs
+
+# ── Domain-Wide Governance ────────────────────────────────────────────────
+governance:
+  pii_policy: "mask_by_default"   # all PII fields must have a masking strategy
+  retention_days: 730             # 2-year retention for all domain datasets
+  classification: "confidential"  # data classification level

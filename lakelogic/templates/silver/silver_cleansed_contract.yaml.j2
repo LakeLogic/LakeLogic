@@ -54,9 +54,13 @@ model:
 {%- endif %}
 {%- endfor %}
 
-# ── Schema Policy ─────────────────────────────────────────────
-schema_policy:
-  unknown_fields: "{{ schema_policy_unknown | default('quarantine') }}"
+# ── Server (Schema Policy) ────────────────────────────────────
+server:
+  type: "{{ server_type | default('local') }}"
+  path: "{{ server_path | default('') }}"
+  schema_policy:
+    evolution: "{{ schema_policy_evolution | default('strict') }}"
+    unknown_fields: "{{ schema_policy_unknown | default('quarantine') }}"
 
 # ── Quality Rules ─────────────────────────────────────────────
 quality:

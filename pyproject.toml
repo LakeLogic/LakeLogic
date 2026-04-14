@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "1.12.0"
+version = "1.13.0"
 description = "A Python-based data contract runtime for consistent quality across engines."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -54,6 +54,7 @@ dependencies = [
     "Jinja2>=3.1.0",
     "sqlglot>=20.0.0",
     "polars>=0.20.0",
+    "typer>=0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -171,7 +172,17 @@ dev = [
     "commitizen>=3.0.0",
     "git-cliff>=2.0.0",
 ]
-all = []  # Backwards compat — base install now includes everything
+all = [
+    "typer>=0.9.0",
+    "polars>=0.20.0",
+    "pandas>=2.0.0",
+    "duckdb>=0.9.0",
+    "pyarrow>=14.0.0",
+    "deltalake>=0.15.0",
+    "sqlglot>=20.0.0",
+    "lxml>=4.9.0",
+    "openpyxl>=3.1.0",
+]
 # Heavy extras — opt-in only (may have numpy/platform conflicts)
 cloud = [
     "snowflake-connector-python>=3.5.0",
@@ -247,7 +258,7 @@ dev = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "1.12.0"
+version         = "1.13.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = false

@@ -455,25 +455,27 @@ class PolarsAdapter(EngineAdapter):
             lf = lf.with_columns(pl.lit(None).alias(col))
 
         server = self.contract.server
-        evolution = None
-        policy = self.contract.schema_policy.unknown_fields if self.contract.schema_policy else "allow"
+        from lakelogic.core.models import SchemaPolicy as _SP
+
+        _sp_defaults = _SP()
+        evolution = _sp_defaults.evolution
+        policy = _sp_defaults.unknown_fields
         cast_to_string = False
-        allow_schema_drift = True
 
         if server:
-            evolution = (server.schema_evolution or "strict").lower()
             cast_to_string = bool(server.cast_to_string)
-            allow_schema_drift = bool(server.allow_schema_drift)
-            if evolution in ["append", "merge", "overwrite"]:
-                policy = "allow"
-            else:
-                policy = "quarantine"
+            if server.schema_policy:
+                evolution = (server.schema_policy.evolution or _sp_defaults.evolution).lower()
+                policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
+
+        self._type_err_cols = []
 
         if cast_to_string:
             columns = lf.collect_schema().names()
             lf = lf.with_columns([pl.col(col).cast(pl.Utf8, strict=False) for col in columns])
         else:
             current_schema = lf.collect_schema()
+            exprs = []
             for field in self.contract.model.fields:
                 dtype = self._to_polars_dtype(field.type)
                 if dtype is None:
@@ -485,7 +487,7 @@ class PolarsAdapter(EngineAdapter):
                 if isinstance(current_dtype, pl.List) and dtype == pl.Utf8:
                     import json as _json
 
-                    lf = lf.with_columns(
+                    exprs.append(
                         pl.col(field.name)
                         .map_elements(
                             lambda v: (
@@ -501,7 +503,19 @@ class PolarsAdapter(EngineAdapter):
                         .alias(field.name)
                     )
                 else:
-                    lf = lf.with_columns(pl.col(field.name).cast(dtype, strict=False))
+                    cast_expr = pl.col(field.name).cast(dtype, strict=False)
+                    err_col = f"__type_err_{field.name}"
+                    self._type_err_cols.append(err_col)
+                    msg = f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    exprs.append(
+                        pl.when(pl.col(field.name).is_not_null() & cast_expr.is_null())
+                        .then(pl.lit(msg))
+                        .otherwise(pl.lit(None))
+                        .alias(err_col)
+                    )
+                    exprs.append(cast_expr.alias(field.name))
+            if exprs:
+                lf = lf.with_columns(exprs)
 
         schema_errors: List[str] = []
         if evolution == "strict" and missing:
@@ -517,7 +531,6 @@ class PolarsAdapter(EngineAdapter):
             "unknown_fields": sorted(unknown),
             "policy": policy,
             "evolution": evolution or "",
-            "allow_schema_drift": allow_schema_drift,
         }
 
         return lf, schema_errors
@@ -627,6 +640,12 @@ class PolarsAdapter(EngineAdapter):
                 error_tracking_exprs.extend([pl.lit(err) for err in schema_errors])
                 category_tracking_exprs.extend([pl.lit("schema") for _ in schema_errors])
 
+            for type_err_col in getattr(self, "_type_err_cols", []):
+                error_tracking_exprs.append(pl.col(type_err_col))
+                category_tracking_exprs.append(
+                    pl.when(pl.col(type_err_col).is_not_null()).then(pl.lit("schema")).otherwise(None)
+                )
+
             for i, rule in enumerate(row_rules):
                 col_name = f"_rule_{i}"
                 error_msg = f"Rule failed: {rule.name} ({rule.sql})"
@@ -642,16 +661,26 @@ class PolarsAdapter(EngineAdapter):
                 ]
             )
         else:
-            schema_error_exprs = [pl.lit(err) for err in schema_errors] if schema_errors else []
-            schema_category_exprs = [pl.lit("schema") for _ in schema_errors] if schema_errors else []
+            schema_error_exprs = []
+            schema_category_exprs = []
+            if schema_errors:
+                schema_error_exprs.extend([pl.lit(err) for err in schema_errors])
+                schema_category_exprs.extend([pl.lit("schema") for _ in schema_errors])
+
+            for type_err_col in getattr(self, "_type_err_cols", []):
+                schema_error_exprs.append(pl.col(type_err_col))
+                schema_category_exprs.append(
+                    pl.when(pl.col(type_err_col).is_not_null()).then(pl.lit("schema")).otherwise(None)
+                )
+
             lf_with_errors = lf.with_columns(
                 [
                     pl.concat_list(schema_error_exprs).list.drop_nulls().alias(self.ERROR_COLUMN)
                     if schema_error_exprs
-                    else pl.lit([]).cast(pl.List(pl.String)).alias(self.ERROR_COLUMN),
+                    else pl.lit([]).cast(pl.List(pl.Utf8)).alias(self.ERROR_COLUMN),
                     pl.concat_list(schema_category_exprs).list.drop_nulls().alias(self.CATEGORY_COLUMN)
                     if schema_category_exprs
-                    else pl.lit([]).cast(pl.List(pl.String)).alias(self.CATEGORY_COLUMN),
+                    else pl.lit([]).cast(pl.List(pl.Utf8)).alias(self.CATEGORY_COLUMN),
                 ]
             )
 
@@ -666,7 +695,7 @@ class PolarsAdapter(EngineAdapter):
         )
 
         # Clean up internal columns
-        internal_cols = [f"_rule_{i}" for i in range(len(row_rules))]
+        internal_cols = [f"_rule_{i}" for i in range(len(row_rules))] + getattr(self, "_type_err_cols", [])
         good_lf = lf_with_errors.filter(~has_errors).drop(internal_cols + [self.ERROR_COLUMN, self.CATEGORY_COLUMN])
 
         # 3. Apply Dataset-Level (Aggregate) Checks
@@ -705,21 +734,25 @@ class PolarsAdapter(EngineAdapter):
                 val = res.row(0)[0]
 
                 passed = True
+                expected = ""
                 if val is None:
                     passed = False
                 elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
+                    expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"
                 elif rule.must_be_less_than is not None:
                     passed = val < rule.must_be_less_than
+                    expected = f"(expected < {rule.must_be_less_than})"
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
+                    expected = f"(expected > {rule.must_be_greater_than})"
 
                 status = "PASS" if passed else "FAIL"
-                logger.info(f"Quality Check: {rule.name} | Result: {val} | Status: {status}")
+                logger.info(f"Quality Check: {rule.name} | Result: {val} {expected} | Status: {status}")
                 self.dataset_rule_results.append(
                     {
                         "name": rule.name,
-                        "value": val,
+                        "value": f"{val} {expected}".strip(),
                         "passed": passed,
                         "description": rule.description,
                     }

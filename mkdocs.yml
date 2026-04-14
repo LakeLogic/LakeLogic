@@ -11,30 +11,27 @@ copyright: >
 
 theme:
   name: material
+  custom_dir: docs/overrides
   logo: assets/logo.svg
   favicon: assets/logo.svg
-  icon:
-    logo: material/shield-check
   font:
     text: "Inter"
     code: "JetBrains Mono"
   palette:
-    # Light mode (default - matching LakeLogic)
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: blue
-      accent: blue
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    # Dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: blue
-      accent: blue
+    # Dark mode (default — Snowflake style)
+    - scheme: slate
+      primary: custom
+      accent: light blue
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+    # Light mode
+    - scheme: default
+      primary: custom
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
   features:
     - navigation.instant        # Instant loading (SPA-like)
     - navigation.tracking       # URL updates with scroll
@@ -42,6 +39,8 @@ theme:
     - navigation.top            # Back to top button
     - navigation.footer         # Previous/next links
     - navigation.indexes        # Allow index pages for sections
+    - navigation.sections       # Collapsible sidebar sections
+    - navigation.expand         # Expand all sections by default
     - toc.follow                # TOC follows scroll
     - search.suggest            # Search suggestions
     - search.highlight          # Highlight search terms
@@ -53,49 +52,51 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: installation.md
-      - "Quickstart: Hello World": examples/01_hello_world.ipynb
   - Concepts:
       - Architecture Overview: architecture_diagram.md
-      - Open Data Contract Standard (ODCS): odcs.md
       - How it Works: concepts.md
-      - Return Values: return_values.md
+      - Open Data Contract Standard (ODCS): odcs.md
       - Contract Organization: organization.md
       - Ingestion & Cloud: ingestion.md
       - Real-Time Streaming: streaming.md
+      - Unstructured Data (LLM Extraction): llm_extraction.md
       - Reprocessing & Partitioning: reprocessing.md
+      - Pipeline Resilience: resilience.md
       - Pipelines & Parallelism: pipelines.md
+  - Examples:
+      - "0. Quickstart": examples/colab/00_quickstart.ipynb
+      - "1. Data Quality & Trust": examples/colab/01_data_quality_trust.ipynb
+      - "2. Compliance & Governance": examples/colab/02_compliance_governance.ipynb
+      - "3. Engine & Scale": examples/colab/03_engine_scale.ipynb
+      - "6. Integrations": examples/colab/06_integrations.ipynb
+  - Deployment: deployment_patterns.md
+  - Observability:
+      - Monitoring & Lineage: observability.md
+      - Notifications & Alerting: notifications.md
+  - Compliance & Governance:
+      - Overview: contracts/compliance.md
+      - Service Level Objectives: contracts/slo.md
+  - Contracts:
+      - Overview: contracts/index.md
+      - Domain Config (_domain.yaml): contracts/domain_config.md
+      - System Config (_system.yaml): contracts/system_config.md
+      - Data Product Contracts:
+          - Contract Anatomy: contracts/data_product_contracts/index.md
+          - Ingestion: contracts/data_product_contracts/ingestion.md
+          - Watermark Strategies: contracts/data_product_contracts/watermark_strategies.md
+          - Transformations: contracts/data_product_contracts/transformations.md
+          - Quality Rules: contracts/data_product_contracts/quality.md
+          - Materialization: contracts/data_product_contracts/materialization.md
+          - Dimensional Modeling: contracts/data_product_contracts/dimensional_modeling.md
+      - Schema & Model: contracts/schema_model.md
+      - Schema Validation API: contracts/schema_api.md
+      - Versioning: contracts/versioning.md
+  - Reference:
+      - Complete Contract Template: contract_template.md
+      - Return Values: return_values.md
       - Automatic Credentials: automatic_credentials.md
       - Catalog Table Names: catalog_table_names.md
       - Delta Lake (Spark-Free): delta_lake_support.md
-  - Tutorials:
-      - Basic Validation: tutorials/basic_validation.md
-      - Medallion Architecture: tutorials/medallion_architecture.md
-      - Notifications & Secrets: tutorials/notifications_secrets.md
-  - Notebooks:
-      - "Database Governance": examples/02_database_governance.ipynb
-      - "HIPAA & GDPR Compliance": examples/hipaa_gdpr_compliance.ipynb
-      - "Bronze Quality Gate": examples/bronze_quality_gate.ipynb
-      - "Medallion Architecture": examples/medallion_architecture.ipynb
-      - "Dedup & Survivorship": examples/dedup_survivorship.ipynb
-      - "SCD2 Dimension": examples/scd2_dimension.ipynb
-      - "Soft Delete (CDC)": examples/soft_delete.ipynb
-      - "Reference Joins": examples/reference_joins.ipynb
-  - Patterns:
-      - Overview: playbooks.md
-      - Bronze Quality Gate: patterns/bronze_quality_gate.md
-      - Dedup & Survivorship: patterns/dedup_survivorship.md
-      - SCD2 Dimension: patterns/scd2_dimension.md
-      - Late Arriving Reprocess: patterns/late_arriving_reprocess.md
-      - External Python Logic: patterns/external_python_logic.md
-  - Deployment:
-      - Deployment Patterns: deployment_patterns.md
-      - Job Templates: job_templates.md
-  - Observability:
-      - Overview: observability.md
-      - Lineage & Reconciliation: reconciliation.md
-      - Notifications & Alerting: notifications.md
-  - Reference:
-      - Contract Template: contract_template.md
       - CLI: cli.md
       - Driver: driver.md
       - Bootstrap: bootstrap.md
@@ -124,7 +125,7 @@ markdown_extensions:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_div_format
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji:

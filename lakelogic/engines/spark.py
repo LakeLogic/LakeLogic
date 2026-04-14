@@ -91,6 +91,10 @@ class SparkAdapter(EngineAdapter):
             error_exprs.extend([F.lit(err) for err in schema_errors])
             category_exprs.extend([F.lit("schema") for _ in schema_errors])
 
+        for type_err_col in getattr(self, "_type_err_cols", []):
+            error_exprs.append(F.col(type_err_col))
+            category_exprs.append(F.when(F.col(type_err_col).isNotNull(), F.lit("schema")).otherwise(F.lit(None)))
+
         df_eval = df
         internal_cols = []
         if pre_rules:
@@ -134,9 +138,10 @@ class SparkAdapter(EngineAdapter):
             .withColumn("quarantine_reprocessed", F.lit(False))
         )
 
-        drop_cols = [self.ERROR_COLUMN, self.CATEGORY_COLUMN] + internal_cols
+        type_errs = getattr(self, "_type_err_cols", [])
+        drop_cols = [self.ERROR_COLUMN, self.CATEGORY_COLUMN] + internal_cols + type_errs
         good_df = df_with_errors.filter(~has_errors).drop(*drop_cols)
-        bad_df = bad_df.drop(*internal_cols)
+        bad_df = bad_df.drop(*internal_cols).drop(*type_errs)
 
         # 4. Apply Dataset-Level (Aggregate) Checks
         self._run_dataset_rules(good_df)
@@ -238,21 +243,25 @@ class SparkAdapter(EngineAdapter):
                 val = res[0][0]
 
                 passed = True
+                expected = ""
                 if val is None:
                     passed = False
                 elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
+                    expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"
                 elif rule.must_be_less_than is not None:
                     passed = val < rule.must_be_less_than
+                    expected = f"(expected < {rule.must_be_less_than})"
                 elif rule.must_be_greater_than is not None:
                     passed = val > rule.must_be_greater_than
+                    expected = f"(expected > {rule.must_be_greater_than})"
 
                 status = "PASS" if passed else "FAIL"
-                logger.info(f"Quality Check (Spark): {rule.name} | Result: {val} | Status: {status}")
+                logger.info(f"Quality Check (Spark): {rule.name} | Result: {val} {expected} | Status: {status}")
                 self.dataset_rule_results.append(
                     {
                         "name": rule.name,
-                        "value": val,
+                        "value": f"{val} {expected}".strip(),
                         "passed": passed,
                         "description": rule.description,
                     }
@@ -772,21 +781,21 @@ class SparkAdapter(EngineAdapter):
         unknown = unknown - self._lineage_columns()
 
         server = self.contract.server
-        evolution = None
-        policy = self.contract.schema_policy.unknown_fields if self.contract.schema_policy else "allow"
+        from lakelogic.core.models import SchemaPolicy as _SP
+
+        _sp_defaults = _SP()
+        evolution = _sp_defaults.evolution
+        policy = _sp_defaults.unknown_fields
         cast_to_string = False
-        allow_schema_drift = True
 
         if server:
-            evolution = (server.schema_evolution or "strict").lower()
             cast_to_string = bool(server.cast_to_string)
-            allow_schema_drift = bool(server.allow_schema_drift)
-            if evolution in ["append", "merge", "overwrite"]:
-                policy = "allow"
-            else:
-                policy = "quarantine"
+            if server.schema_policy:
+                evolution = (server.schema_policy.evolution or _sp_defaults.evolution).lower()
+                policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
 
         select_exprs = []
+        self._type_err_cols = []
         for field in self.contract.model.fields:
             if field.name in existing:
                 col_expr = F.col(field.name)
@@ -795,6 +804,16 @@ class SparkAdapter(EngineAdapter):
 
             spark_type = "string" if cast_to_string else self._to_spark_type(field.type)
             if spark_type:
+                if field.name in existing and not cast_to_string:
+                    err_col = f"__type_err_{field.name}"
+                    self._type_err_cols.append(err_col)
+                    msg = f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    cast_expr = col_expr.cast(spark_type)
+                    select_exprs.append(
+                        F.when(col_expr.isNotNull() & cast_expr.isNull(), F.lit(msg))
+                        .otherwise(F.lit(None))
+                        .alias(err_col)
+                    )
                 col_expr = col_expr.cast(spark_type)
 
             select_exprs.append(col_expr.alias(field.name))
@@ -818,7 +837,6 @@ class SparkAdapter(EngineAdapter):
             "unknown_fields": sorted(unknown),
             "policy": policy,
             "evolution": evolution or "",
-            "allow_schema_drift": allow_schema_drift,
         }
 
         return df, schema_errors

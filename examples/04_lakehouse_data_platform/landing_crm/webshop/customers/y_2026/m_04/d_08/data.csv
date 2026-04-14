@@ -1,0 +1,8 @@
+customer_id,name,email,phone,country,segment,signup_date,_is_invalid
+CUST-428381,Joshua Atkins,noahroberts@example.org,890-712-8469,France,churned,2026-02-06,false
+CUST-136360,Joseph Gregory,ramirezsusan@example.com,689-858-7147,United Kingdom,dormant,2026-04-07,false
+CUST-619706,Paula Williams,vmckinney@example.net,001-255-677-9823x775,Italy,vip,2026-03-29,false
+CUST-861748,Isaac Rodriguez,catherinebrown@example.com,001-809-671-2209x41410,Netherlands,high_value,2026-02-02,false
+CUST-166775,Daniel Smith,virginia59@example.org,,France,vip,2026-03-30,false
+CUST-772849,Joshua Bender,stewartdavid@example.org,+1-721-576-5714x92488,Spain,high_value,2026-03-19,false
+CUST-122317,Gerald Campbell,danieljones@example.org,451-640-5617x733,South Africa,win_back,2026-02-26,false

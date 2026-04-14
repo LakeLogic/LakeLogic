@@ -240,7 +240,19 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
         import polars as pl
 
         if isinstance(df, pl.DataFrame):
-            updated = df.with_columns([pl.lit(value).alias(name) for name, value in columns.items()])
+            _has_source_file = "_source_file" in df.columns
+            col_exprs = []
+            for name, value in columns.items():
+                # For the source column, prefer the per-row _source_file
+                # (tagged at read time from multi-file partition dirs).
+                if name.endswith("_source") and _has_source_file:
+                    col_exprs.append(pl.col("_source_file").alias(name))
+                else:
+                    col_exprs.append(pl.lit(value).alias(name))
+            updated = df.with_columns(col_exprs)
+            # Drop the temporary _source_file column
+            if _has_source_file and "_source_file" in updated.columns:
+                updated = updated.drop("_source_file")
             return updated.select(_sorted_to_right(updated.columns))
     except Exception:
         pass

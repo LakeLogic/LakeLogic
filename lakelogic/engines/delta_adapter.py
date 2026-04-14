@@ -196,17 +196,21 @@ class DeltaAdapter:
             storage_options = resolve_storage_options(path, storage_options)
 
         # Write Delta table
-        # The pyarrow engine does not support schema_mode='merge'; use rust engine.
-        write_engine = "rust" if schema_mode == "merge" else "pyarrow"
-        write_deltalake(
-            path,
-            df,
-            mode=mode,
-            storage_options=storage_options,
-            partition_by=partition_by,
-            schema_mode=schema_mode,
-            engine=write_engine,
-        )
+        # The pyarrow engine does not support schema_mode='merge' in older deltalake versions; use rust engine if available.
+        kwargs = {
+            "mode": mode,
+            "storage_options": storage_options,
+            "partition_by": partition_by,
+            "schema_mode": schema_mode,
+        }
+
+        import inspect
+
+        sig = inspect.signature(write_deltalake)
+        if "engine" in sig.parameters:
+            kwargs["engine"] = "rust" if schema_mode == "merge" else "pyarrow"
+
+        write_deltalake(path, df, **kwargs)
 
     def merge(
         self,

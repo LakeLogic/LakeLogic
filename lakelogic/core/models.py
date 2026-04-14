@@ -7,7 +7,7 @@ from pydantic import (
     model_validator,
 )
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Literal
 from loguru import logger
 
 
@@ -141,6 +141,13 @@ class Info(BaseModel):
     system: Optional[str] = None  # e.g. "zoopla", "salesforce", "sap"
 
 
+class SchemaPolicy(BaseModel):
+    """Schema enforcement rules for unknown and evolving fields."""
+
+    evolution: Literal["strict", "append", "merge", "overwrite", "compatible", "allow"] = "allow"
+    unknown_fields: Literal["quarantine", "drop", "allow"] = "allow"
+
+
 class Server(BaseModel):
     """Storage and ingestion settings for a contract."""
 
@@ -150,8 +157,7 @@ class Server(BaseModel):
 
     # Ingestion Controls
     mode: str = "validate"  # 'validate' for Quality Gate, 'ingest' for Raw-to-Bronze movement
-    schema_evolution: str = "strict"  # strict, append, merge, overwrite
-    allow_schema_drift: bool = False
+    schema_policy: Optional[SchemaPolicy] = Field(default_factory=SchemaPolicy)
     cast_to_string: bool = False
 
 
@@ -207,7 +213,7 @@ class DltSourceConfig(BaseModel):
         source:
           type: dlt
           dlt:
-            pipeline: stripe_analytics
+            source: stripe_analytics
             resource: charges
             credentials:
               api_key: ${STRIPE_API_KEY}
@@ -230,7 +236,7 @@ class DltSourceConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     # Mode 1: Verified Source (e.g., stripe_analytics, google_analytics)
-    pipeline: Optional[str] = None
+    source: Optional[str] = None
     resource: Optional[str] = None
 
     # Mode 2: REST API (fully declarative)
@@ -244,10 +250,8 @@ class DltSourceConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_mode(self) -> "DltSourceConfig":
-        if not self.pipeline and not self.base_url:
-            raise ValueError(
-                "dlt source must specify either 'pipeline' (verified source) or 'base_url' (REST API mode)"
-            )
+        if not self.source and not self.base_url:
+            raise ValueError("dlt source must specify either 'source' (verified source) or 'base_url' (REST API mode)")
         return self
 
 
@@ -394,13 +398,6 @@ class SourceConfig(BaseModel):
     def _warn_unknown_keys(self) -> "SourceConfig":
         _warn_unknown_extra_keys(self, self._SOURCE_KNOWN_KEYS, "source")
         return self
-
-
-class SchemaPolicy(BaseModel):
-    """Schema enforcement rules for unknown and evolving fields."""
-
-    evolution: str = "strict"  # strict, compatible, allow
-    unknown_fields: str = "quarantine"  # quarantine, drop, allow
 
 
 class Link(BaseModel):
@@ -903,6 +900,7 @@ class Quality(BaseModel):
     """Quality rule groups for row and dataset checks."""
 
     enforce_required: bool = True
+    fail_pipeline_on_dataset_error: bool = False
     row_rules: List[
         Union[
             QualityRule,
@@ -964,6 +962,8 @@ class Quarantine(BaseModel):
     enabled: bool = True
     include_error_reason: bool = True
     strict_notifications: bool = True
+    fail_on_quarantine: bool = False
+    notifications_enabled: bool = True
     # Output format for file-based quarantine targets.
     # Supported: parquet (default), csv, delta, json.
     # delta requires the deltalake package for Polars/DuckDB engines;
@@ -1548,6 +1548,51 @@ class DataContract(BaseModel):
 
         return data
 
+    @model_validator(mode="before")
+    @classmethod
+    def _schema_policy_migrator(cls, data: Any) -> Any:
+        """Migrate legacy root-level schema_policy or server.schema_evolution -> server.schema_policy."""
+        if not isinstance(data, dict):
+            return data
+
+        server_block = data.get("server")
+        if not isinstance(server_block, dict):
+            # If there's no server block at all, but there is root policy, we instantiate it
+            if (
+                data.get("schema_policy") is not None
+                or data.get("schema_evolution") is not None
+                or data.get("allow_schema_drift") is not None
+            ):
+                server_block = {}
+                data["server"] = server_block
+            else:
+                return data
+
+        policy = server_block.setdefault("schema_policy", {})
+
+        # 1. Migrate root-level schema_policy
+        root_policy = data.pop("schema_policy", None)
+        if isinstance(root_policy, dict):
+            if "evolution" in root_policy and "evolution" not in policy:
+                policy["evolution"] = root_policy["evolution"]
+            if "unknown_fields" in root_policy and "unknown_fields" not in policy:
+                policy["unknown_fields"] = root_policy["unknown_fields"]
+
+        # 2. Migrate server.schema_evolution
+        legacy_evo = server_block.pop("schema_evolution", None)
+        if legacy_evo:
+            if "evolution" not in policy:
+                policy["evolution"] = legacy_evo
+            if legacy_evo == "strict" and "unknown_fields" not in policy:
+                policy["unknown_fields"] = "quarantine"
+
+        # 3. Migrate server.allow_schema_drift
+        legacy_drift = server_block.pop("allow_schema_drift", None)
+        if legacy_drift is not None and "unknown_fields" not in policy:
+            policy["unknown_fields"] = "allow" if legacy_drift else "quarantine"
+
+        return data
+
     version: str
     info: Optional[Info] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)  # For generic tagging (status, classification)
@@ -1934,9 +1979,9 @@ class DataContract(BaseModel):
                 p = _P(_base) / p
             return p
 
-        def _delete(p: "Path", raw: str) -> bool:
+        def _delete(p: "Path", raw: Optional[str] = None) -> bool:
             """Delete file or directory tree. Returns True if something was removed."""
-            if "://" in raw and not raw.startswith("file://"):
+            if raw and "://" in raw and not raw.startswith("file://"):
                 try:
                     import fsspec
 

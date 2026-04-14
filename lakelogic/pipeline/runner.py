@@ -8,6 +8,7 @@ and HIPAA masking automatically.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time
@@ -67,6 +68,9 @@ class PipelineRunSummary:
         rows_bad: Any = None,
         table_name: str = "",
     ):
+        # Remove any existing entry for this contract+layer (e.g., from failed earlier retry attempts)
+        self.results = [r for r in self.results if not (r.get("contract") == contract and r.get("layer") == layer)]
+
         self.results.append(
             {
                 "contract": contract,
@@ -88,6 +92,18 @@ class PipelineRunSummary:
             "dry_run": self.dry_run,
             "results": self.results,
         }
+
+
+class CircuitBreakerTripped(Exception):
+    """Raised when too many consecutive entity failures indicate an infrastructure outage."""
+
+    pass
+
+
+class EntityTimeoutError(Exception):
+    """Raised when a single entity exceeds entity_timeout_minutes."""
+
+    pass
 
 
 class LakehousePipeline:
@@ -333,16 +349,31 @@ class LakehousePipeline:
                 contract_dict["materialization"] = merged
 
         # ── Step 6: Inherit per-layer server defaults ────────────────
-        if self.registry and self.registry.server_defaults and target_layer:
-            layer_server = self.registry.server_defaults.get(target_layer)
+        if self.registry and self.registry.server and target_layer:
+            layer_server = self.registry.server.get(target_layer)
             if layer_server and isinstance(layer_server, dict):
                 server = contract_dict.get("server")
                 if server and isinstance(server, dict):
-                    # Only enrich existing server block — don't create one
-                    # (Server model requires type + path)
+                    # Deep-merge: layer defaults fill gaps, including
+                    # nested dicts like schema_policy
                     for key, val in layer_server.items():
                         if key not in server:
-                            server[key] = val
+                            server[key] = copy.deepcopy(val)
+                        elif isinstance(val, dict) and isinstance(server.get(key), dict):
+                            # Deep-merge nested dicts (e.g. schema_policy)
+                            for sub_key, sub_val in val.items():
+                                if sub_key not in server[key]:
+                                    server[key][sub_key] = sub_val
+                else:
+                    # No server block — create one with reasonable defaults
+                    # so schema_policy, cast_to_string etc. are inherited.
+                    new_server = copy.deepcopy(layer_server)
+                    new_server.setdefault("type", "local")
+                    new_server.setdefault("path", ".")
+                    contract_dict["server"] = new_server
+                    # Also stash as metadata for materialization fallback
+                    meta = contract_dict.setdefault("metadata", {})
+                    meta["_server_layer_defaults"] = dict(layer_server)
 
         return contract_dict
 
@@ -513,9 +544,20 @@ class LakehousePipeline:
                     logger.debug(f"    Partition: {partition_dir} ({rows_per_day} rows)")
             else:
                 output_dir.mkdir(parents=True, exist_ok=True)
-                self._write_test_data(df, output_dir / f"test_data.{fmt}", fmt)
+                # Produce the full 3-file generation report output
+                if invalid_ratio > 0:
+                    try:
+                        data_path, invalid_path, report_path = gen.save_with_report(
+                            df, output_dir, name=c.entity, format=fmt
+                        )
+                        logger.info(f"     Report   : {report_path}")
+                    except Exception as e:
+                        logger.debug(f"save_with_report failed, falling back: {e}")
+                        self._write_test_data(df, output_dir / f"test_data.{fmt}", fmt)
+                else:
+                    self._write_test_data(df, output_dir / f"test_data.{fmt}", fmt)
 
-            logger.info(f"  ✅ Test data written to {output_dir}")
+            logger.info(f"  Test data written to {output_dir}")
 
             if suggest_rules and c.resolved_path:
                 try:
@@ -758,6 +800,23 @@ class LakehousePipeline:
                             logger.debug("  fsspec not available for quarantine cloud deletion")
                         except Exception as _q_exc:
                             logger.warning(f"  Could not delete quarantine cloud path {q_target}: {_q_exc}")
+                    else:
+                        import shutil
+                        from pathlib import Path as _P
+
+                        _qp = _P(q_target)
+                        if _qp.exists():
+                            try:
+                                if _qp.is_dir():
+                                    shutil.rmtree(_qp)
+                                else:
+                                    _qp.unlink()
+                                logger.info(f"  Reset: deleted local quarantine path {q_target}")
+                                _q_deleted = True
+                            except Exception as _q_exc:
+                                logger.warning(f"  Could not delete local quarantine path {q_target}: {_q_exc}")
+                        else:
+                            _q_deleted = True
                     if not _q_deleted:
                         logger.warning(
                             f"  Quarantine is enabled for {name} but could not resolve/delete "
@@ -825,21 +884,58 @@ class LakehousePipeline:
     # ── Phase 2: DDL Only ────────────────────────────────────────────────────
 
     def generate_ddl_only(self, active_contracts: List[RegistryContract], dry_run: bool) -> PipelineRunSummary:
-        """Create target tables from schemas without data loading."""
+        """Create target tables from schemas without data loading.
+
+        After CREATE TABLE (IF NOT EXISTS), introspects the existing schema
+        and applies safe schema evolution (new columns, type widenings) via
+        ``generate_alter_ddl``.
+        """
+        from lakelogic.core.ddl import _resolve_table_name, generate_alter_ddl
+
         summary = PipelineRunSummary(self.run_id, "ddl_only", dry_run)
         failures = []
 
         for c in active_contracts:
             try:
                 processor = DataProcessor(contract=c.contract_dict, engine=self.engine, pipeline_run_id=self.run_id)
+                resolved_table = _resolve_table_name(processor.contract) or ""
+
                 if dry_run:
                     ddl = processor.generate_ddl(backend=self.engine)
                     logger.info(f"DRY RUN DDL Preview for {c.entity}:\n{ddl}")
-                    summary.append(c.entity, c.layer, "ddl_dry_run")
+
+                    # Also preview ALTER statements if we can introspect
+                    existing_cols, existing_types = self._introspect_table_schema(processor.contract, self.engine)
+                    if existing_cols:
+                        alter_stmts = generate_alter_ddl(
+                            processor.contract,
+                            self.engine,
+                            existing_cols,
+                            existing_column_types=existing_types,
+                        )
+                        if alter_stmts:
+                            alter_preview = "\n".join(alter_stmts)
+                            logger.info(f"DRY RUN Schema Evolution for {c.entity}:\n{alter_preview}")
+
+                    summary.append(c.entity, c.layer, "ddl_dry_run", table_name=resolved_table)
                 else:
                     processor.create_table(backend=self.engine)
                     logger.info(f"Table created for {c.entity}")
-                    summary.append(c.entity, c.layer, "ddl_created")
+
+                    # ── Schema evolution: apply safe ALTERs to existing tables ──
+                    existing_cols, existing_types = self._introspect_table_schema(processor.contract, self.engine)
+                    if existing_cols:
+                        alter_stmts = generate_alter_ddl(
+                            processor.contract,
+                            self.engine,
+                            existing_cols,
+                            existing_column_types=existing_types,
+                        )
+                        if alter_stmts:
+                            self._execute_alter_statements(alter_stmts, self.engine, c.entity)
+                            logger.info(f"Applied {len(alter_stmts)} schema evolution statement(s) for {c.entity}")
+
+                    summary.append(c.entity, c.layer, "ddl_created", table_name=resolved_table)
             except Exception as e:
                 msg = _friendly_validation_error(c.entity, e)
                 logger.error(msg)
@@ -851,6 +947,158 @@ class LakehousePipeline:
             raise RuntimeError(f"DDL failed for {len(failures)} contract(s): {failed_names}. See logs above.")
 
         return summary
+
+    @staticmethod
+    def _introspect_table_schema(contract, backend: str) -> tuple:
+        """Introspect existing table schema to enable schema evolution.
+
+        Returns:
+            Tuple of (column_names: List[str], column_types: Dict[str, str]).
+            Returns ([], {}) if the table doesn't exist or can't be introspected.
+        """
+        from lakelogic.core.ddl import _resolve_table_name
+
+        try:
+            # ── Introspection Routing ─────────────────────────────────────
+            # Determine if target is a direct path (Delta folder) or catalog backed
+            mat = getattr(contract, "materialization", None)
+            target_path = None
+            if mat and hasattr(mat, "target_path") and mat.target_path:
+                target = str(mat.target_path)
+                if not target.startswith("table:"):
+                    target_path = target
+
+            # ── Pattern 1: Direct Storage (Delta Protocol) Introspection ─
+            if backend in ("polars", "pandas", "python") or (backend == "duckdb" and target_path):
+                if not target_path:
+                    return [], {}
+
+                try:
+                    from deltalake import DeltaTable
+
+                    from lakelogic.core.processor import DataProcessor as _DP
+
+                    # Get storage options for cloud paths
+                    storage_opts = None
+                    if any(target_path.startswith(p) for p in ("abfss://", "s3://", "gs://")):
+                        _dummy = _DP.__new__(_DP)
+                        storage_opts = _dummy._get_cloud_storage_options(target_path)
+
+                    dt = DeltaTable(target_path, storage_options=storage_opts)
+                    schema = dt.schema()
+                    col_names = [f.name for f in schema.fields]
+                    # Map Arrow/Delta types to contract-like type names
+                    _delta_type_map = {
+                        "int8": "TINYINT",
+                        "int16": "SMALLINT",
+                        "int32": "INTEGER",
+                        "int64": "BIGINT",
+                        "uint8": "SMALLINT",
+                        "uint16": "INTEGER",
+                        "uint32": "BIGINT",
+                        "uint64": "BIGINT",
+                        "float": "FLOAT",
+                        "double": "DOUBLE",
+                        "float32": "FLOAT",
+                        "float64": "DOUBLE",
+                        "string": "VARCHAR",
+                        "utf8": "VARCHAR",
+                        "large_string": "VARCHAR",
+                        "large_utf8": "VARCHAR",
+                        "boolean": "BOOLEAN",
+                        "bool": "BOOLEAN",
+                        "date32": "DATE",
+                        "date": "DATE",
+                        "timestamp": "TIMESTAMP",
+                        "binary": "BINARY",
+                    }
+                    col_types = {}
+                    for f in schema.fields:
+                        type_str = str(f.type)
+                        # Delta returns PrimitiveType("string") — extract inner name
+                        import re as _re
+
+                        _prim = _re.search(r'"(\w+)"', type_str)
+                        if _prim:
+                            type_str = _prim.group(1).lower()
+                        else:
+                            type_str = type_str.lower()
+                        # Handle timestamp variants
+                        if "timestamp" in type_str:
+                            col_types[f.name] = "TIMESTAMP"
+                        else:
+                            col_types[f.name] = _delta_type_map.get(type_str, type_str.upper())
+                    return col_names, col_types
+                except Exception as e:
+                    logger.debug(f"Could not introspect Delta schema: {e}")
+                    return [], {}
+
+            elif backend == "duckdb":
+                table_name = _resolve_table_name(contract)
+                if not table_name:
+                    return [], {}
+                try:
+                    import duckdb
+
+                    con = duckdb.connect(database=":memory:")
+                    result = con.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                    con.close()
+                    col_names = [row[1] for row in result]
+                    col_types = {row[1]: row[2] for row in result}
+                    return col_names, col_types
+                except Exception:
+                    return [], {}
+
+            elif backend in ("spark", "databricks"):
+                table_name = _resolve_table_name(contract)
+                if not table_name:
+                    return [], {}
+                try:
+                    from pyspark.sql import SparkSession
+
+                    spark = SparkSession.builder.getOrCreate()
+                    df = spark.table(table_name)
+                    col_names = df.columns
+                    col_types = {f.name: f.dataType.simpleString().upper() for f in df.schema.fields}
+                    return col_names, col_types
+                except Exception:
+                    return [], {}
+
+        except Exception as e:
+            logger.debug(f"Schema introspection skipped for {backend}: {e}")
+
+        return [], {}
+
+    @staticmethod
+    def _execute_alter_statements(statements: List[str], backend: str, entity: str) -> None:
+        """Execute ALTER TABLE statements for schema evolution.
+
+        For dataframe engines (polars/pandas), ALTER statements are logged
+        but not executed — Delta handles schema merge on write.
+        """
+        if backend in ("polars", "pandas", "python", "duckdb"):
+            for stmt in statements:
+                logger.info(
+                    f"Schema evolution ({entity}): {stmt} "
+                    f"(will be applied on next Delta write with schema_mode='merge')"
+                )
+            return
+
+        if backend in ("spark", "databricks"):
+            try:
+                from pyspark.sql import SparkSession
+
+                spark = SparkSession.builder.getOrCreate()
+                for stmt in statements:
+                    spark.sql(stmt)
+                    logger.info(f"Executed: {stmt}")
+            except Exception as e:
+                logger.warning(f"Spark ALTER failed for {entity}: {e}")
+            return
+
+        # For other backends, log the statements for manual application
+        for stmt in statements:
+            logger.info(f"Schema evolution ({entity}): {stmt} (manual execution required for {backend})")
 
     # ── Phase 3: Compliance & Privacy ────────────────────────────────────────
 
@@ -1052,6 +1300,12 @@ class LakehousePipeline:
         reprocess_values: Optional[List[str]] = None,
         lookback_days: Optional[int] = None,
         run_log_mode: Optional[str] = None,
+        # Retry / resilience
+        retry_attempts: int = 1,
+        retry_base_wait_seconds: int = 30,
+        entity_timeout_minutes: Optional[int] = None,
+        max_consecutive_failures: int = 0,
+        resume_from_run: Optional[str] = None,
         # Parallel execution
         parallel: bool = False,
         max_workers: int = 4,
@@ -1088,6 +1342,20 @@ class LakehousePipeline:
         forget_values = forget_values or []
         forget_patient_ids = forget_patient_ids or []
         self._created_by_override = created_by
+
+        # ── Checkpointing: load succeeded entities from a previous run ──
+        _checkpoint_succeeded: Set[str] = set()
+        if resume_from_run:
+            _checkpoint_succeeded = self._load_checkpoint(resume_from_run)
+            if _checkpoint_succeeded:
+                logger.info(
+                    f"🔄 Resuming from run {resume_from_run}: "
+                    f"skipping {len(_checkpoint_succeeded)} already-succeeded entities "
+                    f"({', '.join(sorted(_checkpoint_succeeded))})"
+                )
+
+        # ── Circuit breaker state ──
+        _consecutive_failures = 0
 
         targets = [layer.strip().lower() for layer in target_layers.split(",") if layer.strip()]
         layer_order = ["bronze", "silver", "gold"]
@@ -1133,6 +1401,11 @@ class LakehousePipeline:
         # 1. Resolve UC paths for ALL contracts before any processing/validation
         for c in all_active:
             if c.contract_dict:
+                c.contract_dict = copy.deepcopy(c.contract_dict)
+                # Inject pipeline-level environment into contract metadata
+                # so DataProcessor can resolve it consistently for notifications & run logs
+                if environment:
+                    c.contract_dict.setdefault("metadata", {})["environment"] = environment
                 self._resolve_uc_paths(c.contract_dict)
 
         # 2. Resets
@@ -1246,26 +1519,189 @@ class LakehousePipeline:
                         lookback_days,
                         layers_with_new_data,
                         max_workers,
+                        retry_attempts=retry_attempts,
+                        retry_base_wait_seconds=retry_base_wait_seconds,
+                        entity_timeout_minutes=entity_timeout_minutes,
                     )
                 else:
                     for c in wave:
-                        self._process_single_contract(
-                            c,
-                            layer,
-                            summary,
-                            dry_run,
-                            run_log_mode,
-                            reprocess_from,
-                            reprocess_to,
-                            reprocess_column,
-                            reprocess_values,
-                            lookback_days,
-                            layers_with_new_data,
-                        )
+                        # ── Checkpointing: skip already-succeeded entities ──
+                        _ck_key = f"{layer}:{c.entity}"
+                        if _ck_key in _checkpoint_succeeded:
+                            logger.info(
+                                f"  ⏭️ Skipping {c.entity} [{layer}] — already succeeded in run {resume_from_run}"
+                            )
+                            summary.append(c.entity, layer, "skipped_checkpoint")
+                            continue
 
+                        # ── Circuit breaker: abort if too many consecutive failures ──
+                        if max_consecutive_failures > 0 and _consecutive_failures >= max_consecutive_failures:
+                            logger.error(
+                                f"🔴 Circuit breaker tripped: {_consecutive_failures} consecutive failures. "
+                                f"Skipping remaining entities to avoid wasted retries."
+                            )
+                            summary.append(c.entity, layer, "skipped_circuit_breaker")
+                            continue
+
+                        try:
+                            self._process_contract_with_retry(
+                                c,
+                                layer,
+                                summary,
+                                dry_run,
+                                run_log_mode,
+                                reprocess_from,
+                                reprocess_to,
+                                reprocess_column,
+                                reprocess_values,
+                                lookback_days,
+                                layers_with_new_data,
+                                retry_attempts=retry_attempts,
+                                retry_base_wait_seconds=retry_base_wait_seconds,
+                                entity_timeout_minutes=entity_timeout_minutes,
+                            )
+                            _consecutive_failures = 0  # Reset on success
+                        except Exception as e:
+                            _consecutive_failures += 1
+                            if type(e).__name__ == "EntityTimeoutError":
+                                logger.error(
+                                    f"❌ {c.entity} [{layer}] timed out after {entity_timeout_minutes} minutes."
+                                )
+                                summary.append(c.entity, layer, "timeout")
+                            else:
+                                # Catch-all for any other wrapper errors not logged by _process_single_contract
+                                logger.error(f"❌ {c.entity} [{layer}] failed unexpectedly: {e}")
+                                # Only append if not already in summary to avoid duplicate failure entries
+                                if not any(
+                                    r.get("contract") == c.entity and r.get("layer") == layer for r in summary.results
+                                ):
+                                    summary.append(c.entity, layer, "failed")
         return summary
 
+    # ── Checkpoint helpers ─────────────────────────────────────────────────────
+
+    def _load_checkpoint(self, pipeline_run_id: str) -> Set[str]:
+        """Load succeeded entity keys from a previous pipeline run.
+
+        Returns a set of ``"layer:entity"`` strings that succeeded
+        in the given run, so the current run can skip them.
+        """
+        succeeded: Set[str] = set()
+        try:
+            storage = self.registry.storage
+            run_log_table = getattr(storage, "run_log_table", None)
+            if not run_log_table:
+                logger.warning("No run_log_table configured — cannot load checkpoint")
+                return succeeded
+
+            from lakelogic.core.paths import resolve_run_log_ref
+
+            if self.engine == "spark" and self.spark:
+                ref = resolve_run_log_ref(run_log_table, "spark")
+                rows = self.spark.sql(f"""
+                    SELECT data_layer, dataset, stage
+                    FROM {ref}
+                    WHERE pipeline_run_id = '{pipeline_run_id}'
+                      AND stage = 'succeeded'
+                """).collect()
+                for r in rows:
+                    succeeded.add(f"{r['data_layer']}:{r['dataset']}")
+            else:
+                # DuckDB or Polars fallback — read via polars
+                import polars as pl
+
+                from lakelogic.core.paths import enrich_azure_storage_options
+                from lakelogic.engines.cloud_credentials import resolve_storage_options
+
+                storage_opts = enrich_azure_storage_options(resolve_storage_options(run_log_table))
+                try:
+                    df = pl.read_delta(run_log_table, storage_options=storage_opts)
+                except Exception:
+                    df = pl.read_parquet(run_log_table, storage_options=storage_opts)
+
+                filtered = df.filter((pl.col("pipeline_run_id") == pipeline_run_id) & (pl.col("stage") == "succeeded"))
+                for row in filtered.to_dicts():
+                    succeeded.add(f"{row.get('data_layer', '')}:{row.get('dataset', '')}")
+
+            logger.debug(f"Checkpoint loaded: {len(succeeded)} succeeded entities from run {pipeline_run_id}")
+        except Exception as e:
+            logger.warning(f"Failed to load checkpoint from run {pipeline_run_id}: {e}")
+
+        return succeeded
+
     # ── Contract execution helpers ────────────────────────────────────────────
+
+    def _process_contract_with_retry(
+        self,
+        c,
+        layer: str,
+        summary: PipelineRunSummary,
+        dry_run: bool,
+        run_log_mode: Optional[str],
+        reprocess_from: Optional[str],
+        reprocess_to: Optional[str],
+        reprocess_column: Optional[str],
+        reprocess_values: Optional[List[str]],
+        lookback_days: Optional[int],
+        layers_with_new_data: set,
+        *,
+        retry_attempts: int = 1,
+        retry_base_wait_seconds: int = 30,
+        entity_timeout_minutes: Optional[int] = None,
+    ) -> None:
+        """Wrap _process_single_contract with exponential-backoff retry and timeout.
+
+        Delegates to :func:`lakelogic.core.retry.retry_call`.
+        If ``entity_timeout_minutes`` is set, each attempt is time-boxed.
+        """
+        from lakelogic.core.retry import retry_call
+
+        def _timed_process(*args):
+            if entity_timeout_minutes and entity_timeout_minutes > 0:
+                import threading
+
+                entity_label = getattr(c, "entity", str(c))
+
+                # Use a thread with join(timeout) — works on all platforms
+                result_holder = [None]
+                error_holder = [None]
+
+                def _target():
+                    try:
+                        self._process_single_contract(*args)
+                    except Exception as e:
+                        error_holder[0] = e
+
+                t = threading.Thread(target=_target, daemon=True)
+                t.start()
+                t.join(timeout=entity_timeout_minutes * 60)
+
+                if t.is_alive():
+                    raise EntityTimeoutError(f"{entity_label} exceeded timeout of {entity_timeout_minutes} minutes")
+                if error_holder[0]:
+                    raise error_holder[0]
+            else:
+                self._process_single_contract(*args)
+
+        retry_call(
+            _timed_process,
+            args=(
+                c,
+                layer,
+                summary,
+                dry_run,
+                run_log_mode,
+                reprocess_from,
+                reprocess_to,
+                reprocess_column,
+                reprocess_values,
+                lookback_days,
+                layers_with_new_data,
+            ),
+            attempts=retry_attempts,
+            base_wait_seconds=retry_base_wait_seconds,
+            label=getattr(c, "entity", str(c)),
+        )
 
     def _process_single_contract(
         self,
@@ -1295,6 +1731,16 @@ class LakehousePipeline:
             or _mat.get("location", "")
             or ""
         )
+        if _table_name:
+            _sys = getattr(self.registry, "system", "") or ""
+            _dom = getattr(self.registry, "domain", "") or ""
+            _table_name = _table_name.replace("{system}", _sys)
+            _table_name = _table_name.replace("{domain}", _dom)
+            _table_name = _table_name.replace("{layer}", layer)
+            _table_name = _table_name.replace("{bronze_layer}", layer)
+            _table_name = _table_name.replace("{silver_layer}", layer)
+            _table_name = _table_name.replace("{gold_layer}", layer)
+            _table_name = _table_name.strip("._-/")
         logger.info("  ─────────────────────────────────────────────────────────")
         logger.info(f"  📄 [{layer}] {c.entity} | Contract: {_title}{_ver_str}")
 
@@ -1312,6 +1758,10 @@ class LakehousePipeline:
             processor = DataProcessor(
                 contract=c.contract_dict, engine=self.engine, pipeline_run_id=self.run_id, run_log_mode=resolved_mode
             )
+            # Inject domain ownership and notifications configuration
+            processor._ownership = getattr(self.registry, "ownership", {}) or {}
+            processor._notifications = getattr(self.registry, "notifications", []) or []
+            processor._notifications_enabled = getattr(self.registry, "notifications_enabled", True)
             result = processor.run_source(
                 reprocess_from=reprocess_from,
                 reprocess_to=reprocess_to,
@@ -1337,10 +1787,10 @@ class LakehousePipeline:
                 or (hasattr(df_bad, "__len__") and len(df_bad) == 0)
             )
 
+            _status = "success"
             if is_good_empty and is_bad_empty:
-                logger.info(f"No new rows for {c.entity} - incremental load is up to date.")
-                summary.append(c.entity, layer, "no_new_rows", table_name=_table_name)
-                return
+                logger.info(f"No new rows for {c.entity} - proceeding to ensure target schema existence.")
+                _status = "no_new_rows"
 
             # Spark compatibility layer: if the adapter already returned
             # native Spark DataFrames (SparkAdapter does), skip conversion.
@@ -1397,12 +1847,27 @@ class LakehousePipeline:
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
             processor.materialize(df_good, df_bad)
 
+            if rows_bad and rows_bad > 0:
+                _q_config = getattr(processor.contract, "quarantine", None)
+                if _q_config and getattr(_q_config, "fail_on_quarantine", False):
+                    # Surface validation failure details so operators can diagnose immediately
+                    _failures = _report.get("row_rule_failures") or []
+                    _detail_lines = []
+                    for f in _failures[:10]:  # Cap at 10 to avoid log flooding
+                        _msg = f.get("message") or f.get("name") or str(f)
+                        _detail_lines.append(f"  • {_msg}")
+                    _detail_str = "\n".join(_detail_lines) if _detail_lines else "  (no rule details captured)"
+                    raise ValueError(
+                        f"Pipeline failed: {rows_bad} record(s) quarantined for '{c.entity}'.\n"
+                        f"Validation failures:\n{_detail_str}"
+                    )
+
             logger.debug(f"✅ Materialized {row_count} rows for {c.entity}")
             layers_with_new_data.add(layer)
             summary.append(
                 c.entity,
                 layer,
-                "success",
+                _status,
                 rows=row_count,
                 rows_raw=rows_raw,
                 rows_good=rows_good,
@@ -1465,8 +1930,8 @@ class LakehousePipeline:
                         "run_id": str(uuid4()),
                         "pipeline_run_id": self.run_id,
                         "engine": self.engine,
-                        "contract": c.entity,
-                        "dataset": c.entity,
+                        "contract": _title or c.entity,
+                        "dataset": _table_name or c.entity,
                         "data_layer": layer,
                         "domain": getattr(self.registry, "domain", None),
                         "system": getattr(self.registry, "system", None),
@@ -1512,13 +1977,16 @@ class LakehousePipeline:
         lookback_days: Optional[int],
         layers_with_new_data: set,
         max_workers: int = 4,
+        retry_attempts: int = 1,
+        retry_base_wait_seconds: int = 30,
+        entity_timeout_minutes: Optional[int] = None,
     ) -> None:
         """Execute a wave of independent contracts in parallel using threads."""
         errors: List[Exception] = []
 
         def _run_contract(c: RegistryContract) -> None:
             with logger.contextualize(entity=c.entity):
-                self._process_single_contract(
+                self._process_contract_with_retry(
                     c,
                     layer,
                     summary,
@@ -1530,6 +1998,9 @@ class LakehousePipeline:
                     reprocess_values,
                     lookback_days,
                     layers_with_new_data,
+                    retry_attempts=retry_attempts,
+                    retry_base_wait_seconds=retry_base_wait_seconds,
+                    entity_timeout_minutes=entity_timeout_minutes,
                 )
 
         with ThreadPoolExecutor(max_workers=min(max_workers, len(wave))) as executor:
@@ -1718,24 +2189,26 @@ class LakehousePipeline:
             highlighted_edges = set(range(len(edges)))
 
         # Layout: position nodes in columns by layer with generous spacing
-        x_positions = {"external": 0, "bronze": 410, "silver": 820, "gold": 1230, "downstream": 1640}
         node_width = 280
         node_height = 100
         header_h = 40  # space for layer column headers
         y_gap = 180  # vertical gap between nodes in same column
+
+        # Calculate dynamic x_positions based purely on which layers are populated
+        used_layer_list = [layer for layer in layer_order if any(n["layer"] == layer for n in nodes)]
+        x_positions = {layer: i * 410 for i, layer in enumerate(used_layer_list)}
+
         node_positions = {}
-        used_layers = set()
-        for layer in layer_order:
+        used_layers = set(used_layer_list)
+        for layer in used_layer_list:
             layer_nodes = [n for n in nodes if n["layer"] == layer]
-            if not layer_nodes:
-                continue
-            used_layers.add(layer)
+
             total = len(layer_nodes)
             total_height = total * node_height + (total - 1) * (y_gap - node_height) if total else 0
             start_y = max(header_h + 10, header_h + (500 - total_height) // 2) if total else header_h + 100
             for i, n in enumerate(layer_nodes):
                 y = start_y + i * y_gap
-                node_positions[n["id"]] = (x_positions.get(layer, 400), y)
+                node_positions[n["id"]] = (x_positions[layer], y)
 
         # Normalize x positions: shift so minimum x starts at padding
         if node_positions:

@@ -93,7 +93,7 @@ def test_e2e_full(tmp_path: Path) -> None:
                 {"not_null": {"field": "policy_id", "name": "policy_id_not_null"}}
             ]
         },
-        "materialization": {"strategy": "overwrite", "target_path": str(out_dir / "silver_policies"), "format": "csv"},
+        "materialization": {"strategy": "overwrite", "target_path": str(out_dir / "silver_policies"), "format": "parquet"},
         "quarantine": {"enabled": True, "target": str(out_dir / "silver_quarantine")},
     }
     silver_contract_path = tmp_path / "silver_contract.yaml"
@@ -104,7 +104,7 @@ def test_e2e_full(tmp_path: Path) -> None:
         "version": "1.0.0",
         "dataset": "gold_policy_counts",
         "upstream": ["silver_policies"],
-        "source": {"type": "landing", "path": str(out_dir / "silver_policies"), "pattern": "data.csv", "load_mode": "full"},
+        "source": {"type": "landing", "path": str(out_dir / "silver_policies"), "pattern": "*.parquet", "load_mode": "full"},
         "transformations": [
             {"sql": "SELECT customer_id, COUNT(*) AS policy_count FROM source GROUP BY customer_id"}
         ],
@@ -138,8 +138,9 @@ def test_e2e_full(tmp_path: Path) -> None:
     )
 
     assert (out_dir / "bronze_policies" / "data.csv").exists()
-    assert (out_dir / "silver_policies" / "data.csv").exists()
+    assert (out_dir / "silver_policies" / "data.parquet").exists()
     assert (out_dir / "gold_policy_counts" / "data.csv").exists()
+    # Quarantine is written in the same format as the materialization target
     assert (out_dir / "silver_quarantine" / "silver_policies.parquet").exists()
 
 

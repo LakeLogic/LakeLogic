@@ -180,6 +180,24 @@ examples/**/data/landing/*.parquet
 examples/**/data/landing/*.delta
 examples/**/data/landing/*.db
 
+# Notebook-generated files in colab examples
+examples/colab/*.yaml
+examples/colab/*.yml
+examples/colab/*.csv
+examples/colab/*.duckdb
+examples/colab/*.db
+examples/colab/*.json
+examples/colab/*.ndjson
+examples/colab/*.log
+examples/colab/catalog/
+examples/colab/lakehouse/
+examples/colab/landing/
+examples/colab/dag_demo/
+examples/colab/dlt_pipelines/
+
+# Docs-side colab copy (synced from examples/colab before mkdocs build)
+docs/examples/colab/
+
 # LakeGuard state files
 _lakelogic_state/
 .lakelogic/

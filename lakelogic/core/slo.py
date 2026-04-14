@@ -1,8 +1,12 @@
 """
 SLO Validation engine for Lakehouse Domains.
 
-Evaluates data freshness and pipeline schedule guarantees
-against rules defined in `_registry.yaml`.
+Evaluates continuous out-of-band observability metrics across the
+data mesh. Scans materialized files and run logs to validate:
+- Freshness (max delay SLAs)
+- Row volume constraints and historical anomaly detection
+- Dataset quality severity bounds
+- Schedule and duration execution metrics
 """
 
 from __future__ import annotations
@@ -13,6 +17,13 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from loguru import logger
 
+from lakelogic.core.paths import (
+    enrich_azure_storage_options,
+    make_table_name,
+    resolve_materialization_path,
+    resolve_run_log_ref,
+    to_sql_table_ref,
+)
 from lakelogic.core.registry import DomainRegistry
 
 
@@ -50,23 +61,56 @@ class SLOReport(BaseModel):
 
 class SLOValidator:
     """
-    Validates data freshness pipelines against Data Contract and Registry SLAs.
+    Validates Data Contracts and Domain Registries against their defined Service Levels (SLOs).
+
+    This operates continuously out-of-band from ingestion pipelines, evaluating:
+    1. Freshness: By physically scanning Delta/Parquet file timestamps on storage.
+    2. Data Volume: By checking row count min/max bounds and anomaly detection against run log baselines.
+    3. Pipeline Health: By validating execution schedules and dataset quality quarantine ratios.
     """
 
-    def __init__(self, registry: DomainRegistry, spark: Any = None):
+    def __init__(
+        self,
+        registry: DomainRegistry,
+        spark: Any = None,
+        polars: bool = False,
+        duckdb_con: Any = None,
+        storage_options: dict = None,
+    ):
         self.registry = registry
         self.spark = spark
+        self.polars = polars
+        self.duckdb_con = duckdb_con
+        self._storage_options = storage_options
+
+    def _resolve_storage_opts(self, path: str) -> dict:
+        """Resolve storage options for Polars reads.
+
+        If ``storage_options`` was passed to the constructor, enrich and
+        return it directly.  Otherwise fall back to the automatic
+        credential resolver from ``cloud_credentials``.
+        """
+        if self._storage_options is not None:
+            return enrich_azure_storage_options(dict(self._storage_options))
+        from lakelogic.engines.cloud_credentials import resolve_storage_options
+
+        return enrich_azure_storage_options(resolve_storage_options(path))
 
     def check_freshness(self) -> List[SLOCheckResult]:
         """
         Check the freshness of all active contracts against the layer SLOs.
         """
-        if not self.spark:
-            logger.warning("SLOValidator.check_freshness requires a Spark session. Skipping.")
+        if not self.spark and not self.polars and not self.duckdb_con:
+            logger.warning(
+                "SLOValidator.check_freshness requires a Spark session, polars=True, or duckdb_con. Skipping."
+            )
             return []
 
         now = datetime.datetime.now(datetime.timezone.utc)
         results = []
+        logger.info(
+            f"🔍 SLO Freshness Check: scanning {len(self.registry.get_active_contracts())} contracts in {self.registry.domain}/{self.registry.system}"
+        )
 
         freshness_config = self.registry.slo.freshness
         storage = self.registry.storage
@@ -78,15 +122,31 @@ class SLOValidator:
         }
 
         # Validate all active contracts
-        for contract in self.registry.get_active_contracts():
-            layer = contract.layer
-            entity = contract.entity
+        for reg_contract in self.registry.get_active_contracts():
+            layer = reg_contract.layer
+            entity = reg_contract.entity
 
-            if layer not in layer_roots or not layer_roots[layer]:
+            schema_root = layer_roots.get(layer)
+
+            # ── Resolve table path via centralized paths module ──
+            polars_path = resolve_materialization_path(
+                contract=reg_contract,
+                registry_storage=storage,
+                layer=layer,
+                system=self.registry.system,
+                entity=entity,
+            )
+
+            if not self.polars and not self.duckdb_con and not schema_root and not polars_path:
                 continue
 
-            schema_root = layer_roots[layer]
-            table_name = f"{schema_root}.{entity}".replace("`", "")
+            # Build engine-specific SQL table reference
+            entity_table = make_table_name(layer, self.registry.system, entity)
+            table_name = (
+                f"{schema_root}.{entity_table}".replace("`", "")
+                if schema_root
+                else to_sql_table_ref(polars_path, "spark")
+            )
 
             # Get the SLO rules for this specific layer
             layer_slo = freshness_config.get(layer)
@@ -111,9 +171,36 @@ class SLOValidator:
 
             for col in check_cols:
                 try:
-                    # Query the latest timestamp from the table using the current column candidate
-                    row = self.spark.sql(f"SELECT MAX({col}) as latest_ts FROM {table_name}").first()
-                    latest_ts = row["latest_ts"]
+                    if self.spark:
+                        row = self.spark.sql(f"SELECT MAX({col}) as latest_ts FROM {table_name}").first()
+                        latest_ts = row["latest_ts"]
+                    elif self.duckdb_con:
+                        try:
+                            result = self.duckdb_con.execute(
+                                f"SELECT MAX({col}) as latest_ts FROM delta_scan('{polars_path}')"
+                            ).fetchone()
+                        except Exception:
+                            result = self.duckdb_con.execute(
+                                f"SELECT MAX({col}) as latest_ts FROM parquet_scan('{polars_path}')"
+                            ).fetchone()
+                        latest_ts = result[0] if result else None
+                    else:
+                        import polars as pl
+
+                        storage_opts = self._resolve_storage_opts(polars_path)
+                        try:
+                            df = pl.read_delta(polars_path, storage_options=storage_opts)
+                            latest_ts = df.select(pl.col(col).max()).item()
+                        except Exception as delta_e:
+                            # Attempt to read as parquet directory
+                            try:
+                                df = pl.read_parquet(polars_path, storage_options=storage_opts)
+                                latest_ts = df.select(pl.col(col).max()).item()
+                            except Exception as parquet_e:
+                                raise Exception(
+                                    f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                                ) from delta_e
+
                     found_col = col
                     break
                 except Exception as e:
@@ -126,7 +213,7 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status=f"⚠️ ERROR: {str(last_error)[:80]}",
+                        status=f"⚠️ ERROR: {str(last_error)[:200]}",
                         passed=False,
                         slo_max_minutes=max_delay,
                     )
@@ -173,11 +260,27 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status=f"⚠️ ERROR: {str(e)[:80]}",
+                        status=f"⚠️ ERROR: {str(e)[:200]}",
                         passed=False,
                         slo_max_minutes=max_delay,
                     )
                 )
+
+        # ── Summary logging ──────────────────────────────────────────────
+        n_pass = sum(1 for r in results if r.passed)
+        n_fail = sum(1 for r in results if not r.passed and "ERROR" not in r.status)
+        n_err = sum(1 for r in results if "ERROR" in r.status)
+        logger.info(
+            f"📊 SLO Freshness Summary: {len(results)} checks | "
+            f"✅ {n_pass} passed | ❌ {n_fail} failed | ⚠️ {n_err} errors"
+        )
+        for r in results:
+            if r.passed:
+                logger.info(
+                    f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min)"
+                )
+            else:
+                logger.warning(f"   ❌ [{r.layer}] {r.entity}: {r.status}")
 
         return results
 
@@ -189,8 +292,10 @@ class SLOValidator:
         Reads from the run log table (no live COUNT queries) using the existing
         ``counts_good`` / ``counts_source`` / ``counts_total`` columns.
         """
-        if not self.spark:
-            logger.warning("SLOValidator.check_row_counts requires a Spark session. Skipping.")
+        if not self.spark and not self.polars and not self.duckdb_con:
+            logger.warning(
+                "SLOValidator.check_row_counts requires a Spark session, polars=True, or duckdb_con. Skipping."
+            )
             return []
 
         results = []
@@ -204,6 +309,9 @@ class SLOValidator:
 
         # Strip backticks for Spark SQL compatibility
         run_log_table_clean = run_log_table.replace("`", "")
+        # Engine-specific SQL references via centralized paths module
+        spark_table_ref = resolve_run_log_ref(run_log_table, "spark")
+        duckdb_table_ref = resolve_run_log_ref(run_log_table, "duckdb")
 
         for contract in self.registry.get_active_contracts():
             layer = contract.layer
@@ -224,22 +332,66 @@ class SLOValidator:
                 continue
 
             try:
-                # Query the most recent run log entry for this entity + layer
-                row = self.spark.sql(f"""
-                    SELECT {check_field}, timestamp
-                    FROM {run_log_table_clean}
-                    WHERE data_layer = '{layer}'
-                      AND dataset = '{entity}'
-                      AND stage NOT IN ('no_new_data', 'reprocess')
-                    ORDER BY timestamp DESC
-                    LIMIT 1
-                """).first()
+                if self.spark:
+                    row = self.spark.sql(f"""
+                        SELECT {check_field}, timestamp
+                        FROM {spark_table_ref}
+                        WHERE data_layer = '{layer}'
+                          AND dataset = '{entity}'
+                          AND stage NOT IN ('no_new_data', 'reprocess')
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """).first()
+                elif self.duckdb_con:
+                    result = self.duckdb_con.execute(f"""
+                        SELECT {check_field}, timestamp
+                        FROM {duckdb_table_ref}
+                        WHERE data_layer = '{layer}'
+                          AND dataset = '{entity}'
+                          AND stage NOT IN ('no_new_data', 'reprocess')
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """).fetchone()
+                    if result:
+                        row = {check_field: result[0], "timestamp": result[1]}
+                    else:
+                        row = None
+                else:
+                    import polars as pl
+
+                    storage_opts = self._resolve_storage_opts(run_log_table)
+                    try:
+                        df = pl.read_delta(run_log_table, storage_options=storage_opts)
+                    except Exception as delta_e:
+                        try:
+                            df = pl.read_parquet(run_log_table, storage_options=storage_opts)
+                        except Exception as parquet_e:
+                            raise Exception(
+                                f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                            ) from delta_e
+
+                    filtered = (
+                        df.filter(
+                            (pl.col("data_layer") == layer)
+                            & (pl.col("dataset") == entity)
+                            & (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
+                        )
+                        .sort("timestamp", descending=True)
+                        .head(1)
+                    )
+
+                    if not filtered.is_empty():
+                        row_dict = filtered.to_dicts()[0]
+                        row = {check_field: row_dict.get(check_field), "timestamp": row_dict.get("timestamp")}
+                    else:
+                        row = None
+
             except Exception as e:
                 results.append(
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status=f"⚠️ ERROR: {str(e)[:80]}",
+                        status=f"⚠️ ERROR: {str(e)[:200]}",
                         passed=False,
                         slo_min_rows=min_rows,
                         slo_max_rows=max_rows,
@@ -444,7 +596,7 @@ class SLOValidator:
         if not anomaly_cfg or not anomaly_cfg.enabled:
             return None
 
-        if not self.spark:
+        if not self.spark and not self.polars and not self.duckdb_con:
             return None
 
         storage = self.registry.storage
@@ -455,15 +607,56 @@ class SLOValidator:
         run_log_clean = run_log_table.replace("`", "")
 
         try:
-            rows = self.spark.sql(f"""
-                SELECT {anomaly_cfg.check_field if hasattr(anomaly_cfg, "check_field") else "counts_good"} as cnt
-                FROM {run_log_clean}
-                WHERE data_layer = '{layer}'
-                  AND dataset = '{entity}'
-                  AND stage NOT IN ('no_new_data', 'reprocess')
-                ORDER BY timestamp DESC
-                LIMIT {anomaly_cfg.lookback_runs}
-            """).collect()
+            check_field_name = anomaly_cfg.check_field if hasattr(anomaly_cfg, "check_field") else "counts_good"
+            spark_ref = resolve_run_log_ref(run_log_table, "spark")
+            duckdb_ref = resolve_run_log_ref(run_log_table, "duckdb")
+            if self.spark:
+                rows = self.spark.sql(f"""
+                    SELECT {check_field_name} as cnt
+                    FROM {spark_ref}
+                    WHERE data_layer = '{layer}'
+                      AND dataset = '{entity}'
+                      AND stage NOT IN ('no_new_data', 'reprocess')
+                    ORDER BY timestamp DESC
+                    LIMIT {anomaly_cfg.lookback_runs}
+                """).collect()
+            elif self.duckdb_con:
+                duckdb_rows = self.duckdb_con.execute(f"""
+                    SELECT {check_field_name} as cnt
+                    FROM {duckdb_ref}
+                    WHERE data_layer = '{layer}'
+                      AND dataset = '{entity}'
+                      AND stage NOT IN ('no_new_data', 'reprocess')
+                    ORDER BY timestamp DESC
+                    LIMIT {anomaly_cfg.lookback_runs}
+                """).fetchall()
+                rows = [{"cnt": r[0]} for r in duckdb_rows]
+            else:
+                import polars as pl
+
+                storage_opts = self._resolve_storage_opts(run_log_table)
+                try:
+                    df = pl.read_delta(run_log_table, storage_options=storage_opts)
+                except Exception as delta_e:
+                    try:
+                        df = pl.read_parquet(run_log_table, storage_options=storage_opts)
+                    except Exception as parquet_e:
+                        raise Exception(
+                            f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                        ) from delta_e
+
+                filtered = (
+                    df.filter(
+                        (pl.col("data_layer") == layer)
+                        & (pl.col("dataset") == entity)
+                        & (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
+                    )
+                    .sort("timestamp", descending=True)
+                    .head(anomaly_cfg.lookback_runs)
+                )
+
+                rows = [{"cnt": r.get(check_field_name)} for r in filtered.to_dicts()]
+
         except Exception as e:
             logger.debug(f"Anomaly check query failed for {entity}: {e}")
             return None
@@ -540,6 +733,84 @@ class SLOValidator:
             results=results,
         )
 
+    def notify_breaches(self, breaches: List[SLOCheckResult]) -> None:
+        """
+        Send notifications to domain owners for all failed SLO checks via Apprise.
+        Extracts webhooks from the global notifications block in the Domain Registry
+        that have explicitly subscribed to the 'slo_breach' event.
+        """
+        failures = [b for b in breaches if not b.passed]
+        if not failures:
+            return
+
+        try:
+            import apprise
+
+            apobj = apprise.Apprise()
+        except ImportError:
+            logger.warning("apprise is not installed. Skipping SLO Slack notifications. (pip install apprise)")
+            return
+
+        # Load webhooks from registry notifications block
+        notifications = getattr(self.registry, "notifications", [])
+        channel_count = 0
+
+        for cfg in notifications:
+            target = cfg.get("target")
+            events = [e.lower() for e in cfg.get("on_events", [])]
+            if target and "slo_breach" in events:
+                apobj.add(target)
+                channel_count += 1
+
+        # Also load from legacy / metadata domain ownership contacts
+        contacts = self.registry.ownership.get("contacts", []) if self.registry.ownership else []
+        for contact in contacts:
+            slack_url = contact.get("slack")
+            if slack_url:
+                apobj.add(slack_url)
+                channel_count += 1
+
+            teams_url = contact.get("teams")
+            if teams_url:
+                apobj.add(teams_url)
+                channel_count += 1
+
+            webhook_url = contact.get("webhook")
+            if webhook_url:
+                apobj.add(webhook_url)
+                channel_count += 1
+
+            email = contact.get("email")
+            if email:
+                if "://" in email:  # Ensure it is an apprise URI (mailto://)
+                    apobj.add(email)
+                    channel_count += 1
+                else:
+                    import os
+
+                    global_smtp = os.getenv("LAKELOGIC_SMTP_URI")
+                    if global_smtp:
+                        # Append the target email as a path object. Apprise natively standardizes
+                        # this structure for both mailto:// and sendgrid:// and other APIs!
+                        base_url = global_smtp.rstrip("/")
+                        apobj.add(f"{base_url}/{email}")
+                        channel_count += 1
+                    else:
+                        logger.warning(
+                            f"Email contact '{email}' is not a valid Apprise URI. Emails require full SMTP configuration schema (e.g. mailto://...) or the LAKELOGIC_SMTP_URI environment variable. Skipping this target."
+                        )
+
+        if channel_count == 0:
+            logger.debug("No valid notification targets found or subscribed to 'slo_breach'. SLO alerts skipped.")
+            return
+
+        msg = f"LakeLogic SLO Alert: {len(failures)} SLA breaches detected in the '{self.registry.domain}' domain.\n\n"
+        for f in failures:
+            msg += f"- {f.layer}.{f.entity}: {f.status} (Type: {f.check_type})\n"
+
+        apobj.notify(body=msg, title=f"LakeLogic Domain SLO Breach ({self.registry.domain})")
+        logger.info(f"Dispatched SLO alerts to {channel_count} channels via Apprise.")
+
 
 # ── Standalone helpers (used by DataProcessor.run) ───────────────────────────
 
@@ -604,11 +875,12 @@ def _get_max_timestamp(df: Any, field: str, engine_name: str) -> Optional[dateti
                     return None
                 val = df.select(pl.col(field).max()).item()
                 return _coerce_datetime(val)
-        if engine_name == "pandas":
-            if field not in df.columns or df.empty:
-                return None
-            val = df[field].max()
-            return _coerce_datetime(val)
+        if engine_name == "duckdb":
+            import duckdb
+
+            if isinstance(df, duckdb.DuckDBPyRelation):
+                result = df.aggregate(f"MAX({field})").fetchone()
+                return _coerce_datetime(result[0]) if result else None
     except Exception as e:
         logger.debug(f"_get_max_timestamp failed: {e}")
     return None
@@ -628,12 +900,14 @@ def _non_null_ratio(df: Any, field: str, engine_name: str) -> Optional[float]:
                 total = len(df)
                 non_null = total - df.select(pl.col(field).null_count()).item()
                 return non_null / total if total > 0 else None
-        if engine_name == "pandas":
-            if field not in df.columns or df.empty:
+        if engine_name == "duckdb":
+            import duckdb
+
+            if isinstance(df, duckdb.DuckDBPyRelation):
+                result = df.aggregate(f"COUNT({field}), COUNT(*)").fetchone()
+                if result and result[1] > 0:
+                    return result[0] / result[1]
                 return None
-            total = len(df)
-            non_null = df[field].notna().sum()
-            return non_null / total if total > 0 else None
     except Exception as e:
         logger.debug(f"_non_null_ratio failed: {e}")
     return None
@@ -774,7 +1048,7 @@ def compute_slos(
     counts : dict
         Row counts dict (source, good, quarantined, total).
     engine_name : str
-        Engine name (polars, pandas, spark, duckdb).
+        Engine name (polars, spark, duckdb).
     registry_slo : RegistrySLO, optional
         System-level SLO config from the registry. Used as defaults when
         the contract doesn't define its own ``service_levels``.

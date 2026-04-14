@@ -1,48 +1,62 @@
-# Multi-Cloud Ingestion ☁️
+# Ingestion & Cloud
 
-LakeLogic can act as a **schema gate** for ingestion. For local and OSS use, it focuses on validating and quarantining data before it reaches Bronze.
+> **Think of ingestion as border control.**
+> You don't inspect every detail of what's crossing the border — but you do check passports (schema) and flag anything suspicious. The deep security check happens later (Silver layer).
 
-## 1. Cloud Storage Support
-LakeLogic adapters can read from cloud-native paths in hosted environments, but the open-source demo currently focuses on **local files**.
+LakeLogic acts as a **schema gate** for ingestion, ensuring that what lands in your Bronze layer has a known shape and a clean lineage — even if the data itself is messy.
 
--   **Amazon S3 (Simple Storage Service)**: `s3://my-bucket/raw_data/`
--   **Google GCS (Google Cloud Storage)**: `gs://my-bucket/raw_data/`
--   **Azure ADLS (Azure Data Lake Storage)**: `abfss://container@account.dfs.core.windows.net/path/`
+---
 
-## 2. The "Ingestion" Mode (Raw to Bronze)
+## Cloud Storage Support
 
-When moving data from external sources (Raw) into your **Bronze** layer, you might not want complex transformations, but you **always** want to protect your schema.
+LakeLogic reads from all major cloud storage providers:
+
+| Provider | Path format |
+|:---|:---|
+| **Amazon S3** | `s3://my-bucket/raw_data/` |
+| **Google GCS** | `gs://my-bucket/raw_data/` |
+| **Azure ADLS** | `abfss://container@account.dfs.core.windows.net/path/` |
+| **Local files** | `./data/raw_customers.parquet` |
+
+---
+
+## Ingestion Mode (Raw → Bronze)
+
+When moving data from external sources into Bronze, you want schema protection without heavy validation:
 
 ```yaml
 server:
   type: gcs
   path: gs://landing-zone/daily_extract/
-  mode: ingest # Tells LakeLogic to focus on Ingestion
-  schema_evolution: append # Allow new columns, but don't break old ones
+  mode: ingest
+  schema_policy:
+    evolution: append
 ```
 
-> Note: The `server` block is metadata for remote storage in the OSS release, but ingestion controls (`mode`, `schema_evolution`, `cast_to_string`) are now enforced locally.
-
 ### Schema Evolution Strategies
-| Strategy | Behavior |
-| :--- | :--- |
-| **`strict`** | Job fails if the incoming file doesn't match the Bronze table exactly. |
-| **`append`** | Automatically adds new columns to the Bronze table if they appear in the source. |
-| **`merge`** | Upgrades the table schema to the "greatest common denominator" of all files. |
 
-> Note: In the OSS runtime, `append` and `merge` allow unknown columns to pass through locally. Type unification is handled by your downstream table engine.
+| Strategy | Behaviour | Best for |
+|:---|:---|:---|
+| **`strict`** | Fails if incoming file doesn't match the schema exactly | Stable, well-governed sources |
+| **`append`** | Automatically allows new columns to pass through | APIs that add fields over time |
+| **`merge`** | Upgrades the schema to the greatest common denominator | Multi-file ingestion with mixed schemas |
 
-## 3. Schema Drift Protection
-Schema drift is now detected during ingestion. Unknown or missing fields are recorded in the run report and can trigger notifications.
+---
+
+## Schema Drift Protection
+
+> **Think of schema drift like a supplier changing their packaging without telling you.**
+> The product inside might be fine, but if your warehouse is set up for boxes and they start sending tubes, things break.
+
+LakeLogic detects unknown or missing fields during ingestion and can trigger alerts:
 
 ```yaml
 server:
   mode: ingest
-  schema_evolution: append
-  allow_schema_drift: false  # send schema_drift alerts when drift is detected
-```
+  schema_policy:
+    evolution: append
+    unknown_fields: quarantine  # Alert when drift is detected
 
-```yaml
 quarantine:
   notifications:
     - type: slack
@@ -50,9 +64,13 @@ quarantine:
       on_events: ["schema_drift"]
 ```
 
-## 4. Cleanse-on-Arrival (Deduplication & Filtering)
+**Why this matters:** You catch schema changes the moment they arrive, not three days later when a dashboard breaks.
 
-Bronze data is often delivered with duplicates or "deleted" flags from source systems. LakeLogic allows you to cleanse this data the moment it arrives.
+---
+
+## Cleanse-on-Arrival
+
+Bronze data often arrives with duplicates or soft-deleted records. Clean them at the gate:
 
 ```yaml
 transformations:
@@ -61,18 +79,15 @@ transformations:
         SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) AS rn
         FROM source
         WHERE is_deleted = false
-      ) AS t
-      WHERE rn = 1
+      ) WHERE rn = 1
     phase: pre
 ```
 
-This "Pre-Processing" ensures that your Bronze layer stays lean and accurate, saving storage costs and compute time in downstream layers.
-
-> Note: Window-function SQL (like `ROW_NUMBER`) is supported in DuckDB and Spark engines.
+**Why this matters:** A lean Bronze layer saves storage costs and compute time in every downstream layer.
 
 ---
 
-## Example: Landing Azure Data to Bronze
+## Example: Azure to Bronze
 
 ```yaml
 version: 1.0.0
@@ -84,12 +99,9 @@ server:
   type: adls
   path: abfss://raw@datalake.dfs.core.windows.net/crm/
   mode: ingest
-  schema_evolution: append
+  schema_policy:
+    evolution: append
 
-# Note: This is metadata-only in the OSS release.
-
-# We skip quality rules here because we want an exact copy of the source
-# but we still define the "Expected" schema to catch drift.
 model:
   fields:
     - name: user_id
@@ -98,22 +110,33 @@ model:
       type: timestamp
 ```
 
-## 💡 Pro Tip: The "All Strings" Bronze Pattern
+No quality rules here — we want an exact copy of the source. But we still define the expected schema to catch drift early.
 
-Many high-scale data teams use the **"Bronze as Strings"** pattern. 
+---
 
-In this setup, you read **every** column from the source as a `string` (or `varchar`). 
+## The "All Strings" Bronze Pattern
 
-### Why do this?
-1.  **Zero Ingestion Failures**: You never crash your pipeline because an API sent "N/A" into a numeric field.
-2.  **100% Data Capture**: You capture the "dirty" data exactly as it was sent.
-3.  **Fix in Silver**: You perform the casting and data cleaning in the **Silver** layer, where you can use LakeLogic's `quarantine` to isolate the rows that won't cast to the correct type.
+> **Think of this as "photograph the evidence before you touch it."**
+
+Many high-scale teams read every column as a `string` in Bronze:
 
 ```yaml
-# A "Safe" Bronze Ingestion Contract
 server:
   mode: ingest
   cast_to_string: true
 ```
 
-By using LakeLogic at the **Ingestion** point, you ensure that every row in your **Bronze** layer has a known schema and a clean lineage, right from the start. 🛡️☁️
+**Why this works:**
+
+| Benefit | How |
+|:---|:---|
+| **Zero ingestion failures** | You never crash because an API sent `"N/A"` into a numeric field |
+| **100% data capture** | Every value is preserved exactly as the source sent it |
+| **Fix in Silver** | Casting and cleaning happen in Silver, where quarantine catches rows that won't convert |
+
+---
+
+## What's Next?
+
+- **[Reprocessing & Partitioning](reprocessing.md)** — Handling late data and backfills
+- **[Automatic Credentials](automatic_credentials.md)** — Zero-config cloud authentication

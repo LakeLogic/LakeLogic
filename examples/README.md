@@ -9,6 +9,7 @@ Hands-on examples organized by learning stage. Each example is a self-contained 
 | `01_quickstart/` | Your first pipeline in 5 minutes |
 | `02_core_patterns/` | Essential modeling patterns for any lakehouse |
 | `03_compliance_governance/` | HIPAA & GDPR policy enforcement, PII masking |
+| `04_lakehouse_data_platform/` | Full Data Mesh pipeline — domain ownership, config-driven medallion, engine portability |
 | `_archive/` | Untested examples — available once validated |
 
 ## Quick Start
@@ -46,6 +47,11 @@ jupyter notebook 01_hello_world.ipynb
 |---|---|
 | `hipaa_gdpr_pii_masking/` | HIPAA & GDPR Policy Packs, automated PII masking, audit-ready quarantine |
 
+### 04_lakehouse_data_platform
+| Notebook | What You'll Learn |
+|---|---|
+| `data_mesh_ecommerce.ipynb` | Full Data Mesh pipeline with domain-centric contracts, config-driven medallion layers, PII masking, quarantine, cross-product JOINs, SCD2 dimensions, and engine portability (DuckDB → Polars → Spark) |
+
 ## Example Layout
 
 Most examples follow this structure:
@@ -63,3 +69,4 @@ example_name/
 1. **New to LakeLogic?** Start with `01_quickstart/01_hello_world.ipynb`
 2. **Building a lakehouse?** Work through `02_core_patterns/` — bronze gate → dedup → SCD2 → soft delete
 3. **Regulated industry?** Go straight to `03_compliance_governance/hipaa_gdpr_pii_masking/`
+4. **Data Mesh at scale?** Run `04_lakehouse_data_platform/data_mesh_ecommerce.ipynb` — domain ownership, engine portability, config-driven governance

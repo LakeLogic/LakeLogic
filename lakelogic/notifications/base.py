@@ -6,10 +6,109 @@ import smtplib
 from abc import ABC, abstractmethod
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.request import Request, urlopen
 
 from loguru import logger
+
+
+def resolve_ownership_contacts(
+    ownership: Dict[str, Any],
+    event: str,
+    *,
+    roles: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Convert ``ownership.contacts`` into synthetic notification channel configs.
+
+    Each contact with an ``email`` field generates an ``email`` notification.
+    Each contact with a ``slack`` field generates a ``slack`` notification.
+
+    Parameters
+    ----------
+    ownership : dict
+        The ``ownership`` block from the domain/system config.
+    event : str
+        The triggering event name (e.g. ``failure``, ``slo_breach``).
+    roles : list[str], optional
+        If provided, only contacts matching these roles are included.
+        If None, all contacts are included.
+
+    Returns
+    -------
+    list[dict]
+        Notification channel configs ready for ``get_notification_adapter()``.
+    """
+    contacts = ownership.get("contacts") or []
+    channels: List[Dict[str, Any]] = []
+
+    for contact in contacts:
+        name = contact.get("name", "Unknown")
+        role = contact.get("role", "")
+
+        # Role filter: skip contacts that don't match requested roles
+        if roles and role not in roles:
+            continue
+
+        email = contact.get("email")
+        slack = contact.get("slack")
+        teams = contact.get("teams")
+        webhook = contact.get("webhook")
+
+        def _get_list(val):
+            if not val:
+                return []
+            return val if isinstance(val, list) else [val]
+
+        for e in _get_list(email):
+            channels.append(
+                {
+                    "type": "email",
+                    "target": str(e),
+                    "on_events": ["failure", "slo_breach", "quarantine"],
+                    "_source": f"ownership.contacts[{name}]",
+                }
+            )
+
+        # Slack channel names (#channel) and @handles are informational
+        # metadata — only webhook URLs are actionable for notifications.
+        for s in _get_list(slack):
+            s_str = str(s)
+            if s_str.startswith("http"):
+                channels.append(
+                    {
+                        "type": "slack",
+                        "target": s_str,
+                        "on_events": ["failure", "slo_breach", "quarantine"],
+                        "_source": f"ownership.contacts[{name}]",
+                    }
+                )
+
+        for t in _get_list(teams):
+            t_str = str(t)
+            if t_str.startswith("http"):
+                channels.append(
+                    {
+                        "type": "teams",
+                        "target": t_str,
+                        "on_events": ["failure", "slo_breach", "quarantine"],
+                        "_source": f"ownership.contacts[{name}]",
+                    }
+                )
+
+        for w in _get_list(webhook):
+            w_str = str(w)
+            if w_str.startswith("http"):
+                channels.append(
+                    {
+                        "type": "webhook",
+                        "target": w_str,
+                        "on_events": ["failure", "slo_breach", "quarantine"],
+                        "_source": f"ownership.contacts[{name}]",
+                    }
+                )
+
+    return channels
 
 
 class NotificationAdapter(ABC):
@@ -485,6 +584,8 @@ def validate_notification_config(notif_type: str, config: Dict[str, Any]) -> Non
         _require_fields(notif, config, ["api_key", "from_email", "target"])
     elif notif in ["slack", "teams", "webhook"]:
         _require_fields(notif, config, ["target"])
+    elif notif == "console":
+        pass  # Console requires no specific config
     else:
         raise ValueError(f"Unsupported notification type: {notif_type}")
 
@@ -626,6 +727,25 @@ def render_notification_content(
     merged_context: Dict[str, Any] = {"message": message, "subject": subject}
     if context:
         merged_context.update(context)
+        # Apply data masking to source URI built into context
+        source_path = merged_context.get("source_path")
+        if source_path and isinstance(source_path, str):
+            import re
+
+            masked = source_path
+            # Azure: abfss://container@storage_account.dfs.core.windows.net
+            masked = re.sub(
+                r"(abfss?://[^@]+@)([^.]+)(\.dfs\.core\.windows\.net)",
+                lambda m: f"{m.group(1)}{m.group(2)[:1]}***{m.group(3)}",
+                masked,
+            )
+            # S3: s3://bucket/...
+            masked = re.sub(r"(s3a?://)([^/]+)", lambda m: f"{m.group(1)}{m.group(2)[:1]}***", masked)
+            # GCP: gs://bucket/...
+            masked = re.sub(r"(gs://)([^/]+)", lambda m: f"{m.group(1)}{m.group(2)[:1]}***", masked)
+            merged_context["masked_source_path"] = masked
+        else:
+            merged_context["masked_source_path"] = source_path
 
     template_context = config.get("template_context")
     if template_context is not None:
@@ -697,31 +817,31 @@ def _render_jinja_standalone(context: Dict[str, Any]) -> str:
         "schema_drift": "🟡",
         "success": "✅",
         "sla_breach": "🕐",
+        "slo_breach": "🚨",
     }
     icon = _ICONS.get(event, "ℹ️")
 
     lines = [
         f"**LakeLogic** — {title} (v{version})",
         "",
-        f"## {icon} {event.replace('_', ' ').title()}",
+        f"*{icon} {event.replace('_', ' ').title()}*",
         "",
         message,
         "",
-        "| Detail | Value |",
-        "|:-------|:------|",
-        f"| Run ID | `{context.get('run_id', 'N/A')}` |",
-        f"| Pipeline Run | `{context.get('pipeline_run_id') or 'N/A'}` |",
-        f"| Engine | {context.get('engine', 'N/A')} |",
-        f"| Source | `{context.get('source_path') or 'N/A'}` |",
-        f"| Time (UTC) | {context.get('timestamp_utc', 'N/A')} |",
+        f"• *Run ID:* `{context.get('run_id', 'N/A')}`",
+        f"• *Pipeline Run:* `{context.get('pipeline_run_id') or 'N/A'}`",
+        f"• *Engine:* {context.get('engine', 'N/A')}",
+        f"• *Source:* `{context.get('masked_source_path', context.get('source_path')) or 'N/A'}`",
+        f"• *Time (UTC):* {context.get('timestamp_utc', 'N/A')}",
+        f"• *Table:* `{contract.get('dataset', 'N/A')}`",
     ]
 
     if contract.get("domain"):
-        lines.append(f"| Domain | {contract['domain']} |")
+        lines.append(f"• *Domain:* {contract['domain']}")
     if contract.get("system"):
-        lines.append(f"| System | {contract['system']} |")
+        lines.append(f"• *System:* {contract['system']}")
     if contract.get("owner"):
-        lines.append(f"| Owner | {contract['owner']} |")
+        lines.append(f"• *Owner:* {contract['owner']}")
 
     run_id = context.get("run_id", "N/A")
     engine = context.get("engine", "N/A")
@@ -765,7 +885,7 @@ class SMTPAdapter(NotificationAdapter):
         msg["From"] = from_email
         msg["To"] = to_email
 
-        logger.info(f"Sending SMTP email to {to_email} via {host}:{port}")
+        logger.info(f"Sending SMTP email to {to_email} via {host}:{port} [Subject: {subject}]")
         with smtplib.SMTP(host, port, timeout=10) as server:
             if use_tls:
                 server.starttls()
@@ -787,20 +907,25 @@ class SendGridAdapter(NotificationAdapter):
         """
         api_key = self.config.get("api_key")
         from_email = self.config.get("from_email")
+        from_name = self.config.get("from_name")
         to_email = self.config.get("target")
 
         if not api_key or not from_email or not to_email:
             logger.warning("SendGridAdapter missing api_key, from_email, or target; skipping send.")
             return
 
+        from_dict = {"email": from_email}
+        if from_name:
+            from_dict["name"] = from_name
+
         payload = {
             "personalizations": [{"to": [{"email": to_email}]}],
-            "from": {"email": from_email},
+            "from": from_dict,
             "subject": subject,
             "content": [{"type": "text/plain", "value": message}],
         }
 
-        logger.info(f"Sending SendGrid email to {to_email}")
+        logger.info(f"Sending SendGrid email to {to_email} [Subject: {subject}]")
         _post_json(
             "https://api.sendgrid.com/v3/mail/send",
             payload,
@@ -824,7 +949,7 @@ class SlackAdapter(NotificationAdapter):
             logger.warning("SlackAdapter missing target (webhook URL); skipping send.")
             return
         payload = {"text": f"{subject}\n{message}"}
-        logger.info("Sending Slack message")
+        logger.info(f"Sending Slack message [Subject: {subject}]")
         _post_json(url, payload)
 
 
@@ -843,8 +968,8 @@ class TeamsAdapter(NotificationAdapter):
         if not url:
             logger.warning("TeamsAdapter missing target (webhook URL); skipping send.")
             return
-        payload = {"text": f"{subject}\n{message}"}
-        logger.info("Sending Teams message")
+        payload = {"title": subject, "text": message}
+        logger.info(f"Sending Teams message [Subject: {subject}]")
         _post_json(url, payload)
 
 
@@ -864,8 +989,27 @@ class WebhookAdapter(NotificationAdapter):
             logger.warning("WebhookAdapter missing target URL; skipping send.")
             return
         payload = {"subject": subject, "message": message}
-        logger.info("Sending Webhook")
+        logger.info(f"Sending Webhook [Subject: {subject}]")
         _post_json(url, payload)
+
+
+class ConsoleAdapter(NotificationAdapter):
+    """Console notification adapter for local testing and dry runs."""
+
+    def send(self, message: str, subject: str = "LakeLogic Alert"):
+        """
+        Print the notification to stdout.
+
+        Args:
+            message: Body content.
+            subject: Message subject.
+        """
+        print(f"\n{'=' * 60}")
+        print("[LAKELOGIC NOTIFICATION]")
+        print(f"Subject: {subject}")
+        print(f"{'-' * 60}")
+        print(message)
+        print(f"{'=' * 60}\n")
 
 
 def get_notification_adapter(notif_type: str, config: Dict[str, Any]) -> NotificationAdapter:
@@ -882,14 +1026,25 @@ def get_notification_adapter(notif_type: str, config: Dict[str, Any]) -> Notific
     # Lazy-import Apprise adapter to avoid hard dependency
     from lakelogic.notifications.apprise_adapter import AppriseAdapter
 
+    import os
+
+    # Automatically upgrade implicit 'email' to SendGrid if the API key is present in the environment
+    if notif_type.lower() == "email":
+        if os.environ.get("SENDGRID_API_KEY"):
+            notif_type = "sendgrid"
+            config.setdefault("api_key", "env:SENDGRID_API_KEY")
+            config.setdefault("from_email", "env:EMAIL_FROM_ADDRESS")
+            config.setdefault("from_name", "env:EMAIL_FROM_NAME")
+
     adapters = {
         "smtp": SMTPAdapter,
         "sendgrid": SendGridAdapter,
         "slack": SlackAdapter,
         "teams": TeamsAdapter,
-        "email": SMTPAdapter,  # fallback
+        "email": SMTPAdapter,  # fallback if SendGrid is not present
         "webhook": WebhookAdapter,
         "apprise": AppriseAdapter,
+        "console": ConsoleAdapter,
     }
     adapter_class = adapters.get(notif_type.lower())
     if not adapter_class:

@@ -355,9 +355,27 @@ class _ContractValidator:
         if not isinstance(server, dict):
             self._err(path, "'server' must be a mapping")
             return
-        for req in ("type", "path"):
-            if req not in server:
-                self._err(f"{path}.{req}", f"'server.{req}' is required")
+
+        # Detect per-layer server block (used in _system.yaml / _domain.yaml)
+        # e.g. server: { bronze: { schema_policy: ... }, silver: { ... } }
+        _LAYER_KEYS = {"bronze", "silver", "gold", "reference"} | _KNOWN_LAYERS
+        if any(k in _LAYER_KEYS for k in server):
+            for layer_key, layer_cfg in server.items():
+                if layer_key not in _LAYER_KEYS:
+                    continue
+                if isinstance(layer_cfg, dict):
+                    self._check_server_block(layer_cfg, f"{path}.{layer_key}", require_type_path=False)
+            return
+
+        # Flat server block (used in individual contracts)
+        self._check_server_block(server, path, require_type_path=True)
+
+    def _check_server_block(self, server: dict, path: str, require_type_path: bool = True) -> None:
+        """Validate a single server configuration block."""
+        if require_type_path:
+            for req in ("type", "path"):
+                if req not in server:
+                    self._err(f"{path}.{req}", f"'server.{req}' is required")
         if "type" in server and server["type"] not in _KNOWN_SERVER_TYPES:
             self._warn(
                 f"{path}.type",
@@ -373,11 +391,28 @@ class _ContractValidator:
                 f"{path}.mode",
                 f"'server.mode' must be one of {sorted(_KNOWN_MODES)}, got '{server['mode']}'",
             )
-        if "schema_evolution" in server and server["schema_evolution"] not in _KNOWN_EVOLUTION:
+        if "schema_evolution" in server:
             self._warn(
                 f"{path}.schema_evolution",
-                f"Unknown schema_evolution value '{server['schema_evolution']}'",
+                "'schema_evolution' is deprecated — use 'schema_policy.evolution' instead",
             )
+        if "allow_schema_drift" in server:
+            self._warn(
+                f"{path}.allow_schema_drift",
+                "'allow_schema_drift' is deprecated — use 'schema_policy.unknown_fields' instead",
+            )
+        if "schema_policy" in server and isinstance(server["schema_policy"], dict):
+            sp = server["schema_policy"]
+            if "evolution" in sp and sp["evolution"] not in _KNOWN_EVOLUTION:
+                self._warn(
+                    f"{path}.schema_policy.evolution",
+                    f"Unknown evolution value '{sp['evolution']}'",
+                )
+            if "unknown_fields" in sp and sp["unknown_fields"] not in {"quarantine", "drop", "allow"}:
+                self._warn(
+                    f"{path}.schema_policy.unknown_fields",
+                    f"Unknown unknown_fields value '{sp['unknown_fields']}'",
+                )
 
     # ── Source ────────────────────────────────────────────────────────────────
 
@@ -761,11 +796,19 @@ def _augment_schema(schema: Dict[str, Any]) -> None:
         sorted(_KNOWN_MODES),
         "Pipeline mode: 'validate' for quality gate, 'ingest' for raw→bronze",
     )
+    # Note: Server.schema_evolution was removed in favour of
+    # Server.schema_policy.evolution — no augmentation needed.
     _set_nested_enum(
         schema,
-        ["$defs", "Server", "properties", "schema_evolution"],
+        ["$defs", "SchemaPolicy", "properties", "evolution"],
         sorted(_KNOWN_EVOLUTION),
         "Schema evolution policy",
+    )
+    _set_nested_enum(
+        schema,
+        ["$defs", "SchemaPolicy", "properties", "unknown_fields"],
+        ["allow", "drop", "quarantine"],
+        "Handling of undocumented fields",
     )
 
     # source.load_mode

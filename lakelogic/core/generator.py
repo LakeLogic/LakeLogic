@@ -33,9 +33,11 @@ CLI
 
 from __future__ import annotations
 
+import json as _json
 import random
 import re
 import string
+from dataclasses import dataclass
 
 # Module-level alias used in _build_field_rules SQL parsing helpers
 _re = re
@@ -95,6 +97,40 @@ def _try_faker():
         return Faker()
     except ImportError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Test Case metadata — used by the generation report
+# ---------------------------------------------------------------------------
+
+_TEST_CASE_TYPES = {
+    "NOT_NULL_VIOLATION": "Required field set to null",
+    "ACCEPTED_VALUE_VIOLATION": "Value outside accepted_values list",
+    "RANGE_VIOLATION": "Numeric value outside min/max bounds",
+    "TYPE_CONFUSION": "Wrong type injected (e.g. string in numeric field)",
+    "REGEX_VIOLATION": "Value violates expected format/pattern",
+    "TEMPORAL_VIOLATION": "Date/timestamp ordering or consistency broken",
+    "BOUNDARY_VALUE": "Numeric boundary value (0, -1, MAX_INT, etc.)",
+    "EDGE_CASE_AI": "AI-generated edge case value",
+    "EDGE_CASE_BUILTIN": "Built-in edge case from profile index",
+    "EMPTY_STRING": "Empty string on a text field",
+}
+
+
+@dataclass
+class TestCaseInfo:
+    """Metadata about a single invalid value injected during generation.
+
+    Collected by ``_make_invalid_value`` and aggregated into the
+    generation report by ``generate()``.
+    """
+
+    type: str  # Key from _TEST_CASE_TYPES, e.g. "NOT_NULL_VIOLATION"
+    field: str  # Field name, e.g. "email"
+    value: Any = None  # The actual invalid value injected
+    description: str = ""  # Human-readable explanation
+    contract_rule: str = ""  # e.g. "quality.enforce_required"
+    row_index: int = -1  # Set after row is assigned its position
 
 
 # ---------------------------------------------------------------------------
@@ -2896,6 +2932,8 @@ class DataGenerator:
         ai: bool = False,
         ai_provider: Optional[str] = None,
         ai_model: Optional[str] = None,
+        window_start: Optional[datetime] = None,
+        window_end: Optional[datetime] = None,
     ):
         """
         Generate ``rows`` synthetic rows from the contract schema.
@@ -2942,11 +2980,34 @@ class DataGenerator:
             LLM provider (openai, azure, anthropic, ollama).
         ai_model : str, optional
             Model name override.
+        window_start : datetime, optional
+            If provided alongside ``window_end``, all generated timestamps
+            and dates are constrained to this window.  Use this to simulate
+            continuous / streaming data where each batch covers a specific
+            time range (e.g. every 5 minutes)::
+
+                from datetime import datetime, timedelta
+                end   = datetime.now()
+                start = end - timedelta(minutes=5)
+                df = gen.generate(rows=100, window_start=start, window_end=end)
+
+        window_end : datetime, optional
+            End of the generation time window (inclusive).  Defaults to
+            ``datetime.now()`` if ``window_start`` is set but ``window_end``
+            is omitted.
 
         Returns
         -------
         DataFrame (Polars or Pandas depending on output_format)
         """
+        # ── Store time window on instance for all temporal generators ─────
+        if window_start is not None:
+            self._window_start = window_start
+            self._window_end = window_end or datetime.now()
+        else:
+            self._window_start = None
+            self._window_end = None
+
         # Normalise reference_data values to plain Python lists
         fk_pools: Dict[str, List[Any]] = {}
         if reference_data:
@@ -3022,6 +3083,9 @@ class DataGenerator:
         _gen_logger.info(f"📋 Generating data for: {dataset_label}")
         _gen_logger.info(f"   Records    : {n_valid:,} valid + {n_invalid:,} invalid = {rows:,} total")
 
+        if self._window_start:
+            _gen_logger.info(f"   Window     : {self._window_start.isoformat()} → {self._window_end.isoformat()}")
+
         # Log data source rationale
         if ai_sample_pools:
             pool_fields = len(ai_sample_pools)
@@ -3050,26 +3114,179 @@ class DataGenerator:
         elif n_invalid > 0:
             _gen_logger.info("   Edge cases : Heuristic-only (no AI edge cases available)")
 
-        valid_records = [
-            self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools) for _ in range(n_valid)
-        ]
-        invalid_records = [
-            self._make_row(
+        valid_records = []
+        invalid_records = []
+        test_case_manifest: List[TestCaseInfo] = []
+
+        for _ in range(n_valid):
+            row, _ = self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools)
+            valid_records.append(row)
+
+        for _ in range(n_invalid):
+            row, test_cases = self._make_row(
                 invalid=True,
                 fk_pools=fk_pools,
                 sample_pools=auto_pools,
                 edge_case_pools=edge_pools,
             )
-            for _ in range(n_invalid)
-        ]
+            invalid_records.append(row)
+            test_case_manifest.extend(test_cases)
 
         # Shuffle so bad rows aren't all at the end
         all_records = valid_records + invalid_records
         self._rng.shuffle(all_records)
 
-        _gen_logger.info(f"   ✅ Row generation complete: {len(all_records):,} records built")
+        # Assign final row indices to test case entries
+        # Build lookup: id(row) → final index
+        _row_id_to_idx = {id(r): idx for idx, r in enumerate(all_records)}
+        for tc in test_case_manifest:
+            # Find the row this test case belongs to by matching the field value
+            for r in invalid_records:
+                if r.get(tc.field) == tc.value and r.get("_is_invalid"):
+                    tc.row_index = _row_id_to_idx.get(id(r), -1)
+                    break
+
+        _gen_logger.info(f"   Row generation complete: {len(all_records):,} records built")
+
+        # ── Store generation report data on instance ────────────────────────
+        info = self._contract_raw.get("info") or {}
+        self._last_generation_summary = {
+            "total_rows": len(all_records),
+            "valid_rows": n_valid,
+            "invalid_rows": n_invalid,
+            "invalid_ratio": round(n_invalid / max(len(all_records), 1), 4),
+            "test_cases_fired": len(test_case_manifest),
+            "seed": getattr(self, "_seed", None),
+            "contract": info.get("title") or self._contract_raw.get("dataset") or "unknown",
+            "contract_version": info.get("version"),
+            "engine": "polars",
+        }
+        self._last_test_case_manifest = test_case_manifest
+
+        # Log test case summary
+        if test_case_manifest:
+            tc_counts: Dict[str, int] = {}
+            for tc in test_case_manifest:
+                tc_counts[tc.type] = tc_counts.get(tc.type, 0) + 1
+            _gen_logger.info(f"   Test cases : {len(test_case_manifest)} across {len(tc_counts)} categories")
+            for tc_type, count in sorted(tc_counts.items(), key=lambda x: -x[1]):
+                _gen_logger.info(f"     {tc_type:30s} {count:>4d} injections")
 
         return self._to_frame(all_records, output_format)
+
+    def generate_stream(
+        self,
+        rows_per_batch: int = 100,
+        interval_minutes: int = 5,
+        batches: int = 12,
+        output_dir: Optional[str | Path] = None,
+        format: str = "parquet",
+        partition_template: str = "yyyy={Y}/mm={m}/dd={d}/hh={H}/mi={M}",
+        invalid_ratio: float = 0.0,
+        output_format: str = "polars",
+        start_from: Optional[datetime] = None,
+    ):
+        """
+        Generate successive batches of time-windowed data, simulating a streaming source.
+
+        Each batch covers ``interval_minutes`` and all timestamps are constrained
+        to that specific window.  Use this to stress-test freshness SLOs,
+        incremental pipelines, and partition-based ingestion patterns.
+
+        Parameters
+        ----------
+        rows_per_batch : int
+            Number of rows per batch (default 100).
+        interval_minutes : int
+            Duration of each batch window in minutes (default 5).
+        batches : int
+            Total number of batches to generate (default 12 = 1 hour).
+        output_dir : str | Path, optional
+            If provided, each batch is saved to a partitioned subdirectory
+            using ``partition_template``.  If None, batches are yielded
+            in-memory only.
+        format : str
+            File format when saving: ``"parquet"`` (default), ``"csv"``, or
+            ``"json"``.
+        partition_template : str
+            Python strftime-compatible template for partition directories.
+            Default: ``yyyy={Y}/mm={m}/dd={d}/hh={H}/mi={M}``
+        invalid_ratio : float
+            Fraction of bad rows per batch.
+        output_format : str
+            ``"polars"`` (default) or ``"pandas"``.
+        start_from : datetime, optional
+            Starting timestamp for the first batch.  Defaults to
+            ``datetime.now() - interval_minutes * batches``.
+
+        Yields
+        ------
+        tuple[datetime, datetime, DataFrame]
+            ``(window_start, window_end, batch_df)`` for each batch.
+
+        Examples
+        --------
+        In-memory streaming test::
+
+            gen = DataGenerator("contracts/events.yaml")
+            for ws, we, df in gen.generate_stream(batches=6, interval_minutes=5):
+                print(f"Batch {ws} -> {we}: {len(df)} rows")
+
+        Save to partitioned landing zone::
+
+            gen = DataGenerator("contracts/events.yaml")
+            for ws, we, df in gen.generate_stream(
+                output_dir="landing/events",
+                batches=12,
+                interval_minutes=5,
+            ):
+                print(f"Wrote batch {ws} -> {we}")
+        """
+        from loguru import logger
+
+        interval = timedelta(minutes=interval_minutes)
+
+        if start_from is not None:
+            cursor = start_from
+        else:
+            cursor = datetime.now() - (interval * batches)
+
+        logger.info(
+            f"🔄 Streaming {batches} batches × {rows_per_batch} rows "
+            f"({interval_minutes}min intervals, starting {cursor.isoformat()})"
+        )
+
+        for i in range(batches):
+            window_start = cursor
+            window_end = cursor + interval
+
+            df = self.generate(
+                rows=rows_per_batch,
+                invalid_ratio=invalid_ratio,
+                output_format=output_format,
+                window_start=window_start,
+                window_end=window_end,
+            )
+
+            # Save to partitioned directory if requested
+            if output_dir is not None:
+                out_root = Path(output_dir)
+                partition_path = window_end.strftime(
+                    partition_template.replace("{Y}", "%Y")
+                    .replace("{m}", "%m")
+                    .replace("{d}", "%d")
+                    .replace("{H}", "%H")
+                    .replace("{M}", "%M")
+                    .replace("{S}", "%S")
+                )
+                batch_dir = out_root / partition_path
+                batch_dir.mkdir(parents=True, exist_ok=True)
+                batch_file = batch_dir / f"batch.{format}"
+                self.save(df, batch_file, format=format)
+                logger.info(f"   💾 Batch {i + 1}/{batches} saved to {batch_file}")
+
+            yield window_start, window_end, df
+            cursor = window_end
 
     def generate_from_sample(
         self,
@@ -3206,6 +3423,170 @@ class DataGenerator:
                 raise ValueError(f"Unsupported format: {fmt}")
 
         return output
+
+    # ------------------------------------------------------------------
+    # Generation Report
+    # ------------------------------------------------------------------
+
+    def generation_report(self) -> Dict[str, Any]:
+        """Build the structured generation report from the last ``generate()`` call.
+
+        Returns a JSON-serialisable dict documenting every test case that
+        fired, grouped by type, with row counts, sample values, and the
+        contract rule each test case targets.
+
+        Returns ``{}`` if ``generate()`` has not been called yet.
+        """
+        summary = getattr(self, "_last_generation_summary", None)
+        manifest = getattr(self, "_last_test_case_manifest", None)
+
+        if not summary or manifest is None:
+            return {}
+
+        # Group test cases by (type, field) → list of TestCaseInfo
+        from collections import defaultdict
+
+        groups: Dict[Tuple[str, str], List[TestCaseInfo]] = defaultdict(list)
+        for tc in manifest:
+            groups[(tc.type, tc.field)].append(tc)
+
+        # Build test case entries
+        test_cases = []
+        tc_counter = 0
+        for (tc_type, tc_field), entries in sorted(groups.items()):
+            tc_counter += 1
+            # Unique values used
+            values_used = []
+            seen_vals = set()
+            for e in entries:
+                val_repr = repr(e.value)
+                if val_repr not in seen_vals:
+                    seen_vals.add(val_repr)
+                    values_used.append(e.value)
+
+            # Row IDs (capped at 20 for readability)
+            row_ids = sorted({e.row_index for e in entries if e.row_index >= 0})[:20]
+
+            test_cases.append(
+                {
+                    "id": f"TC-{tc_counter:03d}",
+                    "type": tc_type,
+                    "field": tc_field,
+                    "description": entries[0].description,
+                    "rows_generated": len(entries),
+                    "values_used": values_used[:10],  # cap at 10 for readability
+                    "row_ids": row_ids,
+                    "expected_quarantine_reason": tc_type,
+                    "contract_rule_tested": entries[0].contract_rule,
+                }
+            )
+
+        report = {
+            "generated_at": datetime.now().isoformat(),
+            "contract": summary.get("contract", "unknown"),
+            "contract_version": summary.get("contract_version"),
+            "seed": summary.get("seed"),
+            "engine": summary.get("engine", "polars"),
+            "summary": {
+                "total_rows": summary.get("total_rows", 0),
+                "valid_rows": summary.get("valid_rows", 0),
+                "invalid_rows": summary.get("invalid_rows", 0),
+                "invalid_ratio": summary.get("invalid_ratio", 0),
+                "test_cases_fired": len(test_cases),
+            },
+            "test_cases": test_cases,
+        }
+
+        return report
+
+    def save_with_report(
+        self,
+        df,
+        output_dir: str | Path,
+        name: Optional[str] = None,
+        format: str = "csv",
+    ) -> Tuple[Path, Path, Path]:
+        """Save the generated data alongside a generation report and invalid manifest.
+
+        Produces three files in ``output_dir``:
+
+        1. ``{name}_test.{format}`` — all rows with ``_is_invalid`` and
+           ``_test_case_types`` metadata columns stripped.
+        2. ``{name}_invalid.{format}`` — invalid rows only, metadata preserved.
+        3. ``{name}_report.json`` — structured generation report.
+
+        Parameters
+        ----------
+        df : DataFrame
+            The DataFrame returned by ``generate()``.
+        output_dir : str | Path
+            Directory to write files to (created if needed).
+        name : str, optional
+            Base name for files. Defaults to the contract dataset name.
+        format : str
+            Output format: ``csv``, ``parquet``, or ``json``.
+
+        Returns
+        -------
+        tuple of (data_path, invalid_path, report_path)
+        """
+        import polars as pl
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Resolve base name
+        if not name:
+            info = self._contract_raw.get("info") or {}
+            name = info.get("title") or self._contract_raw.get("dataset") or "test_data"
+            # Sanitise for filesystem
+            name = re.sub(r"[^\w\-]", "_", name).strip("_").lower()
+
+        # Metadata columns to strip from the "clean" data file
+        _meta_cols = {"_is_invalid", "_test_case_types"}
+
+        # ── 1. Clean data file (all rows, metadata stripped) ──────────────
+        if isinstance(df, pl.DataFrame):
+            clean_cols = [c for c in df.columns if c not in _meta_cols]
+            clean_df = df.select(clean_cols)
+        else:
+            # Pandas fallback
+            clean_cols = [c for c in df.columns if c not in _meta_cols]
+            clean_df = df[clean_cols]
+
+        data_path = output_dir / f"{name}_test.{format}"
+        self.save(clean_df, data_path, format=format)
+
+        # ── 2. Invalid rows manifest (metadata preserved) ─────────────────
+        if isinstance(df, pl.DataFrame):
+            if "_is_invalid" in df.columns:
+                invalid_df = df.filter(pl.col("_is_invalid") == True)
+            else:
+                invalid_df = pl.DataFrame()
+        else:
+            if "_is_invalid" in df.columns:
+                invalid_df = df[df["_is_invalid"] == True]
+            else:
+                invalid_df = df.iloc[0:0]
+
+        invalid_path = output_dir / f"{name}_invalid.{format}"
+        self.save(invalid_df, invalid_path, format=format)
+
+        # ── 3. Generation report JSON ─────────────────────────────────────
+        report = self.generation_report()
+        report_path = output_dir / f"{name}_report.json"
+        with open(report_path, "w", encoding="utf-8") as f:
+            _json.dump(report, f, indent=2, default=str)
+
+        from loguru import logger as _save_logger
+
+        _save_logger.info(f"   Saved: {data_path}  ({report.get('summary', {}).get('total_rows', '?')} rows)")
+        _save_logger.info(
+            f"   Saved: {invalid_path}  ({report.get('summary', {}).get('invalid_rows', '?')} invalid rows)"
+        )
+        _save_logger.info(f"   Saved: {report_path}  (generation report)")
+
+        return data_path, invalid_path, report_path
 
     def save_partitioned(
         self,
@@ -3425,6 +3806,341 @@ class DataGenerator:
         return stem
 
     # ------------------------------------------------------------------
+    # Related data generation (FK/PK referential integrity)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_fk_relationships(
+        entity_name: str,
+        contract_raw: Dict[str, Any],
+        all_entity_names: List[str],
+        all_pk_columns: Dict[str, List[str]],
+    ) -> List[Dict[str, str]]:
+        """
+        Detect FK columns in a contract that reference another entity's PK.
+
+        Detection sources (in priority order):
+        1. ``links:`` section — explicit table references with join columns
+        2. ``transformations:`` SQL — parses ``JOIN ... ON x.col = y.col``
+        3. Field ``description`` — patterns like "FK to customers table"
+        4. Shared column names — if ``customer_id`` appears in both ``orders``
+           and ``customers`` contracts, and ``customer_id`` is a PK of
+           ``customers``, it's inferred as a FK.
+
+        Returns
+        -------
+        list of dict
+            Each dict has: ``fk_column``, ``ref_entity``, ``ref_column``
+        """
+        relationships: List[Dict[str, str]] = []
+        seen_fk_cols: set = set()
+
+        # 1. Parse links: section
+        links = contract_raw.get("links") or []
+        transformations = contract_raw.get("transformations") or []
+
+        for link in links:
+            link_name = link.get("name", "")
+            link_columns = link.get("columns") or []
+
+            # Try to match link name to an entity in our generation set
+            ref_entity = None
+            for ename in all_entity_names:
+                if ename == entity_name:
+                    continue
+                # Match: link name "customers" matches entity "customers"
+                # Also match partial: link "customers" matches entity "bronze_customers"
+                if link_name == ename or ename.endswith(f"_{link_name}") or link_name.endswith(f"_{ename}"):
+                    ref_entity = ename
+                    break
+
+            if not ref_entity:
+                continue
+
+            # Parse SQL JOINs to find the actual join column
+            for tx in transformations:
+                sql = tx.get("sql", "")
+                if not sql:
+                    continue
+                # Pattern: JOIN <alias> ON <x>.<col> = <y>.<col>
+                join_pattern = re.compile(
+                    r"JOIN\s+(\w+)\s+\w+\s+ON\s+\w+\.(\w+)\s*=\s*\w+\.(\w+)",
+                    re.IGNORECASE,
+                )
+                for m in join_pattern.finditer(sql):
+                    join_table, left_col, right_col = m.group(1), m.group(2), m.group(3)
+                    if join_table.lower() == link_name.lower():
+                        fk_col = left_col  # the column on the source (child) side
+                        ref_col = right_col  # the column on the joined (parent) side
+                        if fk_col not in seen_fk_cols:
+                            relationships.append(
+                                {
+                                    "fk_column": fk_col,
+                                    "ref_entity": ref_entity,
+                                    "ref_column": ref_col,
+                                }
+                            )
+                            seen_fk_cols.add(fk_col)
+
+            # If no SQL JOIN found, try matching link columns against PKs
+            if not any(r["ref_entity"] == ref_entity for r in relationships):
+                ref_pks = all_pk_columns.get(ref_entity, [])
+                for pk_col in ref_pks:
+                    if pk_col in link_columns and pk_col not in seen_fk_cols:
+                        relationships.append(
+                            {
+                                "fk_column": pk_col,
+                                "ref_entity": ref_entity,
+                                "ref_column": pk_col,
+                            }
+                        )
+                        seen_fk_cols.add(pk_col)
+
+        # 2. Parse field descriptions for "FK to <table>" patterns
+        fields = (contract_raw.get("model") or {}).get("fields") or []
+        for field in fields:
+            fname = field.get("name", "")
+            if fname in seen_fk_cols:
+                continue
+            desc = (field.get("description") or "").lower()
+            fk_match = re.search(r"fk\s+to\s+(\w+)", desc, re.IGNORECASE)
+            if fk_match:
+                ref_table = fk_match.group(1).lower()
+                for ename in all_entity_names:
+                    if ename == entity_name:
+                        continue
+                    if ref_table == ename or ename.endswith(f"_{ref_table}") or ref_table.endswith(f"_{ename}"):
+                        relationships.append(
+                            {
+                                "fk_column": fname,
+                                "ref_entity": ename,
+                                "ref_column": fname,  # assume same column name
+                            }
+                        )
+                        seen_fk_cols.add(fname)
+                        break
+
+        # 3. Shared ID column names — if a column ending in _id appears in
+        #    both this contract and is a PK of another entity
+        for field in fields:
+            fname = field.get("name", "")
+            if fname in seen_fk_cols:
+                continue
+            if not fname.endswith("_id"):
+                continue
+            # Derive the likely parent entity from the column name
+            # e.g. customer_id → "customer" or "customers"
+            entity_stem = fname.rsplit("_id", 1)[0]
+            for ename in all_entity_names:
+                if ename == entity_name:
+                    continue
+                ref_pks = all_pk_columns.get(ename, [])
+                # Match: "customer" in "customers" or "customer" in "bronze_customers"
+                ename_lower = ename.lower()
+                if (
+                    entity_stem == ename_lower
+                    or entity_stem + "s" == ename_lower
+                    or ename_lower.endswith(f"_{entity_stem}")
+                    or ename_lower.endswith(f"_{entity_stem}s")
+                ):
+                    if fname in ref_pks:
+                        relationships.append(
+                            {
+                                "fk_column": fname,
+                                "ref_entity": ename,
+                                "ref_column": fname,
+                            }
+                        )
+                        seen_fk_cols.add(fname)
+                        break
+
+        return relationships
+
+    @staticmethod
+    def generate_related(
+        contracts: Dict[str, Any],
+        rows: Any = 100,
+        invalid_ratio: float = 0.0,
+        seed: Optional[int] = None,
+        use_faker: bool = True,
+        output_format: str = "polars",
+        ai: bool = False,
+        ai_provider: Optional[str] = None,
+        ai_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate referentially consistent data for multiple related contracts.
+
+        Automatically detects FK/PK relationships between contracts and
+        generates parent tables first, then passes parent PK values into
+        child tables so FK columns contain valid references.
+
+        Parameters
+        ----------
+        contracts : dict
+            Maps logical entity name → contract path (str or Path).
+            Example::
+
+                {
+                    "customers": "contracts/bronze_customers_v1.0.yaml",
+                    "orders": "contracts/bronze_orders_v1.0.yaml",
+                }
+
+        rows : int or dict
+            Number of rows per entity.  If an ``int``, all entities get the
+            same count.  If a ``dict``, maps entity name → row count::
+
+                {"customers": 50, "orders": 200}
+
+        invalid_ratio : float
+            Fraction of invalid rows (0.0–1.0) injected into each entity.
+        seed : int, optional
+            Random seed for reproducibility.
+        use_faker : bool
+            Use Faker for semantic generation (default True).
+        output_format : str
+            ``"polars"`` (default) or ``"pandas"``.
+        ai : bool
+            Enable AI-generated realistic values.
+        ai_provider / ai_model : str, optional
+            LLM provider and model overrides.
+
+        Returns
+        -------
+        dict[str, DataFrame]
+            Maps entity name → generated DataFrame with referential integrity.
+
+        Examples
+        --------
+        ::
+
+            from lakelogic.core.generator import DataGenerator
+
+            related = DataGenerator.generate_related(
+                contracts={
+                    "customers": "contracts/bronze_customers_v1.0.yaml",
+                    "orders": "contracts/bronze_orders_v1.0.yaml",
+                },
+                rows={"customers": 50, "orders": 200},
+                invalid_ratio=0.05,
+                seed=42,
+            )
+            # Every orders["customer_id"] value exists in customers["customer_id"]
+            cust_ids = set(related["customers"]["customer_id"].to_list())
+            order_cust_ids = set(related["orders"]["customer_id"].to_list())
+            assert order_cust_ids.issubset(cust_ids)
+        """
+        from loguru import logger as _rel_logger
+
+        # ── 1. Load all contracts and extract metadata ────────────────────
+        generators: Dict[str, "DataGenerator"] = {}
+        raw_contracts: Dict[str, Dict[str, Any]] = {}
+        pk_columns: Dict[str, List[str]] = {}
+
+        for name, path in contracts.items():
+            gen = DataGenerator(str(path), seed=seed, use_faker=use_faker)
+            generators[name] = gen
+            raw = gen._contract_raw
+            raw_contracts[name] = raw
+
+            # Extract primary key columns
+            pks: List[str] = []
+            # From top-level primary_key list
+            if raw.get("primary_key"):
+                pks = list(raw["primary_key"])
+            # From field-level primary_key flags
+            if not pks:
+                for f in (raw.get("model") or {}).get("fields") or []:
+                    if f.get("primary_key"):
+                        pks.append(f["name"])
+            pk_columns[name] = pks
+
+        entity_names = list(contracts.keys())
+
+        # ── 2. Detect FK relationships ────────────────────────────────────
+        # relationships: child_entity → [{"fk_column", "ref_entity", "ref_column"}]
+        all_relationships: Dict[str, List[Dict[str, str]]] = {}
+        for name in entity_names:
+            rels = DataGenerator._detect_fk_relationships(
+                name,
+                raw_contracts[name],
+                entity_names,
+                pk_columns,
+            )
+            if rels:
+                all_relationships[name] = rels
+                for r in rels:
+                    _rel_logger.info(f"🔗 Detected FK: {name}.{r['fk_column']} → {r['ref_entity']}.{r['ref_column']}")
+
+        # ── 3. Topological sort — parents before children ─────────────────
+        # Build dependency graph: child → set of parent entities
+        deps: Dict[str, set] = {name: set() for name in entity_names}
+        for child, rels in all_relationships.items():
+            for r in rels:
+                deps[child].add(r["ref_entity"])
+
+        sorted_entities: List[str] = []
+        remaining = set(entity_names)
+        while remaining:
+            # Find entities with no unresolved deps
+            ready = [e for e in remaining if not (deps[e] - set(sorted_entities))]
+            if not ready:
+                # Circular dependency — just add remaining in original order
+                _rel_logger.warning(
+                    f"Circular FK dependencies detected among {remaining}. Generating in original order."
+                )
+                sorted_entities.extend(e for e in entity_names if e in remaining)
+                break
+            sorted_entities.extend(sorted(ready))
+            remaining -= set(ready)
+
+        _rel_logger.info(f"📋 Generation order: {' → '.join(sorted_entities)}")
+
+        # ── 4. Generate in dependency order ───────────────────────────────
+        results: Dict[str, Any] = {}
+        row_counts: Dict[str, int] = rows if isinstance(rows, dict) else {name: rows for name in entity_names}
+
+        for name in sorted_entities:
+            gen = generators[name]
+            n_rows = row_counts.get(name, 100)
+
+            # Build reference_data from parent PKs
+            reference_data: Dict[str, List[Any]] = {}
+            for r in all_relationships.get(name, []):
+                parent_name = r["ref_entity"]
+                parent_col = r["ref_column"]
+                if parent_name in results:
+                    parent_df = results[parent_name]
+                    if hasattr(parent_df, "get_column"):  # polars
+                        pk_values = parent_df.get_column(parent_col).drop_nulls().to_list()
+                    elif hasattr(parent_df, "__getitem__"):  # pandas
+                        pk_values = parent_df[parent_col].dropna().tolist()
+                    else:
+                        pk_values = []
+
+                    if pk_values:
+                        reference_data[r["fk_column"]] = pk_values
+                        _rel_logger.info(
+                            f"   {name}.{r['fk_column']} ← "
+                            f"{len(pk_values)} unique values from "
+                            f"{parent_name}.{parent_col}"
+                        )
+
+            # Generate with FK pools
+            df = gen.generate(
+                rows=n_rows,
+                invalid_ratio=invalid_ratio,
+                output_format=output_format,
+                reference_data=reference_data or None,
+                ai=ai,
+                ai_provider=ai_provider,
+                ai_model=ai_model,
+            )
+            results[name] = df
+
+        return results
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -3612,11 +4328,19 @@ class DataGenerator:
     def _generate_temporal_triplet(self, cfg: dict, is_valid: bool) -> dict:
         now = datetime.now()
 
+        # ── Window-constrained start generation ──────────────────────────
+        if getattr(self, "_window_start", None) is not None:
+            ws = self._window_start
+            we = self._window_end
+            delta_secs = max(int((we - ws).total_seconds()), 1)
+        else:
+            ws = now - timedelta(days=730)  # 2 years
+            delta_secs = int((now - ws).total_seconds())
+
         if is_valid:
             # Valid generation
-            base = now - timedelta(days=730)  # 2 years
-            start_offset = self._rng.randint(0, int((now - base).total_seconds()))
-            start = base + timedelta(seconds=start_offset)
+            start_offset = self._rng.randint(0, delta_secs)
+            start = ws + timedelta(seconds=start_offset)
 
             if "allowed_durations" in cfg:
                 duration = self._rng.choice(cfg["allowed_durations"])
@@ -3647,9 +4371,8 @@ class DataGenerator:
         else:
             # Invalid generation
             pattern = self._rng.choice(list(_TRIPLET_INVALID_PATTERNS.keys()))
-            base = now - timedelta(days=730)
-            start_offset = self._rng.randint(0, int((now - base).total_seconds()))
-            start = base + timedelta(seconds=start_offset)
+            start_offset = self._rng.randint(0, delta_secs)
+            start = ws + timedelta(seconds=start_offset)
             end = None
             duration = None
 
@@ -3690,8 +4413,9 @@ class DataGenerator:
         fk_pools: Optional[Dict[str, List[Any]]] = None,
         sample_pools: Optional[Dict[str, List[Any]]] = None,
         edge_case_pools: Optional[Dict[str, List[Any]]] = None,
-    ) -> Dict[str, Any]:
+    ) -> Tuple[Dict[str, Any], List[TestCaseInfo]]:
         row: Dict[str, Any] = {}
+        test_cases: List[TestCaseInfo] = []
         field_rules = self._build_field_rules(fk_pools=fk_pools)
 
         # ── Pre-populate temporal triplets ──────────────────────────────────
@@ -3714,13 +4438,15 @@ class DataGenerator:
 
             if invalid and self._rng.random() < 0.4:
                 # 40% chance each field is broken in an invalid row
-                row[name] = self._make_invalid_value(
+                val, tc_info = self._make_invalid_value(
                     name,
                     ftype,
                     rules,
                     nullable,
                     edge_case_pools=edge_case_pools,
                 )
+                row[name] = val
+                test_cases.append(tc_info)
             else:
                 row[name] = self._make_valid_value(name, ftype, rules, nullable, sample_pools=sample_pools)
 
@@ -3735,15 +4461,18 @@ class DataGenerator:
 
         # Flag the row for frontend debugging / filtering
         row["_is_invalid"] = invalid
+        if test_cases:
+            # Add primary test case type to the row for filtering
+            row["_test_case_types"] = ",".join(sorted({tc.type for tc in test_cases}))
 
-        return row
+        return row, test_cases
 
     # ------------------------------------------------------------------
     # Temporal-aware date/timestamp generation
     # ------------------------------------------------------------------
 
     def _generate_date(self, name: str) -> str:
-        """Generate a date string, respecting age constraints and weekday bias."""
+        """Generate a date string, respecting age constraints, weekday bias, and time window."""
         name_lower = name.lower()
 
         # Age constraints (date_of_birth, birth_date, etc.)
@@ -3757,9 +4486,16 @@ class DataGenerator:
                 days_range = 1
             return (min_birth + timedelta(days=self._rng.randint(0, days_range))).isoformat()
 
-        today = date.today()
-        base = today - timedelta(days=90)
-        d = base + timedelta(days=self._rng.randint(0, 90))
+        # ── Window-constrained generation ───────────────────────────────────
+        if getattr(self, "_window_start", None) is not None:
+            ws = self._window_start.date()
+            we = self._window_end.date()
+            days_range = max((we - ws).days, 0)
+            d = ws + timedelta(days=self._rng.randint(0, days_range))
+        else:
+            today = date.today()
+            base = today - timedelta(days=90)
+            d = base + timedelta(days=self._rng.randint(0, 90))
 
         # Weekday-only bias: if the field shouldn't fall on weekends, nudge
         if name_lower in _WEEKDAY_ONLY_FIELDS and d.weekday() >= 5:
@@ -3769,12 +4505,19 @@ class DataGenerator:
         return d.isoformat()
 
     def _generate_timestamp(self, name: str) -> str:
-        """Generate a timestamp string with business-hours and weekday awareness."""
+        """Generate a timestamp string with business-hours, weekday awareness, and time window."""
         name_lower = name.lower()
 
-        now = datetime.now()
-        base = now - timedelta(days=90)
-        dt = base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 90))
+        # ── Window-constrained generation ───────────────────────────────────
+        if getattr(self, "_window_start", None) is not None:
+            ws = self._window_start
+            we = self._window_end
+            delta_secs = max(int((we - ws).total_seconds()), 1)
+            dt = ws + timedelta(seconds=self._rng.randint(0, delta_secs))
+        else:
+            now = datetime.now()
+            base = now - timedelta(days=90)
+            dt = base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 90))
 
         # Weekday-only bias
         if name_lower in _WEEKDAY_ONLY_FIELDS and dt.weekday() >= 5:
@@ -4166,8 +4909,13 @@ class DataGenerator:
             if is_epoch_ts:
                 import time as _time
 
-                now = int(_time.time())
-                base = now - 90 * 86400  # 90 days ago
+                # ── Window-constrained epoch generation ────────────────
+                if getattr(self, "_window_start", None) is not None:
+                    base = int(self._window_start.timestamp())
+                    now = int(self._window_end.timestamp())
+                else:
+                    now = int(_time.time())
+                    base = now - 90 * 86400  # 90 days ago
                 epoch_seconds = self._rng.randint(base, now)
                 # Detect granularity from name or description
                 if "_us" in name_lower or "micro" in name_lower:
@@ -4285,17 +5033,24 @@ class DataGenerator:
         rules: Dict[str, Any],
         nullable: bool,
         edge_case_pools: Optional[Dict[str, List[Any]]] = None,
-    ) -> Any:
+    ) -> Tuple[Any, TestCaseInfo]:
+        """Generate an invalid value and return ``(value, test_case_info)``.
+
+        Every invalidation strategy now produces structured metadata so the
+        generation report can document exactly what was injected and why.
+        """
         # AI edge cases get priority — 60% of the time when available
         if edge_case_pools and name in edge_case_pools:
             pool = edge_case_pools[name]
             if pool and self._rng.random() < 0.6:
-                return self._rng.choice(pool)
-
-        strategies = []
-
-        # Null on required field — always a valid "bad" strategy
-        strategies.append(lambda: None)
+                val = self._rng.choice(pool)
+                return val, TestCaseInfo(
+                    type="EDGE_CASE_AI",
+                    field=name,
+                    value=val,
+                    description=f"AI-generated edge case for {name}",
+                    contract_rule="quality.row_rules (AI-targeted)",
+                )
 
         # ── Edge case profile injection (30% chance when matching) ───────
         name_lower = name.lower()
@@ -4303,29 +5058,62 @@ class DataGenerator:
             # Check format violations (field-specific)
             fmt_viol = _EDGE_CASE_PROFILES.get("format_violations", {})
             if name_lower in fmt_viol:
-                return self._rng.choice(fmt_viol[name_lower])
+                val = self._rng.choice(fmt_viol[name_lower])
+                return val, TestCaseInfo(
+                    type="REGEX_VIOLATION",
+                    field=name,
+                    value=val,
+                    description=f"Format violation for {name}",
+                    contract_rule="quality.row_rules.regex_match",
+                )
 
             # Check general edge case index
             if name_lower in _EDGE_CASE_INDEX:
-                return self._rng.choice(_EDGE_CASE_INDEX[name_lower])
+                val = self._rng.choice(_EDGE_CASE_INDEX[name_lower])
+                return val, TestCaseInfo(
+                    type="EDGE_CASE_BUILTIN",
+                    field=name,
+                    value=val,
+                    description=f"Built-in edge case for {name}",
+                    contract_rule="quality.row_rules",
+                )
 
             # Word-boundary match
             parts = name_lower.split("_")
             for i in range(len(parts) - 1, -1, -1):
                 suffix = "_".join(parts[i:])
                 if suffix in _EDGE_CASE_INDEX:
-                    return self._rng.choice(_EDGE_CASE_INDEX[suffix])
+                    val = self._rng.choice(_EDGE_CASE_INDEX[suffix])
+                    return val, TestCaseInfo(
+                        type="EDGE_CASE_BUILTIN",
+                        field=name,
+                        value=val,
+                        description=f"Built-in edge case for {name} (matched suffix '{suffix}')",
+                        contract_rule="quality.row_rules",
+                    )
                 if suffix in fmt_viol:
-                    return self._rng.choice(fmt_viol[suffix])
+                    val = self._rng.choice(fmt_viol[suffix])
+                    return val, TestCaseInfo(
+                        type="REGEX_VIOLATION",
+                        field=name,
+                        value=val,
+                        description=f"Format violation for {name} (matched suffix '{suffix}')",
+                        contract_rule="quality.row_rules.regex_match",
+                    )
 
             # Future date injection
             future_fields = _EDGE_CASE_PROFILES.get("future_dates", {}).get("fields", [])
             if name_lower in future_fields:
                 future_days = self._rng.randint(30, 3650)
                 future_dt = datetime.now() + timedelta(days=future_days)
-                if ftype == "date":
-                    return future_dt.date().isoformat()
-                return future_dt.isoformat()
+                val = future_dt.date().isoformat() if ftype == "date" else future_dt.isoformat()
+                return val, TestCaseInfo(
+                    type="TEMPORAL_VIOLATION",
+                    field=name,
+                    value=val,
+                    description=f"Future date injected for {name} ({future_days} days ahead)",
+                    contract_rule="quality.row_rules.range (temporal)",
+                )
 
             # Numeric boundary injection
             if ftype in (
@@ -4343,40 +5131,114 @@ class DataGenerator:
             ):
                 boundary_vals = _EDGE_CASE_PROFILES.get("numeric_boundaries", {}).get("values", [])
                 if boundary_vals:
-                    return self._rng.choice(boundary_vals)
+                    val = self._rng.choice(boundary_vals)
+                    return val, TestCaseInfo(
+                        type="BOUNDARY_VALUE",
+                        field=name,
+                        value=val,
+                        description=f"Numeric boundary value for {name}",
+                        contract_rule="quality.row_rules.range",
+                    )
 
             # Type confusion injection for numeric-named string fields
             confusion = _EDGE_CASE_PROFILES.get("type_confusion", {})
             if name_lower in confusion.get("fields", []):
-                return self._rng.choice(confusion["values"])
+                val = self._rng.choice(confusion["values"])
+                return val, TestCaseInfo(
+                    type="TYPE_CONFUSION",
+                    field=name,
+                    value=val,
+                    description=f"Type confusion injected for {name}",
+                    contract_rule="schema.type_enforcement",
+                )
+
+        # ── Strategy pool: pick one at random ────────────────────────────
+        strategies: List[Tuple[str, str, str, Any]] = []
+        # Each entry: (tc_type, description, contract_rule, value_factory)
+
+        # Null on required field — always a valid "bad" strategy
+        strategies.append(
+            (
+                "NOT_NULL_VIOLATION",
+                f"{name} set to null — tests required field constraint",
+                "quality.enforce_required",
+                lambda: None,
+            )
+        )
 
         accepted = rules.get("accepted_values")
         if accepted:
             # Value outside accepted list — must stay same Python type
-            if ftype in ("boolean", "bool"):
-                # Booleans have no "outside" value; force None (fails required rule)
-                pass
-            else:
-                strategies.append(lambda: "INVALID_" + "".join(self._rng.choices(string.ascii_uppercase, k=4)))
+            if ftype not in ("boolean", "bool"):
+                strategies.append(
+                    (
+                        "ACCEPTED_VALUE_VIOLATION",
+                        f"{name} set to value outside accepted_values list",
+                        "quality.row_rules.accepted_values",
+                        lambda: "INVALID_" + "".join(self._rng.choices(string.ascii_uppercase, k=4)),
+                    )
+                )
 
         min_val = rules.get("min")
         max_val = rules.get("max")
 
         if ftype in ("integer", "int", "int32", "int64", "long"):
             if min_val is not None:
-                strategies.append(lambda: int(min_val) - self._rng.randint(1, 100))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set below minimum ({min_val})",
+                        "quality.row_rules.range",
+                        lambda: int(min_val) - self._rng.randint(1, 100),
+                    )
+                )
             if max_val is not None:
-                strategies.append(lambda: int(max_val) + self._rng.randint(1, 100))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set above maximum ({max_val})",
+                        "quality.row_rules.range",
+                        lambda: int(max_val) + self._rng.randint(1, 100),
+                    )
+                )
             if len(strategies) == 1:  # only None so far
-                strategies.append(lambda: -self._rng.randint(1, 999))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set to negative value",
+                        "quality.row_rules.range",
+                        lambda: -self._rng.randint(1, 999),
+                    )
+                )
 
         elif ftype in ("double", "float", "float32", "float64", "decimal", "number"):
             if min_val is not None:
-                strategies.append(lambda: float(min_val) - self._rng.uniform(0.01, 10.0))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set below minimum ({min_val})",
+                        "quality.row_rules.range",
+                        lambda: float(min_val) - self._rng.uniform(0.01, 10.0),
+                    )
+                )
             if max_val is not None:
-                strategies.append(lambda: float(max_val) + self._rng.uniform(0.01, 10.0))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set above maximum ({max_val})",
+                        "quality.row_rules.range",
+                        lambda: float(max_val) + self._rng.uniform(0.01, 10.0),
+                    )
+                )
             if len(strategies) == 1:
-                strategies.append(lambda: -self._rng.uniform(0.01, 999.0))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set to negative float",
+                        "quality.row_rules.range",
+                        lambda: -self._rng.uniform(0.01, 999.0),
+                    )
+                )
 
         elif ftype in ("boolean", "bool"):
             # Only valid Python booleans or None — never strings
@@ -4384,10 +5246,26 @@ class DataGenerator:
             pass
 
         else:
-            # String fields: empty string or known-bad sentinel stays as str
-            strategies.append(lambda: "")  # fails not-null / pattern rules
+            # String fields: empty string
+            strategies.append(
+                (
+                    "EMPTY_STRING",
+                    f"{name} set to empty string — tests not_null/pattern rules",
+                    "quality.enforce_required",
+                    lambda: "",
+                )
+            )
 
-        return self._rng.choice(strategies)()
+        # Pick a strategy and fire it
+        tc_type, description, contract_rule, factory = self._rng.choice(strategies)
+        val = factory()
+        return val, TestCaseInfo(
+            type=tc_type,
+            field=name,
+            value=val,
+            description=description,
+            contract_rule=contract_rule,
+        )
 
     def _call_faker(self, hint: str) -> Any:
         """Invoke a Faker method from a hint string.
@@ -4645,10 +5523,22 @@ class DataGenerator:
             kw in name_lower for kw in _DATE_NAME_CONTAINS
         )
         if is_timestamp_name:
+            # ── Window-constrained generation ──────────────────────────
+            if getattr(self, "_window_start", None) is not None:
+                ws = self._window_start
+                we = self._window_end
+                delta_secs = max(int((we - ws).total_seconds()), 1)
+                return (ws + timedelta(seconds=self._rng.randint(0, delta_secs))).isoformat()
             now = datetime.now()
             base = now - timedelta(days=90)
             return (base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 90))).isoformat()
         if is_date_name:
+            # ── Window-constrained generation ──────────────────────────
+            if getattr(self, "_window_start", None) is not None:
+                ws = self._window_start.date()
+                we = self._window_end.date()
+                days_range = max((we - ws).days, 0)
+                return (ws + timedelta(days=self._rng.randint(0, days_range))).isoformat()
             today = date.today()
             base = today - timedelta(days=90)
             return (base + timedelta(days=self._rng.randint(0, 90))).isoformat()
@@ -4842,6 +5732,13 @@ class DataGenerator:
                     entry["_fk_contract"] = fk.get("contract")
                     entry["_fk_column"] = fk.get("column")
                     entry["_fk_surrogate"] = True  # flag: values are synthetic, not real
+
+            # ── FK pool catch-all — apply caller-supplied pool even without
+            #    a formal foreign_key declaration on the field.  This enables
+            #    generate_related() to inject parent PK pools based on naming
+            #    conventions and field descriptions alone.  ─────────────────
+            if fk_pools and fname in fk_pools and "accepted_values" not in entry:
+                entry["accepted_values"] = fk_pools[fname]
 
         # ── 2. Overlay structured quality row_rules ───────────────────────────
         quality = self._quality
