@@ -93,9 +93,7 @@ class SparkAdapter(EngineAdapter):
 
         for type_err_col in getattr(self, "_type_err_cols", []):
             error_exprs.append(F.col(type_err_col))
-            category_exprs.append(
-                F.when(F.col(type_err_col).isNotNull(), F.lit("schema")).otherwise(F.lit(None))
-            )
+            category_exprs.append(F.when(F.col(type_err_col).isNotNull(), F.lit("schema")).otherwise(F.lit(None)))
 
         df_eval = df
         internal_cols = []
@@ -784,6 +782,7 @@ class SparkAdapter(EngineAdapter):
 
         server = self.contract.server
         from lakelogic.core.models import SchemaPolicy as _SP
+
         _sp_defaults = _SP()
         evolution = _sp_defaults.evolution
         policy = _sp_defaults.unknown_fields

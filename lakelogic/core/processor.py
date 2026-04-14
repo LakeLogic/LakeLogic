@@ -149,10 +149,7 @@ class DataProcessor:
         self._resolved_domain = _metadata.get("domain") or (getattr(_info, "domain", None) if _info else None)
         self._resolved_system = _metadata.get("system") or (getattr(_info, "system", None) if _info else None)
         self._resolved_environment = (
-            _metadata.get("environment")
-            or os.environ.get("ENVIRONMENT")
-            or os.environ.get("ENV")
-            or "local"
+            _metadata.get("environment") or os.environ.get("ENVIRONMENT") or os.environ.get("ENV") or "local"
         )
         self._resolved_data_layer = (
             _metadata.get("data_layer")
@@ -612,6 +609,7 @@ class DataProcessor:
         if good_df is not None and self.contract.model and self.contract.model.fields:
             # Resolve unknown_fields policy: server.schema_policy > contract.schema_policy > SchemaPolicy default
             from lakelogic.core.models import SchemaPolicy as _SP
+
             policy = _SP().unknown_fields  # Use the model default
 
             # Check root-level schema_policy first
@@ -847,7 +845,10 @@ class DataProcessor:
                         top_reasons = reasons[:10]
                         if len(reasons) > 10:
                             top_reasons.append(f"...and {len(reasons) - 10} more")
-                        reason_summary = "\n\nRule Failure Breakdown (records can fail multiple rules):\n- " + "\n- ".join(top_reasons)
+                        reason_summary = (
+                            "\n\nRule Failure Breakdown (records can fail multiple rules):\n- "
+                            + "\n- ".join(top_reasons)
+                        )
 
                 msg = (
                     f"LakeLogic Alert: {bad} records quarantined in '{contract_title}'. "
@@ -866,7 +867,9 @@ class DataProcessor:
                 # Halt pipeline if configured
                 halt_on_fail = getattr(self.contract.quality, "fail_pipeline_on_dataset_error", False)
                 if halt_on_fail:
-                    raise ValueError(f"Pipeline halted: Dataset Quality rules failed in '{contract_title}'. Details: {details}")
+                    raise ValueError(
+                        f"Pipeline halted: Dataset Quality rules failed in '{contract_title}'. Details: {details}"
+                    )
 
         # Schema drift detection (ingest mode)
         drift = getattr(self.adapter, "schema_drift", {}) or {}
@@ -982,6 +985,7 @@ class DataProcessor:
                 drift["unknown_fields"] = real_unknown
 
             from lakelogic.core.models import SchemaPolicy as _SP
+
             _default_policy = _SP().unknown_fields
             policy = drift.get("policy", _default_policy)
             if real_missing or real_unknown:
@@ -1093,17 +1097,16 @@ class DataProcessor:
                         detail_parts.append(f"actual={check_result['actual_pct']}%")
                     if check_result.get("reason"):
                         detail_parts.append(check_result["reason"])
-                    breaches.append({
-                        "check": check_name,
-                        "detail": ", ".join(detail_parts) if detail_parts else "failed",
-                    })
+                    breaches.append(
+                        {
+                            "check": check_name,
+                            "detail": ", ".join(detail_parts) if detail_parts else "failed",
+                        }
+                    )
 
             if breaches:
                 breach_lines = [f"  • {b['check']}: {b['detail']}" for b in breaches]
-                breach_msg = (
-                    f"SLO breach detected for '{contract_title}':\n"
-                    + "\n".join(breach_lines)
-                )
+                breach_msg = f"SLO breach detected for '{contract_title}':\n" + "\n".join(breach_lines)
                 logger.warning(breach_msg)
                 try:
                     self.notify(event="slo_breach", message=breach_msg)
@@ -1533,7 +1536,10 @@ class DataProcessor:
                             if source_fmt == "parquet" or path.endswith(".parquet"):
                                 if _tag_source:
                                     df = pl.concat(
-                                        [pl.read_parquet(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                        [
+                                            pl.read_parquet(p).with_columns(pl.lit(p).alias("_source_file"))
+                                            for p in file_paths
+                                        ],
                                         how=_concat_how,
                                     )
                                 else:
@@ -1542,7 +1548,10 @@ class DataProcessor:
                             elif source_fmt == "ndjson" or path.endswith((".ndjson", ".jsonl")):
                                 if _tag_source:
                                     df = pl.concat(
-                                        [pl.read_ndjson(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                        [
+                                            pl.read_ndjson(p).with_columns(pl.lit(p).alias("_source_file"))
+                                            for p in file_paths
+                                        ],
                                         how=_concat_how,
                                     )
                                 else:
@@ -1557,7 +1566,10 @@ class DataProcessor:
                                     # Windows drive-letter paths.
                                     if _tag_source:
                                         df = pl.concat(
-                                            [pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                            [
+                                                pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file"))
+                                                for p in file_paths
+                                            ],
                                             how=_concat_how,
                                         )
                                     else:
@@ -1565,7 +1577,10 @@ class DataProcessor:
                                 else:
                                     if _tag_source:
                                         df = pl.concat(
-                                            [pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file")) for p in file_paths],
+                                            [
+                                                pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file"))
+                                                for p in file_paths
+                                            ],
                                             how=_concat_how,
                                         )
                                     else:
@@ -1790,10 +1805,7 @@ class DataProcessor:
                             # malformed paths like "*.csv://C:/.../data.csv".
                             # Pre-expand globs via Python's glob module and pass
                             # resolved file paths instead.
-                            _needs_pre_glob = (
-                                not self._is_uri_path(path)
-                                and any(ch in path for ch in ["*", "?", "["])
-                            )
+                            _needs_pre_glob = not self._is_uri_path(path) and any(ch in path for ch in ["*", "?", "["])
                             if _needs_pre_glob:
                                 from glob import glob as _glob
 
@@ -2924,6 +2936,7 @@ class DataProcessor:
         """
         # Delegates to centralized lakelogic.core.paths module
         from lakelogic.core.paths import is_uri_path
+
         return is_uri_path(str(path))
 
     def _get_cloud_storage_options(self, path: str) -> Dict[str, str]:
@@ -3040,10 +3053,16 @@ class DataProcessor:
             message: Notification body.
         """
         global_enabled = getattr(self, "_notifications_enabled", True)
-        contract_enabled = getattr(self.contract.quarantine, "notifications_enabled", True) if getattr(self.contract, "quarantine", None) else True
+        contract_enabled = (
+            getattr(self.contract.quarantine, "notifications_enabled", True)
+            if getattr(self.contract, "quarantine", None)
+            else True
+        )
 
         if not global_enabled or not contract_enabled:
-            logger.debug(f"Notifications disabled (global_enabled={global_enabled}, contract_enabled={contract_enabled}). Skipping event: {event}")
+            logger.debug(
+                f"Notifications disabled (global_enabled={global_enabled}, contract_enabled={contract_enabled}). Skipping event: {event}"
+            )
             return
 
         from lakelogic.notifications.base import resolve_ownership_contacts
@@ -3074,13 +3093,17 @@ class DataProcessor:
         q = self.contract.quarantine
         if q and q.enabled and q.notifications:
             for notif in q.notifications:
-                if event in notif.on_events or (event == "dataset_quality_check" and "failure" in notif.on_events) or (event == "failure" and "dataset_rule_failed" in notif.on_events):
+                if (
+                    event in notif.on_events
+                    or (event == "dataset_quality_check" and "failure" in notif.on_events)
+                    or (event == "failure" and "dataset_rule_failed" in notif.on_events)
+                ):
                     try:
                         target = getattr(notif, "target", None) or ""
-                        
+
                         if target in dispatched_targets:
                             continue
-                            
+
                         config = notif.model_dump(by_alias=True)
                         if hasattr(self.contract, "_base_path"):
                             config["_base_path"] = str(self.contract._base_path)
@@ -3092,13 +3115,13 @@ class DataProcessor:
                             context=template_context,
                         )
                         adapter.send(rendered_message, subject=rendered_subject)
-                        
+
                         # Add to deduplication set only if it's hashable
                         try:
                             dispatched_targets.add(target)
                         except TypeError:
-                            pass # If unhashable (like a list), we still successfully dispatched it, just can't dedupe it later
-                            
+                            pass  # If unhashable (like a list), we still successfully dispatched it, just can't dedupe it later
+
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
                         if getattr(q, "strict_notifications", True):
@@ -3114,10 +3137,10 @@ class DataProcessor:
                 continue
             try:
                 target = notif_cfg.get("target", "")
-                
+
                 if target in dispatched_targets:
                     continue
-                    
+
                 notif_type = notif_cfg.get("type", "")
                 # Auto-detect type from target URL when not explicitly set
                 if not notif_type:
@@ -3139,12 +3162,12 @@ class DataProcessor:
                     context=template_context,
                 )
                 adapter.send(rendered_message, subject=rendered_subject)
-                
+
                 try:
                     dispatched_targets.add(target)
                 except TypeError:
                     pass
-                    
+
             except Exception as e:
                 logger.warning(f"Registry notification failed ({notif_cfg.get('target', 'unknown')}): {e}")
 
@@ -3159,10 +3182,10 @@ class DataProcessor:
                     continue
                 try:
                     target = ch.get("target", "")
-                    
+
                     if target in dispatched_targets:
                         continue
-                        
+
                     adapter = get_notification_adapter(ch["type"], ch)
                     rendered_message, rendered_subject = render_notification_content(
                         ch,
@@ -3171,18 +3194,18 @@ class DataProcessor:
                         context=template_context,
                     )
                     adapter.send(rendered_message, subject=rendered_subject)
-                    
+
                     try:
                         dispatched_targets.add(target)
                     except TypeError:
                         pass
-                        
+
                     logger.debug(f"  Notified ownership contact: {ch.get('_source', target)}")
                 except Exception as e:
                     # Missing infrastructure config (smtp_host, etc.) is a
                     # config gap, not a runtime error — log at DEBUG level.
                     err_str = str(e)
-                    target_str = ch.get('_source', ch.get('target', 'unknown'))
+                    target_str = ch.get("_source", ch.get("target", "unknown"))
                     if "missing required fields" in err_str:
                         logger.debug(f"Ownership notification skipped ({target_str}): {e}")
                     else:
@@ -3218,7 +3241,7 @@ class DataProcessor:
         if mat_obj:
             _target_path = getattr(mat_obj, "target_path", "") or getattr(mat_obj, "path", "") or ""
         if str(_target_path).startswith("table:"):
-            _table_full = str(_target_path)[len("table:"):]
+            _table_full = str(_target_path)[len("table:") :]
             _dataset = _table_full.split(".")[-1] if "." in _table_full else _table_full
         else:
             _info_table = getattr(info, "table_name", None) if info else None

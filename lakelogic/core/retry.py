@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import time
 import traceback as _tb
-from typing import Any, Callable, Optional, Tuple, Type
+from typing import Any, Callable, Tuple, Type
 
 from loguru import logger
 
@@ -73,7 +73,7 @@ def retry_call(
     """
     kwargs = kwargs or {}
     label = label or getattr(func, "__name__", str(func))
-    
+
     # Ensure we always attempt at least once, even if user sets retry_attempts=0
     max_total_attempts = max(1, attempts)
 
@@ -99,8 +99,7 @@ def retry_call(
                 time.sleep(wait)
             else:
                 logger.error(
-                    f"❌ All {max_total_attempts} attempts exhausted for "
-                    f"{label} ({type(e).__name__}): {e}\n{tb_str}"
+                    f"❌ All {max_total_attempts} attempts exhausted for {label} ({type(e).__name__}): {e}\n{tb_str}"
                 )
                 raise  # Re-raises the original exception — no wrapping
 
@@ -120,6 +119,7 @@ def with_retry(
         def flaky_api_call(url):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         import functools
 
@@ -134,5 +134,7 @@ def with_retry(
                 retry_on=retry_on,
                 label=label or func.__name__,
             )
+
         return wrapper
+
     return decorator

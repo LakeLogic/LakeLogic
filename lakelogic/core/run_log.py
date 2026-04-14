@@ -811,8 +811,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 if hasattr(data, "__len__") and len(data) == 0:
                     kwargs.pop("schema_mode", None)
                     kwargs.pop("engine", None)
-                    
+
                 import inspect
+
                 sig = inspect.signature(write_deltalake)
                 if "engine" in sig.parameters and kwargs.get("schema_mode") == "merge":
                     kwargs["engine"] = "rust"

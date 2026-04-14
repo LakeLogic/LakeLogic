@@ -324,7 +324,9 @@ def bootstrap(
         help="Enrich contracts with LLM-generated descriptions, PII flags, and SQL rules (requires API key in env).",
     ),
     ai_provider: Optional[str] = typer.Option(
-        None, "--ai-provider", help="AI provider: openai | azure | anthropic | ollama (Requires OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_* env vars)."
+        None,
+        "--ai-provider",
+        help="AI provider: openai | azure | anthropic | ollama (Requires OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_* env vars).",
     ),
     ai_model: Optional[str] = typer.Option(
         None,
@@ -982,12 +984,12 @@ def generate(
             # If output is a directory (or invalid_ratio > 0 and output has no extension):
             # produce the full 3-file report output
             if n_invalid > 0 and (output_path.is_dir() or not output_path.suffix):
-                data_path, invalid_path, report_path = gen.save_with_report(
-                    df, output_path, format=format
-                )
+                data_path, invalid_path, report_path = gen.save_with_report(df, output_path, format=format)
                 typer.echo(typer.style("  OUTPUT:", bold=True))
                 typer.echo(typer.style(f"  ✔  {data_path}", fg=typer.colors.CYAN) + f"  ({rows:,} rows)")
-                typer.echo(typer.style(f"  ✔  {invalid_path}", fg=typer.colors.CYAN) + f"  ({n_invalid:,} invalid rows)")
+                typer.echo(
+                    typer.style(f"  ✔  {invalid_path}", fg=typer.colors.CYAN) + f"  ({n_invalid:,} invalid rows)"
+                )
                 typer.echo(typer.style(f"  ✔  {report_path}", fg=typer.colors.CYAN) + "  (generation report)")
                 typer.echo("")
                 typer.echo(
@@ -1080,8 +1082,7 @@ def assert_report(
     if quarantine_log and quarantine_log.exists():
         typer.echo(
             typer.style(
-                "  ℹ  Quarantine cross-reference is available. "
-                "Full assertion logic requires the run log integration.",
+                "  ℹ  Quarantine cross-reference is available. Full assertion logic requires the run log integration.",
                 dim=True,
             )
         )
@@ -1111,9 +1112,7 @@ def assert_report(
             )
 
     if min_coverage > 0:
-        typer.echo(
-            typer.style(f"  Assertion: min coverage ≥ {min_coverage:.1%}", bold=True)
-        )
+        typer.echo(typer.style(f"  Assertion: min coverage ≥ {min_coverage:.1%}", bold=True))
         # This will be fully implemented when quarantine log cross-reference is added
         typer.echo(typer.style("  ℹ  Coverage assertion requires quarantine log input.", dim=True))
 

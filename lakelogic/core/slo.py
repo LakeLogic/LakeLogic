@@ -1,7 +1,7 @@
 """
 SLO Validation engine for Lakehouse Domains.
 
-Evaluates continuous out-of-band observability metrics across the 
+Evaluates continuous out-of-band observability metrics across the
 data mesh. Scans materialized files and run logs to validate:
 - Freshness (max delay SLAs)
 - Row volume constraints and historical anomaly detection
@@ -62,14 +62,21 @@ class SLOReport(BaseModel):
 class SLOValidator:
     """
     Validates Data Contracts and Domain Registries against their defined Service Levels (SLOs).
-    
+
     This operates continuously out-of-band from ingestion pipelines, evaluating:
     1. Freshness: By physically scanning Delta/Parquet file timestamps on storage.
     2. Data Volume: By checking row count min/max bounds and anomaly detection against run log baselines.
     3. Pipeline Health: By validating execution schedules and dataset quality quarantine ratios.
     """
 
-    def __init__(self, registry: DomainRegistry, spark: Any = None, polars: bool = False, duckdb_con: Any = None, storage_options: dict = None):
+    def __init__(
+        self,
+        registry: DomainRegistry,
+        spark: Any = None,
+        polars: bool = False,
+        duckdb_con: Any = None,
+        storage_options: dict = None,
+    ):
         self.registry = registry
         self.spark = spark
         self.polars = polars
@@ -86,6 +93,7 @@ class SLOValidator:
         if self._storage_options is not None:
             return enrich_azure_storage_options(dict(self._storage_options))
         from lakelogic.engines.cloud_credentials import resolve_storage_options
+
         return enrich_azure_storage_options(resolve_storage_options(path))
 
     def check_freshness(self) -> List[SLOCheckResult]:
@@ -93,12 +101,16 @@ class SLOValidator:
         Check the freshness of all active contracts against the layer SLOs.
         """
         if not self.spark and not self.polars and not self.duckdb_con:
-            logger.warning("SLOValidator.check_freshness requires a Spark session, polars=True, or duckdb_con. Skipping.")
+            logger.warning(
+                "SLOValidator.check_freshness requires a Spark session, polars=True, or duckdb_con. Skipping."
+            )
             return []
 
         now = datetime.datetime.now(datetime.timezone.utc)
         results = []
-        logger.info(f"🔍 SLO Freshness Check: scanning {len(self.registry.get_active_contracts())} contracts in {self.registry.domain}/{self.registry.system}")
+        logger.info(
+            f"🔍 SLO Freshness Check: scanning {len(self.registry.get_active_contracts())} contracts in {self.registry.domain}/{self.registry.system}"
+        )
 
         freshness_config = self.registry.slo.freshness
         storage = self.registry.storage
@@ -174,6 +186,7 @@ class SLOValidator:
                         latest_ts = result[0] if result else None
                     else:
                         import polars as pl
+
                         storage_opts = self._resolve_storage_opts(polars_path)
                         try:
                             df = pl.read_delta(polars_path, storage_options=storage_opts)
@@ -184,8 +197,10 @@ class SLOValidator:
                                 df = pl.read_parquet(polars_path, storage_options=storage_opts)
                                 latest_ts = df.select(pl.col(col).max()).item()
                             except Exception as parquet_e:
-                                raise Exception(f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}...") from delta_e
-                            
+                                raise Exception(
+                                    f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                                ) from delta_e
+
                     found_col = col
                     break
                 except Exception as e:
@@ -253,15 +268,17 @@ class SLOValidator:
 
         # ── Summary logging ──────────────────────────────────────────────
         n_pass = sum(1 for r in results if r.passed)
-        n_fail = sum(1 for r in results if not r.passed and 'ERROR' not in r.status)
-        n_err = sum(1 for r in results if 'ERROR' in r.status)
+        n_fail = sum(1 for r in results if not r.passed and "ERROR" not in r.status)
+        n_err = sum(1 for r in results if "ERROR" in r.status)
         logger.info(
             f"📊 SLO Freshness Summary: {len(results)} checks | "
             f"✅ {n_pass} passed | ❌ {n_fail} failed | ⚠️ {n_err} errors"
         )
         for r in results:
             if r.passed:
-                logger.info(f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min)")
+                logger.info(
+                    f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min)"
+                )
             else:
                 logger.warning(f"   ❌ [{r.layer}] {r.entity}: {r.status}")
 
@@ -276,7 +293,9 @@ class SLOValidator:
         ``counts_good`` / ``counts_source`` / ``counts_total`` columns.
         """
         if not self.spark and not self.polars and not self.duckdb_con:
-            logger.warning("SLOValidator.check_row_counts requires a Spark session, polars=True, or duckdb_con. Skipping.")
+            logger.warning(
+                "SLOValidator.check_row_counts requires a Spark session, polars=True, or duckdb_con. Skipping."
+            )
             return []
 
         results = []
@@ -339,6 +358,7 @@ class SLOValidator:
                         row = None
                 else:
                     import polars as pl
+
                     storage_opts = self._resolve_storage_opts(run_log_table)
                     try:
                         df = pl.read_delta(run_log_table, storage_options=storage_opts)
@@ -346,14 +366,20 @@ class SLOValidator:
                         try:
                             df = pl.read_parquet(run_log_table, storage_options=storage_opts)
                         except Exception as parquet_e:
-                            raise Exception(f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}...") from delta_e
-                        
-                    filtered = df.filter(
-                        (pl.col("data_layer") == layer) &
-                        (pl.col("dataset") == entity) &
-                        (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
-                    ).sort("timestamp", descending=True).head(1)
-                    
+                            raise Exception(
+                                f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                            ) from delta_e
+
+                    filtered = (
+                        df.filter(
+                            (pl.col("data_layer") == layer)
+                            & (pl.col("dataset") == entity)
+                            & (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
+                        )
+                        .sort("timestamp", descending=True)
+                        .head(1)
+                    )
+
                     if not filtered.is_empty():
                         row_dict = filtered.to_dicts()[0]
                         row = {check_field: row_dict.get(check_field), "timestamp": row_dict.get("timestamp")}
@@ -607,6 +633,7 @@ class SLOValidator:
                 rows = [{"cnt": r[0]} for r in duckdb_rows]
             else:
                 import polars as pl
+
                 storage_opts = self._resolve_storage_opts(run_log_table)
                 try:
                     df = pl.read_delta(run_log_table, storage_options=storage_opts)
@@ -614,14 +641,20 @@ class SLOValidator:
                     try:
                         df = pl.read_parquet(run_log_table, storage_options=storage_opts)
                     except Exception as parquet_e:
-                        raise Exception(f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}...") from delta_e
-                    
-                filtered = df.filter(
-                    (pl.col("data_layer") == layer) &
-                    (pl.col("dataset") == entity) &
-                    (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
-                ).sort("timestamp", descending=True).head(anomaly_cfg.lookback_runs)
-                
+                        raise Exception(
+                            f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."
+                        ) from delta_e
+
+                filtered = (
+                    df.filter(
+                        (pl.col("data_layer") == layer)
+                        & (pl.col("dataset") == entity)
+                        & (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
+                    )
+                    .sort("timestamp", descending=True)
+                    .head(anomaly_cfg.lookback_runs)
+                )
+
                 rows = [{"cnt": r.get(check_field_name)} for r in filtered.to_dicts()]
 
         except Exception as e:
@@ -712,6 +745,7 @@ class SLOValidator:
 
         try:
             import apprise
+
             apobj = apprise.Apprise()
         except ImportError:
             logger.warning("apprise is not installed. Skipping SLO Slack notifications. (pip install apprise)")
@@ -720,7 +754,7 @@ class SLOValidator:
         # Load webhooks from registry notifications block
         notifications = getattr(self.registry, "notifications", [])
         channel_count = 0
-        
+
         for cfg in notifications:
             target = cfg.get("target")
             events = [e.lower() for e in cfg.get("on_events", [])]
@@ -735,33 +769,36 @@ class SLOValidator:
             if slack_url:
                 apobj.add(slack_url)
                 channel_count += 1
-                
+
             teams_url = contact.get("teams")
             if teams_url:
                 apobj.add(teams_url)
                 channel_count += 1
-                
+
             webhook_url = contact.get("webhook")
             if webhook_url:
                 apobj.add(webhook_url)
                 channel_count += 1
-            
+
             email = contact.get("email")
             if email:
-                if "://" in email: # Ensure it is an apprise URI (mailto://)
+                if "://" in email:  # Ensure it is an apprise URI (mailto://)
                     apobj.add(email)
                     channel_count += 1
                 else:
                     import os
+
                     global_smtp = os.getenv("LAKELOGIC_SMTP_URI")
                     if global_smtp:
-                        # Append the target email as a path object. Apprise natively standardizes 
+                        # Append the target email as a path object. Apprise natively standardizes
                         # this structure for both mailto:// and sendgrid:// and other APIs!
                         base_url = global_smtp.rstrip("/")
                         apobj.add(f"{base_url}/{email}")
                         channel_count += 1
                     else:
-                        logger.warning(f"Email contact '{email}' is not a valid Apprise URI. Emails require full SMTP configuration schema (e.g. mailto://...) or the LAKELOGIC_SMTP_URI environment variable. Skipping this target.")
+                        logger.warning(
+                            f"Email contact '{email}' is not a valid Apprise URI. Emails require full SMTP configuration schema (e.g. mailto://...) or the LAKELOGIC_SMTP_URI environment variable. Skipping this target."
+                        )
 
         if channel_count == 0:
             logger.debug("No valid notification targets found or subscribed to 'slo_breach'. SLO alerts skipped.")
@@ -771,10 +808,7 @@ class SLOValidator:
         for f in failures:
             msg += f"- {f.layer}.{f.entity}: {f.status} (Type: {f.check_type})\n"
 
-        apobj.notify(
-            body=msg,
-            title=f"LakeLogic Domain SLO Breach ({self.registry.domain})"
-        )
+        apobj.notify(body=msg, title=f"LakeLogic Domain SLO Breach ({self.registry.domain})")
         logger.info(f"Dispatched SLO alerts to {channel_count} channels via Apprise.")
 
 

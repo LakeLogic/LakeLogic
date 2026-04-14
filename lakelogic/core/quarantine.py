@@ -684,8 +684,9 @@ def materialize_quarantine(
                 if hasattr(data, "__len__") and len(data) == 0:
                     kwargs.pop("schema_mode", None)
                     kwargs.pop("engine", None)
-                    
+
                 import inspect
+
                 sig = inspect.signature(write_deltalake)
                 if "engine" in sig.parameters and kwargs.get("schema_mode") == "merge":
                     kwargs["engine"] = "rust"
@@ -711,6 +712,7 @@ def materialize_quarantine(
             else:
                 pdf = _to_pandas(df)
                 import pyarrow as pa
+
                 arrow_data = pa.Table.from_pandas(pdf)
                 rows_written = len(pdf)
 
@@ -730,9 +732,7 @@ def materialize_quarantine(
                 delta_schema = _get_pyarrow_schema(_existing_dt)
 
                 # Case-insensitive lookup: incoming column name → index
-                incoming_by_name = {
-                    f.name.lower(): i for i, f in enumerate(arrow_data.schema)
-                }
+                incoming_by_name = {f.name.lower(): i for i, f in enumerate(arrow_data.schema)}
 
                 result_columns = []
                 result_fields = []
@@ -757,15 +757,19 @@ def materialize_quarantine(
                                 # Handle string -> numeric cast by coercing errors to Null
                                 if is_str and (pa.types.is_integer(tgt_type) or pa.types.is_floating(tgt_type)):
                                     import pandas as pd
+
                                     pd_series = col.to_pandas()
-                                    pd_num = pd.to_numeric(pd_series, errors='coerce').astype("Int64" if pa.types.is_integer(tgt_type) else "Float64")
+                                    pd_num = pd.to_numeric(pd_series, errors="coerce").astype(
+                                        "Int64" if pa.types.is_integer(tgt_type) else "Float64"
+                                    )
                                     casted = pa.array(pd_num, type=tgt_type)
 
                                 # Handle string -> timestamp cast
                                 elif is_str and pa.types.is_timestamp(tgt_type):
                                     import pandas as pd
+
                                     pd_series = col.to_pandas()
-                                    pd_ts = pd.to_datetime(pd_series, errors='coerce', utc=True)
+                                    pd_ts = pd.to_datetime(pd_series, errors="coerce", utc=True)
                                     if getattr(tgt_type, "tz", None) is None:
                                         pd_ts = pd_ts.dt.tz_localize(None)
                                     casted = pa.array(pd_ts, type=tgt_type)
@@ -773,8 +777,9 @@ def materialize_quarantine(
                                 # Handle string -> date cast
                                 elif is_str and pa.types.is_date(tgt_type):
                                     import pandas as pd
+
                                     pd_series = col.to_pandas()
-                                    pd_dt = pd.to_datetime(pd_series, errors='coerce').dt.date
+                                    pd_dt = pd.to_datetime(pd_series, errors="coerce").dt.date
                                     casted = pa.array(pd_dt, type=tgt_type)
 
                                 else:
@@ -790,16 +795,12 @@ def materialize_quarantine(
                                     f"Quarantine: casting '{delta_field.name}' "
                                     f"({col.type} -> {delta_field.type}) failed, null-filling"
                                 )
-                                result_columns.append(
-                                    pa.nulls(len(arrow_data), type=delta_field.type)
-                                )
+                                result_columns.append(pa.nulls(len(arrow_data), type=delta_field.type))
                                 result_fields.append(delta_field)
                                 cast_count += 1
                     else:
                         # Column in Delta but not in incoming — null-fill
-                        result_columns.append(
-                            pa.nulls(len(arrow_data), type=delta_field.type)
-                        )
+                        result_columns.append(pa.nulls(len(arrow_data), type=delta_field.type))
                         result_fields.append(delta_field)
 
                 # Phase 2: Append any NEW columns (not in Delta schema)
@@ -809,15 +810,10 @@ def materialize_quarantine(
                         result_columns.append(arrow_data.column(i))
                         result_fields.append(field)
 
-                arrow_data = pa.table(
-                    result_columns, schema=pa.schema(result_fields)
-                )
+                arrow_data = pa.table(result_columns, schema=pa.schema(result_fields))
 
                 if cast_count > 0:
-                    logger.info(
-                        f"Aligned {cast_count} quarantine column(s) to match "
-                        f"existing Delta table schema"
-                    )
+                    logger.info(f"Aligned {cast_count} quarantine column(s) to match existing Delta table schema")
 
             except Exception as e:
                 err_str = str(e).lower()

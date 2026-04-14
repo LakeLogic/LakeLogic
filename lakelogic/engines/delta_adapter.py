@@ -203,8 +203,9 @@ class DeltaAdapter:
             "partition_by": partition_by,
             "schema_mode": schema_mode,
         }
-        
+
         import inspect
+
         sig = inspect.signature(write_deltalake)
         if "engine" in sig.parameters:
             kwargs["engine"] = "rust" if schema_mode == "merge" else "pyarrow"

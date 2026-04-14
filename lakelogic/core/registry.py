@@ -154,11 +154,7 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     """
     merged = dict(base)
     for key, val in override.items():
-        if (
-            key in merged
-            and isinstance(merged[key], dict)
-            and isinstance(val, dict)
-        ):
+        if key in merged and isinstance(merged[key], dict) and isinstance(val, dict):
             merged[key] = _deep_merge(merged[key], val)
         else:
             merged[key] = val
@@ -266,13 +262,22 @@ class DomainRegistry(BaseModel):
         # Inheritable keys: slo, ownership, notifications, quarantine,
         #                   lineage, materialization, server
         _DOMAIN_INHERITABLE_KEYS = [
-            "slo", "ownership", "notifications", "quarantine",
-            "compliance", "lineage", "materialization", "server",
+            "slo",
+            "ownership",
+            "notifications",
+            "quarantine",
+            "compliance",
+            "lineage",
+            "materialization",
+            "server",
             "cost",
         ]
         # Scalar keys: inherit only if the system doesn't define them
         _DOMAIN_SCALAR_KEYS = [
-            "domain", "bronze_layer", "silver_layer", "gold_layer",
+            "domain",
+            "bronze_layer",
+            "silver_layer",
+            "gold_layer",
             "notifications_enabled",
         ]
         domain_yaml_path = yaml_path.parent.parent / "_domain.yaml"
@@ -481,7 +486,7 @@ class DomainRegistry(BaseModel):
                         c_dict["compliance"] = dict(registry.compliance)
                     else:
                         c_dict["compliance"] = _deep_merge(dict(registry.compliance), c_dict["compliance"])
-                
+
                 # Check data residency against environment region
                 c_compliance = c_dict.get("compliance", {})
                 c_residency = c_compliance.get("data_residency")

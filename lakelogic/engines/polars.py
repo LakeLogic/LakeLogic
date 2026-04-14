@@ -456,6 +456,7 @@ class PolarsAdapter(EngineAdapter):
 
         server = self.contract.server
         from lakelogic.core.models import SchemaPolicy as _SP
+
         _sp_defaults = _SP()
         evolution = _sp_defaults.evolution
         policy = _sp_defaults.unknown_fields
@@ -642,9 +643,7 @@ class PolarsAdapter(EngineAdapter):
             for type_err_col in getattr(self, "_type_err_cols", []):
                 error_tracking_exprs.append(pl.col(type_err_col))
                 category_tracking_exprs.append(
-                    pl.when(pl.col(type_err_col).is_not_null())
-                    .then(pl.lit("schema"))
-                    .otherwise(None)
+                    pl.when(pl.col(type_err_col).is_not_null()).then(pl.lit("schema")).otherwise(None)
                 )
 
             for i, rule in enumerate(row_rules):
@@ -667,15 +666,13 @@ class PolarsAdapter(EngineAdapter):
             if schema_errors:
                 schema_error_exprs.extend([pl.lit(err) for err in schema_errors])
                 schema_category_exprs.extend([pl.lit("schema") for _ in schema_errors])
-            
+
             for type_err_col in getattr(self, "_type_err_cols", []):
                 schema_error_exprs.append(pl.col(type_err_col))
                 schema_category_exprs.append(
-                    pl.when(pl.col(type_err_col).is_not_null())
-                    .then(pl.lit("schema"))
-                    .otherwise(None)
+                    pl.when(pl.col(type_err_col).is_not_null()).then(pl.lit("schema")).otherwise(None)
                 )
-                
+
             lf_with_errors = lf.with_columns(
                 [
                     pl.concat_list(schema_error_exprs).list.drop_nulls().alias(self.ERROR_COLUMN)

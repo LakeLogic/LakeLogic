@@ -20,7 +20,6 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-
 # ── Compiled patterns ─────────────────────────────────────────────────────
 
 # Matches standard URI schemes: abfss://, s3://, gs://, file://, etc.
@@ -32,6 +31,7 @@ _URI_WINDOWS_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]+:\\\\")
 # ═══════════════════════════════════════════════════════════════════════════
 # URI Detection
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def is_uri_path(path: str) -> bool:
     r"""Check if a path is a cloud URI (abfss://, s3://, gs://, file://, etc.).
@@ -58,6 +58,7 @@ def is_uri_path(path: str) -> bool:
 # Table Name Convention
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def make_table_name(layer: str, system: str, entity: str) -> str:
     """Build the canonical LakeLogic table name.
 
@@ -74,6 +75,7 @@ def make_table_name(layer: str, system: str, entity: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # Engine-Specific SQL Table References
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def to_sql_table_ref(path_or_table: str, engine: str) -> str:
     """Convert a path/URI or catalog table name to an engine-specific SQL
@@ -121,6 +123,7 @@ def to_sql_table_ref(path_or_table: str, engine: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # Materialization Target Resolution
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def resolve_materialization_path(
     contract: Any = None,
@@ -230,6 +233,7 @@ def resolve_materialization_path(
 # Run Log Table Reference
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def resolve_run_log_ref(run_log_table: str, engine: str) -> str:
     """Resolve a run_log_table value to an engine-compatible SQL reference.
 
@@ -255,6 +259,7 @@ def resolve_run_log_ref(run_log_table: str, engine: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # Quarantine Path Resolution
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def resolve_quarantine_path(
     contract: Any = None,
@@ -320,6 +325,7 @@ def resolve_quarantine_path(
 # ═══════════════════════════════════════════════════════════════════════════
 # Azure Storage Option Enrichment
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def enrich_azure_storage_options(storage_opts: Dict[str, str]) -> Dict[str, str]:
     """Add ``azure_storage_*`` prefixed keys required by Polars' native Rust

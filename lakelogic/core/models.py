@@ -148,8 +148,6 @@ class SchemaPolicy(BaseModel):
     unknown_fields: Literal["quarantine", "drop", "allow"] = "allow"
 
 
-
-
 class Server(BaseModel):
     """Storage and ingestion settings for a contract."""
 
@@ -253,9 +251,7 @@ class DltSourceConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_mode(self) -> "DltSourceConfig":
         if not self.source and not self.base_url:
-            raise ValueError(
-                "dlt source must specify either 'source' (verified source) or 'base_url' (REST API mode)"
-            )
+            raise ValueError("dlt source must specify either 'source' (verified source) or 'base_url' (REST API mode)")
         return self
 
 
@@ -402,7 +398,6 @@ class SourceConfig(BaseModel):
     def _warn_unknown_keys(self) -> "SourceConfig":
         _warn_unknown_extra_keys(self, self._SOURCE_KNOWN_KEYS, "source")
         return self
-
 
 
 class Link(BaseModel):
@@ -1559,18 +1554,22 @@ class DataContract(BaseModel):
         """Migrate legacy root-level schema_policy or server.schema_evolution -> server.schema_policy."""
         if not isinstance(data, dict):
             return data
-            
+
         server_block = data.get("server")
         if not isinstance(server_block, dict):
             # If there's no server block at all, but there is root policy, we instantiate it
-            if data.get("schema_policy") is not None or data.get("schema_evolution") is not None or data.get("allow_schema_drift") is not None:
+            if (
+                data.get("schema_policy") is not None
+                or data.get("schema_evolution") is not None
+                or data.get("allow_schema_drift") is not None
+            ):
                 server_block = {}
                 data["server"] = server_block
             else:
                 return data
-                
+
         policy = server_block.setdefault("schema_policy", {})
-        
+
         # 1. Migrate root-level schema_policy
         root_policy = data.pop("schema_policy", None)
         if isinstance(root_policy, dict):
@@ -1578,17 +1577,20 @@ class DataContract(BaseModel):
                 policy["evolution"] = root_policy["evolution"]
             if "unknown_fields" in root_policy and "unknown_fields" not in policy:
                 policy["unknown_fields"] = root_policy["unknown_fields"]
-                
+
         # 2. Migrate server.schema_evolution
         legacy_evo = server_block.pop("schema_evolution", None)
-        if legacy_evo and "evolution" not in policy:
-            policy["evolution"] = legacy_evo
-            
+        if legacy_evo:
+            if "evolution" not in policy:
+                policy["evolution"] = legacy_evo
+            if legacy_evo == "strict" and "unknown_fields" not in policy:
+                policy["unknown_fields"] = "quarantine"
+
         # 3. Migrate server.allow_schema_drift
         legacy_drift = server_block.pop("allow_schema_drift", None)
         if legacy_drift is not None and "unknown_fields" not in policy:
             policy["unknown_fields"] = "allow" if legacy_drift else "quarantine"
-            
+
         return data
 
     version: str

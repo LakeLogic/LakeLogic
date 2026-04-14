@@ -260,6 +260,7 @@ def _normalize_base_type(sql_type: str) -> str:
         INT → integer
     """
     import re
+
     m = re.match(r"^(\w+)", sql_type.strip())
     base = m.group(1).lower() if m else sql_type.strip().lower()
 
@@ -280,6 +281,7 @@ def _normalize_base_type(sql_type: str) -> str:
 def _extract_varchar_length(sql_type: str) -> Optional[int]:
     """Extract length from VARCHAR(N) / CHAR(N). Returns None if unbounded."""
     import re
+
     m = re.match(r"^(?:var)?char\s*\((\d+)\)", sql_type.strip(), re.IGNORECASE)
     return int(m.group(1)) if m else None
 
@@ -426,6 +428,7 @@ def _resolve_table_name(contract: DataContract) -> Optional[str]:
     # Last resort: sanitize title for table name
     if contract.info and contract.info.title:
         import re
+
         return re.sub(r"[^a-zA-Z0-9_]", "_", contract.info.title).lower()
 
     return None
@@ -725,16 +728,13 @@ def generate_alter_ddl(
 
     existing_set = {c.lower() for c in existing_columns}
     expected_set = {f.name.lower() for f in fields}
-    existing_types_lower = (
-        {k.lower(): v for k, v in existing_column_types.items()}
-        if existing_column_types
-        else {}
-    )
+    existing_types_lower = {k.lower(): v for k, v in existing_column_types.items()} if existing_column_types else {}
     statements: List[str] = []
 
     # ── Resolve Evolution Policy ──────────────────────────────────────────
     server = contract.effective_server() if hasattr(contract, "effective_server") else None
     from lakelogic.core.models import SchemaPolicy as _SP
+
     _default_evo = _SP().evolution
     evolution = _default_evo
     if server and getattr(server, "schema_policy", None):
@@ -750,19 +750,13 @@ def generate_alter_ddl(
                     f"but not in target table '{resolved_table}'. "
                     f"Schema evolution policy is 'strict'."
                 )
-            
+
             sql_type = _resolve_type(field.type, backend)
             if backend in ("duckdb",):
-                statements.append(
-                    f"ALTER TABLE {resolved_table} ADD COLUMN IF NOT EXISTS {field.name} {sql_type};"
-                )
+                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN IF NOT EXISTS {field.name} {sql_type};")
             else:
-                statements.append(
-                    f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};"
-                )
-            logger.info(
-                f"Schema evolution: ADD COLUMN {field.name} {sql_type} → {resolved_table}"
-            )
+                statements.append(f"ALTER TABLE {resolved_table} ADD COLUMN {field.name} {sql_type};")
+            logger.info(f"Schema evolution: ADD COLUMN {field.name} {sql_type} → {resolved_table}")
 
     # ── 2. Type changes (requires existing_column_types) ──────────────────
     if existing_types_lower:
@@ -781,6 +775,7 @@ def generate_alter_ddl(
 
             # Strip base to compare parameters, e.g. "(10,2)" vs "(10,2)"
             import re
+
             p_cur = re.sub(r"^[a-zA-Z0-9_]+", "", current_sql_type.strip()).replace(" ", "")
             p_des = re.sub(r"^[a-zA-Z0-9_]+", "", desired_sql_type.strip()).replace(" ", "")
 
@@ -813,9 +808,7 @@ def generate_alter_ddl(
                         f"ALTER TABLE {resolved_table} ALTER COLUMN {field.name} TYPE {desired_sql_type};"
                     )
                 elif backend == "snowflake":
-                    statements.append(
-                        f"ALTER TABLE {resolved_table} MODIFY COLUMN {field.name} {desired_sql_type};"
-                    )
+                    statements.append(f"ALTER TABLE {resolved_table} MODIFY COLUMN {field.name} {desired_sql_type};")
                 elif backend == "bigquery":
                     # BigQuery doesn't support ALTER COLUMN TYPE directly;
                     # widening happens automatically for compatible types.
@@ -868,16 +861,27 @@ def generate_alter_ddl(
 
 # Contract type → PyArrow type mapping for Delta table initialization
 _CONTRACT_TO_ARROW: Dict[str, str] = {
-    "string": "string", "varchar": "string", "text": "string", "char": "string",
-    "int": "int32", "integer": "int32",
-    "bigint": "int64", "long": "int64",
-    "smallint": "int16", "tinyint": "int8",
-    "float": "float32", "double": "float64",
-    "boolean": "bool", "bool": "bool",
-    "date": "date32", "timestamp": "timestamp[us]",
-    "timestamp_ntz": "timestamp[us]", "timestamp_tz": "timestamp[us, tz=UTC]",
+    "string": "string",
+    "varchar": "string",
+    "text": "string",
+    "char": "string",
+    "int": "int32",
+    "integer": "int32",
+    "bigint": "int64",
+    "long": "int64",
+    "smallint": "int16",
+    "tinyint": "int8",
+    "float": "float32",
+    "double": "float64",
+    "boolean": "bool",
+    "bool": "bool",
+    "date": "date32",
+    "timestamp": "timestamp[us]",
+    "timestamp_ntz": "timestamp[us]",
+    "timestamp_tz": "timestamp[us, tz=UTC]",
     "binary": "binary",
-    "json": "string", "array": "string",
+    "json": "string",
+    "array": "string",
 }
 
 
@@ -943,17 +947,13 @@ def _init_delta_table_from_contract(contract: DataContract) -> None:
     fields = _get_fields(contract)
     if not fields:
         logger.warning(
-            "Cannot initialize Delta table: contract has no model.fields. "
-            "Table will be created on first data write."
+            "Cannot initialize Delta table: contract has no model.fields. Table will be created on first data write."
         )
         return
 
     mat = contract.materialization
     if not mat or not mat.target_path:
-        logger.info(
-            "No materialization.target_path configured — "
-            "Delta table will be created on first data write."
-        )
+        logger.info("No materialization.target_path configured — Delta table will be created on first data write.")
         return
 
     target = str(mat.target_path)
@@ -970,8 +970,7 @@ def _init_delta_table_from_contract(contract: DataContract) -> None:
         from deltalake import write_deltalake, DeltaTable
     except ImportError:
         logger.warning(
-            "deltalake and pyarrow are required for Delta DDL init. "
-            "Install them: pip install deltalake pyarrow"
+            "deltalake and pyarrow are required for Delta DDL init. Install them: pip install deltalake pyarrow"
         )
         return
 
@@ -979,6 +978,7 @@ def _init_delta_table_from_contract(contract: DataContract) -> None:
     storage_opts = None
     if any(target.startswith(p) for p in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")):
         from lakelogic.core.materialization import _build_storage_options
+
         storage_opts = _build_storage_options()
         if not storage_opts:
             logger.warning(
@@ -1047,10 +1047,7 @@ def _init_delta_table_from_contract(contract: DataContract) -> None:
 
         DeltaTable.create(**create_kwargs)
 
-        logger.info(
-            f"Initialized Delta table schema for {table_label} "
-            f"({len(fields)} columns, 0 rows) at {target}"
-        )
+        logger.info(f"Initialized Delta table schema for {table_label} ({len(fields)} columns, 0 rows) at {target}")
     except TypeError:
         # Older deltalake versions may not have DeltaTable.create()
         # Fall back to write_deltalake with an empty table
@@ -1067,20 +1064,15 @@ def _init_delta_table_from_contract(contract: DataContract) -> None:
 
             write_deltalake(target, empty_table, **wdl_kwargs)
 
-            logger.info(
-                f"Initialized Delta table schema for {table_label} "
-                f"({len(fields)} columns, 0 rows) at {target}"
-            )
+            logger.info(f"Initialized Delta table schema for {table_label} ({len(fields)} columns, 0 rows) at {target}")
         except Exception as fallback_err:
             logger.warning(
                 f"Could not initialize Delta table at {target}: {fallback_err}. "
                 "Table will be created on first data write."
             )
     except Exception as e:
-        logger.warning(
-            f"Could not initialize Delta table at {target}: {e}. "
-            "Table will be created on first data write."
-        )
+        logger.warning(f"Could not initialize Delta table at {target}: {e}. Table will be created on first data write.")
+
 
 def create_table(
     contract: DataContract,

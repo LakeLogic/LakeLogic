@@ -37,7 +37,7 @@ import json as _json
 import random
 import re
 import string
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 
 # Module-level alias used in _build_field_rules SQL parsing helpers
 _re = re
@@ -3084,9 +3084,7 @@ class DataGenerator:
         _gen_logger.info(f"   Records    : {n_valid:,} valid + {n_invalid:,} invalid = {rows:,} total")
 
         if self._window_start:
-            _gen_logger.info(
-                f"   Window     : {self._window_start.isoformat()} → {self._window_end.isoformat()}"
-            )
+            _gen_logger.info(f"   Window     : {self._window_start.isoformat()} → {self._window_end.isoformat()}")
 
         # Log data source rationale
         if ai_sample_pools:
@@ -3274,8 +3272,7 @@ class DataGenerator:
             if output_dir is not None:
                 out_root = Path(output_dir)
                 partition_path = window_end.strftime(
-                    partition_template
-                    .replace("{Y}", "%Y")
+                    partition_template.replace("{Y}", "%Y")
                     .replace("{m}", "%m")
                     .replace("{d}", "%d")
                     .replace("{H}", "%H")
@@ -3286,7 +3283,7 @@ class DataGenerator:
                 batch_dir.mkdir(parents=True, exist_ok=True)
                 batch_file = batch_dir / f"batch.{format}"
                 self.save(df, batch_file, format=format)
-                logger.info(f"   💾 Batch {i+1}/{batches} saved to {batch_file}")
+                logger.info(f"   💾 Batch {i + 1}/{batches} saved to {batch_file}")
 
             yield window_start, window_end, df
             cursor = window_end
@@ -3470,17 +3467,19 @@ class DataGenerator:
             # Row IDs (capped at 20 for readability)
             row_ids = sorted({e.row_index for e in entries if e.row_index >= 0})[:20]
 
-            test_cases.append({
-                "id": f"TC-{tc_counter:03d}",
-                "type": tc_type,
-                "field": tc_field,
-                "description": entries[0].description,
-                "rows_generated": len(entries),
-                "values_used": values_used[:10],  # cap at 10 for readability
-                "row_ids": row_ids,
-                "expected_quarantine_reason": tc_type,
-                "contract_rule_tested": entries[0].contract_rule,
-            })
+            test_cases.append(
+                {
+                    "id": f"TC-{tc_counter:03d}",
+                    "type": tc_type,
+                    "field": tc_field,
+                    "description": entries[0].description,
+                    "rows_generated": len(entries),
+                    "values_used": values_used[:10],  # cap at 10 for readability
+                    "row_ids": row_ids,
+                    "expected_quarantine_reason": tc_type,
+                    "contract_rule_tested": entries[0].contract_rule,
+                }
+            )
 
         report = {
             "generated_at": datetime.now().isoformat(),
@@ -3582,7 +3581,9 @@ class DataGenerator:
         from loguru import logger as _save_logger
 
         _save_logger.info(f"   Saved: {data_path}  ({report.get('summary', {}).get('total_rows', '?')} rows)")
-        _save_logger.info(f"   Saved: {invalid_path}  ({report.get('summary', {}).get('invalid_rows', '?')} invalid rows)")
+        _save_logger.info(
+            f"   Saved: {invalid_path}  ({report.get('summary', {}).get('invalid_rows', '?')} invalid rows)"
+        )
         _save_logger.info(f"   Saved: {report_path}  (generation report)")
 
         return data_path, invalid_path, report_path
@@ -3872,11 +3873,13 @@ class DataGenerator:
                         fk_col = left_col  # the column on the source (child) side
                         ref_col = right_col  # the column on the joined (parent) side
                         if fk_col not in seen_fk_cols:
-                            relationships.append({
-                                "fk_column": fk_col,
-                                "ref_entity": ref_entity,
-                                "ref_column": ref_col,
-                            })
+                            relationships.append(
+                                {
+                                    "fk_column": fk_col,
+                                    "ref_entity": ref_entity,
+                                    "ref_column": ref_col,
+                                }
+                            )
                             seen_fk_cols.add(fk_col)
 
             # If no SQL JOIN found, try matching link columns against PKs
@@ -3884,11 +3887,13 @@ class DataGenerator:
                 ref_pks = all_pk_columns.get(ref_entity, [])
                 for pk_col in ref_pks:
                     if pk_col in link_columns and pk_col not in seen_fk_cols:
-                        relationships.append({
-                            "fk_column": pk_col,
-                            "ref_entity": ref_entity,
-                            "ref_column": pk_col,
-                        })
+                        relationships.append(
+                            {
+                                "fk_column": pk_col,
+                                "ref_entity": ref_entity,
+                                "ref_column": pk_col,
+                            }
+                        )
                         seen_fk_cols.add(pk_col)
 
         # 2. Parse field descriptions for "FK to <table>" patterns
@@ -3905,11 +3910,13 @@ class DataGenerator:
                     if ename == entity_name:
                         continue
                     if ref_table == ename or ename.endswith(f"_{ref_table}") or ref_table.endswith(f"_{ename}"):
-                        relationships.append({
-                            "fk_column": fname,
-                            "ref_entity": ename,
-                            "ref_column": fname,  # assume same column name
-                        })
+                        relationships.append(
+                            {
+                                "fk_column": fname,
+                                "ref_entity": ename,
+                                "ref_column": fname,  # assume same column name
+                            }
+                        )
                         seen_fk_cols.add(fname)
                         break
 
@@ -3930,16 +3937,20 @@ class DataGenerator:
                 ref_pks = all_pk_columns.get(ename, [])
                 # Match: "customer" in "customers" or "customer" in "bronze_customers"
                 ename_lower = ename.lower()
-                if (entity_stem == ename_lower
+                if (
+                    entity_stem == ename_lower
                     or entity_stem + "s" == ename_lower
                     or ename_lower.endswith(f"_{entity_stem}")
-                    or ename_lower.endswith(f"_{entity_stem}s")):
+                    or ename_lower.endswith(f"_{entity_stem}s")
+                ):
                     if fname in ref_pks:
-                        relationships.append({
-                            "fk_column": fname,
-                            "ref_entity": ename,
-                            "ref_column": fname,
-                        })
+                        relationships.append(
+                            {
+                                "fk_column": fname,
+                                "ref_entity": ename,
+                                "ref_column": fname,
+                            }
+                        )
                         seen_fk_cols.add(fname)
                         break
 
@@ -4051,15 +4062,15 @@ class DataGenerator:
         all_relationships: Dict[str, List[Dict[str, str]]] = {}
         for name in entity_names:
             rels = DataGenerator._detect_fk_relationships(
-                name, raw_contracts[name], entity_names, pk_columns,
+                name,
+                raw_contracts[name],
+                entity_names,
+                pk_columns,
             )
             if rels:
                 all_relationships[name] = rels
                 for r in rels:
-                    _rel_logger.info(
-                        f"🔗 Detected FK: {name}.{r['fk_column']} → "
-                        f"{r['ref_entity']}.{r['ref_column']}"
-                    )
+                    _rel_logger.info(f"🔗 Detected FK: {name}.{r['fk_column']} → {r['ref_entity']}.{r['ref_column']}")
 
         # ── 3. Topological sort — parents before children ─────────────────
         # Build dependency graph: child → set of parent entities
@@ -4076,8 +4087,7 @@ class DataGenerator:
             if not ready:
                 # Circular dependency — just add remaining in original order
                 _rel_logger.warning(
-                    f"Circular FK dependencies detected among {remaining}. "
-                    f"Generating in original order."
+                    f"Circular FK dependencies detected among {remaining}. Generating in original order."
                 )
                 sorted_entities.extend(e for e in entity_names if e in remaining)
                 break
@@ -4088,10 +4098,7 @@ class DataGenerator:
 
         # ── 4. Generate in dependency order ───────────────────────────────
         results: Dict[str, Any] = {}
-        row_counts: Dict[str, int] = (
-            rows if isinstance(rows, dict)
-            else {name: rows for name in entity_names}
-        )
+        row_counts: Dict[str, int] = rows if isinstance(rows, dict) else {name: rows for name in entity_names}
 
         for name in sorted_entities:
             gen = generators[name]
@@ -4322,7 +4329,7 @@ class DataGenerator:
         now = datetime.now()
 
         # ── Window-constrained start generation ──────────────────────────
-        if getattr(self, '_window_start', None) is not None:
+        if getattr(self, "_window_start", None) is not None:
             ws = self._window_start
             we = self._window_end
             delta_secs = max(int((we - ws).total_seconds()), 1)
@@ -4480,7 +4487,7 @@ class DataGenerator:
             return (min_birth + timedelta(days=self._rng.randint(0, days_range))).isoformat()
 
         # ── Window-constrained generation ───────────────────────────────────
-        if getattr(self, '_window_start', None) is not None:
+        if getattr(self, "_window_start", None) is not None:
             ws = self._window_start.date()
             we = self._window_end.date()
             days_range = max((we - ws).days, 0)
@@ -4502,7 +4509,7 @@ class DataGenerator:
         name_lower = name.lower()
 
         # ── Window-constrained generation ───────────────────────────────────
-        if getattr(self, '_window_start', None) is not None:
+        if getattr(self, "_window_start", None) is not None:
             ws = self._window_start
             we = self._window_end
             delta_secs = max(int((we - ws).total_seconds()), 1)
@@ -4903,7 +4910,7 @@ class DataGenerator:
                 import time as _time
 
                 # ── Window-constrained epoch generation ────────────────
-                if getattr(self, '_window_start', None) is not None:
+                if getattr(self, "_window_start", None) is not None:
                     base = int(self._window_start.timestamp())
                     now = int(self._window_end.timestamp())
                 else:
@@ -5110,8 +5117,17 @@ class DataGenerator:
 
             # Numeric boundary injection
             if ftype in (
-                "integer", "int", "int32", "int64", "long",
-                "double", "float", "float32", "float64", "decimal", "number",
+                "integer",
+                "int",
+                "int32",
+                "int64",
+                "long",
+                "double",
+                "float",
+                "float32",
+                "float64",
+                "decimal",
+                "number",
             ):
                 boundary_vals = _EDGE_CASE_PROFILES.get("numeric_boundaries", {}).get("values", [])
                 if boundary_vals:
@@ -5141,72 +5157,88 @@ class DataGenerator:
         # Each entry: (tc_type, description, contract_rule, value_factory)
 
         # Null on required field — always a valid "bad" strategy
-        strategies.append((
-            "NOT_NULL_VIOLATION",
-            f"{name} set to null — tests required field constraint",
-            "quality.enforce_required",
-            lambda: None,
-        ))
+        strategies.append(
+            (
+                "NOT_NULL_VIOLATION",
+                f"{name} set to null — tests required field constraint",
+                "quality.enforce_required",
+                lambda: None,
+            )
+        )
 
         accepted = rules.get("accepted_values")
         if accepted:
             # Value outside accepted list — must stay same Python type
             if ftype not in ("boolean", "bool"):
-                strategies.append((
-                    "ACCEPTED_VALUE_VIOLATION",
-                    f"{name} set to value outside accepted_values list",
-                    "quality.row_rules.accepted_values",
-                    lambda: "INVALID_" + "".join(self._rng.choices(string.ascii_uppercase, k=4)),
-                ))
+                strategies.append(
+                    (
+                        "ACCEPTED_VALUE_VIOLATION",
+                        f"{name} set to value outside accepted_values list",
+                        "quality.row_rules.accepted_values",
+                        lambda: "INVALID_" + "".join(self._rng.choices(string.ascii_uppercase, k=4)),
+                    )
+                )
 
         min_val = rules.get("min")
         max_val = rules.get("max")
 
         if ftype in ("integer", "int", "int32", "int64", "long"):
             if min_val is not None:
-                strategies.append((
-                    "RANGE_VIOLATION",
-                    f"{name} set below minimum ({min_val})",
-                    "quality.row_rules.range",
-                    lambda: int(min_val) - self._rng.randint(1, 100),
-                ))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set below minimum ({min_val})",
+                        "quality.row_rules.range",
+                        lambda: int(min_val) - self._rng.randint(1, 100),
+                    )
+                )
             if max_val is not None:
-                strategies.append((
-                    "RANGE_VIOLATION",
-                    f"{name} set above maximum ({max_val})",
-                    "quality.row_rules.range",
-                    lambda: int(max_val) + self._rng.randint(1, 100),
-                ))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set above maximum ({max_val})",
+                        "quality.row_rules.range",
+                        lambda: int(max_val) + self._rng.randint(1, 100),
+                    )
+                )
             if len(strategies) == 1:  # only None so far
-                strategies.append((
-                    "RANGE_VIOLATION",
-                    f"{name} set to negative value",
-                    "quality.row_rules.range",
-                    lambda: -self._rng.randint(1, 999),
-                ))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set to negative value",
+                        "quality.row_rules.range",
+                        lambda: -self._rng.randint(1, 999),
+                    )
+                )
 
         elif ftype in ("double", "float", "float32", "float64", "decimal", "number"):
             if min_val is not None:
-                strategies.append((
-                    "RANGE_VIOLATION",
-                    f"{name} set below minimum ({min_val})",
-                    "quality.row_rules.range",
-                    lambda: float(min_val) - self._rng.uniform(0.01, 10.0),
-                ))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set below minimum ({min_val})",
+                        "quality.row_rules.range",
+                        lambda: float(min_val) - self._rng.uniform(0.01, 10.0),
+                    )
+                )
             if max_val is not None:
-                strategies.append((
-                    "RANGE_VIOLATION",
-                    f"{name} set above maximum ({max_val})",
-                    "quality.row_rules.range",
-                    lambda: float(max_val) + self._rng.uniform(0.01, 10.0),
-                ))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set above maximum ({max_val})",
+                        "quality.row_rules.range",
+                        lambda: float(max_val) + self._rng.uniform(0.01, 10.0),
+                    )
+                )
             if len(strategies) == 1:
-                strategies.append((
-                    "RANGE_VIOLATION",
-                    f"{name} set to negative float",
-                    "quality.row_rules.range",
-                    lambda: -self._rng.uniform(0.01, 999.0),
-                ))
+                strategies.append(
+                    (
+                        "RANGE_VIOLATION",
+                        f"{name} set to negative float",
+                        "quality.row_rules.range",
+                        lambda: -self._rng.uniform(0.01, 999.0),
+                    )
+                )
 
         elif ftype in ("boolean", "bool"):
             # Only valid Python booleans or None — never strings
@@ -5215,12 +5247,14 @@ class DataGenerator:
 
         else:
             # String fields: empty string
-            strategies.append((
-                "EMPTY_STRING",
-                f"{name} set to empty string — tests not_null/pattern rules",
-                "quality.enforce_required",
-                lambda: "",
-            ))
+            strategies.append(
+                (
+                    "EMPTY_STRING",
+                    f"{name} set to empty string — tests not_null/pattern rules",
+                    "quality.enforce_required",
+                    lambda: "",
+                )
+            )
 
         # Pick a strategy and fire it
         tc_type, description, contract_rule, factory = self._rng.choice(strategies)
@@ -5490,7 +5524,7 @@ class DataGenerator:
         )
         if is_timestamp_name:
             # ── Window-constrained generation ──────────────────────────
-            if getattr(self, '_window_start', None) is not None:
+            if getattr(self, "_window_start", None) is not None:
                 ws = self._window_start
                 we = self._window_end
                 delta_secs = max(int((we - ws).total_seconds()), 1)
@@ -5500,7 +5534,7 @@ class DataGenerator:
             return (base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 90))).isoformat()
         if is_date_name:
             # ── Window-constrained generation ──────────────────────────
-            if getattr(self, '_window_start', None) is not None:
+            if getattr(self, "_window_start", None) is not None:
                 ws = self._window_start.date()
                 we = self._window_end.date()
                 days_range = max((we - ws).days, 0)

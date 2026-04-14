@@ -194,11 +194,13 @@ def _apply_partial(value: Any, field_name: str = "", fmt: Optional[str] = None) 
 def _prepare_fernet_key(key: str) -> bytes:
     import base64
     import hashlib
+
     # Fernet requires a 32-byte url-safe base64-encoded key
     # We hash the provided string key to ensure it's exactly 32 bytes, then base64 encode it.
     key_bytes = key.encode("utf-8") if key else b"default-lakelogic-encryption-key"
     hashed = hashlib.sha256(key_bytes).digest()
     return base64.urlsafe_b64encode(hashed)
+
 
 def _apply_encrypt(value: Any, key: str = "") -> Optional[str]:
     """
@@ -206,7 +208,7 @@ def _apply_encrypt(value: Any, key: str = "") -> Optional[str]:
     """
     if value is None:
         return None
-    
+
     try:
         from cryptography.fernet import Fernet
     except ImportError:
@@ -221,7 +223,7 @@ def _apply_decrypt(encrypted_value: str, key: str = "") -> Optional[str]:
     """Reverse the Fernet encryption from _apply_encrypt."""
     if not encrypted_value or not encrypted_value.startswith("enc:"):
         return encrypted_value
-        
+
     try:
         from cryptography.fernet import Fernet
     except ImportError:
@@ -381,7 +383,7 @@ class MaskingEngine:
             logger.info("No PII fields with explicit masking strategy — skipping masking.")
             return df
 
-        VALID_STRATEGIES = {'nullify', 'hash', 'redact', 'partial', 'encrypt'}
+        VALID_STRATEGIES = {"nullify", "hash", "redact", "partial", "encrypt"}
         field_strategies = {}
         for f in fields_with_masking:
             strategy = strategy_override or f.masking
@@ -390,7 +392,7 @@ class MaskingEngine:
                     f"Invalid masking strategy '{strategy}' for field '{f.name}'. "
                     f"Valid options are: nullify, hash, redact, partial, encrypt."
                 )
-            field_strategies[f.name] = (strategy, getattr(f, 'masking_format', None))
+            field_strategies[f.name] = (strategy, getattr(f, "masking_format", None))
 
         logger.info(
             f"PII masking: {len(fields_with_masking)} field(s) for user_groups={user_groups or '(none)'}: "
@@ -572,8 +574,6 @@ class MaskingEngine:
                 )
 
         return df
-
-
 
     # ── PII Vault Helpers ────────────────────────────────────────────────────
 

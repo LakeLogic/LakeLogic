@@ -17,6 +17,7 @@ def _is_remote_path(path) -> bool:
     Delegates to :func:`lakelogic.core.paths.is_uri_path`.
     """
     from lakelogic.core.paths import is_uri_path
+
     return is_uri_path(str(path))
 
 
@@ -143,25 +144,26 @@ def _build_storage_options(
 
 def _get_pyarrow_schema(dt) -> Any:
     """Robustly extract a native PyArrow Schema from a DeltaTable across all deltalake versions.
-    
+
     - deltalake < 0.18: dt.schema().to_pyarrow() returns native pyarrow types.
     - deltalake >= 0.18: dt.schema().to_pyarrow() returns incompatible arro3 types,
       but dt.schema() implements the PyCapsule API (__arrow_c_schema__) so pa.schema() works.
     - dt.to_pyarrow_dataset().schema works in all versions but requires fsspec setup for remote.
     """
     import pyarrow as pa
+
     raw = dt.schema()
-    
+
     if hasattr(raw, "to_pyarrow"):
         s = raw.to_pyarrow()
         if s and getattr(s.field(0).type, "__module__", "").startswith("pyarrow"):
             return s
-            
+
     try:
         return pa.schema(raw)
     except TypeError:
         pass
-        
+
     return dt.to_pyarrow_dataset().schema
 
     # ── AWS S3 ────────────────────────────────────────────────────
@@ -474,7 +476,7 @@ def _safe_write_deltalake(path, data, **kwargs):
         from deltalake import write_deltalake
     except ImportError as e:
         raise ImportError("Delta materialization requires the deltalake package: pip install deltalake") from e
-    
+
     # Empty dataframes initialized into new Delta tables do not need schema merging
     # and dropping it prevents 'rust' engine errors in older deltalake versions.
     if hasattr(data, "__len__") and len(data) == 0:
@@ -486,15 +488,16 @@ def _safe_write_deltalake(path, data, **kwargs):
     # Delta-RS enforce strict schema matching (the desired default).
     if "schema_mode" in kwargs and kwargs["schema_mode"] is None:
         del kwargs["schema_mode"]
-        
+
     import inspect
+
     sig = inspect.signature(write_deltalake)
     if "engine" in sig.parameters:
         if kwargs.get("schema_mode") == "merge":
             kwargs["engine"] = "rust"
     elif "engine" in kwargs:
         del kwargs["engine"]
-        
+
     try:
         return write_deltalake(path, data, **kwargs)
     except Exception as e:
@@ -508,6 +511,7 @@ def _safe_write_deltalake(path, data, **kwargs):
             try:
                 from deltalake import DeltaTable
                 import pyarrow as pa
+
                 dt = DeltaTable(path, storage_options=kwargs.get("storage_options"))
                 existing_schema = _get_pyarrow_schema(dt)
                 if hasattr(data, "schema"):
@@ -535,9 +539,7 @@ def _safe_write_deltalake(path, data, **kwargs):
                             new_arrays.append(data.column(i))
                             new_fields.append(field)
                     if cast_log:
-                        logger.debug(
-                            f"Schema merge type conflict auto-resolved by casting: {', '.join(cast_log)}"
-                        )
+                        logger.debug(f"Schema merge type conflict auto-resolved by casting: {', '.join(cast_log)}")
                         data = pa.table(
                             {f.name: arr for f, arr in zip(new_fields, new_arrays)},
                             schema=pa.schema(new_fields),
@@ -551,6 +553,7 @@ def _safe_write_deltalake(path, data, **kwargs):
         if "schema" in err_msg and ("mismatch" in err_msg or "does not match" in err_msg):
             try:
                 from deltalake import DeltaTable
+
                 dt = DeltaTable(path, storage_options=kwargs.get("storage_options"))
                 existing_schema = _get_pyarrow_schema(dt)
                 existing_cols = {f.name: str(f.type) for f in existing_schema}
@@ -565,7 +568,8 @@ def _safe_write_deltalake(path, data, **kwargs):
                     dropped_cols = [c for c in existing_cols if c not in incoming_cols]
                     type_mismatches = [
                         f"{c} (table: {existing_cols[c]}, data: {incoming_cols[c]})"
-                        for c in incoming_cols if c in existing_cols and existing_cols[c] != incoming_cols[c]
+                        for c in incoming_cols
+                        if c in existing_cols and existing_cols[c] != incoming_cols[c]
                     ]
 
                     diff_parts = []
@@ -579,14 +583,14 @@ def _safe_write_deltalake(path, data, **kwargs):
                     if diff_parts:
                         friendly_msg = " | ".join(diff_parts)
                         raise ValueError(
-                            f"Schema Evolution Blocked (policy=strict): {friendly_msg}. "
-                            f"Original error: {str(e)}"
+                            f"Schema Evolution Blocked (policy=strict): {friendly_msg}. Original error: {str(e)}"
                         ) from e
             except ValueError:
                 raise  # Re-raise our enriched error
             except Exception:
                 pass  # Fallback to original error if diff parsing itself fails
         raise e
+
 
 def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[str, str]] = None) -> None:
     """
@@ -721,7 +725,7 @@ def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[st
 
             db_path = str(path_str) if not is_remote else path_str
             # Use path.stem as table name, stripping non-alphanumeric
-            table_name = re.sub(r'[^a-zA-Z0-9_]', '_', Path(path).stem)
+            table_name = re.sub(r"[^a-zA-Z0-9_]", "_", Path(path).stem)
             if not table_name:
                 table_name = "data"
 
@@ -894,7 +898,7 @@ def _read_frame(path: Path, output_format: str):
         import re
 
         db_path = str(path)
-        table_name = re.sub(r'[^a-zA-Z0-9_]', '_', path.stem)
+        table_name = re.sub(r"[^a-zA-Z0-9_]", "_", path.stem)
         if not table_name:
             table_name = "data"
 
@@ -904,6 +908,7 @@ def _read_frame(path: Path, output_format: str):
         finally:
             con.close()
     raise ValueError(f"Unsupported output format: {output_format}")
+
 
 def _seed_soft_delete_columns_pandas(
     df,
@@ -2580,6 +2585,7 @@ def _materialize_spark_dataframe(
     if output_format == "delta" and contract:
         server = contract.effective_server() if hasattr(contract, "effective_server") else None
         from lakelogic.core.models import SchemaPolicy as _SP
+
         _default_evo = _SP().evolution
         evolution = _default_evo
         if server and getattr(server, "schema_policy", None):
@@ -2658,6 +2664,7 @@ def _partition_aware_merge(
                 _evo = _schema_policy.get("evolution")
             if _evo is None:
                 from lakelogic.core.models import SchemaPolicy as _SP
+
                 _evo = _layer_defaults.get("schema_evolution", _SP().evolution)
         _evo = _evo or "allow"
         if _evo in ("append", "merge", "compatible", "allow"):
@@ -3175,14 +3182,17 @@ def materialize_dataframe(
         if resolved_format == "delta":
             try:
                 from deltalake import DeltaTable
+
                 target_str = str(target_file)
                 _dt_opts = _build_storage_options() if _is_remote_path(target_str) else None
                 DeltaTable(target_str, storage_options=_dt_opts)
             except Exception:
                 is_delta_init = True
-                
+
         if is_delta_init:
-            logger.info(f"materialize: empty DataFrame, but falling through to initialize empty Delta table schema at {target_file}")
+            logger.info(
+                f"materialize: empty DataFrame, but falling through to initialize empty Delta table schema at {target_file}"
+            )
         else:
             logger.info("materialize: empty DataFrame — target exists or not Delta, skipping write.")
             return {
@@ -3270,9 +3280,12 @@ def materialize_dataframe(
                     try:
                         col = arrow_data.column(i)
                         # Handle string → timestamp specially
-                        if (pa.types.is_string(f.type) or pa.types.is_large_string(f.type)) and pa.types.is_timestamp(target_type):
+                        if (pa.types.is_string(f.type) or pa.types.is_large_string(f.type)) and pa.types.is_timestamp(
+                            target_type
+                        ):
                             # Strategy: use pandas to parse ISO timestamps (handles all tz formats)
                             import pandas as pd
+
                             pd_series = col.to_pandas()
                             pd_ts = pd.to_datetime(pd_series, utc=True)
                             if target_type.tz is None:
@@ -3288,9 +3301,7 @@ def materialize_dataframe(
                         arrow_data = arrow_data.set_column(i, pa.field(f.name, target_type), casted_col)
                         cast_count += 1
                     except Exception as col_err:
-                        logger.warning(
-                            f"Could not cast column '{f.name}' from {f.type} to {target_type}: {col_err}"
-                        )
+                        logger.warning(f"Could not cast column '{f.name}' from {f.type} to {target_type}: {col_err}")
 
                 if cast_count:
                     logger.info(f"Cast {cast_count} column(s) to match existing Delta table schema")
@@ -3300,7 +3311,7 @@ def materialize_dataframe(
             # Phase 2: No existing table — cast using contract field types only
             _srv = contract.effective_server() if hasattr(contract, "effective_server") else None
             _cast_to_string = getattr(_srv, "cast_to_string", False) if _srv else False
-            
+
             if not _cast_to_string:
                 try:
                     import pyarrow as pa
@@ -3323,12 +3334,12 @@ def materialize_dataframe(
                             msg_lines = [
                                 f"Casting {diffs_count} column(s) to match contract types before Delta write (new table):",
                                 f"{'Column Name':<35} | {'From Type':<15} | {'To Type':<15}",
-                                "-" * 71
+                                "-" * 71,
                             ]
                             for a, b in zip(arrow_data.schema, target_schema):
                                 if a.type != b.type:
                                     msg_lines.append(f"{a.name:<35} | {str(a.type):<15} | {str(b.type):<15}")
-                            
+
                             logger.info("\n" + "\n".join(msg_lines))
                             arrow_data = arrow_data.cast(target_schema)
                 except Exception as e:
@@ -3445,6 +3456,7 @@ def materialize_dataframe(
 
                 _dt_pre_opts = _build_storage_options() if _is_remote_path(target_str) else None
                 import pyarrow.compute as pc
+
                 _dt_pre = _DT_pre(target_str, storage_options=_dt_pre_opts)
                 _actions = _dt_pre.get_add_actions(flatten=True)
                 if "num_records" in _actions.column_names:

@@ -8,11 +8,11 @@ and HIPAA masking automatically.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time
 import uuid
-import copy
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -69,11 +69,8 @@ class PipelineRunSummary:
         table_name: str = "",
     ):
         # Remove any existing entry for this contract+layer (e.g., from failed earlier retry attempts)
-        self.results = [
-            r for r in self.results 
-            if not (r.get("contract") == contract and r.get("layer") == layer)
-        ]
-        
+        self.results = [r for r in self.results if not (r.get("contract") == contract and r.get("layer") == layer)]
+
         self.results.append(
             {
                 "contract": contract,
@@ -99,11 +96,13 @@ class PipelineRunSummary:
 
 class CircuitBreakerTripped(Exception):
     """Raised when too many consecutive entity failures indicate an infrastructure outage."""
+
     pass
 
 
 class EntityTimeoutError(Exception):
     """Raised when a single entity exceeds entity_timeout_minutes."""
+
     pass
 
 
@@ -802,9 +801,9 @@ class LakehousePipeline:
                         except Exception as _q_exc:
                             logger.warning(f"  Could not delete quarantine cloud path {q_target}: {_q_exc}")
                     else:
-                        from pathlib import Path as _P
                         import shutil
-                        
+                        from pathlib import Path as _P
+
                         _qp = _P(q_target)
                         if _qp.exists():
                             try:
@@ -891,7 +890,7 @@ class LakehousePipeline:
         and applies safe schema evolution (new columns, type widenings) via
         ``generate_alter_ddl``.
         """
-        from lakelogic.core.ddl import generate_alter_ddl, _resolve_table_name
+        from lakelogic.core.ddl import _resolve_table_name, generate_alter_ddl
 
         summary = PipelineRunSummary(self.run_id, "ddl_only", dry_run)
         failures = []
@@ -906,9 +905,7 @@ class LakehousePipeline:
                     logger.info(f"DRY RUN DDL Preview for {c.entity}:\n{ddl}")
 
                     # Also preview ALTER statements if we can introspect
-                    existing_cols, existing_types = self._introspect_table_schema(
-                        processor.contract, self.engine
-                    )
+                    existing_cols, existing_types = self._introspect_table_schema(processor.contract, self.engine)
                     if existing_cols:
                         alter_stmts = generate_alter_ddl(
                             processor.contract,
@@ -918,9 +915,7 @@ class LakehousePipeline:
                         )
                         if alter_stmts:
                             alter_preview = "\n".join(alter_stmts)
-                            logger.info(
-                                f"DRY RUN Schema Evolution for {c.entity}:\n{alter_preview}"
-                            )
+                            logger.info(f"DRY RUN Schema Evolution for {c.entity}:\n{alter_preview}")
 
                     summary.append(c.entity, c.layer, "ddl_dry_run", table_name=resolved_table)
                 else:
@@ -928,9 +923,7 @@ class LakehousePipeline:
                     logger.info(f"Table created for {c.entity}")
 
                     # ── Schema evolution: apply safe ALTERs to existing tables ──
-                    existing_cols, existing_types = self._introspect_table_schema(
-                        processor.contract, self.engine
-                    )
+                    existing_cols, existing_types = self._introspect_table_schema(processor.contract, self.engine)
                     if existing_cols:
                         alter_stmts = generate_alter_ddl(
                             processor.contract,
@@ -939,13 +932,8 @@ class LakehousePipeline:
                             existing_column_types=existing_types,
                         )
                         if alter_stmts:
-                            self._execute_alter_statements(
-                                alter_stmts, self.engine, c.entity
-                            )
-                            logger.info(
-                                f"Applied {len(alter_stmts)} schema evolution "
-                                f"statement(s) for {c.entity}"
-                            )
+                            self._execute_alter_statements(alter_stmts, self.engine, c.entity)
+                            logger.info(f"Applied {len(alter_stmts)} schema evolution statement(s) for {c.entity}")
 
                     summary.append(c.entity, c.layer, "ddl_created", table_name=resolved_table)
             except Exception as e:
@@ -961,9 +949,7 @@ class LakehousePipeline:
         return summary
 
     @staticmethod
-    def _introspect_table_schema(
-        contract, backend: str
-    ) -> tuple:
+    def _introspect_table_schema(contract, backend: str) -> tuple:
         """Introspect existing table schema to enable schema evolution.
 
         Returns:
@@ -989,6 +975,7 @@ class LakehousePipeline:
 
                 try:
                     from deltalake import DeltaTable
+
                     from lakelogic.core.processor import DataProcessor as _DP
 
                     # Get storage options for cloud paths
@@ -1002,16 +989,26 @@ class LakehousePipeline:
                     col_names = [f.name for f in schema.fields]
                     # Map Arrow/Delta types to contract-like type names
                     _delta_type_map = {
-                        "int8": "TINYINT", "int16": "SMALLINT",
-                        "int32": "INTEGER", "int64": "BIGINT",
-                        "uint8": "SMALLINT", "uint16": "INTEGER",
-                        "uint32": "BIGINT", "uint64": "BIGINT",
-                        "float": "FLOAT", "double": "DOUBLE",
-                        "float32": "FLOAT", "float64": "DOUBLE",
-                        "string": "VARCHAR", "utf8": "VARCHAR",
-                        "large_string": "VARCHAR", "large_utf8": "VARCHAR",
-                        "boolean": "BOOLEAN", "bool": "BOOLEAN",
-                        "date32": "DATE", "date": "DATE",
+                        "int8": "TINYINT",
+                        "int16": "SMALLINT",
+                        "int32": "INTEGER",
+                        "int64": "BIGINT",
+                        "uint8": "SMALLINT",
+                        "uint16": "INTEGER",
+                        "uint32": "BIGINT",
+                        "uint64": "BIGINT",
+                        "float": "FLOAT",
+                        "double": "DOUBLE",
+                        "float32": "FLOAT",
+                        "float64": "DOUBLE",
+                        "string": "VARCHAR",
+                        "utf8": "VARCHAR",
+                        "large_string": "VARCHAR",
+                        "large_utf8": "VARCHAR",
+                        "boolean": "BOOLEAN",
+                        "bool": "BOOLEAN",
+                        "date32": "DATE",
+                        "date": "DATE",
                         "timestamp": "TIMESTAMP",
                         "binary": "BINARY",
                     }
@@ -1020,6 +1017,7 @@ class LakehousePipeline:
                         type_str = str(f.type)
                         # Delta returns PrimitiveType("string") — extract inner name
                         import re as _re
+
                         _prim = _re.search(r'"(\w+)"', type_str)
                         if _prim:
                             type_str = _prim.group(1).lower()
@@ -1029,9 +1027,7 @@ class LakehousePipeline:
                         if "timestamp" in type_str:
                             col_types[f.name] = "TIMESTAMP"
                         else:
-                            col_types[f.name] = _delta_type_map.get(
-                                type_str, type_str.upper()
-                            )
+                            col_types[f.name] = _delta_type_map.get(type_str, type_str.upper())
                     return col_names, col_types
                 except Exception as e:
                     logger.debug(f"Could not introspect Delta schema: {e}")
@@ -1043,10 +1039,9 @@ class LakehousePipeline:
                     return [], {}
                 try:
                     import duckdb
+
                     con = duckdb.connect(database=":memory:")
-                    result = con.execute(
-                        f"PRAGMA table_info('{table_name}')"
-                    ).fetchall()
+                    result = con.execute(f"PRAGMA table_info('{table_name}')").fetchall()
                     con.close()
                     col_names = [row[1] for row in result]
                     col_types = {row[1]: row[2] for row in result}
@@ -1060,13 +1055,11 @@ class LakehousePipeline:
                     return [], {}
                 try:
                     from pyspark.sql import SparkSession
+
                     spark = SparkSession.builder.getOrCreate()
                     df = spark.table(table_name)
                     col_names = df.columns
-                    col_types = {
-                        f.name: f.dataType.simpleString().upper()
-                        for f in df.schema.fields
-                    }
+                    col_types = {f.name: f.dataType.simpleString().upper() for f in df.schema.fields}
                     return col_names, col_types
                 except Exception:
                     return [], {}
@@ -1077,9 +1070,7 @@ class LakehousePipeline:
         return [], {}
 
     @staticmethod
-    def _execute_alter_statements(
-        statements: List[str], backend: str, entity: str
-    ) -> None:
+    def _execute_alter_statements(statements: List[str], backend: str, entity: str) -> None:
         """Execute ALTER TABLE statements for schema evolution.
 
         For dataframe engines (polars/pandas), ALTER statements are logged
@@ -1096,6 +1087,7 @@ class LakehousePipeline:
         if backend in ("spark", "databricks"):
             try:
                 from pyspark.sql import SparkSession
+
                 spark = SparkSession.builder.getOrCreate()
                 for stmt in statements:
                     spark.sql(stmt)
@@ -1106,10 +1098,7 @@ class LakehousePipeline:
 
         # For other backends, log the statements for manual application
         for stmt in statements:
-            logger.info(
-                f"Schema evolution ({entity}): {stmt} "
-                f"(manual execution required for {backend})"
-            )
+            logger.info(f"Schema evolution ({entity}): {stmt} (manual execution required for {backend})")
 
     # ── Phase 3: Compliance & Privacy ────────────────────────────────────────
 
@@ -1539,7 +1528,9 @@ class LakehousePipeline:
                         # ── Checkpointing: skip already-succeeded entities ──
                         _ck_key = f"{layer}:{c.entity}"
                         if _ck_key in _checkpoint_succeeded:
-                            logger.info(f"  ⏭️ Skipping {c.entity} [{layer}] — already succeeded in run {resume_from_run}")
+                            logger.info(
+                                f"  ⏭️ Skipping {c.entity} [{layer}] — already succeeded in run {resume_from_run}"
+                            )
                             summary.append(c.entity, layer, "skipped_checkpoint")
                             continue
 
@@ -1573,13 +1564,17 @@ class LakehousePipeline:
                         except Exception as e:
                             _consecutive_failures += 1
                             if type(e).__name__ == "EntityTimeoutError":
-                                logger.error(f"❌ {c.entity} [{layer}] timed out after {entity_timeout_minutes} minutes.")
+                                logger.error(
+                                    f"❌ {c.entity} [{layer}] timed out after {entity_timeout_minutes} minutes."
+                                )
                                 summary.append(c.entity, layer, "timeout")
                             else:
                                 # Catch-all for any other wrapper errors not logged by _process_single_contract
                                 logger.error(f"❌ {c.entity} [{layer}] failed unexpectedly: {e}")
                                 # Only append if not already in summary to avoid duplicate failure entries
-                                if not any(r.get("contract") == c.entity and r.get("layer") == layer for r in summary.results):
+                                if not any(
+                                    r.get("contract") == c.entity and r.get("layer") == layer for r in summary.results
+                                ):
                                     summary.append(c.entity, layer, "failed")
         return summary
 
@@ -1614,8 +1609,9 @@ class LakehousePipeline:
             else:
                 # DuckDB or Polars fallback — read via polars
                 import polars as pl
-                from lakelogic.engines.cloud_credentials import resolve_storage_options
+
                 from lakelogic.core.paths import enrich_azure_storage_options
+                from lakelogic.engines.cloud_credentials import resolve_storage_options
 
                 storage_opts = enrich_azure_storage_options(resolve_storage_options(run_log_table))
                 try:
@@ -1623,10 +1619,7 @@ class LakehousePipeline:
                 except Exception:
                     df = pl.read_parquet(run_log_table, storage_options=storage_opts)
 
-                filtered = df.filter(
-                    (pl.col("pipeline_run_id") == pipeline_run_id) &
-                    (pl.col("stage") == "succeeded")
-                )
+                filtered = df.filter((pl.col("pipeline_run_id") == pipeline_run_id) & (pl.col("stage") == "succeeded"))
                 for row in filtered.to_dicts():
                     succeeded.add(f"{row.get('data_layer', '')}:{row.get('dataset', '')}")
 
@@ -1665,7 +1658,6 @@ class LakehousePipeline:
 
         def _timed_process(*args):
             if entity_timeout_minutes and entity_timeout_minutes > 0:
-                import signal
                 import threading
 
                 entity_label = getattr(c, "entity", str(c))
@@ -1685,9 +1677,7 @@ class LakehousePipeline:
                 t.join(timeout=entity_timeout_minutes * 60)
 
                 if t.is_alive():
-                    raise EntityTimeoutError(
-                        f"{entity_label} exceeded timeout of {entity_timeout_minutes} minutes"
-                    )
+                    raise EntityTimeoutError(f"{entity_label} exceeded timeout of {entity_timeout_minutes} minutes")
                 if error_holder[0]:
                     raise error_holder[0]
             else:
@@ -1696,9 +1686,17 @@ class LakehousePipeline:
         retry_call(
             _timed_process,
             args=(
-                c, layer, summary, dry_run, run_log_mode,
-                reprocess_from, reprocess_to, reprocess_column,
-                reprocess_values, lookback_days, layers_with_new_data,
+                c,
+                layer,
+                summary,
+                dry_run,
+                run_log_mode,
+                reprocess_from,
+                reprocess_to,
+                reprocess_column,
+                reprocess_values,
+                lookback_days,
+                layers_with_new_data,
             ),
             attempts=retry_attempts,
             base_wait_seconds=retry_base_wait_seconds,
@@ -2204,7 +2202,7 @@ class LakehousePipeline:
         used_layers = set(used_layer_list)
         for layer in used_layer_list:
             layer_nodes = [n for n in nodes if n["layer"] == layer]
-            
+
             total = len(layer_nodes)
             total_height = total * node_height + (total - 1) * (y_gap - node_height) if total else 0
             start_y = max(header_h + 10, header_h + (500 - total_height) // 2) if total else header_h + 100

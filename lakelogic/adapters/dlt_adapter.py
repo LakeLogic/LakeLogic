@@ -362,8 +362,7 @@ class DltAdapter:
                         field_types[field.name] = field.type
             if conflicts:
                 logger.info(
-                    f"dlt: auto-casting columns with conflicting types to string: "
-                    f"{', '.join(sorted(conflicts))}"
+                    f"dlt: auto-casting columns with conflicting types to string: {', '.join(sorted(conflicts))}"
                 )
                 cast_tables = []
                 for t in tables:

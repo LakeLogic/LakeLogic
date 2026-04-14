@@ -557,6 +557,7 @@ class SnowflakeAdapter(EngineAdapter):
 
         server = self.contract.server
         from lakelogic.core.models import SchemaPolicy as _SP
+
         _sp_defaults = _SP()
         evolution = _sp_defaults.evolution
         policy = _sp_defaults.unknown_fields

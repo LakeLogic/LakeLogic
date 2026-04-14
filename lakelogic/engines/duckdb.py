@@ -12,7 +12,7 @@ demos, and SQL-heavy contracts.
 
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 from loguru import logger
 
@@ -99,8 +99,7 @@ class DuckDBAdapter(EngineAdapter):
                 if link.table or (link.type and link.type.lower() == "table") or table_path:
                     table_name = link.table or table_path or link.path
                     logger.warning(
-                        f"Link '{link.name}' references table '{table_name}'. "
-                        "Table links are supported in Spark only."
+                        f"Link '{link.name}' references table '{table_name}'. Table links are supported in Spark only."
                     )
                     continue
 
@@ -204,20 +203,20 @@ class DuckDBAdapter(EngineAdapter):
         # Add missing columns as NULL
         add_cols = []
         for col in missing:
-            add_cols.append(f"NULL AS \"{col}\"")
+            add_cols.append(f'NULL AS "{col}"')
 
         if add_cols:
             existing_select = ", ".join(f'"{c}"' for c in existing_cols)
             null_cols = ", ".join(add_cols)
             self.con.sql(
-                f"CREATE OR REPLACE VIEW _schema_applied AS "
-                f"SELECT {existing_select}, {null_cols} FROM {table_name}"
+                f"CREATE OR REPLACE VIEW _schema_applied AS SELECT {existing_select}, {null_cols} FROM {table_name}"
             )
             table_name = "_schema_applied"
 
         # Type casting
         server = self.contract.server
         from lakelogic.core.models import SchemaPolicy as _SP
+
         _sp_defaults = _SP()
         evolution = _sp_defaults.evolution
         policy = _sp_defaults.unknown_fields
@@ -230,9 +229,7 @@ class DuckDBAdapter(EngineAdapter):
                 policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
 
         if cast_to_string:
-            cols = [
-                row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()
-            ]
+            cols = [row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()]
             cast_exprs = ", ".join(f'CAST("{c}" AS VARCHAR) AS "{c}"' for c in cols)
             self.con.sql(f"CREATE OR REPLACE VIEW _typed AS SELECT {cast_exprs} FROM {table_name}")
             table_name = "_typed"
@@ -255,10 +252,7 @@ class DuckDBAdapter(EngineAdapter):
                 "timestamp": "TIMESTAMP",
                 "datetime": "TIMESTAMP",
             }
-            cols = [
-                row[0]
-                for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()
-            ]
+            cols = [row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()]
             casts = []
             self._type_err_cols = []
             for col in cols:
@@ -272,16 +266,14 @@ class DuckDBAdapter(EngineAdapter):
                         err_msg = f"Type Mismatch: {col} cannot be cast to {field_type}".replace("'", "''")
                         casts.append(f'TRY_CAST("{col}" AS {duckdb_type}) AS "{col}"')
                         casts.append(
-                            f"CASE WHEN \"{col}\" IS NOT NULL AND TRY_CAST(\"{col}\" AS {duckdb_type}) IS NULL "
+                            f'CASE WHEN "{col}" IS NOT NULL AND TRY_CAST("{col}" AS {duckdb_type}) IS NULL '
                             f"THEN '{err_msg}' ELSE NULL END AS \"{err_col}\""
                         )
                     else:
                         casts.append(f'"{col}"')
                 else:
                     casts.append(f'"{col}"')
-            self.con.sql(
-                f"CREATE OR REPLACE VIEW _typed AS SELECT {', '.join(casts)} FROM {table_name}"
-            )
+            self.con.sql(f"CREATE OR REPLACE VIEW _typed AS SELECT {', '.join(casts)} FROM {table_name}")
             table_name = "_typed"
 
         schema_errors: List[str] = []
@@ -307,9 +299,7 @@ class DuckDBAdapter(EngineAdapter):
 
     def _get_current_columns(self, table_name: str) -> List[str]:
         """Get column names from a DuckDB table/view."""
-        return [
-            row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()
-        ]
+        return [row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()]
 
     # ── SQL transformations ───────────────────────────────────────────────
 
@@ -331,7 +321,7 @@ class DuckDBAdapter(EngineAdapter):
 
         # Replace 'source' references with actual table name
         if table_name != "source":
-            sql = re.sub(r'\bsource\b', table_name, sql)
+            sql = re.sub(r"\bsource\b", table_name, sql)
 
         view_name = f"_transform_{id(sql) & 0xFFFFFF:06x}"
         try:
@@ -429,13 +419,12 @@ class DuckDBAdapter(EngineAdapter):
 
             if trans.filter and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [Filter]: {trans.filter}")
-                filter_sql = self._normalize_spark_sql(trans.filter.sql if hasattr(trans.filter, 'sql') else str(trans.filter))
+                filter_sql = self._normalize_spark_sql(
+                    trans.filter.sql if hasattr(trans.filter, "sql") else str(trans.filter)
+                )
                 view_name = f"_pre_filter_{id(filter_sql) & 0xFFFFFF:06x}"
                 try:
-                    self.con.sql(
-                        f"CREATE OR REPLACE VIEW {view_name} AS "
-                        f"SELECT * FROM {current} WHERE {filter_sql}"
-                    )
+                    self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current} WHERE {filter_sql}")
                     current = view_name
                 except Exception as e:
                     logger.warning(f"Pre-Transform [Filter] failed: {e}")
@@ -453,10 +442,7 @@ class DuckDBAdapter(EngineAdapter):
                         else:
                             renames.append(f'"{col}"')
                     view_name = f"_pre_rename_{id(mappings) & 0xFFFFFF:06x}"
-                    self.con.sql(
-                        f"CREATE OR REPLACE VIEW {view_name} AS "
-                        f"SELECT {', '.join(renames)} FROM {current}"
-                    )
+                    self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(renames)} FROM {current}")
                     current = view_name
                 continue
 
@@ -502,10 +488,7 @@ class DuckDBAdapter(EngineAdapter):
                 filter_sql = self._normalize_spark_sql(trans.filter)
                 view_name = f"_post_filter_{id(filter_sql) & 0xFFFFFF:06x}"
                 try:
-                    self.con.sql(
-                        f"CREATE OR REPLACE VIEW {view_name} AS "
-                        f"SELECT * FROM {current} WHERE {filter_sql}"
-                    )
+                    self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current} WHERE {filter_sql}")
                     current = view_name
                 except Exception as e:
                     logger.warning(f"Post-Transform [Filter] failed: {e}")
@@ -642,13 +625,11 @@ class DuckDBAdapter(EngineAdapter):
             # Build error tracking
             error_parts = []
             for err in schema_errors:
-                error_parts.append(f"'{err.replace(chr(39), chr(39)*2)}'")
+                error_parts.append(f"'{err.replace(chr(39), chr(39) * 2)}'")
 
             for i, rule in enumerate(row_rules):
                 err_msg = f"Rule failed: {rule.name} ({rule.sql})".replace("'", "''")
-                error_parts.append(
-                    f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{err_msg}' ELSE NULL END"
-                )
+                error_parts.append(f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{err_msg}' ELSE NULL END")
 
             for err_col in getattr(self, "_type_err_cols", []):
                 error_parts.append(f'"{err_col}"')
@@ -668,7 +649,7 @@ class DuckDBAdapter(EngineAdapter):
                     f"FROM _evaluated"
                 )
 
-            eval_count = self.con.sql(f"SELECT COUNT(*) FROM _with_errors").fetchone()[0]
+            eval_count = self.con.sql("SELECT COUNT(*) FROM _with_errors").fetchone()[0]
             self._add_trace(
                 "Row Rules Evaluation",
                 input_rows=eval_count,
@@ -719,10 +700,8 @@ class DuckDBAdapter(EngineAdapter):
         good_df = self._to_output_df(self.con.sql("SELECT * FROM _good"))
 
         if not include_errors:
-            bad_exclude_err = f" EXCLUDE (\"{self.ERROR_COLUMN}\")"
-            bad_df = self._to_output_df(
-                self.con.sql(f"SELECT *{bad_exclude_err} FROM _bad")
-            )
+            bad_exclude_err = f' EXCLUDE ("{self.ERROR_COLUMN}")'
+            bad_df = self._to_output_df(self.con.sql(f"SELECT *{bad_exclude_err} FROM _bad"))
         else:
             bad_df = self._to_output_df(self.con.sql("SELECT * FROM _bad"))
 

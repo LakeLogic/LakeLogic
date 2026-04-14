@@ -17,7 +17,6 @@ Usage (first cell of every notebook):
 
 import os
 import sys
-import json
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -40,11 +39,12 @@ else:
 # 3. Imports used by every notebook
 # ---------------------------------------------------------------------------
 import lakelogic  # noqa: E402
-from lakelogic import DataProcessor, DataGenerator  # noqa: E402
+from lakelogic import DataProcessor  # noqa: E402
 
 # Configure dataframe displays so columns and string values aren't truncated
 try:
     import polars as pl
+
     pl.Config.set_fmt_str_lengths(200)
     pl.Config.set_tbl_rows(100)
     pl.Config.set_tbl_cols(50)
@@ -53,12 +53,14 @@ except ImportError:
 
 try:
     import pandas as pd
+
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_colwidth", None)
 except ImportError:
     pass
 
 VERSION = lakelogic.__version__
+
 
 # ---------------------------------------------------------------------------
 # 4. Helper: write an inline YAML contract to disk and return its path
@@ -68,6 +70,7 @@ def write_contract(yaml_text: str, filename: str = "contract.yaml") -> str:
     p = WORKDIR / filename if IN_COLAB else Path(filename)
     p.write_text(yaml_text.strip() + "\n")
     return str(p)
+
 
 # ---------------------------------------------------------------------------
 # 5. Helper: pretty-print a run report
@@ -89,8 +92,8 @@ def print_report(processor: DataProcessor) -> dict:
         print("\nRule failures:")
         for f in failures:
             if isinstance(f, dict):
-                rule_name = f.get('rule', f.get('name', '?'))
-                count = f.get('failed_count', f.get('count'))
+                rule_name = f.get("rule", f.get("name", "?"))
+                count = f.get("failed_count", f.get("count"))
                 if count is not None:
                     print(f"  {rule_name}: {count} rows")
                 else:
@@ -98,6 +101,7 @@ def print_report(processor: DataProcessor) -> dict:
             else:
                 print(f"  {f}")
     return r
+
 
 # ---------------------------------------------------------------------------
 # 6. Helper: reconciliation assertion
@@ -110,6 +114,7 @@ def assert_reconciliation(source_df, good_df, bad_df):
     print(f"source={s}  good={g}  bad={b}")
     print(f"{s} == {g} + {b} -> {s == g + b}")
     assert s == g + b, f"Reconciliation failed: {s} != {g} + {b}"
+
 
 # ---------------------------------------------------------------------------
 # 7. Announce

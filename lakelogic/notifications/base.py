@@ -56,48 +56,57 @@ def resolve_ownership_contacts(
         webhook = contact.get("webhook")
 
         def _get_list(val):
-            if not val: return []
+            if not val:
+                return []
             return val if isinstance(val, list) else [val]
 
         for e in _get_list(email):
-            channels.append({
-                "type": "email",
-                "target": str(e),
-                "on_events": ["failure", "slo_breach", "quarantine"],
-                "_source": f"ownership.contacts[{name}]",
-            })
+            channels.append(
+                {
+                    "type": "email",
+                    "target": str(e),
+                    "on_events": ["failure", "slo_breach", "quarantine"],
+                    "_source": f"ownership.contacts[{name}]",
+                }
+            )
 
         # Slack channel names (#channel) and @handles are informational
         # metadata — only webhook URLs are actionable for notifications.
         for s in _get_list(slack):
             s_str = str(s)
             if s_str.startswith("http"):
-                channels.append({
-                    "type": "slack",
-                    "target": s_str,
-                    "on_events": ["failure", "slo_breach", "quarantine"],
-                    "_source": f"ownership.contacts[{name}]",
-                })
-                
+                channels.append(
+                    {
+                        "type": "slack",
+                        "target": s_str,
+                        "on_events": ["failure", "slo_breach", "quarantine"],
+                        "_source": f"ownership.contacts[{name}]",
+                    }
+                )
+
         for t in _get_list(teams):
             t_str = str(t)
             if t_str.startswith("http"):
-                channels.append({
-                    "type": "teams",
-                    "target": t_str,
-                    "on_events": ["failure", "slo_breach", "quarantine"],
-                    "_source": f"ownership.contacts[{name}]",
-                })
-                
+                channels.append(
+                    {
+                        "type": "teams",
+                        "target": t_str,
+                        "on_events": ["failure", "slo_breach", "quarantine"],
+                        "_source": f"ownership.contacts[{name}]",
+                    }
+                )
+
         for w in _get_list(webhook):
             w_str = str(w)
             if w_str.startswith("http"):
-                channels.append({
-                    "type": "webhook",
-                    "target": w_str,
-                    "on_events": ["failure", "slo_breach", "quarantine"],
-                    "_source": f"ownership.contacts[{name}]",
-                })
+                channels.append(
+                    {
+                        "type": "webhook",
+                        "target": w_str,
+                        "on_events": ["failure", "slo_breach", "quarantine"],
+                        "_source": f"ownership.contacts[{name}]",
+                    }
+                )
 
     return channels
 
@@ -722,13 +731,18 @@ def render_notification_content(
         source_path = merged_context.get("source_path")
         if source_path and isinstance(source_path, str):
             import re
+
             masked = source_path
             # Azure: abfss://container@storage_account.dfs.core.windows.net
-            masked = re.sub(r'(abfss?://[^@]+@)([^.]+)(\.dfs\.core\.windows\.net)', lambda m: f"{m.group(1)}{m.group(2)[:1]}***{m.group(3)}", masked)
+            masked = re.sub(
+                r"(abfss?://[^@]+@)([^.]+)(\.dfs\.core\.windows\.net)",
+                lambda m: f"{m.group(1)}{m.group(2)[:1]}***{m.group(3)}",
+                masked,
+            )
             # S3: s3://bucket/...
-            masked = re.sub(r'(s3a?://)([^/]+)', lambda m: f"{m.group(1)}{m.group(2)[:1]}***", masked)
+            masked = re.sub(r"(s3a?://)([^/]+)", lambda m: f"{m.group(1)}{m.group(2)[:1]}***", masked)
             # GCP: gs://bucket/...
-            masked = re.sub(r'(gs://)([^/]+)', lambda m: f"{m.group(1)}{m.group(2)[:1]}***", masked)
+            masked = re.sub(r"(gs://)([^/]+)", lambda m: f"{m.group(1)}{m.group(2)[:1]}***", masked)
             merged_context["masked_source_path"] = masked
         else:
             merged_context["masked_source_path"] = source_path
@@ -899,7 +913,7 @@ class SendGridAdapter(NotificationAdapter):
         if not api_key or not from_email or not to_email:
             logger.warning("SendGridAdapter missing api_key, from_email, or target; skipping send.")
             return
-            
+
         from_dict = {"email": from_email}
         if from_name:
             from_dict["name"] = from_name
@@ -954,10 +968,7 @@ class TeamsAdapter(NotificationAdapter):
         if not url:
             logger.warning("TeamsAdapter missing target (webhook URL); skipping send.")
             return
-        payload = {
-            "title": subject,
-            "text": message
-        }
+        payload = {"title": subject, "text": message}
         logger.info(f"Sending Teams message [Subject: {subject}]")
         _post_json(url, payload)
 
@@ -993,12 +1004,12 @@ class ConsoleAdapter(NotificationAdapter):
             message: Body content.
             subject: Message subject.
         """
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("[LAKELOGIC NOTIFICATION]")
         print(f"Subject: {subject}")
-        print(f"{'-'*60}")
+        print(f"{'-' * 60}")
         print(message)
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
 
 def get_notification_adapter(notif_type: str, config: Dict[str, Any]) -> NotificationAdapter:
