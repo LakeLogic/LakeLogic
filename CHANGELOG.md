@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.16.0] — 2026-04-15
+
+### Added
+
+- Add engine portability demo notebook and implement core processor logic
+- Add sync script and populate documentation examples directory with flagship notebooks
 ## [1.15.0] — 2026-04-15
 
 ### Added
@@ -222,6 +228,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.16.0]: https://github.com/lakelogic/LakeLogic/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/lakelogic/LakeLogic/compare/v1.12.0...v1.13.0
