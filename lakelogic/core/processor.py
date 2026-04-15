@@ -818,8 +818,8 @@ class DataProcessor:
                             import pandas as pd
 
                             if isinstance(bad_df, pd.DataFrame) and error_col in bad_df.columns:
-                                counts = bad_df[error_col].explode().dropna().value_counts()
-                                reasons = [f"{k} ({v})" for k, v in counts.items() if k]
+                                err_counts = bad_df[error_col].explode().dropna().value_counts()
+                                reasons = [f"{k} ({v})" for k, v in err_counts.items() if k]
                         except Exception:
                             pass
 
@@ -828,7 +828,7 @@ class DataProcessor:
                             from pyspark.sql.functions import col, explode_outer
 
                             if error_col in bad_df.columns:
-                                counts = (
+                                err_counts = (
                                     bad_df.select(explode_outer(col(error_col)).alias("err"))
                                     .filter(col("err").isNotNull())
                                     .groupBy("err")
@@ -837,7 +837,7 @@ class DataProcessor:
                                     .limit(10)
                                     .collect()
                                 )
-                                reasons = [f"{row['err']} ({row['count']})" for row in counts if row["err"]]
+                                reasons = [f"{row['err']} ({row['count']})" for row in err_counts if row["err"]]
                         except Exception:
                             pass
 
