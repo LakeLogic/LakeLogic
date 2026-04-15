@@ -10,52 +10,38 @@ DOCS_EXAMPLES = Path("docs/examples")
 # Define which notebooks to feature in docs with their supporting files
 FLAGSHIP_EXAMPLES = [
     {
-        "notebook": "01_quickstart/01_hello_world.ipynb",
-        "dest_name": "01_hello_world.ipynb",
+        "notebook": "colab/00_quickstart.ipynb",
+        "dest_name": "00_quickstart.ipynb",
         "supporting_files": [],
     },
     {
-        "notebook": "01_quickstart/02_database_governance.ipynb",
-        "dest_name": "02_database_governance.ipynb",
-        "supporting_files": [
-            ("01_quickstart/users_contract.yaml", "users_contract.yaml"),
-        ],
-    },
-    {
-        # Renamed: 04_compliance_governance/hipaa_pii_masking
-        #       -> 03_compliance_governance/hipaa_gdpr_pii_masking
-        "notebook": "03_compliance_governance/hipaa_gdpr_pii_masking/tutorial_hipaa_gdpr_compliance.ipynb",
-        "dest_name": "hipaa_gdpr_compliance.ipynb",
+        "notebook": "colab/01_data_quality_trust.ipynb",
+        "dest_name": "01_data_quality_trust.ipynb",
         "supporting_files": [],
     },
     {
-        "notebook": "02_core_patterns/bronze_quality_gate/playbook.ipynb",
-        "dest_name": "bronze_quality_gate.ipynb",
+        "notebook": "colab/02_compliance_governance.ipynb",
+        "dest_name": "02_compliance_governance.ipynb",
         "supporting_files": [],
     },
     {
-        "notebook": "02_core_patterns/medallion_architecture/quickstart_tutorial.ipynb",
-        "dest_name": "medallion_architecture.ipynb",
+        "notebook": "colab/03_engine_scale.ipynb",
+        "dest_name": "03_engine_scale.ipynb",
         "supporting_files": [],
     },
     {
-        "notebook": "02_core_patterns/dedup_survivorship/playbook.ipynb",
-        "dest_name": "dedup_survivorship.ipynb",
+        "notebook": "colab/04_developer_experience.ipynb",
+        "dest_name": "04_developer_experience.ipynb",
         "supporting_files": [],
     },
     {
-        "notebook": "02_core_patterns/scd2_dimension/playbook.ipynb",
-        "dest_name": "scd2_dimension.ipynb",
+        "notebook": "colab/05_data_generation_ai.ipynb",
+        "dest_name": "05_data_generation_ai.ipynb",
         "supporting_files": [],
     },
     {
-        "notebook": "02_core_patterns/soft_delete/soft_delete_pattern.ipynb",
-        "dest_name": "soft_delete.ipynb",
-        "supporting_files": [],
-    },
-    {
-        "notebook": "02_core_patterns/reference_joins/playbook.ipynb",
-        "dest_name": "reference_joins.ipynb",
+        "notebook": "colab/06_integrations.ipynb",
+        "dest_name": "06_integrations.ipynb",
         "supporting_files": [],
     },
 ]
