@@ -1,8 +1,0 @@
-order_id,customer_id,order_date,product_name,category,quantity,unit_price,discount_pct,channel,status,_is_invalid
-ORD-435080,CUST-897254,2026-01-19,Display Module,Clothing,2525,8.57,601.0,online,active,false
-ORD-889570,CUST-134957,2026-02-18,Gadget Ultra,Books,3048,27.59,746.0,mobile_app,active,false
-ORD-040425,CUST-346222,2026-04-08,Power Supply 500W,Automotive,1578,20.04,381.0,mobile_app,active,false
-ORD-829891,CUST-607407,2026-01-24,Power Supply 500W,Automotive,8722,11.64,211.0,mobile_app,active,false
-ORD-980635,CUST-897254,2026-03-01,Cooling Fan 120mm,Health,5364,5.31,192.0,online,inactive,false
-ORD-060522,CUST-607407,2026-01-22,Control Board v2,Clothing,8127,13.7,593.0,online,pending,false
-ORD-310547,CUST-346222,2026-01-18,Control Board v2,Finance,1001,44.28,339.0,social,active,false

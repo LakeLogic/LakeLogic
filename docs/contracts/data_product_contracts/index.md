@@ -214,7 +214,7 @@ lineage:
   enabled: true
 ```
 
-Each template uses `{placeholder}` syntax that auto-resolves from your `_system.yaml` and `_domain.yaml` configuration. See [System Config](./../contracts/system_config.md) for all available placeholders.
+Each template uses `{placeholder}` syntax that auto-resolves from your `_system.yaml` and `_domain.yaml` configuration. See [System Config](../system_config.md) for all available placeholders.
 
 ---
 
@@ -233,7 +233,7 @@ Every contract can include these sections (all optional except `version`):
 | `materialization` | Write strategy (append, merge, SCD2) | [Materialization](materialization.md) |
 | `materialization.scd2` / `fact` | Kimball dimensional modeling | [Dimensional Modeling](dimensional_modeling.md) |
 | `service_levels` | Contract-level SLO overrides | [SLOs](../slo.md) |
-| `quarantine` | Bad row handling + notifications | [Notifications](../notifications.md) |
+| `quarantine` | Bad row handling + notifications | [Notifications](../../notifications.md) |
 | `lineage` | Provenance tracking columns | [Schema & Model](../schema_model.md) |
 | `compliance` | GDPR, EU AI Act, etc. | [Compliance](../compliance.md) |
 | `links` | Reference data for joins | [Ingestion](ingestion.md) |

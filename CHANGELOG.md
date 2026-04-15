@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.15.0] — 2026-04-15
+
+### Added
+
+- Add engine portability examples and implement SCD2 materialization support in core models and LLM engine
+## [1.14.0] — 2026-04-15
+
+### Added
+
+- Implement core Pydantic data models and project documentation structure
+- Implement core LakeLogic framework with engine adapters, pipeline runner, and governance modules
+
+### Documentation
+
+- Sync fixed python 3.9 syntax and lint configs
+- Add examples folder to version control and fix mkdocs links
 ## [1.13.0] — 2026-04-14
 
 ### Added
@@ -206,6 +222,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.15.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.15.0
+[1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/lakelogic/LakeLogic/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/lakelogic/LakeLogic/compare/v1.11.0...v1.11.1

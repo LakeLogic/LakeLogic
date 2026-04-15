@@ -238,7 +238,7 @@ export LAKELOGIC_OFFLINE=true
 
 - [Contract Template — Section 20: Cloud Reporting](contract_template.md)
 - [Observability](observability.md)
-- [Tutorial: Cloud Run Log Integration](tutorials/cloud_run_log_integration.md)
+- [Tutorial: Cloud Run Log Integration](observability.md)
 
 ---
 

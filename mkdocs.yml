@@ -9,13 +9,13 @@ copyright: >
   Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · 
   Open Source by <a href="https://github.com/LakeLogic" target="_blank">LakeLogic Team</a>
 
+use_directory_urls: false
+
 theme:
   name: material
   custom_dir: docs/overrides
   logo: assets/logo.svg
   favicon: assets/logo.svg
-  
-use_directory_urls: false
   font:
     text: "Inter"
     code: "JetBrains Mono"
@@ -67,11 +67,8 @@ nav:
       - Pipeline Resilience: resilience.md
       - Pipelines & Parallelism: pipelines.md
   - Examples:
-      - "0. Quickstart": examples/colab/00_quickstart.ipynb
-      - "1. Data Quality & Trust": examples/colab/01_data_quality_trust.ipynb
-      - "2. Compliance & Governance": examples/colab/02_compliance_governance.ipynb
-      - "3. Engine & Scale": examples/colab/03_engine_scale.ipynb
-      - "6. Integrations": examples/colab/06_integrations.ipynb
+      - Overview: examples.md
+
   - Deployment: deployment_patterns.md
   - Observability:
       - Monitoring & Lineage: observability.md

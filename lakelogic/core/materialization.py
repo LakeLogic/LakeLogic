@@ -1216,10 +1216,16 @@ def _inject_unknown_member_pandas(
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
-    # Check if unknown member already exists
+    # Check if unknown member already exists (by SK value OR by change_reason)
+    # Belt-and-suspenders: the SK may have been overwritten by hash recomputation
+    # in _scd2_frames, so also check the change_reason column as a fallback.
     if sk_column in df.columns:
         existing_unknown = df[df[sk_column].astype(str) == sk_value]
         if not existing_unknown.empty:
+            return df
+    if change_reason_col and change_reason_col in df.columns:
+        existing_by_reason = df[df[change_reason_col].astype(str) == "unknown_member"]
+        if not existing_by_reason.empty:
             return df
 
     # Extract lineage column values from first row so the unknown member
@@ -1317,10 +1323,14 @@ def _inject_unknown_member_spark(
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
-    # Check if unknown member already exists
+    # Check if unknown member already exists (by SK value OR by change_reason)
     if sk_column in result.columns:
         existing_count = result.filter(F.col(sk_column).cast("string") == sk_value).count()
         if existing_count > 0:
+            return result
+    if change_reason_col and change_reason_col in result.columns:
+        reason_count = result.filter(F.col(change_reason_col) == "unknown_member").count()
+        if reason_count > 0:
             return result
 
     # Extract lineage column values from the first row so the unknown member
@@ -1745,10 +1755,18 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     # ── Surrogate key injection ──────────────────────────────────
     sk_column = scd2_cfg.get("surrogate_key", "_sk")
     sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
+
+    unknown_cfg = scd2_cfg.get("unknown_member") or {}
+    unknown_sk_val = str(unknown_cfg.get("surrogate_key_value", "-1")) if unknown_cfg.get("enabled", True) else None
+
     if sk_column:
         import hashlib
 
         def _compute_sk(row):
+            # Protect the unknown member SK from being overwritten by a hash
+            if unknown_sk_val and str(row.get(sk_column, "")) == unknown_sk_val:
+                return unknown_sk_val
+
             pk_val = "|".join(str(row.get(c, "")) for c in primary_key)
             ef_val = str(row.get(effective_from, ""))
             raw = f"{pk_val}|{ef_val}"

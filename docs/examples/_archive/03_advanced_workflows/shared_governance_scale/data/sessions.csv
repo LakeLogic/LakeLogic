@@ -1,4 +1,0 @@
-session_id,user_id,device_type,started_at
-s1,u1,ios,2026-02-01T10:01:00Z
-s2, u2,android,2026-02-01T11:01:00Z
-s3,,web,2026-02-01T12:01:00Z

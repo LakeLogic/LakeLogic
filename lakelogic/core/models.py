@@ -1324,15 +1324,16 @@ class ExtractionConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    # LLM provider and model
-    provider: str  # openai | anthropic | azure_openai | ollama | bedrock | google
-    model: str  # gpt-4o-mini | claude-3.5-sonnet | llama-3-70b | gemini-2.0-flash
+    # LLM provider: openai | anthropic | azure_openai | ollama | bedrock | google
+    # local | unstructured | spacy | pdfplumber | easyocr
+    provider: str
+    model: str = "auto"  # gpt-4o-mini | claude-3.5-sonnet | en_core_web_sm | auto
     temperature: float = 0.1  # low for deterministic extraction
     max_tokens: int = 1000
     response_format: str = "json"  # json | text
 
-    # Prompt
-    prompt_template: str  # Jinja2 template with access to row columns
+    # Prompt (optional for local providers like unstructured/spacy)
+    prompt_template: Optional[str] = None  # Jinja2 template with access to row columns
     system_prompt: Optional[str] = None  # system message for the LLM
 
     # Source text configuration

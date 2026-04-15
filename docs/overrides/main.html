@@ -1,21 +1,7 @@
 {% extends "base.html" %}
 
 {% block footer %}
-<!-- Feedback section -->
-<div class="ll-feedback">
-  <div class="ll-feedback__inner md-grid">
-    <span class="ll-feedback__label">Was this page helpful?</span>
-    <button class="ll-feedback__btn ll-feedback__btn--yes" data-value="yes" aria-label="Yes">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 20h2c.55 0 1-.45 1-1v-9c0-.55-.45-1-1-1H2v11zm19.83-7.12c.11-.25.17-.52.17-.8V11c0-1.1-.9-2-2-2h-5.5l.92-4.65c.05-.22.02-.46-.08-.66a4.8 4.8 0 0 0-.88-1.22L14 2 7.59 8.41C7.21 8.79 7 9.3 7 9.83v7.84A2.34 2.34 0 0 0 9.34 20h8.11c.7 0 1.36-.37 1.72-.97l2.66-6.15z"/></svg>
-      Yes
-    </button>
-    <button class="ll-feedback__btn ll-feedback__btn--no" data-value="no" aria-label="No">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4h-2c-.55 0-1 .45-1 1v9c0 .55.45 1 1 1h2V4zM2.17 11.12c-.11.25-.17.52-.17.8V13c0 1.1.9 2 2 2h5.5l-.92 4.65c-.05.22-.02.46.08.66.23.45.52.86.88 1.22L10 22l6.41-6.41c.38-.38.59-.89.59-1.42V6.34A2.34 2.34 0 0 0 14.66 4H6.56c-.71 0-1.37.37-1.73.97L2.17 11.12z"/></svg>
-      No
-    </button>
-    <span class="ll-feedback__thanks" style="display:none">Thanks for your feedback!</span>
-  </div>
-</div>
+
 
 <!-- Footer links grid -->
 <footer class="ll-footer">
@@ -49,10 +35,6 @@
   <!-- Bottom bar -->
   <div class="ll-footer__bottom md-grid">
     <div class="ll-footer__meta">
-      <a href="https://lakelogic.org/privacy">Privacy Notice</a>
-      <span class="ll-footer__sep">&middot;</span>
-      <a href="https://lakelogic.org/terms">Site Terms</a>
-      <span class="ll-footer__sep">&middot;</span>
       <span>&copy; {{ config.copyright | default("2026 LakeLogic. All Rights Reserved.") }}</span>
     </div>
   </div>

@@ -1,3 +1,0 @@
-version: 1.0.0
-platform: databricks_jobs
-job: lakelogic_job

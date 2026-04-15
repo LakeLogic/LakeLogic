@@ -16,14 +16,66 @@ Supported providers::
     provider: bedrock         # AWS Bedrock (Claude, Llama, Titan)
     provider: ollama          # Local models via Ollama
     provider: local           # Direct HuggingFace transformers
+    provider: unstructured    # Document parsing (PDF, DOCX, HTML)
+    provider: spacy           # NER + text classification (local, fast)
+    provider: pdfplumber      # PDF table extraction (pure Python)
+    provider: easyocr         # Image OCR via PyTorch
 
-Usage::
+Usage — LLM with prompting::
 
     from lakelogic import DataContract, DataProcessor
-
     contract = DataContract.from_yaml("contracts/support_tickets.yaml")
-    # contract.extraction is populated → DataProcessor routes to LLMAdapter
     result = DataProcessor.run(contract, df)
+
+Usage — PDF table extraction (pdfplumber)::
+
+    from lakelogic.engines.llm import extract_file
+    from lakelogic.core.models import ExtractionConfig
+    import yaml
+
+    config = ExtractionConfig(**yaml.safe_load('''
+      provider: pdfplumber
+      output_schema:
+        - name: description
+          type: string
+        - name: hours
+          type: integer
+        - name: amount
+          type: string
+    '''))
+    rows = extract_file("invoice.pdf", config)  # list of dicts
+
+Usage — Image OCR (easyocr)::
+
+    config = ExtractionConfig(**yaml.safe_load('''
+      provider: easyocr
+      output_schema:
+        - name: full_text
+          type: string
+          extraction_task: all
+    '''))
+    rows = extract_file("receipt.png", config)
+
+Usage — NER + classification (spacy)::
+
+    result = extract_row(
+        {"text": "Sarah Chen from Microsoft called about billing."},
+        ExtractionConfig(**yaml.safe_load('''
+          provider: spacy
+          text_column: text
+          output_schema:
+            - name: persons
+              type: string
+              extraction_task: ner
+            - name: organizations
+              type: string
+              extraction_task: ner
+              extraction_examples: [ORG]
+            - name: sentiment
+              type: string
+              extraction_task: sentiment
+        ''')),
+    )
 """
 
 from __future__ import annotations
@@ -228,6 +280,418 @@ def _extract_local(
     extracted["_lakelogic_llm_model"] = config.model
     extracted["_lakelogic_llm_provider"] = "local"
     extracted["_lakelogic_llm_prompt_hash"] = _prompt_hash(config.prompt_template)
+    extracted["_lakelogic_llm_token_input"] = 0
+    extracted["_lakelogic_llm_token_output"] = 0
+    extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
+    extracted["_lakelogic_llm_cost_usd"] = 0.0
+
+    return extracted
+
+
+def _extract_unstructured(
+    config: ExtractionConfig,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Extract structured elements from text or documents using ``unstructured``.
+
+    Maps partitioned element categories (Title, NarrativeText, Table, etc.)
+    to output_schema fields via the ``extraction_task`` hint on each field.
+
+    Supported ``extraction_task`` values:
+      - title       — Title elements
+      - narrative   — NarrativeText / body paragraphs
+      - table       — Table elements
+      - list        — ListItem elements
+      - header      — Header elements
+      - all         — concatenation of all elements (default)
+    """
+    try:
+        from unstructured.partition.auto import partition as partition_auto
+        from unstructured.partition.text import partition_text
+    except ImportError:
+        raise ImportError(
+            "unstructured is required for provider='unstructured'. Install with: pip install unstructured"
+        )
+
+    start = time.perf_counter()
+
+    # Partition: if the prompt looks like a file path, use auto partition;
+    # otherwise treat it as raw text.
+    import os
+
+    if os.path.isfile(prompt):
+        elements = partition_auto(filename=prompt)
+    else:
+        elements = partition_text(text=prompt)
+
+    # Map element categories to extraction_task names
+    _CATEGORY_MAP: Dict[str, List[str]] = {
+        "title": ["Title"],
+        "narrative": ["NarrativeText"],
+        "table": ["Table"],
+        "list": ["ListItem"],
+        "header": ["Header"],
+        "image": ["Image"],
+        "all": [],  # sentinel — matches everything
+    }
+
+    extracted: Dict[str, Any] = {}
+    for field in config.output_schema:
+        task = (field.extraction_task or "all").lower()
+        target_cats = _CATEGORY_MAP.get(task)
+        if target_cats is None:
+            # Unknown task — try matching category name directly
+            target_cats = [task.title()]
+        if not target_cats:  # "all"
+            matched = [el.text for el in elements if el.text]
+        else:
+            matched = [el.text for el in elements if el.category in target_cats and el.text]
+        extracted[field.name] = "\n".join(matched) if matched else None
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    # Lineage metadata
+    extracted["_lakelogic_llm_model"] = "unstructured"
+    extracted["_lakelogic_llm_provider"] = "unstructured"
+    extracted["_lakelogic_llm_prompt_hash"] = _prompt_hash(config.prompt_template or "")
+    extracted["_lakelogic_llm_token_input"] = 0
+    extracted["_lakelogic_llm_token_output"] = 0
+    extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
+    extracted["_lakelogic_llm_cost_usd"] = 0.0
+
+    return extracted
+
+
+def _extract_pdfplumber(
+    file_path: str,
+    config: ExtractionConfig,
+) -> List[Dict[str, Any]]:
+    """
+    Extract table data from a PDF using ``pdfplumber``.
+
+    Maps table columns to ``output_schema`` fields by name matching.
+    Fields with ``extraction_task: metadata`` are extracted from page text
+    using a regex pattern supplied in ``extraction_examples[0]``.
+
+    Returns a list of dicts (one per table row).
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        raise ImportError(
+            "pdfplumber is required for provider='pdfplumber'. Install with: pip install lakelogic[extraction-ocr]"
+        )
+
+    import re as _re
+
+    start = time.perf_counter()
+
+    with pdfplumber.open(file_path) as doc:
+        all_text = "\n".join(page.extract_text() or "" for page in doc.pages)
+        all_tables: list = []
+        for page in doc.pages:
+            for tbl in page.extract_tables() or []:
+                if tbl:
+                    all_tables.append(tbl)
+
+    # Separate metadata fields (from text) vs table fields
+    metadata_values: Dict[str, Any] = {}
+    table_field_names: List[str] = []
+
+    for field in config.output_schema:
+        task = (field.extraction_task or "").lower()
+        if task == "metadata":
+            # Use first extraction_example as regex pattern
+            pattern = field.extraction_examples[0] if field.extraction_examples else None
+            if pattern:
+                match = _re.search(pattern, all_text)
+                metadata_values[field.name] = match.group(1) if match else None
+            else:
+                metadata_values[field.name] = None
+        else:
+            table_field_names.append(field.name)
+
+    # Map table columns to schema fields by name similarity
+    rows: List[Dict[str, Any]] = []
+    for table in all_tables:
+        if len(table) < 2:
+            continue
+        header_raw = table[0]
+        header = [h.lower().replace(" ", "_") if h else "" for h in header_raw]
+
+        # Build column mapping: schema_field_name → table_column_index
+        col_map: Dict[str, int] = {}
+        for fn in table_field_names:
+            fn_lower = fn.lower()
+            for idx, col_name in enumerate(header):
+                if fn_lower == col_name or fn_lower in col_name or col_name in fn_lower:
+                    col_map[fn] = idx
+                    break
+
+        for data_row in table[1:]:
+            row: Dict[str, Any] = {}
+            row.update(metadata_values)
+            for fn, col_idx in col_map.items():
+                row[fn] = data_row[col_idx] if col_idx < len(data_row) else None
+            rows.append(row)
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    # Lineage metadata on every row
+    for row in rows:
+        row["_lakelogic_llm_model"] = "pdfplumber"
+        row["_lakelogic_llm_provider"] = "pdfplumber"
+        row["_lakelogic_llm_latency_ms"] = elapsed_ms
+        row["_lakelogic_llm_cost_usd"] = 0.0
+
+    # Fallback: if no tables found, return full text as a single row
+    if not rows:
+        fallback: Dict[str, Any] = {}
+        fallback.update(metadata_values)
+        for fn in table_field_names:
+            fallback[fn] = all_text if fn in ("full_text", "text", "body") else None
+        fallback["_lakelogic_llm_model"] = "pdfplumber"
+        fallback["_lakelogic_llm_provider"] = "pdfplumber"
+        fallback["_lakelogic_llm_latency_ms"] = elapsed_ms
+        fallback["_lakelogic_llm_cost_usd"] = 0.0
+        rows.append(fallback)
+
+    return rows
+
+
+def _extract_easyocr(
+    file_path: str,
+    config: ExtractionConfig,
+) -> List[Dict[str, Any]]:
+    """
+    Extract text from an image using ``easyocr`` (PyTorch).
+
+    Returns a list of dicts (typically a single row with extracted text).
+    """
+    try:
+        import easyocr
+    except ImportError as e:
+        if "easyocr" in str(e):
+            raise ImportError(
+                "easyocr is required for provider='easyocr'. Install with: pip install lakelogic[extraction-ocr]"
+            ) from e
+        raise e
+
+    start = time.perf_counter()
+
+    # Suppress verbose easyocr startup prints if possible
+    import logging
+
+    logging.getLogger("easyocr").setLevel(logging.ERROR)
+
+    # Note: caching the reader in production is recommended, but for single-shot:
+    reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+    ocr_results = reader.readtext(file_path)
+    # easyocr returns list of tuples: (bbox, text, prob)
+    ocr_text = "\n".join([r[1] for r in ocr_results]) if ocr_results else ""
+
+    # Map to output_schema fields
+    extracted: Dict[str, Any] = {}
+    for field in config.output_schema:
+        task = (field.extraction_task or "all").lower()
+        if task == "all":
+            extracted[field.name] = ocr_text
+        elif task == "lines":
+            extracted[field.name] = [r[1] for r in ocr_results] if ocr_results else []
+        elif task == "confidence":
+            extracted[field.name] = [round(float(r[2]), 3) for r in ocr_results] if ocr_results else []
+        else:
+            extracted[field.name] = ocr_text
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    extracted["_lakelogic_llm_model"] = "easyocr"
+    extracted["_lakelogic_llm_provider"] = "easyocr"
+    extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
+    extracted["_lakelogic_llm_cost_usd"] = 0.0
+
+    return [extracted]
+
+
+def _extract_spacy(
+    config: ExtractionConfig,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Extract named entities and classify text using spaCy.
+
+    Dispatches per-field based on the ``extraction_task`` hint:
+
+      - **ner** — extract entities matching the field name
+        (e.g. field ``persons`` → PERSON entities,
+        ``organizations`` → ORG entities).  Custom entity labels
+        can be specified via ``extraction_examples: ["LABEL"]``.
+
+      - **classification** — keyword-frequency classification into
+        the field's ``accepted_values`` list.
+
+      - **sentiment** — polarity via TextBlob (positive / neutral /
+        negative).  Falls back to ``"neutral"`` if TextBlob is not
+        installed.
+
+    Parameters
+    ----------
+    config : ExtractionConfig
+        Must have ``output_schema`` with per-field ``extraction_task``.
+    prompt : str
+        The input text to analyse.
+    """
+    try:
+        import spacy
+    except ImportError:
+        raise ImportError(
+            "spacy is required for provider='spacy'. "
+            "Install with: pip install spacy && python -m spacy download en_core_web_sm"
+        )
+
+    start = time.perf_counter()
+
+    model_name = config.model if config.model != "auto" else "en_core_web_sm"
+    nlp = spacy.load(model_name)
+    doc = nlp(prompt)
+
+    # Map field names to spaCy entity labels
+    _ENTITY_MAP: Dict[str, str] = {
+        "person": "PERSON",
+        "persons": "PERSON",
+        "people": "PERSON",
+        "organization": "ORG",
+        "organizations": "ORG",
+        "org": "ORG",
+        "company": "ORG",
+        "location": "GPE",
+        "locations": "GPE",
+        "place": "GPE",
+        "city": "GPE",
+        "date": "DATE",
+        "dates": "DATE",
+        "money": "MONEY",
+        "amounts": "MONEY",
+        "amount": "MONEY",
+        "email": "EMAIL",
+        "product": "PRODUCT",
+        "products": "PRODUCT",
+        "event": "EVENT",
+        "events": "EVENT",
+    }
+
+    extracted: Dict[str, Any] = {}
+
+    for field in config.output_schema:
+        task = (field.extraction_task or "ner").lower()
+
+        if task == "ner":
+            # Determine which spaCy label to extract
+            if field.extraction_examples:
+                label = field.extraction_examples[0].upper()
+            else:
+                label = _ENTITY_MAP.get(field.name.lower(), field.name.upper())
+            entities = list(
+                dict.fromkeys(ent.text for ent in doc.ents if ent.label_ == label)
+            )  # deduplicated, order-preserving
+            extracted[field.name] = ", ".join(entities) if entities else None
+
+        elif task == "classification":
+            if field.accepted_values:
+                text_lower = prompt.lower()
+                scores = {cat: text_lower.count(cat.lower()) for cat in field.accepted_values}
+                best = max(scores, key=scores.get) if any(scores.values()) else None
+                extracted[field.name] = best
+            else:
+                extracted[field.name] = None
+
+        elif task == "sentiment":
+            # Keyword-boosted sentiment: TextBlob baseline + domain-aware keywords
+            _NEG_KEYWORDS = {
+                "error",
+                "fail",
+                "failed",
+                "failure",
+                "broken",
+                "cracked",
+                "bug",
+                "crash",
+                "block",
+                "blocking",
+                "wrong",
+                "unhelpful",
+                "terrible",
+                "awful",
+                "horrible",
+                "charged",
+                "cancelled",
+                "canceled",
+                "refund",
+                "complaint",
+                "urgent",
+                "warning",
+                "outage",
+                "down",
+                "fix",
+                "unacceptable",
+                "disappointed",
+                "frustrat",
+                "angry",
+            }
+            _POS_KEYWORDS = {
+                "thank",
+                "thanks",
+                "helpful",
+                "great",
+                "excellent",
+                "love",
+                "awesome",
+                "amazing",
+                "perfect",
+                "resolved",
+                "happy",
+                "pleased",
+                "recommend",
+                "fantastic",
+                "wonderful",
+                "impressed",
+            }
+
+            text_lower = prompt.lower()
+
+            neg_hits = sum(1 for kw in _NEG_KEYWORDS if kw in text_lower)
+            pos_hits = sum(1 for kw in _POS_KEYWORDS if kw in text_lower)
+
+            try:
+                from textblob import TextBlob  # type: ignore[import-untyped]
+
+                polarity = TextBlob(prompt).sentiment.polarity
+            except ImportError:
+                polarity = 0.0
+
+            # Boost polarity with keyword signals
+            polarity += (pos_hits - neg_hits) * 0.3
+
+            if polarity > 0.1:
+                extracted[field.name] = "positive"
+            elif polarity < -0.1:
+                extracted[field.name] = "negative"
+            else:
+                extracted[field.name] = "neutral"
+
+        else:
+            logger.warning(f"Unknown extraction_task '{task}' for field '{field.name}'")
+            extracted[field.name] = None
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    # Lineage metadata
+    extracted["_lakelogic_llm_model"] = model_name
+    extracted["_lakelogic_llm_provider"] = "spacy"
+    extracted["_lakelogic_llm_prompt_hash"] = _prompt_hash(config.prompt_template or "")
     extracted["_lakelogic_llm_token_input"] = 0
     extracted["_lakelogic_llm_token_output"] = 0
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
@@ -459,14 +923,27 @@ def extract_row(
     # Step 1: Preprocess if needed
     row = preprocess_row(row, config)
 
-    # Step 2: Render prompt
-    prompt = _render_prompt(config.prompt_template, row)
-
-    # Step 3: Call LLM
+    # Step 2: Render prompt (local providers may not have a template)
     provider = config.provider
+    if config.prompt_template and provider not in ("unstructured", "spacy"):
+        prompt = _render_prompt(config.prompt_template, row)
+    else:
+        # For unstructured/spacy: pass the text column value directly
+        text_col = config.text_column or "text"
+        prompt = str(row.get(text_col, ""))
 
-    if provider == "local":
+    # Step 3: Call provider
+    if provider == "unstructured":
+        extracted = _extract_unstructured(config, prompt, config.system_prompt)
+    elif provider == "spacy":
+        extracted = _extract_spacy(config, prompt, config.system_prompt)
+    elif provider == "local":
         extracted = _extract_local(config, prompt, config.system_prompt)
+    elif provider in ("pdfplumber", "easyocr"):
+        # File-based providers — prompt is typically a file path
+        # For single-row usage, return the first row from extract_file
+        file_rows = extract_file(prompt, config)
+        extracted = file_rows[0] if file_rows else {}
     elif provider in _PROVIDER_EXTRACT:
         if client is None:
             init_fn = _PROVIDER_INIT.get(provider)
@@ -476,7 +953,9 @@ def extract_row(
         extracted = extract_fn(client, config, prompt, config.system_prompt)
     else:
         raise ValueError(
-            f"Unknown extraction provider: {provider!r}. Supported: local, openai, anthropic, azure_openai, google"
+            f"Unknown extraction provider: {provider!r}. "
+            f"Supported: openai, anthropic, azure_openai, google, local, "
+            f"unstructured, spacy, pdfplumber, easyocr"
         )
 
     # Step 4: Score confidence
@@ -493,6 +972,60 @@ def extract_row(
     result.pop("_confidence", None)
 
     return result
+
+
+def extract_file(
+    file_path: str,
+    config: ExtractionConfig,
+) -> List[Dict[str, Any]]:
+    """
+    Extract structured data from a file using the configured provider.
+
+    Unlike ``extract_row`` (single row in → single row out), ``extract_file``
+    reads an entire file and can return **multiple rows** — for example one
+    row per table row in a PDF, or a single row with OCR text from an image.
+
+    Supported providers:
+      - ``pdfplumber`` — PDF table extraction (one row per table row)
+      - ``easyocr``   — Image OCR via PyTorch (one row with text)
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the file to extract from.
+    config : ExtractionConfig
+        Extraction configuration from the contract.
+
+    Returns
+    -------
+    list of dict
+        Extracted rows, each containing the output_schema fields
+        plus ``_lakelogic_llm_*`` lineage columns.
+
+    Examples
+    --------
+    PDF table extraction::
+
+        rows = extract_file("invoice.pdf", config)
+        df = pl.DataFrame(rows)
+
+    Image OCR::
+
+        rows = extract_file("receipt.png", config)
+        df = pl.DataFrame(rows)
+    """
+    provider = config.provider
+
+    if provider == "pdfplumber":
+        return _extract_pdfplumber(file_path, config)
+    elif provider == "easyocr":
+        return _extract_easyocr(file_path, config)
+    else:
+        raise ValueError(
+            f"extract_file does not support provider={provider!r}. "
+            f"Use extract_row() for text-based providers, or use "
+            f"provider='pdfplumber' (PDFs) or 'easyocr' (images)."
+        )
 
 
 def extract_batch(

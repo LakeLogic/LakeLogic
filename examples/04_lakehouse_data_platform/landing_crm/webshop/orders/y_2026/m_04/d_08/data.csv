@@ -1,8 +1,0 @@
-order_id,customer_id,order_date,product_name,category,quantity,unit_price,discount_pct,channel,status,_is_invalid
-ORD-307966,CUST-772849,2026-01-17,Cooling Fan 120mm,Health,8581,37.7,268.0,partner,active,false
-ORD-493752,CUST-772849,2026-03-08,Power Supply 500W,Food,5668,70.25,569.0,partner,active,false
-ORD-428381,CUST-166775,2026-03-19,Control Board v2,Sports,3682,120.45,387.0,partner,active,false
-ORD-511340,CUST-428381,2026-02-14,Circuit Board,Health,7370,25.36,666.0,social,active,false
-ORD-961429,CUST-136360,2026-02-02,Power Supply 500W,Sports,712,43.43,730.0,partner,active,false
-ORD-355280,CUST-122317,2026-02-14,Mounting Bracket,Clothing,4424,4.77,35.0,in-store,active,false
-ORD-424182,CUST-428381,2026-02-24,Connector Kit,Sports,972,60.58,146.0,online,active,false

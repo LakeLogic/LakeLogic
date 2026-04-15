@@ -1,5 +1,0 @@
-user_id,email,status,updated_at
- u1,ALICE@EXAMPLE.COM ,Active,2026-02-01T10:00:00Z
- u2, bob@example.com,ACTIVE,2026-02-01T11:00:00Z
-,bad@example.com,ACTIVE,2026-02-01T12:00:00Z
- u2, bob@example.com,ACTIVE,2026-02-02T11:00:00Z

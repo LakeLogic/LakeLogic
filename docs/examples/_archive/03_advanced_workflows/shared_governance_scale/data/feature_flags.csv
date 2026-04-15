@@ -1,4 +1,0 @@
-flag_id,user_id,flag_name,enabled,updated_at
-f1,u1,new_checkout,true,2026-02-01T08:00:00Z
-f2,u2,beta_home,false,2026-02-01T09:00:00Z
-f3,,new_nav,true,2026-02-01T10:00:00Z

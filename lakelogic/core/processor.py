@@ -1457,7 +1457,21 @@ class DataProcessor:
                 if not source_files:
                     source_files = self._expand_source_files(path)
             else:
-                source_files = self._expand_source_files(path)
+                # For landing sources with a bare directory path (no glob),
+                # auto-append /* so the file scanner discovers contents.
+                _src_type = getattr(self.contract.source, "type", None) if self.contract.source else None
+                _is_bare_dir = (
+                    not any(ch in str(path) for ch in ["*", "?", "["])
+                    and not _is_table
+                    and not self._is_uri_path(str(path))
+                    and Path(path).is_dir()
+                )
+                if _is_bare_dir:
+                    source_files = self._expand_source_files(str(path).rstrip("/") + "/**/*")
+                    if not source_files:
+                        source_files = self._expand_source_files(str(path).rstrip("/") + "/*")
+                else:
+                    source_files = self._expand_source_files(path)
         load_mode = getattr(self.contract.source, "load_mode", "full") if self.contract.source else "full"
         if load_mode == "incremental" and source_files and not _is_reprocess:
             watermark = self._get_last_source_watermark()

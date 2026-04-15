@@ -30,5 +30,5 @@ Note: Some patterns use SQL window functions (e.g., `ROW_NUMBER`) and are best r
 
 ## See Also
 
-- [Tutorials](examples/01_hello_world.ipynb) - Start with the basics first
+- [Tutorials](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb) - Start with the basics first
 - [Production Examples](https://github.com/lakelogic/LakeLogic/tree/main/examples) - Complete end-to-end pipeline

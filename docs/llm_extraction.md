@@ -1,21 +1,54 @@
 # LLM Extraction — Unstructured Data Processing
 <!-- markdownlint-disable MD013 -->
 
-LakeLogic can extract structured data from unstructured text, PDFs, images, audio, and video using LLM providers. The extraction pipeline integrates with the same quality rules, materialization, and lineage as any other contract.
+LakeLogic extracts structured data from PDFs, images, and free-text using a contract-first approach. Define *what* to extract in `model.fields` and *how* in `extraction:` — LakeLogic picks the right library, extracts, validates, and materialises. No custom parsers. No glue code.
 
 ---
 
-## Overview
+## How It Works
 
 ```
-  Raw Source          LLM Extraction         Quality Rules        Output
-┌──────────┐      ┌─────────────────┐     ┌──────────────┐    ┌─────────┐
-│ CSV/PDF/ │ ──→  │ Preprocess      │ ──→ │ Validate     │ ──→│ Delta/  │
-│ Image/   │      │ → Prompt        │     │ Quarantine   │    │ Parquet │
-│ Audio    │      │ → LLM API       │     │ Materialize  │    │         │
-└──────────┘      │ → Parse JSON    │     └──────────────┘    └─────────┘
-                  └─────────────────┘
+  Contract                   DataProcessor.run()
+┌────────────────────┐      ┌──────────────────────────────────────────────┐
+│ model.fields       │      │ 1. Preprocess  (pdfplumber / OCR / spaCy)    │
+│  → what to extract │─────▶│ 2. Extract     (LLM prompt / NER / tables)   │
+│ extraction.config  │      │ 3. Validate    (quality rules + quarantine)   │
+│  → how to extract  │      │ 4. Materialise (parquet / delta / CSV)        │
+└────────────────────┘      └──────────────────────────────────────────────┘
 ```
+
+The same pattern runs every provider. For text DataFrames pass directly; for binary
+files (PDF, image) pass a DataFrame with a `file_path` column:
+
+```python
+import polars as pl
+from lakelogic import DataProcessor
+
+proc = DataProcessor("contract.yaml", engine="polars")
+
+# Text / CSV source — pass the DataFrame directly
+good, bad = proc.run(tickets_df)
+
+# Binary source (PDF, image) — point the engine at the file via a DataFrame
+files_df = pl.DataFrame({"file_path": ["invoice.pdf"]})
+good, bad = proc.run(files_df)   # contract.extraction.preprocessing.file_column: file_path
+```
+
+---
+
+## Supported Providers
+
+| Provider | Install | Input | Cost |
+| -------- | ------- | ----- | ---- |
+| `local` (pdfplumber) | `lakelogic[extraction-ocr]` | PDF, DOCX | $0, offline |
+| `rapidocr` | `lakelogic[extraction-ocr]` | Scanned images | $0, ONNX, no torch |
+| `spacy` | `lakelogic[nlp]` | Free text | $0, local NER |
+| `unstructured` | `lakelogic[extraction]` | PDF, DOCX, HTML | $0, offline |
+| `openai` | `lakelogic[ai]` | Any | Per token |
+| `anthropic` | `lakelogic[ai]` | Any | Per token |
+| `ollama` | `lakelogic[ai]` | Any | $0, local LLM |
+| `azure_openai` | `lakelogic[ai]` | Any | Per token |
+| `bedrock` | `lakelogic[ai]` | Any | Per token |
 
 ---
 
@@ -73,8 +106,6 @@ good_df, bad_df = processor.run_source("data/tickets/batch_001.csv")
 
 ---
 
-## Supported Providers
-
 ### Cloud Providers
 
 | Provider | Env Var | Example Models |
@@ -128,24 +159,32 @@ extraction:
 
 ### Output Schema
 
-Define the fields to extract, with extraction task hints:
+`model.fields` is the single source of truth for field names and types. `output_schema` only
+lists fields that need extraction-specific hints — anything not listed defaults to
+`extraction_task: extraction`. You never need to repeat `type` in `output_schema`.
 
 ```yaml
+model:
+  fields:
+    - name: brand
+      type: string
+    - name: price
+      type: float
+    - name: condition
+      type: string
+
 extraction:
+  # Only fields needing non-default hints appear here — types are inherited from model.fields
   output_schema:
-    - name: "brand"
-      type: "string"
-      extraction_task: "ner"
+    - name: brand
+      extraction_task: ner           # named-entity recognition, not plain extraction
 
-    - name: "price"
-      type: "float"
-      extraction_task: "extraction"
-
-    - name: "condition"
-      type: "string"
-      extraction_task: "classification"
+    - name: condition
+      extraction_task: classification
       accepted_values: ["new", "used", "refurbished"]
       extraction_examples: ["new", "like new", "refurbished"]
+
+    # 'price' omitted — defaults to extraction_task: extraction
 ```
 
 | `extraction_task` | Description |
@@ -342,7 +381,7 @@ lineage:
 
 - [Contract Template — Section 19: LLM Extraction](contract_template.md)
 - [Capabilities](capabilities.md)
-- [Tutorial: LLM Extraction](tutorials/llm_extraction.md)
+- [Tutorial: LLM Extraction](index.md)
 
 ---
 

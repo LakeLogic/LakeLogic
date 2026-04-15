@@ -1,7 +1,0 @@
-order_id,customer_id,region,order_date,amount,status
-ORD-001,cust_01,US,2024-12-18,250.00,pending
-ORD-002,cust_02,EU,2024-12-18,180.50,pending
-ORD-003,cust_03,APAC,2024-12-18,320.00,shipped
-ORD-004,cust_01,US,2024-12-19,75.00,pending
-ORD-005,cust_04,EU,2024-12-19,410.00,shipped
-ORD-006,cust_05,APAC,2024-12-19,95.00,pending

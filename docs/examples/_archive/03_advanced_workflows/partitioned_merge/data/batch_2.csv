@@ -1,4 +1,0 @@
-order_id,customer_id,region,order_date,amount,status
-ORD-001,cust_01,US,2024-12-18,250.00,shipped
-ORD-004,cust_01,US,2024-12-19,75.00,shipped
-ORD-007,cust_06,US,2024-12-20,540.00,pending

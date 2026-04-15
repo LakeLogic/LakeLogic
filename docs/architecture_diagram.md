@@ -192,4 +192,4 @@ python run_pipeline.py
 
 - **[How it Works](concepts.md)** — Deep dive into transformations, validation, and materialization
 - **[Contract Organization](organization.md)** — Structuring contracts for enterprise scale
-- **[Tutorials & Examples](examples/01_hello_world.ipynb)** — Get hands-on in 5 minutes
+- **[Tutorials & Examples](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb)** — Get hands-on in 5 minutes

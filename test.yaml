@@ -1,0 +1,8 @@
+version: 1.0.0
+dataset: tickets
+model:
+  fields:
+    - name: ticket_id
+      type: int
+    - name: priority
+      type: string
