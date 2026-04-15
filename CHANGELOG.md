@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.17.0] — 2026-04-15
+
+### Added
+
+- Implement AI-powered edge-case generation for data contract stress-testing
+- Add engine portability and dimensional modeling demonstration notebook
+- Add example notebooks for engine portability, developer experience, AI data generation, and integrations
+
+### Documentation
+
+- Add comprehensive set of Colab example notebooks for LakeLogic features
 ## [1.16.0] — 2026-04-15
 
 ### Added
@@ -228,6 +239,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.17.0]: https://github.com/lakelogic/LakeLogic/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/lakelogic/LakeLogic/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.13.0...v1.14.0
