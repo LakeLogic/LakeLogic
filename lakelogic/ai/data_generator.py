@@ -69,6 +69,7 @@ def _build_user_prompt(
     fields: List[Dict[str, Any]],
     quality_rules: Optional[Dict[str, Any]] = None,
     dataset_name: str = "",
+    custom_scenario: str = "",
 ) -> str:
     """Build the user prompt from schema and quality rules."""
     lines = []
@@ -112,6 +113,13 @@ def _build_user_prompt(
                     lines.append(f"- ACCEPTED VALUES: {rule['accepted_values']}")
             else:
                 lines.append(f"- {rule}")
+
+    if custom_scenario:
+        lines.append("")
+        lines.append("## Custom Scenario / Instructions")
+        lines.append("")
+        lines.append(f"{custom_scenario.strip()}")
+        lines.append("")
 
     lines.append("")
     lines.append("Generate realistic sample values for EVERY field listed above.")
@@ -240,6 +248,7 @@ def generate_realistic_pools(
     quality_rules: Optional[Dict[str, Any]] = None,
     *,
     dataset_name: str = "",
+    custom_scenario: str = "",
     provider: Optional[str] = None,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -265,7 +274,7 @@ def generate_realistic_pools(
     if not fields:
         return {}
 
-    user_prompt = _build_user_prompt(fields, quality_rules, dataset_name)
+    user_prompt = _build_user_prompt(fields, quality_rules, dataset_name, custom_scenario)
 
     client = get_llm_client(
         provider=provider,

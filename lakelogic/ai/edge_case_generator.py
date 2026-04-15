@@ -64,6 +64,7 @@ def _build_user_prompt(
     fields: List[Dict[str, Any]],
     quality_rules: Optional[Dict[str, Any]] = None,
     dataset_name: str = "",
+    custom_scenario: str = "",
 ) -> str:
     """Build the user prompt from schema and quality rules."""
     lines = []
@@ -112,6 +113,13 @@ def _build_user_prompt(
             if isinstance(rule, dict) and rule.get("unique"):
                 lines.append(f"- UNIQUE: {rule['unique']}")
 
+    if custom_scenario:
+        lines.append("")
+        lines.append("## Custom Scenario / Instructions for Edge Cases")
+        lines.append("")
+        lines.append(f"{custom_scenario.strip()}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -152,6 +160,7 @@ def generate_edge_cases(
     quality_rules: Optional[Dict[str, Any]] = None,
     *,
     dataset_name: str = "",
+    custom_scenario: str = "",
     provider: Optional[str] = None,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -177,7 +186,7 @@ def generate_edge_cases(
     if not fields:
         return {}
 
-    user_prompt = _build_user_prompt(fields, quality_rules, dataset_name)
+    user_prompt = _build_user_prompt(fields, quality_rules, dataset_name, custom_scenario)
 
     client = get_llm_client(
         provider=provider,
