@@ -1755,7 +1755,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     # ── Surrogate key injection ──────────────────────────────────
     sk_column = scd2_cfg.get("surrogate_key", "_sk")
     sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
-    
+
     unknown_cfg = scd2_cfg.get("unknown_member") or {}
     unknown_sk_val = str(unknown_cfg.get("surrogate_key_value", "-1")) if unknown_cfg.get("enabled", True) else None
 

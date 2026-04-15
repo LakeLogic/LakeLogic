@@ -308,12 +308,11 @@ def _extract_unstructured(
       - all         — concatenation of all elements (default)
     """
     try:
-        from unstructured.partition.text import partition_text
         from unstructured.partition.auto import partition as partition_auto
+        from unstructured.partition.text import partition_text
     except ImportError:
         raise ImportError(
-            "unstructured is required for provider='unstructured'. "
-            "Install with: pip install unstructured"
+            "unstructured is required for provider='unstructured'. Install with: pip install unstructured"
         )
 
     start = time.perf_counter()
@@ -382,8 +381,7 @@ def _extract_pdfplumber(
         import pdfplumber
     except ImportError:
         raise ImportError(
-            "pdfplumber is required for provider='pdfplumber'. "
-            "Install with: pip install lakelogic[extraction-ocr]"
+            "pdfplumber is required for provider='pdfplumber'. Install with: pip install lakelogic[extraction-ocr]"
         )
 
     import re as _re
@@ -394,7 +392,7 @@ def _extract_pdfplumber(
         all_text = "\n".join(page.extract_text() or "" for page in doc.pages)
         all_tables: list = []
         for page in doc.pages:
-            for tbl in (page.extract_tables() or []):
+            for tbl in page.extract_tables() or []:
                 if tbl:
                     all_tables.append(tbl)
 
@@ -477,8 +475,7 @@ def _extract_easyocr(
     except ImportError as e:
         if "easyocr" in str(e):
             raise ImportError(
-                "easyocr is required for provider='easyocr'. "
-                "Install with: pip install lakelogic[extraction-ocr]"
+                "easyocr is required for provider='easyocr'. Install with: pip install lakelogic[extraction-ocr]"
             ) from e
         raise e
 
@@ -486,10 +483,11 @@ def _extract_easyocr(
 
     # Suppress verbose easyocr startup prints if possible
     import logging
+
     logging.getLogger("easyocr").setLevel(logging.ERROR)
 
     # Note: caching the reader in production is recommended, but for single-shot:
-    reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+    reader = easyocr.Reader(["en"], gpu=False, verbose=False)
     ocr_results = reader.readtext(file_path)
     # easyocr returns list of tuples: (bbox, text, prob)
     ocr_text = "\n".join([r[1] for r in ocr_results]) if ocr_results else ""
@@ -503,9 +501,7 @@ def _extract_easyocr(
         elif task == "lines":
             extracted[field.name] = [r[1] for r in ocr_results] if ocr_results else []
         elif task == "confidence":
-            extracted[field.name] = (
-                [round(float(r[2]), 3) for r in ocr_results] if ocr_results else []
-            )
+            extracted[field.name] = [round(float(r[2]), 3) for r in ocr_results] if ocr_results else []
         else:
             extracted[field.name] = ocr_text
 
@@ -564,14 +560,27 @@ def _extract_spacy(
 
     # Map field names to spaCy entity labels
     _ENTITY_MAP: Dict[str, str] = {
-        "person": "PERSON", "persons": "PERSON", "people": "PERSON",
-        "organization": "ORG", "organizations": "ORG", "org": "ORG", "company": "ORG",
-        "location": "GPE", "locations": "GPE", "place": "GPE", "city": "GPE",
-        "date": "DATE", "dates": "DATE",
-        "money": "MONEY", "amounts": "MONEY", "amount": "MONEY",
+        "person": "PERSON",
+        "persons": "PERSON",
+        "people": "PERSON",
+        "organization": "ORG",
+        "organizations": "ORG",
+        "org": "ORG",
+        "company": "ORG",
+        "location": "GPE",
+        "locations": "GPE",
+        "place": "GPE",
+        "city": "GPE",
+        "date": "DATE",
+        "dates": "DATE",
+        "money": "MONEY",
+        "amounts": "MONEY",
+        "amount": "MONEY",
         "email": "EMAIL",
-        "product": "PRODUCT", "products": "PRODUCT",
-        "event": "EVENT", "events": "EVENT",
+        "product": "PRODUCT",
+        "products": "PRODUCT",
+        "event": "EVENT",
+        "events": "EVENT",
     }
 
     extracted: Dict[str, Any] = {}
@@ -585,18 +594,15 @@ def _extract_spacy(
                 label = field.extraction_examples[0].upper()
             else:
                 label = _ENTITY_MAP.get(field.name.lower(), field.name.upper())
-            entities = list(dict.fromkeys(
-                ent.text for ent in doc.ents if ent.label_ == label
-            ))  # deduplicated, order-preserving
+            entities = list(
+                dict.fromkeys(ent.text for ent in doc.ents if ent.label_ == label)
+            )  # deduplicated, order-preserving
             extracted[field.name] = ", ".join(entities) if entities else None
 
         elif task == "classification":
             if field.accepted_values:
                 text_lower = prompt.lower()
-                scores = {
-                    cat: text_lower.count(cat.lower())
-                    for cat in field.accepted_values
-                }
+                scores = {cat: text_lower.count(cat.lower()) for cat in field.accepted_values}
                 best = max(scores, key=scores.get) if any(scores.values()) else None
                 extracted[field.name] = best
             else:
@@ -605,16 +611,53 @@ def _extract_spacy(
         elif task == "sentiment":
             # Keyword-boosted sentiment: TextBlob baseline + domain-aware keywords
             _NEG_KEYWORDS = {
-                "error", "fail", "failed", "failure", "broken", "cracked", "bug",
-                "crash", "block", "blocking", "wrong", "unhelpful", "terrible",
-                "awful", "horrible", "charged", "cancelled", "canceled", "refund",
-                "complaint", "urgent", "warning", "outage", "down", "fix",
-                "unacceptable", "disappointed", "frustrat", "angry",
+                "error",
+                "fail",
+                "failed",
+                "failure",
+                "broken",
+                "cracked",
+                "bug",
+                "crash",
+                "block",
+                "blocking",
+                "wrong",
+                "unhelpful",
+                "terrible",
+                "awful",
+                "horrible",
+                "charged",
+                "cancelled",
+                "canceled",
+                "refund",
+                "complaint",
+                "urgent",
+                "warning",
+                "outage",
+                "down",
+                "fix",
+                "unacceptable",
+                "disappointed",
+                "frustrat",
+                "angry",
             }
             _POS_KEYWORDS = {
-                "thank", "thanks", "helpful", "great", "excellent", "love",
-                "awesome", "amazing", "perfect", "resolved", "happy", "pleased",
-                "recommend", "fantastic", "wonderful", "impressed",
+                "thank",
+                "thanks",
+                "helpful",
+                "great",
+                "excellent",
+                "love",
+                "awesome",
+                "amazing",
+                "perfect",
+                "resolved",
+                "happy",
+                "pleased",
+                "recommend",
+                "fantastic",
+                "wonderful",
+                "impressed",
             }
 
             text_lower = prompt.lower()
@@ -625,6 +668,7 @@ def _extract_spacy(
 
             try:
                 from textblob import TextBlob  # type: ignore[import-untyped]
+
                 polarity = TextBlob(prompt).sentiment.polarity
             except ImportError:
                 polarity = 0.0

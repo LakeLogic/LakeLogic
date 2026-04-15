@@ -1014,23 +1014,14 @@ class ConsoleAdapter(NotificationAdapter):
 
         sep = "=" * 60
         dash = "-" * 60
-        block = (
-            f"\n{sep}\n"
-            f"[LAKELOGIC NOTIFICATION]\n"
-            f"Subject: {subject}\n"
-            f"{dash}\n"
-            f"{message}\n"
-            f"{sep}\n"
-        )
+        block = f"\n{sep}\n[LAKELOGIC NOTIFICATION]\nSubject: {subject}\n{dash}\n{message}\n{sep}\n"
 
         try:
             print(block)
         except UnicodeEncodeError:
             # Fallback: encode the whole block at once to keep ordering
             sys.stdout.flush()
-            sys.stdout.buffer.write(
-                block.encode(sys.stdout.encoding or "utf-8", errors="replace")
-            )
+            sys.stdout.buffer.write(block.encode(sys.stdout.encoding or "utf-8", errors="replace"))
             sys.stdout.buffer.write(b"\n")
             sys.stdout.buffer.flush()
 

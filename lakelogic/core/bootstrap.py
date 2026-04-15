@@ -128,9 +128,7 @@ def _format_contract_yaml(data: dict) -> str:
     # Emit plain true/false instead of !!bool 'true' / !!bool 'false'
     _Dumper.add_representer(
         bool,
-        lambda dumper, data: dumper.represent_scalar(
-            "tag:yaml.org,2002:bool", "true" if data else "false"
-        ),
+        lambda dumper, data: dumper.represent_scalar("tag:yaml.org,2002:bool", "true" if data else "false"),
     )
     raw = yaml.dump(
         data,
@@ -142,6 +140,7 @@ def _format_contract_yaml(data: dict) -> str:
     # Belt-and-suspenders: strip any !!bool tags PyYAML may emit despite
     # the custom representer (can happen with stale bytecode caches).
     import re
+
     raw = re.sub(r"!!bool 'true'", "true", raw)
     raw = re.sub(r"!!bool 'false'", "false", raw)
     lines = raw.splitlines()
@@ -592,10 +591,21 @@ class ContractInferrer:
     # ------------------------------------------------------------------
 
     # Known file extensions — anything NOT matching is treated as a table ref
-    _FILE_EXTENSIONS = frozenset({
-        ".csv", ".parquet", ".json", ".ndjson", ".jsonl",
-        ".xlsx", ".xls", ".xml", ".tsv", ".avro", ".orc",
-    })
+    _FILE_EXTENSIONS = frozenset(
+        {
+            ".csv",
+            ".parquet",
+            ".json",
+            ".ndjson",
+            ".jsonl",
+            ".xlsx",
+            ".xls",
+            ".xml",
+            ".tsv",
+            ".avro",
+            ".orc",
+        }
+    )
 
     @classmethod
     def _is_table_reference(cls, source: str) -> bool:
@@ -625,9 +635,7 @@ class ContractInferrer:
             return pl.from_pandas(source), None
 
         # ── Database table reference ──────────────────────────────────────
-        if isinstance(source, str) and (
-            self.connection is not None or self._is_table_reference(source)
-        ):
+        if isinstance(source, str) and (self.connection is not None or self._is_table_reference(source)):
             return self._load_table(source, pl), None
 
         p = Path(source)
@@ -729,17 +737,13 @@ class ContractInferrer:
 
         # ── DuckDB connection ─────────────────────────────────────────────
         if "DuckDBPyConnection" in conn_type or "duckdb" in conn_module:
-            return conn.sql(
-                f"SELECT * FROM {table_ref} LIMIT {limit}"
-            ).pl()
+            return conn.sql(f"SELECT * FROM {table_ref} LIMIT {limit}").pl()
 
         # ── SQLAlchemy engine ─────────────────────────────────────────────
         if "Engine" in conn_type or "Connection" in conn_type:
             import pandas as pd
 
-            pdf = pd.read_sql(
-                f"SELECT * FROM {table_ref} LIMIT {limit}", conn
-            )
+            pdf = pd.read_sql(f"SELECT * FROM {table_ref} LIMIT {limit}", conn)
             return pl.from_pandas(pdf)
 
         # ── Connection URL string (sqlite:///..., postgresql://...) ───────
@@ -750,15 +754,10 @@ class ContractInferrer:
                 engine = create_engine(conn)
                 import pandas as pd
 
-                pdf = pd.read_sql(
-                    f"SELECT * FROM {table_ref} LIMIT {limit}", engine
-                )
+                pdf = pd.read_sql(f"SELECT * FROM {table_ref} LIMIT {limit}", engine)
                 return pl.from_pandas(pdf)
             except ImportError as exc:
-                raise ImportError(
-                    "Connection URL strings require sqlalchemy: "
-                    "pip install sqlalchemy"
-                ) from exc
+                raise ImportError("Connection URL strings require sqlalchemy: pip install sqlalchemy") from exc
 
         raise TypeError(
             f"Unsupported connection type: {conn_type}. "
@@ -1276,6 +1275,7 @@ class ContractInferrer:
         if dataset_rules:
             result["dataset_rules"] = dataset_rules
         return result
+
     # ── Temporal pair detection ───────────────────────────────────────────
     # Maps "early" stems to their natural "late" counterparts.
     # When both columns exist in the DataFrame and are date/timestamp typed,
@@ -1295,20 +1295,21 @@ class ContractInferrer:
         # open → close / closed
         (r"(^|_)open", r"(^|_)(close|closed)", "{early} before {late}"),
         # hire / joined → terminated / left / departed
-        (r"(^|_)(hire|joined|joining)", r"(^|_)(terminated|termination|left|departed|departure)",
-         "{early} before {late}"),
+        (
+            r"(^|_)(hire|joined|joining)",
+            r"(^|_)(terminated|termination|left|departed|departure)",
+            "{early} before {late}",
+        ),
         # birth → death (morbid, but common in insurance/healthcare)
         (r"(^|_)birth", r"(^|_)death", "{early} before {late}"),
         # subscription_start → subscription_end / cancellation
-        (r"(^|_)subscription_start", r"(^|_)(subscription_end|cancellation|cancelled)",
-         "{early} before {late}"),
+        (r"(^|_)subscription_start", r"(^|_)(subscription_end|cancellation|cancelled)", "{early} before {late}"),
         # check_in → check_out
         (r"(^|_)check_in", r"(^|_)check_out", "{early} before {late}"),
         # departure → arrival (travel domain)
         (r"(^|_)departure", r"(^|_)arrival", "{early} before {late}"),
         # ordered / order → delivered / shipped / fulfilled
-        (r"(^|_)(ordered|order)", r"(^|_)(delivered|shipped|fulfilled|delivery|shipment)",
-         "{early} before {late}"),
+        (r"(^|_)(ordered|order)", r"(^|_)(delivered|shipped|fulfilled|delivery|shipment)", "{early} before {late}"),
     ]
 
     def _suggest_temporal_rules(self, df) -> List[Dict[str, Any]]:
@@ -1318,14 +1319,17 @@ class ContractInferrer:
         (e.g. start_date + end_date, created_at + expiry_date) and
         generates cross-column consistency rules: ``early_col <= late_col``.
         """
-        import polars as pl
 
         rules: List[Dict[str, Any]] = []
         # Collect date/timestamp columns
         date_cols = [
-            col for col in df.columns
-            if df[col].dtype.__class__.__name__.lower() in (
-                "date", "datetime", "time",
+            col
+            for col in df.columns
+            if df[col].dtype.__class__.__name__.lower()
+            in (
+                "date",
+                "datetime",
+                "time",
             )
             or (
                 # Also include string columns whose names strongly suggest dates
@@ -1350,11 +1354,13 @@ class ContractInferrer:
                         continue
                     # Generate the rule
                     rule_name = f"{early_col}_before_{late_col}"
-                    rules.append({
-                        "name": rule_name,
-                        "sql": f"{early_col} <= {late_col}",
-                        "category": "consistency",
-                    })
+                    rules.append(
+                        {
+                            "name": rule_name,
+                            "sql": f"{early_col} <= {late_col}",
+                            "category": "consistency",
+                        }
+                    )
                     matched.add(early_col)
                     matched.add(late_col)
                     break  # one pair per early column
@@ -1410,9 +1416,7 @@ class ContractInferrer:
 
     # Pre-compiled pattern to identify date-like values (ISO 8601, etc.)
     # so they are excluded from PII value scanning.
-    _DATE_VALUE = re.compile(
-        r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}"
-    )
+    _DATE_VALUE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}")
     # Column names that strongly suggest date/timestamp content —
     # these are skipped entirely during value-based PII scanning.
     _DATE_COLUMN_NAME = re.compile(
