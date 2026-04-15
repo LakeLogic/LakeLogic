@@ -1,8 +1,0 @@
-customer_id,name,email,phone,country,segment,signup_date,_is_invalid
-CUST-134957,Marcus Buchanan,mark72@example.org,350-694-5291,South Africa,at_risk,2026-01-15,false
-CUST-040425,Michael Thomas,swood@example.org,897.490.8695x986,Switzerland,active,2026-03-13,false
-CUST-346222,Stephanie Dyer MD,wgreen@example.net,856.710.1363x964,Australia,active,2026-01-15,false
-CUST-638571,Brian Martinez,codyhunt@example.com,,Spain,low_value,2026-03-05,false
-CUST-897254,Matthew Russo,audreyparker@example.net,+1-467-290-2011,United Kingdom,high_value,2026-02-20,false
-CUST-413072,James Spence,barbara61@example.org,001-302-202-4418,France,active,2026-03-13,false
-CUST-607407,Richard Moses DDS,kennedyrobert@example.org,,Australia,active,2026-01-22,false

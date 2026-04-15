@@ -11,7 +11,7 @@ Observability in LakeLogic is driven directly by contract configuration. Without
 
 LakeLogic builds an interactive pipeline DAG directly from your active contracts by resolving explicit `depends_on` relationships and implicit target schemas.
 
-![Pipeline DAG Visualization](assets/images/pipeline_dag.png)
+![Pipeline DAG Visualization](assets/lakelogic_architecture.png)
 
 *The DAG automatically collapses gaps. If you skip a Gold layer and point Downstream systems directly to Silver, the visualization closes the visual gap instantly.*
 

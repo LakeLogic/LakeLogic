@@ -1,7 +1,0 @@
-entries:
-- entity: dim_policyholders
-  enabled: true
-  contract_path: gold/gold_dim_policyholders_v1.yaml
-- entity: fact_claims
-  enabled: true
-  contract_path: gold/gold_fact_claims_v1.yaml

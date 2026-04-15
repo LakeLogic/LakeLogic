@@ -1,5 +1,0 @@
-version: 1.0.0
-platform: dagster
-job: lakelogic_job
-schedule: '@hourly'
-command: lakelogic-driver --registry contracts/_registry.yaml --layers bronze,silver

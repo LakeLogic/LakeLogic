@@ -1000,16 +1000,39 @@ class ConsoleAdapter(NotificationAdapter):
         """
         Print the notification to stdout.
 
+        On Windows the default terminal encoding (cp1252) cannot render
+        emoji and special Unicode characters that appear in rendered
+        notification templates.  To guarantee correct ordering *and*
+        avoid ``UnicodeEncodeError``, the entire block is assembled
+        first and then written in a single operation.
+
         Args:
             message: Body content.
             subject: Message subject.
         """
-        print(f"\n{'=' * 60}")
-        print("[LAKELOGIC NOTIFICATION]")
-        print(f"Subject: {subject}")
-        print(f"{'-' * 60}")
-        print(message)
-        print(f"{'=' * 60}\n")
+        import sys
+
+        sep = "=" * 60
+        dash = "-" * 60
+        block = (
+            f"\n{sep}\n"
+            f"[LAKELOGIC NOTIFICATION]\n"
+            f"Subject: {subject}\n"
+            f"{dash}\n"
+            f"{message}\n"
+            f"{sep}\n"
+        )
+
+        try:
+            print(block)
+        except UnicodeEncodeError:
+            # Fallback: encode the whole block at once to keep ordering
+            sys.stdout.flush()
+            sys.stdout.buffer.write(
+                block.encode(sys.stdout.encoding or "utf-8", errors="replace")
+            )
+            sys.stdout.buffer.write(b"\n")
+            sys.stdout.buffer.flush()
 
 
 def get_notification_adapter(notif_type: str, config: Dict[str, Any]) -> NotificationAdapter:

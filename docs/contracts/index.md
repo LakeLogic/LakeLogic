@@ -60,7 +60,7 @@ This means you **write less YAML** and **get consistent governance** across hund
 | **Data Engineer** | Configure how data is written | [Materialization](data_product_contracts/materialization.md) |
 | **Data Modeller** | Build SCD2 dimensions or fact tables | [Dimensional Modeling](data_product_contracts/dimensional_modeling.md) |
 | **Data Engineer** | Define schema, PII masking | [Schema & Model](schema_model.md) |
-| **Data Lead** | Set up alerting | [Notifications](notifications.md) |
+| **Data Lead** | Set up alerting | [Notifications](../notifications.md) |
 | **Compliance** | Add GDPR / EU AI Act metadata | [Compliance](compliance.md) |
 | **Anyone** | Understand versioning | [Versioning](versioning.md) |
 | **Power User** | See everything in one file | [Complete Template](../contract_template.md) |

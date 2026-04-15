@@ -1,9 +1,0 @@
-id,full_name,email,phone,country_code,consent_given,lawful_basis,retention_expires_at,created_at
-1,Anna Müller,anna.mueller@example.de,+49 30 1234567,DE,true,consent,2028-02-01,2026-02-14T08:00:00Z
-2,Pierre Dupont,pierre@example.fr,+33 1 23456789,FR,true,contract,2028-06-15,2026-02-14T08:00:00Z
-3,Sofia García,sofia@bad-format,+34 91 1234567,ES,true,consent,2027-12-31,2026-02-14T08:00:00Z
-4,James Wilson,james@example.co.uk,+44 20 12345678,GB,false,legitimate_interest,2028-01-01,2026-02-14T08:00:00Z
-5,Lars Eriksson,lars@example.se,,SE,true,consent,,2026-02-14T08:00:00Z
-6,Maria Rossi,maria@example.it,+39 06 1234567,IT,,contract,2028-03-15,2026-02-14T08:00:00Z
-7,Hans Weber,hans@example.at,+43 1 1234567,AT,true,invalid_basis,2027-09-01,2026-02-14T08:00:00Z
-8,Emma Nielsen,emma@example.dk,+45 12345678,DK,true,consent,2028-11-30,2026-02-14T08:00:00Z

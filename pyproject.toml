@@ -212,6 +212,31 @@ enterprise = [
     "nbclient>=0.9.0",
     "nbformat>=5.9.0",
 ]
+# NLP — local text extraction (no API keys, no system deps needed)
+nlp = [
+    "spacy>=3.7.0",
+    "textblob>=0.18.0",
+]
+# Extraction — full unstructured document processing
+# For images/PDFs, also install system deps: tesseract-ocr, poppler-utils
+# For MS Office docs: libreoffice
+# See: https://docs.unstructured.io/open-source/installation/full-installation
+extraction = [
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.12.0",
+    "pypandoc-binary>=1.13",
+    "spacy>=3.7.0",
+    "textblob>=0.18.0",
+]
+# Extraction + image/PDF OCR — pure Python, no system deps, no torch
+# rapidocr-onnxruntime handles images via ONNX Runtime; pdfplumber handles PDFs
+extraction-ocr = [
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.12.0",
+    "rapidocr-onnxruntime>=1.4.0",
+    "pdfplumber>=0.10.0",
+    "pypandoc-binary>=1.13",
+    "spacy>=3.7.0",
+    "textblob>=0.18.0",
+]
 
 [project.scripts]
 lakelogic = "lakelogic.cli.main:app"

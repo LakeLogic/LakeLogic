@@ -192,7 +192,8 @@ examples/colab/*.log
 examples/colab/catalog/
 examples/colab/lakehouse/
 examples/colab/landing/
-examples/colab/dag_demo/
+examples/colab/*_demo/
+examples/colab/*_wip/
 examples/colab/dlt_pipelines/
 
 

@@ -12,7 +12,7 @@
 > | Ingestion, watermarks, transforms, quality | [Sub-pages →](contracts/data_product_contracts/ingestion.md) |
 > | SCD2 dimensions, fact tables | [Dimensional Modeling →](contracts/data_product_contracts/dimensional_modeling.md) |
 > | PII masking, schema, lineage | [Schema & Model →](contracts/schema_model.md) |
-> | Notifications & alerting | [Notifications →](contracts/notifications.md) |
+> | Notifications & alerting | [Notifications →](notifications.md) |
 > | GDPR, EU AI Act compliance | [Compliance →](contracts/compliance.md) |
 
 This is a **fully annotated contract template** showing every available configuration option with detailed comments explaining business value and use case scenarios.

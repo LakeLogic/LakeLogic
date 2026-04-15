@@ -212,4 +212,4 @@ When rows fail quality rules, they're sent to quarantine — a separate table wh
       strict_notifications: true     # Fail pipeline if notification fails
     ```
 
-See [Notifications](../notifications.md) for alert configuration.
+See [Notifications](../../notifications.md) for alert configuration.

@@ -18,7 +18,7 @@ A declarative, contract-driven medallion pipeline engine for data mesh architect
 
 ---
 
-## 🌐 Data Mesh Alignment
+## Data Mesh Alignment
 
 LakeLogic is the missing runtime layer for Data Mesh — where domain ownership and federated governance stop being principles and start being enforced.
 
@@ -48,24 +48,24 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 
 ## Technical Capabilities
 
-### 🛡️ Data Quality & Trust
+### Data Quality & Trust
 
 - **100% Reconciliation** — Mathematically guaranteed: `source = good + bad`. Every row is accounted for — nothing silently dropped
 - **[Pydantic](https://docs.pydantic.dev/)-Powered Validation** — Every contract, system & domain configs are parsed through strict Pydantic models with `Literal` type enforcement — invalid YAML is caught at load time, not at runtime
 - **SQL-First Rules** — Define business logic in the language your team already speaks — no SDK, no custom DSL
 - **SLO Monitoring & Anomaly Detection** — Native freshness, row count, and statistical anomaly detection with automatic multi-channel alerting when thresholds breach
 
-> **[✏️ Try it out in Colab: Data Quality & Trust](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/01_data_quality_trust.ipynb)**
+> **[✏️ Try it out in Google Colab: Data Quality & Trust](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/01_data_quality_trust.ipynb)**
 
-### 📜 Compliance & Governance
+### Compliance & Governance
 
 - **GDPR & HIPAA Compliance** — Contract-driven `forget_subjects()` with nullify, hash, or redact strategies and immutable audit trail
 - **Automatic Lineage** — Every row stamped with Run IDs and source paths — traceable from landing zone to Gold layer
 - **Pipeline Cost Intelligence** — Per-entity compute cost attribution with domain-level budget governance, autoscaling-aware estimation, and Databricks Unity Catalog billing integration
 
-> **[✏️ Try it out in Colab: Compliance & Governance](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb)**
+> **[✏️ Try it out in Google Colab: Compliance & Governance](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb)**
 
-### ⚡ Engine & Scale
+### Engine & Scale
 
 - **Engine Agnostic** — Write once, run on [Spark](https://spark.apache.org/), [Polars](https://pola.rs/), or [DuckDB](https://duckdb.org/) — same contract, zero code changes
 - **Dimensional Modeling** — Native SCD Type 2 (slowly changing dimensions), merge/upsert (SCD1), append-only fact tables, periodic snapshot overwrites, and partition-aware writes — all declared in YAML, no manual `MERGE INTO` SQL required
@@ -75,9 +75,9 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 - **External Logic** — Plug in custom Python scripts or notebooks for complex Gold-layer transformations while preserving full contract validation and lineage
 - **Production Resilience** — Built-in exponential-backoff retries, per-entity timeouts, and circuit-breaker thresholds (`max_consecutive_failures`) — pipelines self-heal transient failures without operator intervention
 
-> **[✏️ Try it out in Colab: Engine & Scale](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/03_engine_scale.ipynb)**
+> **[✏️ Try it out in Google Colab: Engine & Scale](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/03_engine_scale.ipynb)**
 
-### 🔧 Developer Experience
+### Developer Experience
 
 - **Structured Diagnostics & Observability** — Deep contextual logging out-of-the-box (powered by [`loguru`](https://loguru.readthedocs.io/)) featuring precise timestamps, severity levels, exact function paths, and execution tags to drastically cut troubleshooting time
 - **Dry Run Mode** — Validate contracts, resolve dependencies, and preview execution plans without touching any data
@@ -86,19 +86,23 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 - **Data Reset & Reload** — Surgically reset and reload specific entities or data layers (Bronze/Silver/Gold) without impacting the rest of the lakehouse
 - **Multi-Channel Alerts** — Powered by [Apprise](https://github.com/caronc/apprise) for Slack, Email (SMTP/SendGrid), Teams, and Webhook notifications with ownership-based auto-routing and full [Jinja2](https://jinja.palletsprojects.com/) templating support for custom formatting
 
-### 🧬 Data Generation & AI
+> **[✏️ Try it out in Google Colab: Developer Experience](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/04_developer_experience.ipynb)**
+
+### Data Generation & AI
 
 - **Synthetic Data** — Built-in `DataGenerator` (powered by [Faker](https://faker.readthedocs.io/)) with streaming simulation, time-windowed output, referential integrity, and AI-powered edge case injection — generate realistic error rows (SQL injection, type confusion, boundary values) for stress testing and quarantine validation
 - **AI Contract Onboarding** — `lakelogic infer` auto-generates contracts from sample data with LLM-powered enrichment: automatic PII detection, column labelling, and quality rule suggestions
 - **Unstructured Processing** — LLM extraction from PDFs, images, audio with same contract validation + lineage
 - **Automated Run Logs** — Every pipeline run emits structured JSON with row counts, quality scores, durations, and error details — queryable as a Delta table
 
-### 🔌 Integrations
+> **[✏️ Try it out in Google Colab: Data Generation & AI](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/05_data_generation_ai.ipynb)**
+
+### Integrations
 
 - **[dbt](https://www.getdbt.com/) Adapter** — Import dbt `schema.yml` models and sources as LakeLogic contracts — reuse existing dbt definitions without rewriting
 - **[dlt](https://dlthub.com/) (Data Load Tool)** — Native `DltAdapter` supporting 100+ verified sources (Stripe, Shopify, SQL databases, Google Analytics, and more) plus declarative REST API ingestion — all with contract-driven quality gates on arrival
 
-> **[✏️ Try it out in Colab: Integrations](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb)**
+> **[✏️ Try it out in Google Colab: Integrations](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb)**
 
 ---
 

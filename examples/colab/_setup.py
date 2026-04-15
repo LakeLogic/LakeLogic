@@ -68,6 +68,7 @@ VERSION = lakelogic.__version__
 def write_contract(yaml_text: str, filename: str = "contract.yaml") -> str:
     """Write a YAML string to *filename* in WORKDIR and return the path."""
     p = WORKDIR / filename if IN_COLAB else Path(filename)
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(yaml_text.strip() + "\n")
     return str(p)
 

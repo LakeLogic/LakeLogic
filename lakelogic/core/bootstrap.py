@@ -12,12 +12,12 @@ Python API
     from lakelogic import infer_contract
 
     # Infer a contract from a file and save it
-    draft = infer_contract("data/zoopla_sample.csv")
+    draft = infer_contract("data/data_sample.csv")
     draft.show()                           # pretty-print the YAML
-    draft.save("contracts/zoopla.yaml")    # write to disk
+    draft.save("contracts/data.yaml")    # write to disk
 
     # Chain straight into DataGenerator (no intermediate file needed)
-    gen = infer_contract("data/zoopla_sample.csv").to_generator(seed=42)
+    gen = infer_contract("data/_sample.csv").to_generator(seed=42)
     df  = gen.generate(rows=5_000)
 
     # Suggest quality rules automatically
@@ -27,7 +27,12 @@ Python API
     # Pass an in-memory DataFrame
     import polars as pl
     df_seed = pl.read_json("data/10001.json")
-    draft = infer_contract(df_seed, title="Zoopla Listings", layer="bronze")
+    draft = infer_contract(df_seed, title="data Listings", layer="bronze")
+
+    # Infer from a database table (Unity Catalog, DuckDB, etc.)
+    draft = infer_contract("my_catalog.my_schema.orders")          # Databricks (auto-detects spark)
+    draft = infer_contract("main.sales.orders", connection=spark)  # explicit SparkSession
+    draft = infer_contract("orders", connection=duckdb_conn)       # DuckDB
 """
 
 from __future__ import annotations
@@ -120,6 +125,13 @@ def _format_contract_yaml(data: dict) -> str:
         FieldList,
         lambda dumper, data: dumper.represent_sequence("tag:yaml.org,2002:seq", data),
     )
+    # Emit plain true/false instead of !!bool 'true' / !!bool 'false'
+    _Dumper.add_representer(
+        bool,
+        lambda dumper, data: dumper.represent_scalar(
+            "tag:yaml.org,2002:bool", "true" if data else "false"
+        ),
+    )
     raw = yaml.dump(
         data,
         Dumper=_Dumper,
@@ -127,6 +139,11 @@ def _format_contract_yaml(data: dict) -> str:
         allow_unicode=True,
         default_flow_style=False,
     )
+    # Belt-and-suspenders: strip any !!bool tags PyYAML may emit despite
+    # the custom representer (can happen with stale bytecode caches).
+    import re
+    raw = re.sub(r"!!bool 'true'", "true", raw)
+    raw = re.sub(r"!!bool 'false'", "false", raw)
     lines = raw.splitlines()
     out: list[str] = []
 
@@ -401,9 +418,9 @@ class ContractInferrer:
 
             extra={
                 "lineage": {
-                    "source_system": "Zoopla API",
-                    "pipeline": "bronze_zoopla_listings",
-                    "upstream": ["raw.zoopla_listings_api"],
+                    "source_system": "data API",
+                    "pipeline": "bronze_data_listings",
+                    "upstream": ["raw.data_listings_api"],
                 },
                 "owner": {"team": "data-eng", "slack": "#data-platform"},
                 "tags": ["pii", "real-estate", "bronze"],
@@ -432,6 +449,7 @@ class ContractInferrer:
         describe_with_ai: bool = False,
         ai_provider: str = "openai",
         ai_model: Optional[str] = None,
+        connection: Any = None,
     ) -> None:
         self.source = source
         self.title = title
@@ -454,6 +472,7 @@ class ContractInferrer:
         self.describe_with_ai = describe_with_ai
         self.ai_provider = ai_provider
         self.ai_model = ai_model
+        self.connection = connection
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -572,6 +591,29 @@ class ContractInferrer:
     # Private helpers
     # ------------------------------------------------------------------
 
+    # Known file extensions — anything NOT matching is treated as a table ref
+    _FILE_EXTENSIONS = frozenset({
+        ".csv", ".parquet", ".json", ".ndjson", ".jsonl",
+        ".xlsx", ".xls", ".xml", ".tsv", ".avro", ".orc",
+    })
+
+    @classmethod
+    def _is_table_reference(cls, source: str) -> bool:
+        """Return True if *source* looks like a database table reference.
+
+        Heuristics:
+        - Contains dots (catalog.schema.table) but no file extension
+        - OR is a simple identifier with no path separators and no extension
+        """
+        if any(sep in source for sep in ("/", "\\")):
+            return False  # looks like a file path
+        ext = Path(source).suffix.lower()
+        if ext in cls._FILE_EXTENSIONS:
+            return False  # has a recognized file extension
+        # Dot-separated identifiers (catalog.schema.table) or bare table names
+        # when connection is explicitly provided
+        return True
+
     def _load(self, pl):
         """Load source into a polars DataFrame, return (df, source_path)."""
         source = self.source
@@ -581,6 +623,12 @@ class ContractInferrer:
 
         if hasattr(source, "to_dict"):  # pandas DataFrame
             return pl.from_pandas(source), None
+
+        # ── Database table reference ──────────────────────────────────────
+        if isinstance(source, str) and (
+            self.connection is not None or self._is_table_reference(source)
+        ):
+            return self._load_table(source, pl), None
 
         p = Path(source)
         ext = p.suffix.lower()
@@ -615,9 +663,108 @@ class ContractInferrer:
         else:
             raise ValueError(
                 f"Cannot infer file format from extension {ext!r}. "
-                "Supported: .csv, .parquet, .json, .ndjson, .jsonl, .xlsx, .xls, .xml"
+                "Supported: .csv, .parquet, .json, .ndjson, .jsonl, .xlsx, .xls, .xml, "
+                "or pass a table name (e.g. 'catalog.schema.table') with connection=..."
             )
         return df, p
+
+    def _load_table(self, table_ref: str, pl) -> Any:
+        """Load a database table into a polars DataFrame.
+
+        Supported connection types:
+        - **SparkSession** — reads via ``spark.table(ref).limit(N)``.
+          Auto-detected from Databricks globals when ``connection`` is None.
+        - **DuckDB connection** — reads via ``con.sql("SELECT ... FROM ref LIMIT N").pl()``.
+        - **SQLAlchemy engine / connection URL** — reads via ``pandas.read_sql``.
+        """
+        conn = self.connection
+        limit = self.sample_rows
+
+        # ── 1. Explicit connection provided ───────────────────────────────
+        if conn is not None:
+            return self._read_from_connection(conn, table_ref, limit, pl)
+
+        # ── 2. Auto-detect Spark from Databricks globals ──────────────────
+        spark = self._find_spark_session()
+        if spark is not None:
+            return self._read_from_connection(spark, table_ref, limit, pl)
+
+        # ── 3. No connection found ────────────────────────────────────────
+        raise ValueError(
+            f"Source {table_ref!r} looks like a table reference but no "
+            f"database connection was provided. Pass connection=spark, "
+            f"connection=duckdb_conn, or connection='sqlite:///path.db'."
+        )
+
+    @staticmethod
+    def _find_spark_session() -> Any:
+        """Try to locate an active SparkSession from Databricks/globals."""
+        # Databricks notebooks inject 'spark' into the global scope
+        import builtins
+
+        if hasattr(builtins, "spark"):
+            return builtins.spark
+
+        # Try the standard PySpark entry point
+        try:
+            from pyspark.sql import SparkSession
+
+            active = SparkSession.getActiveSession()
+            if active is not None:
+                return active
+        except ImportError:
+            pass
+
+        return None
+
+    def _read_from_connection(self, conn: Any, table_ref: str, limit: int, pl) -> Any:
+        """Dispatch to the correct reader based on connection type."""
+        conn_type = type(conn).__name__
+        conn_module = type(conn).__module__ or ""
+
+        # ── SparkSession ──────────────────────────────────────────────────
+        if "SparkSession" in conn_type or "pyspark" in conn_module:
+            pdf = conn.table(table_ref).limit(limit).toPandas()
+            return pl.from_pandas(pdf)
+
+        # ── DuckDB connection ─────────────────────────────────────────────
+        if "DuckDBPyConnection" in conn_type or "duckdb" in conn_module:
+            return conn.sql(
+                f"SELECT * FROM {table_ref} LIMIT {limit}"
+            ).pl()
+
+        # ── SQLAlchemy engine ─────────────────────────────────────────────
+        if "Engine" in conn_type or "Connection" in conn_type:
+            import pandas as pd
+
+            pdf = pd.read_sql(
+                f"SELECT * FROM {table_ref} LIMIT {limit}", conn
+            )
+            return pl.from_pandas(pdf)
+
+        # ── Connection URL string (sqlite:///..., postgresql://...) ───────
+        if isinstance(conn, str) and "://" in conn:
+            try:
+                from sqlalchemy import create_engine
+
+                engine = create_engine(conn)
+                import pandas as pd
+
+                pdf = pd.read_sql(
+                    f"SELECT * FROM {table_ref} LIMIT {limit}", engine
+                )
+                return pl.from_pandas(pdf)
+            except ImportError as exc:
+                raise ImportError(
+                    "Connection URL strings require sqlalchemy: "
+                    "pip install sqlalchemy"
+                ) from exc
+
+        raise TypeError(
+            f"Unsupported connection type: {conn_type}. "
+            f"Expected SparkSession, DuckDB connection, SQLAlchemy engine, "
+            f"or a connection URL string."
+        )
 
     @staticmethod
     def _load_xml(path: Path, pl) -> Any:
@@ -846,6 +993,25 @@ class ContractInferrer:
         except Exception:
             return df  # fallback: return original if reconstruction fails
 
+    # ── Audit / system-managed column patterns ──────────────────────────────
+    # These columns are populated by the database or application layer
+    # (e.g. created_at, updated_on, inserted_date, modified_by, deleted_at).
+    # They should NOT receive quality expectations (not_null, unique, range)
+    # because their values are system-managed and inherently volatile.
+    _AUDIT_FIELD = re.compile(
+        r"(^|_)(created|inserted|updated|modified|deleted|archived"
+        r"|synced|processed|published|approved|reviewed|submitted"
+        r"|imported|exported|loaded|ingested|refreshed"
+        r"|last_login|last_seen)"
+        r"(_at|_on|_date|_time|_ts|_timestamp|_by)?$",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_audit_field(cls, col_name: str) -> bool:
+        """Return True for system-managed audit/timestamp columns."""
+        return bool(cls._AUDIT_FIELD.search(col_name))
+
     def _infer_fields(
         self,
         df,
@@ -858,7 +1024,12 @@ class ContractInferrer:
             ctype = "string" if self.all_strings else _polars_dtype_to_contract(col_dtype)
             series = df[col_name].drop_nulls()
             null_ratio = 1.0 - len(series) / max(len(df), 1)
-            required = null_ratio < 0.01
+
+            # Audit/timestamp fields are never marked required — they are
+            # populated by the system layer and may legitimately be null
+            # during initial ingestion or in partial records.
+            is_audit = self._is_audit_field(col_name)
+            required = null_ratio < 0.01 and not is_audit
 
             field: Dict[str, Any] = {
                 "name": col_name,
@@ -867,14 +1038,15 @@ class ContractInferrer:
             if required:
                 field["required"] = True
 
-            # PII tagging
-            if col_name in pii_map:
+            # PII tagging — skip audit columns to prevent false positives
+            if col_name in pii_map and not is_audit:
                 field["pii"] = True
                 field["classification"] = pii_map[col_name].lower()
 
             # One representative example per column.
             # Skipped entirely for PII-flagged columns to avoid leaking sensitive data.
-            if col_name not in pii_map and not series.is_empty():
+            # Skipped for audit columns — their values are not semantically useful.
+            if col_name not in pii_map and not is_audit and not series.is_empty():
                 if ctype == "string":
                     # Only show an example if the column has low cardinality
                     # (i.e. it's a useful, non-free-text field).
@@ -945,6 +1117,9 @@ class ContractInferrer:
         def _is_enum_like(col: str) -> bool:
             return bool(_ENUM_LIKE.search(col))
 
+        def _is_audit(col: str) -> bool:
+            return self._is_audit_field(col)
+
         for col_name in df.columns:
             series = df[col_name]
             non_null = series.drop_nulls()
@@ -974,6 +1149,12 @@ class ContractInferrer:
             skip_domain_rules = _is_id_like(col_name)  # only not_null for id/date/desc cols
             prefer_enum = _is_enum_like(col_name)  # status/type/option → accepted_values
 
+            # ── Skip audit/timestamp columns entirely ─────────────────────
+            # System-managed fields (created_at, updated_on, etc.) should
+            # receive NO quality expectations at all — not even not_null.
+            if _is_audit(col_name):
+                continue
+
             # ── not_null ───────────────────────────────────────────────────
             if null_ratio < 0.01:
                 row_rules.append(
@@ -991,16 +1172,20 @@ class ContractInferrer:
             # ── unique (dataset-level) ─────────────────────────────────────
             # Require minimum sample size to avoid flagging everything as PK,
             # BUT always flag columns named 'id' or '*_id'/'*_key' that are unique.
+            # Skip numeric non-ID columns (amount, price, score, etc.) — they
+            # can appear unique in a small sample but naturally repeat in
+            # production data.
             col_lower = col_name.lower()
             is_id_column = col_lower == "id" or col_lower.endswith("_id") or col_lower.endswith("_key")
             if n_unique == total and (total >= 10 or is_id_column):
-                dataset_rules.append(
-                    {
-                        "name": f"{col_name}_unique",
-                        "sql": f"{col_name}",
-                        "category": "uniqueness",
-                    }
-                )
+                if is_id_column or not is_numeric:
+                    dataset_rules.append(
+                        {
+                            "name": f"{col_name}_unique",
+                            "sql": f"{col_name}",
+                            "category": "uniqueness",
+                        }
+                    )
 
             # ── accepted_values ────────────────────────────────────────────
             # String columns with low cardinality, OR numeric columns whose
@@ -1079,12 +1264,104 @@ class ContractInferrer:
                         }
                     )
 
+        # ── temporal pair rules (cross-column consistency) ─────────────
+        # Detect common date/timestamp column pairs and generate rules
+        # like "start_date <= end_date" or "created_at <= expiry_date".
+        temporal_rules = self._suggest_temporal_rules(df)
+        row_rules.extend(temporal_rules)
+
         result: Dict[str, Any] = {}
         if row_rules:
             result["row_rules"] = row_rules
         if dataset_rules:
             result["dataset_rules"] = dataset_rules
         return result
+    # ── Temporal pair detection ───────────────────────────────────────────
+    # Maps "early" stems to their natural "late" counterparts.
+    # When both columns exist in the DataFrame and are date/timestamp typed,
+    # a cross-column consistency rule is emitted: early_col <= late_col.
+    _TEMPORAL_PAIRS: List[tuple] = [
+        # (early_stem_regex, late_stem_regex, rule_name_template)
+        # start → end / finish / completion / expiry / expire
+        (r"(^|_)start", r"(^|_)(end|finish|completion|expiry|expire|expires)", "{early} before {late}"),
+        # created → updated / modified / expired / expiry
+        (r"(^|_)created", r"(^|_)(updated|modified|expired|expiry|expires)", "{early} before {late}"),
+        # issued / issue → expired / expiry / expiration
+        (r"(^|_)(issued|issue)", r"(^|_)(expired|expiry|expiration|expires)", "{early} before {late}"),
+        # valid_from → valid_to / valid_until / expiry
+        (r"(^|_)valid_from", r"(^|_)(valid_to|valid_until|expiry|expires)", "{early} before {late}"),
+        # effective → expiry / end / termination
+        (r"(^|_)effective", r"(^|_)(expiry|end|termination|expires)", "{early} before {late}"),
+        # open → close / closed
+        (r"(^|_)open", r"(^|_)(close|closed)", "{early} before {late}"),
+        # hire / joined → terminated / left / departed
+        (r"(^|_)(hire|joined|joining)", r"(^|_)(terminated|termination|left|departed|departure)",
+         "{early} before {late}"),
+        # birth → death (morbid, but common in insurance/healthcare)
+        (r"(^|_)birth", r"(^|_)death", "{early} before {late}"),
+        # subscription_start → subscription_end / cancellation
+        (r"(^|_)subscription_start", r"(^|_)(subscription_end|cancellation|cancelled)",
+         "{early} before {late}"),
+        # check_in → check_out
+        (r"(^|_)check_in", r"(^|_)check_out", "{early} before {late}"),
+        # departure → arrival (travel domain)
+        (r"(^|_)departure", r"(^|_)arrival", "{early} before {late}"),
+        # ordered / order → delivered / shipped / fulfilled
+        (r"(^|_)(ordered|order)", r"(^|_)(delivered|shipped|fulfilled|delivery|shipment)",
+         "{early} before {late}"),
+    ]
+
+    def _suggest_temporal_rules(self, df) -> List[Dict[str, Any]]:
+        """Detect date/timestamp column pairs and suggest ordering rules.
+
+        Scans all date/datetime columns for semantically paired names
+        (e.g. start_date + end_date, created_at + expiry_date) and
+        generates cross-column consistency rules: ``early_col <= late_col``.
+        """
+        import polars as pl
+
+        rules: List[Dict[str, Any]] = []
+        # Collect date/timestamp columns
+        date_cols = [
+            col for col in df.columns
+            if df[col].dtype.__class__.__name__.lower() in (
+                "date", "datetime", "time",
+            )
+            or (
+                # Also include string columns whose names strongly suggest dates
+                df[col].dtype.__class__.__name__.lower() in ("utf8", "string")
+                and re.search(r"(date|_at|_on|_time|_ts|_timestamp)$", col, re.IGNORECASE)
+            )
+        ]
+        if len(date_cols) < 2:
+            return rules
+
+        matched: set = set()  # track already-paired columns
+        for early_pattern, late_pattern, name_tpl in self._TEMPORAL_PAIRS:
+            early_re = re.compile(early_pattern, re.IGNORECASE)
+            late_re = re.compile(late_pattern, re.IGNORECASE)
+
+            early_matches = [c for c in date_cols if early_re.search(c) and c not in matched]
+            late_matches = [c for c in date_cols if late_re.search(c) and c not in matched]
+
+            for early_col in early_matches:
+                for late_col in late_matches:
+                    if early_col == late_col:
+                        continue
+                    # Generate the rule
+                    rule_name = f"{early_col}_before_{late_col}"
+                    rules.append({
+                        "name": rule_name,
+                        "sql": f"{early_col} <= {late_col}",
+                        "category": "consistency",
+                    })
+                    matched.add(early_col)
+                    matched.add(late_col)
+                    break  # one pair per early column
+                if early_col in matched:
+                    break  # move to next pattern
+
+        return rules
 
     # ── PII keyword / regex patterns (no external deps) ─────────
     _PII_COLUMN_KEYWORDS: Dict[str, str] = {
@@ -1131,9 +1408,23 @@ class ContractInferrer:
         "tin": "tax_id",
     }
 
+    # Pre-compiled pattern to identify date-like values (ISO 8601, etc.)
+    # so they are excluded from PII value scanning.
+    _DATE_VALUE = re.compile(
+        r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}"
+    )
+    # Column names that strongly suggest date/timestamp content —
+    # these are skipped entirely during value-based PII scanning.
+    _DATE_COLUMN_NAME = re.compile(
+        r"(date|_at|_on|_time|_ts|_timestamp|_dt|year|month|day)",
+        re.IGNORECASE,
+    )
+
     _PII_VALUE_PATTERNS: List[tuple] = [
         ("email", re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")),
-        ("phone", re.compile(r"^[\+]?[(]?[0-9]{1,4}[)]?[-\s\./0-9]{7,15}$")),
+        # Phone: require at least one non-digit separator to avoid matching
+        # pure-numeric strings like dates (2024-01-01) or IDs.
+        ("phone", re.compile(r"^[\+]?[(]?[0-9]{1,4}[)]?[\s\./][\-\s\./0-9]{6,14}$")),
         ("ssn", re.compile(r"^\d{3}-?\d{2}-?\d{4}$")),
         ("credit_card", re.compile(r"^\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}$")),
         ("ip_address", re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")),
@@ -1155,12 +1446,16 @@ class ContractInferrer:
                     pii_map[col_name] = pii_type
                     break
 
-            # If not detected by name, check sample values
-            if col_name not in pii_map:
+            # If not detected by name, check sample values.
+            # Skip columns whose name signals a date/timestamp — their values
+            # (e.g. "2024-01-01") can false-positive against phone/SSN patterns.
+            if col_name not in pii_map and not self._DATE_COLUMN_NAME.search(col_lower):
                 series = df[col_name].drop_nulls()
                 dtype_name = series.dtype.__class__.__name__.lower()
                 if dtype_name in ("utf8", "string", "large_utf8", "categorical"):
                     sample = [str(v) for v in series.head(20).to_list()]
+                    # Filter out date-like values before pattern matching
+                    sample = [v for v in sample if not self._DATE_VALUE.match(v)]
                     if sample:
                         for pii_type, pattern in self._PII_VALUE_PATTERNS:
                             matches = sum(1 for v in sample if pattern.match(v))
@@ -1219,21 +1514,41 @@ def infer_contract(
     describe_with_ai: bool = False,
     ai_provider: str = "openai",
     ai_model: Optional[str] = None,
+    connection: Any = None,
 ) -> ContractDraft:
     """
-    Infer a LakeLogic contract from an existing data file — no contract needed upfront.
+    Infer a LakeLogic contract from an existing data source — no contract needed upfront.
 
-    Reads the file (or DataFrame), infers column names and types, optionally suggests
-    quality rules, and returns a :class:`ContractDraft` object that can be saved to
-    YAML, printed, or immediately turned into a :class:`DataGenerator`.
+    Reads a file, DataFrame, or database table, infers column names and types,
+    optionally suggests quality rules, and returns a :class:`ContractDraft` object
+    that can be saved to YAML, printed, or immediately turned into a
+    :class:`DataGenerator`.
 
     Parameters
     ----------
     source : str | Path | polars.DataFrame | pandas.DataFrame
-        Data source.  Accepts file paths (CSV, Parquet, JSON, NDJSON, Excel) or
-        an existing in-memory DataFrame.
+        Data source.  Accepts:
+
+        - **File paths** — CSV, Parquet, JSON, NDJSON, Excel, XML
+        - **DataFrames** — Polars or Pandas (passed directly)
+        - **Table references** — dot-separated identifiers for database tables
+          (e.g. ``"catalog.schema.table"`` for Unity Catalog,
+          ``"schema.table"`` for DuckDB / PostgreSQL, or ``"table_name"``
+          with an explicit ``connection``).
+
+    connection : SparkSession | DuckDB connection | SQLAlchemy Engine | str, optional
+        Database connection used when *source* is a table reference.
+
+        - **SparkSession** — reads via ``spark.table(ref).limit(N)``.
+          Auto-detected from Databricks notebook globals when omitted.
+        - **DuckDB connection** — reads via ``con.sql("SELECT ... LIMIT N").pl()``.
+        - **SQLAlchemy Engine** — reads via ``pandas.read_sql()``.
+        - **Connection URL string** — e.g. ``"sqlite:///data.db"`` or
+          ``"postgresql://user:pass@host/db"``.
+
     title : str, optional
-        Override the auto-derived contract title (defaults to the file stem).
+        Override the auto-derived contract title (defaults to the file stem
+        or table name).
     version : str
         Contract version string (default ``"1.0.0"``).
     description : str, optional
@@ -1241,7 +1556,7 @@ def infer_contract(
     layer : str
         Data layer hint written to ``info.target_layer`` (default ``"bronze"``).
     sample_rows : int
-        Max rows to read from the file for inference (default 10 000).
+        Max rows to read from the source for inference (default 10 000).
     suggest_rules : bool
         Auto-suggest quality rules from the data (default True):
 
@@ -1249,32 +1564,16 @@ def infer_contract(
         - ``unique``         — columns where all values are distinct
         - ``accepted_values`` — string columns with ≤ 20 distinct values
         - ``range``          — numeric columns (observed min/max boundaries)
+        - ``consistency``    — temporal pair ordering (e.g. start_date <= end_date)
 
     detect_pii : bool
         Flag PII fields using Presidio (default False).
         Requires ``pip install lakelogic[profiling]``.
     extra : dict, optional
         Extra top-level sections added to the contract (e.g. ``lineage``,
-        ``owner``, ``tags``, ``sla``).  These are merged in after the standard
-        auto-generated sections, so they can also be used to override defaults.
+        ``owner``, ``tags``, ``sla``).
 
-        Example::
-
-            draft = infer_contract(
-                "data/10001.json",
-                title="Zoopla Listing",
-                layer="bronze",
-                extra={
-                    "lineage": {
-                        "source_system": "Zoopla API",
-                        "upstream": ["raw.zoopla_listings_api"],
-                        "pipeline": "bronze_zoopla_ingest",
-                    },
-                    "owner": {"team": "data-eng", "slack": "#data-platform"},
-                    "tags": ["real-estate", "bronze", "api"],
-                },
-            )
-
+    Returns
     -------
     ContractDraft
         An object with ``.show()``, ``.save(path)``, ``.to_yaml()``,
@@ -1290,16 +1589,29 @@ def infer_contract(
         draft.show()                          # inspect YAML
         draft.save("contracts/orders.yaml")   # write to disk
 
+    Infer from a Unity Catalog table (Databricks)::
+
+        draft = infer_contract("my_catalog.sales.orders")
+        draft.save("contracts/orders.yaml")
+
+    Infer from a Unity Catalog table (explicit SparkSession)::
+
+        draft = infer_contract("my_catalog.sales.orders", connection=spark)
+
+    Infer from a DuckDB table::
+
+        import duckdb
+        con = duckdb.connect("warehouse.duckdb")
+        draft = infer_contract("orders", connection=con)
+
+    Infer from a SQLite / PostgreSQL table via URL::
+
+        draft = infer_contract("users", connection="sqlite:///app.db")
+
     Chain directly into DataGenerator::
 
         gen = infer_contract("data/orders.csv").to_generator(seed=42)
         df  = gen.generate(rows=5_000)
-
-    Infer from a single JSON record file::
-
-        draft = infer_contract("data/10001.json", layer="bronze",
-                               title="Zoopla Listing")
-        draft.save("contracts/bronze_zoopla.yaml")
 
     Pass an in-memory DataFrame::
 
@@ -1326,4 +1638,5 @@ def infer_contract(
         describe_with_ai=describe_with_ai,
         ai_provider=ai_provider,
         ai_model=ai_model,
+        connection=connection,
     ).infer()

@@ -152,4 +152,4 @@ Every SLO result is automatically recorded in the `_run_logs` table — giving y
 
 > **Business value:** This run log data is what powers your **data reliability dashboard**. Instead of asking "is our data trustworthy?", your team can show stakeholders a chart of SLO compliance over the last 90 days — just like an uptime SLA for a web service.
 
-SLO breaches emit `"slo_breach"` notification events that route through the [Notifications](notifications.md) system — so the right people get alerted immediately.
+SLO breaches emit `"slo_breach"` notification events that route through the [Notifications](../notifications.md) system — so the right people get alerted immediately.

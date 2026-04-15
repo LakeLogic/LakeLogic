@@ -185,4 +185,4 @@ LakeLogic will call your function, then optionally validate and materialize the 
 
 - **[Architecture Overview](architecture_diagram.md)** — Visual guide to Bronze → Silver → Gold
 - **[Contract Organization](organization.md)** — Structuring contracts for enterprise scale
-- **[Tutorials & Examples](examples/01_hello_world.ipynb)** — Get hands-on in 5 minutes
+- **[Tutorials & Examples](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb)** — Get hands-on in 5 minutes
