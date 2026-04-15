@@ -259,6 +259,15 @@ artifacts = [
 [tool.uv]
 managed = true
 
+# Security: force minimum versions for transitive deps to close Dependabot alerts
+constraint-dependencies = [
+    "nltk>=3.9.4; python_version >= '3.10'",    # CVE-2025-14009 Zip Slip, Path Traversal AFO, remote shutdown, XSS, unbounded recursion
+    "pillow>=12.1.1; python_version >= '3.10'",  # CVE-2026-25990 PSD out-of-bounds write, FITS GZIP decompression bomb
+    "orjson>=3.11.6; python_version >= '3.10'",  # CVE-2025-67221 recursion DoS on deeply nested JSON
+    "pytest>=9.0.3; python_version >= '3.10'",  # CVE-2025-71176 predictable tmpdir symlink attack
+    "unstructured>=0.18.18; python_version >= '3.10'",  # CVE-2025-64712 MSG attachment path traversal
+]
+
 [dependency-groups]
 dev = [
     "pytest>=7.0.0",
