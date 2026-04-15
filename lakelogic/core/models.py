@@ -1324,8 +1324,9 @@ class ExtractionConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    # LLM provider and model
-    provider: str  # openai | anthropic | azure_openai | ollama | bedrock | google | local | unstructured | spacy | pdfplumber | easyocr
+    # LLM provider: openai | anthropic | azure_openai | ollama | bedrock | google
+    # local | unstructured | spacy | pdfplumber | easyocr
+    provider: str
     model: str = "auto"  # gpt-4o-mini | claude-3.5-sonnet | en_core_web_sm | auto
     temperature: float = 0.1  # low for deterministic extraction
     max_tokens: int = 1000

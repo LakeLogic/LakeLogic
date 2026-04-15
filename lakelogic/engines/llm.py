@@ -661,7 +661,6 @@ def _extract_spacy(
             }
 
             text_lower = prompt.lower()
-            words = set(text_lower.split())
 
             neg_hits = sum(1 for kw in _NEG_KEYWORDS if kw in text_lower)
             pos_hits = sum(1 for kw in _POS_KEYWORDS if kw in text_lower)
