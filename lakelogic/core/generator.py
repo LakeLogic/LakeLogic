@@ -2932,6 +2932,8 @@ class DataGenerator:
         ai: bool = False,
         ai_provider: Optional[str] = None,
         ai_model: Optional[str] = None,
+        ai_api_key: Optional[str] = None,
+        ai_custom_scenario: Optional[str] = None,
         window_start: Optional[datetime] = None,
         window_end: Optional[datetime] = None,
     ):
@@ -2980,6 +2982,12 @@ class DataGenerator:
             LLM provider (openai, azure, anthropic, ollama).
         ai_model : str, optional
             Model name override.
+        ai_api_key : str, optional
+            API key override.  If not provided, falls back to the
+            provider's default env var (e.g. ``OPENAI_API_KEY``).
+        ai_custom_scenario : str, optional
+            Free-text scenario or test condition to guide the AI's generation.
+            (e.g., "Generate users with non-latin characters and ages above 80").
         window_start : datetime, optional
             If provided alongside ``window_end``, all generated timestamps
             and dates are constrained to this window.  Use this to simulate
@@ -3041,6 +3049,8 @@ class DataGenerator:
                     dataset_name=dataset_name,
                     provider=ai_provider,
                     model=ai_model,
+                    api_key=ai_api_key,
+                    custom_scenario=ai_custom_scenario or "",
                 )
             except Exception as e:
                 from loguru import logger
@@ -3061,6 +3071,8 @@ class DataGenerator:
                     dataset_name=dataset_name,
                     provider=ai_provider,
                     model=ai_model,
+                    api_key=ai_api_key,
+                    custom_scenario=ai_custom_scenario or "",
                 )
             except Exception as e:
                 from loguru import logger

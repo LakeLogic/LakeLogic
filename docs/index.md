@@ -212,7 +212,8 @@ LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file
 [ :simple-googlecolab: Run the Developer Experience Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/04_developer_experience.ipynb){: target="_blank" .md-button }
 ### Data Generation & AI
 
-- **Synthetic Data** — Built-in `DataGenerator` (powered by [Faker](https://faker.readthedocs.io/){: target="_blank" }) with streaming simulation, time-windowed output, referential integrity, and AI-powered edge case injection — generate realistic error rows (SQL injection, type confusion, boundary values) for stress testing and quarantine validation
+- **Synthetic Data** — Built-in `DataGenerator` (powered by [Faker](https://faker.readthedocs.io/){: target="_blank" }) with streaming simulation, time-windowed output, referential integrity, and edge case injection — generate realistic error rows (SQL injection, type confusion, boundary values) for stress testing and quarantine validation
+- **Descriptive AI Test Data** — Steer synthetic data generation with natural language prompts (e.g. *"Generate users who are French or Japanese only, enterprise-tier, over 60 years old with SQL injection attempts in email fields"*) — output strictly adheres to the YAML contract schema
 - **AI Contract Onboarding** — `lakelogic infer` auto-generates contracts from sample data with LLM-powered enrichment: automatic PII detection, column labelling, and quality rule suggestions
 - **Unstructured Processing** — LLM extraction from PDFs, images, audio with same contract validation + lineage
 - **Automated Run Logs** — Every pipeline run emits structured JSON with row counts, quality scores, durations, and error details — queryable as a Delta table
