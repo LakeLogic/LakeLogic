@@ -2,12 +2,12 @@
 
 **Your Data Estate. Under Contract.**
 
-<a href="https://img.shields.io/badge/docs-GitHub%20Pages-blue" target="_blank">![Documentation</a>](https://LakeLogic.github.io/LakeLogic/)
-<a href="https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white" target="_blank">![PyPI</a>](https://pypi.org/project/lakelogic/)
-<a href="https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg" target="_blank">![CI</a>](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml)
-<a href="https://img.shields.io/badge/coverage-100%25-brightgreen?logo=codecov" target="_blank">![Coverage</a>](https://github.com/LakeLogic/LakeLogic)
-<a href="https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white" target="_blank">![Python</a>](https://www.python.org)
-<a href="https://img.shields.io/badge/license-Apache%202.0-green" target="_blank">![License</a>](LICENSE)
+<a href="https://LakeLogic.github.io/LakeLogic/" target="_blank"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-blue" alt="Documentation"></a>
+<a href="https://pypi.org/project/lakelogic/" target="_blank"><img src="https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white" alt="PyPI"></a>
+<a href="https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml" target="_blank"><img src="https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/LakeLogic/LakeLogic" target="_blank"><img src="https://img.shields.io/badge/coverage-100%25-brightgreen?logo=codecov" alt="Coverage"></a>
+<a href="https://www.python.org" target="_blank"><img src="https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white" alt="Python"></a>
+<a href="LICENSE" target="_blank"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
 
 A declarative, contract-driven medallion pipeline engine for data mesh architectures.
 
