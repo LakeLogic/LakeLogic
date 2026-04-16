@@ -2606,32 +2606,67 @@ for _ec_name, _ec_profile in _EDGE_CASE_PROFILES.items():
 
 class DataGenerator:
     """
-    Generate synthetic data from a LakeLogic contract YAML.
+    Generate synthetic data from a LakeLogic contract YAML or schema definition.
 
     Parameters
     ----------
-    contract_path : str | Path
-        Path to the contract YAML file.
+    contract_path : str | Path | list | dict | StructType
+        Data source schema.  Accepts:
+
+        - **Contract path** — path to a YAML contract file
+        - **DDL string**    — ``"col1 STRING, col2 INT, col3 TIMESTAMP"``
+        - **List of tuples** — ``[("col1", "string"), ("col2", "int")]``
+        - **Dict**          — ``{"col1": "string", "col2": "int"}``
+        - **Spark StructType** — schema-only, no data needed
+
     seed : int, optional
         Random seed for reproducibility.
     use_faker : bool
         If True (default) and Faker is installed, use semantic generation
         for string fields with recognisable names (email, name, …).
+
+    Examples
+    --------
+    From a contract file::
+
+        gen = DataGenerator("contracts/orders.yaml")
+        df  = gen.generate(rows=1000, invalid_ratio=0.10)
+
+    From a DDL string::
+
+        gen = DataGenerator("order_id BIGINT, email STRING, amount DOUBLE, created_at TIMESTAMP")
+        df  = gen.generate(rows=1000, invalid_ratio=0.10)
+
+    From a list of tuples::
+
+        gen = DataGenerator([("user_id", "integer"), ("name", "string"), ("active", "boolean")])
+        df  = gen.generate(rows=500)
+
+    From a dict::
+
+        gen = DataGenerator({"product_id": "integer", "price": "decimal", "in_stock": "boolean"})
+        df  = gen.generate(rows=200)
     """
 
     def __init__(
         self,
-        contract_path: str | Path,
+        contract_path,
         seed: Optional[int] = None,
         use_faker: bool = True,
     ) -> None:
-        self.contract_path = Path(contract_path)
         self.seed = seed
         self._rng = random.Random(seed)
         self._faker = _try_faker() if use_faker else None
         if self._faker and seed is not None:
             self._faker.seed_instance(seed)
-        self._contract_raw: Dict[str, Any] = self._load_yaml()
+
+        # ── Schema-only input (DDL string, tuples, dict, StructType) ───────
+        if self._is_schema_input(contract_path):
+            self.contract_path = Path("_from_schema")
+            self._contract_raw = self._contract_from_schema(contract_path)
+        else:
+            self.contract_path = Path(contract_path)
+            self._contract_raw: Dict[str, Any] = self._load_yaml()
 
         # ── Guard: contracts with LLM extraction are not supported ─────────
         if self._contract_raw.get("extraction"):
@@ -2654,6 +2689,63 @@ class DataGenerator:
         # Populated by from_file(); generate() uses these automatically
         self._auto_sample_pools: Optional[Dict[str, List[Any]]] = None
         self._triplets: List[Dict[str, Any]] = self._detect_triplets()
+
+    @staticmethod
+    def _is_schema_input(source) -> bool:
+        """Return True if *source* is a schema definition (not a file path)."""
+        # Spark StructType
+        if type(source).__name__ == "StructType":
+            return True
+        # List/tuple of (name, type) pairs
+        if isinstance(source, (list, tuple)) and source and isinstance(source[0], (list, tuple)):
+            return True
+        # Dict {"col": "type"}
+        if isinstance(source, dict) and source:
+            return all(isinstance(v, str) for v in source.values())
+        # DDL string heuristic
+        if isinstance(source, str) and not any(sep in source for sep in ("/", "\\")):
+            # Must not end with .yaml/.yml (contract path)
+            if source.rstrip().endswith((".yaml", ".yml")):
+                return False
+            _ddl_types = {
+                "string",
+                "varchar",
+                "char",
+                "int",
+                "integer",
+                "bigint",
+                "smallint",
+                "tinyint",
+                "float",
+                "double",
+                "decimal",
+                "boolean",
+                "date",
+                "timestamp",
+                "binary",
+                "long",
+                "short",
+            }
+            tokens = {t.strip().lower().split("(")[0] for t in source.replace(",", " ").split()}
+            if len(tokens & _ddl_types) >= 2:
+                return True
+        return False
+
+    @staticmethod
+    def _contract_from_schema(schema) -> Dict[str, Any]:
+        """Build an in-memory contract dict from a schema definition."""
+        from lakelogic.core.bootstrap import _parse_schema_to_fields
+
+        fields = _parse_schema_to_fields(schema)
+        return {
+            "info": {
+                "title": "_from_schema",
+                "version": "0.0.0",
+                "description": "Auto-generated contract from schema definition.",
+            },
+            "model": {"fields": fields},
+            "quality": {},
+        }
 
     @classmethod
     def from_file(

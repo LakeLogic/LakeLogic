@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.18.0] — 2026-04-16
+
+### Added
+
+- Implement core data generation, processing, and bootstrapping modules with accompanying documentation and examples.
+
+### Documentation
+
+- Fix broken badge image rendering in README links
 ## [1.17.1] — 2026-04-15
 
 ### Changed
@@ -244,6 +253,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.18.0]: https://github.com/lakelogic/LakeLogic/compare/v1.17.1...v1.18.0
 [1.17.1]: https://github.com/lakelogic/LakeLogic/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/lakelogic/LakeLogic/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/lakelogic/LakeLogic/compare/v1.15.0...v1.16.0
