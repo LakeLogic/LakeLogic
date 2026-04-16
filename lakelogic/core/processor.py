@@ -3977,7 +3977,9 @@ class DataProcessor:
         """
         import polars as pl
 
-        contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "database_source")
+        contract_title = (
+            self.contract.info.title if self.contract.info else (self.contract.dataset or "database_source")
+        )
         logger.info(f"Running database source for contract: {contract_title} via engine={self.engine_name}")
 
         dataset = self.contract.dataset
@@ -4038,6 +4040,7 @@ class DataProcessor:
                 logger.info(f"Batch execution active. Fetching data in {fetch_size} row chunks via SQLAlchemy yield.")
                 try:
                     import sqlalchemy
+
                     sa_engine = sqlalchemy.create_engine(uri).execution_options(yield_per=fetch_size)
 
                     all_good: list = []
@@ -4046,7 +4049,9 @@ class DataProcessor:
                     with sa_engine.connect() as conn:
                         # pl.read_database natively supports iterating batches
                         # when given an SQLAlchemy connection object.
-                        for chunk_df in pl.read_database(query, connection=conn, iter_batches=True, batch_size=fetch_size):
+                        for chunk_df in pl.read_database(
+                            query, connection=conn, iter_batches=True, batch_size=fetch_size
+                        ):
                             batch_idx += 1
                             logger.info(f"Processing database chunk {batch_idx} ({chunk_df.height} rows)...")
 
@@ -4078,7 +4083,9 @@ class DataProcessor:
                     kwargs["partition_on"] = partition_column
                     kwargs["partition_num"] = partition_num
                     kwargs["engine"] = "connectorx"
-                    logger.info(f"Running parallel extraction partitioned on '{partition_column}' ({partition_num} slices).")
+                    logger.info(
+                        f"Running parallel extraction partitioned on '{partition_column}' ({partition_num} slices)."
+                    )
 
                 try:
                     logger.debug(f"Executing Polars read_database_uri: {query}")
@@ -4110,7 +4117,7 @@ class DataProcessor:
                 duckdb_uri = uri
                 if extension == "sqlite":
                     duckdb_uri = duckdb_uri.replace("sqlite:///", "").replace("sqlite://", "")
-                    
+
                 duckdb_query = f"SELECT * FROM {scanner}('{duckdb_uri}', '{dataset}')"
                 if load_mode == "incremental" and watermark is not None:
                     duckdb_query += f" WHERE {watermark_field} > '{watermark_iso}'"

@@ -179,6 +179,7 @@ def _parse_schema_to_fields(schema: Any) -> List[Dict[str, str]]:
         # Try Spark DDL parsing first (if PySpark is available)
         try:
             from pyspark.sql.types import _parse_datatype_string  # type: ignore
+
             struct = _parse_datatype_string(f"struct<{schema}>")
             return _parse_schema_to_fields(struct)
         except Exception:
@@ -186,6 +187,7 @@ def _parse_schema_to_fields(schema: Any) -> List[Dict[str, str]]:
 
         # Manual DDL parsing: "col1 STRING, col2 INT NOT NULL, col3 TIMESTAMP"
         import re as _ddl_re
+
         for part in schema.split(","):
             part = part.strip()
             if not part:
@@ -787,9 +789,23 @@ class ContractInferrer:
         # DDL string heuristic: contains known SQL type keywords, no path separators
         if isinstance(source, str) and not any(sep in source for sep in ("/", "\\")):
             _ddl_types = {
-                "string", "varchar", "char", "int", "integer", "bigint",
-                "smallint", "tinyint", "float", "double", "decimal",
-                "boolean", "date", "timestamp", "binary", "long", "short",
+                "string",
+                "varchar",
+                "char",
+                "int",
+                "integer",
+                "bigint",
+                "smallint",
+                "tinyint",
+                "float",
+                "double",
+                "decimal",
+                "boolean",
+                "date",
+                "timestamp",
+                "binary",
+                "long",
+                "short",
             }
             tokens = {t.strip().lower().split("(")[0] for t in source.replace(",", " ").split()}
             # Must match at least 2 type keywords (to distinguish from table refs)

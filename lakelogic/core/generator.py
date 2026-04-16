@@ -2708,9 +2708,23 @@ class DataGenerator:
             if source.rstrip().endswith((".yaml", ".yml")):
                 return False
             _ddl_types = {
-                "string", "varchar", "char", "int", "integer", "bigint",
-                "smallint", "tinyint", "float", "double", "decimal",
-                "boolean", "date", "timestamp", "binary", "long", "short",
+                "string",
+                "varchar",
+                "char",
+                "int",
+                "integer",
+                "bigint",
+                "smallint",
+                "tinyint",
+                "float",
+                "double",
+                "decimal",
+                "boolean",
+                "date",
+                "timestamp",
+                "binary",
+                "long",
+                "short",
             }
             tokens = {t.strip().lower().split("(")[0] for t in source.replace(",", " ").split()}
             if len(tokens & _ddl_types) >= 2:
