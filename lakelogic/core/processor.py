@@ -1321,6 +1321,10 @@ class DataProcessor:
         if self.contract.source and self.contract.source.type == "dlt":
             return self._run_dlt_source()
 
+        # ── database source: native SQL ingestion ─────────────────────────────
+        if self.contract.source and self.contract.source.type == "database":
+            return self._run_database_source()
+
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
@@ -3956,6 +3960,174 @@ class DataProcessor:
         return self.run(
             df,
             source_path=f"dlt://{self.contract.source.dlt.source or self.contract.source.dlt.base_url}",
+        )
+
+    # ── database source integration ────────────────────────────────────────────
+
+    def _run_database_source(self) -> "ValidationResult":
+        """Extract data natively via Polars or DuckDB, run validation.
+
+        Called by :meth:`run_source` when ``source.type == "database"``.
+
+        Supports:
+          - PostgreSQL, MySQL, SQL Server, Oracle, SQLite via URI auto-detection.
+          - Incremental CDC via ``load_mode: incremental`` + ``watermark_field``.
+          - Batch chunking via ``options.fetch_size`` (SQLAlchemy iterator).
+          - Parallel partitioned reads via ``options.partition_column`` + ``partition_num``.
+        """
+        import polars as pl
+
+        contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "database_source")
+        logger.info(f"Running database source for contract: {contract_title} via engine={self.engine_name}")
+
+        dataset = self.contract.dataset
+        if not dataset:
+            raise ValueError("Database source requires 'dataset' to be defined in contract to use as table name")
+
+        uri = self.contract.source.path
+        if not uri:
+            raise ValueError("Database source requires 'source.path' connection URI")
+
+        # ── Options extraction ───────────────────────────────
+        options = getattr(self.contract.source, "options", {}) or {}
+        partition_column = options.get("partition_column")
+        partition_num = options.get("partition_num")
+        fetch_size = options.get("fetch_size")
+
+        # ── Column projection from contract model ────────────
+        # Push column selection down to the database query so we only
+        # transfer the fields declared in the contract over the wire.
+        columns = "*"
+        model = getattr(self.contract, "model", None)
+        if model and getattr(model, "fields", None):
+            col_names = [f.name for f in model.fields if f.name]
+            # Ensure the watermark field is always fetched even if
+            # it was omitted from the model (needed for CDC tracking).
+            wf = getattr(self.contract.source, "watermark_field", None)
+            if wf and wf not in col_names:
+                col_names.append(wf)
+            if col_names:
+                columns = ", ".join(f'"{c}"' for c in col_names)
+                logger.info(f"Column projection: selecting {len(col_names)} fields from contract model")
+
+        query = f'SELECT {columns} FROM "{dataset}"'
+        load_mode = getattr(self.contract.source, "load_mode", "full")
+        watermark_field = getattr(self.contract.source, "watermark_field", None)
+
+        watermark = None
+        if load_mode == "incremental":
+            if not watermark_field:
+                raise ValueError("Incremental load mode requires 'source.watermark_field' in contract config")
+
+            watermark = self._get_last_source_watermark()
+            if watermark is not None:
+                # _get_last_source_watermark returns a float (Unix epoch).
+                # Convert to ISO-8601 so the SQL WHERE clause is valid for
+                # TIMESTAMP / DATETIME columns in all database dialects.
+                from datetime import datetime, timezone
+
+                watermark_iso = datetime.fromtimestamp(watermark, tz=timezone.utc).isoformat()
+                query += f" WHERE {watermark_field} > '{watermark_iso}'"
+                logger.info(f"Incremental mode active. Appending filter: WHERE {watermark_field} > '{watermark_iso}'")
+            else:
+                logger.info("Incremental mode: First run detected. Running full table extraction.")
+
+        # ── Execute via chosen engine ────────────────────────
+        if self.engine_name == "polars":
+            if fetch_size:
+                logger.info(f"Batch execution active. Fetching data in {fetch_size} row chunks via SQLAlchemy yield.")
+                try:
+                    import sqlalchemy
+                    sa_engine = sqlalchemy.create_engine(uri).execution_options(yield_per=fetch_size)
+
+                    all_good: list = []
+                    all_bad: list = []
+                    batch_idx = 0
+                    with sa_engine.connect() as conn:
+                        # pl.read_database natively supports iterating batches
+                        # when given an SQLAlchemy connection object.
+                        for chunk_df in pl.read_database(query, connection=conn, iter_batches=True, batch_size=fetch_size):
+                            batch_idx += 1
+                            logger.info(f"Processing database chunk {batch_idx} ({chunk_df.height} rows)...")
+
+                            res = self.run(chunk_df, source_path=f"database://{dataset}")
+                            all_good.append(res.good)
+                            all_bad.append(res.bad)
+
+                    if batch_idx == 0:
+                        logger.warning("Query returned zero rows. Returning empty result.")
+                        return ValidationResult(pl.DataFrame(), pl.DataFrame())
+
+                    combined_good = pl.concat(all_good) if all_good else pl.DataFrame()
+                    combined_bad = pl.concat(all_bad) if all_bad else pl.DataFrame()
+                    logger.info(
+                        f"Batch ingestion complete across {batch_idx} chunks. "
+                        f"Good: {combined_good.height}, Bad: {combined_bad.height}"
+                    )
+                    return ValidationResult(combined_good, combined_bad)
+
+                except ImportError:
+                    raise ImportError("Batching requires SQLAlchemy. (Tip: pip install SQLAlchemy)")
+                except Exception as e:
+                    raise RuntimeError(f"Polars batched DB extraction failed. Error: {e}")
+
+            else:
+                # Eager / parallel processing
+                kwargs = {}
+                if partition_column and partition_num:
+                    kwargs["partition_on"] = partition_column
+                    kwargs["partition_num"] = partition_num
+                    kwargs["engine"] = "connectorx"
+                    logger.info(f"Running parallel extraction partitioned on '{partition_column}' ({partition_num} slices).")
+
+                try:
+                    logger.debug(f"Executing Polars read_database_uri: {query}")
+                    df = pl.read_database_uri(query, uri, **kwargs)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Polars DB extraction failed. "
+                        f"(Tip: pip install connectorx or adbc-driver-postgresql). Error: {e}"
+                    )
+
+        elif self.engine_name == "duckdb":
+            import duckdb
+
+            # Sniff dialect for accurate DuckDB extension mapping
+            dialect = uri.split("://")[0].lower()
+            extension = "postgres"
+            scanner = "postgres_scan"
+
+            if "mysql" in dialect:
+                extension = "mysql"
+                scanner = "mysql_scan"
+            elif "sqlite" in dialect:
+                extension = "sqlite"
+                scanner = "sqlite_scan"
+
+            duckdb.sql(f"INSTALL {extension} IF NOT EXISTS; LOAD {extension};")
+            try:
+                # DuckDB sqlite_scan expects a raw path, not a URI
+                duckdb_uri = uri
+                if extension == "sqlite":
+                    duckdb_uri = duckdb_uri.replace("sqlite:///", "").replace("sqlite://", "")
+                    
+                duckdb_query = f"SELECT * FROM {scanner}('{duckdb_uri}', '{dataset}')"
+                if load_mode == "incremental" and watermark is not None:
+                    duckdb_query += f" WHERE {watermark_field} > '{watermark_iso}'"
+
+                logger.debug(f"Executing DuckDB {scanner}: {duckdb_query}")
+                df = duckdb.sql(duckdb_query).pl()
+            except Exception as e:
+                raise RuntimeError(f"DuckDB {extension} DB extraction failed. Error: {e}")
+
+        else:
+            raise ValueError("Database source natively supports engines 'polars' and 'duckdb'.")
+
+        logger.info(f"database: loaded {df.height} rows, {df.width} columns")
+
+        return self.run(
+            df,
+            source_path=f"database://{dataset}",
         )
 
     # ── Polars Streaming ─────────────────────────────────────────────────

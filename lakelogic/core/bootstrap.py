@@ -87,6 +87,145 @@ _POLARS_DTYPE_MAP: Dict[str, str] = {
     "unknown": "string",
 }
 
+# Spark DDL type → LakeLogic contract type
+_SPARK_TYPE_MAP: Dict[str, str] = {
+    "string": "string",
+    "varchar": "string",
+    "char": "string",
+    "binary": "string",
+    "byte": "integer",
+    "tinyint": "integer",
+    "short": "integer",
+    "smallint": "integer",
+    "int": "integer",
+    "integer": "integer",
+    "long": "integer",
+    "bigint": "integer",
+    "float": "float",
+    "double": "double",
+    "decimal": "double",
+    "boolean": "boolean",
+    "date": "date",
+    "timestamp": "timestamp",
+    "timestamp_ntz": "timestamp",
+    "array": "string",
+    "map": "string",
+    "struct": "string",
+}
+
+# Spark DDL type → Polars dtype (for building zero-row DataFrames)
+_SPARK_TYPE_TO_POLARS: Dict[str, str] = {
+    "string": "Utf8",
+    "varchar": "Utf8",
+    "char": "Utf8",
+    "binary": "Utf8",
+    "byte": "Int8",
+    "tinyint": "Int8",
+    "short": "Int16",
+    "smallint": "Int16",
+    "int": "Int32",
+    "integer": "Int32",
+    "long": "Int64",
+    "bigint": "Int64",
+    "float": "Float32",
+    "double": "Float64",
+    "decimal": "Float64",
+    "boolean": "Boolean",
+    "date": "Date",
+    "timestamp": "Datetime",
+    "timestamp_ntz": "Datetime",
+}
+
+
+def _parse_schema_to_fields(schema: Any) -> List[Dict[str, str]]:
+    """Parse a schema definition into a list of {name, type} dicts.
+
+    Accepted formats:
+    - **Spark StructType** — ``StructType([StructField("col", StringType())])``
+    - **DDL string**       — ``"col1 STRING, col2 INT, col3 TIMESTAMP"``
+    - **List of tuples**   — ``[("col1", "string"), ("col2", "int")]``
+    - **Dict**             — ``{"col1": "string", "col2": "int"}``
+
+    Returns a list of ``{"name": ..., "type": ...}`` dicts using LakeLogic type names.
+    """
+    fields: List[Dict[str, str]] = []
+
+    # ── Spark StructType ──────────────────────────────────────────────────
+    type_name = type(schema).__name__
+    if type_name == "StructType":
+        for sf in schema.fields:
+            spark_type = sf.dataType.simpleString().lower().split("(")[0]  # e.g. "decimal(10,2)" → "decimal"
+            ll_type = _SPARK_TYPE_MAP.get(spark_type, "string")
+            fields.append({"name": sf.name, "type": ll_type})
+        return fields
+
+    # ── Dict {"col": "type"} ───────────────────────────────────────────────
+    if isinstance(schema, dict):
+        for name, dtype in schema.items():
+            ll_type = _SPARK_TYPE_MAP.get(dtype.lower().split("(")[0], "string")
+            fields.append({"name": name, "type": ll_type})
+        return fields
+
+    # ── List of tuples [("col", "type")] ───────────────────────────────────
+    if isinstance(schema, (list, tuple)) and schema and isinstance(schema[0], (list, tuple)):
+        for item in schema:
+            name, dtype = item[0], item[1]
+            ll_type = _SPARK_TYPE_MAP.get(dtype.lower().split("(")[0], "string")
+            fields.append({"name": name, "type": ll_type})
+        return fields
+
+    # ── DDL string "col1 TYPE, col2 TYPE" ─────────────────────────────────
+    if isinstance(schema, str):
+        # Try Spark DDL parsing first (if PySpark is available)
+        try:
+            from pyspark.sql.types import _parse_datatype_string  # type: ignore
+            struct = _parse_datatype_string(f"struct<{schema}>")
+            return _parse_schema_to_fields(struct)
+        except Exception:
+            pass
+
+        # Manual DDL parsing: "col1 STRING, col2 INT NOT NULL, col3 TIMESTAMP"
+        import re as _ddl_re
+        for part in schema.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            tokens = _ddl_re.split(r"\s+", part)
+            if len(tokens) >= 2:
+                col_name = tokens[0].strip("`").strip('"')
+                col_type = tokens[1].lower().split("(")[0]
+                ll_type = _SPARK_TYPE_MAP.get(col_type, "string")
+                fields.append({"name": col_name, "type": ll_type})
+        return fields
+
+    raise ValueError(
+        f"Cannot parse schema of type {type(schema).__name__}. "
+        "Accepted: Spark StructType, DDL string ('col1 STRING, col2 INT'), "
+        "list of tuples [('col', 'type')], or dict {'col': 'type'}."
+    )
+
+
+def _schema_to_polars_df(schema: Any):
+    """Build an empty polars DataFrame from a schema definition.
+
+    Used when the user passes a schema instead of data to infer_contract.
+    """
+    import polars as pl
+
+    fields = _parse_schema_to_fields(schema)
+    columns: Dict[str, list] = {}
+    schema_dict: Dict[str, Any] = {}
+
+    for f in fields:
+        columns[f["name"]] = []
+        pl_type_name = _SPARK_TYPE_TO_POLARS.get(f["type"], "Utf8")
+        # Also try from the original spark type
+        if f["type"] in _SPARK_TYPE_MAP:
+            pl_type_name = _SPARK_TYPE_TO_POLARS.get(f["type"], "Utf8")
+        schema_dict[f["name"]] = getattr(pl, pl_type_name, pl.Utf8)
+
+    return pl.DataFrame(columns, schema=schema_dict)
+
 
 def _polars_dtype_to_contract(dtype) -> str:
     """Map a polars DataType instance to a LakeLogic contract type string."""
@@ -624,6 +763,41 @@ class ContractInferrer:
         # when connection is explicitly provided
         return True
 
+    @staticmethod
+    def _is_schema_input(source: Any) -> bool:
+        """Return True if *source* is a schema definition rather than data.
+
+        Recognized schema formats:
+        - Spark ``StructType`` object
+        - List/tuple of ``(name, type)`` pairs
+        - Dict ``{name: type}``
+        - DDL string ``"col1 STRING, col2 INT"`` — detected via heuristic
+          (contains known SQL type keywords and no path separators)
+        """
+        # Spark StructType
+        if type(source).__name__ == "StructType":
+            return True
+        # List/tuple of pairs: [("col", "type"), ...]
+        if isinstance(source, (list, tuple)) and source and isinstance(source[0], (list, tuple)):
+            return True
+        # Dict {"col": "type"}
+        if isinstance(source, dict) and source:
+            # All values should be strings (type names)
+            return all(isinstance(v, str) for v in source.values())
+        # DDL string heuristic: contains known SQL type keywords, no path separators
+        if isinstance(source, str) and not any(sep in source for sep in ("/", "\\")):
+            _ddl_types = {
+                "string", "varchar", "char", "int", "integer", "bigint",
+                "smallint", "tinyint", "float", "double", "decimal",
+                "boolean", "date", "timestamp", "binary", "long", "short",
+            }
+            tokens = {t.strip().lower().split("(")[0] for t in source.replace(",", " ").split()}
+            # Must match at least 2 type keywords (to distinguish from table refs)
+            matches = tokens & _ddl_types
+            if len(matches) >= 2:
+                return True
+        return False
+
     def _load(self, pl):
         """Load source into a polars DataFrame, return (df, source_path)."""
         source = self.source
@@ -633,6 +807,11 @@ class ContractInferrer:
 
         if hasattr(source, "to_dict"):  # pandas DataFrame
             return pl.from_pandas(source), None
+
+        # ── Schema-only inference (StructType, DDL string, tuples, dict) ──
+        if self._is_schema_input(source):
+            df = _schema_to_polars_df(source)
+            return df, None
 
         # ── Database table reference ──────────────────────────────────────
         if isinstance(source, str) and (self.connection is not None or self._is_table_reference(source)):
@@ -1530,7 +1709,7 @@ def infer_contract(
 
     Parameters
     ----------
-    source : str | Path | polars.DataFrame | pandas.DataFrame
+    source : str | Path | polars.DataFrame | pandas.DataFrame | StructType | list | dict
         Data source.  Accepts:
 
         - **File paths** — CSV, Parquet, JSON, NDJSON, Excel, XML
@@ -1539,6 +1718,10 @@ def infer_contract(
           (e.g. ``"catalog.schema.table"`` for Unity Catalog,
           ``"schema.table"`` for DuckDB / PostgreSQL, or ``"table_name"``
           with an explicit ``connection``).
+        - **Spark StructType** — schema-only inference, no data needed
+        - **DDL string** — ``"col1 STRING, col2 INT, col3 TIMESTAMP"``
+        - **List of tuples** — ``[("col1", "string"), ("col2", "int")]``
+        - **Dict** — ``{"col1": "string", "col2": "int"}``
 
     connection : SparkSession | DuckDB connection | SQLAlchemy Engine | str, optional
         Database connection used when *source* is a table reference.
@@ -1623,6 +1806,37 @@ def infer_contract(
         df_raw = pl.read_parquet("data/seed.parquet")
         draft  = infer_contract(df_raw, title="My Table")
         gen    = draft.to_generator()
+
+    Infer from a Spark DDL string (no data needed)::
+
+        draft = infer_contract(
+            "order_id BIGINT, customer_id STRING, amount DOUBLE, created_at TIMESTAMP",
+            title="Orders",
+        )
+        draft.show()
+
+    Infer from a Spark StructType::
+
+        from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+        schema = StructType([
+            StructField("user_id", IntegerType()),
+            StructField("email", StringType()),
+        ])
+        draft = infer_contract(schema, title="Users")
+
+    Infer from a list of (name, type) tuples::
+
+        draft = infer_contract(
+            [("customer_id", "string"), ("revenue", "double"), ("active", "boolean")],
+            title="Customers",
+        )
+
+    Infer from a dict::
+
+        draft = infer_contract(
+            {"product_id": "integer", "name": "string", "price": "decimal"},
+            title="Products",
+        )
     """
     return ContractInferrer(
         source,

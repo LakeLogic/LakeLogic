@@ -224,6 +224,12 @@ LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file
 
 - **[dbt](https://www.getdbt.com/){: target="_blank" } Adapter** — Import dbt `schema.yml` models and sources as LakeLogic contracts — reuse existing dbt definitions without rewriting
 - **[dlt](https://dlthub.com/){: target="_blank" } (Data Load Tool)** — Native `DltAdapter` supporting 100+ verified sources (Stripe, Shopify, SQL databases, Google Analytics, and more) plus declarative REST API ingestion — all with contract-driven quality gates on arrival
+- **Native Streaming Connectors** — Built-in `WebSocketConnector`, `SSEConnector`, `KafkaConnector`, `WebhookConnector` (plus Azure Event Grid, Service Bus, AWS SQS, GCP Pub/Sub) for real-time data feeds piped directly into contract validation with pre-validation rename transformations
+- **Native Database Ingestion** — High-performance SQL extraction via [Polars/ConnectorX](https://pola.rs/){: target="_blank" } and [DuckDB](https://duckdb.org/){: target="_blank" } — supports PostgreSQL, MySQL, SQL Server, SQLite, and more with automatic dialect detection
+- **Incremental CDC** — Watermark-based change data capture with automatic state tracking — injects `WHERE updated_at > last_watermark` into the SQL engine before data leaves the database
+- **Batch Processing** — Memory-safe chunked ingestion via `fetch_size` for massive initial loads — processes 100GB+ tables without OOM errors
+- **Column Projection Pushdown** — Automatically constructs precise `SELECT "col1", "col2"` queries from your contract's `model.fields` — only extracts what the contract declares, zero configuration
+- **Cloud Data Sources** — Native `abfss://`, `s3://`, `gs://` URI support with automatic credential resolution via `CloudCredentialResolver` — Azure AD, AWS IAM roles, GCP ADC, service principals, and Databricks secret scopes all work out of the box
 
 [ :simple-googlecolab: Run the Integrations Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb){: target="_blank" .md-button }
 
