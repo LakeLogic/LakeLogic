@@ -1,0 +1,53 @@
+version: 1.0.0
+
+info:
+  title: "Gold — Trip KPIs"
+  table_name: "{gold_layer}_rideflow_trip_kpis"
+  description: "Daily revenue, volume, and distance KPIs aggregated from completed trips."
+  target_layer: gold
+  domain: marketplace
+  system: rideflow
+
+source:
+  type: delta
+  path: "{silver_path}/silver_rideflow_trips"
+
+model:
+  fields:
+    - name: kpi_date
+      type: date
+      required: true
+    - name: city_code
+      type: string
+    - name: total_trips
+      type: integer
+    - name: total_revenue
+      type: float
+    - name: total_distance_km
+      type: float
+    - name: avg_fare
+      type: float
+    - name: avg_surge
+      type: float
+
+quality:
+  row_rules:
+    - name: positive_revenue
+      sql: "total_revenue >= 0"
+    - name: positive_trips
+      sql: "total_trips >= 0"
+  dataset_rules: []
+
+transformations:
+  - sql: |
+      SELECT
+          CAST(requested_at AS DATE) AS kpi_date,
+          city_code,
+          COUNT(*)                   AS total_trips,
+          SUM(fare_amount)           AS total_revenue,
+          SUM(distance_km)           AS total_distance_km,
+          AVG(fare_amount)           AS avg_fare,
+          AVG(surge_multiplier)      AS avg_surge
+      FROM source
+      WHERE requested_at IS NOT NULL
+      GROUP BY CAST(requested_at AS DATE), city_code

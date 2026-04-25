@@ -1,0 +1,56 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — Stripe Payouts"
+  table_name: "{bronze_layer}_{system}_payouts"
+  description: >
+    Raw driver payout events from Stripe. One row per payout to driver bank account.
+  target_layer: bronze
+  domain: payments
+  system: stripe
+
+model:
+  fields:
+    - name: payout_id
+      type: string
+      required: true
+      description: "Stripe payout ID"
+    - name: driver_id
+      type: string
+      required: true
+      description: "FK to marketplace driver"
+    - name: amount
+      type: string
+      description: "Payout amount in minor units"
+    - name: currency
+      type: string
+      description: "ISO 4217 currency code"
+    - name: status
+      type: string
+      description: "Payout status (paid, pending, failed)"
+    - name: payout_email
+      type: string
+      pii: true
+      description: "Driver payout email"
+    - name: bank_account_last_four
+      type: string
+      pii: true
+      description: "Last 4 of bank account"
+    - name: arrival_date
+      type: string
+      description: "Expected arrival date"
+    - name: created_at
+      type: string
+      description: "Payout creation timestamp"
+
+source:
+  type: landing
+  path: "{landing_root}/payouts"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d"

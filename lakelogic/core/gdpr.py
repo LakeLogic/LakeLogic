@@ -430,82 +430,168 @@ def forget_subjects(
         )
         return df
 
+    # ── Build audit report (written AFTER erasure succeeds) ─────────────
+    _audit_report = None
+    _audit_engine = None
     if audit:
         partition_msg = ""
         if partition_filter:
             partition_msg = f", partition={partition_filter['column']}='{partition_filter['value']}'"
+        
+        timestamp_iso = datetime.now(timezone.utc).isoformat()
         logger.info(
             f"GDPR erasure request: strategy={erasure_strategy}, "
             f"subjects={len(subject_ids)}, pii_columns={pii_columns}{partition_msg}, "
-            f"timestamp={datetime.now(timezone.utc).isoformat()}"
+            f"timestamp={timestamp_iso}"
         )
 
-    # Detect frame type and dispatch
-    try:
-        import polars as pl
+        try:
+            import uuid
 
-        if isinstance(df, (pl.DataFrame, pl.LazyFrame)):
-            return _forget_polars(
-                df,
-                pii_columns,
+            # Build engine name from dataframe type since we don't have processor context here
+            _audit_engine = "pandas"
+            df_type = str(type(df)).lower()
+            if "polars" in df_type:
+                _audit_engine = "polars"
+            elif "pyspark" in df_type:
+                _audit_engine = "spark"
+            elif "duckdb" in df_type or hasattr(df, "fetchdf"):
+                _audit_engine = "duckdb"
+
+            metadata = getattr(contract, "metadata", {}) or {}
+            erasure_report = generate_erasure_report(
+                contract,
                 subject_column,
                 subject_ids,
                 erasure_strategy,
-                hash_salt,
-                partition_filter,
-                delete_reason,
+                partition_filter=partition_filter,
             )
-    except ImportError:
-        pass
+
+            run_id = f"erasure_{uuid.uuid4().hex[:8]}"
+            _audit_report = {
+                "run_id": run_id,
+                "pipeline_run_id": run_id, # standalone event
+                "timestamp": timestamp_iso,
+                "start_time": timestamp_iso,
+                "end_time": timestamp_iso,
+                "run_duration_seconds": 0.0,
+                "engine": _audit_engine,
+                "contract": contract.info.title if getattr(contract, "info", None) else None,
+                "dataset": getattr(contract, "dataset", None),
+                "domain": metadata.get("domain", ""),
+                "system": metadata.get("system", ""),
+                "stage": "gdpr_erasure",
+                "status": "ok",
+                "counts": {
+                    "total": len(subject_ids),
+                    "good": len(subject_ids),
+                    "quarantined": len(subject_ids), # repurpose to mean 'erased count' for easy dashboarding
+                    "quarantine_ratio": 1.0,
+                },
+                "erasure_report": erasure_report,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to build GDPR erasure audit report: {e}")
+
+    # ── Detect frame type and dispatch ────────────────────────────────
+    result = None
 
     try:
-        import pandas as pd
+        try:
+            import polars as pl
 
-        if isinstance(df, pd.DataFrame):
-            return _forget_pandas(
-                df,
-                pii_columns,
-                subject_column,
-                subject_ids,
-                erasure_strategy,
-                hash_salt,
-                partition_filter,
-                delete_reason,
-            )
-    except ImportError:
-        pass
+            if isinstance(df, (pl.DataFrame, pl.LazyFrame)):
+                result = _forget_polars(
+                    df,
+                    pii_columns,
+                    subject_column,
+                    subject_ids,
+                    erasure_strategy,
+                    hash_salt,
+                    partition_filter,
+                    delete_reason,
+                )
+        except ImportError:
+            pass
 
-    # PySpark DataFrame
-    try:
-        from pyspark.sql import DataFrame as SparkDataFrame
+        if result is None:
+            try:
+                import pandas as pd
 
-        if isinstance(df, SparkDataFrame):
-            return _forget_pyspark(
-                df,
-                pii_columns,
-                subject_column,
-                subject_ids,
-                erasure_strategy,
-                hash_salt,
-                partition_filter,
-                delete_reason,
-            )
-    except ImportError:
-        pass
+                if isinstance(df, pd.DataFrame):
+                    result = _forget_pandas(
+                        df,
+                        pii_columns,
+                        subject_column,
+                        subject_ids,
+                        erasure_strategy,
+                        hash_salt,
+                        partition_filter,
+                        delete_reason,
+                    )
+            except ImportError:
+                pass
 
-    # DuckDB relation → convert to pandas, process, convert back
-    if hasattr(df, "fetchdf"):
-        import pandas as pd
+        if result is None:
+            # PySpark DataFrame
+            try:
+                from pyspark.sql import DataFrame as SparkDataFrame
 
-        pdf = df.fetchdf()
-        result = _forget_pandas(
-            pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt, partition_filter, delete_reason
-        )
-        import duckdb
+                if isinstance(df, SparkDataFrame):
+                    result = _forget_pyspark(
+                        df,
+                        pii_columns,
+                        subject_column,
+                        subject_ids,
+                        erasure_strategy,
+                        hash_salt,
+                        partition_filter,
+                        delete_reason,
+                    )
+            except ImportError:
+                pass
 
-        return duckdb.from_df(result)
+        if result is None:
+            # DuckDB relation → convert to pandas, process, convert back
+            if hasattr(df, "fetchdf"):
+                import pandas as pd
 
-    raise TypeError(f"Unsupported dataframe type: {type(df)}")
+                pdf = df.fetchdf()
+                pdf_result = _forget_pandas(
+                    pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt, partition_filter, delete_reason
+                )
+                import duckdb
+
+                result = duckdb.from_df(pdf_result)
+
+        if result is None:
+            raise TypeError(f"Unsupported dataframe type: {type(df)}")
+
+    except Exception as exc:
+        # Record failure in audit log before re-raising
+        if _audit_report is not None:
+            try:
+                from lakelogic.core.run_log import write_run_log
+
+                _audit_report["status"] = "error"
+                _audit_report["error_message"] = str(exc)
+                _audit_report["end_time"] = datetime.now(timezone.utc).isoformat()
+                write_run_log(_audit_report, contract, engine_name=_audit_engine)
+            except Exception:
+                pass
+        raise
+
+    # ── Write audit log after successful erasure ──────────────────────
+    if _audit_report is not None:
+        try:
+            from lakelogic.core.run_log import write_run_log
+
+            _audit_report["end_time"] = datetime.now(timezone.utc).isoformat()
+            write_run_log(_audit_report, contract, engine_name=_audit_engine)
+        except Exception as e:
+            logger.warning(f"Failed to record GDPR erasure to run_log: {e}")
+
+    return result
 
 
 def mask_pii_columns(

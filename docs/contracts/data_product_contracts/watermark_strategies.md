@@ -11,9 +11,9 @@ Watermark strategies control **how LakeLogic tracks incremental progress** — w
 ## Strategy Comparison
 
 | Strategy | Best For | Source Type | State Stored In | Requires Spark? |
-|---|---|---|---|---|
-| `max_target` | Most batch pipelines | Table only | Target table (self-heal) | Yes |
-| `pipeline_log` | File-based incremental | File only ⚠️ | `_run_logs` table | No |
+| --- | --- | --- | --- | --- |
+| `max_target` | Most batch pipelines | Table only | Target table (self-heal) | No |
+| `pipeline_log` | Safe cross-layer increments | File or Table | `_run_logs` table | No |
 | `lookback` | Simple rolling windows | File or Table | None (stateless) | No |
 | `date_range` | Backfills & widgets | File or Table | None (explicit dates) | No |
 | `manifest` | Non-Spark pipelines | File only | JSON manifest file | No |
@@ -21,9 +21,8 @@ Watermark strategies control **how LakeLogic tracks incremental progress** — w
 
 ### Cross-Validation Rules (enforced at runtime)
 
-- `pipeline_log` on a table source → **raises ValueError** (no file mtimes to compare)
 - `delta_version` on a file source → **raises ValueError** (no Delta transaction log)
-- For table-to-table incremental, use `load_mode: cdc` with `cdc_timestamp_field`
+- For table-to-table incremental, use `watermark_strategy: pipeline_log` to safely track cross-layer timestamps, or `load_mode: cdc` with `cdc_timestamp_field`
 
 ---
 
@@ -45,9 +44,7 @@ source:
 
 ## Strategy 2: `pipeline_log`
 
-Queries the `_run_logs` table for the last successful `max_source_mtime` of this dataset. Compares file modification times against the watermark.
-
-⚠️ **File sources only** — raises ValueError on table sources.
+Queries the `_run_logs` table for the last successful high-water mark of this dataset. Compares source timestamps or file modification times against the watermark. Safe for cross-layer table reads because it uses the source timestamp from the previous run, avoiding data loss from late-arriving records.
 
 ```yaml
 source:
@@ -122,6 +119,7 @@ source:
 ```
 
 Manifest JSON format:
+
 ```json
 { "processed_partitions": ["2024-03-20", "2024-03-21"], "last_updated": "..." }
 ```

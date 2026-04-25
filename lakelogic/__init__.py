@@ -5,6 +5,7 @@ from lakelogic.core.bootstrap import ContractDraft, ContractInferrer, infer_cont
 from lakelogic.core.describe_columns import describe_columns
 from lakelogic.core.generator import DataGenerator
 from lakelogic.core.incremental import Boundary, IncrementalBoundary
+from lakelogic.core.streaming import StreamingSimulator
 from lakelogic.core.models import (
     DataContract,
     FieldDefinition,
@@ -193,6 +194,7 @@ observability = help.observability
 __all__ = [
     "DataProcessor",
     "DataGenerator",
+    "StreamingSimulator",
     "DataContract",
     "FieldDefinition",
     "QualityRule",

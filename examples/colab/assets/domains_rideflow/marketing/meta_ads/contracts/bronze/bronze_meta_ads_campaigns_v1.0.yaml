@@ -1,0 +1,60 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — Meta Ads Campaigns"
+  table_name: "{bronze_layer}_{system}_campaigns"
+  description: >
+    Raw Meta (Facebook/Instagram) advertising campaign metrics. Aggregate data — no PII.
+  target_layer: bronze
+  domain: marketing
+  system: meta_ads
+
+model:
+  fields:
+    - name: campaign_id
+      type: string
+      required: true
+      description: "Meta campaign ID"
+    - name: campaign_name
+      type: string
+      required: true
+      description: "Campaign name"
+    - name: adset_id
+      type: string
+      description: "Ad set ID"
+    - name: adset_name
+      type: string
+      description: "Ad set name"
+    - name: date
+      type: string
+      description: "Reporting date"
+    - name: impressions
+      type: string
+      description: "Number of impressions"
+    - name: clicks
+      type: string
+      description: "Number of clicks (link)"
+    - name: spend
+      type: string
+      description: "Total spend"
+    - name: actions_json
+      type: string
+      description: "Raw actions array as JSON"
+    - name: conversions
+      type: string
+      description: "Number of conversions"
+    - name: currency
+      type: string
+      description: "ISO 4217 currency code"
+
+source:
+  type: landing
+  path: "{landing_root}/campaigns"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

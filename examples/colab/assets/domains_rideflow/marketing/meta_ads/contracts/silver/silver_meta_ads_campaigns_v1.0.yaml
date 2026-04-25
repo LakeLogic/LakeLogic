@@ -1,0 +1,45 @@
+version: 1.0.0
+info:
+  title: "Silver \u2014 Meta Ads Campaigns"
+  table_name: '{silver_layer}_meta_ads_campaigns'
+  description: Cleaned, typed, and deduplicated data.
+  target_layer: silver
+  domain: marketing
+  system: meta_ads
+model:
+  fields:
+  - name: campaign_id
+    type: string
+    required: true
+  - name: campaign_name
+    type: string
+    required: true
+  - name: adset_id
+    type: string
+  - name: adset_name
+    type: string
+  - name: date
+    type: string
+  - name: impressions
+    type: integer
+  - name: clicks
+    type: integer
+  - name: spend
+    type: string
+  - name: actions_json
+    type: string
+  - name: conversions
+    type: integer
+  - name: currency
+    type: string
+quality:
+  row_rules: []
+  dataset_rules:
+  - unique: campaign_id
+transformations:
+- deduplicate:
+    by:
+    - campaign_id
+source:
+  type: delta
+  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_campaigns'

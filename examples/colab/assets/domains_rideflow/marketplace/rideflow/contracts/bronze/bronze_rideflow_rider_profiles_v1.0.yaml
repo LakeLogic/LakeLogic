@@ -1,0 +1,60 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — RideFlow Rider Profiles"
+  table_name: "{bronze_layer}_{system}_rider_profiles"
+  description: >
+    Raw rider profile data from the RideFlow platform.
+    Contains rider PII including name, email, phone, date of birth, and address.
+  target_layer: bronze
+  domain: marketplace
+  system: rideflow
+
+model:
+  fields:
+    - name: rider_id
+      type: string
+      required: true
+      description: "Unique rider identifier"
+    - name: name
+      type: string
+      description: "Rider full name"
+    - name: email
+      type: string
+      description: "Rider email address"
+    - name: phone
+      type: string
+      description: "Rider phone number"
+    - name: date_of_birth
+      type: string
+      description: "Rider date of birth"
+    - name: home_address
+      type: string
+      description: "Rider home address"
+    - name: city_code
+      type: string
+      description: "Primary city"
+    - name: signup_date
+      type: string
+      description: "Account creation date"
+    - name: status
+      type: string
+      description: "active, inactive, suspended"
+    - name: preferred_payment_method
+      type: string
+      description: "card, apple_pay, google_pay, cash"
+    - name: updated_at
+      type: string
+      description: "Last profile update timestamp"
+
+source:
+  type: landing
+  path: "{landing_root}/rider_profiles"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

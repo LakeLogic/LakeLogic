@@ -447,9 +447,10 @@ class PolarsAdapter(EngineAdapter):
         missing = expected - existing
         unknown = existing - expected
 
-        # Exclude transient and lineage columns from unknown field assessment
+        # Exclude transient, framework, and lineage columns from unknown field assessment
         transient_cols = {"rn", "__index_level_0__", "_row_number"}
-        unknown = unknown - transient_cols - self._lineage_columns()
+        system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
+        unknown = unknown - transient_cols - system_cols - self._lineage_columns()
 
         for col in missing:
             lf = lf.with_columns(pl.lit(None).alias(col))

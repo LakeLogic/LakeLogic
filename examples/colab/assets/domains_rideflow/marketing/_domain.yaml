@@ -1,0 +1,98 @@
+domain: marketing
+
+# ── Domain Ownership ────────────────────────────────────────────────────────
+ownership:
+  domain_owner: "Growth Team"
+  team: growth_analytics
+  contacts:
+    - name: Growth Data Lead
+      role: oncall
+      email: growth-data@rideflow.com
+  cost_center: growth_marketing
+  jira_project: GROWTH
+
+# ── Service Level Objectives (SLOs) ──────────────────────────────────────
+slo:
+  freshness:
+    bronze:
+      max_delay_minutes: 120
+      check_column: "_lakelogic_loaded_at"
+      max_source_delay_minutes: 240
+    silver:
+      max_delay_minutes: 360
+      check_column: "_lakelogic_processed_at"
+      max_source_delay_minutes: 480
+
+  row_count:
+    bronze:
+      min_rows: 1
+      max_rows: 100000
+      warn_only: false
+      anomaly:
+        enabled: true
+        lookback_runs: 14
+        min_ratio: 0.5
+        max_ratio: 2.0
+        method: "median"
+        min_runs_before_enforcement: 5
+    silver:
+      min_rows: 1
+      max_rows: 100000
+      warn_only: false
+      anomaly:
+        enabled: true
+        lookback_runs: 14
+        min_ratio: 0.5
+        max_ratio: 2.0
+        method: "median"
+        min_runs_before_enforcement: 5
+
+  quality:
+    min_good_ratio: 0.95
+    max_quarantine_ratio: 0.05
+    by_severity:
+      critical:
+        min_good_ratio: 0.999
+      high:
+        min_good_ratio: 0.99
+      medium:
+        min_good_ratio: 0.95
+      low:
+        min_good_ratio: 0.90
+
+  schedule:
+    environments: ["dev", "prod", "staging"]
+    expected_start_utc: "06:00"
+    expected_completion_utc: "07:00"
+    expected_duration_minutes: 30
+    warn_if_duration_exceeds_minutes: 60
+    timezone: "UTC"
+
+# ── Cost Governance ──────────────────────────────────────────────────────────
+cost:
+  currency: "GBP"
+  budget:
+    daily_limit: 20.00
+    weekly_limit: 100.00
+    monthly_limit: 300.00
+    per_run_anomaly_multiplier: 3.0
+    alert_channels: ["slack", "email"]
+
+# ── Observatory Telemetry ────────────────────────────────────────────────────
+observatory:
+  enabled: true
+  endpoint: "http://localhost:8001/api/v1/operations/run-logs/ingest"  # e.g., "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
+  api_key: "233rwejkkioasdaskasasp"   # e.g., "${LAKELOGIC_API_KEY}" for prod
+  emit_on: [success, partial, failed]
+  include_quarantine_sample: true     # attach first 50 quarantined rows
+
+# ── Compliance & Privacy ─────────────────────────────────────────────────────
+compliance:
+  erasure:
+    strategy: redact   # marketing PII replaced with ***REDACTED*** for attribution gap analysis
+
+# Layer aliases
+bronze_layer: bronze
+silver_layer: silver
+gold_layer: gold
+

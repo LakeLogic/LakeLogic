@@ -2,7 +2,7 @@
 Quarantine materialization for LakeLogic.
 
 Handles writing quarantined (bad) records to file-based targets and
-multi-backend table targets (Spark, DuckDB, SQLite, Snowflake, BigQuery).
+multi-backend table targets (Spark, DuckDB, SQLite, Snowflake, BigQuery, Iceberg).
 
 Extracted from materialization.py to keep concerns focused.
 """
@@ -113,6 +113,8 @@ def _write_quarantine_table(
         return _write_quarantine_table_snowflake(df, contract, table_name, metadata)
     if backend == "bigquery":
         return _write_quarantine_table_bigquery(df, contract, table_name, metadata)
+    if backend == "iceberg":
+        return _write_quarantine_table_iceberg(df, contract, table_name, metadata)
 
     logger.warning(f"Unsupported quarantine table backend: {backend}")
     return {}
@@ -417,6 +419,82 @@ def _write_quarantine_table_bigquery(df: Any, contract, table_name: str, metadat
     rows_written = len(pdf)
     logger.info(f"Wrote {rows_written} quarantined rows to {table_id}")
     return {"target": table_id, "rows_written": rows_written, "format": "bigquery"}
+
+
+def _write_quarantine_table_iceberg(df: Any, contract, table_name: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Write quarantined records to an Apache Iceberg table via pyiceberg.
+
+    Requires ``pyiceberg`` and ``pyarrow``.  The catalog is resolved from
+    metadata (``iceberg_catalog_name``, ``iceberg_catalog_uri``) or
+    environment variables (``ICEBERG_CATALOG_NAME``, ``ICEBERG_CATALOG_URI``).
+
+    Args:
+        df: Engine dataframe for quarantined data.
+        contract: DataContract instance.
+        table_name: Fully qualified Iceberg table identifier (e.g. ``db.quarantine_orders``).
+        metadata: Contract metadata.
+
+    Returns:
+        Metadata about the write.
+    """
+    try:
+        from pyiceberg.catalog import load_catalog
+        import pyarrow as pa
+    except ImportError as exc:
+        raise ImportError(
+            "Iceberg quarantine backend requires pyiceberg and pyarrow: "
+            "pip install pyiceberg pyarrow"
+        ) from exc
+
+    catalog_name = metadata.get("iceberg_catalog_name") or os.getenv("ICEBERG_CATALOG_NAME", "default")
+    catalog_props = {}
+    catalog_uri = metadata.get("iceberg_catalog_uri") or os.getenv("ICEBERG_CATALOG_URI")
+    if catalog_uri:
+        catalog_props["uri"] = catalog_uri
+    catalog_warehouse = metadata.get("iceberg_catalog_warehouse") or os.getenv("ICEBERG_CATALOG_WAREHOUSE")
+    if catalog_warehouse:
+        catalog_props["warehouse"] = catalog_warehouse
+
+    catalog = load_catalog(catalog_name, **catalog_props)
+
+    # Convert to Arrow table
+    if hasattr(df, "to_arrow"):
+        # Polars DataFrame
+        collected = df.collect() if hasattr(df, "collect") else df
+        arrow_table = collected.to_arrow()
+    elif hasattr(df, "to_pandas"):
+        import pyarrow as pa
+        arrow_table = pa.Table.from_pandas(df.to_pandas())
+    else:
+        from lakelogic.core.materialization import _to_pandas
+        import pyarrow as pa
+        arrow_table = pa.Table.from_pandas(_to_pandas(df))
+
+    rows_written = arrow_table.num_rows
+
+    # Parse namespace and table
+    parts = table_name.split(".")
+    if len(parts) >= 2:
+        namespace = tuple(parts[:-1])
+        tbl_name = parts[-1]
+    else:
+        namespace = ("default",)
+        tbl_name = table_name
+
+    try:
+        iceberg_table = catalog.load_table(f"{'.'.join(namespace)}.{tbl_name}")
+    except Exception:
+        # Table doesn't exist — create it
+        iceberg_table = catalog.create_table(
+            f"{'.'.join(namespace)}.{tbl_name}",
+            schema=arrow_table.schema,
+        )
+
+    iceberg_table.append(arrow_table)
+
+    logger.info(f"Wrote {rows_written} quarantined rows to Iceberg table {table_name}")
+    return {"target": table_name, "rows_written": rows_written, "format": "iceberg"}
 
 
 # ── Lineage stamping ──
@@ -837,12 +915,65 @@ def materialize_quarantine(
             "write_mode": delta_write_mode,
         }
 
+    # ── Iceberg format (Polars / DuckDB via pyiceberg) ────────────────────────
+    if resolved_format == "iceberg":
+        try:
+            from pyiceberg.catalog import load_catalog
+            import pyarrow as pa
+        except ImportError as exc:
+            raise ImportError(
+                "Iceberg quarantine format requires pyiceberg and pyarrow: "
+                "pip install pyiceberg pyarrow"
+            ) from exc
+
+        metadata = contract.metadata or {}
+        catalog_name = metadata.get("iceberg_catalog_name") or os.getenv("ICEBERG_CATALOG_NAME", "default")
+        catalog_props = {}
+        catalog_uri = metadata.get("iceberg_catalog_uri") or os.getenv("ICEBERG_CATALOG_URI")
+        if catalog_uri:
+            catalog_props["uri"] = catalog_uri
+        catalog_warehouse = metadata.get("iceberg_catalog_warehouse") or os.getenv("ICEBERG_CATALOG_WAREHOUSE")
+        if catalog_warehouse:
+            catalog_props["warehouse"] = catalog_warehouse
+
+        catalog = load_catalog(catalog_name, **catalog_props)
+
+        # Convert to Arrow
+        if _is_polars_frame(df):
+            collected = df.collect() if hasattr(df, "collect") else df
+            arrow_table = collected.to_arrow()
+            rows_written = collected.height
+        else:
+            pdf = _to_pandas(df)
+            arrow_table = pa.Table.from_pandas(pdf)
+            rows_written = len(pdf)
+
+        # Parse table identifier from target path
+        ice_table_id = str(target_file).replace("/", ".").replace("\\", ".")
+        # Strip leading dots and normalize
+        ice_table_id = ice_table_id.strip(".")
+
+        try:
+            iceberg_table = catalog.load_table(ice_table_id)
+        except Exception:
+            iceberg_table = catalog.create_table(ice_table_id, schema=arrow_table.schema)
+
+        iceberg_table.append(arrow_table)
+
+        logger.info(f"Wrote {rows_written} quarantined rows to Iceberg table {ice_table_id}")
+        return {
+            "target": ice_table_id,
+            "rows_written": rows_written,
+            "format": "iceberg",
+            "write_mode": write_mode,
+        }
+
     # ── File formats: csv / parquet ───────────────────────────────────────────
     if resolved_format not in ["csv", "parquet"]:
         raise ValueError(
             f"Unsupported quarantine format '{resolved_format}'. "
             "Supported: parquet, csv, delta (requires deltalake), "
-            "or use Spark for iceberg/json."
+            "iceberg (requires pyiceberg), or use Spark for json."
         )
 
     # Prefer native Polars writes to avoid pyarrow dependency.

@@ -196,9 +196,10 @@ class DuckDBAdapter(EngineAdapter):
         missing = expected - existing_cols
         unknown = existing_cols - expected
 
-        # Exclude transient/lineage columns from unknown
+        # Exclude transient, framework, and lineage columns from unknown
         transient_cols = {"rn", "__index_level_0__", "_row_number"}
-        unknown = unknown - transient_cols - self._lineage_columns()
+        system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
+        unknown = unknown - transient_cols - system_cols - self._lineage_columns()
 
         # Add missing columns as NULL
         add_cols = []
@@ -604,6 +605,11 @@ class DuckDBAdapter(EngineAdapter):
                 output_rows=post_output,
                 duration_ms=(time.perf_counter() - step_start) * 1000,
             )
+            # Prune type-error columns that no longer exist after
+            # transformations (e.g. GROUP BY replaces entire column set)
+            if getattr(self, "_type_err_cols", None):
+                surviving = set(self._get_current_columns(current_table))
+                self._type_err_cols = [c for c in self._type_err_cols if c in surviving]
 
         # 4. Row-level quality rules
         row_rules = self.get_row_rules()

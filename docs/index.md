@@ -61,6 +61,7 @@ Write once. Run on [Spark](https://spark.apache.org/){: target="_blank" }, [Pola
       strategy: merge
       primary_key: [cus_id]
       target_path: catalog.silver.customers
+      format: iceberg  # natively supports iceberg, delta, parquet, csv
     ```
 
 === "2. Run Pipeline"
@@ -149,7 +150,7 @@ Data mesh isn't a buzzword in LakeLogic — it's the **architecture**. The `doma
 
 ## Define Once. Enforce Everywhere.
 
-LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file replaces hundreds of lines of validation code, and it runs on any engine.
+LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file replaces hundreds of lines of ingestion, validation, and materialization code, and it runs on any engine.
 
 > **Think of a contract like a building code.** The architect (data engineer) writes the spec once. Every builder (Spark, Polars, DuckDB) follows the same code — no matter which team or tool runs the pipeline.
 
@@ -191,6 +192,7 @@ LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file
 ### Engine & Scale
 
 - **Engine Agnostic** — Write once, run on [Spark](https://spark.apache.org/){: target="_blank" }, [Polars](https://pola.rs/){: target="_blank" }, or [DuckDB](https://duckdb.org/){: target="_blank" } — same contract, zero code changes
+- **Multi-Format Materialization** — Natively output validated data to **Apache Iceberg** or **Delta Lake** open-table formats without requiring pipeline rewrites
 - **Dimensional Modeling** — Native SCD Type 2 (slowly changing dimensions), merge/upsert (SCD1), append-only fact tables, periodic snapshot overwrites, and partition-aware writes — all declared in YAML, no manual `MERGE INTO` SQL required
 - **Incremental-First** — Built-in watermarking, CDC, and file-mtime tracking
 - **Parallel Processing** — Concurrent multi-contract execution with data-layer-aware orchestration and topological dependency ordering

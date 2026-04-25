@@ -261,6 +261,7 @@ class SourceConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     type: str  # landing | stream | table | dlt
+    query: Optional[str] = None
     path: Optional[str] = None
     format: Optional[str] = None
     load_mode: str = "full"  # full | incremental | cdc
@@ -370,6 +371,7 @@ class SourceConfig(BaseModel):
 
     _SOURCE_KNOWN_KEYS: set = {
         "type",
+        "query",
         "path",
         "format",
         "load_mode",
@@ -1615,6 +1617,7 @@ class DataContract(BaseModel):
 
     # EXTERNAL LOGIC
     external_logic: Optional[ExternalLogic] = None
+    observatory: Optional[Dict[str, Any]] = None
 
     # LLM EXTRACTION (unstructured → structured)
     extraction: Optional[ExtractionConfig] = None
@@ -1630,6 +1633,7 @@ class DataContract(BaseModel):
     transformations: List[Transformation] = Field(default_factory=list)
     service_levels: Optional[ServiceLevel] = None
     quarantine: Optional[Quarantine] = Field(default_factory=Quarantine)
+    compliance: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     # TIER / LAYER ── mandatory for single-contract mode
     tier: Optional[str] = Field(
@@ -1711,6 +1715,8 @@ class DataContract(BaseModel):
         "slaProperties",
         "tags",
         "customProperties",
+        "observatory",
+        "compliance",
     }
     _PRIVATE_EXTRA_KEYS: set = {
         "_base_path",

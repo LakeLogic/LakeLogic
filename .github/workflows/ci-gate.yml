@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   pull-requests: write # To post comments on PRs
 
 jobs:
@@ -61,7 +62,13 @@ jobs:
           uv pip install --system pytest pytest-cov
 
       - name: Run Tests
-        run: pytest tests/ -x -q --tb=short --cov=lakelogic --cov-report=term-missing
+        run: pytest tests/ -x -q --tb=short --cov=lakelogic --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=25
 
-      - name: Fail on Low Coverage
-        run: pytest tests/ --cov=lakelogic --cov-fail-under=50 -q --no-header 2>/dev/null || echo "⚠️ Coverage below 50% — work in progress"
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true

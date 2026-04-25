@@ -1,0 +1,51 @@
+version: 1.0.0
+
+info:
+  title: "Gold — Surge Pricing ML Model Log"
+  table_name: "{gold_layer}_{system}_surge_pricing_model"
+  description: "Tracks ML inference outputs for dynamic surge pricing, classifying ML behavior against EU AI Act bounds."
+  target_layer: gold
+  domain: marketplace
+  system: rideflow
+
+dataset: "surge_pricing_model"
+
+source:
+  type: landing
+  format: parquet
+  # Simulating a direct Gold ingestion for inferences that map into landing -> gold
+  path: "{storage_root}/{domain}/surge_inference_landing"
+
+model:
+  fields:
+    - name: inference_id
+      type: string
+      required: true
+    - name: model_version
+      type: string
+      required: true
+    - name: city_code
+      type: string
+    - name: demand_index
+      type: float
+    - name: surge_multiplier
+      type: float
+      required: true
+    - name: timestamp
+      type: timestamp
+      required: true
+
+quality:
+  row_rules:
+    - name: valid_surge_bounds
+      sql: "surge_multiplier >= 1.0 AND surge_multiplier <= 5.0"
+    - name: demand_index_bounds
+      sql: "demand_index >= 0.0 AND demand_index <= 10.0"
+
+  dataset_rules:
+    - unique: inference_id
+
+transformations: []
+
+lineage:
+  enabled: true

@@ -553,7 +553,8 @@ class SnowflakeAdapter(EngineAdapter):
 
         missing = expected - existing_cols
         unknown = existing_cols - expected
-        unknown = unknown - self._lineage_columns()
+        system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
+        unknown = unknown - system_cols - self._lineage_columns()
 
         server = self.contract.server
         from lakelogic.core.models import SchemaPolicy as _SP

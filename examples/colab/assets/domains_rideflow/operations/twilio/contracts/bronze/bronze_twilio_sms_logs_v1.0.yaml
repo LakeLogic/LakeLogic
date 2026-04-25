@@ -1,0 +1,66 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — Twilio SMS Logs"
+  table_name: "{bronze_layer}_{system}_sms_logs"
+  description: >
+    Raw SMS notification logs from Twilio. One row per SMS sent.
+  target_layer: bronze
+  domain: operations
+  system: twilio
+
+model:
+  fields:
+    - name: message_sid
+      type: string
+      required: true
+      description: "Twilio message SID"
+    - name: recipient_phone
+      type: string
+      required: true
+      pii: true
+      description: "Recipient phone number"
+    - name: sender_phone
+      type: string
+      pii: true
+      description: "Sender phone number"
+    - name: message_body
+      type: string
+      pii: true
+      description: "SMS body text (may contain PII)"
+    - name: status
+      type: string
+      description: "delivered, failed, undelivered, sent, queued"
+    - name: direction
+      type: string
+      description: "outbound-api, inbound"
+    - name: num_segments
+      type: string
+      description: "Number of SMS segments"
+    - name: price
+      type: string
+      description: "Cost of the message"
+    - name: price_unit
+      type: string
+      description: "Currency of price"
+    - name: sent_at
+      type: string
+      description: "Send timestamp"
+    - name: delivered_at
+      type: string
+      description: "Delivery confirmation timestamp"
+    - name: error_code
+      type: string
+      description: "Twilio error code (null if success)"
+
+source:
+  type: landing
+  path: "{landing_root}/sms_logs"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

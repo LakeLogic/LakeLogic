@@ -93,6 +93,48 @@ class PipelineRunSummary:
             "results": self.results,
         }
 
+    def __str__(self) -> str:
+        lines = []
+        lines.append("=" * 80)
+        lines.append(" PIPELINE RUN SUMMARY")
+        lines.append("=" * 80)
+        lines.append(f"  Pipeline run    : {self.run_id}")
+        lines.append(f"  Environment     : {self.environment}")
+        lines.append(f"  Dry run         : {self.dry_run}")
+        lines.append("")
+        
+        if not self.results:
+            lines.append("  No contracts processed.")
+            lines.append("=" * 80)
+            return "\n".join(lines)
+            
+        header = f"  {'Table Name':<38} {'Layer':<8} {'Status':<10} {'Rows':<8} {'Good/Qrtn':<12}"
+        lines.append(header)
+        lines.append("  " + "-" * 78)
+        
+        for r in self.results:
+            t_name = str(r.get("table_name") or r.get("contract") or "")[:36]
+            layer = str(r.get("layer") or "")[:7]
+            status = str(r.get("status") or "")[:9]
+            rows = str(r.get("rows", "-"))[:7]
+            
+            good = r.get("rows_good")
+            bad = r.get("rows_bad")
+            if good is not None and bad is not None:
+                dq_str = f"{good}/{bad}"
+            else:
+                dq_str = "-"
+                
+            line = f"  {t_name:<38} {layer:<8} {status:<10} {rows:<8} {dq_str:<12}"
+            lines.append(line)
+            
+            err = r.get("error")
+            if err:
+                lines.append(f"    └─ Error: {str(err)[:70]}")
+                
+        lines.append("=" * 80)
+        return "\n".join(lines)
+
 
 class CircuitBreakerTripped(Exception):
     """Raised when too many consecutive entity failures indicate an infrastructure outage."""
@@ -287,7 +329,7 @@ class LakehousePipeline:
             if target_layer in ("silver", "gold"):
                 source = contract_dict.get("source") or {}
                 if _is_direct:
-                    if not source.get("path") and _layer_root:
+                    if not source.get("path") and source.get("type") != "sql" and _layer_root:
                         source["path"] = f"{_layer_root}/{table_name}"
                         source.setdefault("type", "landing")
                         source.setdefault("format", "delta")
@@ -433,7 +475,11 @@ class LakehousePipeline:
             if not c or not c.depends_on:
                 levels[entity] = 0
                 return 0
-            dep_level = max(_level(dep, visited) for dep in c.depends_on if dep in by_entity)
+            dep_levels = [_level(dep, visited) for dep in c.depends_on if dep in by_entity]
+            if not dep_levels:
+                levels[entity] = 0
+                return 0
+            dep_level = max(dep_levels)
             levels[entity] = dep_level + 1
             return dep_level + 1
 
@@ -1102,6 +1148,33 @@ class LakehousePipeline:
 
     # ── Phase 3: Compliance & Privacy ────────────────────────────────────────
 
+    def _resolve_erasure_strategy(self, contract_dict: Optional[Dict[str, Any]], fallback: str) -> str:
+        """Resolve the effective erasure strategy for a contract.
+
+        Resolution order (first non-None wins):
+          1. Contract-level: ``contract_dict.compliance.erasure.strategy``
+          2. Registry-level: ``self.registry.compliance.erasure.strategy``
+          3. Fallback parameter (from CLI or method default)
+        """
+        # 1. Contract-level override
+        if contract_dict:
+            c_strategy = (
+                (contract_dict.get("compliance") or {})
+                .get("erasure", {})
+                .get("strategy")
+            )
+            if c_strategy:
+                return c_strategy
+
+        # 2. Registry-level (domain / system)
+        reg_compliance = getattr(self.registry, "compliance", None) or {}
+        r_strategy = (reg_compliance.get("erasure") or {}).get("strategy")
+        if r_strategy:
+            return r_strategy
+
+        # 3. Fallback
+        return fallback
+
     def _execute_gdpr_pass(
         self,
         active_contracts: List[RegistryContract],
@@ -1132,6 +1205,15 @@ class LakehousePipeline:
             if not has_target:
                 continue
 
+            # Resolve per-contract effective strategy (contract → registry → CLI param)
+            effective_strategy = self._resolve_erasure_strategy(c.contract_dict, strategy)
+
+            if effective_strategy != strategy:
+                logger.info(
+                    f"  [{c.entity}] Using compliance config strategy '{effective_strategy}' "
+                    f"(overrides default '{strategy}')"
+                )
+
             mat_cfg = (c.contract_dict or {}).get("materialization", {})
             mat_target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
 
@@ -1141,13 +1223,13 @@ class LakehousePipeline:
 
                 set_clauses = []
                 for col in pii_cols:
-                    if col == subject_col and strategy == "nullify":
+                    if col == subject_col and effective_strategy == "nullify":
                         continue
-                    if strategy == "nullify":
+                    if effective_strategy == "nullify":
                         set_clauses.append(f"`{col}` = NULL")
-                    elif strategy == "redact":
+                    elif effective_strategy == "redact":
                         set_clauses.append(f"`{col}` = '***REDACTED***'")
-                    elif strategy == "hash":
+                    elif effective_strategy == "hash":
                         set_clauses.append(f"`{col}` = hex(sha2(concat('{salt}', `{col}`), 256))")
 
                 if not set_clauses:
@@ -1175,7 +1257,7 @@ class LakehousePipeline:
 
                 if affected > 0 or dry_run:
                     report = generate_erasure_report(
-                        dc, subject_col, subject_ids, strategy, affected, partition_filter=partition_filter
+                        dc, subject_col, subject_ids, effective_strategy, affected, partition_filter=partition_filter
                     )
                     report["pipeline_run_id"] = self.run_id
 
@@ -1225,6 +1307,15 @@ class LakehousePipeline:
             if not has_target:
                 continue
 
+            # Resolve per-contract effective strategy (contract → registry → CLI param)
+            effective_strategy = self._resolve_erasure_strategy(c.contract_dict, strategy)
+
+            if effective_strategy != strategy:
+                logger.info(
+                    f"  [{c.entity}] Using compliance config strategy '{effective_strategy}' "
+                    f"(overrides default '{strategy}')"
+                )
+
             mat_cfg = (c.contract_dict or {}).get("materialization", {})
             mat_target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
 
@@ -1234,13 +1325,13 @@ class LakehousePipeline:
 
                 set_clauses = []
                 for col in phi_cols:
-                    if col == patient_col and strategy == "nullify":
+                    if col == patient_col and effective_strategy == "nullify":
                         continue
-                    if strategy == "nullify":
+                    if effective_strategy == "nullify":
                         set_clauses.append(f"`{col}` = NULL")
-                    elif strategy == "redact":
+                    elif effective_strategy == "redact":
                         set_clauses.append(f"`{col}` = '***REDACTED_PHI***'")
-                    elif strategy == "hash":
+                    elif effective_strategy == "hash":
                         set_clauses.append(f"`{col}` = hex(sha2(concat('{salt}', `{col}`), 256))")
 
                 if not set_clauses:
@@ -1268,7 +1359,7 @@ class LakehousePipeline:
 
                 if affected > 0 or dry_run:
                     report = generate_hipaa_erasure_report(
-                        dc, patient_col, patient_ids, strategy, affected, partition_filter=partition_filter
+                        dc, patient_col, patient_ids, effective_strategy, affected, partition_filter=partition_filter
                     )
                     report["pipeline_run_id"] = self.run_id
 
@@ -1934,6 +2025,7 @@ class LakehousePipeline:
                         "data_layer": layer,
                         "domain": getattr(self.registry, "domain", None),
                         "system": getattr(self.registry, "system", None),
+                        "environment": (c.contract_dict or {}).get("metadata", {}).get("environment", "unknown"),
                         "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                         "status": "failed",
                         "error_message": str(e)[:2000],
@@ -2017,10 +2109,11 @@ class LakehousePipeline:
 
     # ── DAG Visualization ────────────────────────────────────────────────────
 
-    def visualize_dag(self, *, entity_filter: str = "", layer_filter: str = "") -> str:
+    def visualize_dag(self, *, title: str = None, entity_filter: str = "", layer_filter: str = "") -> str:
         """Generate an inline HTML DAG visualization of the pipeline.
 
         Args:
+            title: Optional business value oriented label to override the default domain/system header.
             entity_filter: Comma-separated entity names to highlight (e.g. "sessions").
             layer_filter: Comma-separated layers to highlight (e.g. "bronze").
 
@@ -2032,8 +2125,8 @@ class LakehousePipeline:
             pipeline = LakehousePipeline(registry)
             displayHTML(pipeline.visualize_dag())
 
-            # Filtered view — highlight bronze sessions and its connections:
-            displayHTML(pipeline.visualize_dag(entity_filter="sessions", layer_filter="bronze"))
+            # Custom business label:
+            displayHTML(pipeline.visualize_dag(title="Marketplace Booking Engine"))
         """
 
         contracts = self.registry.get_active_contracts()
@@ -2053,12 +2146,24 @@ class LakehousePipeline:
 
         # Build node data
         nodes = []
+        # Build entity→node_id lookup for cross-layer depends_on resolution
+        _entity_to_node_id = {c.entity: f"{c.layer}_{c.entity}" for c in contracts}
+
         for c in contracts:
             cd = c.contract_dict or {}
             info = cd.get("info", {})
             pii_count = sum(1 for f in (cd.get("model", {}).get("fields", [])) if f.get("pii"))
             pipeline_config = cd.get("pipeline", {})
             frequency = pipeline_config.get("frequency", "") if isinstance(pipeline_config, dict) else ""
+            # Resolve depends_on: look up each dependency's actual layer via
+            # the entity map, falling back to same-layer prefix only as last resort.
+            resolved_deps = []
+            for d in c.depends_on:
+                if d in _entity_to_node_id:
+                    resolved_deps.append(_entity_to_node_id[d])
+                else:
+                    # Fallback: assume same layer (legacy behaviour)
+                    resolved_deps.append(f"{c.layer}_{d}")
             nodes.append(
                 {
                     "id": f"{c.layer}_{c.entity}",
@@ -2068,7 +2173,7 @@ class LakehousePipeline:
                     "version": cd.get("version", ""),
                     "pii": pii_count,
                     "frequency": frequency,
-                    "depends_on": [f"{c.layer}_{d}" for d in c.depends_on],
+                    "depends_on": resolved_deps,
                 }
             )
 
@@ -2102,12 +2207,63 @@ class LakehousePipeline:
             for dep_id in n["depends_on"]:
                 edges.append((dep_id, n["id"], "dependency"))
 
-        # Cross-layer lineage edges
+        # Cross-layer lineage edges — intelligent entity-name matching
+        # Only infer edges for nodes that have NO explicit depends_on.
+        # Use bidirectional substring matching and source.path parsing.
         upstream_map = {"silver": "bronze", "gold": "silver"}
+        # Build a set of node IDs that already have explicit upstream deps
+        _has_explicit_deps = {n["id"] for n in nodes if n["depends_on"]}
+
         for layer, upstream_layer in upstream_map.items():
             for n in layer_entities.get(layer, []):
-                for upstream_n in layer_entities.get(upstream_layer, []):
-                    edges.append((upstream_n["id"], n["id"], "lineage"))
+                if n["id"] in _has_explicit_deps:
+                    continue  # Already has explicit depends_on edges
+
+                # Try to extract source table name from contract YAML source.path
+                _matched = False
+                for c in contracts:
+                    if f"{c.layer}_{c.entity}" != n["id"]:
+                        continue
+                    cd = c.contract_dict or {}
+                    source_path = (cd.get("source") or {}).get("path", "")
+                    if source_path:
+                        # Extract the table/entity suffix from paths like
+                        # "{bronze_path}/{bronze_layer}_{system}_trip_completed"
+                        path_tail = source_path.rsplit("/", 1)[-1]
+                        # Strip template vars: "{bronze_layer}_rideflow_trips" → "rideflow_trips"
+                        import re as _re
+                        path_tail_clean = _re.sub(r'\{[^}]*\}_?', '', path_tail).strip("_")
+                        if path_tail_clean:
+                            for upstream_n in layer_entities.get(upstream_layer, []):
+                                u_entity = upstream_n["entity"].lower()
+                                # Match if upstream entity name is in the cleaned source path
+                                # or vice versa (bidirectional for system-prefixed names)
+                                if (path_tail_clean.lower() in u_entity
+                                        or u_entity in path_tail_clean.lower()):
+                                    edges.append((upstream_n["id"], n["id"], "lineage"))
+                                    _matched = True
+                    break
+
+                # Fallback: bidirectional entity name matching
+                if not _matched:
+                    entity_lower = n["entity"].lower()
+                    # Strip the tier prefix and optional system prefix for matching
+                    _core = entity_lower
+                    for pfx in [f"{layer}_", f"{layer}_rideflow_", f"{layer}_olist_"]:
+                        if _core.startswith(pfx):
+                            _core = _core[len(pfx):]
+                            break
+                    for upstream_n in layer_entities.get(upstream_layer, []):
+                        u_entity = upstream_n["entity"].lower()
+                        u_core = u_entity
+                        for pfx in [f"{upstream_layer}_", f"{upstream_layer}_rideflow_", f"{upstream_layer}_olist_"]:
+                            if u_core.startswith(pfx):
+                                u_core = u_core[len(pfx):]
+                                break
+                        # Bidirectional: either core name is a substring of the other
+                        if _core and u_core and (_core in u_core or u_core in _core):
+                            edges.append((upstream_n["id"], n["id"], "lineage"))
+
 
         # External source → consuming contract edges
         for ext in ext_sources:
@@ -2374,12 +2530,14 @@ class LakehousePipeline:
         else:
             subtitle = f"{std_contract_count} contracts • {std_layer_count} layers"
 
+        dag_title = title if title else f"{self.registry.domain} / {self.registry.system}"
+
         html = f"""
         <div style="font-family:'Inter','Segoe UI',sans-serif;background:#0d0d0f;
              background-image:radial-gradient(circle at 1px 1px,#1a1a1f 1px,transparent 0);
              background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;overflow-x:auto;">
           <h2 style="color:#fff;font-size:1.2rem;margin:0 0 4px;"
-              >📊 Pipeline DAG — {self.registry.domain} / {self.registry.system}</h2>
+              >📊 Pipeline DAG — {dag_title}</h2>
           <p style="color:#666;font-size:0.8rem;margin:0 0 24px;">{subtitle}</p>
           <div style="position:relative;width:{canvas_w}px;height:{canvas_h}px;">
             {header_html}

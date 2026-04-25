@@ -25,6 +25,61 @@ Python API
     gen = DataGenerator("contracts/orders.yaml")
     df  = gen.generate_from_sample("data/orders_sample.csv", rows=5_000)
 
+    # ── Shorthand Schema Initialization ─────────────────────────────────────
+    
+    # DDL string
+    gen = DataGenerator("order_id BIGINT, email STRING, amount DOUBLE, created_at TIMESTAMP")
+    df  = gen.generate(rows=1000, invalid_ratio=0.10)
+
+    # List of tuples
+    gen = DataGenerator([("user_id", "integer"), ("name", "string"), ("active", "boolean")])
+    df  = gen.generate(rows=500)
+
+    # Dictionary
+    gen = DataGenerator({"product_id": "integer", "price": "decimal", "in_stock": "boolean"})
+    df  = gen.generate(rows=200)
+
+    # Spark StructType
+    from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+    schema = StructType([StructField("user_id", IntegerType()), StructField("email", StringType())])
+    gen = DataGenerator(schema)
+    df  = gen.generate(rows=50)
+
+    # ── Reading from Unity Catalog / Database Tables ───────────────────────
+    
+    from lakelogic import infer_contract
+    # Chain directly to generator from a live catalog table
+    gen = infer_contract("my_catalog.sales.orders").to_generator(seed=42)
+    df  = gen.generate(rows=500, invalid_ratio=0.05)
+
+    # ── Multi-Table Referential Integrity (generate_related) ─────────────
+
+    # Auto-detected FK relationships (column names match across contracts)
+    related = DataGenerator.generate_related(
+        contracts={
+            "customers": "customer_id BIGINT, name STRING, email STRING",
+            "orders": "order_id BIGINT, customer_id BIGINT, amount DOUBLE",
+        },
+        rows={"customers": 50, "orders": 200},
+    )
+    # Every orders["customer_id"] exists in customers["customer_id"]
+
+    # Explicit FK relationships (when column names differ)
+    related = DataGenerator.generate_related(
+        contracts={
+            "customers": "id BIGINT, name STRING, email STRING",
+            "products":  "id BIGINT, product_name STRING, price DOUBLE",
+            "sales":     "sale_id BIGINT, cust_id BIGINT, prod_id BIGINT, amount DOUBLE",
+        },
+        rows={"customers": 50, "products": 30, "sales": 500},
+        relationships=[
+            {"child": "sales", "child_column": "cust_id",  "parent": "customers", "parent_column": "id"},
+            {"child": "sales", "child_column": "prod_id",  "parent": "products",  "parent_column": "id"},
+        ],
+    )
+    # Every sales["cust_id"] exists in customers["id"]
+    # Every sales["prod_id"] exists in products["id"]
+
 CLI
 ---
     lakelogic generate --contract contracts/orders.yaml --rows 1000 \\
@@ -218,6 +273,123 @@ for _a2, _a3, _num, _name, _curr in _GEO_DATA:
         "currency_code": _curr,
         "currency": _curr,
     }
+
+# ── City → Coordinates lookup for geo-alignment ──────────────────────────
+# Maps city names, codes, and common abbreviations to (lat, lng) center.
+# Used by _apply_geo_alignment() to snap lat/lng fields to match a city field.
+_CITY_GEO_COORDS: Dict[str, Tuple[float, float]] = {
+    # Full names (lowercase for matching)
+    "london": (51.5074, -0.1278),
+    "new york": (40.7128, -74.0060),
+    "new york city": (40.7128, -74.0060),
+    "berlin": (52.5200, 13.4050),
+    "paris": (48.8566, 2.3522),
+    "tokyo": (35.6762, 139.6503),
+    "sydney": (-33.8688, 151.2093),
+    "los angeles": (34.0522, -118.2437),
+    "chicago": (41.8781, -87.6298),
+    "san francisco": (37.7749, -122.4194),
+    "toronto": (43.6532, -79.3832),
+    "mexico city": (19.4326, -99.1332),
+    "mumbai": (19.0760, 72.8777),
+    "singapore": (1.3521, 103.8198),
+    "dubai": (25.2048, 55.2708),
+    "amsterdam": (52.3676, 4.9041),
+    "madrid": (40.4168, -3.7038),
+    "rome": (41.9028, 12.4964),
+    "seoul": (37.5665, 126.9780),
+    "beijing": (39.9042, 116.4074),
+    "shanghai": (31.2304, 121.4737),
+    "hong kong": (22.3193, 114.1694),
+    "bangkok": (13.7563, 100.5018),
+    "istanbul": (41.0082, 28.9784),
+    "cape town": (- 33.9249, 18.4241),
+    "johannesburg": (-26.2041, 28.0473),
+    "lagos": (6.5244, 3.3792),
+    "nairobi": (-1.2921, 36.8219),
+    "cairo": (30.0444, 31.2357),
+    "moscow": (55.7558, 37.6173),
+    "seattle": (47.6062, -122.3321),
+    "boston": (42.3601, -71.0589),
+    "miami": (25.7617, -80.1918),
+    "atlanta": (33.7490, -84.3880),
+    "denver": (39.7392, -104.9903),
+    "austin": (30.2672, -97.7431),
+    "dallas": (32.7767, -96.7970),
+    "houston": (29.7604, -95.3698),
+    "phoenix": (33.4484, -112.0740),
+    "portland": (45.5152, -122.6784),
+    "vancouver": (49.2827, -123.1207),
+    "montreal": (45.5017, -73.5673),
+    "melbourne": (-37.8136, 144.9631),
+    "brisbane": (-27.4698, 153.0251),
+    "auckland": (-36.8485, 174.7633),
+    "dublin": (53.3498, -6.2603),
+    "lisbon": (38.7223, -9.1393),
+    "zurich": (47.3769, 8.5417),
+    "stockholm": (59.3293, 18.0686),
+    "oslo": (59.9139, 10.7522),
+    "copenhagen": (55.6761, 12.5683),
+    "helsinki": (60.1699, 24.9384),
+    "warsaw": (52.2297, 21.0122),
+    "prague": (50.0755, 14.4378),
+    "vienna": (48.2082, 16.3738),
+    "budapest": (47.4979, 19.0402),
+    "bucharest": (44.4268, 26.1025),
+    # Short codes (e.g. from city_code fields)
+    "lon": (51.5074, -0.1278),
+    "nyc": (40.7128, -74.0060),
+    "ber": (52.5200, 13.4050),
+    "par": (48.8566, 2.3522),
+    "tyo": (35.6762, 139.6503),
+    "syd": (-33.8688, 151.2093),
+    "lax": (34.0522, -118.2437),
+    "chi": (41.8781, -87.6298),
+    "sfo": (37.7749, -122.4194),
+    "tor": (43.6532, -79.3832),
+    "mex": (19.4326, -99.1332),
+    "bom": (19.0760, 72.8777),
+    "sin": (1.3521, 103.8198),
+    "dxb": (25.2048, 55.2708),
+    "ams": (52.3676, 4.9041),
+    "mad": (40.4168, -3.7038),
+    "rom": (41.9028, 12.4964),
+    "sel": (37.5665, 126.9780),
+    "pek": (39.9042, 116.4074),
+    "sha": (31.2304, 121.4737),
+    "hkg": (22.3193, 114.1694),
+    "bkk": (13.7563, 100.5018),
+    "ist": (41.0082, 28.9784),
+    "cpt": (-33.9249, 18.4241),
+    "jnb": (-26.2041, 28.0473),
+    "los": (6.5244, 3.3792),
+    "nbo": (-1.2921, 36.8219),
+    "cai": (30.0444, 31.2357),
+    "svo": (55.7558, 37.6173),
+    "sea": (47.6062, -122.3321),
+    "bos": (42.3601, -71.0589),
+    "mia": (25.7617, -80.1918),
+    "atl": (33.7490, -84.3880),
+    "den": (39.7392, -104.9903),
+    "aus": (30.2672, -97.7431),
+    "dfw": (32.7767, -96.7970),
+    "hou": (29.7604, -95.3698),
+    "phx": (33.4484, -112.0740),
+    "pdx": (45.5152, -122.6784),
+    "yvr": (49.2827, -123.1207),
+    "yul": (45.5017, -73.5673),
+    "mel": (-37.8136, 144.9631),
+    "bne": (-27.4698, 153.0251),
+    "akl": (-36.8485, 174.7633),
+    "dub": (53.3498, -6.2603),
+    "lis": (38.7223, -9.1393),
+    "zrh": (47.3769, 8.5417),
+}
+
+# Field name patterns for geo-alignment detection
+_LAT_FIELD_PATTERNS = {"latitude", "lat", "gps_lat", "pickup_lat", "dropoff_lat", "start_lat", "end_lat", "origin_lat", "dest_lat", "destination_lat"}
+_LNG_FIELD_PATTERNS = {"longitude", "lng", "lon", "gps_lng", "gps_lon", "pickup_lng", "dropoff_lng", "pickup_lon", "dropoff_lon", "start_lng", "end_lng", "origin_lng", "dest_lng", "destination_lng", "start_lon", "end_lon", "origin_lon", "dest_lon", "destination_lon"}
+_CITY_FIELD_PATTERNS = {"city", "city_code", "city_name", "town", "metro", "metro_area", "location_city"}
 
 
 _TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_dt", "_ts")
@@ -2646,6 +2818,28 @@ class DataGenerator:
 
         gen = DataGenerator({"product_id": "integer", "price": "decimal", "in_stock": "boolean"})
         df  = gen.generate(rows=200)
+
+    From a Spark StructType::
+
+        from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+        schema = StructType([
+            StructField("user_id", IntegerType()),
+            StructField("email", StringType()),
+        ])
+        gen = DataGenerator(schema)
+        df  = gen.generate(rows=50)
+
+    From reading a Databricks Unity Catalog / Database table (chained)::
+
+        from lakelogic import infer_contract
+        gen = infer_contract("my_catalog.sales.orders").to_generator(seed=42)
+        df  = gen.generate(rows=500, invalid_ratio=0.05)
+
+    From a CSV / Parquet file (chained)::
+
+        from lakelogic import infer_contract
+        gen = infer_contract("data/orders.csv").to_generator(seed=0)
+        df  = gen.generate(rows=100)
     """
 
     def __init__(
@@ -2689,6 +2883,7 @@ class DataGenerator:
         # Populated by from_file(); generate() uses these automatically
         self._auto_sample_pools: Optional[Dict[str, List[Any]]] = None
         self._triplets: List[Dict[str, Any]] = self._detect_triplets()
+        self._geo_alignments: List[Dict[str, str]] = self._detect_geo_alignment()
 
     @staticmethod
     def _is_schema_input(source) -> bool:
@@ -2752,6 +2947,7 @@ class DataGenerator:
         cls,
         source,
         *,
+        format: Optional[str] = None,
         seed: Optional[int] = None,
         use_faker: bool = True,
     ) -> "DataGenerator":
@@ -2768,6 +2964,8 @@ class DataGenerator:
         source : str | Path | polars.DataFrame | pandas.DataFrame
             Seed file or in-memory DataFrame.  File formats auto-detected from extension:
             ``.csv``, ``.parquet``, ``.json``, ``.ndjson`` / ``.jsonl``, ``.xlsx`` / ``.xls``.
+        format : str, optional
+            Explicit file format to use if the file has no extension or a non-standard one (e.g. "csv").
         seed : int, optional
             Random seed for reproducibility.
         use_faker : bool
@@ -2810,7 +3008,7 @@ class DataGenerator:
             df = pl.from_pandas(source)
         else:
             p = Path(source)
-            ext = p.suffix.lower()
+            ext = f".{format.lower().lstrip('.')}" if format else p.suffix.lower()
             if ext == ".csv":
                 df = pl.read_csv(p, infer_schema_length=10_000)
             elif ext == ".parquet":
@@ -3289,6 +3487,9 @@ class DataGenerator:
         invalid_ratio: float = 0.0,
         output_format: str = "polars",
         start_from: Optional[datetime] = None,
+        micro_batches: int = 1,
+        up_to: Optional[datetime] = None,
+        resume: bool = False,
     ):
         """
         Generate successive batches of time-windowed data, simulating a streaming source.
@@ -3322,6 +3523,21 @@ class DataGenerator:
         start_from : datetime, optional
             Starting timestamp for the first batch.  Defaults to
             ``datetime.now() - interval_minutes * batches``.
+        micro_batches : int
+            Number of files to split each window's rows into (default 1).
+            Set to e.g. 6 to produce ~1 file per 10 minutes in a 60-minute
+            window, or 60 for ~1 file per minute.  Each micro-batch is saved
+            as a separate file in the same partition directory, simulating
+            realistic streaming ingestion patterns.
+        up_to : datetime, optional
+            Stop generating windows whose start time exceeds this timestamp.
+            Defaults to None (no cap).  Set to ``datetime.now()`` to prevent
+            generating future data.
+        resume : bool
+            If True and ``output_dir`` is set, scan existing partitions to
+            find the latest one and start from the next window.  This allows
+            incremental generation: run once in the morning, run again later
+            to fill the gap.  Requires ``output_dir`` to be set.
 
         Yields
         ------
@@ -3336,33 +3552,80 @@ class DataGenerator:
             for ws, we, df in gen.generate_stream(batches=6, interval_minutes=5):
                 print(f"Batch {ws} -> {we}: {len(df)} rows")
 
-        Save to partitioned landing zone::
+        Save to partitioned landing zone with micro-batching::
 
             gen = DataGenerator("contracts/events.yaml")
             for ws, we, df in gen.generate_stream(
                 output_dir="landing/events",
                 batches=12,
-                interval_minutes=5,
+                interval_minutes=60,
+                micro_batches=6,  # 6 files per hour = ~10 min intervals
+            ):
+                print(f"Wrote batch {ws} -> {we}")
+
+        Time-aware incremental generation::
+
+            gen = DataGenerator("contracts/events.yaml")
+            for ws, we, df in gen.generate_stream(
+                output_dir="landing/events",
+                batches=24,
+                interval_minutes=60,
+                up_to=datetime.now(),   # never generate future data
+                resume=True,            # skip already-generated windows
             ):
                 print(f"Wrote batch {ws} -> {we}")
         """
         from loguru import logger
+        import uuid as _uuid
+        import math as _math
 
         interval = timedelta(minutes=interval_minutes)
 
-        if start_from is not None:
+        # ── Resume: detect latest existing partition ──────────────────────
+        if resume and output_dir is not None:
+            resume_from = self._detect_latest_partition(
+                Path(output_dir), partition_template, interval_minutes
+            )
+            if resume_from is not None:
+                # Start from the window AFTER the latest existing partition
+                cursor = resume_from + interval
+                logger.info(
+                    f"\u23ed\ufe0f  Resuming from {resume_from.isoformat()} "
+                    f"(next window: {cursor.isoformat()})"
+                )
+            else:
+                cursor = start_from if start_from is not None else (
+                    datetime.now() - (interval * batches)
+                )
+        elif start_from is not None:
             cursor = start_from
         else:
             cursor = datetime.now() - (interval * batches)
 
+        effective_up_to = up_to  # None means no cap
+
         logger.info(
-            f"🔄 Streaming {batches} batches × {rows_per_batch} rows "
-            f"({interval_minutes}min intervals, starting {cursor.isoformat()})"
+            f"\U0001f504 Streaming {batches} batches \u00d7 {rows_per_batch} rows "
+            f"({interval_minutes}min intervals, starting {cursor.isoformat()}"
+            + (f", capped at {effective_up_to.isoformat()}" if effective_up_to else "")
+            + ")"
         )
 
         for i in range(batches):
             window_start = cursor
             window_end = cursor + interval
+
+            # ── Time cap: skip windows past up_to ─────────────────────────
+            if effective_up_to is not None and window_start >= effective_up_to:
+                logger.info(
+                    f"   \u23f9 Stopping at window {i}: {window_start.isoformat()} "
+                    f">= up_to {effective_up_to.isoformat()}"
+                )
+                break
+
+            # For partial windows (last window touching up_to), cap the end
+            if effective_up_to is not None and window_end > effective_up_to:
+                window_end = effective_up_to
 
             df = self.generate(
                 rows=rows_per_batch,
@@ -3375,7 +3638,7 @@ class DataGenerator:
             # Save to partitioned directory if requested
             if output_dir is not None:
                 out_root = Path(output_dir)
-                partition_path = window_end.strftime(
+                partition_path = window_start.strftime(
                     partition_template.replace("{Y}", "%Y")
                     .replace("{m}", "%m")
                     .replace("{d}", "%d")
@@ -3385,12 +3648,90 @@ class DataGenerator:
                 )
                 batch_dir = out_root / partition_path
                 batch_dir.mkdir(parents=True, exist_ok=True)
-                batch_file = batch_dir / f"batch.{format}"
-                self.save(df, batch_file, format=format)
-                logger.info(f"   💾 Batch {i + 1}/{batches} saved to {batch_file}")
+
+                # ── Micro-batching: split rows into N files ───────────────
+                if micro_batches > 1:
+                    total_rows = len(df)
+                    chunk_size = max(1, _math.ceil(total_rows / micro_batches))
+
+                    for mb_idx in range(micro_batches):
+                        start_row = mb_idx * chunk_size
+                        end_row = min(start_row + chunk_size, total_rows)
+                        if start_row >= total_rows:
+                            break
+
+                        if output_format == "polars":
+                            chunk_df = df.slice(start_row, end_row - start_row)
+                        else:  # pandas
+                            chunk_df = df.iloc[start_row:end_row]
+
+                        batch_file = batch_dir / f"batch_{mb_idx:02d}_{_uuid.uuid4().hex[:6]}.{format}"
+                        self.save(chunk_df, batch_file, format=format)
+
+                    logger.info(
+                        f"   \U0001f4be Batch {i + 1}/{batches} \u2192 {min(micro_batches, total_rows)} "
+                        f"micro-batch files in {batch_dir}"
+                    )
+                else:
+                    batch_file = batch_dir / f"batch_{_uuid.uuid4().hex[:6]}.{format}"
+                    self.save(df, batch_file, format=format)
+                    logger.info(f"   \U0001f4be Batch {i + 1}/{batches} saved to {batch_file}")
 
             yield window_start, window_end, df
             cursor = window_end
+
+    @staticmethod
+    def _detect_latest_partition(
+        output_dir: Path,
+        partition_template: str,
+        interval_minutes: int,
+    ) -> Optional[datetime]:
+        """Scan output_dir for the latest existing partition timestamp.
+
+        Walks the directory tree and parses partition folder names using
+        the provided template to reconstruct timestamps.  Returns the
+        latest timestamp found, or None if the directory is empty.
+        """
+        import os as _os
+        if not output_dir.exists():
+            return None
+
+        # Build a regex from the partition template to extract date parts
+        import re as _re_mod
+        pattern = (
+            partition_template
+            .replace("{Y}", r"(?P<Y>\d{4})")
+            .replace("{m}", r"(?P<m>\d{2})")
+            .replace("{d}", r"(?P<d>\d{2})")
+            .replace("{H}", r"(?P<H>\d{2})")
+            .replace("{M}", r"(?P<M>\d{2})")
+            .replace("{S}", r"(?P<S>\d{2})")
+        )
+        regex = _re_mod.compile(pattern)
+
+        latest: Optional[datetime] = None
+
+        for dirpath, dirnames, filenames in _os.walk(output_dir):
+            rel = str(Path(dirpath).relative_to(output_dir)).replace("\\", "/")
+            match = regex.search(rel)
+            if match:
+                parts = match.groupdict()
+                try:
+                    ts = datetime(
+                        year=int(parts.get("Y", 2026)),
+                        month=int(parts.get("m", 1)),
+                        day=int(parts.get("d", 1)),
+                        hour=int(parts.get("H", 0)),
+                        minute=int(parts.get("M", 0)),
+                        second=int(parts.get("S", 0)),
+                    )
+                    if latest is None or ts > latest:
+                        latest = ts
+                except (ValueError, KeyError):
+                    continue
+
+        return latest
+
 
     def generate_from_sample(
         self,
@@ -4068,6 +4409,7 @@ class DataGenerator:
         seed: Optional[int] = None,
         use_faker: bool = True,
         output_format: str = "polars",
+        relationships: Optional[List[Dict[str, str]]] = None,
         ai: bool = False,
         ai_provider: Optional[str] = None,
         ai_model: Optional[str] = None,
@@ -4082,12 +4424,34 @@ class DataGenerator:
         Parameters
         ----------
         contracts : dict
-            Maps logical entity name → contract path (str or Path).
-            Example::
+            Maps logical entity name → contract schema source.  Each value
+            can be any format accepted by ``DataGenerator()``:
+
+            - **Contract YAML path** — ``"contracts/orders_v1.0.yaml"``
+            - **DDL string** — ``"order_id BIGINT, customer_id STRING, amount DOUBLE"``
+            - **List of tuples** — ``[("order_id", "integer"), ("customer_id", "string")]``
+            - **Dict** — ``{"order_id": "integer", "customer_id": "string"}``
+            - **Spark StructType** — schema object (no data needed)
+
+            Example (contract paths)::
 
                 {
                     "customers": "contracts/bronze_customers_v1.0.yaml",
                     "orders": "contracts/bronze_orders_v1.0.yaml",
+                }
+
+            Example (DDL strings — no YAML files needed)::
+
+                {
+                    "customers": "customer_id BIGINT, name STRING, email STRING",
+                    "orders": "order_id BIGINT, customer_id BIGINT, amount DOUBLE",
+                }
+
+            Example (tuple lists)::
+
+                {
+                    "customers": [("customer_id", "integer"), ("name", "string")],
+                    "orders": [("order_id", "integer"), ("customer_id", "integer"), ("amount", "double")],
                 }
 
         rows : int or dict
@@ -4104,6 +4468,19 @@ class DataGenerator:
             Use Faker for semantic generation (default True).
         output_format : str
             ``"polars"`` (default) or ``"pandas"``.
+        relationships : list of dict, optional
+            Explicit FK→PK mappings for cases where column names differ
+            between parent and child.  Each dict must have::
+
+                {
+                    "child": "<child_entity_name>",
+                    "child_column": "<FK column in child>",
+                    "parent": "<parent_entity_name>",
+                    "parent_column": "<PK column in parent>",
+                }
+
+            These are merged with auto-detected relationships (explicit
+            declarations take priority).
         ai : bool
             Enable AI-generated realistic values.
         ai_provider / ai_model : str, optional
@@ -4116,9 +4493,7 @@ class DataGenerator:
 
         Examples
         --------
-        ::
-
-            from lakelogic.core.generator import DataGenerator
+        From contract YAML files::
 
             related = DataGenerator.generate_related(
                 contracts={
@@ -4129,10 +4504,62 @@ class DataGenerator:
                 invalid_ratio=0.05,
                 seed=42,
             )
-            # Every orders["customer_id"] value exists in customers["customer_id"]
-            cust_ids = set(related["customers"]["customer_id"].to_list())
-            order_cust_ids = set(related["orders"]["customer_id"].to_list())
-            assert order_cust_ids.issubset(cust_ids)
+
+        From DDL strings (zero files required)::
+
+            related = DataGenerator.generate_related(
+                contracts={
+                    "customers": "customer_id BIGINT, name STRING, email STRING",
+                    "orders": "order_id BIGINT, customer_id BIGINT, amount DOUBLE, created_at TIMESTAMP",
+                },
+                rows={"customers": 20, "orders": 100},
+            )
+
+        From tuple lists::
+
+            related = DataGenerator.generate_related(
+                contracts={
+                    "patients": [("patient_id", "string"), ("ssn", "string"), ("name", "string")],
+                    "admissions": [("admission_id", "integer"), ("patient_id", "string"), ("diagnosis_code", "string")],
+                },
+                rows={"patients": 50, "admissions": 200},
+            )
+
+        From a Unity Catalog table (via infer_contract)::
+
+            from lakelogic import infer_contract
+
+            # Infer contracts from live catalog tables, save, then generate
+            cust = infer_contract("my_catalog.sales.customers")
+            cust.save("contracts/customers.yaml")
+            ords = infer_contract("my_catalog.sales.orders")
+            ords.save("contracts/orders.yaml")
+
+            related = DataGenerator.generate_related(
+                contracts={
+                    "customers": "contracts/customers.yaml",
+                    "orders": "contracts/orders.yaml",
+                },
+                rows={"customers": 50, "orders": 200},
+            )
+
+        With explicit relationships (when column names differ)::
+
+            # Parent has PK "id", child has FK "cust_id"
+            related = DataGenerator.generate_related(
+                contracts={
+                    "customers": "id BIGINT, name STRING, email STRING",
+                    "products": "id BIGINT, product_name STRING, price DOUBLE",
+                    "sales": "sale_id BIGINT, cust_id BIGINT, prod_id BIGINT, amount DOUBLE",
+                },
+                rows={"customers": 50, "products": 30, "sales": 500},
+                relationships=[
+                    {"child": "sales", "child_column": "cust_id", "parent": "customers", "parent_column": "id"},
+                    {"child": "sales", "child_column": "prod_id", "parent": "products", "parent_column": "id"},
+                ],
+            )
+            # Every sales["cust_id"] exists in customers["id"]
+            # Every sales["prod_id"] exists in products["id"]
         """
         from loguru import logger as _rel_logger
 
@@ -4141,8 +4568,8 @@ class DataGenerator:
         raw_contracts: Dict[str, Dict[str, Any]] = {}
         pk_columns: Dict[str, List[str]] = {}
 
-        for name, path in contracts.items():
-            gen = DataGenerator(str(path), seed=seed, use_faker=use_faker)
+        for name, schema_source in contracts.items():
+            gen = DataGenerator(schema_source, seed=seed, use_faker=use_faker)
             generators[name] = gen
             raw = gen._contract_raw
             raw_contracts[name] = raw
@@ -4162,8 +4589,28 @@ class DataGenerator:
         entity_names = list(contracts.keys())
 
         # ── 2. Detect FK relationships ────────────────────────────────────
-        # relationships: child_entity → [{"fk_column", "ref_entity", "ref_column"}]
+        # relationships_map: child_entity → [{"fk_column", "ref_entity", "ref_column"}]
         all_relationships: Dict[str, List[Dict[str, str]]] = {}
+
+        # 2a. Apply explicit relationships first (highest priority)
+        if relationships:
+            for rel in relationships:
+                child = rel["child"]
+                entry = {
+                    "fk_column": rel["child_column"],
+                    "ref_entity": rel["parent"],
+                    "ref_column": rel["parent_column"],
+                }
+                all_relationships.setdefault(child, []).append(entry)
+                _rel_logger.info(
+                    f"🔗 Explicit FK: {child}.{rel['child_column']} → {rel['parent']}.{rel['parent_column']}"
+                )
+
+        # 2b. Auto-detect remaining relationships (skips already-declared FK columns)
+        explicit_fk_cols: Dict[str, set] = {}
+        for child, rels in all_relationships.items():
+            explicit_fk_cols[child] = {r["fk_column"] for r in rels}
+
         for name in entity_names:
             rels = DataGenerator._detect_fk_relationships(
                 name,
@@ -4171,9 +4618,11 @@ class DataGenerator:
                 entity_names,
                 pk_columns,
             )
-            if rels:
-                all_relationships[name] = rels
-                for r in rels:
+            # Only add auto-detected relationships for columns not already declared
+            existing = explicit_fk_cols.get(name, set())
+            for r in rels:
+                if r["fk_column"] not in existing:
+                    all_relationships.setdefault(name, []).append(r)
                     _rel_logger.info(f"🔗 Detected FK: {name}.{r['fk_column']} → {r['ref_entity']}.{r['ref_column']}")
 
         # ── 3. Topological sort — parents before children ─────────────────
@@ -4240,6 +4689,36 @@ class DataGenerator:
                 ai_provider=ai_provider,
                 ai_model=ai_model,
             )
+
+            # Intentionally introduce margin of error (orphan FKs) for invalid_ratio > 0
+            if invalid_ratio > 0 and reference_data:
+                if output_format == "polars":
+                    import polars as pl
+                    for fk_col in reference_data.keys():
+                        if fk_col not in df.columns:
+                            continue
+                        if df.schema[fk_col] in (pl.Utf8, pl.Categorical):
+                            expr = pl.concat_str([pl.col(fk_col), pl.lit("_ORPHAN")])
+                        else:
+                            expr = pl.col(fk_col).cast(pl.Int64) + 999000
+                            
+                        df = df.with_columns(
+                            pl.when(pl.col("_is_invalid") == True)
+                            .then(expr)
+                            .otherwise(pl.col(fk_col))
+                            .alias(fk_col)
+                        )
+                else:  # pandas
+                    import pandas as pd
+                    for fk_col in reference_data.keys():
+                        if fk_col not in df.columns:
+                            continue
+                        mask = df["_is_invalid"] == True
+                        if pd.api.types.is_string_dtype(df[fk_col]):
+                            df.loc[mask, fk_col] = df.loc[mask, fk_col].astype(str) + "_ORPHAN"
+                        elif pd.api.types.is_numeric_dtype(df[fk_col]):
+                            df.loc[mask, fk_col] = df.loc[mask, fk_col] + 999000
+
             results[name] = df
 
         return results
@@ -4562,6 +5041,7 @@ class DataGenerator:
             self._apply_correlations(row)
             self._apply_temporal_ordering(row)
             self._apply_field_consistency(row)
+            self._apply_geo_alignment(row)
 
         # Flag the row for frontend debugging / filtering
         row["_is_invalid"] = invalid
@@ -4848,6 +5328,114 @@ class DataGenerator:
                     row[dep_field] = template
                 break  # first matching correlation wins
 
+    def _detect_geo_alignment(self) -> List[Dict[str, str]]:
+        """Detect lat/lng + city field groups that should be geo-aligned.
+
+        Scans the schema fields and pairs up latitude/longitude fields with
+        a city field that shares a common prefix (e.g. ``pickup_lat``,
+        ``pickup_lng`` → ``city_code``) or falls back to the first city field
+        found.
+
+        Returns a list of dicts, each with keys: ``lat_field``, ``lng_field``,
+        ``city_field``.
+        """
+        field_names = [f.get("name", "").lower() for f in self._fields]
+        field_name_set = set(field_names)
+
+        # Collect all lat, lng, and city fields
+        lat_fields = [n for n in field_names if n in _LAT_FIELD_PATTERNS]
+        lng_fields = [n for n in field_names if n in _LNG_FIELD_PATTERNS]
+        city_fields = [n for n in field_names if n in _CITY_FIELD_PATTERNS]
+
+        if not lat_fields or not lng_fields or not city_fields:
+            return []
+
+        alignments: List[Dict[str, str]] = []
+        used_lngs: set = set()
+
+        for lat_f in lat_fields:
+            # Try to find a matching lng by prefix (pickup_lat → pickup_lng)
+            prefix = lat_f.rsplit("lat", 1)[0]  # e.g. "gps_", "pickup_", ""
+            matched_lng = None
+            for lng_f in lng_fields:
+                if lng_f in used_lngs:
+                    continue
+                lng_prefix = lng_f.rsplit("lng", 1)[0] if "lng" in lng_f else lng_f.rsplit("lon", 1)[0]
+                if lng_prefix == prefix:
+                    matched_lng = lng_f
+                    break
+
+            if not matched_lng:
+                # Fallback: first unused lng field
+                for lng_f in lng_fields:
+                    if lng_f not in used_lngs:
+                        matched_lng = lng_f
+                        break
+
+            if matched_lng:
+                used_lngs.add(matched_lng)
+                # Use first available city field (city_code, city, etc.)
+                alignments.append({
+                    "lat_field": lat_f,
+                    "lng_field": matched_lng,
+                    "city_field": city_fields[0],
+                })
+
+        if alignments:
+            try:
+                from loguru import logger as _logger
+                _logger.debug(
+                    f"\U0001f30d Geo-alignment detected: "
+                    + ", ".join(
+                        f"{a['lat_field']}/{a['lng_field']} ← {a['city_field']}"
+                        for a in alignments
+                    )
+                )
+            except ImportError:
+                pass
+
+        return alignments
+
+    def _apply_geo_alignment(self, row: Dict[str, Any]) -> None:
+        """Snap lat/lng fields to match the city field's coordinates.
+
+        When a row contains both a city field and lat/lng fields, this method
+        looks up the city in ``_CITY_GEO_COORDS`` and overrides the lat/lng
+        with coordinates near the city center (±0.05° jitter for realism).
+
+        Only applies to valid rows. Mutates *row* in place.
+        """
+        if not self._geo_alignments:
+            return
+
+        for alignment in self._geo_alignments:
+            city_field = alignment["city_field"]
+            lat_field = alignment["lat_field"]
+            lng_field = alignment["lng_field"]
+
+            city_val = row.get(city_field)
+            if city_val is None:
+                continue
+
+            # Lookup city coordinates (case-insensitive)
+            coords = _CITY_GEO_COORDS.get(str(city_val).lower().strip())
+            if coords is None:
+                continue
+
+            center_lat, center_lng = coords
+            # Add ±0.05° jitter (~5km) for realistic spread within the city
+            jitter_lat = self._rng.uniform(-0.05, 0.05)
+            jitter_lng = self._rng.uniform(-0.05, 0.05)
+
+            # Determine output format: match existing value type
+            existing_lat = row.get(lat_field)
+            if isinstance(existing_lat, str):
+                row[lat_field] = f"{center_lat + jitter_lat:.6f}"
+                row[lng_field] = f"{center_lng + jitter_lng:.6f}"
+            else:
+                row[lat_field] = round(center_lat + jitter_lat, 6)
+                row[lng_field] = round(center_lng + jitter_lng, 6)
+
     def _expand_template(self, template: str) -> str:
         """Expand a template string: ``#`` → random digit, ``?`` → random letter."""
         out: List[str] = []
@@ -4964,16 +5552,32 @@ class DataGenerator:
         # Non-ID integers (bathrooms=3, total_bedrooms=4) correctly repeat.
         if sample_pools and name in sample_pools:
             pool = sample_pools[name]
-            is_int_type = ftype in ("integer", "int", "int32", "int64", "long")
-            is_id_field = "id" in name.lower()
-            single_value_id_int = len(pool) == 1 and is_int_type and is_id_field
-            if pool and not single_value_id_int:
+            if pool:
+                is_pk = rules.get("primary_key", False)
+                is_int_type = ftype in ("integer", "int", "int32", "int64", "long")
+                is_id_field = "id" in name.lower()
+                
+                # If it's a primary key, we must avoid duplicates and match formatting
+                if is_pk or (is_id_field and is_int_type and len(pool) == 1):
+                    if is_int_type:
+                        # Spread integers widely to minimise collisions
+                        seed_val = int(pool[0])
+                        return self._rng.randint(seed_val, seed_val + 10_000_000)
+                    else:
+                        base_val = str(self._rng.choice(pool))
+                        # Infer format: alphanumeric prefix + numeric suffix (e.g., CUST-1001, PRD_005)
+                        if match := re.match(r"^(.*?)([\d]+)$", base_val):
+                            prefix = match.group(1)
+                            num_len = len(match.group(2))
+                            new_num = "".join(self._rng.choices(string.digits, k=num_len))
+                            return f"{prefix}{new_num}"
+                        else:
+                            # Fallback: append a random suffix to preserve uniqueness
+                            suffix = "".join(self._rng.choices(string.ascii_uppercase + string.digits, k=6))
+                            return f"{base_val}-{suffix}"
+                
+                # Not a primary key — safely replay observed values
                 return self._rng.choice(pool)
-            if single_value_id_int:
-                # Spread around the seed value so IDs stay realistic
-                # (10001 → random in 10001..20001)
-                seed_val = int(pool[0])
-                return self._rng.randint(seed_val, seed_val + 10_000)
 
         # accepted_values ALWAYS wins — even over Faker semantic hints.
         # This is critical: Faker's country() returns 'United Kingdom', not 'GB'.
@@ -5792,12 +6396,21 @@ class DataGenerator:
         """
         result: Dict[str, Dict[str, Any]] = {}
 
+        # ── 0. Model-level primary key list ───────────────────────────────────
+        _pk_fields: set = set()
+        for pk_col in (self._contract_raw.get("primary_key") or []):
+            _pk_fields.add(pk_col)
+
         # ── 1. Seed from field-level definitions ──────────────────────────────
         for field in self._fields:
             fname = field.get("name", "")
             if not fname:
                 continue
             entry = result.setdefault(fname, {})
+
+            # Propagate primary_key flag (field-level or model-level)
+            if field.get("primary_key") or fname in _pk_fields:
+                entry["primary_key"] = True
             has_range = "min" in field or "max" in field
             av = field.get("accepted_values")
             # accepted_values from a single-record infer_contract produces a

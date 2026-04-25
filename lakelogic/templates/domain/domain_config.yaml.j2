@@ -1,4 +1,17 @@
 {# ── {{ domain | title }} Domain Configuration ── #}
+# ── {{ domain | title }} Domain ──────────────────────────────────────────────
+# This file defines domain-level metadata, ownership, SLOs, and compliance
+# settings. It is discovered by the LakeLogic bridge during Sync Graph to
+# auto-create Domain records in the platform.
+#
+# Place this file at:  domains_<project>/<domain>/_domain.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+domain: {{ domain }}
+display_name: "{{ display_name | default(domain | replace('_', ' ') | title) }}"
+description: "{{ description | default(domain | title + ' domain') }}"
+color: "{{ color | default('#3B82F6') }}"
+
 # ── Domain Ownership ──
 ownership:
   domain_owner: "{{ owner_team | default('Data Engineering Team') }}"
@@ -31,7 +44,7 @@ slo:
     min_good_ratio: {{ min_good_ratio | default(0.90) }}
     max_quarantine_ratio: {{ max_quarantine_ratio | default(0.10) }}
 
-# ── GDPR Compliance ──
+# ── Compliance ──
 compliance:
   gdpr:
     applicable: {{ gdpr_applicable | default(true) | lower }}
@@ -40,10 +53,8 @@ compliance:
     purpose: "{{ gdpr_purpose | default('Data processing for ' + domain + ' analytics and reporting') }}"
     retention_period: "{{ gdpr_retention | default('7 years') }}"
     retention_basis: {{ gdpr_retention_basis | default('contractual_obligation') }}
-    # Options: contractual_obligation, legal_requirement, consent_duration, business_need
     dpia_required: {{ gdpr_dpia_required | default(false) | lower }}
     dpia_status: {{ gdpr_dpia_status | default('not_required') }}
-    # Options: not_required, pending, approved, rejected
   data_classification: {{ data_classification | default('internal') }}
   # Options: public, internal, confidential, restricted
   encryption_at_rest: {{ encryption_at_rest | default(true) | lower }}

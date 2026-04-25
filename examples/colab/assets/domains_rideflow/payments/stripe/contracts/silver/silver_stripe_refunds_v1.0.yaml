@@ -1,0 +1,43 @@
+version: 1.0.0
+info:
+  title: "Silver \u2014 Stripe Refunds"
+  table_name: '{silver_layer}_stripe_refunds'
+  description: Cleaned, typed, and deduplicated data.
+  target_layer: silver
+  domain: payments
+  system: stripe
+model:
+  fields:
+  - name: refund_id
+    type: string
+    required: true
+  - name: charge_id
+    type: string
+    required: true
+  - name: rider_id
+    type: string
+  - name: amount
+    type: float
+  - name: currency
+    type: string
+  - name: status
+    type: string
+  - name: reason
+    type: string
+  - name: refund_reason
+    type: string
+    pii: true
+    masking: hash
+  - name: created_at
+    type: timestamp
+quality:
+  row_rules: []
+  dataset_rules:
+  - unique: refund_id
+transformations:
+- deduplicate:
+    by:
+    - refund_id
+source:
+  type: delta
+  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_refunds'

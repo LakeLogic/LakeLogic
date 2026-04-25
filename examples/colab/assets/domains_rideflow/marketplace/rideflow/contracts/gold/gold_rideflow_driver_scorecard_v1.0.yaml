@@ -1,0 +1,51 @@
+version: 1.0.0
+
+info:
+  title: "Gold — Driver Scorecard"
+  table_name: "{gold_layer}_rideflow_driver_scorecard"
+  description: "Per-driver performance scorecard with trip counts, earnings, and ratings."
+  target_layer: gold
+  domain: marketplace
+  system: rideflow
+
+source:
+  type: delta
+  path: "{silver_path}/silver_rideflow_trips"
+
+model:
+  fields:
+    - name: driver_id
+      type: string
+      required: true
+    - name: total_trips
+      type: integer
+    - name: total_earnings
+      type: float
+    - name: avg_driver_rating
+      type: float
+    - name: avg_distance_km
+      type: float
+    - name: avg_duration_minutes
+      type: float
+
+quality:
+  row_rules:
+    - name: positive_trips
+      sql: "total_trips >= 0"
+    - name: valid_rating
+      sql: "avg_driver_rating IS NULL OR (avg_driver_rating >= 1.0 AND avg_driver_rating <= 5.0)"
+  dataset_rules:
+    - unique: driver_id
+
+transformations:
+  - sql: |
+      SELECT
+          driver_id,
+          COUNT(*)                   AS total_trips,
+          SUM(fare_amount)           AS total_earnings,
+          AVG(driver_rating)         AS avg_driver_rating,
+          AVG(distance_km)           AS avg_distance_km,
+          AVG(duration_minutes)      AS avg_duration_minutes
+      FROM source
+      WHERE driver_id IS NOT NULL
+      GROUP BY driver_id

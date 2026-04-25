@@ -1,0 +1,52 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — HubSpot Push Notifications"
+  table_name: "{bronze_layer}_{system}_push_notifications"
+  description: >
+    Raw push notification delivery data from HubSpot.
+  target_layer: bronze
+  domain: marketing
+  system: hubspot
+
+model:
+  fields:
+    - name: notification_id
+      type: string
+      required: true
+      description: "Notification ID"
+    - name: rider_id
+      type: string
+      pii: true
+      description: "FK to marketplace rider"
+    - name: device_token
+      type: string
+      pii: true
+      description: "Mobile push token"
+    - name: campaign_name
+      type: string
+      description: "Push campaign name"
+    - name: sent_at
+      type: string
+      description: "Send timestamp"
+    - name: delivered_at
+      type: string
+      description: "Delivery timestamp"
+    - name: opened_at
+      type: string
+      description: "Open timestamp"
+    - name: platform
+      type: string
+      description: "ios, android"
+
+source:
+  type: landing
+  path: "{landing_root}/push_notifications"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

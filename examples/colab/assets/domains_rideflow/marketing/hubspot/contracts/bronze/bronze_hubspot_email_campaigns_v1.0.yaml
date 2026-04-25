@@ -1,0 +1,59 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — HubSpot Email Campaigns"
+  table_name: "{bronze_layer}_{system}_email_campaigns"
+  description: >
+    Raw email campaign send and engagement data from HubSpot.
+  target_layer: bronze
+  domain: marketing
+  system: hubspot
+
+model:
+  fields:
+    - name: campaign_id
+      type: string
+      required: true
+      description: "HubSpot campaign ID"
+    - name: recipient_email
+      type: string
+      required: true
+      pii: true
+      description: "Recipient email address"
+    - name: recipient_name
+      type: string
+      pii: true
+      description: "Recipient display name"
+    - name: campaign_name
+      type: string
+      description: "Campaign name"
+    - name: subject_line
+      type: string
+      description: "Email subject line"
+    - name: sent_at
+      type: string
+      description: "Send timestamp"
+    - name: opened_at
+      type: string
+      description: "Open timestamp (null if not opened)"
+    - name: clicked_at
+      type: string
+      description: "Click timestamp (null if not clicked)"
+    - name: bounced
+      type: string
+      description: "true/false bounce flag"
+    - name: unsubscribed
+      type: string
+      description: "true/false unsubscribe flag"
+
+source:
+  type: landing
+  path: "{landing_root}/email_campaigns"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

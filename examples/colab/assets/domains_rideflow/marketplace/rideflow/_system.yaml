@@ -1,0 +1,222 @@
+# ── RideFlow Platform System Registry ────────────────────────────────────────
+# Core ride-sharing + food delivery platform.
+# Entities: riders, drivers, trips, restaurants (Phase 2).
+domain: marketplace
+system: rideflow
+
+metadata:
+  run_log_table: "{log_path}"
+  run_log_backend: "delta"
+
+quarantine:
+  enabled: true
+  fail_on_quarantine: false
+  include_error_reason: true
+  target: "{quarantine_path}"
+  format: "delta"
+  mode: "append"
+
+storage:
+  # ── Table Resolution ──────────────────────────────────────────────────────
+  domain_catalog: "`{catalog}`.{domain}"
+  external_location_root: "{data_root}"
+
+  # ── Operational Paths (UC mode — Databricks Volumes) ──────────────────────
+  contract_root: "/Workspace/Shared/data_platform/domains/{domain}/{system}"
+  landing_root: "/Volumes/{catalog}/nondelta/landing_{domain}/{system}"
+  log_root: "/Volumes/{catalog}/nondelta/_logs"
+
+  # ── Storage Paths (direct mode — cloud/local) ────────────────────────────
+  landing_path: "{storage_root}/_data/landing_{domain}/{system}"
+  contract_path: "{storage_root}/_contracts/{domain}/{system}"
+  bronze_path: "{data_root}/{bronze_layer}"
+  silver_path: "{data_root}/{silver_layer}"
+  gold_path: "{data_root}/{gold_layer}"
+  log_path: "{data_root}/_logs"
+  quarantine_path: "{data_root}/_quarantine"
+
+# ── External Sources (for lineage visualization) ────────────────────────────
+external_sources:
+  - name: "RideFlow Platform API"
+    source_domain: "Internal Platform"
+    catalog_path: "rideflow_backend_api"
+    consumed_by:
+      - "rider_profiles"
+      - "rider_app_events"
+      - "driver_profiles"
+      - "driver_telemetry"
+      - "trip_requests"
+      - "trip_completed"
+      - "trip_cancellations"
+
+# ── Contract Registry ───────────────────────────────────────────────────────
+contracts:
+  # Bronze Layer
+  - layer: bronze
+    entity: rider_profiles
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_rider_profiles_v1.0.yaml"
+    enabled: true
+  - layer: bronze
+    entity: rider_app_events
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_rider_app_events_v1.0.yaml"
+    enabled: true
+  - layer: bronze
+    entity: driver_profiles
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_driver_profiles_v1.0.yaml"
+    enabled: true
+  - layer: bronze
+    entity: driver_telemetry
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_driver_telemetry_v1.0.yaml"
+    enabled: true
+  - layer: bronze
+    entity: trip_requests
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_trip_requests_v1.0.yaml"
+    enabled: true
+  - layer: bronze
+    entity: trip_completed
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_trip_completed_v1.0.yaml"
+    enabled: true
+  - layer: bronze
+    entity: trip_cancellations
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_trip_cancellations_v1.0.yaml"
+    enabled: true
+
+# Silver Layer
+  - layer: silver
+    entity: silver_rideflow_driver_profiles
+    path: "contracts/{silver_layer}/silver_rideflow_driver_profiles_v1.0.yaml"
+    enabled: true
+  - layer: silver
+    entity: silver_rideflow_driver_telemetry
+    path: "contracts/{silver_layer}/silver_rideflow_driver_telemetry_v1.0.yaml"
+    depends_on: ['silver_rideflow_driver_profiles']
+    enabled: true
+  - layer: silver
+    entity: silver_rideflow_rider_profiles
+    path: "contracts/{silver_layer}/silver_rideflow_rider_profiles_v1.0.yaml"
+    enabled: true
+  - layer: silver
+    entity: silver_rideflow_trips
+    path: "contracts/{silver_layer}/silver_rideflow_trips_v1.0.yaml"
+    depends_on: ['silver_rideflow_rider_profiles', 'silver_rideflow_driver_profiles']
+    enabled: true
+
+# Gold Layer
+  - layer: gold
+    entity: gold_rideflow_trip_kpis
+    path: "contracts/{gold_layer}/gold_rideflow_trip_kpis_v1.0.yaml"
+    depends_on: ['silver_rideflow_trips']
+    enabled: true
+  - layer: gold
+    entity: gold_rideflow_driver_scorecard
+    path: "contracts/{gold_layer}/gold_rideflow_driver_scorecard_v1.0.yaml"
+    depends_on: ['silver_rideflow_trips', 'silver_rideflow_driver_profiles']
+    enabled: true
+  - layer: gold
+    entity: gold_rideflow_rider_lifetime_value
+    path: "contracts/{gold_layer}/gold_rideflow_rider_lifetime_value_v1.0.yaml"
+    depends_on: ['silver_rideflow_trips', 'silver_rideflow_rider_profiles']
+    enabled: true
+  - layer: gold
+    entity: gold_rideflow_surge_pricing_model
+    path: "contracts/{gold_layer}/gold_rideflow_surge_pricing_model_v1.0.yaml"
+    enabled: true
+
+# ── Lineage (inherited by all contracts) ────────────────────────────────────
+lineage:
+  enabled: true
+  source_column_name: "_lakelogic_source"
+  timestamp_column_name: "_lakelogic_processed_at"
+  run_id_column_name: "_lakelogic_run_id"
+  contract_name_column_name: "_lakelogic_contract_name"
+  capture_domain: false
+  capture_system: false
+
+# ── Materialization (per-layer defaults, contracts override) ────────────────
+materialization:
+  bronze:
+    strategy: append
+    format: delta
+  silver:
+    strategy: merge
+    format: delta
+    merge_dedup_guard: true
+  gold:
+    strategy: merge
+    format: delta
+
+# ── Server Defaults (per-layer, contracts override) ─────────────────────────
+server:
+  bronze:
+    cast_to_string: true
+    schema_policy:
+      evolution: append
+      unknown_fields: allow
+  silver:
+    schema_policy:
+      evolution: strict
+      unknown_fields: quarantine
+  gold:
+    schema_policy:
+      evolution: strict
+      unknown_fields: quarantine
+
+# ── Cost Observability ──────────────────────────────────────────────────────
+cost:
+  provider: "manual"
+  attribution: "duration_proportional"
+  currency: "GBP"
+  rates:
+    dbu_per_hour: 0.22
+    storage_per_gb_month: 0.023
+  cluster:
+    min_nodes: 2
+    max_nodes: 8
+    scaling_assumption: "avg"
+  layer_rates:
+    bronze:
+      dbu_per_hour: 0.15
+      cluster:
+        min_nodes: 1
+        max_nodes: 4
+        scaling_assumption: "min"
+    silver:
+      dbu_per_hour: 0.22
+    gold:
+      dbu_per_hour: 0.55
+      cluster:
+        min_nodes: 1
+        max_nodes: 16
+        scaling_assumption: "p75"
+
+notifications_enabled: false
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ENVIRONMENTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+x-azure-storage: &azure_storage
+  storage_root: "abfss://nondelta@{storage_account}.dfs.core.windows.net"
+  data_root: "abfss://{domain}@{storage_account}.dfs.core.windows.net"
+
+environments:
+  dev:
+    catalog: "rideflow-lakehouse-dev-001"
+    storage_account: "sarideflowdevadls001"
+    <<: *azure_storage
+  staging:
+    catalog: "rideflow-lakehouse-staging-001"
+    storage_account: "sarideflowstgadls001"
+    <<: *azure_storage
+  prod:
+    catalog: "rideflow-lakehouse-prod-001"
+    storage_account: "sarideflowprodadls001"
+    <<: *azure_storage
+  local:
+    catalog: "local"
+    storage_root: "./lakehouse"
+    data_root: "./lakehouse/{domain}"
+  colab:
+    catalog: "colab"
+    storage_root: "/content/lake"
+    data_root: "/content/lake/{domain}"

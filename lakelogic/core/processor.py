@@ -1346,10 +1346,10 @@ class DataProcessor:
         # delta_version → reads Delta transaction log → only valid for table sources
         # Mismatches silently degrade to full reloads every run.
         _src_cfg = self.contract.source if self.contract.source else None
-        _is_table = str(path).startswith("table:") or (_src_cfg and getattr(_src_cfg, "type", None) == "table")
+        _is_table = str(path).startswith("table:") or (_src_cfg and getattr(_src_cfg, "type", None) in ("table", "delta", "iceberg"))
         _wm_strategy = getattr(_src_cfg, "watermark_strategy", None) if _src_cfg else None
         _load_mode = getattr(_src_cfg, "load_mode", "full") if _src_cfg else "full"
-        if _is_table and _wm_strategy == "pipeline_log" and _load_mode in ("incremental",):
+        if _is_table and _wm_strategy == "pipeline_log" and getattr(_src_cfg, "type", None) == "table":
             raise ValueError(
                 "Invalid configuration: source type 'table' cannot use "
                 "watermark_strategy 'pipeline_log' (it relies on file modification times "
@@ -1449,7 +1449,7 @@ class DataProcessor:
             # Force directory glob to calculate mtimes for incremental file reads
             # if a raw directory path was provided without an explicit glob.
             _is_table = str(path).startswith("table:") or (
-                self.contract.source and self.contract.source.type == "table"
+                self.contract.source and self.contract.source.type in ("table", "delta", "iceberg")
             )
             if (
                 self.contract.source
@@ -1467,8 +1467,11 @@ class DataProcessor:
                 _is_bare_dir = (
                     not any(ch in str(path) for ch in ["*", "?", "["])
                     and not _is_table
+                    and _src_type not in ("delta", "iceberg")
                     and not self._is_uri_path(str(path))
                     and Path(path).is_dir()
+                    and not (Path(path) / "_delta_log").exists()
+                    and not ((Path(path) / "metadata").exists() and (Path(path) / "data").exists())
                 )
                 if _is_bare_dir:
                     source_files = self._expand_source_files(str(path).rstrip("/") + "/**/*")
@@ -1705,6 +1708,7 @@ class DataProcessor:
                             if getattr(_src_cfg, "load_mode", None) in ("incremental", "cdc") and not os.environ.get(
                                 "LAKELOGIC_SKIP_INCREMENTAL_CHECK"
                             ):
+                                _wm_strategy = getattr(_src_cfg, "watermark_strategy", None)
                                 _wm_field = getattr(_src_cfg, "watermark_field", None)
                                 # Default to the configured lineage timestamp when no explicit watermark is set.
                                 if not _wm_field:
@@ -1722,36 +1726,47 @@ class DataProcessor:
                                     _src_col, _tgt_col = self._resolve_watermark_columns(_wm_field)
                                     _max_wm = None
 
-                                    # Watermark checking on the target table (Delta)
-                                    # Skip Path() checks for URIs to avoid OSError on Windows
-                                    _tgt_is_delta_dir = False
-                                    if not self._is_uri_path(_tgt):
-                                        _tgt_delta = Path(_tgt)
-                                        _tgt_is_delta_dir = (_tgt_delta / "_delta_log").exists()
+                                    if _wm_strategy == "pipeline_log":
+                                        _max_wm_val = self._get_last_source_watermark()
+                                        if _max_wm_val is not None:
+                                            try:
+                                                from datetime import datetime, timezone
+                                                # Convert float back to datetime for Polars comparison
+                                                _max_wm = datetime.fromtimestamp(float(_max_wm_val), tz=timezone.utc).replace(tzinfo=None)
+                                            except Exception as e:
+                                                logger.debug(f"Failed to parse pipeline_log watermark: {e}")
+                                                _max_wm = None
                                     else:
-                                        _tgt_is_delta_dir = True  # Assume URI target is accessible if it's delta
-
-                                    if _tgt_is_delta_dir:
-                                        try:
-                                            # Use DeltaTable → Arrow → Polars to avoid
-                                            # deltalake/polars Schema iteration bug
-                                            from deltalake import DeltaTable as _DT
-
-                                            _dt_opts = (
-                                                self._get_cloud_storage_options(str(_tgt))
-                                                if self._is_uri_path(str(_tgt))
-                                                else None
-                                            )
-                                            _dt_tgt = _DT(str(_tgt), storage_options=_dt_opts)
-                                            _tdf = pl.from_arrow(_dt_tgt.to_pyarrow_table())
-                                            if _tgt_col in _tdf.columns:
-                                                _max_wm = _tdf.select(pl.col(_tgt_col).max()).item()
-                                        except Exception as _wm_err:
-                                            logger.debug(f"Watermark read failed (full load): {_wm_err}")
+                                        # Watermark checking on the target table (Delta)
+                                        # Skip Path() checks for URIs to avoid OSError on Windows
+                                        _tgt_is_delta_dir = False
+                                        if not self._is_uri_path(_tgt):
+                                            _tgt_delta = Path(_tgt)
+                                            _tgt_is_delta_dir = (_tgt_delta / "_delta_log").exists()
+                                        else:
+                                            _tgt_is_delta_dir = True  # Assume URI target is accessible if it's delta
+    
+                                        if _tgt_is_delta_dir:
+                                            try:
+                                                # Use DeltaTable → Arrow → Polars to avoid
+                                                # deltalake/polars Schema iteration bug
+                                                from deltalake import DeltaTable as _DT
+    
+                                                _dt_opts = (
+                                                    self._get_cloud_storage_options(str(_tgt))
+                                                    if self._is_uri_path(str(_tgt))
+                                                    else None
+                                                )
+                                                _dt_tgt = _DT(str(_tgt), storage_options=_dt_opts)
+                                                _tdf = pl.from_arrow(_dt_tgt.to_pyarrow_table())
+                                                if _tgt_col in _tdf.columns:
+                                                    _max_wm = _tdf.select(pl.col(_tgt_col).max()).item()
+                                            except Exception as _wm_err:
+                                                logger.debug(f"Watermark read failed (full load): {_wm_err}")
                                     if _max_wm is not None:
                                         logger.info(
                                             f"Incremental load: filtering {_src_col} > {_max_wm!r} "
-                                            f"(target column: '{_tgt_col}')"
+                                            f"(strategy: {_wm_strategy or 'max_target'})"
                                         )
                                         _wm_filter_expr = pl.col(_src_col) > _max_wm
                                     else:
@@ -1813,10 +1828,9 @@ class DataProcessor:
                                 else ""
                             )
                             # Polars needs explicit glob if it's a directory
-                            if fmt == "parquet" and not path.endswith(".parquet"):
-                                path = f"{path.rstrip('/')}/*.parquet"
-                            elif fmt == "csv" and not path.endswith(".csv"):
-                                path = f"{path.rstrip('/')}/*.csv"
+                            _supported_globs = ["csv", "parquet", "json", "jsonl", "ndjson"]
+                            if fmt in _supported_globs and not any(chr in path for chr in ["*", "?", "["]) and not path.endswith(f".{fmt}"):
+                                path = f"{path.rstrip('/')}/**/*.{fmt}"
 
                             # On Windows, Polars' internal glob misinterprets
                             # drive-letter colons (C:) as URI schemes, producing
@@ -2762,8 +2776,11 @@ class DataProcessor:
         if source_type == "table":
             return None
         p = Path(path)
-        if p.is_dir() and (p / "_delta_log").exists():
-            return None  # Delta table directory — read as a whole, not individual files
+        if p.is_dir():
+            if (p / "_delta_log").exists():
+                return None  # Delta table directory
+            if (p / "metadata").exists() and (p / "data").exists():
+                return None  # Iceberg table directory
         if not any(ch in path for ch in ["*", "?", "["]):
             return None
 
@@ -4012,7 +4029,12 @@ class DataProcessor:
                 columns = ", ".join(f'"{c}"' for c in col_names)
                 logger.info(f"Column projection: selecting {len(col_names)} fields from contract model")
 
-        query = f'SELECT {columns} FROM "{dataset}"'
+        custom_query = getattr(self.contract.source, "query", None)
+        if custom_query:
+            query = f"SELECT {columns} FROM ({custom_query}) AS _lakelogic_src"
+        else:
+            query = f'SELECT {columns} FROM "{dataset}"'
+
         load_mode = getattr(self.contract.source, "load_mode", "full")
         watermark_field = getattr(self.contract.source, "watermark_field", None)
 
