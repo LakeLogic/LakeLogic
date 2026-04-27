@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sys
 import types
-from pathlib import Path
 
 from lakelogic.core import schema_api as sa
 

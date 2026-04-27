@@ -3,11 +3,12 @@ import sys
 import types
 
 import pytest
+
 from lakelogic.notifications import base as nb
 from lakelogic.notifications.base import (
     ConsoleAdapter,
-    SMTPAdapter,
     SendGridAdapter,
+    SMTPAdapter,
     get_notification_adapter,
     resolve_config_secrets,
     resolve_ownership_contacts,

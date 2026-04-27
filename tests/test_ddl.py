@@ -1,27 +1,26 @@
 """
 Tests for lakelogic.core.ddl — DDL generation from contracts.
 """
-import pytest
 import sys
 import textwrap
-from pathlib import Path
 
-from lakelogic.core.models import DataContract, FieldDefinition, Model, Materialization, Info
+import pytest
+
 from lakelogic.core.ddl import (
+    _extract_varchar_length,
+    _init_delta_table_from_contract,
+    _normalize_base_type,
+    _resolve_arrow_type,
+    _resolve_table_name,
+    _resolve_type,
+    create_table,
+    generate_alter_ddl,
     generate_ddl,
     generate_drop_ddl,
-    generate_alter_ddl,
-    create_table,
-    _resolve_type,
-    _resolve_table_name,
-    _normalize_base_type,
-    _extract_varchar_length,
-    is_safe_widening,
     init_tables_from_directory,
-    _resolve_arrow_type,
-    _init_delta_table_from_contract,
+    is_safe_widening,
 )
-
+from lakelogic.core.models import DataContract, FieldDefinition, Info, Materialization, Model
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -307,7 +306,7 @@ class TestAlterDDL:
         # Ensure server block uses "append" to allow new columns automatically
         contract.server = type("MockServer", (), {})()
         contract.server.schema_policy = type("MockPolicy", (), {"evolution": "append"})()
-        
+
         existing = ["order_id", "customer_id", "order_date"]
         stmts = generate_alter_ddl(contract, "duckdb", existing)
         # Should add amount, status, is_active

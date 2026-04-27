@@ -1,5 +1,5 @@
-import pytest
 from lakelogic.core.models import DataContract
+
 
 def test_odcs_parser_intercepts_and_converts():
     """Test that a pure ODCS dictionary is successfully parsed into a LakeLogic DataContract."""
@@ -26,14 +26,14 @@ def test_odcs_parser_intercepts_and_converts():
             }
         }
     }
-    
+
     contract = DataContract(**odcs_payload)
-    
+
     # Assert ODCS fields mapped beautifully
     assert contract.version == "v3.1.0"
     assert contract.info.title == "customers_silver"
     assert contract.tier == "silver"
-    
+
     # Assert schema mapped to model.fields
     assert contract.model is not None
     assert len(contract.model.fields) == 3
@@ -43,7 +43,7 @@ def test_odcs_parser_intercepts_and_converts():
     assert contract.model.fields[1].name == "email"
     assert contract.model.fields[1].pii is True
     assert contract.model.fields[2].name == "created_at"
-    
+
     # Assert LakeLogic pipeline specifics were lifted out of customProperties
     assert contract.source.path == "s3://bronze/customers"
     assert contract.source.format == "parquet"
@@ -61,7 +61,7 @@ def test_lakelogic_native_skips_interceptor():
             "fields": [{"name": "id", "type": "integer"}]
         }
     }
-    
+
     contract = DataContract(**native_payload)
     assert contract.version == "1.0"
     assert contract.info.title == "lakelogic-native"
@@ -75,7 +75,7 @@ def test_odcs_partial_payload():
         "apiVersion": "v1.2",
         "dataset": "headless_contract"
     }
-    
+
     # Because there are missing parts, Pydantic should still try its best,
     # but since LakeLogic allows no tier/source in libraries, it should parse.
     contract = DataContract(**odcs_payload)

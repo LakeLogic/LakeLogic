@@ -1,8 +1,10 @@
 import pytest
+
 typer = pytest.importorskip("typer")
+
 from typer.testing import CliRunner
+
 from lakelogic.cli.main import app
-import os
 
 runner = CliRunner()
 

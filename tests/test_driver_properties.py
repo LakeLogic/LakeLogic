@@ -15,13 +15,13 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
 hypothesis = pytest.importorskip("hypothesis")
-from hypothesis import given, assume, settings, HealthCheck
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from lakelogic.cli.cli_parsers import (
     build_backfill_windows,
-    parse_contracts,
     parse_entities,
     parse_layers,
     parse_metrics_tags,
@@ -32,7 +32,6 @@ from lakelogic.cli.observability import (
     flatten_summary,
     format_prometheus,
 )
-
 
 # ── Strategies ───────────────────────────────────────────────────────────────
 

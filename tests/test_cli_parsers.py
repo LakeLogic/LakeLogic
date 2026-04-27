@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import sys
 import types
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import pytest
 
@@ -24,7 +24,7 @@ def test_parse_layers_entities_contracts_tags_and_overrides(monkeypatch, tmp_pat
     assert cp.parse_layers("bronze, ref") == ["bronze", "reference"]
     with pytest.raises(ValueError, match="No layers specified"):
         cp.parse_layers("  ,  ")
-    with pytest.raises(ValueError, match="Invalid layer\(s\): platinum"):
+    with pytest.raises(ValueError, match=r"Invalid layer\(s\): platinum"):
         cp.parse_layers("platinum")
     with pytest.raises(ValueError, match="Invalid layer order"):
         cp.parse_layers("gold,bronze", strict=True)

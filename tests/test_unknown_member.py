@@ -3,6 +3,7 @@ Tests for the unknown member row injection in SCD2 materialization.
 """
 
 import pytest
+
 pd = pytest.importorskip("pandas")
 
 
@@ -123,7 +124,7 @@ class TestSCD2WithUnknownMember:
     """Test _scd2_frames integration with unknown_member config."""
 
     def test_scd2_frames_injects_unknown(self):
-        from lakelogic.core.materialization import _scd2_frames, _inject_unknown_member_pandas
+        from lakelogic.core.materialization import _inject_unknown_member_pandas, _scd2_frames
 
         existing = pd.DataFrame()
         incoming = pd.DataFrame(

@@ -1,5 +1,7 @@
 import pytest
+
 from lakelogic.core.models import DataContract
+
 
 def test_contract_parsing_minimal():
     """Test that a minimal contract can be parsed."""
@@ -159,6 +161,7 @@ def test_transformation_rename_mappings():
 def test_quality_rule_category_normalization_warns(caplog):
     """Unknown categories should warn and be normalized to lowercase."""
     import logging
+
     from loguru import logger
 
     # Enable loguru -> standard logging propagation for caplog

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 pd = pytest.importorskip("pandas")
 import yaml
 

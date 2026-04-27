@@ -662,7 +662,7 @@ def test_process_single_contract_spark_conversion_and_fail_on_quarantine(monkeyp
     summary = runner.PipelineRunSummary("run-1", "dev", dry_run=False)
     contract = types.SimpleNamespace(entity="orders", contract_dict={"info": {"title": "Orders", "table_name": "orders"}, "materialization": {}})
 
-    with pytest.raises(ValueError, match="Pipeline failed: 1 record\(s\) quarantined") as exc_info:
+    with pytest.raises(ValueError, match=r"Pipeline failed: 1 record\(s\) quarantined") as exc_info:
         pipeline._process_single_contract(
             contract,
             "silver",

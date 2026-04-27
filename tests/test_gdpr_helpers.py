@@ -1,11 +1,10 @@
 from __future__ import annotations
-import pytest
-import pytest
 
 import sys
 import types
 
 import pandas as pd
+import pytest
 
 from lakelogic.core import gdpr
 from lakelogic.core.models import DataContract, FieldDefinition, Info, Model

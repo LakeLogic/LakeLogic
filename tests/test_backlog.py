@@ -5,14 +5,17 @@ Tests for the backlog features:
   3. Polars streaming (run_source_streaming)
   4. Partition-aware merge materialization
 """
+
 import pytest
-from datetime import date
-from pathlib import Path
 
 from lakelogic.core.models import (
-    DataContract, FieldDefinition, Model, Materialization, Info, Server,
+    DataContract,
+    FieldDefinition,
+    Info,
+    Materialization,
+    Model,
+    Server,
 )
-
 
 # ── GDPR Tests ───────────────────────────────────────────────────────────────
 
@@ -32,6 +35,7 @@ class TestGDPRForget:
 
     def test_forget_nullify_polars(self):
         import polars as pl
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
@@ -56,6 +60,7 @@ class TestGDPRForget:
 
     def test_forget_hash_polars(self):
         import polars as pl
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
@@ -74,6 +79,7 @@ class TestGDPRForget:
 
     def test_forget_redact_polars(self):
         import polars as pl
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
@@ -93,6 +99,7 @@ class TestGDPRForget:
     def test_forget_nullify_pandas(self):
         import pytest; pytest.skip("pandas")
         import pandas as pd
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
@@ -114,6 +121,7 @@ class TestGDPRForget:
 
     def test_forget_nonexistent_subject(self):
         import polars as pl
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
@@ -130,6 +138,7 @@ class TestGDPRForget:
 
     def test_forget_missing_subject_column_raises(self):
         import polars as pl
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
@@ -140,6 +149,7 @@ class TestGDPRForget:
 
     def test_forget_no_pii_fields_warns(self):
         import polars as pl
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = DataContract(
@@ -156,6 +166,7 @@ class TestGDPRForget:
 
     def test_invalid_strategy_raises(self):
         import polars as pl
+
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
@@ -184,6 +195,7 @@ class TestGDPRMask:
 
     def test_mask_nullify_polars(self):
         import polars as pl
+
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
@@ -203,6 +215,7 @@ class TestGDPRMask:
 
     def test_mask_hash_preserves_referential_integrity(self):
         import polars as pl
+
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
@@ -221,6 +234,7 @@ class TestGDPRMask:
     def test_mask_pandas(self):
         import pytest; pytest.skip("pandas")
         import pandas as pd
+
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
@@ -238,6 +252,7 @@ class TestGDPRMask:
 
     def test_mask_with_custom_columns(self):
         import polars as pl
+
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
@@ -431,6 +446,7 @@ class TestDateDimension:
     def test_duckdb_output(self):
         import pytest; pytest.skip("duckdb")
         import duckdb
+
         from lakelogic.core.dim_date import generate_date_dimension
 
         con = duckdb.connect()
@@ -601,12 +617,12 @@ class TestPolarsStreaming:
 
 # ── Partition-Aware Merge Tests ──────────────────────────────────────────────
 
-import pytest
 @pytest.mark.skip(reason="Requires pandas (deprecated execution engine integration)")
 class TestPartitionAwareMerge:
 
     def test_partitioned_merge_creates_partition_dirs(self, tmp_path):
         import pandas as pd
+
         from lakelogic.core.materialization import materialize_dataframe
 
         contract = DataContract(
@@ -640,6 +656,7 @@ class TestPartitionAwareMerge:
 
     def test_partitioned_merge_upserts_correctly(self, tmp_path):
         import pandas as pd
+
         from lakelogic.core.materialization import materialize_dataframe
 
         contract = DataContract(
@@ -684,6 +701,7 @@ class TestPartitionAwareMerge:
 
     def test_partitioned_merge_scopes_to_affected_partitions(self, tmp_path):
         import pandas as pd
+
         from lakelogic.core.materialization import materialize_dataframe
 
         contract = DataContract(
@@ -726,6 +744,7 @@ class TestPartitionAwareMerge:
 
     def test_partitioned_merge_polars_input(self, tmp_path):
         import polars as pl
+
         from lakelogic.core.materialization import materialize_dataframe
 
         contract = DataContract(

@@ -1,13 +1,13 @@
 import json
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 
-import yaml
 import pytest
+import yaml
+
 typer = pytest.importorskip("typer")
 pd = pytest.importorskip("pandas")
-from lakelogic.cli import main as cli_main_module  # noqa: F811 — avoid shadowed name
 from lakelogic.cli.main import bootstrap
 
 

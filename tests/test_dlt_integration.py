@@ -13,7 +13,6 @@ Integration tests (requires dlt + network, CI-gated):
 import builtins
 import json
 import os
-from pathlib import Path
 import sys
 import types
 from unittest.mock import MagicMock, patch
@@ -21,12 +20,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lakelogic.core.models import (
-    DataContract,
     DltEndpointConfig,
     DltSourceConfig,
     SourceConfig,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Model validation

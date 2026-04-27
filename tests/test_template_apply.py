@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import builtins
 import types
-from pathlib import Path
 
 from lakelogic.tools import template_apply as ta
 
