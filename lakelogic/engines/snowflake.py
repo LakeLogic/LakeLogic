@@ -597,10 +597,19 @@ class SnowflakeAdapter(EngineAdapter):
             f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {table_name}",
         )
 
+        # ── Detect post-phase SQL transforms that reshape columns ────────────
+        _has_post_sql = False
+        if self.contract.transformations:
+            for _t in self.contract.transformations:
+                _phase = (getattr(_t, "phase", None) or "post").lower()
+                if _phase == "post" and getattr(_t, "sql", None):
+                    _has_post_sql = True
+                    break
+
         schema_errors = []
-        if evolution == "strict" and missing:
+        if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
-        if policy == "quarantine" and unknown:
+        if policy == "quarantine" and unknown and not _has_post_sql:
             schema_errors.append(f"Unknown fields present: {', '.join(sorted(unknown))}")
 
         self.schema_drift = {

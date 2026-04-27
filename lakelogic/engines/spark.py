@@ -827,10 +827,24 @@ class SparkAdapter(EngineAdapter):
 
         df = df.select(*select_exprs)
 
+        # ── Detect post-phase SQL transforms that reshape columns ────────────
+        # When a contract has a post-phase SQL transform (e.g. gold aggregation
+        # with GROUP BY), the model fields describe the *output* of the SQL, not
+        # the source.  Strict missing/unknown enforcement at this stage would
+        # produce false positives because the source columns haven't been
+        # transformed yet (post-transforms run AFTER schema enforcement).
+        _has_post_sql = False
+        if self.contract.transformations:
+            for _t in self.contract.transformations:
+                _phase = (getattr(_t, "phase", None) or "post").lower()
+                if _phase == "post" and getattr(_t, "sql", None):
+                    _has_post_sql = True
+                    break
+
         schema_errors = []
-        if evolution == "strict" and missing:
+        if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
-        if policy == "quarantine" and unknown:
+        if policy == "quarantine" and unknown and not _has_post_sql:
             schema_errors.append(f"Unknown fields present: {', '.join(sorted(unknown))}")
 
         self.schema_drift = {

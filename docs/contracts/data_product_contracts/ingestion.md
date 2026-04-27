@@ -157,6 +157,104 @@ Register additional datasets for use in SQL transformations. This is how you **j
 
 ---
 
+## Zero-Retention Architecture (Post-Ingestion Lifecycle)
+
+After Bronze ingestion commits data to Delta, you may want to **delete or archive** the original landing zone files. This is critical for GDPR compliance — raw PII should not persist in unmanaged file storage.
+
+The `post_ingestion` config controls what happens to source files **after a successful Bronze commit**.
+
+### Contract-Level (Recommended)
+
+The simplest setup — declare `post_ingestion` directly on the `source:` block:
+
+!!! example "Example: Zero-retention on a single contract"
+
+    ```yaml
+    source:
+      type: local
+      path: "/landing/crm/customers"
+      format: parquet
+      post_ingestion:
+        action: delete                # delete | archive | retain
+        cleanup_is_blocking: false    # cleanup failure ≠ pipeline failure
+    ```
+
+This is ideal for simple pipelines and single-contract setups — no `server:` block needed.
+
+### System-Level Default
+
+For data mesh and multi-system pipelines, set a default for **all** Bronze contracts in `_system.yaml`:
+
+!!! example "Example: Zero-retention for the entire system"
+
+    ```yaml
+    server:
+      bronze:
+        post_ingestion:
+          action: delete
+          cleanup_is_blocking: false
+    ```
+
+Individual contracts can then override the system default:
+
+!!! example "Example: Override system default to archive for audit-sensitive data"
+
+    ```yaml
+    source:
+      type: landing
+      path: "s3://landing/finance/invoices"
+      post_ingestion:
+        action: archive               # Override system-level 'delete'
+        archive_path: "s3://archive/finance/invoices"
+    ```
+
+### Precedence
+
+Contract-level config always takes priority, consistent with how LakeLogic handles all other overrides:
+
+| Level | Location | Priority |
+| --- | --- | --- |
+| **Contract** | `source.post_ingestion` | Highest — overrides system default |
+| **System** | `server.post_ingestion` in `_system.yaml` | Default for all Bronze contracts |
+| **None** | Neither configured | `retain` (files stay in place) |
+
+### Actions
+
+| Action | Behaviour | Use Case |
+| --- | --- | --- |
+| `delete` | Remove landing files after Bronze commit | GDPR zero-retention, cost reduction |
+| `archive` | Move files to `archive_path` | Regulatory audit trails, 7-year retention |
+| `retain` | Leave files in place (default) | Development, debugging, replay scenarios |
+
+### Safety Guarantees
+
+The cleanup engine follows strict safety rules:
+
+1. **Cleanup only runs after a successful Bronze Delta commit** — if ingestion fails, files are untouched
+2. **Cleanup failures are non-blocking by default** (`cleanup_is_blocking: false`) — the pipeline succeeds with a warning
+3. **Cleanup failures are logged** — if a delete/archive fails, the warning is logged for manual intervention
+4. **No double-counting risk** — the watermark has advanced past cleaned files, so they won't be re-ingested
+
+### Failure Matrix
+
+| Stage | Failure | Result |
+| --- | --- | --- |
+| Read fails | File is malformed | Handled by `quarantine:` — file quarantined |
+| Write fails | Bronze commit crashes | File untouched in landing, retried on next run |
+| Delete/Archive fails | Permission / network error | Pipeline succeeds with warning, file stays in landing |
+
+### Configuration Reference
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `action` | `string` | `"retain"` | `delete`, `archive`, or `retain` |
+| `cleanup_is_blocking` | `bool` | `false` | If `true`, cleanup failure fails the pipeline |
+| `archive_path` | `string` | `null` | Destination path for `archive` action. Required when `action: archive` |
+
+> **Archive path resolution:** When `action: archive`, files are moved to the `archive_path` specified in `post_ingestion`. If not set at the contract level, the PipelineRunner falls back to `storage.archive_path` in `_system.yaml`. How long archived files are retained is controlled by your cloud provider's lifecycle policy (e.g., Azure Blob Lifecycle Management), not by LakeLogic.
+
+---
+
 ## Load Mode Validation
 
 The pipeline validates required properties per load_mode:
@@ -168,3 +266,4 @@ The pipeline validates required properties per load_mode:
 | `cdc` | At least ONE of: `cdc_op_field`, `cdc_timestamp_field` |
 
 See [Watermark Strategies](watermark_strategies.md) for incremental state tracking.
+

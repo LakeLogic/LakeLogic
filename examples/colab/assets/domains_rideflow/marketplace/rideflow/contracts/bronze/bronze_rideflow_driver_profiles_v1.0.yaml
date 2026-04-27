@@ -20,21 +20,27 @@ model:
     - name: name
       type: string
       description: "Driver full name"
+      pii: true
     - name: email
       type: string
       description: "Driver email address"
+      pii: true
     - name: phone
       type: string
       description: "Driver phone number"
+      pii: true
     - name: date_of_birth
       type: string
       description: "Driver date of birth"
+      pii: true
     - name: home_address
       type: string
       description: "Driver home address"
+      pii: true
     - name: licence_number
       type: string
       description: "Driving licence number"
+      pii: true
     - name: licence_plate
       type: string
       description: "Vehicle licence plate"
@@ -46,6 +52,7 @@ model:
       description: "Last 4 digits of bank account"
     - name: city_code
       type: string
+      pii: true
       description: "Primary operating city"
     - name: signup_date
       type: string

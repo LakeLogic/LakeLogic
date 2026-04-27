@@ -28,6 +28,7 @@ model:
       description: "Client IP address"
     - name: event_name
       type: string
+      pii: true
       description: "Event type (screen_view, button_tap, search, etc.)"
     - name: screen_name
       type: string

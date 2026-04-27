@@ -7,9 +7,9 @@ ownership:
   contacts:
     - name: Platform Data Lead
       role: oncall
-      email: platform-data@rideflow.com
+      email: collins_emetonjor@live.co.uk
   cost_center: platform_engineering
-  jira_project: MKTPLACE
+  jira_project: KAN
 
 # ── Service Level Objectives (SLOs) ──────────────────────────────────────
 slo:
@@ -18,10 +18,12 @@ slo:
       max_delay_minutes: 30
       check_column: "_lakelogic_loaded_at"
       max_source_delay_minutes: 60
+      source_check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at"]
     silver:
       max_delay_minutes: 120
       check_column: "_lakelogic_processed_at"
       max_source_delay_minutes: 180
+      source_check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at"]
 
   row_count:
     bronze:
@@ -80,12 +82,19 @@ cost:
 
 # ── Observatory Telemetry ────────────────────────────────────────────────────
 observatory:
-  enabled: true
+  enabled: false
   environments: ["dev", "prod", "staging", "local"]
   endpoint: "http://127.0.0.1:3007/api/v1/operations/run-logs/ingest"  # e.g., "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
   api_key: "llc_sk_b3665de6822db5fa3b2e7f91eb74b989"   # e.g., "${LAKELOGIC_API_KEY}" for prod
   emit_on: [success, partial, failed]
-  include_quarantine_sample: true     # attach first 50 quarantined rows
+  expected_delivery:                  # Telemetry Delivery Watchdog
+    cadence_minutes: 15
+    grace_minutes: 10
+    missing_after_minutes: 45
+    active_days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    active_hours_utc:
+      start: "00:00"
+      end: "23:59"
 
 # ── Compliance & Privacy ─────────────────────────────────────────────────────
 compliance:

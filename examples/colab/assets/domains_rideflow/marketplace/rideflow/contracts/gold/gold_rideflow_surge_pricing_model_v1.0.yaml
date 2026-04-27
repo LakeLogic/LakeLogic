@@ -16,6 +16,8 @@ source:
   # Simulating a direct Gold ingestion for inferences that map into landing -> gold
   path: "{storage_root}/{domain}/surge_inference_landing"
 
+primary_key: [inference_id]
+
 model:
   fields:
     - name: inference_id

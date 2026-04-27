@@ -6,6 +6,8 @@ info:
   target_layer: silver
   domain: marketplace
   system: rideflow
+
+primary_key: [rider_id]
 model:
   fields:
   - name: rider_id
@@ -13,16 +15,22 @@ model:
     required: true
   - name: name
     type: string
+    pii: true
   - name: email
     type: string
+    pii: true
   - name: phone
     type: string
+    pii: true
   - name: date_of_birth
     type: string
+    pii: true
   - name: home_address
     type: string
+    pii: true
   - name: city_code
     type: string
+    pii: true
   - name: signup_date
     type: timestamp
   - name: status

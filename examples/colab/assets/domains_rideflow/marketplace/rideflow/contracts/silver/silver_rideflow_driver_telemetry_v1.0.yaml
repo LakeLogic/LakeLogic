@@ -6,6 +6,9 @@ info:
   target_layer: silver
   domain: marketplace
   system: rideflow
+
+primary_key: [telemetry_id]
+
 model:
   fields:
   - name: telemetry_id

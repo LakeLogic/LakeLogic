@@ -34,10 +34,12 @@ storage:
   gold_path: "{data_root}/{gold_layer}"
   log_path: "{data_root}/_logs"
   quarantine_path: "{data_root}/_quarantine"
+  archive_path: "abfss://archive@{storage_account}.dfs.core.windows.net/landing/{domain}/{system}"
 
 # ── External Sources (for lineage visualization) ────────────────────────────
 external_sources:
   - name: "RideFlow Platform API"
+    type: api
     source_domain: "Internal Platform"
     catalog_path: "rideflow_backend_api"
     consumed_by:
@@ -85,6 +87,7 @@ contracts:
   - layer: silver
     entity: silver_rideflow_driver_profiles
     path: "contracts/{silver_layer}/silver_rideflow_driver_profiles_v1.0.yaml"
+
     enabled: true
   - layer: silver
     entity: silver_rideflow_driver_telemetry
@@ -94,6 +97,7 @@ contracts:
   - layer: silver
     entity: silver_rideflow_rider_profiles
     path: "contracts/{silver_layer}/silver_rideflow_rider_profiles_v1.0.yaml"
+
     enabled: true
   - layer: silver
     entity: silver_rideflow_trips
@@ -113,8 +117,8 @@ contracts:
     depends_on: ['silver_rideflow_trips', 'silver_rideflow_driver_profiles']
     enabled: true
   - layer: gold
-    entity: gold_rideflow_rider_lifetime_value
-    path: "contracts/{gold_layer}/gold_rideflow_rider_lifetime_value_v1.0.yaml"
+    entity: gold_rideflow_rider_daily_metrics
+    path: "contracts/{gold_layer}/gold_rideflow_rider_daily_metrics_v1.0.yaml"
     depends_on: ['silver_rideflow_trips', 'silver_rideflow_rider_profiles']
     enabled: true
   - layer: gold
@@ -152,6 +156,9 @@ server:
     schema_policy:
       evolution: append
       unknown_fields: allow
+    post_ingestion:
+      action: delete                    # delete | archive | retain
+      cleanup_is_blocking: false        # if true, cleanup failure fails the pipeline; false = warn only
   silver:
     schema_policy:
       evolution: strict
@@ -201,16 +208,16 @@ x-azure-storage: &azure_storage
 
 environments:
   dev:
-    catalog: "rideflow-lakehouse-dev-001"
-    storage_account: "sarideflowdevadls001"
+    catalog: "${RIDEFLOW_DEV_CATALOG}"
+    storage_account: "${RIDEFLOW_DEV_STORAGE_ACCOUNT}"
     <<: *azure_storage
   staging:
-    catalog: "rideflow-lakehouse-staging-001"
-    storage_account: "sarideflowstgadls001"
+    catalog: "${RIDEFLOW_STG_CATALOG}"
+    storage_account: "${RIDEFLOW_STG_STORAGE_ACCOUNT}"
     <<: *azure_storage
   prod:
-    catalog: "rideflow-lakehouse-prod-001"
-    storage_account: "sarideflowprodadls001"
+    catalog: "${RIDEFLOW_PROD_CATALOG}"
+    storage_account: "${RIDEFLOW_PROD_STORAGE_ACCOUNT}"
     <<: *azure_storage
   local:
     catalog: "local"

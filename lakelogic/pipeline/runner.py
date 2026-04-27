@@ -1793,6 +1793,211 @@ class LakehousePipeline:
             label=getattr(c, "entity", str(c)),
         )
 
+    # ── Post-ingestion landing zone cleanup ────────────────────────────────
+
+    def _execute_post_ingestion_cleanup(self, c: RegistryContract, processor: Any) -> None:
+        """Execute landing zone cleanup after a successful Bronze commit.
+
+        Actions:
+          delete  — remove source files from the landing zone
+          archive — move source files to the archive path
+          retain  — no-op (files stay in place)
+
+        Safety:
+          - Only runs AFTER a successful Bronze Delta commit.
+          - If cleanup fails and cleanup_is_blocking is False (default),
+            the pipeline continues with a warning.
+          - If cleanup_is_blocking is True, a cleanup failure raises.
+        """
+        contract_dict = c.contract_dict or {}
+        server = contract_dict.get("server") or {}
+
+        # Resolve post_ingestion config:
+        #   1. source.post_ingestion (contract-level override, highest precedence)
+        #   2. server.post_ingestion (system-level default)
+        source = contract_dict.get("source") or {}
+        pi_config = source.get("post_ingestion") or server.get("post_ingestion") or {}
+        action = pi_config.get("action", "retain")
+
+        if action == "retain":
+            return  # Nothing to do
+
+        # Resolve the source landing path
+        source = contract_dict.get("source") or {}
+        landing_path = source.get("path")
+        if not landing_path:
+            logger.debug(f"  No source.path for {c.entity} — skipping post-ingestion cleanup")
+            return
+
+        cleanup_is_blocking = pi_config.get("cleanup_is_blocking", False)
+
+        try:
+            if action == "delete":
+                self._cleanup_landing_files(landing_path, c.entity, mode="delete")
+            elif action == "archive":
+                # Resolve archive_path: config-level > storage-level
+                archive_path = pi_config.get("archive_path")
+                if not archive_path:
+                    storage = self.registry.storage if self.registry else None
+                    archive_path = getattr(storage, "archive_path", None) if storage else None
+                if not archive_path:
+                    logger.warning(
+                        f"  ⚠️ post_ingestion.action=archive for {c.entity} but no "
+                        f"archive_path configured — skipping archive"
+                    )
+                    return
+                self._cleanup_landing_files(landing_path, c.entity, mode="archive", archive_path=archive_path)
+            else:
+                logger.warning(f"  Unknown post_ingestion action '{action}' for {c.entity} — skipping")
+                return
+
+            logger.info(f"  🧹 Post-ingestion: {action}d landing files for {c.entity}")
+
+        except Exception as cleanup_exc:
+            if cleanup_is_blocking:
+                raise RuntimeError(
+                    f"Post-ingestion cleanup ({action}) failed for {c.entity}: {cleanup_exc}"
+                ) from cleanup_exc
+            else:
+                logger.warning(
+                    f"  ⚠️ Post-ingestion cleanup ({action}) failed for {c.entity}: {cleanup_exc}. "
+                    f"Pipeline continues (cleanup_is_blocking=false). "
+                    f"Files remain in landing zone and will be retried on next run."
+                )
+
+    def _cleanup_landing_files(
+        self, landing_path: str, entity: str, mode: str = "delete", archive_path: Optional[str] = None
+    ) -> None:
+        """Physically delete or move files from the landing zone.
+
+        Supports three storage backends:
+          1. Local filesystem (pathlib) — for local/colab environments
+          2. Cloud storage (fsspec) — for Azure ADLS, S3, GCS
+          3. Databricks dbutils — when running on Databricks clusters
+        """
+        _is_cloud = any(
+            landing_path.startswith(pfx)
+            for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
+        )
+        _is_local = not _is_cloud
+
+        if _is_local:
+            self._cleanup_local(landing_path, entity, mode, archive_path)
+        else:
+            # Try dbutils first (Databricks), then fall back to fsspec
+            if self.spark and self._try_cleanup_dbutils(landing_path, entity, mode, archive_path):
+                return
+            self._cleanup_cloud(landing_path, entity, mode, archive_path)
+
+    def _cleanup_local(
+        self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]
+    ) -> None:
+        """Clean up landing files on local filesystem."""
+        from pathlib import Path
+        import shutil
+
+        src = Path(landing_path)
+        if not src.exists():
+            logger.debug(f"  Landing path {src} does not exist — nothing to clean up")
+            return
+
+        if mode == "delete":
+            if src.is_dir():
+                # Delete only the files, preserve the directory structure
+                for f in src.rglob("*"):
+                    if f.is_file():
+                        f.unlink()
+                logger.debug(f"  Deleted all files in {src}")
+            elif src.is_file():
+                src.unlink()
+                logger.debug(f"  Deleted file {src}")
+        elif mode == "archive" and archive_path:
+            dst = Path(archive_path)
+            dst.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                for f in src.rglob("*"):
+                    if f.is_file():
+                        target = dst / f.relative_to(src)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(f), str(target))
+                logger.debug(f"  Archived files from {src} → {dst}")
+            elif src.is_file():
+                shutil.move(str(src), str(dst / src.name))
+                logger.debug(f"  Archived {src} → {dst}")
+
+    def _try_cleanup_dbutils(
+        self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]
+    ) -> bool:
+        """Attempt cleanup via Databricks dbutils. Returns True if successful."""
+        _dbutils = None
+        try:
+            _dbutils = self.spark._jvm.com.databricks.service.DBUtils(self.spark._jsc.sc())
+        except Exception:
+            try:
+                import IPython
+                _dbutils = IPython.get_ipython().user_ns.get("dbutils")
+            except Exception:
+                pass
+
+        if not _dbutils:
+            return False
+
+        try:
+            if mode == "delete":
+                _dbutils.fs.rm(landing_path, True)
+                logger.debug(f"  Deleted {landing_path} via dbutils")
+            elif mode == "archive" and archive_path:
+                # dbutils.fs.mv is an atomic move on ADLS/S3
+                _dbutils.fs.mv(landing_path, archive_path, True)
+                logger.debug(f"  Archived {landing_path} → {archive_path} via dbutils")
+            return True
+        except Exception as e:
+            logger.debug(f"  dbutils cleanup failed for {entity}: {e}")
+            return False
+
+    def _cleanup_cloud(
+        self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]
+    ) -> None:
+        """Clean up landing files on cloud storage via fsspec."""
+        import os as _os_cleanup
+
+        try:
+            import fsspec
+        except ImportError:
+            raise RuntimeError(
+                f"fsspec is required for cloud post-ingestion cleanup but is not installed. "
+                f"Install it with: pip install fsspec adlfs  (or s3fs / gcsfs)"
+            )
+
+        # Build storage options from environment variables
+        storage_opts: dict = {}
+        if landing_path.startswith(("abfss://", "abfs://")):
+            for env_key, opt_key in [
+                ("AZURE_STORAGE_ACCOUNT_NAME", "account_name"),
+                ("AZURE_STORAGE_ACCOUNT", "account_name"),
+                ("AZURE_STORAGE_ACCOUNT_KEY", "account_key"),
+                ("AZURE_STORAGE_SAS_TOKEN", "sas_token"),
+                ("AZURE_CLIENT_ID", "client_id"),
+                ("AZURE_CLIENT_SECRET", "client_secret"),
+                ("AZURE_TENANT_ID", "tenant_id"),
+            ]:
+                val = _os_cleanup.environ.get(env_key)
+                if val:
+                    storage_opts[opt_key] = val
+
+        fs, _ = fsspec.core.url_to_fs(landing_path, **storage_opts)
+
+        if mode == "delete":
+            if fs.exists(landing_path):
+                fs.rm(landing_path, recursive=True)
+                logger.debug(f"  Deleted {landing_path} via fsspec")
+        elif mode == "archive" and archive_path:
+            if fs.exists(landing_path):
+                # For cross-container moves, use copy + delete
+                fs.copy(landing_path, archive_path, recursive=True)
+                fs.rm(landing_path, recursive=True)
+                logger.debug(f"  Archived {landing_path} → {archive_path} via fsspec")
+
     def _process_single_contract(
         self,
         c: RegistryContract,
@@ -1954,6 +2159,13 @@ class LakehousePipeline:
 
             logger.debug(f"✅ Materialized {row_count} rows for {c.entity}")
             layers_with_new_data.add(layer)
+
+            # ── Post-ingestion cleanup (Bronze only) ────────────────────────
+            # After a successful Bronze commit, execute the landing zone
+            # lifecycle action (delete / archive / retain).
+            if layer == "bronze":
+                self._execute_post_ingestion_cleanup(c, processor)
+
             summary.append(
                 c.entity,
                 layer,
@@ -1965,17 +2177,20 @@ class LakehousePipeline:
                 table_name=_table_name,
             )
 
-            # Write run log with final succeeded status
-            _report = getattr(processor, "last_report", None) or {}
-            _report["status"] = "succeeded"
-            try:
-                from lakelogic.core.run_log import write_run_log
+            # Write run log with final succeeded status.
+            # Skip if the processor already wrote its own log (e.g. no_new_data early-exit).
+            _already_logged = getattr(processor, "_run_log_already_written", False)
+            if not _already_logged:
+                _report = getattr(processor, "last_report", None) or {}
+                _report["status"] = "succeeded"
+                try:
+                    from lakelogic.core.run_log import write_run_log
 
-                write_run_log(
-                    _report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode
-                )
-            except Exception as log_exc:
-                logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
+                    write_run_log(
+                        _report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode
+                    )
+                except Exception as log_exc:
+                    logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
 
         except Exception as e:
             # Enrich auth/permission errors with the active identity so
@@ -2208,16 +2423,17 @@ class LakehousePipeline:
                 edges.append((dep_id, n["id"], "dependency"))
 
         # Cross-layer lineage edges — intelligent entity-name matching
-        # Only infer edges for nodes that have NO explicit depends_on.
-        # Use bidirectional substring matching and source.path parsing.
+        # Always infer cross-layer edges from source.path, even when
+        # depends_on is present.  depends_on controls intra-layer
+        # ordering (e.g. dimensions before facts); source.path captures
+        # the primary Bronze→Silver or Silver→Gold data-flow edge.
         upstream_map = {"silver": "bronze", "gold": "silver"}
-        # Build a set of node IDs that already have explicit upstream deps
-        _has_explicit_deps = {n["id"] for n in nodes if n["depends_on"]}
+        # Build set of (node_id, upstream_node_id) pairs already covered
+        # by explicit depends_on so we don't draw duplicate edges.
+        _existing_edges = {(dep_id, n["id"]) for n in nodes for dep_id in n["depends_on"]}
 
         for layer, upstream_layer in upstream_map.items():
             for n in layer_entities.get(layer, []):
-                if n["id"] in _has_explicit_deps:
-                    continue  # Already has explicit depends_on edges
 
                 # Try to extract source table name from contract YAML source.path
                 _matched = False
@@ -2240,7 +2456,10 @@ class LakehousePipeline:
                                 # or vice versa (bidirectional for system-prefixed names)
                                 if (path_tail_clean.lower() in u_entity
                                         or u_entity in path_tail_clean.lower()):
-                                    edges.append((upstream_n["id"], n["id"], "lineage"))
+                                    edge_pair = (upstream_n["id"], n["id"])
+                                    if edge_pair not in _existing_edges:
+                                        edges.append((upstream_n["id"], n["id"], "lineage"))
+                                        _existing_edges.add(edge_pair)
                                     _matched = True
                     break
 
@@ -2262,7 +2481,10 @@ class LakehousePipeline:
                                 break
                         # Bidirectional: either core name is a substring of the other
                         if _core and u_core and (_core in u_core or u_core in _core):
-                            edges.append((upstream_n["id"], n["id"], "lineage"))
+                            edge_pair = (upstream_n["id"], n["id"])
+                            if edge_pair not in _existing_edges:
+                                edges.append((upstream_n["id"], n["id"], "lineage"))
+                                _existing_edges.add(edge_pair)
 
 
         # External source → consuming contract edges

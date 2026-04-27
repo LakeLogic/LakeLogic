@@ -148,6 +148,42 @@ class SchemaPolicy(BaseModel):
     unknown_fields: Literal["quarantine", "drop", "allow"] = "allow"
 
 
+class PostIngestionConfig(BaseModel):
+    """Landing zone lifecycle policy — what to do with source files after
+    successful Bronze ingestion.
+
+    Actions:
+      delete  — remove source files after commit (zero-retention)
+      archive — move source files to archive_path after commit
+      retain  — leave source files in place (default / no-op)
+
+    Safety guarantees:
+      - Cleanup only executes AFTER a successful Bronze Delta commit.
+      - If cleanup fails, the pipeline still succeeds (unless
+        cleanup_is_blocking is True).
+      - Cleanup failures are logged as warnings for manual intervention.
+
+    Example YAML (system-level default)::
+
+        server:
+          bronze:
+            post_ingestion:
+              action: delete
+              cleanup_is_blocking: false
+
+    Example YAML (contract-level with archive)::
+
+        source:
+          post_ingestion:
+            action: archive
+            archive_path: "/archive/crm/customers"
+    """
+
+    action: Literal["delete", "archive", "retain"] = "retain"
+    cleanup_is_blocking: bool = False
+    archive_path: Optional[str] = None  # Required when action == "archive"
+
+
 class Server(BaseModel):
     """Storage and ingestion settings for a contract."""
 
@@ -159,6 +195,9 @@ class Server(BaseModel):
     mode: str = "validate"  # 'validate' for Quality Gate, 'ingest' for Raw-to-Bronze movement
     schema_policy: Optional[SchemaPolicy] = Field(default_factory=SchemaPolicy)
     cast_to_string: bool = False
+
+    # Landing zone lifecycle (Bronze layer only)
+    post_ingestion: Optional[PostIngestionConfig] = None
 
 
 class Environment(BaseModel):
@@ -369,6 +408,20 @@ class SourceConfig(BaseModel):
     #     flatten_nested: [derived, pricing, location]
     flatten_nested: Union[bool, List[str]] = False
 
+    # ── Landing zone lifecycle (Bronze layer) ──────────────────────────────────
+    # Contract-level shorthand for post-ingestion cleanup.  For simple
+    # single-contract pipelines this avoids needing a full ``server:`` block.
+    #
+    # Precedence: source.post_ingestion (contract) > server.post_ingestion (system)
+    #
+    # Example (contract YAML):
+    #   source:
+    #     type: local
+    #     path: /landing/events
+    #     post_ingestion:
+    #       action: delete
+    post_ingestion: Optional[PostIngestionConfig] = None
+
     _SOURCE_KNOWN_KEYS: set = {
         "type",
         "query",
@@ -394,6 +447,7 @@ class SourceConfig(BaseModel):
         "partition_filters",
         "flatten_nested",
         "dlt",
+        "post_ingestion",
     }
 
     @model_validator(mode="after")
@@ -1640,6 +1694,7 @@ class DataContract(BaseModel):
         default=None,
         validation_alias=AliasChoices("tier", "layer", "target_layer"),
     )
+    contract_file_name: Optional[str] = None
 
     @field_validator("tier", mode="before")
     @classmethod

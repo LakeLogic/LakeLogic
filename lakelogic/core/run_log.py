@@ -284,6 +284,8 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "counts_total": counts.get("total"),
         "counts_good": counts.get("good"),
         "counts_quarantined": counts.get("quarantined"),
+        "counts_aggregated": _int(counts.get("aggregated_rows")),
+        "counts_dropped": _int(counts.get("pre_transform_dropped")),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
         # ── Cost observability ────────────────────────────────────────
         "estimated_cost": _num(report.get("estimated_cost")),
@@ -1094,8 +1096,12 @@ def write_run_log(
                     headers["X-API-Key"] = api_key
 
                 # ── Map engine report → RunLogIngest schema ──────────────
-                _counts_good = report.get("counts_good", 0) or 0
-                _counts_source = report.get("counts_source", 0) or 0
+                _counts = report.get("counts") or {}
+                _counts_good = _counts.get("good") or report.get("counts_good", 0) or 0
+                _counts_source = _counts.get("source") or report.get("counts_source", 0) or 0
+                _counts_quarantined = _counts.get("quarantined") or report.get("counts_quarantined", 0) or 0
+                _counts_total = _counts.get("total") or report.get("counts_total", 0) or 0
+
                 _quality = (
                     float(_counts_good) / float(_counts_source)
                     if _counts_source > 0 else 1.0
@@ -1118,8 +1124,8 @@ def write_run_log(
                     "duration_seconds": report.get("run_duration_seconds"),
                     "rows_input": _counts_source,
                     "rows_valid": _counts_good,
-                    "rows_quarantined": report.get("counts_quarantined", 0) or 0,
-                    "rows_output": report.get("counts_total", 0) or 0,
+                    "rows_quarantined": _counts_quarantined,
+                    "rows_output": _counts_total,
                     "quality_score": round(_quality, 6),
                     "error_message": report.get("error_message"),
                     "quarantined_rows": _quarantined_rows,

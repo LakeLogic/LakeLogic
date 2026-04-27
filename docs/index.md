@@ -184,7 +184,8 @@ LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file
 ### Compliance & Governance
 
 - **GDPR & HIPAA Compliance** — Contract-driven `forget_subjects()` with nullify, hash, or redact strategies and immutable audit trail
-- **Automatic Lineage** — Every row stamped with Run IDs and source paths — traceable from landing zone to Gold layer
+- **Zero-Retention Architecture** — Built-in `zero_retention_days` enforcement for transient data layers, automatically purging micro-batches after successful downstream processing
+- **Automated PII Handling** — Declarative encryption and hashing (`pii: true`, `masking: "encrypt"`) applied at the Bronze layer before data even reaches rest
 - **Pipeline Cost Intelligence** — Per-entity compute cost attribution with domain-level budget governance, autoscaling-aware estimation, and Databricks Unity Catalog billing integration
 
 [ :simple-googlecolab: Run the Compliance & Governance Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb){: target="_blank" .md-button }

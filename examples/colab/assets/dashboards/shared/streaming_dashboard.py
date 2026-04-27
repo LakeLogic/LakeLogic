@@ -46,8 +46,13 @@ def create_streaming_dashboard_inline(
     import hvplot.pandas  # noqa: F401
     import holoviews as hv
 
-    pn.extension("tabulator", sizing_mode="stretch_width")
-    hv.extension("bokeh", logo=False)
+    # Only initialise Panel/HoloViews if the caller hasn't done so already.
+    # Calling pn.extension() multiple times in a notebook injects duplicate
+    # Bokeh JS bundles and corrupts the widget renderer → blank charts.
+    if not getattr(pn.state, '_extensions_loaded', False):
+        pn.extension("tabulator", sizing_mode="stretch_width")
+        hv.extension("bokeh", logo=False)
+        pn.state._extensions_loaded = True
 
     domain = kwargs.get("domain", "marketplace")
     system = kwargs.get("system", "rideflow")
@@ -95,7 +100,7 @@ def create_streaming_dashboard_inline(
         elif agg_level == "Day":
             return dt_series.dt.strftime("%Y-%m-%d")
         elif agg_level == "Week":
-            return dt_series.dt.dt.to_period('W').dt.start_time.dt.strftime("%Y-%m-%d")
+            return dt_series.dt.to_period('W').dt.start_time.strftime("%Y-%m-%d")
         elif agg_level == "Month":
             return dt_series.dt.strftime("%Y-%m")
         return dt_series.dt.strftime("%Y-%m-%d")
@@ -145,57 +150,70 @@ def create_streaming_dashboard_inline(
         )
         
         # ── 5 Core Charts (Pastel aesthetic) ─────────────────────────
-        
-        # 1. Trips by Temporal Period
-        periodic_trips = df.groupby("period").size().reset_index(name="trips").sort_values("period")
-        # Show at most ~12 tick labels to avoid overlap
-        n_periods = len(periodic_trips)
-        tick_step = max(1, n_periods // 12)
-        xticks = list(range(0, n_periods, tick_step))
-        chart_trips.objects = [ periodic_trips.hvplot.bar(
-            x="period", y="trips", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
-            height=260, rot=45, responsive=True, toolbar=None,
-            xlabel="Period", ylabel="Trips", xticks=xticks
-        )]
-
-        # 2. Top 10 Drivers by Completed Trips & Revenue
-        top_drivers = df.groupby("driver_name").agg(
-            total_revenue=("fare_amount", "sum"),
-            trips=("driver_name", "count")
-        ).nlargest(10, 'total_revenue').reset_index().sort_values("total_revenue", ascending=True)
-        
-        chart_top_drivers.objects = [ top_drivers.hvplot.barh(
-            x="driver_name", y="total_revenue", hover_cols=["trips"],
-            color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR,
-            height=260, responsive=True, toolbar=None,
-            xlabel="Total Revenue (£)", ylabel=""
-        )]
-
-        # 3. Revenue by City (Narrow)
-        if "city_code" in df.columns and "fare_amount" in df.columns:
-            city_rev = df.groupby("city_code")["fare_amount"].sum().sort_values(ascending=False).reset_index().head(7)
-            city_rev.columns = ["city", "revenue"]
-            chart_city.objects = [ city_rev.hvplot.barh(
-                x="city", y="revenue", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
-                height=240, responsive=True, toolbar=None,
-                xlabel="Revenue (£)", ylabel=""
+        try:
+            # 1. Trips by Temporal Period
+            periodic_trips = df.groupby("period").size().reset_index(name="trips").sort_values("period")
+            n_periods = len(periodic_trips)
+            tick_step = max(1, n_periods // 12)
+            xticks = list(range(0, n_periods, tick_step))
+            chart_trips.objects = [ periodic_trips.hvplot.bar(
+                x="period", y="trips", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
+                height=260, rot=45, responsive=True, toolbar=None,
+                xlabel="Period", ylabel="Trips", xticks=xticks
             )]
+        except Exception as e:
+            chart_trips.objects = [pn.pane.Markdown(f"⚠️ Chart error: {e}", styles={"color": "#f87171"})]
 
-        # 4. Rating Distribution (Narrow)
-        if "driver_rating" in df.columns:
-            chart_ratings.objects = [ df.hvplot.hist(
-                "driver_rating", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
-                bins=10, height=240, responsive=True, toolbar=None,
-                xlabel="Driver Rating", ylabel="Count"
+        try:
+            # 2. Top 10 Drivers by Completed Trips & Revenue
+            top_drivers = df.groupby("driver_name").agg(
+                total_revenue=("fare_amount", "sum"),
+                trips=("driver_name", "count")
+            ).nlargest(10, 'total_revenue').reset_index().sort_values("total_revenue", ascending=True)
+            
+            chart_top_drivers.objects = [ top_drivers.hvplot.barh(
+                x="driver_name", y="total_revenue", hover_cols=["trips"],
+                color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR,
+                height=260, responsive=True, toolbar=None,
+                xlabel="Total Revenue (£)", ylabel=""
             )]
+        except Exception as e:
+            chart_top_drivers.objects = [pn.pane.Markdown(f"⚠️ Chart error: {e}", styles={"color": "#f87171"})]
 
-        # 5. Surge Distribution (Narrow)
-        if "surge_multiplier" in df.columns:
-            chart_surge.objects = [ df.hvplot.hist(
-                "surge_multiplier", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
-                bins=15, height=240, responsive=True, toolbar=None,
-                xlabel="Surge Multiplier", ylabel="Count"
-            )]
+        try:
+            # 3. Revenue by City (Narrow)
+            if "city_code" in df.columns and "fare_amount" in df.columns:
+                city_rev = df.groupby("city_code")["fare_amount"].sum().sort_values(ascending=False).reset_index().head(7)
+                city_rev.columns = ["city", "revenue"]
+                chart_city.objects = [ city_rev.hvplot.barh(
+                    x="city", y="revenue", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
+                    height=240, responsive=True, toolbar=None,
+                    xlabel="Revenue (£)", ylabel=""
+                )]
+        except Exception as e:
+            chart_city.objects = [pn.pane.Markdown(f"⚠️ Chart error: {e}", styles={"color": "#f87171"})]
+
+        try:
+            # 4. Rating Distribution (Narrow)
+            if "driver_rating" in df.columns:
+                chart_ratings.objects = [ df.hvplot.hist(
+                    "driver_rating", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
+                    bins=10, height=240, responsive=True, toolbar=None,
+                    xlabel="Driver Rating", ylabel="Count"
+                )]
+        except Exception as e:
+            chart_ratings.objects = [pn.pane.Markdown(f"⚠️ Chart error: {e}", styles={"color": "#f87171"})]
+
+        try:
+            # 5. Surge Distribution (Narrow)
+            if "surge_multiplier" in df.columns:
+                chart_surge.objects = [ df.hvplot.hist(
+                    "surge_multiplier", color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, 
+                    bins=15, height=240, responsive=True, toolbar=None,
+                    xlabel="Surge Multiplier", ylabel="Count"
+                )]
+        except Exception as e:
+            chart_surge.objects = [pn.pane.Markdown(f"⚠️ Chart error: {e}", styles={"color": "#f87171"})]
 
         status.object = f"**✅ Live** — Last updated {pd.Timestamp.now().strftime('%H:%M:%S')}"
 

@@ -22,6 +22,7 @@ class SLOFreshnessConfig(BaseModel):
     max_delay_minutes: int
     check_column: Union[str, List[str]] = "_lakelogic_loaded_at"
     max_source_delay_minutes: Optional[int] = None  # source-time freshness
+    source_check_columns: List[str] = Field(default_factory=list)  # candidate source timestamp columns (first match wins, skip if none found)
     exclude_tables: List[str] = Field(default_factory=list)
 
 

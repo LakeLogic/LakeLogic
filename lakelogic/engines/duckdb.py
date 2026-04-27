@@ -277,16 +277,31 @@ class DuckDBAdapter(EngineAdapter):
             self.con.sql(f"CREATE OR REPLACE VIEW _typed AS SELECT {', '.join(casts)} FROM {table_name}")
             table_name = "_typed"
 
+        # ── Detect post-phase SQL transforms that reshape columns ────────────
+        # When a contract has a post-phase SQL transform (e.g. gold aggregation
+        # with GROUP BY), the model fields describe the *output* of the SQL, not
+        # the source.  Strict missing/unknown enforcement at this stage would
+        # produce false positives because the source columns haven't been
+        # transformed yet (post-transforms run AFTER schema enforcement).
+        _has_post_sql = False
+        if self.contract.transformations:
+            for _t in self.contract.transformations:
+                _phase = (getattr(_t, "phase", None) or "post").lower()
+                if _phase == "post" and getattr(_t, "sql", None):
+                    _has_post_sql = True
+                    break
+
         schema_errors: List[str] = []
-        if evolution == "strict" and missing:
+        if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
 
         if policy == "drop" and unknown:
-            keep_cols = [c for c in self._get_current_columns(table_name) if c not in unknown]
-            select = ", ".join(f'"{c}"' for c in keep_cols)
-            self.con.sql(f"CREATE OR REPLACE VIEW _pruned AS SELECT {select} FROM {table_name}")
-            table_name = "_pruned"
-        elif policy == "quarantine" and unknown:
+            if not _has_post_sql:
+                keep_cols = [c for c in self._get_current_columns(table_name) if c not in unknown]
+                select = ", ".join(f'"{c}"' for c in keep_cols)
+                self.con.sql(f"CREATE OR REPLACE VIEW _pruned AS SELECT {select} FROM {table_name}")
+                table_name = "_pruned"
+        elif policy == "quarantine" and unknown and not _has_post_sql:
             schema_errors.append(f"Unknown fields present: {', '.join(sorted(unknown))}")
 
         self.schema_drift = {

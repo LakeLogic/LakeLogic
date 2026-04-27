@@ -6,6 +6,9 @@ info:
   target_layer: silver
   domain: marketplace
   system: rideflow
+
+primary_key: [trip_id]
+
 model:
   fields:
   - name: trip_id
@@ -53,14 +56,20 @@ model:
     type: float
   - name: notes
     type: string
+
+
 quality:
-  row_rules: []
-  dataset_rules:
-  - unique: trip_id
+  row_rules:
+    - name: positive_spend
+      sql: "fare_amount >= 0"
+    - name: valid_rating
+      sql: "rider_rating IS NULL OR (rider_rating >= 1.0 AND rider_rating <= 5.0)"
+
 transformations:
 - deduplicate:
     by:
     - trip_id
+
 source:
   type: delta
   path: '{bronze_path}/{bronze_layer}_{system}_trip_completed'

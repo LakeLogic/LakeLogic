@@ -19,21 +19,27 @@ model:
     - name: name
       type: string
       description: "Rider full name"
+      pii: true
     - name: email
       type: string
       description: "Rider email address"
+      pii: true
     - name: phone
       type: string
       description: "Rider phone number"
+      pii: true
     - name: date_of_birth
       type: string
       description: "Rider date of birth"
+      pii: true
     - name: home_address
       type: string
       description: "Rider home address"
+      pii: true
     - name: city_code
       type: string
       description: "Primary city"
+      pii: true
     - name: signup_date
       type: string
       description: "Account creation date"

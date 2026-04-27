@@ -13,7 +13,7 @@ Watermark strategies control **how LakeLogic tracks incremental progress** — w
 | Strategy | Best For | Source Type | State Stored In | Requires Spark? |
 | --- | --- | --- | --- | --- |
 | `max_target` | Most batch pipelines | Table only | Target table (self-heal) | No |
-| `pipeline_log` | Safe cross-layer increments | File or Table | `_run_logs` table | No |
+| `pipeline_log` | Cross-layer increments (Bronze → Silver) | File or Delta | `_run_logs` table | No |
 | `lookback` | Simple rolling windows | File or Table | None (stateless) | No |
 | `date_range` | Backfills & widgets | File or Table | None (explicit dates) | No |
 | `manifest` | Non-Spark pipelines | File only | JSON manifest file | No |
@@ -22,7 +22,8 @@ Watermark strategies control **how LakeLogic tracks incremental progress** — w
 ### Cross-Validation Rules (enforced at runtime)
 
 - `delta_version` on a file source → **raises ValueError** (no Delta transaction log)
-- For table-to-table incremental, use `watermark_strategy: pipeline_log` to safely track cross-layer timestamps, or `load_mode: cdc` with `cdc_timestamp_field`
+- `pipeline_log` on a `type: table` source → **raises ValueError** (use `type: delta` for table-backed Bronze sources)
+- For cross-layer incremental (Bronze → Silver), use `watermark_strategy: pipeline_log` with `type: delta`
 
 ---
 
@@ -44,7 +45,23 @@ source:
 
 ## Strategy 2: `pipeline_log`
 
-Queries the `_run_logs` table for the last successful high-water mark of this dataset. Compares source timestamps or file modification times against the watermark. Safe for cross-layer table reads because it uses the source timestamp from the previous run, avoiding data loss from late-arriving records.
+Queries the `_run_logs` table for the last successful processing boundary. Works with **both file-based and Delta table sources** — making it the recommended strategy for cross-layer reads (Bronze → Silver, Silver → Gold).
+
+### How It Works
+
+The engine queries `_run_logs` filtering by `dataset`, `data_layer`, `domain`, and `system`, then resolves the boundary using a **priority cascade**:
+
+| Priority | Column | Description |
+| --- | --- | --- |
+| 1 | `max_source_mtime` | Epoch timestamp of the newest file processed in the prior run |
+| 2 | `max_watermark_value` | Explicit watermark value recorded by the prior run |
+| 3 | `timestamp` | Run timestamp (fallback when neither above is available) |
+
+Only successful runs are considered — failed runs and `no_new_data` runs are excluded.
+
+### File Sources (Landing → Bronze)
+
+For file-based sources, `pipeline_log` compares file modification times against the `max_source_mtime` from the last run. Only files newer than the watermark are read.
 
 ```yaml
 source:
@@ -54,7 +71,27 @@ source:
   watermark_strategy: pipeline_log
 ```
 
-State: `_run_logs` table (configured via `metadata.run_log_table`). Filters by: dataset, data_layer, domain, system. Excludes: failed runs, no_new_data runs. Fallback: if no prior runs, scans all files.
+### Delta Table Sources (Bronze → Silver)
+
+For Delta table sources, `pipeline_log` converts the epoch watermark to an ISO timestamp and applies it as a filter on the watermark column (typically `_lakelogic_processed_at`). This avoids reading the entire Bronze table on each Silver run.
+
+```yaml
+source:
+  type: delta
+  path: "{bronze_path}/{bronze_layer}_{system}_driver_profiles"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+```
+
+> **Why not `type: table`?** The `type: table` source type triggers a Spark-native `spark.table()` read, which is not compatible with `pipeline_log`. Use `type: delta` for cross-layer reads — LakeLogic reads the Delta directory directly and applies the watermark filter at the storage layer.
+
+### State
+
+State is stored in the `_run_logs` table (configured via `metadata.run_log_table`).
+
+- **Filters by:** `dataset`, `data_layer`, `domain`, `system`
+- **Excludes:** failed runs, `no_new_data` runs, reprocess runs
+- **Fallback:** if no prior runs exist, scans all data (initial load)
 
 ---
 

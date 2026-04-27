@@ -123,6 +123,30 @@ This prevents accidental cross-region data transfers — a key GDPR Art. 44–49
 
 The `compliance:` block in your contracts supports any regulatory framework your organisation is subject to. Below are **examples** of what can be captured. These are not exhaustive — add any fields relevant to your compliance posture.
 
+### General Risk & DPO Review
+
+LakeLogic allows you to define a generic risk classification and track Data Protection Officer (DPO) reviews directly within the compliance block. 
+
+> [!IMPORTANT]
+> If a dataset is classified as **High Risk** due to triggers like `AUTOMATED_DECISIONS` or `PROFILING`, a DPO Review and an associated `review_date` are strictly required.
+
+```yaml
+compliance:
+  risk:
+    level: "HIGH"                       # LOW | MEDIUM | HIGH | CRITICAL
+    triggers:
+      - "AUTOMATED_DECISIONS"
+      - "PROFILING"
+      - "CROSS_BORDER"
+      - "PII"
+
+  dpo_review:
+    required: true                      
+    review_date: "2027-11-30"           # YYYY-MM-DD
+    ticket: "DPO-4059"                  # Reference to Jira/ServiceNow ticket
+    reason: "High Risk due to Automated Profiling"
+```
+
 ### GDPR (EU 2016/679)
 
 ```yaml

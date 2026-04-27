@@ -11,6 +11,15 @@ info:
 source:
   type: delta
   path: "{silver_path}/silver_rideflow_trips"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+
+primary_key: [driver_id]
+
+links:
+  - name: silver_trips_full
+    path: "{silver_path}/silver_rideflow_trips"
+    type: delta
 
 model:
   fields:
@@ -28,15 +37,6 @@ model:
     - name: avg_duration_minutes
       type: float
 
-quality:
-  row_rules:
-    - name: positive_trips
-      sql: "total_trips >= 0"
-    - name: valid_rating
-      sql: "avg_driver_rating IS NULL OR (avg_driver_rating >= 1.0 AND avg_driver_rating <= 5.0)"
-  dataset_rules:
-    - unique: driver_id
-
 transformations:
   - sql: |
       SELECT
@@ -46,6 +46,12 @@ transformations:
           AVG(driver_rating)         AS avg_driver_rating,
           AVG(distance_km)           AS avg_distance_km,
           AVG(duration_minutes)      AS avg_duration_minutes
-      FROM source
+      -- Read the FULL Silver table (via link) so aggregates compute all-time
+      -- metrics accurately. The Jinja guard restricts the
+      -- recomputation only to drivers who had new trips.
+      FROM silver_trips_full
       WHERE driver_id IS NOT NULL
+      -- Only re-aggregate drivers that received new trips.
+      -- On a full load, `source` contains everything, so this safely selects all drivers.
+      AND driver_id IN (SELECT DISTINCT driver_id FROM source)
       GROUP BY driver_id

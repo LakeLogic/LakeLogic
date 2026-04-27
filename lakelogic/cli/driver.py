@@ -63,6 +63,7 @@ class ContractLoader:
         """
         data = yaml.load(path.read_text(encoding="utf-8"), Loader=self._loader)
         contract = DataContract(**data)
+        contract.contract_file_name = path.name
         contract._base_path = path.parent
         contract._contract_path = path
         return contract
