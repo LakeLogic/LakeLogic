@@ -164,7 +164,8 @@ class LakehousePipeline:
             # Try to auto-resolve if inside Databricks
             try:  # pragma: no cover
                 from pyspark.sql import SparkSession  # pragma: no cover
-  # pragma: no cover
+
+                # pragma: no cover
                 self.spark = SparkSession.builder.getOrCreate()  # pragma: no cover
             except ImportError:  # pragma: no cover
                 pass  # pragma: no cover
@@ -173,7 +174,9 @@ class LakehousePipeline:
             try:
                 # Force strictly OSS-compatible Delta tables to ensure Polars interoperability
                 self.spark.conf.set("spark.databricks.delta.properties.defaults.enableDeletionVectors", "false")
-                logger.debug("Disabled DeletionVectors by default in Spark session for OSS compatibility.")  # pragma: no cover
+                logger.debug(
+                    "Disabled DeletionVectors by default in Spark session for OSS compatibility."
+                )  # pragma: no cover
             except Exception as e:
                 logger.debug(f"Could not disable DeletionVectors on Spark session: {e}")
 
@@ -263,10 +266,14 @@ class LakehousePipeline:
             elif "s3://" in root or "s3a://" in root:  # pragma: no cover
                 aws_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]  # pragma: no cover
                 if not all(os.environ.get(v) for v in aws_vars):  # pragma: no cover
-                    logger.warning(f"Direct mode with S3 — credentials may be needed: {', '.join(aws_vars)}")  # pragma: no cover
+                    logger.warning(
+                        f"Direct mode with S3 — credentials may be needed: {', '.join(aws_vars)}"
+                    )  # pragma: no cover
             elif "gs://" in root:  # pragma: no cover
                 if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):  # pragma: no cover
-                    logger.warning("Direct mode with GCS — GOOGLE_APPLICATION_CREDENTIALS may be needed.")  # pragma: no cover
+                    logger.warning(
+                        "Direct mode with GCS — GOOGLE_APPLICATION_CREDENTIALS may be needed."
+                    )  # pragma: no cover
 
         if table_name and storage:
             # ── Layer-aware root resolution ────────────────────────────────
@@ -703,7 +710,9 @@ class LakehousePipeline:
                     self.spark.sql(f"DELETE FROM {_rl_table} WHERE {where_clause}")
                     logger.info(f"  Cleared run log entries ({', '.join(params_desc)}) from {_rl_table}")
                 else:
-                    logger.debug(f"  Run log table {_rl_table} does not exist yet; nothing to clear")  # pragma: no cover
+                    logger.debug(
+                        f"  Run log table {_rl_table} does not exist yet; nothing to clear"
+                    )  # pragma: no cover
             else:
                 # Polars / non-Spark fallback using delta-rs
                 try:
@@ -719,8 +728,12 @@ class LakehousePipeline:
                             f"  Cleared run log entries ({', '.join(params_desc)}) from {_rl_table} via delta-rs"
                         )
                     except Exception as e:  # pragma: no cover
-                        if "No table" in str(e) or "Not a Delta table" in str(e) or "is not a Delta table" in str(e):  # pragma: no cover
-                            logger.debug(f"  Run log table {_rl_table} does not exist yet; nothing to clear")  # pragma: no cover
+                        if (
+                            "No table" in str(e) or "Not a Delta table" in str(e) or "is not a Delta table" in str(e)
+                        ):  # pragma: no cover
+                            logger.debug(
+                                f"  Run log table {_rl_table} does not exist yet; nothing to clear"
+                            )  # pragma: no cover
                         else:  # pragma: no cover
                             raise e  # pragma: no cover
                 except ImportError:  # pragma: no cover
@@ -804,10 +817,12 @@ class LakehousePipeline:
                                 logger.info(f"  Reset: deleted quarantine cloud location {q_cloud_path} via dbutils")
                             else:
                                 logger.debug(  # pragma: no cover
-                                    f"  dbutils not available; quarantine cloud path {q_cloud_path} not deleted"  # pragma: no cover
+                                    f"  dbutils not available; quarantine cloud path {q_cloud_path} not deleted"  # pragma: no cover # noqa: E501
                                 )  # pragma: no cover
                         except Exception as _qp_exc:  # pragma: no cover
-                            logger.warning(f"  Could not delete quarantine cloud path {q_cloud_path}: {_qp_exc}")  # pragma: no cover
+                            logger.warning(
+                                f"  Could not delete quarantine cloud path {q_cloud_path}: {_qp_exc}"
+                            )  # pragma: no cover
 
                 elif q_cfg.get("enabled") and q_target:
                     # Quarantine target is not a table: prefix — try cloud (fsspec) deletion
@@ -840,12 +855,16 @@ class LakehousePipeline:
                                 fs.rm(q_path_part, recursive=True)
                                 logger.info(f"  Reset: deleted quarantine cloud path {q_target}")
                             else:
-                                logger.info(f"  Reset: quarantine cloud path {q_target} does not exist")  # pragma: no cover
+                                logger.info(
+                                    f"  Reset: quarantine cloud path {q_target} does not exist"
+                                )  # pragma: no cover
                             _q_deleted = True
                         except ImportError:  # pragma: no cover
                             logger.debug("  fsspec not available for quarantine cloud deletion")  # pragma: no cover
                         except Exception as _q_exc:  # pragma: no cover
-                            logger.warning(f"  Could not delete quarantine cloud path {q_target}: {_q_exc}")  # pragma: no cover
+                            logger.warning(
+                                f"  Could not delete quarantine cloud path {q_target}: {_q_exc}"
+                            )  # pragma: no cover
                     else:
                         import shutil
                         from pathlib import Path as _P
@@ -860,7 +879,9 @@ class LakehousePipeline:
                                 logger.info(f"  Reset: deleted local quarantine path {q_target}")
                                 _q_deleted = True
                             except Exception as _q_exc:  # pragma: no cover
-                                logger.warning(f"  Could not delete local quarantine path {q_target}: {_q_exc}")  # pragma: no cover
+                                logger.warning(
+                                    f"  Could not delete local quarantine path {q_target}: {_q_exc}"
+                                )  # pragma: no cover
                         else:  # pragma: no cover
                             _q_deleted = True  # pragma: no cover
                     if not _q_deleted:
@@ -915,7 +936,9 @@ class LakehousePipeline:
                             ).reset(targets=["quarantine"])
                             logger.info(f"  Truncated quarantine (deleted files) {q_target}")
                         except Exception as e:  # pragma: no cover
-                            logger.warning(f"  Could not truncate quarantine files at {q_target}: {e}")  # pragma: no cover
+                            logger.warning(
+                                f"  Could not truncate quarantine files at {q_target}: {e}"
+                            )  # pragma: no cover
 
                 # Clear run log entries using precise multi-column filter
                 if not dry_run:
@@ -1085,7 +1108,8 @@ class LakehousePipeline:
                     return [], {}  # pragma: no cover
                 try:  # pragma: no cover
                     import duckdb  # pragma: no cover
-  # pragma: no cover
+
+                    # pragma: no cover
                     con = duckdb.connect(database=":memory:")  # pragma: no cover
                     result = con.execute(f"PRAGMA table_info('{table_name}')").fetchall()  # pragma: no cover
                     con.close()  # pragma: no cover
@@ -1109,10 +1133,10 @@ class LakehousePipeline:
                     return col_names, col_types
                 except Exception:  # pragma: no cover
                     return [], {}  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         except Exception as e:  # pragma: no cover
             logger.debug(f"Schema introspection skipped for {backend}: {e}")  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         return [], {}  # pragma: no cover
 
     @staticmethod
@@ -1186,7 +1210,9 @@ class LakehousePipeline:
 
         partition_msg = ""
         if partition_filter:
-            partition_msg = f" [partition: {partition_filter['column']}='{partition_filter['value']}']"  # pragma: no cover
+            partition_msg = (
+                f" [partition: {partition_filter['column']}='{partition_filter['value']}']"  # pragma: no cover
+            )
         logger.info(
             f"GDPR Erasure Pass: {len(subject_ids)} subjects on '{subject_col}' (Strategy: {strategy}){partition_msg}"
         )
@@ -1267,7 +1293,7 @@ class LakehousePipeline:
                         RemoteObserver().report(report)
                     except Exception:  # pragma: no cover
                         pass  # Fail silently  # pragma: no cover
-  # pragma: no cover
+            # pragma: no cover
             else:  # pragma: no cover
                 logger.warning(  # pragma: no cover
                     f"Path-based target for [{c.layer}] {c.entity} not yet supported in native driver erasure pass."
@@ -1288,7 +1314,9 @@ class LakehousePipeline:
 
         partition_msg = ""
         if partition_filter:
-            partition_msg = f" [partition: {partition_filter['column']}='{partition_filter['value']}']"  # pragma: no cover
+            partition_msg = (
+                f" [partition: {partition_filter['column']}='{partition_filter['value']}']"  # pragma: no cover
+            )
         logger.info(
             f"HIPAA Erasure Pass: {len(patient_ids)} patients on '{patient_col}' (Strategy: {strategy}){partition_msg}"
         )
@@ -1592,7 +1620,9 @@ class LakehousePipeline:
 
             for wave_idx, wave in enumerate(waves):
                 if parallel and len(wave) > 1:
-                    logger.info(f"  Wave {wave_idx}: [{', '.join(c.entity for c in wave)}] (parallel)")  # pragma: no cover
+                    logger.info(
+                        f"  Wave {wave_idx}: [{', '.join(c.entity for c in wave)}] (parallel)"
+                    )  # pragma: no cover
                     self._execute_wave_parallel(  # pragma: no cover
                         wave,
                         layer,
@@ -1652,7 +1682,7 @@ class LakehousePipeline:
                             _consecutive_failures += 1
                             if type(e).__name__ == "EntityTimeoutError":
                                 logger.error(  # pragma: no cover
-                                    f"❌ {c.entity} [{layer}] timed out after {entity_timeout_minutes} minutes."  # pragma: no cover
+                                    f"❌ {c.entity} [{layer}] timed out after {entity_timeout_minutes} minutes."  # pragma: no cover # noqa: E501
                                 )  # pragma: no cover
                                 summary.append(c.entity, layer, "timeout")  # pragma: no cover
                             else:
@@ -1824,9 +1854,9 @@ class LakehousePipeline:
         if not landing_path:  # pragma: no cover
             logger.debug(f"  No source.path for {c.entity} — skipping post-ingestion cleanup")  # pragma: no cover
             return  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         cleanup_is_blocking = pi_config.get("cleanup_is_blocking", False)  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         try:  # pragma: no cover
             if action == "delete":  # pragma: no cover
                 self._cleanup_landing_files(landing_path, c.entity, mode="delete")  # pragma: no cover
@@ -1842,13 +1872,17 @@ class LakehousePipeline:
                         f"archive_path configured — skipping archive"  # pragma: no cover
                     )  # pragma: no cover
                     return  # pragma: no cover
-                self._cleanup_landing_files(landing_path, c.entity, mode="archive", archive_path=archive_path)  # pragma: no cover
+                self._cleanup_landing_files(
+                    landing_path, c.entity, mode="archive", archive_path=archive_path
+                )  # pragma: no cover
             else:  # pragma: no cover
-                logger.warning(f"  Unknown post_ingestion action '{action}' for {c.entity} — skipping")  # pragma: no cover
+                logger.warning(
+                    f"  Unknown post_ingestion action '{action}' for {c.entity} — skipping"
+                )  # pragma: no cover
                 return  # pragma: no cover
-  # pragma: no cover
+            # pragma: no cover
             logger.info(f"  🧹 Post-ingestion: {action}d landing files for {c.entity}")  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         except Exception as cleanup_exc:  # pragma: no cover
             if cleanup_is_blocking:  # pragma: no cover
                 raise RuntimeError(  # pragma: no cover
@@ -1872,10 +1906,11 @@ class LakehousePipeline:
           3. Databricks dbutils — when running on Databricks clusters
         """
         _is_cloud = any(  # pragma: no cover
-            landing_path.startswith(pfx) for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")  # pragma: no cover
+            landing_path.startswith(pfx)
+            for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")  # pragma: no cover
         )  # pragma: no cover
         _is_local = not _is_cloud  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         if _is_local:  # pragma: no cover
             self._cleanup_local(landing_path, entity, mode, archive_path)  # pragma: no cover
         else:  # pragma: no cover
@@ -1888,12 +1923,13 @@ class LakehousePipeline:
         """Clean up landing files on local filesystem."""
         import shutil  # pragma: no cover
         from pathlib import Path  # pragma: no cover
-  # pragma: no cover
+
+        # pragma: no cover
         src = Path(landing_path)  # pragma: no cover
         if not src.exists():  # pragma: no cover
             logger.debug(f"  Landing path {src} does not exist — nothing to clean up")  # pragma: no cover
             return  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         if mode == "delete":  # pragma: no cover
             if src.is_dir():  # pragma: no cover
                 # Delete only the files, preserve the directory structure  # pragma: no cover
@@ -1926,14 +1962,15 @@ class LakehousePipeline:
         except Exception:  # pragma: no cover
             try:  # pragma: no cover
                 import IPython  # pragma: no cover
-  # pragma: no cover
+
+                # pragma: no cover
                 _dbutils = IPython.get_ipython().user_ns.get("dbutils")  # pragma: no cover
             except Exception:  # pragma: no cover
                 pass  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         if not _dbutils:  # pragma: no cover
             return False  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         try:  # pragma: no cover
             if mode == "delete":  # pragma: no cover
                 _dbutils.fs.rm(landing_path, True)  # pragma: no cover
@@ -1950,7 +1987,8 @@ class LakehousePipeline:
     def _cleanup_cloud(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> None:
         """Clean up landing files on cloud storage via fsspec."""
         import os as _os_cleanup  # pragma: no cover
-  # pragma: no cover
+
+        # pragma: no cover
         try:  # pragma: no cover
             import fsspec  # pragma: no cover
         except ImportError:  # pragma: no cover
@@ -1958,7 +1996,7 @@ class LakehousePipeline:
                 "fsspec is required for cloud post-ingestion cleanup but is not installed. "  # pragma: no cover
                 "Install it with: pip install fsspec adlfs  (or s3fs / gcsfs)"  # pragma: no cover
             )  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         # Build storage options from environment variables  # pragma: no cover
         storage_opts: dict = {}  # pragma: no cover
         if landing_path.startswith(("abfss://", "abfs://")):  # pragma: no cover
@@ -1974,9 +2012,9 @@ class LakehousePipeline:
                 val = _os_cleanup.environ.get(env_key)  # pragma: no cover
                 if val:  # pragma: no cover
                     storage_opts[opt_key] = val  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         fs, _ = fsspec.core.url_to_fs(landing_path, **storage_opts)  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         if mode == "delete":  # pragma: no cover
             if fs.exists(landing_path):  # pragma: no cover
                 fs.rm(landing_path, recursive=True)  # pragma: no cover
@@ -2201,7 +2239,9 @@ class LakehousePipeline:
                 elif _os.getenv("AZURE_STORAGE_SAS_TOKEN"):  # pragma: no cover
                     _identity_hint = " | identity: SAS token"  # pragma: no cover
                 else:  # pragma: no cover
-                    _identity_hint = " | identity: DefaultAzureCredential (az login / managed identity)"  # pragma: no cover
+                    _identity_hint = (
+                        " | identity: DefaultAzureCredential (az login / managed identity)"  # pragma: no cover
+                    )
             logger.error(f"❌ Failed to process {c.entity}: {e}{_identity_hint}")
             summary.append(c.entity, layer, "failed", error=str(e), table_name=_table_name)
 
@@ -2440,14 +2480,17 @@ class LakehousePipeline:
                         path_tail = source_path.rsplit("/", 1)[-1]  # pragma: no cover
                         # Strip template vars: "{bronze_layer}_rideflow_trips" → "rideflow_trips"  # pragma: no cover
                         import re as _re  # pragma: no cover
-  # pragma: no cover
+
+                        # pragma: no cover
                         path_tail_clean = _re.sub(r"\{[^}]*\}_?", "", path_tail).strip("_")  # pragma: no cover
                         if path_tail_clean:  # pragma: no cover
                             for upstream_n in layer_entities.get(upstream_layer, []):  # pragma: no cover
                                 u_entity = upstream_n["entity"].lower()  # pragma: no cover
                                 # Match if upstream entity name is in the cleaned source path  # pragma: no cover
                                 # or vice versa (bidirectional for system-prefixed names)  # pragma: no cover
-                                if path_tail_clean.lower() in u_entity or u_entity in path_tail_clean.lower():  # pragma: no cover
+                                if (
+                                    path_tail_clean.lower() in u_entity or u_entity in path_tail_clean.lower()
+                                ):  # pragma: no cover
                                     edge_pair = (upstream_n["id"], n["id"])  # pragma: no cover
                                     if edge_pair not in _existing_edges:  # pragma: no cover
                                         edges.append((upstream_n["id"], n["id"], "lineage"))  # pragma: no cover

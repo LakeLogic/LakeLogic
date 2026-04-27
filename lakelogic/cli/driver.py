@@ -458,12 +458,16 @@ class PipelineDriver:
                     "run_log_entry_missing",  # pragma: no cover
                     "run_log_db_missing",  # pragma: no cover
                 ]:  # pragma: no cover
-                    logger.warning(f"{contract.dataset or contract.info.title}: {reason}; forcing full load.")  # pragma: no cover
+                    logger.warning(
+                        f"{contract.dataset or contract.info.title}: {reason}; forcing full load."
+                    )  # pragma: no cover
                 elif reason == "no_run_log_table":  # pragma: no cover
-                    logger.warning(f"{contract.dataset or contract.info.title}: no run_log_table; forcing full load.")  # pragma: no cover
+                    logger.warning(
+                        f"{contract.dataset or contract.info.title}: no run_log_table; forcing full load."
+                    )  # pragma: no cover
                 else:  # pragma: no cover
                     logger.warning(  # pragma: no cover
-                        f"{contract.dataset or contract.info.title}: {reason or 'no_last_success'}; forcing full load."  # pragma: no cover
+                        f"{contract.dataset or contract.info.title}: {reason or 'no_last_success'}; forcing full load."  # pragma: no cover # noqa: E501
                     )  # pragma: no cover
                 if reason:  # pragma: no cover
                     self._increment_metric("full_loads_due_to_missing_logs", 1)  # pragma: no cover
@@ -564,7 +568,9 @@ class PipelineDriver:
                     missing.append({"upstream": upstream, "reason": "stale_last_success"})  # pragma: no cover
         if missing:
             if policy == "warn":
-                logger.warning(f"Upstream policy=warn; proceeding with stale/missing upstreams: {missing}")  # pragma: no cover
+                logger.warning(
+                    f"Upstream policy=warn; proceeding with stale/missing upstreams: {missing}"
+                )  # pragma: no cover
                 return True, missing  # pragma: no cover
             return False, missing
         return True, []
@@ -728,7 +734,9 @@ class PipelineDriver:
                 attempt += 1  # pragma: no cover
                 if attempt > self.retries:  # pragma: no cover
                     raise  # pragma: no cover
-                logger.warning(f"Retry {attempt}/{self.retries} for source {source} after error: {exc}")  # pragma: no cover
+                logger.warning(
+                    f"Retry {attempt}/{self.retries} for source {source} after error: {exc}"
+                )  # pragma: no cover
                 time.sleep(min(delay, self.retry_max_delay))  # pragma: no cover
                 delay = min(delay * 2, self.retry_max_delay)  # pragma: no cover
 
@@ -1059,7 +1067,8 @@ class PipelineDriver:
     def _flatten_summary(self) -> Dict[str, object]:
         """Flatten summary data into a table-oriented record."""
         from lakelogic.cli.observability import flatten_summary  # pragma: no cover
-  # pragma: no cover
+
+        # pragma: no cover
         return flatten_summary(self.summary)  # pragma: no cover
 
     def _emit_metrics(self) -> None:
@@ -1085,7 +1094,8 @@ class PipelineDriver:
     def _start_prometheus_server(self) -> None:
         """Start a lightweight Prometheus /metrics HTTP server."""
         from lakelogic.cli.observability import start_prometheus_server  # pragma: no cover
-  # pragma: no cover
+
+        # pragma: no cover
         server, thread = start_prometheus_server(  # pragma: no cover
             self.metrics_host,  # pragma: no cover
             self.metrics_port,  # pragma: no cover

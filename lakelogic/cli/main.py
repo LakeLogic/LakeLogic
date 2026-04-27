@@ -160,12 +160,12 @@ def run(
         message = record["message"]  # pragma: no cover
         if len(message) <= max_line_length:  # pragma: no cover
             return True  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         # Split at word boundaries  # pragma: no cover
         words = message.split()  # pragma: no cover
         lines = []  # pragma: no cover
         current_line = ""  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         for word in words:  # pragma: no cover
             if len(current_line) + len(word) + 1 <= max_line_length:  # pragma: no cover
                 current_line += word + " "  # pragma: no cover
@@ -173,10 +173,10 @@ def run(
                 if current_line:  # pragma: no cover
                     lines.append(current_line.rstrip())  # pragma: no cover
                 current_line = "  " + word + " "  # Indent continuation lines  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         if current_line:  # pragma: no cover
             lines.append(current_line.rstrip())  # pragma: no cover
-  # pragma: no cover
+        # pragma: no cover
         record["message"] = "\n".join(lines)  # pragma: no cover
         return True  # pragma: no cover
 
@@ -559,19 +559,19 @@ def bootstrap(
             if distinct > 0 and series.dtype == "object":
                 col_lower = col.lower()  # pragma: no cover
                 col_parts = set(col_lower.replace("-", "_").split("_"))  # pragma: no cover
-  # pragma: no cover
+                # pragma: no cover
                 # Skip fields that should never be enum  # pragma: no cover
                 if col_parts & _NEVER_ENUM_KEYWORDS:  # pragma: no cover
                     continue  # pragma: no cover
-  # pragma: no cover
+                # pragma: no cover
                 # Cardinality ratio: distinct values / total rows  # pragma: no cover
                 cardinality_ratio = distinct / total if total > 0 else 1.0  # pragma: no cover
-  # pragma: no cover
+                # pragma: no cover
                 # Accept if: (a) field name matches enum keywords, OR  # pragma: no cover
                 #             (b) very low cardinality ratio with small distinct count  # pragma: no cover
                 is_enum_name = bool(col_parts & _ENUM_KEYWORDS)  # pragma: no cover
                 is_low_cardinality = cardinality_ratio < 0.3 and distinct <= 15  # pragma: no cover
-  # pragma: no cover
+                # pragma: no cover
                 if (is_enum_name or is_low_cardinality) and distinct <= 20:  # pragma: no cover
                     values = [v for v in series.dropna().unique().tolist() if v is not None]  # pragma: no cover
                     rules["row_rules"].append({"accepted_values": {"field": col, "values": values}})  # pragma: no cover
@@ -1004,8 +1004,10 @@ def generate(
                 saved = gen.save(df, output, format=format)  # pragma: no cover
                 typer.echo(typer.style(f"✔  Saved → {saved}", fg=typer.colors.CYAN))  # pragma: no cover
         else:  # pragma: no cover
-            typer.echo(typer.style("ℹ  No --output specified; use --output to save to disk.", dim=True))  # pragma: no cover
-  # pragma: no cover
+            typer.echo(
+                typer.style("ℹ  No --output specified; use --output to save to disk.", dim=True)
+            )  # pragma: no cover
+    # pragma: no cover
     except Exception as e:  # pragma: no cover
         logger.exception(f"Generation failed: {e}")  # pragma: no cover
         raise typer.Exit(code=1)  # pragma: no cover
@@ -1082,7 +1084,7 @@ def assert_report(
     if quarantine_log and quarantine_log.exists():
         typer.echo(  # pragma: no cover
             typer.style(  # pragma: no cover
-                "  ℹ  Quarantine cross-reference is available. Full assertion logic requires the run log integration.",  # pragma: no cover
+                "  ℹ  Quarantine cross-reference is available. Full assertion logic requires the run log integration.",  # pragma: no cover # noqa: E501
                 dim=True,  # pragma: no cover
             )  # pragma: no cover
         )  # pragma: no cover
@@ -1222,7 +1224,8 @@ def import_dbt(
         typer.echo(typer.style(f"✗  {exc}", fg=typer.colors.RED), err=True)
         if verbose:
             import traceback  # pragma: no cover
-  # pragma: no cover
+
+            # pragma: no cover
             traceback.print_exc()  # pragma: no cover
         raise typer.Exit(code=1)
 

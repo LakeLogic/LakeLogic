@@ -338,7 +338,9 @@ def _write_summary_bigquery(record: Dict[str, object], table_name: str) -> None:
         return  # pragma: no cover
 
     if not project:
-        logger.warning("BigQuery summary write missing project (BIGQUERY_PROJECT or GOOGLE_CLOUD_PROJECT).")  # pragma: no cover
+        logger.warning(
+            "BigQuery summary write missing project (BIGQUERY_PROJECT or GOOGLE_CLOUD_PROJECT)."
+        )  # pragma: no cover
         return  # pragma: no cover
 
     try:
