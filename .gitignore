@@ -266,7 +266,6 @@ site/
 
 # Temporary test files
 check_contract.py
-test_*.py
 
 # Secret files (just in case)
 secrets.yaml
