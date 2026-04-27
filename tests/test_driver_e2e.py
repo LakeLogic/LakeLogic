@@ -74,7 +74,12 @@ def test_e2e_full(tmp_path: Path) -> None:
         "version": "1.0.0",
         "dataset": "silver_policies",
         "upstream": ["bronze_policies", "ref_claim_status"],
-        "source": {"type": "landing", "path": str(out_dir / "bronze_policies"), "pattern": "data.csv", "load_mode": "full"},
+        "source": {
+            "type": "landing",
+            "path": str(out_dir / "bronze_policies"),
+            "pattern": "data.csv",
+            "load_mode": "full",
+        },
         "model": {
             "fields": [
                 {"name": "policy_id", "type": "string", "required": True},
@@ -83,18 +88,14 @@ def test_e2e_full(tmp_path: Path) -> None:
                 {"name": "premium", "type": "double"},
             ]
         },
-        "links": [
-            {"name": "ref_claim_status", "path": str(ref_file), "type": "csv"}
-        ],
-        "transformations": [
-            {"derive": {"field": "is_active", "sql": "status = 'ACTIVE'"}}
-        ],
-        "quality": {
-            "row_rules": [
-                {"not_null": {"field": "policy_id", "name": "policy_id_not_null"}}
-            ]
+        "links": [{"name": "ref_claim_status", "path": str(ref_file), "type": "csv"}],
+        "transformations": [{"derive": {"field": "is_active", "sql": "status = 'ACTIVE'"}}],
+        "quality": {"row_rules": [{"not_null": {"field": "policy_id", "name": "policy_id_not_null"}}]},
+        "materialization": {
+            "strategy": "overwrite",
+            "target_path": str(out_dir / "silver_policies"),
+            "format": "parquet",
         },
-        "materialization": {"strategy": "overwrite", "target_path": str(out_dir / "silver_policies"), "format": "parquet"},
         "quarantine": {"enabled": True, "target": str(out_dir / "silver_quarantine")},
     }
     silver_contract_path = tmp_path / "silver_contract.yaml"
@@ -105,11 +106,18 @@ def test_e2e_full(tmp_path: Path) -> None:
         "version": "1.0.0",
         "dataset": "gold_policy_counts",
         "upstream": ["silver_policies"],
-        "source": {"type": "landing", "path": str(out_dir / "silver_policies"), "pattern": "*.parquet", "load_mode": "full"},
-        "transformations": [
-            {"sql": "SELECT customer_id, COUNT(*) AS policy_count FROM source GROUP BY customer_id"}
-        ],
-        "materialization": {"strategy": "overwrite", "target_path": str(out_dir / "gold_policy_counts"), "format": "csv"},
+        "source": {
+            "type": "landing",
+            "path": str(out_dir / "silver_policies"),
+            "pattern": "*.parquet",
+            "load_mode": "full",
+        },
+        "transformations": [{"sql": "SELECT customer_id, COUNT(*) AS policy_count FROM source GROUP BY customer_id"}],
+        "materialization": {
+            "strategy": "overwrite",
+            "target_path": str(out_dir / "gold_policy_counts"),
+            "format": "csv",
+        },
     }
     gold_contract_path = tmp_path / "gold_contract.yaml"
     gold_contract_path.write_text(yaml.safe_dump(gold_contract, sort_keys=False), encoding="utf-8")
@@ -117,10 +125,16 @@ def test_e2e_full(tmp_path: Path) -> None:
     # Registries
     system_registry = {
         "entries": [
-            {"entity": "policies", "enabled": True, "contracts": {"bronze": bronze_contract_path.name, "silver": silver_contract_path.name}}
+            {
+                "entity": "policies",
+                "enabled": True,
+                "contracts": {"bronze": bronze_contract_path.name, "silver": silver_contract_path.name},
+            }
         ]
     }
-    reference_registry = {"entries": [{"entity": "reference", "enabled": True, "contracts": {"reference": ref_contract_path.name}}]}
+    reference_registry = {
+        "entries": [{"entity": "reference", "enabled": True, "contracts": {"reference": ref_contract_path.name}}]
+    }
     gold_registry = {"entries": [{"entity": "gold", "enabled": True, "contracts": {"gold": gold_contract_path.name}}]}
 
     system_registry_path = tmp_path / "_system_registry.yaml"
@@ -147,6 +161,7 @@ def test_e2e_full(tmp_path: Path) -> None:
 
 def test_e2e_inc(tmp_path: Path) -> None:
     import os
+
     # The incremental validator requires a run-log backend in production.
     # This test exercises file-window selection only — bypass the check.
     os.environ["LAKELOGIC_SKIP_INCREMENTAL_CHECK"] = "1"

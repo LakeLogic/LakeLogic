@@ -13,11 +13,17 @@ from lakelogic.core import generator as gen
 
 def _make_generator(monkeypatch, fields=None, faker=None, seed=7):
     monkeypatch.setattr(gen, "_try_faker", lambda: faker)
-    monkeypatch.setattr(gen.DataGenerator, "_contract_from_schema", staticmethod(lambda schema: {
-        "info": {"title": "schema", "version": "0.0.0"},
-        "model": {"fields": fields or [{"name": "id", "type": "string"}]},
-        "quality": {},
-    }))
+    monkeypatch.setattr(
+        gen.DataGenerator,
+        "_contract_from_schema",
+        staticmethod(
+            lambda schema: {
+                "info": {"title": "schema", "version": "0.0.0"},
+                "model": {"fields": fields or [{"name": "id", "type": "string"}]},
+                "quality": {},
+            }
+        ),
+    )
     monkeypatch.setattr(gen.DataGenerator, "_extract_fields", lambda self: self._contract_raw["model"]["fields"])
     monkeypatch.setattr(gen.DataGenerator, "_extract_unique_integer_fields", lambda self: set())
     monkeypatch.setattr(gen.DataGenerator, "_detect_triplets", lambda self: [])
@@ -64,11 +70,17 @@ def test_schema_input_detection_and_contract_from_schema(monkeypatch):
 
 def test_generator_init_with_schema_and_extraction_guard(monkeypatch):
     monkeypatch.setattr(gen, "_try_faker", lambda: None)
-    monkeypatch.setattr(gen.DataGenerator, "_contract_from_schema", staticmethod(lambda schema: {
-        "info": {"title": "schema", "version": "0.0.0"},
-        "model": {"fields": [{"name": "id", "type": "integer"}]},
-        "quality": {},
-    }))
+    monkeypatch.setattr(
+        gen.DataGenerator,
+        "_contract_from_schema",
+        staticmethod(
+            lambda schema: {
+                "info": {"title": "schema", "version": "0.0.0"},
+                "model": {"fields": [{"name": "id", "type": "integer"}]},
+                "quality": {},
+            }
+        ),
+    )
     monkeypatch.setattr(gen.DataGenerator, "_extract_fields", lambda self: self._contract_raw["model"]["fields"])
     monkeypatch.setattr(gen.DataGenerator, "_extract_unique_integer_fields", lambda self: {"id"})
     monkeypatch.setattr(gen.DataGenerator, "_detect_triplets", lambda self: [{"field": "id"}])
@@ -152,13 +164,17 @@ def test_generator_distribution_faker_and_template_helpers(monkeypatch):
 
     assert instance._expand_template("AB##??")[:2] == "AB"
     assert instance._sample_distribution({"distribution": "weighted", "weights": {"active": 1.0}}) == "active"
-    lognormal = instance._sample_distribution({"distribution": "lognormal", "mean": 1.0, "std": 0.1, "min": 1.0, "max": 5.0})
+    lognormal = instance._sample_distribution(
+        {"distribution": "lognormal", "mean": 1.0, "std": 0.1, "min": 1.0, "max": 5.0}
+    )
     assert 1.0 <= lognormal <= 5.0
     normal = instance._sample_distribution({"distribution": "normal", "mean": 10, "std": 0.1, "min": 1, "max": 20})
     assert isinstance(normal, int)
     beta = instance._sample_distribution({"distribution": "beta", "alpha": 2.0, "beta": 3.0})
     assert 0.0 <= beta <= 1.0
-    bimodal = instance._sample_distribution({"distribution": "bimodal", "peak_1": {"value": 9, "weight": 1.0}, "peak_2": {"value": 2, "weight": 0.0}})
+    bimodal = instance._sample_distribution(
+        {"distribution": "bimodal", "peak_1": {"value": 9, "weight": 1.0}, "peak_2": {"value": 2, "weight": 0.0}}
+    )
     assert 8 <= bimodal <= 10
     assert instance._sample_distribution({}) is None
 
@@ -218,21 +234,31 @@ def test_generator_valid_and_invalid_value_helpers(monkeypatch):
     fields = [{"name": "event_timestamp", "type": "integer", "description": "microseconds epoch"}]
     instance = _make_generator(monkeypatch, fields=fields, seed=17)
 
-    monkeypatch.setattr(gen, "_match_null_probability", lambda name: 1.0 if name == "optional_text" else gen._match_null_probability(name))
+    monkeypatch.setattr(
+        gen,
+        "_match_null_probability",
+        lambda name: 1.0 if name == "optional_text" else gen._match_null_probability(name),
+    )
     assert instance._make_valid_value("optional_text", "string", {}, nullable=True) is None
 
-    pk_int = instance._make_valid_value("customer_id", "integer", {"primary_key": True}, nullable=False, sample_pools={"customer_id": [10]})
+    pk_int = instance._make_valid_value(
+        "customer_id", "integer", {"primary_key": True}, nullable=False, sample_pools={"customer_id": [10]}
+    )
     assert isinstance(pk_int, int)
     assert pk_int >= 10
 
-    pk_string = instance._make_valid_value("order_id", "string", {"primary_key": True}, nullable=False, sample_pools={"order_id": ["ORD-1001"]})
+    pk_string = instance._make_valid_value(
+        "order_id", "string", {"primary_key": True}, nullable=False, sample_pools={"order_id": ["ORD-1001"]}
+    )
     assert pk_string.startswith("ORD-")
     assert pk_string != "ORD-1001"
 
     accepted = instance._make_valid_value("status", "string", {"accepted_values": ["active"]}, nullable=False)
     assert accepted == "active"
 
-    regex_value = instance._make_valid_value("code", "string", {"regex_match": "[A-Z]{2}", "min_length": 2, "max_length": 2}, nullable=False)
+    regex_value = instance._make_valid_value(
+        "code", "string", {"regex_match": "[A-Z]{2}", "min_length": 2, "max_length": 2}, nullable=False
+    )
     assert len(regex_value) == 2
     assert regex_value.isupper()
 
@@ -304,7 +330,13 @@ def test_generator_temporal_triplet_generation_covers_valid_and_invalid_formats(
     instance._window_start = gen.datetime(2024, 1, 1, 0, 0, 0)
     instance._window_end = gen.datetime(2024, 1, 2, 0, 0, 0)
 
-    valid_cfg = {"start": "started_at", "end": "ended_at", "duration": "duration_minutes", "unit": "minutes", "allowed_durations": [15]}
+    valid_cfg = {
+        "start": "started_at",
+        "end": "ended_at",
+        "duration": "duration_minutes",
+        "unit": "minutes",
+        "allowed_durations": [15],
+    }
     valid_triplet = instance._generate_temporal_triplet(valid_cfg, True)
     started = gen.datetime.fromisoformat(valid_triplet["started_at"])
     ended = gen.datetime.fromisoformat(valid_triplet["ended_at"])
@@ -312,7 +344,9 @@ def test_generator_temporal_triplet_generation_covers_valid_and_invalid_formats(
     assert int((ended - started).total_seconds()) == 900
 
     original_choice = instance._rng.choice
-    instance._rng.choice = lambda seq: "microsecond_precision_mismatch" if isinstance(seq, list) else original_choice(seq)
+    instance._rng.choice = lambda seq: (
+        "microsecond_precision_mismatch" if isinstance(seq, list) else original_choice(seq)
+    )
     try:
         invalid_triplet = instance._generate_temporal_triplet(
             {"start": "started_at", "end": "ended_at", "duration": "duration_seconds", "max_duration": 3600},
@@ -437,7 +471,9 @@ def test_generator_fk_detection_and_related_generation(monkeypatch):
             return pl.DataFrame({"customer_id": [f"C{i}" for i in range(rows)], "_is_invalid": is_invalid})
         pool = (reference_data or {}).get("customer_id", ["NONE"])
         values = [pool[i % len(pool)] for i in range(rows)]
-        return pl.DataFrame({"order_id": [f"O{i}" for i in range(rows)], "customer_id": values, "_is_invalid": is_invalid})
+        return pl.DataFrame(
+            {"order_id": [f"O{i}" for i in range(rows)], "customer_id": values, "_is_invalid": is_invalid}
+        )
 
     monkeypatch.setattr(gen.DataGenerator, "__init__", fake_init)
     monkeypatch.setattr(gen.DataGenerator, "generate", fake_generate)
@@ -499,7 +535,9 @@ def test_generator_generation_report_and_save_with_report(monkeypatch, tmp_path)
 
 
 def test_generator_save_partitioned_and_to_frame(monkeypatch, tmp_path):
-    instance = _make_generator(monkeypatch, fields=[{"name": "id", "type": "integer"}, {"name": "payload", "type": "string"}], seed=23)
+    instance = _make_generator(
+        monkeypatch, fields=[{"name": "id", "type": "integer"}, {"name": "payload", "type": "string"}], seed=23
+    )
     json_df = pl.DataFrame(
         {
             "listing_id": [1001, 1002],
@@ -527,7 +565,11 @@ def test_generator_save_partitioned_and_to_frame(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="filename_field 'missing'"):
         instance.save_partitioned(json_df, tmp_path / "bad", filename_field="missing")
 
-    instance._fields = [{"name": "id", "type": "integer"}, {"name": "flag", "type": "boolean"}, {"name": "payload", "type": "string"}]
+    instance._fields = [
+        {"name": "id", "type": "integer"},
+        {"name": "flag", "type": "boolean"},
+        {"name": "payload", "type": "string"},
+    ]
     frame = instance._to_frame(
         [{"id": "10", "flag": "true", "payload": {"name": "alice"}, "extra": "x"}],
         "polars",
@@ -548,7 +590,9 @@ def test_generator_save_partitioned_and_to_frame(monkeypatch, tmp_path):
 def test_generator_generate_stream_writes_micro_batches_and_resumes(monkeypatch, tmp_path):
     instance = _make_generator(monkeypatch, fields=[{"name": "id", "type": "integer"}], seed=29)
     resume_from = gen.datetime(2026, 1, 1, 0, 0, 0)
-    monkeypatch.setattr(instance, "_detect_latest_partition", lambda output_dir, template, interval_minutes: resume_from)
+    monkeypatch.setattr(
+        instance, "_detect_latest_partition", lambda output_dir, template, interval_minutes: resume_from
+    )
 
     generated = []
 
@@ -558,7 +602,9 @@ def test_generator_generate_stream_writes_micro_batches_and_resumes(monkeypatch,
 
     saved = []
     monkeypatch.setattr(instance, "generate", fake_generate)
-    monkeypatch.setattr(instance, "save", lambda frame, path, format="parquet": saved.append((path, format, len(frame))))
+    monkeypatch.setattr(
+        instance, "save", lambda frame, path, format="parquet": saved.append((path, format, len(frame)))
+    )
 
     batches = list(
         instance.generate_stream(
@@ -610,7 +656,9 @@ def test_generator_generate_uses_ai_pools_and_builds_manifest(monkeypatch):
     realistic_calls = []
     edge_calls = []
     fake_ai_data = types.ModuleType("lakelogic.ai.data_generator")
-    fake_ai_data.generate_realistic_pools = lambda fields, quality, **kwargs: realistic_calls.append(kwargs) or {"id": [10, 20]}
+    fake_ai_data.generate_realistic_pools = lambda fields, quality, **kwargs: (
+        realistic_calls.append(kwargs) or {"id": [10, 20]}
+    )
     fake_ai_edge = types.ModuleType("lakelogic.ai.edge_case_generator")
     fake_ai_edge.generate_edge_cases = lambda fields, quality, **kwargs: edge_calls.append(kwargs) or {"id": [-1, -2]}
     monkeypatch.setitem(sys.modules, "lakelogic.ai.data_generator", fake_ai_data)

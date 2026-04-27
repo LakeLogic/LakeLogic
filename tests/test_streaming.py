@@ -22,9 +22,7 @@ def _load_streaming_module(
     package.core = core_package
 
     if create_registry:
-        registry_module = sys.modules.setdefault(
-            "lakelogic.core.registry", types.ModuleType("lakelogic.core.registry")
-        )
+        registry_module = sys.modules.setdefault("lakelogic.core.registry", types.ModuleType("lakelogic.core.registry"))
         if not hasattr(registry_module, "DomainRegistry"):
             registry_module.DomainRegistry = object
         core_package.registry = registry_module
@@ -309,9 +307,9 @@ def test_telemetry_and_app_event_generators_emit_rows(tmp_path):
     simulator._rider_ids = ["RDR-001"]
     simulator._rider_cities = {"RDR-001": "NYC"}
     simulator._rng = types.SimpleNamespace(
-        choice=lambda options: "on_trip"
-        if options == ["on_trip", "on_trip", "on_trip", "idle", "offline"]
-        else options[0],
+        choice=lambda options: (
+            "on_trip" if options == ["on_trip", "on_trip", "on_trip", "idle", "offline"] else options[0]
+        ),
         randint=lambda start_value, end_value: start_value,
     )
 

@@ -23,6 +23,7 @@ def test_lineage_injection(tmp_path):
 
 def test_materialization_partitioned_append(tmp_path):
     import pytest
+
     pytest.importorskip("pandas")
     contract = {
         "version": "1.0.0",
@@ -35,9 +36,7 @@ def test_materialization_partitioned_append(tmp_path):
             "format": "csv",
         },
     }
-    df = pl.DataFrame(
-        {"event_id": [1, 2], "event_date": ["2024-01-01", "2024-01-02"], "value": [10, 20]}
-    )
+    df = pl.DataFrame({"event_id": [1, 2], "event_date": ["2024-01-01", "2024-01-02"], "value": [10, 20]})
     processor = DataProcessor(engine="polars", contract=contract)
     processor.materialize(df)
 
@@ -49,6 +48,7 @@ def test_materialization_partitioned_append(tmp_path):
 
 def test_materialization_merge(tmp_path):
     import pytest
+
     pytest.importorskip("pandas")
     contract = {
         "version": "1.0.0",
@@ -71,8 +71,10 @@ def test_materialization_merge(tmp_path):
     merged_path = tmp_path / "customers.csv"
     assert merged_path.exists()
 
+
 def test_quarantine_table_duckdb(tmp_path):
     import pytest
+
     pytest.skip("DuckDB engine is deprecated")
     contract = {
         "version": "1.0.0",
@@ -90,6 +92,7 @@ def test_quarantine_table_duckdb(tmp_path):
     processor.materialize(good_df, bad_df)
 
     import duckdb
+
     con = duckdb.connect(str(tmp_path / "quarantine.duckdb"))
     try:
         count = con.execute("SELECT COUNT(*) FROM quarantine_events").fetchone()[0]

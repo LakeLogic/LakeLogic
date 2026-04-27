@@ -19,18 +19,20 @@ from lakelogic.core.models import (
 
 # ── GDPR Tests ───────────────────────────────────────────────────────────────
 
-class TestGDPRForget:
 
+class TestGDPRForget:
     def _make_contract_with_pii(self):
         return DataContract(
             version="1.0",
             info=Info(title="Customer Data", version="1.0"),
-            model=Model(fields=[
-                FieldDefinition(name="customer_id", type="string", required=True),
-                FieldDefinition(name="email", type="string", pii=True),
-                FieldDefinition(name="full_name", type="string", pii=True),
-                FieldDefinition(name="order_total", type="float"),
-            ]),
+            model=Model(
+                fields=[
+                    FieldDefinition(name="customer_id", type="string", required=True),
+                    FieldDefinition(name="email", type="string", pii=True),
+                    FieldDefinition(name="full_name", type="string", pii=True),
+                    FieldDefinition(name="order_total", type="float"),
+                ]
+            ),
         )
 
     def test_forget_nullify_polars(self):
@@ -39,19 +41,21 @@ class TestGDPRForget:
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1", "c2", "c3"],
-            "email": ["a@x.com", "b@x.com", "c@x.com"],
-            "full_name": ["Alice", "Bob", "Charlie"],
-            "order_total": [100.0, 200.0, 300.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1", "c2", "c3"],
+                "email": ["a@x.com", "b@x.com", "c@x.com"],
+                "full_name": ["Alice", "Bob", "Charlie"],
+                "order_total": [100.0, 200.0, 300.0],
+            }
+        )
 
         result = forget_subjects(df, contract, "customer_id", ["c1", "c3"])
 
         # c1 and c3 should have PII nullified
-        assert result["email"][0] is None   # c1
+        assert result["email"][0] is None  # c1
         assert result["email"][1] == "b@x.com"  # c2 untouched
-        assert result["email"][2] is None   # c3
+        assert result["email"][2] is None  # c3
         assert result["full_name"][0] is None
         assert result["full_name"][1] == "Bob"
         assert result["full_name"][2] is None
@@ -64,12 +68,14 @@ class TestGDPRForget:
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1", "c2"],
-            "email": ["a@x.com", "b@x.com"],
-            "full_name": ["Alice", "Bob"],
-            "order_total": [100.0, 200.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1", "c2"],
+                "email": ["a@x.com", "b@x.com"],
+                "full_name": ["Alice", "Bob"],
+                "order_total": [100.0, 200.0],
+            }
+        )
 
         result = forget_subjects(df, contract, "customer_id", ["c1"], erasure_strategy="hash")
 
@@ -83,12 +89,14 @@ class TestGDPRForget:
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1", "c2"],
-            "email": ["a@x.com", "b@x.com"],
-            "full_name": ["Alice", "Bob"],
-            "order_total": [100.0, 200.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1", "c2"],
+                "email": ["a@x.com", "b@x.com"],
+                "full_name": ["Alice", "Bob"],
+                "order_total": [100.0, 200.0],
+            }
+        )
 
         result = forget_subjects(df, contract, "customer_id", ["c1"], erasure_strategy="redact")
 
@@ -97,18 +105,22 @@ class TestGDPRForget:
         assert result["email"][1] == "b@x.com"
 
     def test_forget_nullify_pandas(self):
-        import pytest; pytest.skip("pandas")
+        import pytest
+
+        pytest.skip("pandas")
         import pandas as pd
 
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
-        df = pd.DataFrame({
-            "customer_id": ["c1", "c2", "c3"],
-            "email": ["a@x.com", "b@x.com", "c@x.com"],
-            "full_name": ["Alice", "Bob", "Charlie"],
-            "order_total": [100.0, 200.0, 300.0],
-        })
+        df = pd.DataFrame(
+            {
+                "customer_id": ["c1", "c2", "c3"],
+                "email": ["a@x.com", "b@x.com", "c@x.com"],
+                "full_name": ["Alice", "Bob", "Charlie"],
+                "order_total": [100.0, 200.0, 300.0],
+            }
+        )
 
         result = forget_subjects(df, contract, "customer_id", ["c2"])
 
@@ -125,12 +137,14 @@ class TestGDPRForget:
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1", "c2"],
-            "email": ["a@x.com", "b@x.com"],
-            "full_name": ["Alice", "Bob"],
-            "order_total": [100.0, 200.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1", "c2"],
+                "email": ["a@x.com", "b@x.com"],
+                "full_name": ["Alice", "Bob"],
+                "order_total": [100.0, 200.0],
+            }
+        )
 
         result = forget_subjects(df, contract, "customer_id", ["c999"])
         # No changes
@@ -154,10 +168,12 @@ class TestGDPRForget:
 
         contract = DataContract(
             version="1.0",
-            model=Model(fields=[
-                FieldDefinition(name="id", type="int"),
-                FieldDefinition(name="value", type="float"),
-            ]),
+            model=Model(
+                fields=[
+                    FieldDefinition(name="id", type="int"),
+                    FieldDefinition(name="value", type="float"),
+                ]
+            ),
         )
         df = pl.DataFrame({"id": [1, 2], "value": [10.0, 20.0]})
         result = forget_subjects(df, contract, "id", [1])
@@ -170,27 +186,30 @@ class TestGDPRForget:
         from lakelogic.core.gdpr import forget_subjects
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1"],
-            "email": ["a@x.com"],
-            "full_name": ["Alice"],
-            "order_total": [100.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1"],
+                "email": ["a@x.com"],
+                "full_name": ["Alice"],
+                "order_total": [100.0],
+            }
+        )
         with pytest.raises(ValueError, match="Invalid erasure_strategy"):
             forget_subjects(df, contract, "customer_id", ["c1"], erasure_strategy="delete")
 
 
 class TestGDPRMask:
-
     def _make_contract_with_pii(self):
         return DataContract(
             version="1.0",
-            model=Model(fields=[
-                FieldDefinition(name="customer_id", type="string"),
-                FieldDefinition(name="email", type="string", pii=True),
-                FieldDefinition(name="phone", type="string", pii=True),
-                FieldDefinition(name="value", type="float"),
-            ]),
+            model=Model(
+                fields=[
+                    FieldDefinition(name="customer_id", type="string"),
+                    FieldDefinition(name="email", type="string", pii=True),
+                    FieldDefinition(name="phone", type="string", pii=True),
+                    FieldDefinition(name="value", type="float"),
+                ]
+            ),
         )
 
     def test_mask_nullify_polars(self):
@@ -199,12 +218,14 @@ class TestGDPRMask:
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1", "c2"],
-            "email": ["a@x.com", "b@x.com"],
-            "phone": ["111", "222"],
-            "value": [10.0, 20.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1", "c2"],
+                "email": ["a@x.com", "b@x.com"],
+                "phone": ["111", "222"],
+                "value": [10.0, 20.0],
+            }
+        )
 
         result = mask_pii_columns(df, contract, strategy="nullify")
         assert result["email"][0] is None
@@ -219,12 +240,14 @@ class TestGDPRMask:
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1", "c2", "c1"],
-            "email": ["a@x.com", "b@x.com", "a@x.com"],
-            "phone": ["111", "222", "111"],
-            "value": [10.0, 20.0, 30.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1", "c2", "c1"],
+                "email": ["a@x.com", "b@x.com", "a@x.com"],
+                "phone": ["111", "222", "111"],
+                "value": [10.0, 20.0, 30.0],
+            }
+        )
 
         result = mask_pii_columns(df, contract, strategy="hash")
         # Same emails should hash to same value (preserves joins)
@@ -232,18 +255,22 @@ class TestGDPRMask:
         assert result["email"][0] != result["email"][1]
 
     def test_mask_pandas(self):
-        import pytest; pytest.skip("pandas")
+        import pytest
+
+        pytest.skip("pandas")
         import pandas as pd
 
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
-        df = pd.DataFrame({
-            "customer_id": ["c1", "c2"],
-            "email": ["a@x.com", "b@x.com"],
-            "phone": ["111", "222"],
-            "value": [10.0, 20.0],
-        })
+        df = pd.DataFrame(
+            {
+                "customer_id": ["c1", "c2"],
+                "email": ["a@x.com", "b@x.com"],
+                "phone": ["111", "222"],
+                "value": [10.0, 20.0],
+            }
+        )
 
         result = mask_pii_columns(df, contract, strategy="redact")
         assert result.loc[0, "email"] == "***REDACTED***"
@@ -256,12 +283,14 @@ class TestGDPRMask:
         from lakelogic.core.gdpr import mask_pii_columns
 
         contract = self._make_contract_with_pii()
-        df = pl.DataFrame({
-            "customer_id": ["c1"],
-            "email": ["a@x.com"],
-            "phone": ["111"],
-            "value": [10.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1"],
+                "email": ["a@x.com"],
+                "phone": ["111"],
+                "value": [10.0],
+            }
+        )
 
         # Only mask email, not phone
         result = mask_pii_columns(df, contract, columns=["email"])
@@ -270,20 +299,19 @@ class TestGDPRMask:
 
 
 class TestGDPRAuditReport:
-
     def test_erasure_report(self):
         from lakelogic.core.gdpr import generate_erasure_report
 
         contract = DataContract(
             version="1.0",
             info=Info(title="Customer Data", version="1.0"),
-            model=Model(fields=[
-                FieldDefinition(name="email", type="string", pii=True),
-            ]),
+            model=Model(
+                fields=[
+                    FieldDefinition(name="email", type="string", pii=True),
+                ]
+            ),
         )
-        report = generate_erasure_report(
-            contract, "customer_id", ["c1", "c2"], affected_rows=5
-        )
+        report = generate_erasure_report(contract, "customer_id", ["c1", "c2"], affected_rows=5)
         assert report["report_type"] == "gdpr_erasure"
         assert report["subjects_erased"] == 2
         assert report["affected_rows"] == 5
@@ -293,8 +321,8 @@ class TestGDPRAuditReport:
 
 # ── Date Dimension Tests ─────────────────────────────────────────────────────
 
-class TestDateDimension:
 
+class TestDateDimension:
     def test_basic_generation_polars(self):
         from lakelogic.core.dim_date import generate_date_dimension
 
@@ -311,7 +339,9 @@ class TestDateDimension:
         assert "fiscal_year" in df.columns
 
     def test_basic_generation_pandas(self):
-        import pytest; pytest.skip("pandas")
+        import pytest
+
+        pytest.skip("pandas")
         from lakelogic.core.dim_date import generate_date_dimension
 
         df = generate_date_dimension(
@@ -336,7 +366,7 @@ class TestDateDimension:
 
         df = generate_date_dimension(
             start_date="2024-01-01",  # Monday
-            end_date="2024-01-07",    # Sunday
+            end_date="2024-01-07",  # Sunday
             engine="polars",
         )
         day_names = df["day_name"].to_list()
@@ -364,7 +394,7 @@ class TestDateDimension:
             holiday_calendar="us",
             engine="polars",
         )
-        holidays = df.filter(df["is_holiday"]==True)
+        holidays = df.filter(df["is_holiday"] == True)
         holiday_names = holidays["holiday_name"].to_list()
         assert "New Year's Day" in holiday_names
         assert "Independence Day" in holiday_names
@@ -380,7 +410,7 @@ class TestDateDimension:
             holiday_calendar="uk",
             engine="polars",
         )
-        holidays = df.filter(df["is_holiday"]==True)
+        holidays = df.filter(df["is_holiday"] == True)
         holiday_names = holidays["holiday_name"].to_list()
         assert "Good Friday" in holiday_names
         assert "Boxing Day" in holiday_names
@@ -395,12 +425,12 @@ class TestDateDimension:
             engine="polars",
         )
         # January 2024 → FY2023 (fiscal year started Apr 2023)
-        jan_row = df.filter(df["date_key"]==20240115)
+        jan_row = df.filter(df["date_key"] == 20240115)
         assert jan_row["fiscal_year"][0] == 2023
         assert jan_row["fiscal_quarter"][0] == 4  # Jan-Mar = Q4 in Apr fiscal year
 
         # April 2024 → FY2024 (new fiscal year starts)
-        apr_row = df.filter(df["date_key"]==20240415)
+        apr_row = df.filter(df["date_key"] == 20240415)
         assert apr_row["fiscal_year"][0] == 2024
         assert apr_row["fiscal_quarter"][0] == 1
 
@@ -414,7 +444,7 @@ class TestDateDimension:
             custom_holidays={"2024-03-17": "St Patrick's Day"},
             engine="polars",
         )
-        mar17 = df.filter(df["date_key"]==20240317)
+        mar17 = df.filter(df["date_key"] == 20240317)
         assert mar17["is_holiday"][0] == True
         assert mar17["holiday_name"][0] == "St Patrick's Day"
 
@@ -444,7 +474,9 @@ class TestDateDimension:
         assert "days_from_today" in df.columns
 
     def test_duckdb_output(self):
-        import pytest; pytest.skip("duckdb")
+        import pytest
+
+        pytest.skip("duckdb")
         import duckdb
 
         from lakelogic.core.dim_date import generate_date_dimension
@@ -491,20 +523,21 @@ class TestDateDimension:
             engine="polars",
         )
         # Q1: Jan-Mar, Q2: Apr-Jun, Q3: Jul-Sep, Q4: Oct-Dec
-        jan = df.filter(df["date_key"]==20240115)
+        jan = df.filter(df["date_key"] == 20240115)
         assert jan["quarter"][0] == 1
         assert jan["year_quarter"][0] == "2024-Q1"
 
-        jul = df.filter(df["date_key"]==20240715)
+        jul = df.filter(df["date_key"] == 20240715)
         assert jul["quarter"][0] == 3
 
 
 # ── Polars Streaming Tests ───────────────────────────────────────────────────
 
-class TestPolarsStreaming:
 
+class TestPolarsStreaming:
     def test_streaming_requires_polars_engine(self, tmp_path):
         import yaml
+
         contract_data = {
             "version": "1.0",
             "info": {"title": "Test", "version": "1.0"},
@@ -515,6 +548,7 @@ class TestPolarsStreaming:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
         proc.engine_name = "duckdb"
         with pytest.raises(ValueError, match="polars"):
@@ -525,11 +559,13 @@ class TestPolarsStreaming:
         import yaml
 
         # Create test data
-        test_data = pl.DataFrame({
-            "id": list(range(100)),
-            "value": [float(i * 10) for i in range(100)],
-            "category": ["A" if i % 2 == 0 else "B" for i in range(100)],
-        })
+        test_data = pl.DataFrame(
+            {
+                "id": list(range(100)),
+                "value": [float(i * 10) for i in range(100)],
+                "category": ["A" if i % 2 == 0 else "B" for i in range(100)],
+            }
+        )
         data_path = tmp_path / "data.parquet"
         test_data.write_parquet(str(data_path))
 
@@ -544,6 +580,7 @@ class TestPolarsStreaming:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
         result = proc.run_source_streaming(str(data_path))
@@ -556,10 +593,12 @@ class TestPolarsStreaming:
         import polars as pl
         import yaml
 
-        test_data = pl.DataFrame({
-            "id": list(range(50)),
-            "value": [float(i) for i in range(50)],
-        })
+        test_data = pl.DataFrame(
+            {
+                "id": list(range(50)),
+                "value": [float(i) for i in range(50)],
+            }
+        )
         data_path = tmp_path / "input.parquet"
         test_data.write_parquet(str(data_path))
 
@@ -574,6 +613,7 @@ class TestPolarsStreaming:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
         output = tmp_path / "output.parquet"
@@ -588,10 +628,12 @@ class TestPolarsStreaming:
         import polars as pl
         import yaml
 
-        test_data = pl.DataFrame({
-            "id": list(range(20)),
-            "name": [f"item_{i}" for i in range(20)],
-        })
+        test_data = pl.DataFrame(
+            {
+                "id": list(range(20)),
+                "name": [f"item_{i}" for i in range(20)],
+            }
+        )
         data_path = tmp_path / "data.csv"
         test_data.write_csv(str(data_path))
 
@@ -606,6 +648,7 @@ class TestPolarsStreaming:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
         result = proc.run_source_streaming(str(data_path))
@@ -617,9 +660,9 @@ class TestPolarsStreaming:
 
 # ── Partition-Aware Merge Tests ──────────────────────────────────────────────
 
+
 @pytest.mark.skip(reason="Requires pandas (deprecated execution engine integration)")
 class TestPartitionAwareMerge:
-
     def test_partitioned_merge_creates_partition_dirs(self, tmp_path):
         import pandas as pd
 
@@ -637,11 +680,13 @@ class TestPartitionAwareMerge:
             server=Server(type="file", path=str(tmp_path / "output"), format="parquet"),
         )
 
-        df = pd.DataFrame({
-            "id": [1, 2, 3, 4],
-            "region": ["US", "EU", "US", "EU"],
-            "value": [10, 20, 30, 40],
-        })
+        df = pd.DataFrame(
+            {
+                "id": [1, 2, 3, 4],
+                "region": ["US", "EU", "US", "EU"],
+                "value": [10, 20, 30, 40],
+            }
+        )
 
         result = materialize_dataframe(df, contract)
         assert result["rows_written"] == 4
@@ -672,19 +717,23 @@ class TestPartitionAwareMerge:
         )
 
         # First batch
-        df1 = pd.DataFrame({
-            "id": [1, 2],
-            "region": ["US", "US"],
-            "value": [10, 20],
-        })
+        df1 = pd.DataFrame(
+            {
+                "id": [1, 2],
+                "region": ["US", "US"],
+                "value": [10, 20],
+            }
+        )
         materialize_dataframe(df1, contract)
 
         # Second batch: update id=1, insert id=3
-        df2 = pd.DataFrame({
-            "id": [1, 3],
-            "region": ["US", "US"],
-            "value": [999, 30],
-        })
+        df2 = pd.DataFrame(
+            {
+                "id": [1, 3],
+                "region": ["US", "US"],
+                "value": [999, 30],
+            }
+        )
         result = materialize_dataframe(df2, contract)
 
         # Read back the US partition
@@ -717,19 +766,23 @@ class TestPartitionAwareMerge:
         )
 
         # First batch: both US and EU
-        df1 = pd.DataFrame({
-            "id": [1, 2],
-            "region": ["US", "EU"],
-            "value": [10, 20],
-        })
+        df1 = pd.DataFrame(
+            {
+                "id": [1, 2],
+                "region": ["US", "EU"],
+                "value": [10, 20],
+            }
+        )
         materialize_dataframe(df1, contract)
 
         # Second batch: only US data
-        df2 = pd.DataFrame({
-            "id": [1],
-            "region": ["US"],
-            "value": [999],
-        })
+        df2 = pd.DataFrame(
+            {
+                "id": [1],
+                "region": ["US"],
+                "value": [999],
+            }
+        )
         materialize_dataframe(df2, contract)
 
         # EU partition should be untouched
@@ -759,11 +812,13 @@ class TestPartitionAwareMerge:
             server=Server(type="file", path=str(tmp_path / "output"), format="parquet"),
         )
 
-        df = pl.DataFrame({
-            "id": [1, 2, 3],
-            "category": ["A", "B", "A"],
-            "amount": [100.0, 200.0, 300.0],
-        })
+        df = pl.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "category": ["A", "B", "A"],
+                "amount": [100.0, 200.0, 300.0],
+            }
+        )
 
         result = materialize_dataframe(df, contract)
         assert result["rows_written"] == 3
@@ -771,8 +826,8 @@ class TestPartitionAwareMerge:
 
 # ── DataProcessor Integration Tests ──────────────────────────────────────────
 
-class TestProcessorBacklogFeatures:
 
+class TestProcessorBacklogFeatures:
     def test_processor_forget(self, tmp_path):
         import polars as pl
         import yaml
@@ -793,13 +848,16 @@ class TestProcessorBacklogFeatures:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
-        df = pl.DataFrame({
-            "customer_id": ["c1", "c2"],
-            "email": ["a@x.com", "b@x.com"],
-            "score": [90.0, 85.0],
-        })
+        df = pl.DataFrame(
+            {
+                "customer_id": ["c1", "c2"],
+                "email": ["a@x.com", "b@x.com"],
+                "score": [90.0, 85.0],
+            }
+        )
 
         result = proc.forget(df, "customer_id", ["c1"])
         assert result["email"][0] is None  # PII nullified
@@ -824,6 +882,7 @@ class TestProcessorBacklogFeatures:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
         df = pl.DataFrame({"id": [1, 2], "name": ["Alice", "Bob"]})

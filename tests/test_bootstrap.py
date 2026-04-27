@@ -67,7 +67,9 @@ def test_bootstrap_parquet_profile_pii_rules_and_ai(tmp_path: Path, monkeypatch)
     monkeypatch.setitem(
         sys.modules,
         "dataprofiler",
-        types.SimpleNamespace(Profiler=lambda df: types.SimpleNamespace(profile={"rows": len(df), "columns": list(df.columns)})),
+        types.SimpleNamespace(
+            Profiler=lambda df: types.SimpleNamespace(profile={"rows": len(df), "columns": list(df.columns)})
+        ),
     )
     monkeypatch.setitem(sys.modules, "presidio_analyzer", types.SimpleNamespace(AnalyzerEngine=lambda: FakeAnalyzer()))
 

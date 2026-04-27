@@ -10,21 +10,15 @@ def test_odcs_parser_intercepts_and_converts():
         "schema": [
             {"name": "customer_id", "type": "integer", "required": True},
             {"name": "email", "type": "string", "pii": True},
-            {"name": "created_at", "type": "timestamp"}
+            {"name": "created_at", "type": "timestamp"},
         ],
         "customProperties": {
             "lakelogic": {
                 "tier": "silver",
-                "source": {
-                    "type": "file",
-                    "path": "s3://bronze/customers",
-                    "format": "parquet"
-                },
-                "materialization": {
-                    "strategy": "merge"
-                }
+                "source": {"type": "file", "path": "s3://bronze/customers", "format": "parquet"},
+                "materialization": {"strategy": "merge"},
             }
-        }
+        },
     }
 
     contract = DataContract(**odcs_payload)
@@ -57,9 +51,7 @@ def test_lakelogic_native_skips_interceptor():
         "info": {"title": "lakelogic-native"},
         "tier": "bronze",
         "dataset": "test-set",  # Even with 'dataset' present, lack of `kind: DataContract` halts parser
-        "model": {
-            "fields": [{"name": "id", "type": "integer"}]
-        }
+        "model": {"fields": [{"name": "id", "type": "integer"}]},
     }
 
     contract = DataContract(**native_payload)
@@ -70,11 +62,7 @@ def test_lakelogic_native_skips_interceptor():
 
 def test_odcs_partial_payload():
     """Test ODCS payload with missing schema or missing extension blocks."""
-    odcs_payload = {
-        "kind": "DataContract",
-        "apiVersion": "v1.2",
-        "dataset": "headless_contract"
-    }
+    odcs_payload = {"kind": "DataContract", "apiVersion": "v1.2", "dataset": "headless_contract"}
 
     # Because there are missing parts, Pydantic should still try its best,
     # but since LakeLogic allows no tier/source in libraries, it should parse.

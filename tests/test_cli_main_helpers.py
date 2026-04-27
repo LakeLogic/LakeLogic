@@ -111,8 +111,17 @@ def test_display_trace_and_setup_oss(monkeypatch):
         run_id="run-1",
         total_duration_ms=42.0,
         steps=[
-            types.SimpleNamespace(step="read", status="ok", input_rows=10, output_rows=10, duration_ms=1.5, details={"path": "/tmp/file"}),
-            types.SimpleNamespace(step="validate", status="error", input_rows=10, output_rows=8, duration_ms=2.0, details={"errors": [1, 2]}),
+            types.SimpleNamespace(
+                step="read", status="ok", input_rows=10, output_rows=10, duration_ms=1.5, details={"path": "/tmp/file"}
+            ),
+            types.SimpleNamespace(
+                step="validate",
+                status="error",
+                input_rows=10,
+                output_rows=8,
+                duration_ms=2.0,
+                details={"errors": [1, 2]},
+            ),
         ],
     )
     cli_main._display_trace(trace)
@@ -132,7 +141,11 @@ def test_display_trace_and_setup_oss(monkeypatch):
 
     logs.clear()
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(install_extension=lambda ext: (_ for _ in ()).throw(RuntimeError("boom"))))
+    monkeypatch.setitem(
+        sys.modules,
+        "duckdb",
+        types.SimpleNamespace(install_extension=lambda ext: (_ for _ in ()).throw(RuntimeError("boom"))),
+    )
     cli_main.setup_oss()
     assert any("deltalake is NOT installed" in message for message in logs)
     assert any("Could not load duckdb extension" in message for message in logs)
@@ -408,7 +421,9 @@ def test_write_or_print_contract_and_import_dbt_no_models(monkeypatch, tmp_path)
     outputs = []
     monkeypatch.setattr(cli_main.typer, "echo", lambda message="", **kwargs: outputs.append(message))
 
-    contract = types.SimpleNamespace(dataset="orders", model_dump=lambda exclude_none=True, by_alias=True: {"version": "1.0", "dataset": "orders"})
+    contract = types.SimpleNamespace(
+        dataset="orders", model_dump=lambda exclude_none=True, by_alias=True: {"version": "1.0", "dataset": "orders"}
+    )
 
     cli_main._write_or_print_contract(contract, None, None, overwrite=False, dry_run=True, verbose=False)
     assert any("# --- orders ---" in str(message) for message in outputs)

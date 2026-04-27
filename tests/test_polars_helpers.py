@@ -112,7 +112,9 @@ def test_polars_helper_register_links_handles_projection_cache_and_warnings(monk
         metadata={"cache_reference_links": True},
         links=[
             types.SimpleNamespace(name="table_ref", table="catalog.orders", type=None, path=None, columns=None),
-            types.SimpleNamespace(name="remote_ref", table=None, type=None, path="abfss://container/ref.csv", columns=None),
+            types.SimpleNamespace(
+                name="remote_ref", table=None, type=None, path="abfss://container/ref.csv", columns=None
+            ),
             types.SimpleNamespace(name="missing_ref", table=None, type=None, path="missing.csv", columns=None),
             types.SimpleNamespace(name="csv_ref", table=None, type=None, path="lookup.csv", columns=["id", "name"]),
             types.SimpleNamespace(name="pq_ref", table=None, type=None, path=str(parquet_path), columns=None),
@@ -171,11 +173,46 @@ def test_polars_helper_apply_sql_transformation_replaces_duplicate_alias(monkeyp
 def test_polars_helper_run_dataset_rules_evaluates_thresholds_and_errors(monkeypatch):
     adapter = PolarsAdapter(types.SimpleNamespace(dataset="orders", quality=None))
     adapter.get_dataset_rules = lambda: [
-        types.SimpleNamespace(name="between", sql="between_sql", must_be_between=[1, 5], must_be_less_than=None, must_be_greater_than=None, description="between"),
-        types.SimpleNamespace(name="less_than", sql="less_sql", must_be_between=None, must_be_less_than=10, must_be_greater_than=None, description="lt"),
-        types.SimpleNamespace(name="greater_than", sql="greater_sql", must_be_between=None, must_be_less_than=None, must_be_greater_than=3, description="gt"),
-        types.SimpleNamespace(name="null_rule", sql="null_sql", must_be_between=None, must_be_less_than=None, must_be_greater_than=None, description="null"),
-        types.SimpleNamespace(name="broken", sql="broken_sql", must_be_between=None, must_be_less_than=None, must_be_greater_than=None, description="broken"),
+        types.SimpleNamespace(
+            name="between",
+            sql="between_sql",
+            must_be_between=[1, 5],
+            must_be_less_than=None,
+            must_be_greater_than=None,
+            description="between",
+        ),
+        types.SimpleNamespace(
+            name="less_than",
+            sql="less_sql",
+            must_be_between=None,
+            must_be_less_than=10,
+            must_be_greater_than=None,
+            description="lt",
+        ),
+        types.SimpleNamespace(
+            name="greater_than",
+            sql="greater_sql",
+            must_be_between=None,
+            must_be_less_than=None,
+            must_be_greater_than=3,
+            description="gt",
+        ),
+        types.SimpleNamespace(
+            name="null_rule",
+            sql="null_sql",
+            must_be_between=None,
+            must_be_less_than=None,
+            must_be_greater_than=None,
+            description="null",
+        ),
+        types.SimpleNamespace(
+            name="broken",
+            sql="broken_sql",
+            must_be_between=None,
+            must_be_less_than=None,
+            must_be_greater_than=None,
+            description="broken",
+        ),
     ]
 
     class FakeScalarFrame:
@@ -258,7 +295,9 @@ def test_polars_helper_apply_sql_transformation_duckdb_fallback_and_strict_mode(
             return None
 
     monkeypatch.setattr(pl, "SQLContext", BrokenSQLContext)
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database=":memory:": FakeDuckConnection()))
+    monkeypatch.setitem(
+        sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database=":memory:": FakeDuckConnection())
+    )
     fallback = adapter._apply_sql_transformation(lf, "SELECT *, id + 1 AS next_id FROM source").collect()
     assert fallback["next_id"].to_list() == [2, 3]
 
@@ -280,10 +319,24 @@ def test_polars_helper_pre_transformations_cover_column_operations():
             {"trim": {"fields": ["name"], "side": "both"}},
             {"lower": {"fields": ["name"]}},
             {"upper": {"fields": ["code"]}},
-            {"coalesce": {"field": "nickname", "sources": ["nickname", "name"], "output": "display_name", "default": "missing"}},
+            {
+                "coalesce": {
+                    "field": "nickname",
+                    "sources": ["nickname", "name"],
+                    "output": "display_name",
+                    "default": "missing",
+                }
+            },
             {"split": {"field": "tags", "delimiter": "|", "output": "tag_list"}},
             {"explode": {"field": "tag_list"}},
-            {"map_values": {"field": "status", "mapping": {"A": "active"}, "default": "other", "output": "status_norm"}},
+            {
+                "map_values": {
+                    "field": "status",
+                    "mapping": {"A": "active"},
+                    "default": "other",
+                    "output": "status_norm",
+                }
+            },
             {"filter": {"sql": "id > 1"}},
             {"deduplicate": {"on": ["id", "tag_list"], "sort_by": ["code"], "order": "desc"}},
         ],
@@ -305,11 +358,17 @@ def test_polars_helper_pre_transformations_cover_column_operations():
     assert transformed["id"].to_list() == [2, 2]
     assert transformed["name"].to_list() == ["bob", "bob"]
     assert transformed["code"].to_list() == ["XY", "XY"]
-    assert transformed["display_name"].to_list() == [" Bob ", " Bob "] or transformed["display_name"].to_list() == ["bob", "bob"]
+    assert transformed["display_name"].to_list() == [" Bob ", " Bob "] or transformed["display_name"].to_list() == [
+        "bob",
+        "bob",
+    ]
     assert transformed["tag_list"].to_list() == ["c", "d"]
     assert transformed["status_norm"].to_list() == ["other", "other"]
     assert transformed["city"].to_list() == ["Berlin", "Berlin"]
-    assert transformed["derived"].to_list() == [" Bob -x", " Bob -x"] or transformed["derived"].to_list() == ["bob-x", "bob-x"]
+    assert transformed["derived"].to_list() == [" Bob -x", " Bob -x"] or transformed["derived"].to_list() == [
+        "bob-x",
+        "bob-x",
+    ]
 
 
 def test_polars_helper_post_transformations_cover_sql_lookup_join_and_date_ranges(monkeypatch):
@@ -343,7 +402,9 @@ def test_polars_helper_post_transformations_cover_sql_lookup_join_and_date_range
             _transformation(unpivot=types.SimpleNamespace(name="unpivot")),
             _transformation(bucket=types.SimpleNamespace(field="bucketed")),
             _transformation(date_diff=types.SimpleNamespace(field="days_open")),
-            _transformation(json_extract=types.SimpleNamespace(source="payload", path="$.city", field="city", cast=None)),
+            _transformation(
+                json_extract=types.SimpleNamespace(source="payload", path="$.city", field="city", cast=None)
+            ),
             _transformation(
                 date_range_explode=types.SimpleNamespace(
                     start_col="start_date",
@@ -372,7 +433,9 @@ def test_polars_helper_post_transformations_cover_sql_lookup_join_and_date_range
     monkeypatch.setattr(
         adapter,
         "_build_bucket_sql",
-        lambda cfg, source_table="orders": "SELECT *, CASE WHEN amount > 10 THEN 'high' ELSE 'low' END AS bucketed FROM orders",
+        lambda cfg, source_table="orders": (
+            "SELECT *, CASE WHEN amount > 10 THEN 'high' ELSE 'low' END AS bucketed FROM orders"
+        ),
     )
     monkeypatch.setattr(
         adapter,
@@ -382,7 +445,9 @@ def test_polars_helper_post_transformations_cover_sql_lookup_join_and_date_range
     monkeypatch.setattr(
         adapter,
         "_build_join_sql",
-        lambda join_cfg, tbl_name="orders": "SELECT src.*, ref.segment AS segment FROM orders src LEFT JOIN segment_ref ref ON src.customer_id = ref.id",
+        lambda join_cfg, tbl_name="orders": (
+            "SELECT src.*, ref.segment AS segment FROM orders src LEFT JOIN segment_ref ref ON src.customer_id = ref.id"
+        ),
     )
 
     lf = pl.DataFrame(
@@ -471,7 +536,16 @@ def test_polars_helper_post_transformations_date_range_and_derive_failure_paths(
     adapter = PolarsAdapter(contract)
     monkeypatch.setattr(adapter, "_transpile_derive_sql", lambda derive: "UNSUPPORTED(expr)")
     monkeypatch.setattr(adapter, "_try_native_polars_derive", lambda raw_sql, field_name, lf: None)
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database=":memory:": types.SimpleNamespace(register=lambda *args, **kwargs: None, execute=lambda sql: (_ for _ in ()).throw(RuntimeError("duckdb failed")))))
+    monkeypatch.setitem(
+        sys.modules,
+        "duckdb",
+        types.SimpleNamespace(
+            connect=lambda database=":memory:": types.SimpleNamespace(
+                register=lambda *args, **kwargs: None,
+                execute=lambda sql: (_ for _ in ()).throw(RuntimeError("duckdb failed")),
+            )
+        ),
+    )
 
     lf = pl.DataFrame(
         {

@@ -162,7 +162,9 @@ def test_from_max_target_success_and_fallback(monkeypatch):
     class FakeSpark:
         def __init__(self, value):
             self.value = value
-            self.read = types.SimpleNamespace(format=lambda _: types.SimpleNamespace(load=lambda path: FakeFrame(self.value)))
+            self.read = types.SimpleNamespace(
+                format=lambda _: types.SimpleNamespace(load=lambda path: FakeFrame(self.value))
+            )
 
         def table(self, name):
             return FakeFrame(self.value)
@@ -174,7 +176,9 @@ def test_from_max_target_success_and_fallback(monkeypatch):
     assert boundary.metadata["watermark_value"] == "2024-03-05"
 
     class BrokenSpark:
-        read = types.SimpleNamespace(format=lambda _: types.SimpleNamespace(load=lambda path: (_ for _ in ()).throw(RuntimeError("missing"))))
+        read = types.SimpleNamespace(
+            format=lambda _: types.SimpleNamespace(load=lambda path: (_ for _ in ()).throw(RuntimeError("missing")))
+        )
 
         def table(self, name):
             raise RuntimeError("missing")
@@ -320,11 +324,15 @@ def test_manifest_update_and_resolution(tmp_path):
 
 def test_date_range_lookback_contract_and_source_config_dispatch(monkeypatch, tmp_path):
     reference = datetime(2024, 3, 10, tzinfo=timezone.utc)
-    lookback = inc.IncrementalBoundary.from_lookback("7 days", reference_dt=reference, partition_filters={"country": "GB"})
+    lookback = inc.IncrementalBoundary.from_lookback(
+        "7 days", reference_dt=reference, partition_filters={"country": "GB"}
+    )
     assert lookback.metadata["delta_seconds"] == 604800
     assert lookback.partition_filters == {"country": "GB"}
 
-    date_range = inc.IncrementalBoundary.from_date_range("2024-03-01", date(2024, 3, 5), partition_filters={"region": "south"})
+    date_range = inc.IncrementalBoundary.from_date_range(
+        "2024-03-01", date(2024, 3, 5), partition_filters={"region": "south"}
+    )
     assert date_range.from_dt == datetime(2024, 3, 1)
     assert date_range.to_dt == datetime(2024, 3, 5)
 
@@ -344,11 +352,28 @@ source:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(inc.IncrementalBoundary, "from_pipeline_log", classmethod(lambda cls, *args, **kwargs: inc.Boundary(datetime(2024, 3, 1), datetime(2024, 3, 2), "pipeline_log")))
+    monkeypatch.setattr(
+        inc.IncrementalBoundary,
+        "from_pipeline_log",
+        classmethod(
+            lambda cls, *args, **kwargs: inc.Boundary(datetime(2024, 3, 1), datetime(2024, 3, 2), "pipeline_log")
+        ),
+    )
     boundary = inc.IncrementalBoundary.from_contract(str(contract_path), partition_filters={"tenant": 7})
     assert boundary.partition_filters == {"country": "GB", "tenant": 7}
 
-    monkeypatch.setattr(inc.IncrementalBoundary, "from_lookback", classmethod(lambda cls, *args, **kwargs: inc.Boundary(datetime(2024, 3, 1), datetime(2024, 3, 2), "lookback", partition_filters=kwargs.get("partition_filters") or {})))
+    monkeypatch.setattr(
+        inc.IncrementalBoundary,
+        "from_lookback",
+        classmethod(
+            lambda cls, *args, **kwargs: inc.Boundary(
+                datetime(2024, 3, 1),
+                datetime(2024, 3, 2),
+                "lookback",
+                partition_filters=kwargs.get("partition_filters") or {},
+            )
+        ),
+    )
     assert inc.IncrementalBoundary.from_contract(str(contract_path), lookback="2 days").strategy == "lookback"
 
     class SourceConfig:
@@ -359,7 +384,11 @@ source:
                 "partition_filters": {"country": "GB"},
             }
 
-    monkeypatch.setattr(inc.IncrementalBoundary, "from_manifest", classmethod(lambda cls, *args, **kwargs: inc.Boundary(datetime(2024, 3, 1), datetime(2024, 3, 2), "manifest")))
+    monkeypatch.setattr(
+        inc.IncrementalBoundary,
+        "from_manifest",
+        classmethod(lambda cls, *args, **kwargs: inc.Boundary(datetime(2024, 3, 1), datetime(2024, 3, 2), "manifest")),
+    )
     source_boundary = inc.IncrementalBoundary.from_source_config(SourceConfig(), partition_filters={"tenant": 7})
     assert source_boundary.strategy == "manifest"
     assert source_boundary.partition_filters == {"country": "GB", "tenant": 7}

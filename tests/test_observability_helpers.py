@@ -122,7 +122,11 @@ def test_write_summary_snowflake_and_bigquery_backends(monkeypatch):
     connector_module = types.ModuleType("snowflake.connector")
     connector_module.connect = lambda **kwargs: connect_calls.append(kwargs) or FakeSnowflakeConnection()
     pandas_tools_module = types.ModuleType("snowflake.connector.pandas_tools")
-    pandas_tools_module.write_pandas = lambda conn, pdf, table_name, database=None, schema=None, auto_create_table=True, overwrite=False: connect_calls.append((table_name, database, schema, len(pdf)))
+    pandas_tools_module.write_pandas = (
+        lambda conn, pdf, table_name, database=None, schema=None, auto_create_table=True, overwrite=False: (
+            connect_calls.append((table_name, database, schema, len(pdf)))
+        )
+    )
     snowflake_root = types.ModuleType("snowflake")
     snowflake_root.connector = connector_module
     monkeypatch.setitem(sys.modules, "snowflake", snowflake_root)
@@ -245,7 +249,7 @@ def test_finalize_emit_metrics_sqlite_and_prometheus_helpers(monkeypatch, tmp_pa
     written_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert written_metrics["tags"] == {"env": "test"}
     assert snapshot["metrics"]["successful"] == 1
-    assert "demo_successful{env=\"test\"} 1\n" in obs.format_prometheus(snapshot, "demo")
+    assert 'demo_successful{env="test"} 1\n' in obs.format_prometheus(snapshot, "demo")
 
     sqlite_db = tmp_path / "logs" / "summary.sqlite"
     obs._write_summary_sqlite(obs.flatten_summary(summary), "analytics.pipeline_runs", str(sqlite_db))

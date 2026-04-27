@@ -1,6 +1,7 @@
 """
 Core processor tests: run(), run_source(), tracing, and ValidationResult API.
 """
+
 import os
 
 import polars as pl
@@ -165,7 +166,7 @@ class TestRunSource:
         proc = DataProcessor(engine="polars", contract=contract)
         good, bad = proc.run_source()
         assert len(good) == 1  # Alice (30)
-        assert len(bad) == 1   # Bob (25)
+        assert len(bad) == 1  # Bob (25)
 
     def test_run_source_no_path_raises(self):
         contract = {"version": "1.0.0", "dataset": "people"}
@@ -269,7 +270,7 @@ class TestEdgeCases:
         proc = DataProcessor(engine="polars", contract=contract)
         good, bad = proc.run(df)
         assert len(good) == 1  # 50 passes both
-        assert len(bad) == 2   # -1 fails first, 200 fails second
+        assert len(bad) == 2  # -1 fails first, 200 fails second
 
     def test_processor_init_from_dict(self):
         proc = DataProcessor(engine="polars", contract={"version": "1.0.0", "dataset": "test"})
@@ -305,27 +306,33 @@ class TestSLOComputation:
 
     def test_parse_duration_hours(self):
         from lakelogic.core.slo import _parse_duration_seconds
+
         assert _parse_duration_seconds("24h") == 86400.0
 
     def test_parse_duration_minutes(self):
         from lakelogic.core.slo import _parse_duration_seconds
+
         assert _parse_duration_seconds("30m") == 1800.0
 
     def test_parse_duration_numeric(self):
         from lakelogic.core.slo import _parse_duration_seconds
+
         # Numeric values treated as hours
         assert _parse_duration_seconds(2) == 7200.0
 
     def test_parse_duration_none(self):
         from lakelogic.core.slo import _parse_duration_seconds
+
         assert _parse_duration_seconds(None) is None
 
     def test_coerce_datetime_none(self):
         from lakelogic.core.slo import _coerce_datetime
+
         assert _coerce_datetime(None) is None
 
     def test_coerce_datetime_iso_string(self):
         from lakelogic.core.slo import _coerce_datetime
+
         dt = _coerce_datetime("2024-01-15T12:00:00Z")
         assert dt is not None
         assert dt.tzinfo is not None
@@ -337,6 +344,7 @@ class TestSLOComputation:
 
 try:
     import pyspark as _pyspark  # noqa: F401
+
     _HAS_PYSPARK = True
 except ImportError:
     _HAS_PYSPARK = False
@@ -362,9 +370,9 @@ def spark_session():
         os.environ["HADOOP_HOME"] = hadoop_home
 
     from pyspark.sql import SparkSession
+
     spark = (
-        SparkSession.builder
-        .master("local[1]")
+        SparkSession.builder.master("local[1]")
         .appName("lakelogic-tests")
         .config("spark.ui.enabled", "false")
         .config("spark.driver.bindAddress", "127.0.0.1")
@@ -373,12 +381,12 @@ def spark_session():
     yield spark
     spark.stop()
 
+
 import sys as _sys
 
 _SKIP_SPARK = not _HAS_PYSPARK or _sys.platform == "win32"
 _SKIP_SPARK_REASON = (
-    "PySpark not installed" if not _HAS_PYSPARK
-    else "PySpark local mode unreliable on Windows (run in CI/Databricks)"
+    "PySpark not installed" if not _HAS_PYSPARK else "PySpark local mode unreliable on Windows (run in CI/Databricks)"
 )
 
 
@@ -408,6 +416,7 @@ class TestSparkAdapter:
 
     def test_spark_returns_spark_dataframes(self, spark_session):
         from pyspark.sql import DataFrame as SparkDataFrame
+
         contract = {"version": "1.0.0", "dataset": "test"}
         df = spark_session.createDataFrame([(1,), (2,)], ["a"])
         proc = DataProcessor(engine="spark", contract=contract)
@@ -430,7 +439,7 @@ class TestSparkAdapter:
         proc = DataProcessor(engine="spark", contract=contract)
         good, bad = proc.run(df)
         assert good.count() == 1  # 50 passes both
-        assert bad.count() == 2   # -1 fails first, 200 fails second
+        assert bad.count() == 2  # -1 fails first, 200 fails second
 
     def test_spark_all_quarantined(self, spark_session):
         contract = {
@@ -458,6 +467,7 @@ class TestSparkAdapter:
 
     def test_spark_run_source_parquet(self, spark_session, tmp_path):
         import pandas as pd
+
         pq_file = tmp_path / "data.parquet"
         pd.DataFrame({"x": [10, 20]}).to_parquet(str(pq_file))
         contract = {

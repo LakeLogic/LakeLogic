@@ -84,7 +84,11 @@ def test_gdpr_forget_and_mask_duckdb_dispatch(monkeypatch):
         def fetchdf(self):
             return pdf
 
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(from_df=lambda frame: {"rows": len(frame), "columns": list(frame.columns)}))
+    monkeypatch.setitem(
+        sys.modules,
+        "duckdb",
+        types.SimpleNamespace(from_df=lambda frame: {"rows": len(frame), "columns": list(frame.columns)}),
+    )
     forgot = gdpr.forget_subjects(FakeRelation(), contract, "customer_id", ["c1"], audit=False)
     masked = gdpr.mask_pii_columns(FakeRelation(), contract, strategy="redact")
 

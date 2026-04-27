@@ -69,7 +69,13 @@ def test_generic_sql_execute_generate_ddl_and_validate_connection(monkeypatch):
     dataset_rules = [
         types.SimpleNamespace(name="few_nulls", sql="SELECT 0.1", must_be_less_than=0.5, must_be_greater_than=None),
         types.SimpleNamespace(name="enough_rows", sql="SELECT 100", must_be_less_than=None, must_be_greater_than=50),
-        types.SimpleNamespace(name="between_range", sql="SELECT 4", must_be_less_than=None, must_be_greater_than=None, must_be_between=(1, 5)),
+        types.SimpleNamespace(
+            name="between_range",
+            sql="SELECT 4",
+            must_be_less_than=None,
+            must_be_greater_than=None,
+            must_be_between=(1, 5),
+        ),
     ]
 
     monkeypatch.setattr(adapter, "get_row_rules", lambda: row_rules)
@@ -89,7 +95,9 @@ def test_generic_sql_execute_generate_ddl_and_validate_connection(monkeypatch):
         return 0
 
     monkeypatch.setattr(adapter, "_fetch_count", fake_fetch_count)
-    monkeypatch.setattr(adapter, "_fetch_scalar", lambda sql: 0.1 if sql == "SELECT 0.1" else 100 if sql == "SELECT 100" else 4)
+    monkeypatch.setattr(
+        adapter, "_fetch_scalar", lambda sql: 0.1 if sql == "SELECT 0.1" else 100 if sql == "SELECT 100" else 4
+    )
 
     good, bad = adapter.execute()
     assert good["count"] == 9
@@ -130,7 +138,9 @@ def test_generic_sql_schema_sync_and_alter_helpers(monkeypatch):
     assert adapter.conn.commit_calls == 1
     assert executed
 
-    add_result = adapter.alter_add_column("gold.orders", "created_at", "TIMESTAMP", default="CURRENT_TIMESTAMP", not_null=True)
+    add_result = adapter.alter_add_column(
+        "gold.orders", "created_at", "TIMESTAMP", default="CURRENT_TIMESTAMP", not_null=True
+    )
     assert add_result["status"] == "ok"
     drop_result = adapter.alter_drop_column("gold.orders", "legacy_col")
     assert drop_result["status"] == "ok"
@@ -228,7 +238,9 @@ def test_generic_sql_metadata_materialize_modes_and_error_paths(monkeypatch):
 
     bad_fail = adapter.materialize_bad("quarantine.orders", if_exists="fail", include_error_columns=False)
     assert bad_fail["rows"] == 2
-    assert any("CREATE TABLE quarantine.orders AS SELECT * FROM raw.orders WHERE NOT (amount > 0)" in sql for sql in executed)
+    assert any(
+        "CREATE TABLE quarantine.orders AS SELECT * FROM raw.orders WHERE NOT (amount > 0)" in sql for sql in executed
+    )
 
     created = adapter.create_tables("gold.orders", bad_table=None, if_exists="append")
     assert created["good"]["status"] == "ok"

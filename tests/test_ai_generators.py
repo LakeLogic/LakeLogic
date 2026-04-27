@@ -52,7 +52,17 @@ def test_data_generator_builds_prompt_and_coerces_values(monkeypatch):
 
 def test_data_generator_prompt_covers_all_optional_field_parts():
     prompt = dg._build_user_prompt(
-        [{"name": "price", "type": "decimal", "required": False, "min": 0, "max": 10, "accepted_values": [1, 2], "foreign_key": "dim.id"}],
+        [
+            {
+                "name": "price",
+                "type": "decimal",
+                "required": False,
+                "min": 0,
+                "max": 10,
+                "accepted_values": [1, 2],
+                "foreign_key": "dim.id",
+            }
+        ],
         None,
         "",
         "",
@@ -148,7 +158,10 @@ def test_edge_case_generator_builds_prompt_and_coerces_values(monkeypatch):
     ]
     prompt = ecg._build_user_prompt(
         fields,
-        {"row_rules": [{"sql": "amount > 0"}, {"accepted_values": ["new", "done"]}], "dataset_rules": [{"unique": "amount"}]},
+        {
+            "row_rules": [{"sql": "amount > 0"}, {"accepted_values": ["new", "done"]}],
+            "dataset_rules": [{"unique": "amount"}],
+        },
         "orders",
         "Break accepted values",
     )

@@ -54,13 +54,9 @@ class TestUnknownMemberPandas:
         )
 
         scd2_cfg = _make_scd2_cfg()
-        unknown_cfg = _make_unknown_cfg(
-            COUNTRY_CODE="_UNKNOWN", COUNTRY_NAME="Unknown"
-        )
+        unknown_cfg = _make_unknown_cfg(COUNTRY_CODE="_UNKNOWN", COUNTRY_NAME="Unknown")
 
-        result = _inject_unknown_member_pandas(
-            data, ["COUNTRY_CODE"], scd2_cfg, unknown_cfg
-        )
+        result = _inject_unknown_member_pandas(data, ["COUNTRY_CODE"], scd2_cfg, unknown_cfg)
 
         assert len(result) == 3  # 2 original + 1 unknown
         unknown_row = result[result["COUNTRY_SR_KEY"] == "-1"]
@@ -87,13 +83,9 @@ class TestUnknownMemberPandas:
         )
 
         scd2_cfg = _make_scd2_cfg()
-        unknown_cfg = _make_unknown_cfg(
-            COUNTRY_CODE="_UNKNOWN", COUNTRY_NAME="Unknown"
-        )
+        unknown_cfg = _make_unknown_cfg(COUNTRY_CODE="_UNKNOWN", COUNTRY_NAME="Unknown")
 
-        result = _inject_unknown_member_pandas(
-            data, ["COUNTRY_CODE"], scd2_cfg, unknown_cfg
-        )
+        result = _inject_unknown_member_pandas(data, ["COUNTRY_CODE"], scd2_cfg, unknown_cfg)
 
         # Should NOT add another row — already has SK=-1
         assert len(result) == 2
@@ -113,9 +105,7 @@ class TestUnknownMemberPandas:
         scd2_cfg = _make_scd2_cfg()
         unknown_cfg = _make_unknown_cfg(enabled=False)
 
-        result = _inject_unknown_member_pandas(
-            data, ["COUNTRY_CODE"], scd2_cfg, unknown_cfg
-        )
+        result = _inject_unknown_member_pandas(data, ["COUNTRY_CODE"], scd2_cfg, unknown_cfg)
 
         assert len(result) == 1  # No unknown row added
 
@@ -134,12 +124,8 @@ class TestSCD2WithUnknownMember:
             }
         )
 
-        unknown_cfg = _make_unknown_cfg(
-            COUNTRY_CODE="_UNKNOWN", COUNTRY_NAME="Unknown"
-        )
-        scd2_cfg = _make_scd2_cfg(
-            unknown_member=unknown_cfg
-        )
+        unknown_cfg = _make_unknown_cfg(COUNTRY_CODE="_UNKNOWN", COUNTRY_NAME="Unknown")
+        scd2_cfg = _make_scd2_cfg(unknown_member=unknown_cfg)
 
         result = _scd2_frames(existing, incoming, ["COUNTRY_CODE"], scd2_cfg)
         # Unknown member injection happens at the caller level, not inside _scd2_frames

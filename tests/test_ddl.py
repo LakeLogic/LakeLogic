@@ -1,6 +1,7 @@
 """
 Tests for lakelogic.core.ddl — DDL generation from contracts.
 """
+
 import sys
 import textwrap
 
@@ -23,6 +24,7 @@ from lakelogic.core.ddl import (
 from lakelogic.core.models import DataContract, FieldDefinition, Info, Materialization, Model
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
+
 
 def _make_contract(
     fields=None,
@@ -49,7 +51,11 @@ def _make_contract(
         cluster_by=cluster_by or [],
         format=fmt,
     )
-    info = Info(title="Orders Contract", version="1.0", description=description) if description else Info(title="Orders", version="1.0")
+    info = (
+        Info(title="Orders Contract", version="1.0", description=description)
+        if description
+        else Info(title="Orders", version="1.0")
+    )
     return DataContract(
         version="1.0",
         info=info,
@@ -61,8 +67,8 @@ def _make_contract(
 
 # ── Type Resolution Tests ────────────────────────────────────────────────────
 
-class TestTypeResolution:
 
+class TestTypeResolution:
     def test_type_normalization_and_varchar_length_helpers(self):
         assert _normalize_base_type("STRING") == "varchar"
         assert _normalize_base_type("INT8") == "bigint"
@@ -130,8 +136,8 @@ class TestTypeResolution:
 
 # ── DDL Generation Tests ─────────────────────────────────────────────────────
 
-class TestGenerateDDL:
 
+class TestGenerateDDL:
     def test_basic_spark_ddl(self):
         contract = _make_contract()
         ddl = generate_ddl(contract, "spark")
@@ -286,8 +292,8 @@ class TestGenerateDDL:
 
 # ── DROP & ALTER Tests ───────────────────────────────────────────────────────
 
-class TestDropDDL:
 
+class TestDropDDL:
     def test_drop_table(self):
         contract = _make_contract()
         ddl = generate_drop_ddl(contract, "duckdb")
@@ -300,7 +306,6 @@ class TestDropDDL:
 
 
 class TestAlterDDL:
-
     def test_alter_adds_new_columns(self):
         contract = _make_contract()
         # Ensure server block uses "append" to allow new columns automatically
@@ -363,8 +368,8 @@ class TestAlterDDL:
 
 # ── Table Name Resolution Tests ──────────────────────────────────────────────
 
-class TestTableNameResolution:
 
+class TestTableNameResolution:
     def test_from_materialization(self):
         contract = _make_contract(table_name="gold.dim_customer")
         assert _resolve_table_name(contract) == "gold.dim_customer"
@@ -377,7 +382,9 @@ class TestTableNameResolution:
         contract = DataContract(version="1.0", server={"type": "local", "path": "table:catalog.orders"})
         assert _resolve_table_name(contract) == "catalog.orders"
 
-        info_contract = DataContract(version="1.0", info={"title": "Orders", "version": "1.0", "table_name": "mart.orders"})
+        info_contract = DataContract(
+            version="1.0", info={"title": "Orders", "version": "1.0", "table_name": "mart.orders"}
+        )
         assert _resolve_table_name(info_contract) == "mart.orders"
 
     def test_from_info_title(self):
@@ -396,9 +403,9 @@ class TestTableNameResolution:
 
 
 class TestCreateTableSQLite:
-
     def test_create_table_sqlite_memory(self):
         import sqlite3
+
         contract = _make_contract(table_name="orders")
         con = sqlite3.connect(":memory:")
         try:
@@ -432,14 +439,27 @@ class TestCreateTableSQLite:
                 return type("Job", (), {"result": lambda self: None})()
 
         init_calls = []
-        monkeypatch.setattr("lakelogic.core.ddl._init_delta_table_from_contract", lambda contract: init_calls.append(_resolve_table_name(contract)))
+        monkeypatch.setattr(
+            "lakelogic.core.ddl._init_delta_table_from_contract",
+            lambda contract: init_calls.append(_resolve_table_name(contract)),
+        )
 
         spark_calls = []
         fake_sql_module = type("FakeSparkModule", (), {})()
         fake_sql_module.SparkSession = type(
             "FakeSparkSession",
             (),
-            {"builder": type("Builder", (), {"getOrCreate": staticmethod(lambda: type("Spark", (), {"sql": lambda self, stmt: spark_calls.append(stmt)})())})()},
+            {
+                "builder": type(
+                    "Builder",
+                    (),
+                    {
+                        "getOrCreate": staticmethod(
+                            lambda: type("Spark", (), {"sql": lambda self, stmt: spark_calls.append(stmt)})()
+                        )
+                    },
+                )()
+            },
         )
         monkeypatch.setitem(sys.modules, "pyspark", type("FakePyspark", (), {})())
         monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
@@ -491,7 +511,12 @@ class TestCreateTableSQLite:
         )
         (contract_dir / "bad.yaml").write_text("[]", encoding="utf-8")
 
-        monkeypatch.setattr("lakelogic.core.ddl.create_table", lambda contract, backend, db_path=None, connection=None, dry_run=False: f"DDL::{_resolve_table_name(contract)}::{backend}")
+        monkeypatch.setattr(
+            "lakelogic.core.ddl.create_table",
+            lambda contract, backend, db_path=None, connection=None, dry_run=False: (
+                f"DDL::{_resolve_table_name(contract)}::{backend}"
+            ),
+        )
         results = init_tables_from_directory(contract_dir, "duckdb", dry_run=True)
         assert str(contract_dir / "good.yaml") in results
         assert str(contract_dir / "other.yml") in results
@@ -500,10 +525,11 @@ class TestCreateTableSQLite:
 
 # ── DataProcessor Integration Tests ──────────────────────────────────────────
 
-class TestProcessorDDL:
 
+class TestProcessorDDL:
     def test_processor_generate_ddl(self, tmp_path):
         import yaml
+
         contract_data = {
             "version": "1.0",
             "info": {"title": "Test Contract", "version": "1.0"},
@@ -523,6 +549,7 @@ class TestProcessorDDL:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
         ddl = proc.generate_ddl("duckdb")
@@ -533,6 +560,7 @@ class TestProcessorDDL:
 
     def test_processor_create_table_dry_run(self, tmp_path):
         import yaml
+
         contract_data = {
             "version": "1.0",
             "info": {"title": "Test", "version": "1.0"},
@@ -551,6 +579,7 @@ class TestProcessorDDL:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
         ddl = proc.create_table("spark", dry_run=True)
@@ -559,8 +588,8 @@ class TestProcessorDDL:
         assert "id INT NOT NULL" in ddl
         assert "value DECIMAL(8,2)" in ddl
 
-class TestDeltaInitialization:
 
+class TestDeltaInitialization:
     def test_resolve_arrow_type_handles_parameterized_and_scalar_types(self):
         pa = pytest.importorskip("pyarrow")
 
@@ -621,7 +650,11 @@ class TestDeltaInitialization:
             def __init__(self, target, storage_options=None):
                 self.target = target
 
-        fake_deltalake = type("FakeDeltaLake", (), {"write_deltalake": staticmethod(lambda *args, **kwargs: None), "DeltaTable": FakeExistingDeltaTable})
+        fake_deltalake = type(
+            "FakeDeltaLake",
+            (),
+            {"write_deltalake": staticmethod(lambda *args, **kwargs: None), "DeltaTable": FakeExistingDeltaTable},
+        )
         monkeypatch.setitem(sys.modules, "deltalake", fake_deltalake)
         _init_delta_table_from_contract(existing_contract)
         assert any("already exists" in message for message in infos)
@@ -634,7 +667,12 @@ class TestDeltaInitialization:
         contract = DataContract(
             version="1.0",
             info=Info(title="Orders", version="1.0"),
-            model=Model(fields=[FieldDefinition(name="id", type="int", required=True), FieldDefinition(name="payload", type="string")]),
+            model=Model(
+                fields=[
+                    FieldDefinition(name="id", type="int", required=True),
+                    FieldDefinition(name="payload", type="string"),
+                ]
+            ),
             materialization=Materialization(target_path=str(tmp_path / "delta_orders"), partition_by=["id", "missing"]),
             lineage={
                 "enabled": True,
@@ -664,7 +702,12 @@ class TestDeltaInitialization:
         fake_deltalake = type(
             "FakeDeltaLake",
             (),
-            {"write_deltalake": staticmethod(lambda target, table, **kwargs: write_calls.append((target, table, kwargs))), "DeltaTable": FakeDeltaTable},
+            {
+                "write_deltalake": staticmethod(
+                    lambda target, table, **kwargs: write_calls.append((target, table, kwargs))
+                ),
+                "DeltaTable": FakeDeltaTable,
+            },
         )
         monkeypatch.setitem(sys.modules, "deltalake", fake_deltalake)
         _init_delta_table_from_contract(contract)
@@ -684,7 +727,12 @@ class TestDeltaInitialization:
         fake_fallback = type(
             "FakeFallbackDeltaLake",
             (),
-            {"write_deltalake": staticmethod(lambda target, table, **kwargs: write_calls.append((target, table, kwargs))), "DeltaTable": FakeFallbackDeltaTable},
+            {
+                "write_deltalake": staticmethod(
+                    lambda target, table, **kwargs: write_calls.append((target, table, kwargs))
+                ),
+                "DeltaTable": FakeFallbackDeltaTable,
+            },
         )
         monkeypatch.setitem(sys.modules, "deltalake", fake_fallback)
         _init_delta_table_from_contract(contract)
@@ -696,11 +744,10 @@ class TestDeltaInitialization:
 
     def test_processor_defaults_to_own_engine(self, tmp_path):
         import yaml
+
         contract_data = {
             "version": "1.0",
-            "model": {
-                "fields": [{"name": "id", "type": "int"}]
-            },
+            "model": {"fields": [{"name": "id", "type": "int"}]},
             "materialization": {"target_path": "table:test_table"},
         }
         contract_file = tmp_path / "test.yaml"
@@ -708,6 +755,7 @@ class TestDeltaInitialization:
             yaml.dump(contract_data, f)
 
         from lakelogic.core.processor import DataProcessor
+
         proc = DataProcessor(str(contract_file), engine="polars")
 
         ddl = proc.generate_ddl()  # No backend specified → uses polars generic backend or defaults

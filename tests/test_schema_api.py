@@ -25,7 +25,9 @@ def test_validate_contract_parsing_paths(tmp_path):
     assert sa.validate_contract(yaml_path).valid is True
 
     json_path = tmp_path / "contract.json"
-    json_path.write_text(json.dumps({"version": "1.0", "model": {"fields": [{"name": "id", "type": "string"}]}}), encoding="utf-8")
+    json_path.write_text(
+        json.dumps({"version": "1.0", "model": {"fields": [{"name": "id", "type": "string"}]}}), encoding="utf-8"
+    )
     assert sa.validate_contract(json_path).valid is True
 
     yaml_result = sa.validate_contract("version: '1.0'\nmodel:\n  fields:\n    - name: id\n      type: string\n")

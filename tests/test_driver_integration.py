@@ -16,6 +16,7 @@ Coverage:
     • Entity and contract filtering
     • Resume / state persistence
 """
+
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -39,6 +40,7 @@ from lakelogic.cli.observability import (
 from lakelogic.cli.run_log_reader import RunLogReader
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _write_csv(path: Path, rows: list[dict]) -> Path:
     """Write a list of dicts to a CSV file via pandas."""
@@ -111,6 +113,7 @@ def _write_registry(path: Path, entries: list[dict]) -> Path:
 
 # ── DuckDB End-to-End Pipeline ───────────────────────────────────────────────
 
+
 @pytest.mark.skip(reason="DuckDB execution engine is deprecated")
 class TestDuckDBPipelineE2E:
     """End-to-end pipeline test running on the DuckDB engine."""
@@ -180,7 +183,9 @@ class TestDuckDBPipelineE2E:
             pattern="data.csv",
             upstream=["silver_orders"],
             transformations=[
-                {"sql": "SELECT customer_id, SUM(amount) AS total_amount, COUNT(*) AS order_count FROM source GROUP BY customer_id"},
+                {
+                    "sql": "SELECT customer_id, SUM(amount) AS total_amount, COUNT(*) AS order_count FROM source GROUP BY customer_id"
+                },
             ],
         )
         gold_path = _write_contract(tmp_path / "gold_order_summary.yaml", gold)
@@ -206,7 +211,10 @@ class TestDuckDBPipelineE2E:
 
         summary_path = tmp_path / "summary.json"
         drv = driver.PipelineDriver(
-            "duckdb", max_workers=1, summary_path=summary_path, fail_fast=True,
+            "duckdb",
+            max_workers=1,
+            summary_path=summary_path,
+            fail_fast=True,
         )
         drv.run(
             {"system": system_reg, "gold": gold_reg},
@@ -268,6 +276,7 @@ class TestDuckDBPipelineE2E:
         )
 
         import duckdb
+
         con = duckdb.connect(str(db_path))
         try:
             rows = con.execute("SELECT run_id, successful, failed FROM pipeline_runs").fetchall()
@@ -323,6 +332,7 @@ class TestDuckDBPipelineE2E:
 
 # ── Entity and Contract Filtering ────────────────────────────────────────────
 
+
 class TestDriverFiltering:
     """Tests for entity and contract level filtering."""
 
@@ -337,11 +347,17 @@ class TestDriverFiltering:
         _write_csv(landing / "customers.csv", [{"id": 1, "name": "Alice"}])
 
         contract_a = _make_contract(
-            "bronze_orders", landing, out, pattern="orders.csv",
+            "bronze_orders",
+            landing,
+            out,
+            pattern="orders.csv",
             fields=[{"name": "id", "type": "integer"}, {"name": "val", "type": "integer"}],
         )
         contract_b = _make_contract(
-            "bronze_customers", landing, out, pattern="customers.csv",
+            "bronze_customers",
+            landing,
+            out,
+            pattern="customers.csv",
             fields=[{"name": "id", "type": "integer"}, {"name": "name", "type": "string"}],
         )
         _write_contract(tmp_path / "bronze_orders.yaml", contract_a)
@@ -397,6 +413,7 @@ class TestDriverFiltering:
 
 # ── Resume / State Persistence ───────────────────────────────────────────────
 
+
 class TestDriverResume:
     """Tests for the resume (state persistence) feature."""
 
@@ -409,7 +426,10 @@ class TestDriverResume:
 
         _write_csv(landing / "data.csv", [{"id": 1, "val": 10}])
         contract = _make_contract(
-            "bronze_data", landing, out, pattern="data.csv",
+            "bronze_data",
+            landing,
+            out,
+            pattern="data.csv",
             fields=[{"name": "id", "type": "integer"}, {"name": "val", "type": "integer"}],
         )
         _write_contract(tmp_path / "contract.yaml", contract)
@@ -423,8 +443,11 @@ class TestDriverResume:
 
         # First run
         drv = driver.PipelineDriver(
-            "polars", max_workers=1, summary_path=summary_path,
-            state_path=state_path, fail_fast=True,
+            "polars",
+            max_workers=1,
+            summary_path=summary_path,
+            state_path=state_path,
+            fail_fast=True,
         )
         drv.run(
             {"system": tmp_path / "_registry.yaml"},
@@ -436,8 +459,12 @@ class TestDriverResume:
 
         # Second run with resume — should skip
         drv2 = driver.PipelineDriver(
-            "polars", max_workers=1, summary_path=tmp_path / "summary2.json",
-            state_path=state_path, resume=True, fail_fast=True,
+            "polars",
+            max_workers=1,
+            summary_path=tmp_path / "summary2.json",
+            state_path=state_path,
+            resume=True,
+            fail_fast=True,
         )
         drv2.run(
             {"system": tmp_path / "_registry.yaml"},
@@ -452,6 +479,7 @@ class TestDriverResume:
 
 
 # ── Standalone Observability Functions ───────────────────────────────────────
+
 
 class TestObservabilityFunctions:
     """Unit tests for the extracted observability functions."""
@@ -526,6 +554,7 @@ class TestObservabilityFunctions:
 
 
 # ── RunLogReader Integration ─────────────────────────────────────────────────
+
 
 class TestRunLogReaderIntegration:
     """Tests for RunLogReader with DuckDB and SQLite backends."""
@@ -615,6 +644,7 @@ class TestRunLogReaderIntegration:
 
 # ── Backfill Window Generation ───────────────────────────────────────────────
 
+
 class TestBackfillWindows:
     """Tests for backfill window generation."""
 
@@ -638,6 +668,7 @@ class TestBackfillWindows:
 
 
 # ── DuckDB Derive & Filter Transforms ───────────────────────────────────────
+
 
 @pytest.mark.skip(reason="DuckDB execution engine is deprecated")
 class TestDuckDBTransforms:
@@ -689,7 +720,7 @@ class TestDuckDBTransforms:
 
         assert "total_price" in good_df.columns
         total_prices = sorted(good_df["total_price"].tolist())
-        assert abs(total_prices[0] - 60.0) < 0.01   # P-2: 50 * 1.2
+        assert abs(total_prices[0] - 60.0) < 0.01  # P-2: 50 * 1.2
         assert abs(total_prices[1] - 110.0) < 0.01  # P-1: 100 * 1.1
 
     def test_filter_transformation(self, tmp_path: Path) -> None:
@@ -782,6 +813,7 @@ class TestDuckDBTransforms:
 
 
 # ── RunLogReader Unit Tests ──────────────────────────────────────────────────
+
 
 class TestRunLogReaderUnit:
     """Comprehensive unit tests for the RunLogReader module."""
@@ -945,6 +977,7 @@ class TestRunLogReaderUnit:
 
 # ── Prometheus Server Lifecycle ──────────────────────────────────────────────
 
+
 class TestPrometheusServer:
     """Tests for the Prometheus HTTP metrics server."""
 
@@ -957,7 +990,8 @@ class TestPrometheusServer:
             "metrics": {"successful": 42, "failed": 0},
         }
         server, thread = start_prometheus_server(
-            "127.0.0.1", 0,  # port 0 = OS picks a free port
+            "127.0.0.1",
+            0,  # port 0 = OS picks a free port
             lambda: snapshot,
             "test_prefix",
         )
@@ -969,6 +1003,7 @@ class TestPrometheusServer:
 
             # Query the /metrics endpoint
             import urllib.request
+
             port = server.server_address[1]
             url = f"http://127.0.0.1:{port}/metrics"
             response = urllib.request.urlopen(url, timeout=5)
@@ -986,7 +1021,8 @@ class TestPrometheusServer:
         from lakelogic.cli.observability import start_prometheus_server, stop_prometheus_server
 
         server, thread = start_prometheus_server(
-            "127.0.0.1", 0,
+            "127.0.0.1",
+            0,
             lambda: {"tags": {}, "metrics": {}},
             "test",
         )
@@ -1003,10 +1039,12 @@ class TestPrometheusServer:
     def test_stop_none_server_is_noop(self) -> None:
         """stop_prometheus_server should handle None gracefully."""
         from lakelogic.cli.observability import stop_prometheus_server
+
         stop_prometheus_server(None, None)  # should not raise
 
 
 # ── CLI main() Entrypoint Tests ──────────────────────────────────────────────
+
 
 class TestCLIMain:
     """Tests for the CLI main() entrypoint."""
@@ -1020,7 +1058,10 @@ class TestCLIMain:
 
         _write_csv(landing / "data.csv", [{"id": 1, "val": 10}])
         contract = _make_contract(
-            "bronze_data", landing, out, pattern="data.csv",
+            "bronze_data",
+            landing,
+            out,
+            pattern="data.csv",
             fields=[{"name": "id", "type": "integer"}, {"name": "val", "type": "integer"}],
         )
         _write_contract(tmp_path / "contract.yaml", contract)
@@ -1031,20 +1072,29 @@ class TestCLIMain:
 
         summary_path = tmp_path / "summary.json"
         import sys
+
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             [
                 "lakelogic-driver",
-                "--registry", str(tmp_path / "_registry.yaml"),
-                "--layers", "bronze",
-                "--engine", "polars",
-                "--max-workers", "1",
-                "--summary-path", str(summary_path),
-                "--window", "none",
+                "--registry",
+                str(tmp_path / "_registry.yaml"),
+                "--layers",
+                "bronze",
+                "--engine",
+                "polars",
+                "--max-workers",
+                "1",
+                "--summary-path",
+                str(summary_path),
+                "--window",
+                "none",
             ],
         )
 
         from lakelogic.cli.driver import main
+
         main()
 
         assert summary_path.exists()
@@ -1063,11 +1113,17 @@ class TestCLIMain:
         _write_csv(landing / "b.csv", [{"id": 2}])
 
         contract_a = _make_contract(
-            "bronze_a", landing, out, pattern="a.csv",
+            "bronze_a",
+            landing,
+            out,
+            pattern="a.csv",
             fields=[{"name": "id", "type": "integer"}],
         )
         contract_b = _make_contract(
-            "bronze_b", landing, out, pattern="b.csv",
+            "bronze_b",
+            landing,
+            out,
+            pattern="b.csv",
             fields=[{"name": "id", "type": "integer"}],
         )
         _write_contract(tmp_path / "a.yaml", contract_a)
@@ -1082,21 +1138,31 @@ class TestCLIMain:
 
         summary_path = tmp_path / "summary.json"
         import sys
+
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             [
                 "lakelogic-driver",
-                "--registry", str(tmp_path / "_registry.yaml"),
-                "--layers", "bronze",
-                "--engine", "polars",
-                "--max-workers", "1",
-                "--summary-path", str(summary_path),
-                "--window", "none",
-                "--entities", "alpha",
+                "--registry",
+                str(tmp_path / "_registry.yaml"),
+                "--layers",
+                "bronze",
+                "--engine",
+                "polars",
+                "--max-workers",
+                "1",
+                "--summary-path",
+                str(summary_path),
+                "--window",
+                "none",
+                "--entities",
+                "alpha",
             ],
         )
 
         from lakelogic.cli.driver import main
+
         main()
 
         assert (out / "bronze_a" / "data.csv").exists()
@@ -1111,7 +1177,10 @@ class TestCLIMain:
 
         _write_csv(landing / "data.csv", [{"id": 1, "val": 10}])
         contract = _make_contract(
-            "bronze_data", landing, out, pattern="data.csv",
+            "bronze_data",
+            landing,
+            out,
+            pattern="data.csv",
             fields=[{"name": "id", "type": "integer"}, {"name": "val", "type": "integer"}],
         )
         _write_contract(tmp_path / "contract.yaml", contract)
@@ -1122,21 +1191,31 @@ class TestCLIMain:
 
         summary_path = tmp_path / "summary.json"
         import sys
+
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             [
                 "lakelogic-driver",
-                "--registry", str(tmp_path / "_registry.yaml"),
-                "--layers", "bronze",
-                "--engine", "polars",
-                "--max-workers", "1",
-                "--summary-path", str(summary_path),
-                "--window", "none",
-                "--set", "materialization.format=csv",
+                "--registry",
+                str(tmp_path / "_registry.yaml"),
+                "--layers",
+                "bronze",
+                "--engine",
+                "polars",
+                "--max-workers",
+                "1",
+                "--summary-path",
+                str(summary_path),
+                "--window",
+                "none",
+                "--set",
+                "materialization.format=csv",
             ],
         )
 
         from lakelogic.cli.driver import main
+
         main()
 
         assert summary_path.exists()
@@ -1152,7 +1231,10 @@ class TestCLIMain:
 
         _write_csv(landing / "data.csv", [{"id": 1, "val": 10}])
         contract = _make_contract(
-            "bronze_data", landing, out, pattern="data.csv",
+            "bronze_data",
+            landing,
+            out,
+            pattern="data.csv",
             fields=[{"name": "id", "type": "integer"}, {"name": "val", "type": "integer"}],
         )
         _write_contract(tmp_path / "contract.yaml", contract)
@@ -1163,23 +1245,35 @@ class TestCLIMain:
 
         summary_path = tmp_path / "summary.json"
         import sys
+
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             [
                 "lakelogic-driver",
-                "--registry", str(tmp_path / "_registry.yaml"),
-                "--layers", "bronze",
-                "--engine", "polars",
-                "--max-workers", "1",
-                "--summary-path", str(summary_path),
-                "--window", "none",
-                "--backfill-start-date", "2026-02-01",
-                "--backfill-end-date", "2026-02-03",
-                "--backfill-granularity", "day",
+                "--registry",
+                str(tmp_path / "_registry.yaml"),
+                "--layers",
+                "bronze",
+                "--engine",
+                "polars",
+                "--max-workers",
+                "1",
+                "--summary-path",
+                str(summary_path),
+                "--window",
+                "none",
+                "--backfill-start-date",
+                "2026-02-01",
+                "--backfill-end-date",
+                "2026-02-03",
+                "--backfill-granularity",
+                "day",
             ],
         )
 
         from lakelogic.cli.driver import main
+
         main()
 
         # Backfill runs overwrite the summary for each window, so last window's summary should exist
@@ -1187,6 +1281,7 @@ class TestCLIMain:
 
 
 # ── Observability Backend Coverage ───────────────────────────────────────────
+
 
 class TestObservabilityBackends:
     """Tests for summary table write backends and metrics emission."""
@@ -1203,9 +1298,13 @@ class TestObservabilityBackends:
             "duration_seconds": 10.5,
             "engine": "polars",
             "metrics": {
-                "total_contracts": 3, "successful": 2, "failed": 1,
-                "skipped_missing_upstream": 0, "skipped_no_sources": 0,
-                "full_loads": 1, "full_loads_due_to_missing_logs": 0,
+                "total_contracts": 3,
+                "successful": 2,
+                "failed": 1,
+                "skipped_missing_upstream": 0,
+                "skipped_no_sources": 0,
+                "full_loads": 1,
+                "full_loads_due_to_missing_logs": 0,
                 "missing_upstreams": 0,
             },
         }
@@ -1233,9 +1332,13 @@ class TestObservabilityBackends:
             "duration_seconds": 5.0,
             "engine": "duckdb",
             "metrics": {
-                "total_contracts": 1, "successful": 1, "failed": 0,
-                "skipped_missing_upstream": 0, "skipped_no_sources": 0,
-                "full_loads": 0, "full_loads_due_to_missing_logs": 0,
+                "total_contracts": 1,
+                "successful": 1,
+                "failed": 0,
+                "skipped_missing_upstream": 0,
+                "skipped_no_sources": 0,
+                "full_loads": 0,
+                "full_loads_due_to_missing_logs": 0,
                 "missing_upstreams": 0,
             },
         }
@@ -1258,6 +1361,7 @@ class TestObservabilityBackends:
     def test_no_summary_table_is_noop(self) -> None:
         """When summary_table is None, write_summary_table should be a no-op."""
         from lakelogic.cli.observability import write_summary_table
+
         write_summary_table({"run_id": "x"}, None, None, None, None, False, "polars")
 
     def test_emit_metrics_statsd_no_crash(self) -> None:
@@ -1277,12 +1381,18 @@ class TestObservabilityBackends:
         db_path = tmp_path / "runs.sqlite"
         summary = {
             "run_id": "dot-test",
-            "started_at": None, "finished_at": None, "duration_seconds": None,
+            "started_at": None,
+            "finished_at": None,
+            "duration_seconds": None,
             "engine": "polars",
             "metrics": {
-                "total_contracts": 0, "successful": 0, "failed": 0,
-                "skipped_missing_upstream": 0, "skipped_no_sources": 0,
-                "full_loads": 0, "full_loads_due_to_missing_logs": 0,
+                "total_contracts": 0,
+                "successful": 0,
+                "failed": 0,
+                "skipped_missing_upstream": 0,
+                "skipped_no_sources": 0,
+                "full_loads": 0,
+                "full_loads_due_to_missing_logs": 0,
                 "missing_upstreams": 0,
             },
         }

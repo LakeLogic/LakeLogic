@@ -188,7 +188,11 @@ def test_aws_gcp_and_vault_secret_resolution(monkeypatch):
             return types.SimpleNamespace(payload=types.SimpleNamespace(data=b"gcp-secret"))
 
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "demo-project")
-    monkeypatch.setitem(sys.modules, "google.cloud", types.SimpleNamespace(secretmanager=types.SimpleNamespace(SecretManagerServiceClient=FakeSecretManagerClient)))
+    monkeypatch.setitem(
+        sys.modules,
+        "google.cloud",
+        types.SimpleNamespace(secretmanager=types.SimpleNamespace(SecretManagerServiceClient=FakeSecretManagerClient)),
+    )
     assert nb._resolve_gcp_secret("smtp-pass", {}) == "gcp-secret"
     assert nb._resolve_gcp_secret("projects/x/secrets/y/versions/latest", {}) == "gcp-secret"
 
@@ -197,7 +201,9 @@ def test_aws_gcp_and_vault_secret_resolution(monkeypatch):
             self.secrets = types.SimpleNamespace(
                 kv=types.SimpleNamespace(
                     v1=types.SimpleNamespace(read_secret=lambda path: {"data": {"plain": "v1-secret"}}),
-                    v2=types.SimpleNamespace(read_secret_version=lambda path: {"data": {"data": {"field": "vault-secret"}}}),
+                    v2=types.SimpleNamespace(
+                        read_secret_version=lambda path: {"data": {"data": {"field": "vault-secret"}}}
+                    ),
                 )
             )
 
@@ -261,7 +267,12 @@ def test_validation_helpers_and_template_path_resolution(tmp_path):
     with pytest.raises(ValueError, match="smtp_password is required"):
         nb.validate_notification_config(
             "smtp",
-            {"smtp_host": "smtp.example.com", "from_email": "from@example.com", "target": "to@example.com", "smtp_username": "user"},
+            {
+                "smtp_host": "smtp.example.com",
+                "from_email": "from@example.com",
+                "target": "to@example.com",
+                "smtp_username": "user",
+            },
         )
     with pytest.raises(ValueError, match="Unsupported notification type"):
         nb.validate_notification_config("pagerduty", {"target": "x"})
@@ -312,7 +323,12 @@ def test_render_notification_content_with_files_builtin_and_standalone_fallback(
     fallback_message, _ = nb.render_notification_content(
         {"message_template": "{{ message }}"},
         "Fallback body",
-        context={"event": "failure", "run_id": "r1", "engine": "duckdb", "contract": {"title": "Orders", "version": "1.0", "dataset": "bronze_orders"}},
+        context={
+            "event": "failure",
+            "run_id": "r1",
+            "engine": "duckdb",
+            "contract": {"title": "Orders", "version": "1.0", "dataset": "bronze_orders"},
+        },
     )
     assert "Fallback body" in fallback_message
     assert "Run ID" in fallback_message
@@ -372,7 +388,9 @@ def test_adapters_send_paths(monkeypatch):
     assert ("login", "user", "pass") in smtp_events
     assert any(event[0] == "send" for event in smtp_events if isinstance(event, tuple))
 
-    nb.SendGridAdapter({"api_key": "sg", "from_email": "from@example.com", "target": "to@example.com"}).send("body", "subject")
+    nb.SendGridAdapter({"api_key": "sg", "from_email": "from@example.com", "target": "to@example.com"}).send(
+        "body", "subject"
+    )
     nb.SlackAdapter({"target": "https://slack.example"}).send("body", "subject")
     nb.TeamsAdapter({"target": "https://teams.example"}).send("body", "subject")
     nb.WebhookAdapter({"target": "https://hook.example"}).send("body", "subject")

@@ -97,7 +97,10 @@ def test_infer_columns_from_csv_sources(tmp_path):
     assert ta._infer_columns_from_source(contract, tmp_path / "contract.yaml") == ["a", "b"]
 
     assert ta._infer_columns_from_source({"source": {"path": "s3://bucket/file.csv"}}, tmp_path / "contract.yaml") == []
-    assert ta._infer_columns_from_source({"source": {"path": str(tmp_path / "missing.csv")}}, tmp_path / "contract.yaml") == []
+    assert (
+        ta._infer_columns_from_source({"source": {"path": str(tmp_path / "missing.csv")}}, tmp_path / "contract.yaml")
+        == []
+    )
 
 
 def test_infer_columns_from_parquet_handles_missing_or_failing_pyarrow(tmp_path, monkeypatch):
@@ -354,11 +357,7 @@ def test_apply_contract_template_accepts_template_path_and_string_options(tmp_pa
 def test_apply_contract_template_accepts_iterable_soft_delete_values(tmp_path):
     contract_path = tmp_path / "contract.yaml"
     contract_path.write_text(
-        "dataset: bronze_orders\n"
-        "model:\n"
-        "  fields:\n"
-        "    - name: operation\n"
-        "      type: string\n",
+        "dataset: bronze_orders\nmodel:\n  fields:\n    - name: operation\n      type: string\n",
         encoding="utf-8",
     )
 
@@ -413,9 +412,7 @@ def test_apply_contract_template_output_paths_with_registry_and_contracts_dir(tm
     contract_path.write_text("dataset: bronze_orders\n", encoding="utf-8")
     registry_path = registry_root / "registry.yaml"
     registry_path.write_text(
-        "entries:\n"
-        "  - enabled: true\n"
-        "    contract_path: contracts/bronze_orders.yaml\n",
+        "entries:\n  - enabled: true\n    contract_path: contracts/bronze_orders.yaml\n",
         encoding="utf-8",
     )
     output_dir = tmp_path / "generated"
@@ -425,5 +422,7 @@ def test_apply_contract_template_output_paths_with_registry_and_contracts_dir(tm
 
     outside_contract = tmp_path / "outside.yaml"
     outside_contract.write_text("dataset: bronze_orders\n", encoding="utf-8")
-    contract_results = ta.apply_contract_template({}, contracts_dir=contracts_dir, contracts=[outside_contract], output_dir=output_dir, dry_run=True)
+    contract_results = ta.apply_contract_template(
+        {}, contracts_dir=contracts_dir, contracts=[outside_contract], output_dir=output_dir, dry_run=True
+    )
     assert any(result.output_path == output_dir / "outside.yaml" for result in contract_results)

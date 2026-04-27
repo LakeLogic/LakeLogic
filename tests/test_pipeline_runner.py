@@ -49,7 +49,9 @@ def test_pipeline_run_summary_append_replace_and_render():
 
 
 def test_runner_mode_and_catalog_reference_detection():
-    registry = types.SimpleNamespace(storage_mode="uc", storage=None, quarantine=None, lineage=None, materialization=None, server=None)
+    registry = types.SimpleNamespace(
+        storage_mode="uc", storage=None, quarantine=None, lineage=None, materialization=None, server=None
+    )
     pipeline = runner.LakehousePipeline(registry, engine="polars")
 
     assert pipeline._resolve_run_log_mode({"metadata": {"run_log_table": "catalog.logs"}}) == "table"
@@ -188,7 +190,9 @@ def test_dependency_helpers_and_erasure_strategy_resolution():
 
     registry = types.SimpleNamespace(compliance={"erasure": {"strategy": "hash"}}, storage_mode="uc", storage=None)
     pipeline = runner.LakehousePipeline(registry, engine="polars")
-    assert pipeline._resolve_erasure_strategy({"compliance": {"erasure": {"strategy": "redact"}}}, "nullify") == "redact"
+    assert (
+        pipeline._resolve_erasure_strategy({"compliance": {"erasure": {"strategy": "redact"}}}, "nullify") == "redact"
+    )
     assert pipeline._resolve_erasure_strategy({}, "nullify") == "hash"
     assert pipeline._resolve_erasure_strategy(None, "nullify") == "hash"
 
@@ -236,9 +240,18 @@ def test_write_test_data_and_schema_helpers(monkeypatch, tmp_path):
     assert col_types == {"id": "BIGINT", "created_at": "TIMESTAMP"}
 
     spark_contract = types.SimpleNamespace(materialization=types.SimpleNamespace(target_path="table:catalog.orders"))
-    fake_df = types.SimpleNamespace(columns=["id"], schema=types.SimpleNamespace(fields=[types.SimpleNamespace(name="id", dataType=types.SimpleNamespace(simpleString=lambda: "int"))]))
+    fake_df = types.SimpleNamespace(
+        columns=["id"],
+        schema=types.SimpleNamespace(
+            fields=[types.SimpleNamespace(name="id", dataType=types.SimpleNamespace(simpleString=lambda: "int"))]
+        ),
+    )
     fake_sql_module = types.ModuleType("pyspark.sql")
-    fake_sql_module.SparkSession = types.SimpleNamespace(builder=types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(table=lambda name: fake_df, sql=lambda stmt: None)))
+    fake_sql_module.SparkSession = types.SimpleNamespace(
+        builder=types.SimpleNamespace(
+            getOrCreate=lambda: types.SimpleNamespace(table=lambda name: fake_df, sql=lambda stmt: None)
+        )
+    )
     monkeypatch.setitem(sys.modules, "pyspark", types.ModuleType("pyspark"))
     monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
     col_names, col_types = runner.LakehousePipeline._introspect_table_schema(spark_contract, "spark")
@@ -257,7 +270,9 @@ def test_execute_alter_statements_routes_by_backend(monkeypatch):
 
     executed = []
     fake_sql_module = types.ModuleType("pyspark.sql")
-    fake_sql_module.SparkSession = types.SimpleNamespace(builder=types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(sql=lambda stmt: executed.append(stmt))))
+    fake_sql_module.SparkSession = types.SimpleNamespace(
+        builder=types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(sql=lambda stmt: executed.append(stmt)))
+    )
     monkeypatch.setitem(sys.modules, "pyspark", types.ModuleType("pyspark"))
     monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
     runner.LakehousePipeline._execute_alter_statements(["ALTER TABLE x ADD COLUMN y INT"], "spark", "orders")
@@ -330,13 +345,25 @@ def test_execute_resets_and_reloads_routes_to_processor_and_spark(monkeypatch, t
     fake_spark = types.SimpleNamespace(
         sql=lambda stmt: dropped.append(stmt),
         catalog=types.SimpleNamespace(tableExists=lambda _: True),
-        _jvm=types.SimpleNamespace(com=types.SimpleNamespace(databricks=types.SimpleNamespace(service=types.SimpleNamespace(DBUtils=lambda *_args: (_ for _ in ()).throw(RuntimeError("no dbutils")))))),
+        _jvm=types.SimpleNamespace(
+            com=types.SimpleNamespace(
+                databricks=types.SimpleNamespace(
+                    service=types.SimpleNamespace(
+                        DBUtils=lambda *_args: (_ for _ in ()).throw(RuntimeError("no dbutils"))
+                    )
+                )
+            )
+        ),
         _jsc=types.SimpleNamespace(sc=lambda: object()),
     )
     storage = types.SimpleNamespace(domain_catalog="catalog.domain", external_location_root=None)
     registry = types.SimpleNamespace(storage_mode="uc", storage=storage)
     pipeline = runner.LakehousePipeline(registry, engine="spark", spark=fake_spark)
-    monkeypatch.setattr(pipeline, "_delete_run_log_entries", lambda contract_dict, name, layer: dropped.append(f"runlog::{name}::{layer}"))
+    monkeypatch.setattr(
+        pipeline,
+        "_delete_run_log_entries",
+        lambda contract_dict, name, layer: dropped.append(f"runlog::{name}::{layer}"),
+    )
 
     reset_contract = types.SimpleNamespace(
         layer="silver",
@@ -357,7 +384,11 @@ def test_execute_resets_and_reloads_routes_to_processor_and_spark(monkeypatch, t
     )
 
     pipeline._execute_resets([reset_contract, reload_contract], {"silver"}, {"gold"}, dry_run=False)
-    assert any(call[0] == "DROP TABLE IF EXISTS catalog.domain.orders" for call in [(stmt,) for stmt in dropped] if isinstance(call[0], str))
+    assert any(
+        call[0] == "DROP TABLE IF EXISTS catalog.domain.orders"
+        for call in [(stmt,) for stmt in dropped]
+        if isinstance(call[0], str)
+    )
     assert "DROP TABLE IF EXISTS catalog.quarantine.orders" in dropped
     assert "runlog::orders::silver" in dropped
     assert any(call["targets"] is None and call["dry_run"] is False for call in reset_calls)
@@ -400,7 +431,9 @@ def test_execute_resets_deletes_cloud_and_local_quarantine_targets(monkeypatch, 
     (local_quarantine / "part-0001.parquet").write_text("x", encoding="utf-8")
 
     pipeline = runner.LakehousePipeline(types.SimpleNamespace(storage_mode="direct", storage=None), engine="polars")
-    monkeypatch.setattr(pipeline, "_delete_run_log_entries", lambda contract_dict, name, layer: deleted_run_logs.append((name, layer)))
+    monkeypatch.setattr(
+        pipeline, "_delete_run_log_entries", lambda contract_dict, name, layer: deleted_run_logs.append((name, layer))
+    )
 
     contracts = [
         types.SimpleNamespace(
@@ -445,7 +478,9 @@ def test_generate_ddl_only_and_generate_test_data(monkeypatch, tmp_path):
         "lakelogic.core.ddl",
         types.SimpleNamespace(
             _resolve_table_name=lambda contract: f"catalog.{contract['info']['table_name']}",
-            generate_alter_ddl=lambda contract, engine, existing_cols, existing_column_types=None: ["ALTER TABLE add column x INT"] if existing_cols else [],
+            generate_alter_ddl=lambda contract, engine, existing_cols, existing_column_types=None: (
+                ["ALTER TABLE add column x INT"] if existing_cols else []
+            ),
         ),
     )
 
@@ -453,9 +488,15 @@ def test_generate_ddl_only_and_generate_test_data(monkeypatch, tmp_path):
     pipeline = runner.LakehousePipeline(registry, engine="polars")
     monkeypatch.setattr(pipeline, "_introspect_table_schema", lambda contract, engine: (["id"], {"id": "BIGINT"}))
     executed = []
-    monkeypatch.setattr(pipeline, "_execute_alter_statements", lambda statements, engine, entity: executed.append((statements, engine, entity)))
+    monkeypatch.setattr(
+        pipeline,
+        "_execute_alter_statements",
+        lambda statements, engine, entity: executed.append((statements, engine, entity)),
+    )
 
-    contracts = [types.SimpleNamespace(entity="orders", layer="silver", contract_dict={"info": {"table_name": "orders"}})]
+    contracts = [
+        types.SimpleNamespace(entity="orders", layer="silver", contract_dict={"info": {"table_name": "orders"}})
+    ]
     dry_summary = pipeline.generate_ddl_only(contracts, dry_run=True)
     assert dry_summary.results[0]["status"] == "ddl_dry_run"
     real_summary = pipeline.generate_ddl_only(contracts, dry_run=False)
@@ -556,7 +597,9 @@ def test_generate_test_data_suggest_rules_success(monkeypatch, tmp_path):
     ]
 
     pipeline = runner.LakehousePipeline(types.SimpleNamespace(storage_mode="direct", storage=None), engine="polars")
-    pipeline._generate_test_data(contracts, rows=4, invalid_ratio=0.0, suggest_rules=True, ai_provider="openai", ai_model="gpt")
+    pipeline._generate_test_data(
+        contracts, rows=4, invalid_ratio=0.0, suggest_rules=True, ai_provider="openai", ai_model="gpt"
+    )
 
     assert "row_rules" in resolved_path.read_text(encoding="utf-8")
     assert any("Saved suggested rules" in message for message in infos)
@@ -575,12 +618,17 @@ def test_generate_ddl_only_raises_on_failures(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "lakelogic.core.ddl",
-        types.SimpleNamespace(_resolve_table_name=lambda contract: f"catalog.{contract['info']['table_name']}", generate_alter_ddl=lambda *args, **kwargs: []),
+        types.SimpleNamespace(
+            _resolve_table_name=lambda contract: f"catalog.{contract['info']['table_name']}",
+            generate_alter_ddl=lambda *args, **kwargs: [],
+        ),
     )
     pipeline = runner.LakehousePipeline(types.SimpleNamespace(storage_mode="uc", storage=None), engine="polars")
     monkeypatch.setattr(pipeline, "_introspect_table_schema", lambda contract, engine: ([], {}))
     contracts = [
-        types.SimpleNamespace(entity="bad_orders", layer="silver", contract_dict={"info": {"table_name": "bad_orders"}}),
+        types.SimpleNamespace(
+            entity="bad_orders", layer="silver", contract_dict={"info": {"table_name": "bad_orders"}}
+        ),
     ]
     with pytest.raises(RuntimeError, match="DDL failed for 1 contract"):
         pipeline.generate_ddl_only(contracts, dry_run=False)
@@ -600,17 +648,35 @@ def test_execute_resets_uses_ipython_dbutils_for_quarantine_cloud_cleanup(monkey
     monkeypatch.setitem(
         sys.modules,
         "IPython",
-        types.SimpleNamespace(get_ipython=lambda: types.SimpleNamespace(user_ns={"dbutils": types.SimpleNamespace(fs=types.SimpleNamespace(rm=lambda path, recursive: removed.append((path, recursive))))})),
+        types.SimpleNamespace(
+            get_ipython=lambda: types.SimpleNamespace(
+                user_ns={
+                    "dbutils": types.SimpleNamespace(
+                        fs=types.SimpleNamespace(rm=lambda path, recursive: removed.append((path, recursive)))
+                    )
+                }
+            )
+        ),
     )
 
     fake_spark = types.SimpleNamespace(
         sql=lambda stmt: None,
         catalog=types.SimpleNamespace(tableExists=lambda _: True),
-        _jvm=types.SimpleNamespace(com=types.SimpleNamespace(databricks=types.SimpleNamespace(service=types.SimpleNamespace(DBUtils=lambda *_args: (_ for _ in ()).throw(RuntimeError("no direct dbutils")))))),
+        _jvm=types.SimpleNamespace(
+            com=types.SimpleNamespace(
+                databricks=types.SimpleNamespace(
+                    service=types.SimpleNamespace(
+                        DBUtils=lambda *_args: (_ for _ in ()).throw(RuntimeError("no direct dbutils"))
+                    )
+                )
+            )
+        ),
         _jsc=types.SimpleNamespace(sc=lambda: object()),
     )
     storage = types.SimpleNamespace(domain_catalog="catalog.domain", external_location_root="abfss://lake/root")
-    pipeline = runner.LakehousePipeline(types.SimpleNamespace(storage_mode="uc", storage=storage), engine="spark", spark=fake_spark)
+    pipeline = runner.LakehousePipeline(
+        types.SimpleNamespace(storage_mode="uc", storage=storage), engine="spark", spark=fake_spark
+    )
     monkeypatch.setattr(pipeline, "_delete_run_log_entries", lambda contract_dict, name, layer: None)
 
     reset_contract = types.SimpleNamespace(
@@ -655,12 +721,18 @@ def test_process_single_contract_spark_conversion_and_fail_on_quarantine(monkeyp
             self.sparkSession = True
             self.pdf = pdf
 
-    fake_spark = types.SimpleNamespace(createDataFrame=lambda pdf: converted.append(list(pdf.columns)) or FakeSparkFrame(pdf))
+    fake_spark = types.SimpleNamespace(
+        createDataFrame=lambda pdf: converted.append(list(pdf.columns)) or FakeSparkFrame(pdf)
+    )
     monkeypatch.setattr(runner, "DataProcessor", FakeProcessor)
 
-    pipeline = runner.LakehousePipeline(types.SimpleNamespace(system="crm", domain="sales", storage=None), engine="spark", spark=fake_spark)
+    pipeline = runner.LakehousePipeline(
+        types.SimpleNamespace(system="crm", domain="sales", storage=None), engine="spark", spark=fake_spark
+    )
     summary = runner.PipelineRunSummary("run-1", "dev", dry_run=False)
-    contract = types.SimpleNamespace(entity="orders", contract_dict={"info": {"title": "Orders", "table_name": "orders"}, "materialization": {}})
+    contract = types.SimpleNamespace(
+        entity="orders", contract_dict={"info": {"title": "Orders", "table_name": "orders"}, "materialization": {}}
+    )
 
     with pytest.raises(ValueError, match=r"Pipeline failed: 1 record\(s\) quarantined") as exc_info:
         pipeline._process_single_contract(
@@ -729,7 +801,11 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
         "lakelogic.core.gdpr",
         types.SimpleNamespace(
             _get_pii_column_names=lambda dc: ["email", "phone"],
-            generate_erasure_report=lambda dc, subject_col, subject_ids, strategy, affected, partition_filter=None: {"kind": "gdpr", "strategy": strategy, "affected": affected},
+            generate_erasure_report=lambda dc, subject_col, subject_ids, strategy, affected, partition_filter=None: {
+                "kind": "gdpr",
+                "strategy": strategy,
+                "affected": affected,
+            },
         ),
     )
     monkeypatch.setitem(
@@ -737,7 +813,11 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
         "lakelogic.core.hipaa",
         types.SimpleNamespace(
             _get_phi_column_names=lambda dc: ["diagnosis", "address"],
-            generate_hipaa_erasure_report=lambda dc, patient_col, patient_ids, strategy, affected, partition_filter=None: {"kind": "hipaa", "strategy": strategy, "affected": affected},
+            generate_hipaa_erasure_report=lambda dc, patient_col, patient_ids, strategy, affected, partition_filter=None: {
+                "kind": "hipaa",
+                "strategy": strategy,
+                "affected": affected,
+            },
         ),
     )
 
@@ -760,7 +840,11 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
 def test_load_checkpoint_for_spark_and_polars(monkeypatch):
     spark_rows = [{"data_layer": "bronze", "dataset": "orders"}, {"data_layer": "silver", "dataset": "customers"}]
     fake_spark = types.SimpleNamespace(sql=lambda stmt: types.SimpleNamespace(collect=lambda: spark_rows))
-    pipeline = runner.LakehousePipeline(types.SimpleNamespace(storage=types.SimpleNamespace(run_log_table="catalog.logs")), engine="spark", spark=fake_spark)
+    pipeline = runner.LakehousePipeline(
+        types.SimpleNamespace(storage=types.SimpleNamespace(run_log_table="catalog.logs")),
+        engine="spark",
+        spark=fake_spark,
+    )
 
     fake_paths = types.ModuleType("lakelogic.core.paths")
     fake_paths.resolve_run_log_ref = lambda table, engine: f"resolved::{table}::{engine}"
@@ -792,7 +876,9 @@ def test_load_checkpoint_for_spark_and_polars(monkeypatch):
     fake_creds.resolve_storage_options = lambda table: {"table": table}
     monkeypatch.setitem(sys.modules, "lakelogic.engines.cloud_credentials", fake_creds)
 
-    polars_pipeline = runner.LakehousePipeline(types.SimpleNamespace(storage=types.SimpleNamespace(run_log_table="abfss://lake/logs")), engine="polars")
+    polars_pipeline = runner.LakehousePipeline(
+        types.SimpleNamespace(storage=types.SimpleNamespace(run_log_table="abfss://lake/logs")), engine="polars"
+    )
     assert polars_pipeline._load_checkpoint("run-2") == {"gold:payments"}
 
 
@@ -800,9 +886,11 @@ def test_process_contract_with_retry(monkeypatch):
     calls = []
 
     fake_retry = types.ModuleType("lakelogic.core.retry")
+
     def retry_call(func, args=(), attempts=1, base_wait_seconds=0, label=None):
         calls.append((attempts, base_wait_seconds, label))
         return func(*args)
+
     fake_retry.retry_call = retry_call
     monkeypatch.setitem(sys.modules, "lakelogic.core.retry", fake_retry)
 
@@ -884,9 +972,9 @@ def test_process_contract_with_retry_timeout_and_parallel_wave(monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "_process_contract_with_retry",
-        lambda contract, *_args, **_kwargs: seen.append(contract.entity)
-        if contract.entity == "ok"
-        else (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda contract, *_args, **_kwargs: (
+            seen.append(contract.entity) if contract.entity == "ok" else (_ for _ in ()).throw(RuntimeError("boom"))
+        ),
     )
     errors = []
     monkeypatch.setattr(runner.logger, "error", errors.append)
@@ -995,7 +1083,9 @@ def test_process_single_contract_success_and_failure_logging(monkeypatch):
 
     failures = []
     monkeypatch.setattr(runner.logger, "error", failures.append)
-    monkeypatch.setattr(runner.os, "getenv", lambda key: {"AZURE_CLIENT_ID": "client-1", "AZURE_TENANT_ID": "tenant-1"}.get(key))
+    monkeypatch.setattr(
+        runner.os, "getenv", lambda key: {"AZURE_CLIENT_ID": "client-1", "AZURE_TENANT_ID": "tenant-1"}.get(key)
+    )
 
     class FailingProcessor:
         def __init__(self, contract, engine, pipeline_run_id, run_log_mode=None):
@@ -1033,8 +1123,12 @@ def test_process_single_contract_success_and_failure_logging(monkeypatch):
 
 
 def test_run_orchestrates_ddl_skips_checkpoint_and_circuit_breaker(monkeypatch):
-    bronze = types.SimpleNamespace(entity="orders", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "orders"}})
-    silver = types.SimpleNamespace(entity="customers", layer="silver", depends_on=[], contract_dict={"info": {"table_name": "customers"}})
+    bronze = types.SimpleNamespace(
+        entity="orders", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "orders"}}
+    )
+    silver = types.SimpleNamespace(
+        entity="customers", layer="silver", depends_on=[], contract_dict={"info": {"table_name": "customers"}}
+    )
     registry = types.SimpleNamespace(
         domain="commerce",
         system="erp",
@@ -1050,12 +1144,34 @@ def test_run_orchestrates_ddl_skips_checkpoint_and_circuit_breaker(monkeypatch):
     hipaa_calls = []
     test_data_calls = []
     ddl_calls = []
-    monkeypatch.setattr(pipeline, "_resolve_uc_paths", lambda contract_dict: resolved.append(contract_dict.get("info", {}).get("table_name")) or contract_dict)
-    monkeypatch.setattr(pipeline, "_execute_resets", lambda active, reset_layers, reload_layers, dry_run: resets.append((len(active), reset_layers, reload_layers, dry_run)))
-    monkeypatch.setattr(pipeline, "_execute_gdpr_pass", lambda *args, **kwargs: gdpr_calls.append(kwargs.get("partition_filter")))
-    monkeypatch.setattr(pipeline, "_execute_hipaa_pass", lambda *args, **kwargs: hipaa_calls.append(kwargs.get("partition_filter")))
-    monkeypatch.setattr(pipeline, "_generate_test_data", lambda contracts, **kwargs: test_data_calls.append((len(contracts), kwargs["rows"])))
-    monkeypatch.setattr(pipeline, "generate_ddl_only", lambda contracts, dry_run: ddl_calls.append(([c.entity for c in contracts], dry_run)) or "ddl-summary")
+    monkeypatch.setattr(
+        pipeline,
+        "_resolve_uc_paths",
+        lambda contract_dict: resolved.append(contract_dict.get("info", {}).get("table_name")) or contract_dict,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_execute_resets",
+        lambda active, reset_layers, reload_layers, dry_run: resets.append(
+            (len(active), reset_layers, reload_layers, dry_run)
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline, "_execute_gdpr_pass", lambda *args, **kwargs: gdpr_calls.append(kwargs.get("partition_filter"))
+    )
+    monkeypatch.setattr(
+        pipeline, "_execute_hipaa_pass", lambda *args, **kwargs: hipaa_calls.append(kwargs.get("partition_filter"))
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_generate_test_data",
+        lambda contracts, **kwargs: test_data_calls.append((len(contracts), kwargs["rows"])),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "generate_ddl_only",
+        lambda contracts, dry_run: ddl_calls.append(([c.entity for c in contracts], dry_run)) or "ddl-summary",
+    )
 
     ddl_result = pipeline.run(
         target_layers="all",
@@ -1086,9 +1202,15 @@ def test_run_orchestrates_ddl_skips_checkpoint_and_circuit_breaker(monkeypatch):
     assert isinstance(test_data_result, runner.PipelineRunSummary)
     assert test_data_calls == [(1, 7)]
 
-    contract_a = types.SimpleNamespace(entity="done", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "done"}})
-    contract_b = types.SimpleNamespace(entity="failing", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "failing"}})
-    contract_c = types.SimpleNamespace(entity="after_failure", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "after_failure"}})
+    contract_a = types.SimpleNamespace(
+        entity="done", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "done"}}
+    )
+    contract_b = types.SimpleNamespace(
+        entity="failing", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "failing"}}
+    )
+    contract_c = types.SimpleNamespace(
+        entity="after_failure", layer="bronze", depends_on=[], contract_dict={"info": {"table_name": "after_failure"}}
+    )
     circuit_registry = types.SimpleNamespace(
         domain="commerce",
         system="erp",
@@ -1112,7 +1234,11 @@ def test_run_orchestrates_ddl_skips_checkpoint_and_circuit_breaker(monkeypatch):
 
     summary = circuit_pipeline.run(target_layers="bronze", resume_from_run="prior-run", max_consecutive_failures=1)
     assert processed == ["failing"]
-    assert [result["status"] for result in summary.results] == ["skipped_checkpoint", "failed", "skipped_circuit_breaker"]
+    assert [result["status"] for result in summary.results] == [
+        "skipped_checkpoint",
+        "failed",
+        "skipped_circuit_breaker",
+    ]
 
     upstream_registry = types.SimpleNamespace(
         domain="commerce",
@@ -1152,7 +1278,9 @@ def test_visualize_dag_includes_filters_external_and_downstream():
     registry = types.SimpleNamespace(
         domain="commerce",
         system="erp",
-        external_sources=[{"name": "CRM", "source_domain": "Sales", "catalog_path": "crm.api", "consumed_by": ["orders"]}],
+        external_sources=[
+            {"name": "CRM", "source_domain": "Sales", "catalog_path": "crm.api", "consumed_by": ["orders"]}
+        ],
         get_active_contracts=lambda: [contract, silver],
     )
     pipeline = runner.LakehousePipeline(registry, engine="polars")

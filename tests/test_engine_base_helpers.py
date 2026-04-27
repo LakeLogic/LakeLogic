@@ -70,7 +70,7 @@ def test_base_sql_helper_generation_and_lineage_columns():
     rollup_sql = adapter._build_rollup_sql(rollup)
     assert 'SUM(amount) AS "revenue"' in rollup_sql
     assert 'GROUP BY "country"' in rollup_sql
-    assert "ARRAY_AGG(DISTINCT CONCAT_WS('||', \"id\", \"region\"))" in rollup_sql
+    assert 'ARRAY_AGG(DISTINCT CONCAT_WS(\'||\', "id", "region"))' in rollup_sql
     assert "ANY_VALUE(expr)" == adapter._pivot_agg_expr("first", "expr")
     assert "COUNT(DISTINCT expr)" == adapter._pivot_agg_expr("count_distinct", "expr")
 
@@ -115,11 +115,11 @@ def test_base_sql_helper_generation_and_lineage_columns():
     )
     bucket_sql = adapter._build_bucket_sql(bucket)
     assert 'WHEN "amount" >= 0 AND "amount" < 100 THEN ' in bucket_sql
-    assert 'ELSE ' in bucket_sql
+    assert "ELSE " in bucket_sql
 
     date_diff = types.SimpleNamespace(field="days_open", from_col="opened_at", to_col="closed_at", unit="days")
     date_diff_sql = adapter._build_date_diff_sql(date_diff)
-    assert "DATEDIFF('day', \"opened_at\", \"closed_at\")" in date_diff_sql
+    assert 'DATEDIFF(\'day\', "opened_at", "closed_at")' in date_diff_sql
 
 
 def test_base_date_diff_and_transform_validation_paths():
@@ -136,16 +136,29 @@ def test_base_date_diff_and_transform_validation_paths():
     )
     assert 'DATEDIFF("closed_at", "opened_at")' in spark_sql
 
-    assert polars_adapter._build_pivot_sql(types.SimpleNamespace(pivot_col=None, pivot_cols=[], value_cols=["x"], values=["a"])) is None
+    assert (
+        polars_adapter._build_pivot_sql(
+            types.SimpleNamespace(pivot_col=None, pivot_cols=[], value_cols=["x"], values=["a"])
+        )
+        is None
+    )
     assert polars_adapter._build_unpivot_sql(types.SimpleNamespace(id_vars=["id"], value_vars=[])) is None
-    assert polars_adapter._build_bucket_sql(types.SimpleNamespace(field="bucket", source="amount", bins=[], default=None)) is None
-    assert polars_adapter._build_date_diff_sql(types.SimpleNamespace(field=None, from_col="a", to_col="b", unit="days")) is None
+    assert (
+        polars_adapter._build_bucket_sql(types.SimpleNamespace(field="bucket", source="amount", bins=[], default=None))
+        is None
+    )
+    assert (
+        polars_adapter._build_date_diff_sql(types.SimpleNamespace(field=None, from_col="a", to_col="b", unit="days"))
+        is None
+    )
 
 
 def test_expand_row_rules_for_supported_structured_types():
     adapter = _make_adapter()
 
-    not_null_rules = adapter._expand_row_rule(RowRuleNotNull(not_null={"fields": ["email", {"field": "status", "severity": "warn"}]}))
+    not_null_rules = adapter._expand_row_rule(
+        RowRuleNotNull(not_null={"fields": ["email", {"field": "status", "severity": "warn"}]})
+    )
     assert len(not_null_rules) == 2
     assert not_null_rules[0].sql == '"email" IS NOT NULL'
     assert not_null_rules[1].severity == "warn"
@@ -153,17 +166,21 @@ def test_expand_row_rules_for_supported_structured_types():
     accepted = adapter._expand_row_rule(
         RowRuleAcceptedValues(accepted_values={"field": "status", "values": ["A", "B"], "severity": "warn"})
     )
-    assert accepted.sql == '"status" IN (\'A\', \'B\')'
+    assert accepted.sql == "\"status\" IN ('A', 'B')"
     assert accepted.severity == "warn"
 
     regex = adapter._expand_row_rule(RowRuleRegexMatch(regex_match={"field": "email", "pattern": ".+@.+"}))
     assert "REGEXP_MATCHES" in regex.sql
 
-    range_rule = adapter._expand_row_rule(RowRuleRange(range={"field": "age", "min": 18, "max": 65, "inclusive": False}))
+    range_rule = adapter._expand_row_rule(
+        RowRuleRange(range={"field": "age", "min": 18, "max": 65, "inclusive": False})
+    )
     assert range_rule.sql == '"age" > 18 AND "age" < 65'
 
     ref_rule = adapter._expand_row_rule(
-        RowRuleReferentialIntegrity(referential_integrity={"field": "customer_id", "reference": "dim_customers", "key": "id"})
+        RowRuleReferentialIntegrity(
+            referential_integrity={"field": "customer_id", "reference": "dim_customers", "key": "id"}
+        )
     )
     assert ref_rule.sql == '"customer_id" IN (SELECT "id" FROM dim_customers)'
 
@@ -177,7 +194,10 @@ def test_expand_row_rules_for_supported_structured_types():
             }
         )
     )
-    assert 'COALESCE((SELECT r."end_date" FROM dim_customers r WHERE r."id" = "customer_id"), \'9999-12-31\')' in lifecycle.sql
+    assert (
+        'COALESCE((SELECT r."end_date" FROM dim_customers r WHERE r."id" = "customer_id"), \'9999-12-31\')'
+        in lifecycle.sql
+    )
 
     rule = QualityRule(name="raw", sql="1=1")
     assert adapter._expand_row_rule(rule) is rule
@@ -193,9 +213,11 @@ def test_expand_dataset_rules_and_transpile_helpers(monkeypatch):
 
     null_ratio = adapter._expand_dataset_rule(DatasetRuleNullRatio(null_ratio={"field": "email", "max": 25}))
     assert null_ratio.must_be_less_than == 0.25
-    assert 'NULLIF(COUNT(*), 0)' in null_ratio.sql
+    assert "NULLIF(COUNT(*), 0)" in null_ratio.sql
 
-    row_count_between = adapter._expand_dataset_rule(DatasetRuleRowCountBetween(row_count_between={"min": 10, "max": 20}))
+    row_count_between = adapter._expand_dataset_rule(
+        DatasetRuleRowCountBetween(row_count_between={"min": 10, "max": 20})
+    )
     assert row_count_between.must_be_between == [10, 20]
 
     min_only = adapter._expand_dataset_rule(DatasetRuleRowCountBetween(row_count_between={"min": 10}))

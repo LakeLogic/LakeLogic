@@ -22,7 +22,9 @@ def test_none_and_manual_cost_providers():
         currency="GBP",
         attribution="duration_proportional",
         cluster_config={"min_nodes": 2, "max_nodes": 4},
-        layer_rates={"gold": {"dbu_per_hour": 2.0, "cluster": {"min_nodes": 1, "max_nodes": 5, "scaling_assumption": "peak"}}},
+        layer_rates={
+            "gold": {"dbu_per_hour": 2.0, "cluster": {"min_nodes": 1, "max_nodes": 5, "scaling_assumption": "peak"}}
+        },
     )
 
     assert provider._rate_for_layer("silver") == (1.2, 3.0)
@@ -52,7 +54,10 @@ def test_databricks_cost_provider_exact_and_fallback(monkeypatch):
     assert fallback.confidence == "estimated"
     assert any("falling back to duration estimate" in message for message in debug_messages)
 
-    assert cp.DatabricksUCCostProvider(spark=None, fallback_dbu_rate=0.5).estimate(duration_seconds=3600).estimated_cost == 0.5
+    assert (
+        cp.DatabricksUCCostProvider(spark=None, fallback_dbu_rate=0.5).estimate(duration_seconds=3600).estimated_cost
+        == 0.5
+    )
 
 
 def test_cost_provider_factory_currency_and_budget(monkeypatch):
@@ -62,7 +67,9 @@ def test_cost_provider_factory_currency_and_budget(monkeypatch):
     assert isinstance(cp.resolve_cost_provider(), cp.NoneCostProvider)
     assert isinstance(cp.resolve_cost_provider({"provider": "none"}), cp.NoneCostProvider)
     assert isinstance(
-        cp.resolve_cost_provider({"provider": "manual", "rates": {"dbu_per_hour": 1.5}, "layer_rates": {}}, spark="ignored"),
+        cp.resolve_cost_provider(
+            {"provider": "manual", "rates": {"dbu_per_hour": 1.5}, "layer_rates": {}}, spark="ignored"
+        ),
         cp.ManualCostProvider,
     )
     databricks = cp.resolve_cost_provider({"provider": "databricks", "billing_tag_key": "run_tag"}, spark="spark")
@@ -81,5 +88,7 @@ def test_cost_provider_factory_currency_and_budget(monkeypatch):
     assert cp.check_budget_threshold(estimated_cost=10.0, cost_config=budget, entity="orders", historical_avg=4.0) == (
         "Cost anomaly: orders run cost $10.0000 exceeds 2× historical average $4.0000"
     )
-    assert cp.check_budget_threshold(estimated_cost=5.0, cost_config=budget, entity="orders", historical_avg=4.0) is None
+    assert (
+        cp.check_budget_threshold(estimated_cost=5.0, cost_config=budget, entity="orders", historical_avg=4.0) is None
+    )
     assert cp.check_budget_threshold(estimated_cost=5.0, cost_config={}, entity="orders", historical_avg=4.0) is None

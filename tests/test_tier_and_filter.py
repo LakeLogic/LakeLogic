@@ -88,9 +88,7 @@ class TestTierNormalization:
 
     def test_tier_from_target_layer_alias(self):
         """'target_layer' key should be accepted as an alias for 'tier'."""
-        contract = DataContract.model_validate(
-            {"version": "1.0.0", "target_layer": "raw"}
-        )
+        contract = DataContract.model_validate({"version": "1.0.0", "target_layer": "raw"})
         assert contract.tier == "bronze"
 
 
@@ -99,15 +97,13 @@ class TestTierCanonicalMap:
 
     def test_all_map_values_are_valid_canonical(self):
         for key, value in TIER_CANONICAL_MAP.items():
-            assert (
-                value in TIER_VALID_CANONICAL
-            ), f"TIER_CANONICAL_MAP['{key}'] = '{value}' is not in TIER_VALID_CANONICAL"
+            assert value in TIER_VALID_CANONICAL, (
+                f"TIER_CANONICAL_MAP['{key}'] = '{value}' is not in TIER_VALID_CANONICAL"
+            )
 
     def test_canonical_names_map_to_themselves(self):
         for canonical in TIER_VALID_CANONICAL:
-            assert (
-                TIER_CANONICAL_MAP.get(canonical) == canonical
-            ), f"Canonical '{canonical}' should map to itself"
+            assert TIER_CANONICAL_MAP.get(canonical) == canonical, f"Canonical '{canonical}' should map to itself"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -143,9 +139,7 @@ class TestTransformationFilterShorthand:
         """Dict filter also still works inside a full contract."""
         contract = DataContract(
             version="1.0.0",
-            transformations=[
-                {"phase": "pre", "filter": {"sql": "order_id IS NOT NULL"}}
-            ],
+            transformations=[{"phase": "pre", "filter": {"sql": "order_id IS NOT NULL"}}],
         )
         assert contract.transformations[0].filter.sql == "order_id IS NOT NULL"
 
@@ -167,9 +161,7 @@ class TestTransformationDeduplicateAlias:
         assert d.on == ["customer_id"]
 
     def test_by_with_sort(self):
-        d = TransformationDeduplicate.model_validate(
-            {"by": ["id"], "sort_by": ["updated_at"], "order": "desc"}
-        )
+        d = TransformationDeduplicate.model_validate({"by": ["id"], "sort_by": ["updated_at"], "order": "desc"})
         assert d.on == ["id"]
         assert d.sort_by == ["updated_at"]
         assert d.order == "desc"
@@ -178,9 +170,7 @@ class TestTransformationDeduplicateAlias:
         """'by' alias works inside a full contract transformation."""
         contract = DataContract(
             version="1.0.0",
-            transformations=[
-                {"deduplicate": {"by": ["customer_unique_id"]}}
-            ],
+            transformations=[{"deduplicate": {"by": ["customer_unique_id"]}}],
         )
         assert contract.transformations[0].deduplicate.on == ["customer_unique_id"]
 

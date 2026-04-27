@@ -39,7 +39,9 @@ def test_quarantine_backend_defaults_and_dispatch(monkeypatch, tmp_path):
 
     calls = []
     monkeypatch.setattr(q, "_write_quarantine_table_duckdb", lambda *args: calls.append("duckdb") or {"target": "duck"})
-    monkeypatch.setattr(q, "_write_quarantine_table_sqlite", lambda *args: calls.append("sqlite") or {"target": "sqlite"})
+    monkeypatch.setattr(
+        q, "_write_quarantine_table_sqlite", lambda *args: calls.append("sqlite") or {"target": "sqlite"}
+    )
     monkeypatch.setattr(q, "_write_quarantine_table_spark", lambda *args: calls.append("spark") or {"target": "spark"})
 
     contract = _contract(metadata={"quarantine_table_backend": "duckdb"})
@@ -57,10 +59,14 @@ def test_stamp_quarantine_lineage_and_fallback(monkeypatch):
     df = pl.DataFrame({"id": [1]})
     lineage_calls = []
     fake_lineage_module = types.ModuleType("lakelogic.core.lineage")
-    fake_lineage_module.add_columns = lambda frame, values, engine_name=None: lineage_calls.append((values, engine_name)) or {"engine": engine_name, "values": values}
+    fake_lineage_module.add_columns = lambda frame, values, engine_name=None: (
+        lineage_calls.append((values, engine_name)) or {"engine": engine_name, "values": values}
+    )
     monkeypatch.setitem(sys.modules, "lakelogic.core.lineage", fake_lineage_module)
 
-    contract = _contract(metadata={"domain": "commerce", "system": "erp", "lineage": {"run_id_column_name": "run_id_col"}})
+    contract = _contract(
+        metadata={"domain": "commerce", "system": "erp", "lineage": {"run_id_column_name": "run_id_col"}}
+    )
     stamped = q._stamp_quarantine_lineage(df, contract, run_id="run-1")
     assert stamped["engine"] == "polars"
     assert stamped["values"]["run_id_col"] == "run-1"
@@ -79,7 +85,9 @@ def test_materialize_quarantine_main_branches(monkeypatch, tmp_path):
 
     monkeypatch.setattr(q, "_stamp_quarantine_lineage", lambda frame, contract: frame)
     monkeypatch.setattr(q, "_frame_has_columns", lambda frame: len(getattr(frame, "columns", [])) > 0)
-    monkeypatch.setattr(q, "_row_count", lambda frame: frame.height if hasattr(frame, "height") else None, raising=False)
+    monkeypatch.setattr(
+        q, "_row_count", lambda frame: frame.height if hasattr(frame, "height") else None, raising=False
+    )
     monkeypatch.setattr(q, "_resolve_path", lambda raw, base: Path(base or tmp_path) / raw)
     monkeypatch.setattr(q, "_is_polars_frame", lambda frame: isinstance(frame, pl.DataFrame))
     monkeypatch.setattr(q, "_append_without_pandas", lambda frame, path, fmt: 2)
@@ -96,7 +104,13 @@ def test_materialize_quarantine_main_branches(monkeypatch, tmp_path):
 
     monkeypatch.setattr(q, "_write_frame", fake_write_frame)
     table_calls = []
-    monkeypatch.setattr(q, "_write_quarantine_table", lambda frame, contract, table_name, engine_name=None: table_calls.append((table_name, engine_name)) or {"target": table_name, "rows_written": 1})
+    monkeypatch.setattr(
+        q,
+        "_write_quarantine_table",
+        lambda frame, contract, table_name, engine_name=None: (
+            table_calls.append((table_name, engine_name)) or {"target": table_name, "rows_written": 1}
+        ),
+    )
 
     assert q.materialize_quarantine(df, None) == {}
     assert q.materialize_quarantine(df, types.SimpleNamespace(quarantine=None)) == {}
@@ -109,13 +123,26 @@ def test_materialize_quarantine_main_branches(monkeypatch, tmp_path):
     empty_result = q.materialize_quarantine(empty_df, _contract(), target_path=tmp_path / "empty")
     assert empty_result["rows_written"] == 0
 
-    table_contract = _contract(quarantine=types.SimpleNamespace(target="unused", table="catalog.quarantine_orders", format=None, write_mode=None))
-    assert q.materialize_quarantine(df, table_contract, quarantine_mode="table", engine_name="polars") == {"target": "catalog.quarantine_orders", "rows_written": 1}
+    table_contract = _contract(
+        quarantine=types.SimpleNamespace(
+            target="unused", table="catalog.quarantine_orders", format=None, write_mode=None
+        )
+    )
+    assert q.materialize_quarantine(df, table_contract, quarantine_mode="table", engine_name="polars") == {
+        "target": "catalog.quarantine_orders",
+        "rows_written": 1,
+    }
 
-    fallback_contract = _contract(quarantine=types.SimpleNamespace(target="quarantine/out", table=None, format=None, write_mode=None))
-    assert q.materialize_quarantine(df, fallback_contract, quarantine_mode="table", engine_name="polars")["target"].endswith("orders.parquet")
+    fallback_contract = _contract(
+        quarantine=types.SimpleNamespace(target="quarantine/out", table=None, format=None, write_mode=None)
+    )
+    assert q.materialize_quarantine(df, fallback_contract, quarantine_mode="table", engine_name="polars")[
+        "target"
+    ].endswith("orders.parquet")
 
-    unresolved_contract = _contract(quarantine=types.SimpleNamespace(target="{quarantine_path}", table=None, format=None, write_mode=None))
+    unresolved_contract = _contract(
+        quarantine=types.SimpleNamespace(target="{quarantine_path}", table=None, format=None, write_mode=None)
+    )
     with pytest.raises(ValueError, match="not fully resolved"):
         q.materialize_quarantine(df, unresolved_contract)
 
@@ -132,13 +159,25 @@ def test_materialize_quarantine_main_branches(monkeypatch, tmp_path):
 
 def test_materialize_quarantine_table_prefix_and_spark_path(monkeypatch, tmp_path):
     table_calls = []
-    monkeypatch.setattr(q, "_write_quarantine_table", lambda frame, contract, table_name, engine_name=None: table_calls.append((table_name, engine_name)) or {"target": table_name})
+    monkeypatch.setattr(
+        q,
+        "_write_quarantine_table",
+        lambda frame, contract, table_name, engine_name=None: (
+            table_calls.append((table_name, engine_name)) or {"target": table_name}
+        ),
+    )
     monkeypatch.setattr(q, "_stamp_quarantine_lineage", lambda frame, contract: frame)
     monkeypatch.setattr(q, "_frame_has_columns", lambda frame: True)
     monkeypatch.setattr(q, "_row_count", lambda frame: None, raising=False)
 
-    table_target_contract = _contract(quarantine=types.SimpleNamespace(target="table:catalog.quarantine_orders", table=None, format=None, write_mode=None))
-    assert q.materialize_quarantine(pl.DataFrame({"id": [1]}), table_target_contract, engine_name="duckdb") == {"target": "catalog.quarantine_orders"}
+    table_target_contract = _contract(
+        quarantine=types.SimpleNamespace(
+            target="table:catalog.quarantine_orders", table=None, format=None, write_mode=None
+        )
+    )
+    assert q.materialize_quarantine(pl.DataFrame({"id": [1]}), table_target_contract, engine_name="duckdb") == {
+        "target": "catalog.quarantine_orders"
+    }
     assert table_calls == [("catalog.quarantine_orders", "duckdb")]
 
     write_events = []
@@ -165,7 +204,11 @@ def test_materialize_quarantine_table_prefix_and_spark_path(monkeypatch, tmp_pat
             write_events.append((self.fmt, self.mode_value, dict(self.options), path))
 
     spark_df = types.SimpleNamespace(write=FakeWriter(), count=lambda: 3, columns=["id"], sparkSession=object())
-    spark_contract = _contract(_base_path=tmp_path, quarantine=types.SimpleNamespace(target="spark_quarantine", table=None, format="json", write_mode=None), metadata={"quarantine_table_mode": "append"})
+    spark_contract = _contract(
+        _base_path=tmp_path,
+        quarantine=types.SimpleNamespace(target="spark_quarantine", table=None, format="json", write_mode=None),
+        metadata={"quarantine_table_mode": "append"},
+    )
     result = q.materialize_quarantine(spark_df, spark_contract, engine_name="spark")
     assert result["rows_written"] == 3
     assert write_events[0][0] == "json"
@@ -198,7 +241,10 @@ def test_quarantine_table_duckdb_and_sqlite_writers(monkeypatch, tmp_path):
     duck_result = q._write_quarantine_table_duckdb(pdf, contract, "analytics.quarantine_orders", {})
     assert duck_result["rows_written"] == 1
     assert duck_result["format"] == "duckdb"
-    assert any("ALTER TABLE analytics.quarantine_orders ADD COLUMN IF NOT EXISTS \"new_col\" VARCHAR" in str(stmt) for stmt in executed)
+    assert any(
+        'ALTER TABLE analytics.quarantine_orders ADD COLUMN IF NOT EXISTS "new_col" VARCHAR' in str(stmt)
+        for stmt in executed
+    )
 
     sqlite_contract = _contract(_base_path=tmp_path, metadata={})
     sqlite_result = q._write_quarantine_table_sqlite(pdf, sqlite_contract, "analytics.quarantine_orders", {})
@@ -222,7 +268,11 @@ def test_quarantine_table_snowflake_and_bigquery_writers(monkeypatch):
     connector_module = types.ModuleType("snowflake.connector")
     connector_module.connect = lambda **kwargs: snowflake_calls.append(kwargs) or FakeSnowflakeConnection()
     pandas_tools_module = types.ModuleType("snowflake.connector.pandas_tools")
-    pandas_tools_module.write_pandas = lambda conn, frame, table_name, database=None, schema=None, auto_create_table=True, overwrite=False: snowflake_calls.append((table_name, database, schema, len(frame)))
+    pandas_tools_module.write_pandas = (
+        lambda conn, frame, table_name, database=None, schema=None, auto_create_table=True, overwrite=False: (
+            snowflake_calls.append((table_name, database, schema, len(frame)))
+        )
+    )
     snowflake_root = types.ModuleType("snowflake")
     snowflake_root.connector = connector_module
     monkeypatch.setitem(sys.modules, "snowflake", snowflake_root)
@@ -235,7 +285,9 @@ def test_quarantine_table_snowflake_and_bigquery_writers(monkeypatch):
         "snowflake_password": "secret",
         "snowflake_warehouse": "wh",
     }
-    snowflake_result = q._write_quarantine_table_snowflake(pdf, _contract(metadata=metadata), "raw.audit.quarantine_orders", metadata)
+    snowflake_result = q._write_quarantine_table_snowflake(
+        pdf, _contract(metadata=metadata), "raw.audit.quarantine_orders", metadata
+    )
     assert snowflake_result["target"] == "raw.audit.quarantine_orders"
     assert any(isinstance(call, tuple) and call[0] == "quarantine_orders" for call in snowflake_calls)
 
@@ -270,7 +322,12 @@ def test_quarantine_table_snowflake_and_bigquery_writers(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.cloud", cloud_module)
     monkeypatch.setitem(sys.modules, "google.cloud.bigquery", bigquery_module)
 
-    bq_result = q._write_quarantine_table_bigquery(pdf, _contract(metadata={"bigquery_project": "demo"}), "analytics.quarantine_orders", {"bigquery_project": "demo"})
+    bq_result = q._write_quarantine_table_bigquery(
+        pdf,
+        _contract(metadata={"bigquery_project": "demo"}),
+        "analytics.quarantine_orders",
+        {"bigquery_project": "demo"},
+    )
     assert bq_result["target"] == "demo.analytics.quarantine_orders"
     assert ("demo", "demo.analytics.quarantine_orders", "WRITE_APPEND", 1) in bq_calls
 
@@ -379,9 +436,13 @@ def test_materialize_quarantine_delta_and_iceberg_file_modes(monkeypatch, tmp_pa
 
     delta_calls = []
     writer_module = types.ModuleType("deltalake.writer")
-    writer_module.write_deltalake = lambda path, data, **kwargs: delta_calls.append((path, data.num_rows, kwargs.copy()))
+    writer_module.write_deltalake = lambda path, data, **kwargs: delta_calls.append(
+        (path, data.num_rows, kwargs.copy())
+    )
     deltalake_module = types.ModuleType("deltalake")
-    deltalake_module.DeltaTable = lambda path, storage_options=None: (_ for _ in ()).throw(RuntimeError("table doesn't exist"))
+    deltalake_module.DeltaTable = lambda path, storage_options=None: (_ for _ in ()).throw(
+        RuntimeError("table doesn't exist")
+    )
     deltalake_module.writer = writer_module
     monkeypatch.setitem(sys.modules, "deltalake", deltalake_module)
     monkeypatch.setitem(sys.modules, "deltalake.writer", writer_module)
@@ -389,7 +450,10 @@ def test_materialize_quarantine_delta_and_iceberg_file_modes(monkeypatch, tmp_pa
     monkeypatch.setattr(mat, "_is_remote_path", lambda path: False)
     monkeypatch.setattr(mat, "_get_pyarrow_schema", lambda dt: pa.schema([pa.field("id", pa.int64())]))
 
-    delta_contract = _contract(_base_path=tmp_path, quarantine=types.SimpleNamespace(target="quarantine/delta", table=None, format="delta", write_mode="append"))
+    delta_contract = _contract(
+        _base_path=tmp_path,
+        quarantine=types.SimpleNamespace(target="quarantine/delta", table=None, format="delta", write_mode="append"),
+    )
     delta_result = q.materialize_quarantine(pl.DataFrame({"id": [1], "value": ["bad"]}), delta_contract)
     assert delta_result["format"] == "delta"
     assert delta_calls[0][1] == 1
@@ -416,7 +480,12 @@ def test_materialize_quarantine_delta_and_iceberg_file_modes(monkeypatch, tmp_pa
     monkeypatch.setitem(sys.modules, "pyiceberg", pyiceberg_root)
     monkeypatch.setitem(sys.modules, "pyiceberg.catalog", pyiceberg_catalog)
 
-    iceberg_contract = _contract(_base_path=tmp_path, quarantine=types.SimpleNamespace(target="quarantine/iceberg", table=None, format="iceberg", write_mode="append"))
+    iceberg_contract = _contract(
+        _base_path=tmp_path,
+        quarantine=types.SimpleNamespace(
+            target="quarantine/iceberg", table=None, format="iceberg", write_mode="append"
+        ),
+    )
     iceberg_result = q.materialize_quarantine(pl.DataFrame({"id": [1]}), iceberg_contract)
     assert iceberg_result["format"] == "iceberg"
     assert catalog_events[0][0] == "create"
@@ -448,7 +517,9 @@ def test_materialize_quarantine_delta_aligns_to_existing_schema(monkeypatch, tmp
         {"target": target, "arrow": arrow_data, "kwargs": kwargs}
     )
     fake_delta = types.ModuleType("deltalake")
-    fake_delta.DeltaTable = lambda path, storage_options=None: types.SimpleNamespace(path=path, storage_options=storage_options)
+    fake_delta.DeltaTable = lambda path, storage_options=None: types.SimpleNamespace(
+        path=path, storage_options=storage_options
+    )
     fake_delta.writer = fake_writer
     monkeypatch.setitem(sys.modules, "deltalake", fake_delta)
     monkeypatch.setitem(sys.modules, "deltalake.writer", fake_writer)
@@ -483,6 +554,9 @@ def test_materialize_quarantine_unsupported_format_raises(monkeypatch, tmp_path)
     monkeypatch.setattr(q, "_frame_has_columns", lambda frame: True)
     monkeypatch.setattr(q, "_resolve_path", lambda raw, base: Path(base or tmp_path) / raw)
 
-    contract = _contract(_base_path=tmp_path, quarantine=types.SimpleNamespace(target="quarantine/raw", table=None, format="jsonl", write_mode="append"))
+    contract = _contract(
+        _base_path=tmp_path,
+        quarantine=types.SimpleNamespace(target="quarantine/raw", table=None, format="jsonl", write_mode="append"),
+    )
     with pytest.raises(ValueError, match="Unsupported quarantine format"):
         q.materialize_quarantine(pl.DataFrame({"id": [1]}), contract)

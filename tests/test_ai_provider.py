@@ -15,7 +15,7 @@ class _Usage:
 
 
 def test_llm_response_as_json_strips_code_fences():
-    response = ai_provider.LLMResponse("```json\n{\"value\": 1}\n```")
+    response = ai_provider.LLMResponse('```json\n{"value": 1}\n```')
 
     assert response.as_json() == {"value": 1}
 
@@ -130,7 +130,9 @@ def test_ollama_client_chat(monkeypatch):
 def test_gemini_client_requires_api_key(monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "google", types.SimpleNamespace(genai=types.SimpleNamespace(Client=lambda api_key: None)))
+    monkeypatch.setitem(
+        sys.modules, "google", types.SimpleNamespace(genai=types.SimpleNamespace(Client=lambda api_key: None))
+    )
 
     with pytest.raises(ValueError):
         ai_provider._GeminiClient()

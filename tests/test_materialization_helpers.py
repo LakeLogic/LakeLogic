@@ -103,7 +103,10 @@ def test_resolve_target_and_to_pandas(monkeypatch, tmp_path):
     override_target, override_format = mat._resolve_target(remote_contract, override_path=tmp_path / "override")
     assert override_target == tmp_path / "override"
     assert override_format == "json"
-    assert mat._resolve_target(types.SimpleNamespace(materialization=None, effective_server=lambda: None), None) == (None, None)
+    assert mat._resolve_target(types.SimpleNamespace(materialization=None, effective_server=lambda: None), None) == (
+        None,
+        None,
+    )
 
     pandas_df = pd.DataFrame({"id": [1]})
     polars_df = pl.DataFrame({"id": [1]})
@@ -212,7 +215,9 @@ def test_write_frame_delta_duckdb_and_iceberg_branches(monkeypatch, tmp_path):
 
     delta_calls = []
     fake_deltalake = types.ModuleType("deltalake")
-    fake_deltalake.write_deltalake = lambda path, data, **kwargs: delta_calls.append((path, kwargs.copy(), data.num_rows))
+    fake_deltalake.write_deltalake = lambda path, data, **kwargs: delta_calls.append(
+        (path, kwargs.copy(), data.num_rows)
+    )
     monkeypatch.setitem(sys.modules, "deltalake", fake_deltalake)
     monkeypatch.setattr(mat, "_sanitize_arrow_nulls", lambda table: table)
     mat._write_frame(pdf, tmp_path / "frame.delta", "delta")
@@ -235,7 +240,11 @@ def test_write_frame_delta_duckdb_and_iceberg_branches(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda: FakeDuckConnection()))
     mat._write_frame(pdf, tmp_path / "frame.duckdb", "duckdb")
     assert any(isinstance(item, str) and item.startswith("ATTACH '") for item in duck_calls)
-    assert any("CREATE OR REPLACE TABLE target_db.frame AS SELECT * FROM incoming_df" in item for item in duck_calls if isinstance(item, str))
+    assert any(
+        "CREATE OR REPLACE TABLE target_db.frame AS SELECT * FROM incoming_df" in item
+        for item in duck_calls
+        if isinstance(item, str)
+    )
 
     iceberg_calls = []
 
@@ -267,7 +276,11 @@ def test_write_frame_parquet_falls_back_to_duckdb(monkeypatch, tmp_path):
         def close(self):
             commands.append(("close",))
 
-    monkeypatch.setattr(pd.DataFrame, "to_parquet", lambda self, path, index=False: (_ for _ in ()).throw(RuntimeError("missing parquet engine")))
+    monkeypatch.setattr(
+        pd.DataFrame,
+        "to_parquet",
+        lambda self, path, index=False: (_ for _ in ()).throw(RuntimeError("missing parquet engine")),
+    )
     monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda: FakeConnection()))
 
     mat._write_frame(pdf, tmp_path / "fallback.parquet", "parquet")
@@ -316,14 +329,22 @@ def test_materialize_dataframe_dispatch_and_guard_branches(monkeypatch, tmp_path
     assert any("target path or format could not be resolved" in message for message in warning_messages)
 
     fallback_contract = types.SimpleNamespace(
-        materialization=types.SimpleNamespace(strategy="append", partition_by=[], scd2=None, location="abfss://lake/orders"),
+        materialization=types.SimpleNamespace(
+            strategy="append", partition_by=[], scd2=None, location="abfss://lake/orders"
+        ),
         primary_key=[],
         effective_server=lambda: None,
         metadata={},
     )
-    monkeypatch.setattr(mat, "_resolve_target", lambda contract, override_path=None: (mat.URIPath("table:catalog.schema.orders"), "parquet"))
+    monkeypatch.setattr(
+        mat,
+        "_resolve_target",
+        lambda contract, override_path=None: (mat.URIPath("table:catalog.schema.orders"), "parquet"),
+    )
     monkeypatch.setattr(mat, "_frame_has_columns", lambda frame: False)
-    empty_write = mat.materialize_dataframe(pl.DataFrame(schema={"id": pl.Int64}), fallback_contract, engine_name="polars")
+    empty_write = mat.materialize_dataframe(
+        pl.DataFrame(schema={"id": pl.Int64}), fallback_contract, engine_name="polars"
+    )
     assert empty_write == {
         "target": "abfss://lake/orders/data.parquet",
         "rows_written": 0,
@@ -347,12 +368,22 @@ def test_materialize_dataframe_dispatches_to_partition_and_spark_paths(monkeypat
         metadata={},
     )
     monkeypatch.setattr(mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "events", "parquet"))
-    monkeypatch.setattr(mat, "_partition_aware_merge", lambda *args, **kwargs: {"target": "partitioned", "rows_written": 3, "format": "parquet"})
+    monkeypatch.setattr(
+        mat,
+        "_partition_aware_merge",
+        lambda *args, **kwargs: {"target": "partitioned", "rows_written": 3, "format": "parquet"},
+    )
     partitioned = mat.materialize_dataframe(pl.DataFrame({"id": [1], "event_date": ["2024-01-01"]}), partition_contract)
     assert partitioned == {"target": "partitioned", "rows_written": 3, "format": "parquet"}
 
     spark_calls = []
-    monkeypatch.setattr(mat, "_materialize_spark_dataframe", lambda *args, **kwargs: spark_calls.append((args, kwargs)) or {"target": "spark", "rows_written": 1, "format": "delta"})
+    monkeypatch.setattr(
+        mat,
+        "_materialize_spark_dataframe",
+        lambda *args, **kwargs: (
+            spark_calls.append((args, kwargs)) or {"target": "spark", "rows_written": 1, "format": "delta"}
+        ),
+    )
     spark_contract = types.SimpleNamespace(
         materialization=types.SimpleNamespace(strategy="append", partition_by=[]),
         primary_key=[],
@@ -394,7 +425,9 @@ def test_materialize_dataframe_handles_no_pandas_and_native_polars_paths(monkeyp
     monkeypatch.setattr(mat, "_is_polars_frame", lambda frame: True)
     monkeypatch.setattr(mat, "_write_frame", lambda frame, path, fmt: None)
     monkeypatch.setattr(mat, "_row_count", lambda frame: None)
-    monkeypatch.setattr(mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "orders_native", "csv"))
+    monkeypatch.setattr(
+        mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "orders_native", "csv")
+    )
     collected = types.SimpleNamespace(height=2)
     lazy_df = types.SimpleNamespace(collect=lambda: collected)
     native_contract = types.SimpleNamespace(
@@ -404,7 +437,11 @@ def test_materialize_dataframe_handles_no_pandas_and_native_polars_paths(monkeyp
         metadata={},
     )
     native = mat.materialize_dataframe(lazy_df, native_contract, output_format="parquet")
-    assert native == {"target": str(tmp_path / "orders_native" / "data.parquet"), "rows_written": 2, "format": "parquet"}
+    assert native == {
+        "target": str(tmp_path / "orders_native" / "data.parquet"),
+        "rows_written": 2,
+        "format": "parquet",
+    }
 
 
 def test_materialize_spark_dataframe_merge_scd2_and_table_writes(monkeypatch, tmp_path):
@@ -452,11 +489,33 @@ def test_materialize_spark_dataframe_merge_scd2_and_table_writes(monkeypatch, tm
     save_table_calls = []
     merge_calls = []
     scd2_calls = []
-    monkeypatch.setattr(mat, "_spark_apply_table_metadata", lambda spark, table_name, contract: metadata_calls.append(table_name))
-    monkeypatch.setattr(mat, "_spark_update_incremental_version", lambda spark, table_name, version: version_calls.append((table_name, version)))
-    monkeypatch.setattr(mat, "_spark_save_as_table", lambda writer, table_name, mode, location=None: save_table_calls.append((table_name, mode, location)))
-    monkeypatch.setattr(mat, "_spark_merge_dataframe", lambda *args, **kwargs: merge_calls.append(kwargs) or {"target": str(args[2]), "rows_written": 2, "format": args[4]})
-    monkeypatch.setattr(mat, "_spark_scd2_dataframe", lambda *args, **kwargs: scd2_calls.append(kwargs) or {"target": str(args[2]), "rows_written": 3, "format": args[5]})
+    monkeypatch.setattr(
+        mat, "_spark_apply_table_metadata", lambda spark, table_name, contract: metadata_calls.append(table_name)
+    )
+    monkeypatch.setattr(
+        mat,
+        "_spark_update_incremental_version",
+        lambda spark, table_name, version: version_calls.append((table_name, version)),
+    )
+    monkeypatch.setattr(
+        mat,
+        "_spark_save_as_table",
+        lambda writer, table_name, mode, location=None: save_table_calls.append((table_name, mode, location)),
+    )
+    monkeypatch.setattr(
+        mat,
+        "_spark_merge_dataframe",
+        lambda *args, **kwargs: (
+            merge_calls.append(kwargs) or {"target": str(args[2]), "rows_written": 2, "format": args[4]}
+        ),
+    )
+    monkeypatch.setattr(
+        mat,
+        "_spark_scd2_dataframe",
+        lambda *args, **kwargs: (
+            scd2_calls.append(kwargs) or {"target": str(args[2]), "rows_written": 3, "format": args[5]}
+        ),
+    )
 
     def _contract(strategy, **materialization_overrides):
         materialization = {
@@ -479,7 +538,9 @@ def test_materialize_spark_dataframe_merge_scd2_and_table_writes(monkeypatch, tm
             effective_server=lambda: types.SimpleNamespace(schema_policy=types.SimpleNamespace(evolution="merge")),
         )
 
-    merge_df = types.SimpleNamespace(sparkSession=FakeSpark(), write=FakeWriter(), columns=["id", "event_date"], count=lambda: 2)
+    merge_df = types.SimpleNamespace(
+        sparkSession=FakeSpark(), write=FakeWriter(), columns=["id", "event_date"], count=lambda: 2
+    )
     merge_result = mat._materialize_spark_dataframe(
         merge_df,
         _contract("merge"),
@@ -492,7 +553,9 @@ def test_materialize_spark_dataframe_merge_scd2_and_table_writes(monkeypatch, tm
     assert metadata_calls[0] == "catalog.schema.orders"
     assert version_calls[0] == ("catalog.schema.orders", 7)
 
-    scd2_df = types.SimpleNamespace(sparkSession=FakeSpark(), write=FakeWriter(), columns=["id", "event_date"], count=lambda: 3)
+    scd2_df = types.SimpleNamespace(
+        sparkSession=FakeSpark(), write=FakeWriter(), columns=["id", "event_date"], count=lambda: 3
+    )
     scd2_result = mat._materialize_spark_dataframe(
         scd2_df,
         _contract("scd2"),
@@ -505,7 +568,9 @@ def test_materialize_spark_dataframe_merge_scd2_and_table_writes(monkeypatch, tm
     assert metadata_calls[1] == "catalog.schema.dimension_orders"
     assert version_calls[1] == ("catalog.schema.dimension_orders", 9)
 
-    append_df = types.SimpleNamespace(sparkSession=FakeSpark(), write=FakeWriter(), columns=["id", "event_date"], count=lambda: 5)
+    append_df = types.SimpleNamespace(
+        sparkSession=FakeSpark(), write=FakeWriter(), columns=["id", "event_date"], count=lambda: 5
+    )
     append_result = mat._materialize_spark_dataframe(
         append_df,
         _contract("append", location=None),
@@ -531,7 +596,9 @@ def test_materialize_spark_dataframe_merge_scd2_and_table_writes(monkeypatch, tm
 
 
 def test_materialize_spark_dataframe_requires_primary_key_for_merge_and_scd2():
-    spark_df = types.SimpleNamespace(sparkSession=object(), write=types.SimpleNamespace(format=lambda fmt: None), columns=[], count=lambda: 0)
+    spark_df = types.SimpleNamespace(
+        sparkSession=object(), write=types.SimpleNamespace(format=lambda fmt: None), columns=[], count=lambda: 0
+    )
     merge_contract = types.SimpleNamespace(
         materialization=types.SimpleNamespace(strategy="merge", partition_by=[], scd2=None, location=None),
         primary_key=[],
@@ -565,18 +632,49 @@ def test_partition_aware_merge_non_delta_merge_and_scd2(monkeypatch, tmp_path):
     scd2_calls = []
     inject_calls = []
     write_calls = []
-    monkeypatch.setattr(mat, "_merge_frames", lambda existing, group, primary_key, **kwargs: merge_calls.append((existing.copy(), group.copy(), kwargs)) or group.assign(merged=True))
-    monkeypatch.setattr(mat, "_scd2_frames", lambda existing, group, primary_key, scd2_cfg: scd2_calls.append((existing.copy(), group.copy(), scd2_cfg.copy())) or group.assign(_sk=range(1, len(group) + 1), effective_from="2024-01-01", is_current=True))
-    monkeypatch.setattr(mat, "_inject_unknown_member_pandas", lambda frame, primary_key, scd2_cfg, unknown_cfg: inject_calls.append((list(primary_key), unknown_cfg.copy())) or frame.assign(unknown=False))
-    monkeypatch.setattr(mat, "_write_frame", lambda frame, path, fmt: write_calls.append((frame.copy(), str(path), fmt)))
-    monkeypatch.setattr(mat, "_read_frame", lambda path, fmt: pd.DataFrame({"id": [99], "event_date": ["2024-01-01"], "status": ["old"]}))
+    monkeypatch.setattr(
+        mat,
+        "_merge_frames",
+        lambda existing, group, primary_key, **kwargs: (
+            merge_calls.append((existing.copy(), group.copy(), kwargs)) or group.assign(merged=True)
+        ),
+    )
+    monkeypatch.setattr(
+        mat,
+        "_scd2_frames",
+        lambda existing, group, primary_key, scd2_cfg: (
+            scd2_calls.append((existing.copy(), group.copy(), scd2_cfg.copy()))
+            or group.assign(_sk=range(1, len(group) + 1), effective_from="2024-01-01", is_current=True)
+        ),
+    )
+    monkeypatch.setattr(
+        mat,
+        "_inject_unknown_member_pandas",
+        lambda frame, primary_key, scd2_cfg, unknown_cfg: (
+            inject_calls.append((list(primary_key), unknown_cfg.copy())) or frame.assign(unknown=False)
+        ),
+    )
+    monkeypatch.setattr(
+        mat, "_write_frame", lambda frame, path, fmt: write_calls.append((frame.copy(), str(path), fmt))
+    )
+    monkeypatch.setattr(
+        mat,
+        "_read_frame",
+        lambda path, fmt: pd.DataFrame({"id": [99], "event_date": ["2024-01-01"], "status": ["old"]}),
+    )
 
     contract = types.SimpleNamespace(
         source=types.SimpleNamespace(cdc_op_field="op", cdc_delete_values=["D"], cdc_timestamp_field="event_ts"),
         effective_server=lambda: None,
         metadata={},
     )
-    mat_cfg = types.SimpleNamespace(soft_delete_column="is_deleted", soft_delete_value=True, soft_delete_time_column="deleted_at", soft_delete_reason_column="reason", merge_dedup_guard=True)
+    mat_cfg = types.SimpleNamespace(
+        soft_delete_column="is_deleted",
+        soft_delete_value=True,
+        soft_delete_time_column="deleted_at",
+        soft_delete_reason_column="reason",
+        merge_dedup_guard=True,
+    )
 
     existing_path = tmp_path / "merge" / "event_date=2024-01-01" / "data.parquet"
     existing_path.parent.mkdir(parents=True, exist_ok=True)
@@ -606,7 +704,13 @@ def test_partition_aware_merge_non_delta_merge_and_scd2(monkeypatch, tmp_path):
         "scd2",
         ["event_date"],
         ["id"],
-        types.SimpleNamespace(soft_delete_column=None, soft_delete_value=True, soft_delete_time_column=None, soft_delete_reason_column=None, merge_dedup_guard=False),
+        types.SimpleNamespace(
+            soft_delete_column=None,
+            soft_delete_value=True,
+            soft_delete_time_column=None,
+            soft_delete_reason_column=None,
+            merge_dedup_guard=False,
+        ),
         {"unknown_member": {"enabled": True}},
     )
     assert scd2_result == {"target": str(tmp_path / "scd2"), "rows_written": 2, "format": "parquet"}
@@ -628,7 +732,13 @@ def test_partition_aware_merge_delta_first_write_and_scd2_overwrite(monkeypatch,
     monkeypatch.setattr(mat, "_maybe_compact_delta", lambda path, contract: None)
 
     safe_writes = []
-    monkeypatch.setattr(mat, "_safe_write_deltalake", lambda path, data, **kwargs: safe_writes.append((path, kwargs.copy(), data.num_rows if hasattr(data, "num_rows") else None)))
+    monkeypatch.setattr(
+        mat,
+        "_safe_write_deltalake",
+        lambda path, data, **kwargs: safe_writes.append(
+            (path, kwargs.copy(), data.num_rows if hasattr(data, "num_rows") else None)
+        ),
+    )
 
     class FakeMergeBuilder:
         def __init__(self, calls):
@@ -663,20 +773,53 @@ def test_partition_aware_merge_delta_first_write_and_scd2_overwrite(monkeypatch,
     fake_deltalake.write_deltalake = lambda *args, **kwargs: None
     monkeypatch.setitem(sys.modules, "deltalake", fake_deltalake)
 
-
     merge_calls = []
     scd2_calls = []
-    monkeypatch.setattr(mat, "_merge_frames", lambda existing, group, primary_key, **kwargs: merge_calls.append((existing.copy(), group.copy())) or group)
-    monkeypatch.setattr(mat, "_seed_soft_delete_columns_pandas", lambda group, *args, **kwargs: group.assign(is_deleted=False))
-    monkeypatch.setattr(mat, "_scd2_frames", lambda existing, group, primary_key, scd2_cfg: scd2_calls.append((existing.copy(), group.copy())) or pd.DataFrame({"_sk": [1], "id": [group.iloc[0]["id"]], "event_date": [group.iloc[0]["event_date"]], "status": [group.iloc[0]["status"]], "effective_from": ["2024-01-01"], "effective_to": [None], "is_current": [True], "_version": [1]}))
-    monkeypatch.setattr(mat, "_inject_unknown_member_pandas", lambda frame, primary_key, scd2_cfg, unknown_cfg: frame.assign(_lakelogic_source="src"))
+    monkeypatch.setattr(
+        mat,
+        "_merge_frames",
+        lambda existing, group, primary_key, **kwargs: merge_calls.append((existing.copy(), group.copy())) or group,
+    )
+    monkeypatch.setattr(
+        mat, "_seed_soft_delete_columns_pandas", lambda group, *args, **kwargs: group.assign(is_deleted=False)
+    )
+    monkeypatch.setattr(
+        mat,
+        "_scd2_frames",
+        lambda existing, group, primary_key, scd2_cfg: (
+            scd2_calls.append((existing.copy(), group.copy()))
+            or pd.DataFrame(
+                {
+                    "_sk": [1],
+                    "id": [group.iloc[0]["id"]],
+                    "event_date": [group.iloc[0]["event_date"]],
+                    "status": [group.iloc[0]["status"]],
+                    "effective_from": ["2024-01-01"],
+                    "effective_to": [None],
+                    "is_current": [True],
+                    "_version": [1],
+                }
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        mat,
+        "_inject_unknown_member_pandas",
+        lambda frame, primary_key, scd2_cfg, unknown_cfg: frame.assign(_lakelogic_source="src"),
+    )
 
     contract = types.SimpleNamespace(
         source=types.SimpleNamespace(cdc_op_field="op", cdc_delete_values=["D"], cdc_timestamp_field="event_ts"),
         effective_server=lambda: types.SimpleNamespace(schema_policy=types.SimpleNamespace(evolution="merge")),
         metadata={},
     )
-    mat_cfg = types.SimpleNamespace(soft_delete_column="is_deleted", soft_delete_value=True, soft_delete_time_column="deleted_at", soft_delete_reason_column="reason", merge_dedup_guard=False)
+    mat_cfg = types.SimpleNamespace(
+        soft_delete_column="is_deleted",
+        soft_delete_value=True,
+        soft_delete_time_column="deleted_at",
+        soft_delete_reason_column="reason",
+        merge_dedup_guard=False,
+    )
 
     result_first = mat._partition_aware_merge(
         pdf,
@@ -704,7 +847,14 @@ def test_partition_aware_merge_delta_first_write_and_scd2_overwrite(monkeypatch,
         ["event_date"],
         ["id"],
         mat_cfg,
-        {"unknown_member": {"enabled": True}, "surrogate_key": "_sk", "effective_from_field": "effective_from", "effective_to_field": "effective_to", "current_flag_field": "is_current", "version_column": "_version"},
+        {
+            "unknown_member": {"enabled": True},
+            "surrogate_key": "_sk",
+            "effective_from_field": "effective_from",
+            "effective_to_field": "effective_to",
+            "current_flag_field": "is_current",
+            "version_column": "_version",
+        },
     )
     assert result_scd2 == {"target": str(tmp_path / "delta-scd2"), "rows_written": 2, "format": "delta"}
     assert len(scd2_calls) == 2
@@ -722,7 +872,13 @@ def test_partition_aware_merge_guards(monkeypatch, tmp_path):
         "merge",
         ["event_date"],
         ["id"],
-        types.SimpleNamespace(soft_delete_column=None, soft_delete_value=True, soft_delete_time_column=None, soft_delete_reason_column=None, merge_dedup_guard=False),
+        types.SimpleNamespace(
+            soft_delete_column=None,
+            soft_delete_value=True,
+            soft_delete_time_column=None,
+            soft_delete_reason_column=None,
+            merge_dedup_guard=False,
+        ),
         {},
     )
     assert empty_result == {"target": str(tmp_path / "empty"), "rows_written": 0, "format": "parquet"}
@@ -737,7 +893,13 @@ def test_partition_aware_merge_guards(monkeypatch, tmp_path):
             "merge",
             ["event_date"],
             [],
-            types.SimpleNamespace(soft_delete_column=None, soft_delete_value=True, soft_delete_time_column=None, soft_delete_reason_column=None, merge_dedup_guard=False),
+            types.SimpleNamespace(
+                soft_delete_column=None,
+                soft_delete_value=True,
+                soft_delete_time_column=None,
+                soft_delete_reason_column=None,
+                merge_dedup_guard=False,
+            ),
             {},
         )
 
@@ -747,7 +909,11 @@ def test_materialize_dataframe_delta_first_write_merge_and_scd2(monkeypatch, tmp
 
     safe_writes = []
     monkeypatch.setattr(mat, "_sanitize_arrow_nulls", lambda table: table)
-    monkeypatch.setattr(mat, "_safe_write_deltalake", lambda path, data, **kwargs: safe_writes.append((path, kwargs.copy(), data.num_rows)))
+    monkeypatch.setattr(
+        mat,
+        "_safe_write_deltalake",
+        lambda path, data, **kwargs: safe_writes.append((path, kwargs.copy(), data.num_rows)),
+    )
     monkeypatch.setattr(mat, "_is_remote_path", lambda path: False)
     monkeypatch.setattr(mat, "_pandas_available", lambda: True)
     monkeypatch.setattr(mat, "_maybe_compact_delta", lambda path, contract: None)
@@ -774,16 +940,45 @@ def test_materialize_dataframe_delta_first_write_merge_and_scd2(monkeypatch, tmp
         effective_server=lambda: types.SimpleNamespace(cast_to_string=True),
         metadata={},
     )
-    monkeypatch.setattr(mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "delta-merge", "delta"))
+    monkeypatch.setattr(
+        mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "delta-merge", "delta")
+    )
     merge_result = mat.materialize_dataframe(pl.DataFrame({"id": [1], "status": ["new"]}), merge_contract)
     assert merge_result == {"target": str(tmp_path / "delta-merge"), "rows_written": 1, "format": "delta"}
     assert safe_writes[0][1]["mode"] == "overwrite"
 
     scd2_calls = []
-    monkeypatch.setattr(mat, "_scd2_frames", lambda existing, incoming, primary_key, scd2_cfg: scd2_calls.append((existing.copy(), incoming.copy(), scd2_cfg.copy())) or pd.DataFrame({"id": [1], "status": ["new"], "_sk": [1], "effective_from": ["2024-01-01"], "effective_to": [None], "is_current": [True], "_version": [1]}))
-    monkeypatch.setattr(mat, "_inject_unknown_member_pandas", lambda frame, primary_key, scd2_cfg, unknown_cfg: frame.assign(_lakelogic_source="src"))
+    monkeypatch.setattr(
+        mat,
+        "_scd2_frames",
+        lambda existing, incoming, primary_key, scd2_cfg: (
+            scd2_calls.append((existing.copy(), incoming.copy(), scd2_cfg.copy()))
+            or pd.DataFrame(
+                {
+                    "id": [1],
+                    "status": ["new"],
+                    "_sk": [1],
+                    "effective_from": ["2024-01-01"],
+                    "effective_to": [None],
+                    "is_current": [True],
+                    "_version": [1],
+                }
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        mat,
+        "_inject_unknown_member_pandas",
+        lambda frame, primary_key, scd2_cfg, unknown_cfg: frame.assign(_lakelogic_source="src"),
+    )
     scd2_contract = types.SimpleNamespace(
-        materialization=types.SimpleNamespace(strategy="scd2", partition_by=[], scd2={"unknown_member": {"enabled": True}}, track_columns=None, merge_dedup_guard=True),
+        materialization=types.SimpleNamespace(
+            strategy="scd2",
+            partition_by=[],
+            scd2={"unknown_member": {"enabled": True}},
+            track_columns=None,
+            merge_dedup_guard=True,
+        ),
         primary_key=["id"],
         effective_server=lambda: types.SimpleNamespace(cast_to_string=True),
         metadata={},
@@ -810,7 +1005,11 @@ def test_materialize_dataframe_delta_existing_table_merge_and_append(monkeypatch
 
     merge_steps = []
     safe_writes = []
-    monkeypatch.setattr(mat, "_safe_write_deltalake", lambda path, data, **kwargs: safe_writes.append((path, kwargs.copy(), data.num_rows)))
+    monkeypatch.setattr(
+        mat,
+        "_safe_write_deltalake",
+        lambda path, data, **kwargs: safe_writes.append((path, kwargs.copy(), data.num_rows)),
+    )
 
     class FakeMergeBuilder:
         def when_matched_update_all(self):
@@ -846,6 +1045,7 @@ def test_materialize_dataframe_delta_existing_table_merge_and_append(monkeypatch
 
         def to_pyarrow_table(self):
             import pyarrow as pa
+
             return pa.table({"id": [1, 2, 3]})
 
     fake_deltalake = types.ModuleType("deltalake")
@@ -854,15 +1054,20 @@ def test_materialize_dataframe_delta_existing_table_merge_and_append(monkeypatch
     monkeypatch.setitem(sys.modules, "deltalake", fake_deltalake)
 
     import pyarrow.compute as pc
+
     monkeypatch.setattr(pc, "sum", lambda values: types.SimpleNamespace(as_py=lambda: 2))
 
     merge_contract = types.SimpleNamespace(
-        materialization=types.SimpleNamespace(strategy="merge", partition_by=[], scd2=None, track_columns=None, merge_dedup_guard=False),
+        materialization=types.SimpleNamespace(
+            strategy="merge", partition_by=[], scd2=None, track_columns=None, merge_dedup_guard=False
+        ),
         primary_key=["id"],
         effective_server=lambda: types.SimpleNamespace(cast_to_string=True),
         metadata={},
     )
-    monkeypatch.setattr(mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "delta-existing", "delta"))
+    monkeypatch.setattr(
+        mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "delta-existing", "delta")
+    )
     delta_log = tmp_path / "delta-existing" / "_delta_log"
     delta_log.mkdir(parents=True, exist_ok=True)
     merge_result = mat.materialize_dataframe(pl.DataFrame({"id": [1], "status": ["new"]}), merge_contract)
@@ -876,8 +1081,15 @@ def test_materialize_dataframe_delta_existing_table_merge_and_append(monkeypatch
         effective_server=lambda: types.SimpleNamespace(cast_to_string=True),
         metadata={},
     )
-    monkeypatch.setattr(mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "delta-append", "delta"))
-    append_result = mat.materialize_dataframe(pl.DataFrame({"id": [1], "status": ["new"]}), append_contract, target_path=tmp_path / "delta-append", output_format="delta")
+    monkeypatch.setattr(
+        mat, "_resolve_target", lambda contract, override_path=None: (tmp_path / "delta-append", "delta")
+    )
+    append_result = mat.materialize_dataframe(
+        pl.DataFrame({"id": [1], "status": ["new"]}),
+        append_contract,
+        target_path=tmp_path / "delta-append",
+        output_format="delta",
+    )
     assert append_result == {"target": str(tmp_path / "delta-append"), "rows_written": 1, "format": "delta"}
     assert safe_writes[0][1]["mode"] == "append"
 
@@ -887,7 +1099,9 @@ def test_spark_save_as_table_and_apply_metadata(monkeypatch):
     saved = []
 
     class FakeSparkSession:
-        builder = types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(sql=lambda stmt: sql_calls.append(stmt)))
+        builder = types.SimpleNamespace(
+            getOrCreate=lambda: types.SimpleNamespace(sql=lambda stmt: sql_calls.append(stmt))
+        )
 
     fake_sql_module = types.ModuleType("pyspark.sql")
     fake_sql_module.SparkSession = FakeSparkSession
@@ -916,7 +1130,12 @@ def test_spark_save_as_table_and_apply_metadata(monkeypatch):
 
     spark = types.SimpleNamespace(sql=lambda stmt: sql_calls.append(stmt))
     contract = types.SimpleNamespace(
-        model=types.SimpleNamespace(fields=[types.SimpleNamespace(name="order_id", description="Order identifier"), types.SimpleNamespace(name="note", description="Owner's note")]),
+        model=types.SimpleNamespace(
+            fields=[
+                types.SimpleNamespace(name="order_id", description="Order identifier"),
+                types.SimpleNamespace(name="note", description="Owner's note"),
+            ]
+        ),
         materialization=types.SimpleNamespace(table_properties={"quality": "gold", "owner": "analytics"}),
     )
     mat._spark_apply_table_metadata(spark, "catalog.schema.orders", contract)
@@ -1405,20 +1624,24 @@ def test_scd2_frames_initial_load_versions_duplicate_keys(monkeypatch):
         }
     )
 
-    result = mat._scd2_frames(
-        existing,
-        incoming,
-        primary_key=["customer_id"],
-        scd2_cfg={
-            "effective_from_field": "effective_from",
-            "effective_to_field": "effective_to",
-            "current_flag_field": "is_current",
-            "change_date_field": "updated_at",
-            "change_reason_column": "_change_reason",
-            "version_column": "_version",
-            "surrogate_key": "_sk",
-        },
-    ).sort_values(["customer_id", "_version"]).reset_index(drop=True)
+    result = (
+        mat._scd2_frames(
+            existing,
+            incoming,
+            primary_key=["customer_id"],
+            scd2_cfg={
+                "effective_from_field": "effective_from",
+                "effective_to_field": "effective_to",
+                "current_flag_field": "is_current",
+                "change_date_field": "updated_at",
+                "change_reason_column": "_change_reason",
+                "version_column": "_version",
+                "surrogate_key": "_sk",
+            },
+        )
+        .sort_values(["customer_id", "_version"])
+        .reset_index(drop=True)
+    )
 
     assert result["customer_id"].tolist() == [1, 1, 2]
     assert result["_version"].tolist() == [1, 2, 1]
@@ -1451,21 +1674,25 @@ def test_scd2_frames_tracks_changes_and_skips_unchanged_rows():
         }
     )
 
-    result = mat._scd2_frames(
-        existing,
-        incoming,
-        primary_key=["customer_id"],
-        scd2_cfg={
-            "effective_from_field": "effective_from",
-            "effective_to_field": "effective_to",
-            "current_flag_field": "is_current",
-            "change_date_field": "updated_at",
-            "track_columns": ["name", "city"],
-            "change_reason_column": "_change_reason",
-            "version_column": "_version",
-            "surrogate_key": "_sk",
-        },
-    ).sort_values(["customer_id", "effective_from"]).reset_index(drop=True)
+    result = (
+        mat._scd2_frames(
+            existing,
+            incoming,
+            primary_key=["customer_id"],
+            scd2_cfg={
+                "effective_from_field": "effective_from",
+                "effective_to_field": "effective_to",
+                "current_flag_field": "is_current",
+                "change_date_field": "updated_at",
+                "track_columns": ["name", "city"],
+                "change_reason_column": "_change_reason",
+                "version_column": "_version",
+                "surrogate_key": "_sk",
+            },
+        )
+        .sort_values(["customer_id", "effective_from"])
+        .reset_index(drop=True)
+    )
 
     id1 = result[result["customer_id"] == 1].reset_index(drop=True)
     id2 = result[result["customer_id"] == 2].reset_index(drop=True)
