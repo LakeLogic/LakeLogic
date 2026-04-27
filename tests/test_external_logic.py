@@ -76,8 +76,7 @@ def test_run_python_logic_main_paths(monkeypatch, tmp_path):
     path = tmp_path / "logic.py"
     _write_script(
         path,
-        "def run(good_df, contract, engine, suffix='!'):\n"
-        "    return {'value': f'{good_df}-{engine}{suffix}'}\n",
+        "def run(good_df, contract, engine, suffix='!'):\n    return {'value': f'{good_df}-{engine}{suffix}'}\n",
     )
     contract = _contract(_logic(args={"suffix": "?"}), base_path=tmp_path)
 
@@ -95,8 +94,7 @@ def test_run_python_logic_main_paths(monkeypatch, tmp_path):
 
     none_script = _write_script(
         tmp_path / "none_logic.py",
-        "def run(good_df, contract, engine, add_trace=None, trace_step=None):\n"
-        "    return None\n",
+        "def run(good_df, contract, engine, add_trace=None, trace_step=None):\n    return None\n",
     )
     none_logic = _logic(path=str(none_script), handles_output=True)
     none_result = ext._run_python_logic(none_script, none_logic, "df", contract, "spark", "run-4", None, None)
@@ -116,16 +114,35 @@ def test_run_python_logic_main_paths(monkeypatch, tmp_path):
 def test_run_python_logic_errors_and_restricted_imports(monkeypatch, tmp_path):
     contract = _contract(_logic(), base_path=tmp_path)
     with pytest.raises(FileNotFoundError):
-        ext._run_python_logic(tmp_path / "missing.py", contract.external_logic, "df", contract, "spark", "run", None, None)
+        ext._run_python_logic(
+            tmp_path / "missing.py", contract.external_logic, "df", contract, "spark", "run", None, None
+        )
 
     real_thread = ext.threading.Thread
-    monkeypatch.setattr(ext.threading, "Thread", lambda *args, **kwargs: types.SimpleNamespace(start=lambda: None, join=lambda timeout=None: None, is_alive=lambda: True))
+    monkeypatch.setattr(
+        ext.threading,
+        "Thread",
+        lambda *args, **kwargs: types.SimpleNamespace(
+            start=lambda: None, join=lambda timeout=None: None, is_alive=lambda: True
+        ),
+    )
     timeout_script = _write_script(tmp_path / "timeout.py", "def run(good_df, contract, engine):\n    return good_df\n")
     with pytest.raises(TimeoutError):
-        ext._run_python_logic(timeout_script, _logic(path=str(timeout_script), timeout_seconds=1), "df", contract, "spark", "run", None, None)
+        ext._run_python_logic(
+            timeout_script,
+            _logic(path=str(timeout_script), timeout_seconds=1),
+            "df",
+            contract,
+            "spark",
+            "run",
+            None,
+            None,
+        )
 
     monkeypatch.setattr(ext.threading, "Thread", real_thread)
-    blocked = _write_script(tmp_path / "blocked.py", "import subprocess\n\ndef run(good_df, contract, engine):\n    return good_df\n")
+    blocked = _write_script(
+        tmp_path / "blocked.py", "import subprocess\n\ndef run(good_df, contract, engine):\n    return good_df\n"
+    )
     with pytest.raises(ImportError):
         ext._run_python_logic(blocked, _logic(path=str(blocked)), "df", contract, "spark", "run", None, None)
 
@@ -153,8 +170,7 @@ def test_run_python_logic_errors_and_restricted_imports(monkeypatch, tmp_path):
 
     exploding = _write_script(
         tmp_path / "explode.py",
-        "def run(good_df, contract, engine, add_trace=None, trace_step=None):\n"
-        "    raise RuntimeError('boom')\n",
+        "def run(good_df, contract, engine, add_trace=None, trace_step=None):\n    raise RuntimeError('boom')\n",
     )
     with pytest.raises(RuntimeError, match="boom"):
         ext._run_python_logic(exploding, _logic(path=str(exploding)), "df", contract, "spark", "run", None, None)
@@ -192,7 +208,9 @@ def test_run_python_logic_with_none_args_and_loader_missing(monkeypatch, tmp_pat
 
     monkeypatch.setattr(importlib.util, "spec_from_file_location", original)
     monkeypatch.setattr(ext, "_load_output_frame", lambda path, fmt: {"loaded": str(path), "fmt": fmt})
-    final_path = _write_script(tmp_path / "path_logic.py", "def run(good_df, contract, engine):\n    return {'ok': True}\n")
+    final_path = _write_script(
+        tmp_path / "path_logic.py", "def run(good_df, contract, engine):\n    return {'ok': True}\n"
+    )
     contract = _contract(_logic(path=str(final_path), args=None), base_path=tmp_path)
     assert ext._run_python_logic(final_path, contract.external_logic, "df", contract, "spark", "run", None, None) == (
         {"ok": True},
@@ -248,7 +266,9 @@ def test_run_notebook_logic_and_output_loading(monkeypatch, tmp_path):
     assert executed["executed"] is True
 
     no_output_logic = _logic(type="notebook", path=str(notebook_path), output_path=None, handles_output=None)
-    no_output = ext._run_notebook_logic(notebook_path, no_output_logic, [{"id": 1}], contract, "spark", "run-10", "source.csv")
+    no_output = ext._run_notebook_logic(
+        notebook_path, no_output_logic, [{"id": 1}], contract, "spark", "run-10", "source.csv"
+    )
     assert no_output == ([{"id": 1}], True)
 
     class WithToPandas:
@@ -274,7 +294,9 @@ def test_run_notebook_logic_and_output_loading(monkeypatch, tmp_path):
 
 def test_run_notebook_logic_logs_input_write_failures(monkeypatch, tmp_path):
     notebook_path = _write_script(tmp_path / "logic.ipynb", "{}")
-    contract = _contract(_logic(type="notebook", path=str(notebook_path), output_path=None, handles_output=None), base_path=tmp_path)
+    contract = _contract(
+        _logic(type="notebook", path=str(notebook_path), output_path=None, handles_output=None), base_path=tmp_path
+    )
 
     class FakeNotebook:
         def __init__(self):
@@ -313,7 +335,9 @@ def test_run_notebook_logic_logs_input_write_failures(monkeypatch, tmp_path):
             return {"rows": [1]}
 
     failing_input = WithToPandas()
-    result = ext._run_notebook_logic(notebook_path, contract.external_logic, failing_input, contract, "spark", "run-12", None)
+    result = ext._run_notebook_logic(
+        notebook_path, contract.external_logic, failing_input, contract, "spark", "run-12", None
+    )
     assert result == (failing_input, True)
     assert any("Failed to write notebook input data" in message for message in warnings)
 

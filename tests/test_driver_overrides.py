@@ -57,9 +57,7 @@ def test_driver_apply_policy_pack_merges_defaults_and_stage(tmp_path: Path) -> N
                     "row_rules": [{"name": "positive_id", "sql": "id > 0"}],
                     "dataset_rules": [{"name": "row_count", "sql": "COUNT(*) > 0"}],
                 },
-                "service_levels": {
-                    "freshness": {"description": "Daily", "threshold": "24h", "field": "updated_at"}
-                },
+                "service_levels": {"freshness": {"description": "Daily", "threshold": "24h", "field": "updated_at"}},
             },
             sort_keys=False,
         ),
@@ -193,7 +191,9 @@ def test_driver_approval_gates_thresholds_drift_and_bypass(tmp_path: Path) -> No
 
     approval_file = tmp_path / "approval.txt"
     approval_file.write_text("approved", encoding="utf-8")
-    bypass_contract = contract.model_copy(update={"metadata": {**contract.metadata, "approval_file": str(approval_file)}})
+    bypass_contract = contract.model_copy(
+        update={"metadata": {**contract.metadata, "approval_file": str(approval_file)}}
+    )
     drv._evaluate_approvals(report, bypass_contract, "orders")
 
 

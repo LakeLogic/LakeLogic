@@ -280,13 +280,26 @@ class TestDltAdapter:
         adapter = DltAdapter(src, "test")
         monkeypatch.setitem(sys.modules, "dlt", types.SimpleNamespace())
         monkeypatch.setattr(adapter, "_resolve_credentials", lambda: {"api_key": "x"})
-        monkeypatch.setattr(adapter, "_run_verified_source", lambda credentials, previous_state=None: ("verified", credentials, previous_state))
+        monkeypatch.setattr(
+            adapter,
+            "_run_verified_source",
+            lambda credentials, previous_state=None: ("verified", credentials, previous_state),
+        )
         assert adapter.extract("state") == ("verified", {"api_key": "x"}, "state")
 
-        rest_src = SourceConfig(type="dlt", dlt=DltSourceConfig(base_url="https://api.example.com", endpoints=[DltEndpointConfig(name="users", path="users")]))
+        rest_src = SourceConfig(
+            type="dlt",
+            dlt=DltSourceConfig(
+                base_url="https://api.example.com", endpoints=[DltEndpointConfig(name="users", path="users")]
+            ),
+        )
         rest_adapter = DltAdapter(rest_src, "test")
         monkeypatch.setattr(rest_adapter, "_resolve_credentials", lambda: {"token": "x"})
-        monkeypatch.setattr(rest_adapter, "_run_rest_api", lambda credentials, previous_state=None: ("rest", credentials, previous_state))
+        monkeypatch.setattr(
+            rest_adapter,
+            "_run_rest_api",
+            lambda credentials, previous_state=None: ("rest", credentials, previous_state),
+        )
         assert rest_adapter.extract("state") == ("rest", {"token": "x"}, "state")
 
         missing_mode = DltAdapter(SourceConfig(type="dlt", dlt=DltSourceConfig(source="placeholder")), "test")
@@ -316,8 +329,14 @@ class TestDltAdapter:
 
         src = SourceConfig(type="dlt", dlt=DltSourceConfig(source="stripe", resource="charges"))
         adapter = DltAdapter(src, "test")
-        fake_module = types.SimpleNamespace(stripe=lambda **credentials: types.SimpleNamespace(with_resources=lambda resource: ("resource", resource, credentials)))
-        monkeypatch.setattr("lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module)
+        fake_module = types.SimpleNamespace(
+            stripe=lambda **credentials: types.SimpleNamespace(
+                with_resources=lambda resource: ("resource", resource, credentials)
+            )
+        )
+        monkeypatch.setattr(
+            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module
+        )
 
         pipeline = types.SimpleNamespace(state={}, run=lambda *args, **kwargs: None)
         fake_dlt = types.ModuleType("dlt")
@@ -325,7 +344,11 @@ class TestDltAdapter:
         fake_dlt.destinations = types.SimpleNamespace(filesystem=lambda bucket_url: {"bucket_url": bucket_url})
         monkeypatch.setitem(sys.modules, "dlt", fake_dlt)
         monkeypatch.setattr(adapter, "_get_tmp_dir", lambda: tmp_path)
-        monkeypatch.setattr(adapter, "_collect_parquet_files", lambda tmp_dir, pipeline_obj: {"tmp_dir": tmp_dir, "pipeline": pipeline_obj})
+        monkeypatch.setattr(
+            adapter,
+            "_collect_parquet_files",
+            lambda tmp_dir, pipeline_obj: {"tmp_dir": tmp_dir, "pipeline": pipeline_obj},
+        )
 
         result = adapter._run_verified_source({"api_key": "x"})
         assert result == {"tmp_dir": tmp_path, "pipeline": pipeline}
@@ -338,7 +361,9 @@ class TestDltAdapter:
         setattr(fake_module, "other", lambda: None)
         setattr(fake_module, "decorated", decorated_source)
         adapter.cfg = DltSourceConfig(source="missing_source")
-        monkeypatch.setattr("lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module)
+        monkeypatch.setattr(
+            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module
+        )
         assert adapter._run_verified_source({}) == {"tmp_dir": tmp_path, "pipeline": pipeline}
 
     def test_run_verified_source_import_and_state_restore_failures(self, monkeypatch, tmp_path):
@@ -356,7 +381,9 @@ class TestDltAdapter:
 
         fake_module = types.ModuleType("stripe")
         fake_module.other = object()
-        monkeypatch.setattr("lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module)
+        monkeypatch.setattr(
+            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module
+        )
         with pytest.raises(ValueError, match="Could not find a source function"):
             adapter._run_verified_source({})
 
@@ -371,7 +398,9 @@ class TestDltAdapter:
         monkeypatch.setattr("lakelogic.adapters.dlt_adapter.logger.warning", warnings.append)
         ok_module = types.ModuleType("stripe")
         ok_module.stripe = lambda **credentials: types.SimpleNamespace()
-        monkeypatch.setattr("lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: ok_module)
+        monkeypatch.setattr(
+            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: ok_module
+        )
         adapter._run_verified_source({}, previous_state="not-json")
         assert any("Failed to restore dlt state" in message for message in warnings)
 
@@ -380,7 +409,9 @@ class TestDltAdapter:
 
         src = SourceConfig(
             type="dlt",
-            dlt=DltSourceConfig(base_url="https://api.example.com", endpoints=[DltEndpointConfig(name="users", path="users")]),
+            dlt=DltSourceConfig(
+                base_url="https://api.example.com", endpoints=[DltEndpointConfig(name="users", path="users")]
+            ),
         )
         adapter = DltAdapter(src, "test")
         pipeline = types.SimpleNamespace(state={"cursor": 1}, run=lambda *args, **kwargs: None)
@@ -389,12 +420,23 @@ class TestDltAdapter:
             destinations=types.SimpleNamespace(filesystem=lambda bucket_url: {"bucket_url": bucket_url}),
         )
         monkeypatch.setitem(sys.modules, "dlt", fake_dlt)
-        monkeypatch.setitem(sys.modules, "dlt.sources.rest_api", types.SimpleNamespace(rest_api_source=lambda config: {"config": config}))
+        monkeypatch.setitem(
+            sys.modules,
+            "dlt.sources.rest_api",
+            types.SimpleNamespace(rest_api_source=lambda config: {"config": config}),
+        )
         monkeypatch.setattr(adapter, "_get_tmp_dir", lambda: tmp_path)
-        monkeypatch.setattr(adapter, "_collect_parquet_files", lambda tmp_dir, pipeline_obj: {"tmp_dir": tmp_dir, "pipeline": pipeline_obj})
+        monkeypatch.setattr(
+            adapter,
+            "_collect_parquet_files",
+            lambda tmp_dir, pipeline_obj: {"tmp_dir": tmp_dir, "pipeline": pipeline_obj},
+        )
         result = adapter._run_rest_api({"api_key": "secret"}, previous_state=json.dumps({"saved": True}))
         assert result == {"tmp_dir": tmp_path, "pipeline": pipeline}
-        assert adapter.dlt_state_json == '{"cursor": 1, "saved": true}' or adapter.dlt_state_json == '{"saved": true, "cursor": 1}'
+        assert (
+            adapter.dlt_state_json == '{"cursor": 1, "saved": true}'
+            or adapter.dlt_state_json == '{"saved": true, "cursor": 1}'
+        )
 
         class FakePA:
             class ArrowInvalid(Exception):

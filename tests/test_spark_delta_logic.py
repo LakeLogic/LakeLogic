@@ -3,9 +3,11 @@ from unittest.mock import MagicMock
 
 # Mock pyspark before it's imported by lakelogic
 
+
 class MockSparkDataFrame(MagicMock):
     def count(self):
         return 0
+
 
 mock_pyspark = MagicMock()
 sys.modules["pyspark"] = mock_pyspark
@@ -29,8 +31,8 @@ def test_spark_delta_version_options_table():
             "type": "table",
             "path": "table:source_table",
             "load_mode": "incremental",
-            "watermark_strategy": "delta_version"
-        }
+            "watermark_strategy": "delta_version",
+        },
     )
 
     # We must mock SparkSession.builder.getOrCreate
@@ -71,6 +73,7 @@ def test_spark_delta_version_options_table():
             mock_reader.option.assert_any_call("endingVersion", 5)
             mock_reader.table.assert_called_with("source_table")
 
+
 def test_spark_delta_version_options_file():
     pytest.skip("Obsolete invalid config test")
     """Verify that delta_version strategy sets startingVersion and endingVersion for file sources."""
@@ -82,8 +85,8 @@ def test_spark_delta_version_options_file():
             "type": "landing",
             "path": "/some/path/to/delta",
             "load_mode": "incremental",
-            "watermark_strategy": "delta_version"
-        }
+            "watermark_strategy": "delta_version",
+        },
     )
 
     with patch("pyspark.sql.SparkSession") as mock_spark_session_cls:
@@ -116,5 +119,6 @@ def test_spark_delta_version_options_file():
             mock_reader.option.assert_any_call("startingVersion", 10)
             mock_reader.option.assert_any_call("endingVersion", 20)
             import os
+
             actual_path = mock_reader.load.call_args[0][0]
             assert os.path.normpath(actual_path) == os.path.normpath("/some/path/to/delta")

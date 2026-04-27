@@ -1,4 +1,5 @@
 """Tests for SLOValidator.check_row_counts() — system-level row count SLO."""
+
 from __future__ import annotations
 
 import datetime
@@ -33,16 +34,25 @@ def _make_registry(row_count_cfg: dict | None = None, contracts=None):
     if contracts is None:
         contracts = [
             RegistryContract(
-                layer="bronze", entity="events", path="dummy.yaml",
-                enabled=True, contract_dict={"info": {}},
+                layer="bronze",
+                entity="events",
+                path="dummy.yaml",
+                enabled=True,
+                contract_dict={"info": {}},
             ),
             RegistryContract(
-                layer="bronze", entity="sessions", path="dummy.yaml",
-                enabled=True, contract_dict={"info": {}},
+                layer="bronze",
+                entity="sessions",
+                path="dummy.yaml",
+                enabled=True,
+                contract_dict={"info": {}},
             ),
             RegistryContract(
-                layer="silver", entity="clean_events", path="dummy.yaml",
-                enabled=True, contract_dict={"info": {}},
+                layer="silver",
+                entity="clean_events",
+                path="dummy.yaml",
+                enabled=True,
+                contract_dict={"info": {}},
             ),
         ]
 
@@ -71,7 +81,6 @@ def _mock_spark_row(check_field_value, timestamp="2026-03-26T12:00:00"):
 
 
 class TestCheckRowCounts:
-
     def test_passes_when_above_min(self):
         """Row count of 50 with min_rows=20 should pass."""
         registry = _make_registry({"bronze": {"min_rows": 20}})
@@ -136,9 +145,7 @@ class TestCheckRowCounts:
 
     def test_excluded_entity(self):
         """Entities in exclude_tables should be skipped."""
-        registry = _make_registry({
-            "bronze": {"min_rows": 20, "exclude_tables": ["sessions"]}
-        })
+        registry = _make_registry({"bronze": {"min_rows": 20, "exclude_tables": ["sessions"]}})
         spark = MagicMock()
         spark.sql.return_value.first.return_value = _mock_spark_row(50)
 
@@ -317,7 +324,9 @@ def test_resolve_storage_opts_uses_explicit_options_and_cloud_resolver(monkeypat
     assert validator._resolve_storage_opts("abfss://container/path") == {"account_name": "demo", "enriched": True}
 
     cloud_calls = []
-    fake_cloud_module = SimpleNamespace(resolve_storage_options=lambda path: cloud_calls.append(path) or {"token": "abc"})
+    fake_cloud_module = SimpleNamespace(
+        resolve_storage_options=lambda path: cloud_calls.append(path) or {"token": "abc"}
+    )
     monkeypatch.setitem(sys.modules, "lakelogic.engines.cloud_credentials", fake_cloud_module)
     validator = SLOValidator(SimpleNamespace())
     assert validator._resolve_storage_opts("abfss://container/path") == {"token": "abc", "enriched": True}
@@ -403,9 +412,9 @@ def test_check_freshness_source_columns_pass_fail_and_skip(monkeypatch):
     monkeypatch.setattr(slo, "to_sql_table_ref", lambda path, engine: f"ref_{engine}_{path.rsplit('/', 1)[-1]}")
 
     contracts = [
-        SimpleNamespace(layer="bronze", entity="fresh_src"),    # source is fresh
-        SimpleNamespace(layer="bronze", entity="stale_src"),    # source is stale
-        SimpleNamespace(layer="bronze", entity="no_src_col"),   # no source columns found
+        SimpleNamespace(layer="bronze", entity="fresh_src"),  # source is fresh
+        SimpleNamespace(layer="bronze", entity="stale_src"),  # source is stale
+        SimpleNamespace(layer="bronze", entity="no_src_col"),  # no source columns found
     ]
 
     freshness = {
@@ -491,9 +500,14 @@ def test_check_freshness_duckdb_fallback_and_no_data(monkeypatch):
     registry = SimpleNamespace(
         domain="commerce",
         system="erp",
-        slo=SimpleNamespace(freshness={"bronze": SimpleNamespace(max_delay_minutes=30, exclude_tables=[], check_column="loaded_at")}),
+        slo=SimpleNamespace(
+            freshness={"bronze": SimpleNamespace(max_delay_minutes=30, exclude_tables=[], check_column="loaded_at")}
+        ),
         storage=SimpleNamespace(bronze_root=None, silver_root=None, gold_root=None),
-        get_active_contracts=lambda: [SimpleNamespace(layer="bronze", entity="orders"), SimpleNamespace(layer="bronze", entity="empty")],
+        get_active_contracts=lambda: [
+            SimpleNamespace(layer="bronze", entity="orders"),
+            SimpleNamespace(layer="bronze", entity="empty"),
+        ],
     )
 
     class FakeDuckResult:
@@ -544,7 +558,13 @@ def test_check_freshness_polars_uses_delta_then_parquet(monkeypatch):
     registry = SimpleNamespace(
         domain="commerce",
         system="erp",
-        slo=SimpleNamespace(freshness={"bronze": SimpleNamespace(max_delay_minutes=20, exclude_tables=[], check_column=["missing", "loaded_at"])}),
+        slo=SimpleNamespace(
+            freshness={
+                "bronze": SimpleNamespace(
+                    max_delay_minutes=20, exclude_tables=[], check_column=["missing", "loaded_at"]
+                )
+            }
+        ),
         storage=SimpleNamespace(bronze_root=None, silver_root=None, gold_root=None),
         get_active_contracts=lambda: [SimpleNamespace(layer="bronze", entity="orders")],
     )
@@ -567,8 +587,12 @@ def test_check_freshness_polars_uses_delta_then_parquet(monkeypatch):
 
     fake_polars = SimpleNamespace(
         col=lambda name: SimpleNamespace(max=lambda: name),
-        read_delta=lambda path, storage_options=None: read_calls.append(("delta", path, storage_options)) or (_ for _ in ()).throw(RuntimeError("delta failed")),
-        read_parquet=lambda path, storage_options=None: read_calls.append(("parquet", path, storage_options)) or FakeFrame(now - datetime.timedelta(minutes=4)),
+        read_delta=lambda path, storage_options=None: (
+            read_calls.append(("delta", path, storage_options)) or (_ for _ in ()).throw(RuntimeError("delta failed"))
+        ),
+        read_parquet=lambda path, storage_options=None: (
+            read_calls.append(("parquet", path, storage_options)) or FakeFrame(now - datetime.timedelta(minutes=4))
+        ),
     )
     monkeypatch.setitem(sys.modules, "polars", fake_polars)
 
@@ -602,15 +626,20 @@ def test_notify_breaches_uses_registered_targets_and_smtp_env(monkeypatch):
         notifications=[{"target": "slack://team", "on_events": ["slo_breach"]}],
         ownership={
             "contacts": [
-                {"slack": "slack://owner", "teams": "teams://owner", "webhook": "https://hook", "email": "ops@example.com"}
+                {
+                    "slack": "slack://owner",
+                    "teams": "teams://owner",
+                    "webhook": "https://hook",
+                    "email": "ops@example.com",
+                }
             ]
         },
     )
     validator = SLOValidator(registry)
 
-    validator.notify_breaches([
-        SLOCheckResult(layer="bronze", entity="orders", status="❌ STALE", passed=False, check_type="freshness")
-    ])
+    validator.notify_breaches(
+        [SLOCheckResult(layer="bronze", entity="orders", status="❌ STALE", passed=False, check_type="freshness")]
+    )
 
     assert "slack://team" in added
     assert "slack://owner" in added

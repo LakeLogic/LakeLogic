@@ -67,7 +67,9 @@ def test_processor_storage_path_and_empty_frame_helpers(monkeypatch, tmp_path):
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "secret")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "aws-key")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
-    assert processor._get_cloud_storage_options("abfss://container@acct.dfs.core.windows.net/path")["account_key"] == "key"
+    assert (
+        processor._get_cloud_storage_options("abfss://container@acct.dfs.core.windows.net/path")["account_key"] == "key"
+    )
     assert processor._get_cloud_storage_options("s3://bucket/path") == {"key": "aws-key", "secret": "aws-secret"}
 
     monkeypatch.setattr(processor, "_is_uri_path", lambda path: path.startswith("abfss://"))
@@ -133,14 +135,21 @@ def test_processor_counts_report_and_delegates(monkeypatch, tmp_path):
     fake_execution_context = types.ModuleType("lakelogic.core.execution_context")
     fake_execution_context.capture_execution_context = lambda engine_name, start_time=None: {"engine": engine_name}
     monkeypatch.setitem(sys.modules, "lakelogic.core.execution_context", fake_execution_context)
-    report = processor._build_report("Orders", counts, slos={"freshness": True}, row_rule_failures=["bad"], schema_drift={"extra": []})
+    report = processor._build_report(
+        "Orders", counts, slos={"freshness": True}, row_rule_failures=["bad"], schema_drift={"extra": []}
+    )
     assert report["dataset"] == "orders"
     assert report["execution_context"] == {"engine": "polars"}
     assert report["counts"]["good"] == 2
 
     fake_lineage = types.ModuleType("lakelogic.core.lineage")
     fake_lineage.inject_lineage = lambda *args: ("good-lined", "bad-lined")
-    fake_lineage._preserve_upstream_lineage = lambda df, columns, prefix, engine_name: (df, columns, prefix, engine_name)
+    fake_lineage._preserve_upstream_lineage = lambda df, columns, prefix, engine_name: (
+        df,
+        columns,
+        prefix,
+        engine_name,
+    )
     fake_lineage.add_columns = lambda df, columns, engine_name: {"df": df, "columns": columns, "engine": engine_name}
     monkeypatch.setitem(sys.modules, "lakelogic.core.lineage", fake_lineage)
     assert processor._inject_lineage("good", "bad") == ("good-lined", "bad-lined")
@@ -173,7 +182,11 @@ def test_processor_write_empty_run_log_and_extract_row_rule_failures(monkeypatch
     processor.adapter = types.SimpleNamespace(ERROR_COLUMN="_lakelogic_errors")
     processor._build_report = lambda contract_title, counts: {"contract": contract_title, "counts": counts}
     calls = []
-    monkeypatch.setattr(proc_mod, "write_run_log", lambda report, contract, engine_name, run_log_mode=None: calls.append((report, engine_name, run_log_mode)))
+    monkeypatch.setattr(
+        proc_mod,
+        "write_run_log",
+        lambda report, contract, engine_name, run_log_mode=None: calls.append((report, engine_name, run_log_mode)),
+    )
     processor._write_empty_run_log()
     assert calls[0][0]["status"] == "no_new_data"
 
@@ -240,7 +253,10 @@ def test_processor_cdc_defaults_and_accumulating_snapshot_rules():
         version="1.0.0",
         info={"title": "Pipeline"},
         model={"fields": [{"name": "placed_date", "type": "date"}, {"name": "shipped_date", "type": "date"}]},
-        materialization={"strategy": "merge", "fact": {"type": "accumulating_snapshot", "milestone_dates": ["placed_date", "shipped_date"]}},
+        materialization={
+            "strategy": "merge",
+            "fact": {"type": "accumulating_snapshot", "milestone_dates": ["placed_date", "shipped_date"]},
+        },
     )
     snapshot_contract.quality = Quality()
     governed = processor._apply_fact_governance(snapshot_contract)
@@ -301,7 +317,11 @@ def test_processor_notification_context_and_materialize(monkeypatch):
     assert context["metadata"] == {"priority": "high"}
 
     calls = []
-    monkeypatch.setattr(proc_mod, "materialize_dataframe", lambda *args, **kwargs: calls.append(("good", args, kwargs)) or {"target": "ok"})
+    monkeypatch.setattr(
+        proc_mod,
+        "materialize_dataframe",
+        lambda *args, **kwargs: calls.append(("good", args, kwargs)) or {"target": "ok"},
+    )
     monkeypatch.setattr(proc_mod, "materialize_quarantine", lambda *args, **kwargs: calls.append(("bad", args, kwargs)))
     result = processor.materialize("good_df", "bad_df", target_path="override/out")
     assert result == {"target": "ok"}
@@ -318,7 +338,11 @@ def test_processor_materialize_quarantine_failure_and_trace_helpers(monkeypatch)
     )
     warnings = []
     monkeypatch.setattr(proc_mod, "materialize_dataframe", lambda *args, **kwargs: {"target": "ok"})
-    monkeypatch.setattr(proc_mod, "materialize_quarantine", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("quarantine boom")))
+    monkeypatch.setattr(
+        proc_mod,
+        "materialize_quarantine",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("quarantine boom")),
+    )
     monkeypatch.setattr(proc_mod.logger, "warning", lambda message: warnings.append(message))
 
     assert processor.materialize("good_df", "bad_df") == {"target": "ok"}
@@ -349,11 +373,15 @@ def test_processor_reprocess_resolution_and_polars_filter(monkeypatch):
     filtered = processor._apply_reprocess_date_filter(df, "2024-01-02", "2024-01-02")
     assert filtered["id"].to_list() == [2]
 
-    processor.contract = types.SimpleNamespace(materialization=types.SimpleNamespace(reprocess_date_column="event_date", partition_by=[]))
+    processor.contract = types.SimpleNamespace(
+        materialization=types.SimpleNamespace(reprocess_date_column="event_date", partition_by=[])
+    )
     with pytest.raises(ValueError, match="not found in DataFrame"):
         processor._apply_reprocess_date_filter(pl.DataFrame({"other": [1]}), "2024-01-01", None)
 
-    processor.contract = types.SimpleNamespace(materialization=types.SimpleNamespace(reprocess_date_column=None, partition_by=[]))
+    processor.contract = types.SimpleNamespace(
+        materialization=types.SimpleNamespace(reprocess_date_column=None, partition_by=[])
+    )
     with pytest.raises(ValueError, match="Cannot apply date-range reprocessing"):
         processor._resolve_reprocess_date_column()
 
@@ -361,7 +389,9 @@ def test_processor_reprocess_resolution_and_polars_filter(monkeypatch):
 def test_processor_flatten_json_and_watermark_columns():
     processor = object.__new__(proc_mod.DataProcessor)
     processor.contract = types.SimpleNamespace(
-        model=types.SimpleNamespace(fields=[types.SimpleNamespace(name="payload_id"), types.SimpleNamespace(name="payload_city")]),
+        model=types.SimpleNamespace(
+            fields=[types.SimpleNamespace(name="payload_id"), types.SimpleNamespace(name="payload_city")]
+        ),
         lineage=types.SimpleNamespace(preserve_upstream=["_lakelogic_loaded_at"], upstream_prefix="_upstream"),
     )
 
@@ -419,10 +449,14 @@ def test_processor_run_covers_notifications_drift_slos_and_trace(monkeypatch):
         info=types.SimpleNamespace(title="Orders"),
         dataset="orders",
         external_logic=None,
-        model=types.SimpleNamespace(fields=[types.SimpleNamespace(name="id", pii=False), types.SimpleNamespace(name="email", pii=True)]),
+        model=types.SimpleNamespace(
+            fields=[types.SimpleNamespace(name="id", pii=False), types.SimpleNamespace(name="email", pii=True)]
+        ),
         schema_policy=None,
         server=types.SimpleNamespace(schema_policy=types.SimpleNamespace(unknown_fields="drop")),
-        quality=types.SimpleNamespace(enforce_required=True, row_rules=[1], dataset_rules=[1], fail_pipeline_on_dataset_error=False),
+        quality=types.SimpleNamespace(
+            enforce_required=True, row_rules=[1], dataset_rules=[1], fail_pipeline_on_dataset_error=False
+        ),
         transformations=[
             {"rename": {"mappings": {"legacy_email": "email"}}},
             {"drop": {"columns": ["old_col"]}},
@@ -456,7 +490,14 @@ def test_processor_run_covers_notifications_drift_slos_and_trace(monkeypatch):
         dataset_rule_results=[{"name": "row_count_check", "value": 0, "passed": False}],
         schema_drift={
             "missing_fields": ["derived_col", "effective_from", "email", "unexpected_required"],
-            "unknown_fields": ["legacy_email", "old_col", "_source_file", "_lakelogic_run_id", "event_params_json", "mystery_col"],
+            "unknown_fields": [
+                "legacy_email",
+                "old_col",
+                "_source_file",
+                "_lakelogic_run_id",
+                "event_params_json",
+                "mystery_col",
+            ],
             "policy": "quarantine",
         },
         ERROR_COLUMN="_lakelogic_errors",
@@ -556,7 +597,9 @@ def test_processor_run_quarantine_disabled_and_trace_fallback(monkeypatch):
         model=None,
         schema_policy=None,
         server=None,
-        quality=types.SimpleNamespace(enforce_required=True, row_rules=[], dataset_rules=[], fail_pipeline_on_dataset_error=False),
+        quality=types.SimpleNamespace(
+            enforce_required=True, row_rules=[], dataset_rules=[], fail_pipeline_on_dataset_error=False
+        ),
         transformations=[],
         materialization=None,
         service_levels=None,
@@ -605,13 +648,17 @@ def test_processor_run_source_rejects_invalid_watermark_strategies(monkeypatch):
     monkeypatch.setitem(sys.modules, "lakelogic.engines.catalog_resolver", fake_catalog)
 
     processor.contract = types.SimpleNamespace(
-        source=types.SimpleNamespace(path="table:catalog.orders", type="table", watermark_strategy="pipeline_log", load_mode="incremental"),
+        source=types.SimpleNamespace(
+            path="table:catalog.orders", type="table", watermark_strategy="pipeline_log", load_mode="incremental"
+        ),
     )
     with pytest.raises(ValueError, match="source type 'table' cannot use"):
         processor.run_source()
 
     processor.contract = types.SimpleNamespace(
-        source=types.SimpleNamespace(path="landing/orders.parquet", type="file", watermark_strategy="delta_version", load_mode="incremental"),
+        source=types.SimpleNamespace(
+            path="landing/orders.parquet", type="file", watermark_strategy="delta_version", load_mode="incremental"
+        ),
     )
     with pytest.raises(ValueError, match="file-based source cannot use"):
         processor.run_source()
@@ -661,8 +708,12 @@ def test_processor_expand_source_files_and_partitioned_paths(monkeypatch, tmp_pa
         processor._expand_source_files("abfss://container/*.json")
 
     expanded = []
-    monkeypatch.setattr(processor, "_expand_source_files", lambda path: expanded.append(path) or [{"path": path, "mtime": 1.0}])
-    partition_cfg = types.SimpleNamespace(start_date="2024-01-01", end_date="2024-01-02", lookback_days=2, file_pattern="*.json", format="%Y/%m/%d")
+    monkeypatch.setattr(
+        processor, "_expand_source_files", lambda path: expanded.append(path) or [{"path": path, "mtime": 1.0}]
+    )
+    partition_cfg = types.SimpleNamespace(
+        start_date="2024-01-01", end_date="2024-01-02", lookback_days=2, file_pattern="*.json", format="%Y/%m/%d"
+    )
     partitioned = processor._expand_partitioned_paths("abfss://landing/events", partition_cfg)
     assert len(partitioned) == 2
     assert expanded == [
@@ -764,9 +815,9 @@ def test_processor_run_source_polars_reads_multiple_csvs_and_applies_targeted_re
     processor._is_uri_path = lambda path: False
 
     captured = {}
-    processor.run = lambda df, source_path=None, reset_trace=False: captured.update(
-        {"df": df, "source_path": source_path, "reset_trace": reset_trace}
-    ) or "run-result"
+    processor.run = lambda df, source_path=None, reset_trace=False: (
+        captured.update({"df": df, "source_path": source_path, "reset_trace": reset_trace}) or "run-result"
+    )
 
     result = processor.run_source(reprocess_column="customer_id", reprocess_values=[2, 3])
     assert result == "run-result"
@@ -809,8 +860,8 @@ def test_processor_run_source_polars_json_flattens_and_preserves_upstream(monkey
     processor._apply_reprocess_date_filter = lambda df, reprocess_from, reprocess_to: df
 
     flatten_calls = []
-    processor._flatten_json_df = lambda df, flatten_nested: flatten_calls.append(flatten_nested) or df.with_columns(
-        pl.lit(1).alias("payload_id")
+    processor._flatten_json_df = lambda df, flatten_nested: (
+        flatten_calls.append(flatten_nested) or df.with_columns(pl.lit(1).alias("payload_id"))
     )
 
     fake_lineage = types.ModuleType("lakelogic.core.lineage")
@@ -820,7 +871,9 @@ def test_processor_run_source_polars_json_flattens_and_preserves_upstream(monkey
     monkeypatch.setitem(sys.modules, "lakelogic.core.lineage", fake_lineage)
 
     captured = {}
-    processor.run = lambda df, source_path=None, reset_trace=False: captured.update({"df": df, "source_path": source_path}) or df
+    processor.run = lambda df, source_path=None, reset_trace=False: (
+        captured.update({"df": df, "source_path": source_path}) or df
+    )
 
     result = processor.run_source()
     assert flatten_calls == [True]
@@ -891,7 +944,9 @@ def test_processor_run_database_source_polars_uses_projection_and_incremental_wa
     monkeypatch.setattr(
         pl,
         "read_database_uri",
-        lambda query, uri, **kwargs: queries.append((query, uri, kwargs)) or pl.DataFrame({"id": [1], "status": ["ok"]}),
+        lambda query, uri, **kwargs: (
+            queries.append((query, uri, kwargs)) or pl.DataFrame({"id": [1], "status": ["ok"]})
+        ),
     )
 
     captured = {}
@@ -987,7 +1042,9 @@ def test_processor_run_source_polars_ndjson_json_and_multi_file_eager_fallback(m
     monkeypatch.setitem(sys.modules, "fsspec", types.SimpleNamespace(open=lambda path, mode, **opts: FakeOpen()))
 
     captured = {}
-    processor.run = lambda df, source_path=None, reset_trace=False: captured.update({"df": df, "source_path": source_path}) or df
+    processor.run = lambda df, source_path=None, reset_trace=False: (
+        captured.update({"df": df, "source_path": source_path}) or df
+    )
 
     result = processor.run_source()
     assert result["id"].to_list() == [1, 2]
@@ -1086,19 +1143,33 @@ def test_processor_notify_dispatches_and_handles_failures(monkeypatch):
     fake_notifications = types.ModuleType("lakelogic.notifications.base")
     fake_notifications.resolve_ownership_contacts = lambda ownership, event: [
         {"type": "email", "target": "broken-owner", "on_events": ["failure"], "_source": "owner-email"},
-        {"type": "slack", "target": "https://ownership.example/hook", "on_events": ["failure"], "_source": "owner-slack"},
+        {
+            "type": "slack",
+            "target": "https://ownership.example/hook",
+            "on_events": ["failure"],
+            "_source": "owner-slack",
+        },
     ]
     monkeypatch.setitem(sys.modules, "lakelogic.notifications.base", fake_notifications)
     monkeypatch.setattr(proc_mod, "get_notification_adapter", _get_notification_adapter)
-    monkeypatch.setattr(proc_mod, "render_notification_content", lambda config, message, subject, context: (
-        f"rendered::{message}",
-        f"rendered::{subject}",
-    ))
+    monkeypatch.setattr(
+        proc_mod,
+        "render_notification_content",
+        lambda config, message, subject, context: (
+            f"rendered::{message}",
+            f"rendered::{subject}",
+        ),
+    )
 
     processor.notify("failure", "Pipeline failed")
     processor.notify("dataset_quality_check", "Dataset rule failed")
 
-    assert ("webhook", "https://contract.example/hook", "rendered::[DEV] sales/erp: Failure Alert", "rendered::Pipeline failed") in sent
+    assert (
+        "webhook",
+        "https://contract.example/hook",
+        "rendered::[DEV] sales/erp: Failure Alert",
+        "rendered::Pipeline failed",
+    ) in sent
     assert any(item[0] == "slack" and item[1] == "https://hooks.slack.com/services/demo" for item in sent)
     assert any(item[0] == "email" and item[1] == "ops@example.com" for item in sent)
     assert any("Ownership notification skipped" in message for message in debug_messages)
@@ -1134,7 +1205,9 @@ def test_processor_compute_counts_spark_optimized_and_fallback(monkeypatch):
             counts = {}
             for marker in self.markers:
                 counts[marker] = counts.get(marker, 0) + 1
-            return types.SimpleNamespace(count=lambda: FakeGrouped([{"_count_marker": key, "count": value} for key, value in counts.items()]))
+            return types.SimpleNamespace(
+                count=lambda: FakeGrouped([{"_count_marker": key, "count": value} for key, value in counts.items()])
+            )
 
     class FakeFrame:
         def __init__(self, marker, rows):

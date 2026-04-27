@@ -102,7 +102,11 @@ def test_reference_detection_spark_lookup_and_connection_dispatch(monkeypatch):
     SparkSessionConn = type(
         "SparkSessionConn",
         (),
-        {"table": lambda self, ref: types.SimpleNamespace(limit=lambda n: types.SimpleNamespace(toPandas=lambda: __import__("pandas").DataFrame({"id": [1]})))},
+        {
+            "table": lambda self, ref: types.SimpleNamespace(
+                limit=lambda n: types.SimpleNamespace(toPandas=lambda: __import__("pandas").DataFrame({"id": [1]}))
+            )
+        },
     )
     DuckDBPyConnection = type(
         "DuckDBPyConnection",
@@ -160,7 +164,18 @@ def test_infer_fields_rules_and_pii_detection():
         {
             "id": list(range(1, 11)),
             "order_ref": [f"A-{idx}" for idx in range(1, 11)],
-            "status": ["active", "inactive", "active", "inactive", "active", "inactive", "active", "inactive", "active", "inactive"],
+            "status": [
+                "active",
+                "inactive",
+                "active",
+                "inactive",
+                "active",
+                "inactive",
+                "active",
+                "inactive",
+                "active",
+                "inactive",
+            ],
             "amount": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0],
             "start_date": [f"2024-01-{idx:02d}" for idx in range(1, 11)],
             "end_date": [f"2024-01-{idx:02d}" for idx in range(11, 21)],
@@ -204,14 +219,20 @@ def test_presidio_detection_load_table_and_infer_contract_end_to_end(monkeypatch
     assert pii["name"] == "PERSON"
 
     load_calls = []
-    monkeypatch.setattr(bs.ContractInferrer, "_load_table", lambda self, source, pl_mod: (load_calls.append(source) or pl.DataFrame({"id": [1], "state": ["new"]})))
+    monkeypatch.setattr(
+        bs.ContractInferrer,
+        "_load_table",
+        lambda self, source, pl_mod: load_calls.append(source) or pl.DataFrame({"id": [1], "state": ["new"]}),
+    )
     table_inferrer = bs.ContractInferrer("catalog.schema.orders", connection=object())
     loaded_df, loaded_path = table_inferrer._load(pl)
     assert load_calls == ["catalog.schema.orders"]
     assert loaded_path is None
     assert loaded_df.to_dicts() == [{"id": 1, "state": "new"}]
 
-    monkeypatch.setattr("lakelogic.core.describe_columns.describe_columns", lambda fields, **kwargs: {"status": "Lifecycle state"})
+    monkeypatch.setattr(
+        "lakelogic.core.describe_columns.describe_columns", lambda fields, **kwargs: {"status": "Lifecycle state"}
+    )
     source_df = pl.DataFrame({"status": ["new", "done"], "email": ["a@example.com", "b@example.com"]})
     draft = bs.infer_contract(
         source_df,
@@ -225,5 +246,9 @@ def test_presidio_detection_load_table_and_infer_contract_end_to_end(monkeypatch
     assert contract["info"]["title"] == "Orders"
     assert contract["info"]["domain"] == "commerce"
     assert contract["model"]["owner"] == "team-data"
-    assert any(field.get("description") == "Lifecycle state" for field in contract["model"]["fields"] if field["name"] == "status")
+    assert any(
+        field.get("description") == "Lifecycle state"
+        for field in contract["model"]["fields"]
+        if field["name"] == "status"
+    )
     assert contract["tags"] == ["bronze"]

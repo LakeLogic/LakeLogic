@@ -58,7 +58,7 @@ def test_gdpr_forget_pandas_partition_filter_and_metadata(monkeypatch):
         "",
         partition_filter={"column": "country_code", "value": "FR"},
     )
-    assert result.loc[0, "email"] is None
+    assert pd.isna(result.loc[0, "email"])
     assert result.loc[1, "email"] == "b@example.com"
     assert result.loc[0, gdpr.META_IS_DELETED] == True
     assert result.loc[1, gdpr.META_IS_DELETED] == False
@@ -84,7 +84,11 @@ def test_gdpr_forget_and_mask_duckdb_dispatch(monkeypatch):
         def fetchdf(self):
             return pdf
 
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(from_df=lambda frame: {"rows": len(frame), "columns": list(frame.columns)}))
+    monkeypatch.setitem(
+        sys.modules,
+        "duckdb",
+        types.SimpleNamespace(from_df=lambda frame: {"rows": len(frame), "columns": list(frame.columns)}),
+    )
     forgot = gdpr.forget_subjects(FakeRelation(), contract, "customer_id", ["c1"], audit=False)
     masked = gdpr.mask_pii_columns(FakeRelation(), contract, strategy="redact")
 

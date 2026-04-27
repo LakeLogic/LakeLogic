@@ -87,7 +87,9 @@ def test_capture_duckdb_context_handles_import_and_query_failures(monkeypatch):
         def close(self):
             return None
 
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(__version__="1.1.0", connect=lambda _: BrokenConn()))
+    monkeypatch.setitem(
+        sys.modules, "duckdb", types.SimpleNamespace(__version__="1.1.0", connect=lambda _: BrokenConn())
+    )
     assert ec.capture_duckdb_context() == {"engine_version": "1.1.0"}
 
 
@@ -105,7 +107,9 @@ def test_capture_spark_context_paths(monkeypatch):
         applicationId="app-1",
         appName="lake-job",
         getConf=lambda: fake_conf,
-        _jsc=types.SimpleNamespace(sc=lambda: types.SimpleNamespace(getExecutorMemoryStatus=lambda: {"driver": 1, "exec1": 1, "exec2": 1})),
+        _jsc=types.SimpleNamespace(
+            sc=lambda: types.SimpleNamespace(getExecutorMemoryStatus=lambda: {"driver": 1, "exec1": 1, "exec2": 1})
+        ),
         uiWebUrl="http://spark-ui",
     )
     fake_session = types.SimpleNamespace(sparkContext=fake_sc)
@@ -128,11 +132,15 @@ def test_capture_spark_context_paths(monkeypatch):
         version="3.5.0",
         applicationId="app-2",
         appName="lake-job",
-        getConf=lambda: types.SimpleNamespace(get=lambda key, default=None: {"spark.executor.instances": "unknown"}.get(key, default)),
+        getConf=lambda: types.SimpleNamespace(
+            get=lambda key, default=None: {"spark.executor.instances": "unknown"}.get(key, default)
+        ),
         _jsc=types.SimpleNamespace(sc=lambda: (_ for _ in ()).throw(RuntimeError("bad"))),
         uiWebUrl=None,
     )
-    fake_spark_sql.SparkSession = types.SimpleNamespace(getActiveSession=lambda: types.SimpleNamespace(sparkContext=fallback_sc))
+    fake_spark_sql.SparkSession = types.SimpleNamespace(
+        getActiveSession=lambda: types.SimpleNamespace(sparkContext=fallback_sc)
+    )
     fallback_ctx = ec.capture_spark_context()
     assert fallback_ctx["num_workers"] == "unknown"
 
@@ -149,9 +157,15 @@ def test_capture_pandas_context_and_dispatch(monkeypatch):
     pandas_ctx = ec.capture_pandas_context()
     assert pandas_ctx == {"engine_version": "2.2.0", "copy_on_write": True, "dtype_backend": "pyarrow"}
 
-    monkeypatch.setattr(ec, "capture_universal_context", lambda *args, **kwargs: {"engine": "polars", "engine_version": "old"})
+    monkeypatch.setattr(
+        ec, "capture_universal_context", lambda *args, **kwargs: {"engine": "polars", "engine_version": "old"}
+    )
     monkeypatch.setattr(ec, "capture_polars_context", lambda: {"engine_version": "new", "streaming": False})
-    assert ec.capture_execution_context("polars") == {"engine": "polars", "engine_version": "new", "polars": {"streaming": False}}
+    assert ec.capture_execution_context("polars") == {
+        "engine": "polars",
+        "engine_version": "new",
+        "polars": {"streaming": False},
+    }
     assert ec.capture_execution_context("unknown") == {"engine": "polars", "engine_version": "old"}
 
 
@@ -174,10 +188,12 @@ def test_engine_version_and_peak_memory_helpers(monkeypatch):
     monkeypatch.setattr(ec.sys, "platform", "linux")
     assert ec._get_peak_memory_mb() == 2.0
 
-    monkeypatch.delitem(sys.modules, "resource", raising=False)
+    monkeypatch.setitem(sys.modules, "resource", None)
     monkeypatch.setitem(
         sys.modules,
         "psutil",
-        types.SimpleNamespace(Process=lambda: types.SimpleNamespace(memory_info=lambda: types.SimpleNamespace(rss=3 * 1024 * 1024))),
+        types.SimpleNamespace(
+            Process=lambda: types.SimpleNamespace(memory_info=lambda: types.SimpleNamespace(rss=3 * 1024 * 1024))
+        ),
     )
     assert ec._get_peak_memory_mb() == 3.0

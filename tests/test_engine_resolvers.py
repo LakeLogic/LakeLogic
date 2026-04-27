@@ -66,10 +66,14 @@ def test_catalog_resolver_sdk_api_and_convenience_functions(monkeypatch):
     api_resolver = cr.UnityCatalogResolver(host="https://workspace", token="token", use_databricks_sdk=False)
     assert api_resolver._resolve_with_api("main.default.orders") == "abfss://api/orders"
 
-    monkeypatch.setattr(cr, "get_unity_catalog_resolver", lambda: types.SimpleNamespace(
-        is_unity_catalog_table=lambda path: path == "main.default.orders",
-        resolve_table=lambda path: "abfss://resolved/orders",
-    ))
+    monkeypatch.setattr(
+        cr,
+        "get_unity_catalog_resolver",
+        lambda: types.SimpleNamespace(
+            is_unity_catalog_table=lambda path: path == "main.default.orders",
+            resolve_table=lambda path: "abfss://resolved/orders",
+        ),
+    )
     assert cr.resolve_unity_catalog_path("main.default.orders") == "abfss://resolved/orders"
     assert cr.resolve_unity_catalog_path("local/path") == "local/path"
 

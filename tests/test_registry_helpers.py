@@ -26,7 +26,9 @@ def test_registry_helper_models_and_merge(monkeypatch):
 
     merged = _deep_merge({"a": {"b": 1}, "list": [1]}, {"a": {"c": 2}, "list": [2]})
     assert merged == {"a": {"b": 1, "c": 2}, "list": [2]}
-    assert _resolve_placeholders({"path": "{domain}/{system}", "items": ["{domain}"]}, {"domain": "sales", "system": "crm"}) == {
+    assert _resolve_placeholders(
+        {"path": "{domain}/{system}", "items": ["{domain}"]}, {"domain": "sales", "system": "crm"}
+    ) == {
         "path": "sales/crm",
         "items": ["sales"],
     }
@@ -94,7 +96,12 @@ def test_registry_from_yaml_resolves_inheritance_and_contracts(tmp_path):
     assert len(active) == 1
     contract = active[0]
     assert contract.entity == "orders"
-    assert contract.resolved_path.endswith("contracts\\orders.yaml") or contract.resolved_path.endswith("contracts/orders.yaml")
+    assert contract.resolved_path.endswith("contracts\\orders.yaml") or contract.resolved_path.endswith(
+        "contracts/orders.yaml"
+    )
     assert contract.contract_dict["info"]["table_name"] == "bronze_crm_orders"
-    assert contract.contract_dict["materialization"]["target_path"] == "abfss://sales@acct.dfs.core.windows.net/bronze/orders"
+    assert (
+        contract.contract_dict["materialization"]["target_path"]
+        == "abfss://sales@acct.dfs.core.windows.net/bronze/orders"
+    )
     assert contract.contract_dict["schedule"]["cron"] == "0 0 * * *"

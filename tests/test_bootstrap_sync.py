@@ -106,9 +106,7 @@ def test_bootstrap_sync_preserves_existing_registry_entries(tmp_path: Path) -> N
                 "domain": "finance",
                 "system": "erp",
                 "owner": "team-data",
-                "contracts": [
-                    {"entity": "legacy", "enabled": True, "contracts": {"bronze": "bronze_legacy.yaml"}}
-                ],
+                "contracts": [{"entity": "legacy", "enabled": True, "contracts": {"bronze": "bronze_legacy.yaml"}}],
             },
             sort_keys=False,
         ),

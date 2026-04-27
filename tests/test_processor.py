@@ -11,14 +11,13 @@ def test_processor_init():
     assert proc.engine_name == "polars"
     assert proc.contract.version == "1.0.0"
 
+
 def test_processor_run_mock():
     """Test the full run cycle with mock data."""
     contract_data = {
         "version": "1.0.0",
         "dataset": "test_ds",
-        "quality": {
-            "row_rules": [{"name": "not_null", "sql": "val IS NOT NULL"}]
-        }
+        "quality": {"row_rules": [{"name": "not_null", "sql": "val IS NOT NULL"}]},
     }
     df = pl.DataFrame({"val": [1, None, 3]})
 

@@ -245,13 +245,16 @@ def test_write_run_log_to_sqlite_table_and_fetch_precise_state(tmp_path: Path):
 
     assert result is None
     assert (tmp_path / "db" / "run_logs.sqlite").exists()
-    assert get_last_run_watermark(
-        contract,
-        "orders_contract",
-        "silver",
-        dataset="orders",
-        data_layer="silver",
-    ) == 1713355200.0
+    assert (
+        get_last_run_watermark(
+            contract,
+            "orders_contract",
+            "silver",
+            dataset="orders",
+            data_layer="silver",
+        )
+        == 1713355200.0
+    )
     assert get_last_run_dlt_state(
         contract,
         "orders_contract",
@@ -289,13 +292,16 @@ def test_write_run_log_to_duckdb_and_ignore_failed_or_reprocess_rows(tmp_path: P
 
     assert result is None
     assert (tmp_path / "db" / "run_logs.duckdb").exists()
-    assert get_last_run_watermark(
-        contract,
-        "orders_contract",
-        "silver",
-        dataset="orders",
-        data_layer="silver",
-    ) == 3.0
+    assert (
+        get_last_run_watermark(
+            contract,
+            "orders_contract",
+            "silver",
+            dataset="orders",
+            data_layer="silver",
+        )
+        == 3.0
+    )
     assert get_last_run_dlt_state(
         contract,
         "orders_contract",
@@ -428,13 +434,16 @@ def test_get_last_run_watermark_and_dlt_state_from_delta_backend(monkeypatch, tm
 
     contract = _make_contract(tmp_path, {"run_log_table": "abfss://container/logs", "run_log_backend": "delta"})
 
-    assert get_last_run_watermark(
-        contract,
-        "orders_contract",
-        "silver",
-        dataset="orders",
-        data_layer="silver",
-    ) == 3.0
+    assert (
+        get_last_run_watermark(
+            contract,
+            "orders_contract",
+            "silver",
+            dataset="orders",
+            data_layer="silver",
+        )
+        == 3.0
+    )
     assert get_last_run_dlt_state(
         contract,
         "orders_contract",
@@ -601,7 +610,11 @@ def test_write_run_log_table_delta_and_iceberg_paths(monkeypatch, tmp_path: Path
     sleep_calls = []
     random_values = []
     monkeypatch.setitem(sys.modules, "time", types.SimpleNamespace(sleep=lambda value: sleep_calls.append(value)))
-    monkeypatch.setitem(sys.modules, "random", types.SimpleNamespace(uniform=lambda low, high: random_values.append((low, high)) or 0.05))
+    monkeypatch.setitem(
+        sys.modules,
+        "random",
+        types.SimpleNamespace(uniform=lambda low, high: random_values.append((low, high)) or 0.05),
+    )
 
     delta_contract = _make_contract(
         tmp_path,
@@ -621,7 +634,9 @@ def test_write_run_log_table_delta_and_iceberg_paths(monkeypatch, tmp_path: Path
     assert failed is None
     assert len(sleep_calls) == 5
     assert random_values and random_values[0] == (0.05, 0.2)
-    assert any("Failed to write run log to Delta table abfss://container/logs: merge failed" in message for message in warnings)
+    assert any(
+        "Failed to write run log to Delta table abfss://container/logs: merge failed" in message for message in warnings
+    )
 
     unresolved_contract = _make_contract(tmp_path, {"run_log_table": "{log_path}", "run_log_backend": "delta"})
     assert _write_run_log_table(report, unresolved_contract, engine_name="polars") is None
@@ -665,18 +680,33 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
     assert write_run_log(report, None, engine_name="polars") is None
 
     calls = []
-    cloud_contract = _make_contract(tmp_path, {"run_log_path": "abfss://container/logs/run.json", "run_log_table": "catalog.logs"})
-    monkeypatch.setattr("lakelogic.core.run_log._cloud_write_json", lambda path, data: calls.append(("cloud", path, data["run_id"])))
-    monkeypatch.setattr("lakelogic.core.run_log._write_run_log_table", lambda data, contract, engine_name=None: calls.append(("table", contract.metadata["run_log_table"], engine_name)))
+    cloud_contract = _make_contract(
+        tmp_path, {"run_log_path": "abfss://container/logs/run.json", "run_log_table": "catalog.logs"}
+    )
+    monkeypatch.setattr(
+        "lakelogic.core.run_log._cloud_write_json", lambda path, data: calls.append(("cloud", path, data["run_id"]))
+    )
+    monkeypatch.setattr(
+        "lakelogic.core.run_log._write_run_log_table",
+        lambda data, contract, engine_name=None: calls.append(
+            ("table", contract.metadata["run_log_table"], engine_name)
+        ),
+    )
     assert write_run_log(report, cloud_contract, engine_name="spark", run_log_mode="table") is None
     assert calls == [("table", "catalog.logs", "spark")]
-    assert write_run_log(report, cloud_contract, engine_name="spark", run_log_mode="dir") == "abfss://container/logs/run.json"
+    assert (
+        write_run_log(report, cloud_contract, engine_name="spark", run_log_mode="dir")
+        == "abfss://container/logs/run.json"
+    )
     assert calls[-1] == ("cloud", "abfss://container/logs/run.json", "writer-1")
 
     warnings = []
     monkeypatch.setattr("lakelogic.core.run_log.logger.warning", warnings.append)
     monkeypatch.setitem(sys.modules, "fsspec", None)
-    monkeypatch.setattr("lakelogic.core.run_log._cloud_write_json", lambda path, data: (_ for _ in ()).throw(ImportError("missing fsspec")))
+    monkeypatch.setattr(
+        "lakelogic.core.run_log._cloud_write_json",
+        lambda path, data: (_ for _ in ()).throw(ImportError("missing fsspec")),
+    )
     assert write_run_log(report, cloud_contract, engine_name="spark", run_log_mode="dir") is None
     assert any("Install with: pip install fsspec adlfs" in message for message in warnings)
 
@@ -732,8 +762,15 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
     monkeypatch.setitem(sys.modules, "pyspark.sql.functions", fake_functions)
 
     spark_contract = _make_contract(tmp_path, {"run_log_table": "catalog.logs", "run_log_backend": "spark"})
-    assert get_last_run_watermark(spark_contract, "orders_contract", "silver", engine_name="spark", dataset="orders", data_layer="silver") == 12.5
-    assert get_last_run_dlt_state(spark_contract, "orders_contract", "silver", engine_name="spark", dataset="orders", data_layer="silver") == json.dumps({"cursor": "spark"})
+    assert (
+        get_last_run_watermark(
+            spark_contract, "orders_contract", "silver", engine_name="spark", dataset="orders", data_layer="silver"
+        )
+        == 12.5
+    )
+    assert get_last_run_dlt_state(
+        spark_contract, "orders_contract", "silver", engine_name="spark", dataset="orders", data_layer="silver"
+    ) == json.dumps({"cursor": "spark"})
 
     class FakeScalar:
         def __init__(self, value):
@@ -772,9 +809,24 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
         def to_pyarrow_table(self, columns=None, filters=None):
             return FakeArrowTable(
                 [
-                    {"dlt_state_json": None, "stage": "silver", "status": "success", "timestamp": "2026-04-15T00:00:00+00:00"},
-                    {"dlt_state_json": json.dumps({"cursor": "delta"}), "stage": "silver", "status": "success", "timestamp": "2026-04-16T00:00:00+00:00"},
-                    {"dlt_state_json": json.dumps({"cursor": "old"}), "stage": "reprocess", "status": "success", "timestamp": "2026-04-14T00:00:00+00:00"},
+                    {
+                        "dlt_state_json": None,
+                        "stage": "silver",
+                        "status": "success",
+                        "timestamp": "2026-04-15T00:00:00+00:00",
+                    },
+                    {
+                        "dlt_state_json": json.dumps({"cursor": "delta"}),
+                        "stage": "silver",
+                        "status": "success",
+                        "timestamp": "2026-04-16T00:00:00+00:00",
+                    },
+                    {
+                        "dlt_state_json": json.dumps({"cursor": "old"}),
+                        "stage": "reprocess",
+                        "status": "success",
+                        "timestamp": "2026-04-14T00:00:00+00:00",
+                    },
                 ]
             )
 
@@ -783,11 +835,15 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
         is_valid=lambda column: [item is not None for item in column.values],
         and_=lambda left, right: [a and b for a, b in zip(left, right)],
         max=lambda column: FakeScalar(max(value for value in column.values if value is not None)),
-        sort_indices=lambda table, sort_keys=None: sorted(range(len(table.rows)), key=lambda idx: table.rows[idx][sort_keys[0][0]], reverse=True),
+        sort_indices=lambda table, sort_keys=None: sorted(
+            range(len(table.rows)), key=lambda idx: table.rows[idx][sort_keys[0][0]], reverse=True
+        ),
     )
     monkeypatch.setitem(sys.modules, "deltalake", types.SimpleNamespace(DeltaTable=FakeDeltaReadTable))
     monkeypatch.setitem(sys.modules, "pyarrow", types.SimpleNamespace(compute=fake_pc))
     monkeypatch.setitem(sys.modules, "pyarrow.compute", fake_pc)
 
     delta_contract = _make_contract(tmp_path, {"run_log_table": "abfss://container/logs", "run_log_backend": "delta"})
-    assert get_last_run_dlt_state(delta_contract, "orders_contract", "silver", dataset="orders", data_layer="silver") == json.dumps({"cursor": "delta"})
+    assert get_last_run_dlt_state(
+        delta_contract, "orders_contract", "silver", dataset="orders", data_layer="silver"
+    ) == json.dumps({"cursor": "delta"})

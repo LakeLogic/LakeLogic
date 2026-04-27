@@ -68,7 +68,9 @@ def test_add_columns_for_polars_pandas_and_spark(monkeypatch):
 
     fake_functions = types.SimpleNamespace(
         col=lambda name: f"col:{name}",
-        lit=lambda value: types.SimpleNamespace(cast=lambda dtype: f"cast:{value}:{dtype}") if isinstance(value, str) else value,
+        lit=lambda value: (
+            types.SimpleNamespace(cast=lambda dtype: f"cast:{value}:{dtype}") if isinstance(value, str) else value
+        ),
     )
     fake_types = types.ModuleType("pyspark.sql.types")
     fake_types.TimestampType = lambda: "timestamp"
@@ -89,7 +91,11 @@ def test_add_columns_for_polars_pandas_and_spark(monkeypatch):
 
 
 def test_inject_lineage_builds_expected_metadata(monkeypatch):
-    monkeypatch.setattr(lineage, "add_columns", lambda df, columns, engine_name: {"frame": df, "columns": columns, "engine": engine_name})
+    monkeypatch.setattr(
+        lineage,
+        "add_columns",
+        lambda df, columns, engine_name: {"frame": df, "columns": columns, "engine": engine_name},
+    )
     monkeypatch.setattr("getpass.getuser", lambda: "tester")
 
     contract = types.SimpleNamespace(
@@ -121,7 +127,9 @@ def test_inject_lineage_builds_expected_metadata(monkeypatch):
         metadata={"domain": "commerce", "system": "erp"},
     )
 
-    monkeypatch.setattr(lineage, "_preserve_upstream_lineage", lambda df, columns, prefix, engine_name: {"preserved": True, "df": df})
+    monkeypatch.setattr(
+        lineage, "_preserve_upstream_lineage", lambda df, columns, prefix, engine_name: {"preserved": True, "df": df}
+    )
     good, bad = lineage.inject_lineage(
         good_df={"good": True},
         bad_df={"bad": True},
@@ -173,7 +181,7 @@ def test_preserve_upstream_lineage_and_add_columns_for_duckdb(monkeypatch):
 
     relation = FakeRelation()
     preserved = lineage._preserve_upstream_lineage(relation, ["_lakelogic_source"], "_upstream", "duckdb")
-    assert '_upstream_lakelogic_source' in preserved["sql"]
+    assert "_upstream_lakelogic_source" in preserved["sql"]
 
     updated = lineage.add_columns(relation, {"_lakelogic_run_id": "run-1", "_lakelogic_flag": True}, "duckdb")
     assert 'TRUE AS "_lakelogic_flag"' in updated["sql"]

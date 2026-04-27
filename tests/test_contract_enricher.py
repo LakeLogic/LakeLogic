@@ -69,7 +69,13 @@ def test_enrich_contract_merges_ai_enrichment_from_polars_samples(monkeypatch):
         text="ignored",
         parsed={
             "fields": [
-                {"name": "email", "description": "Customer email", "pii": True, "pii_type": "email", "pii_remediation": "hash"},
+                {
+                    "name": "email",
+                    "description": "Customer email",
+                    "pii": True,
+                    "pii_type": "email",
+                    "pii_remediation": "hash",
+                },
                 {"name": "status", "description": "Lifecycle status", "pii": False},
             ],
             "suggested_rules": [
@@ -113,7 +119,9 @@ def test_enrich_contract_supports_pandas_samples_and_json_repair(monkeypatch):
 
     response = DummyResponse(text="broken", fail_parse=True)
     monkeypatch.setattr("lakelogic.ai.provider.get_llm_client", lambda **kwargs: DummyClient(response))
-    monkeypatch.setattr("lakelogic.ai.data_generator._repair_llm_json", lambda text: {"fields": [], "summary": "Orders summary"})
+    monkeypatch.setattr(
+        "lakelogic.ai.data_generator._repair_llm_json", lambda text: {"fields": [], "summary": "Orders summary"}
+    )
     warnings = []
     monkeypatch.setattr(ce.logger, "warning", warnings.append)
 

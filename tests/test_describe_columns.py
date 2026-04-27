@@ -72,6 +72,8 @@ def test_provider_call_helpers(monkeypatch):
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
     monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=FakeAnthropic))
     monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(post=lambda *args, **kwargs: FakeHttpxResponse()))
+    google_namespace = types.SimpleNamespace(generativeai=fake_google)
+    monkeypatch.setitem(sys.modules, "google", google_namespace)
     monkeypatch.setitem(sys.modules, "google.generativeai", fake_google)
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.test")
 

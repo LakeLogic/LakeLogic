@@ -1092,7 +1092,14 @@ def _merge_frames(
     for col in metadata_cols:
         if col not in all_cols:
             all_cols.append(col)
-            existing[col] = None
+
+    for col in all_cols:
+        if col not in existing.columns:
+            dtype = incoming[col].dtype if col in incoming.columns else "object"
+            existing[col] = pd.Series(dtype=dtype)
+        if col not in incoming.columns:
+            dtype = existing[col].dtype if col in existing.columns else "object"
+            incoming[col] = pd.Series(dtype=dtype)
 
     existing = existing.reindex(columns=all_cols)
     incoming = incoming.reindex(columns=all_cols)

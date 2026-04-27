@@ -22,7 +22,9 @@ def test_run_log_reader_shortcuts_and_helpers(tmp_path):
     contract = _contract()
     assert reader.last_success(contract) is None
     assert reader.last_success_info(contract) == (None, "no_run_log_table")
-    assert RunLogReader("polars").last_success_info(_contract({"run_log_table": "tbl", "run_log_backend": "other"})) == (
+    assert RunLogReader("polars").last_success_info(
+        _contract({"run_log_table": "tbl", "run_log_backend": "other"})
+    ) == (
         None,
         "unsupported_backend",
     )
@@ -63,13 +65,21 @@ def test_run_log_reader_duckdb_paths(monkeypatch, tmp_path):
         def close(self):
             return None
 
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database: FakeConnection(raises=True)))
+    monkeypatch.setitem(
+        sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database: FakeConnection(raises=True))
+    )
     assert reader.last_success_info(contract) == (None, "run_log_table_missing")
 
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database: FakeConnection(result=(None,))))
+    monkeypatch.setitem(
+        sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database: FakeConnection(result=(None,)))
+    )
     assert reader.last_success_info(contract) == (None, "run_log_entry_missing")
 
-    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda database: FakeConnection(result=("2026-01-02T03:04:05",))))
+    monkeypatch.setitem(
+        sys.modules,
+        "duckdb",
+        types.SimpleNamespace(connect=lambda database: FakeConnection(result=("2026-01-02T03:04:05",))),
+    )
     ts, reason = reader.last_success_info(contract)
     assert ts == datetime(2026, 1, 2, 3, 4, 5)
     assert reason is None
@@ -98,10 +108,12 @@ def test_run_log_reader_sqlite_and_spark_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(builtins, "__import__", original_import)
 
     class FakeSparkSession:
-        builder = types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(
-            catalog=types.SimpleNamespace(tableExists=lambda name: True),
-            sql=lambda query: types.SimpleNamespace(collect=lambda: [{"last_ts": "2026-02-03T04:05:06"}]),
-        ))
+        builder = types.SimpleNamespace(
+            getOrCreate=lambda: types.SimpleNamespace(
+                catalog=types.SimpleNamespace(tableExists=lambda name: True),
+                sql=lambda query: types.SimpleNamespace(collect=lambda: [{"last_ts": "2026-02-03T04:05:06"}]),
+            )
+        )
 
     fake_pyspark = types.ModuleType("pyspark")
     fake_pyspark_sql = types.ModuleType("pyspark.sql")
@@ -114,25 +126,31 @@ def test_run_log_reader_sqlite_and_spark_paths(monkeypatch, tmp_path):
     assert reason is None
 
     missing_table_spark = types.SimpleNamespace(
-        builder=types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(catalog=types.SimpleNamespace(tableExists=lambda name: False)))
+        builder=types.SimpleNamespace(
+            getOrCreate=lambda: types.SimpleNamespace(catalog=types.SimpleNamespace(tableExists=lambda name: False))
+        )
     )
     fake_pyspark_sql.SparkSession = missing_table_spark
     assert reader._read_spark("run_log", contract) == (None, "run_log_table_missing")
 
     empty_rows_spark = types.SimpleNamespace(
-        builder=types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(
-            catalog=types.SimpleNamespace(tableExists=lambda name: True),
-            sql=lambda query: types.SimpleNamespace(collect=lambda: []),
-        ))
+        builder=types.SimpleNamespace(
+            getOrCreate=lambda: types.SimpleNamespace(
+                catalog=types.SimpleNamespace(tableExists=lambda name: True),
+                sql=lambda query: types.SimpleNamespace(collect=lambda: []),
+            )
+        )
     )
     fake_pyspark_sql.SparkSession = empty_rows_spark
     assert reader._read_spark("run_log", contract) == (None, "run_log_entry_missing")
 
     null_value_spark = types.SimpleNamespace(
-        builder=types.SimpleNamespace(getOrCreate=lambda: types.SimpleNamespace(
-            catalog=types.SimpleNamespace(tableExists=lambda name: True),
-            sql=lambda query: types.SimpleNamespace(collect=lambda: [{"last_ts": None}]),
-        ))
+        builder=types.SimpleNamespace(
+            getOrCreate=lambda: types.SimpleNamespace(
+                catalog=types.SimpleNamespace(tableExists=lambda name: True),
+                sql=lambda query: types.SimpleNamespace(collect=lambda: [{"last_ts": None}]),
+            )
+        )
     )
     fake_pyspark_sql.SparkSession = null_value_spark
     assert reader._read_spark("run_log", contract) == (None, "run_log_entry_missing")

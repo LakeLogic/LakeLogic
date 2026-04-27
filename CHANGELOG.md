@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.21.0] — 2026-04-27
+
+### Added
+
+- Add CI quality gate workflow and compliance governance tutorial notebook
+- Add silver layer contract for rideflow trips and configure coverage exclusions
+
+### CI/CD
+
+- Add GitHub Actions CI workflow and constrain dependency python version markers in uv.lock
+
+### Changed
+
+- Update coverage exclusion patterns to remove deprecated cli path and simplify ai module comment
+
+### Testing
+
+- Commit all missing test files by fixing gitignore exclusion
 ## [1.20.0] — 2026-04-27
 
 ### Added
@@ -236,6 +254,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.21.0]: https://github.com/lakelogic/LakeLogic/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.19.0
 [1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.14.0

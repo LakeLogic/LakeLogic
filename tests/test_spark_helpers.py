@@ -168,7 +168,9 @@ class FakeSelectableDataFrame:
 
     def select(self, *exprs):
         self.selected = exprs
-        selected_names = [getattr(expr, "alias_name", None) or expr.value[1] for expr in exprs if hasattr(expr, "value")]
+        selected_names = [
+            getattr(expr, "alias_name", None) or expr.value[1] for expr in exprs if hasattr(expr, "value")
+        ]
         clone = FakeSelectableDataFrame(selected_names, self.schema.fields)
         clone.selected = exprs
         clone.with_columns = list(self.with_columns)
@@ -256,7 +258,9 @@ class FakeSparkForLinks:
 
 
 def _install_fake_pyspark(monkeypatch):
-    fake_sql_module = types.SimpleNamespace(functions=FakeFunctions, Window=FakeWindowModule, types=types.SimpleNamespace(StringType=FakeStringType))
+    fake_sql_module = types.SimpleNamespace(
+        functions=FakeFunctions, Window=FakeWindowModule, types=types.SimpleNamespace(StringType=FakeStringType)
+    )
     monkeypatch.setitem(sys.modules, "pyspark", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
     monkeypatch.setitem(sys.modules, "pyspark.sql.functions", FakeFunctions)
@@ -581,7 +585,9 @@ def test_spark_helper_execute_handles_list_input_and_post_rules(monkeypatch):
     adapter._apply_pre_transformations = lambda df: calls.append("pre") or df
     adapter._apply_schema = lambda df: (df.withColumn("__type_err_id", FakeFunctions.lit(None)), ["schema mismatch"])
     adapter._run_dataset_rules = lambda df: calls.append(("dataset", list(df.columns)))
-    adapter._apply_post_transformations = lambda df: calls.append("post") or df.withColumn("derived", FakeFunctions.lit("ok"))
+    adapter._apply_post_transformations = lambda df: (
+        calls.append("post") or df.withColumn("derived", FakeFunctions.lit("ok"))
+    )
 
     good_df, bad_df = adapter.execute([{"id": 1, "status": "ok"}])
 
@@ -633,17 +639,27 @@ def test_spark_helper_pre_transformations_cover_column_operations(monkeypatch):
         transformations=[
             _transformation(sql="SELECT id, status FROM source"),
             _transformation(derive=types.SimpleNamespace(field="derived")),
-            _transformation(rename=types.SimpleNamespace(iter_pairs=lambda: [("missing", "skipped"), ("id", "order_id")])),
+            _transformation(
+                rename=types.SimpleNamespace(iter_pairs=lambda: [("missing", "skipped"), ("id", "order_id")])
+            ),
             _transformation(select=types.SimpleNamespace(columns=["order_id", "status", "derived"])),
             _transformation(drop=types.SimpleNamespace(columns=["status"])),
             _transformation(cast=types.SimpleNamespace(columns={"order_id": "integer"})),
             _transformation(trim=types.SimpleNamespace(fields=["order_id"], side="both")),
             _transformation(lower=types.SimpleNamespace(fields=["order_id"])),
             _transformation(upper=types.SimpleNamespace(fields=["order_id"])),
-            _transformation(coalesce=types.SimpleNamespace(field="status_filled", sources=["status"], default="unknown", output="status_filled")),
+            _transformation(
+                coalesce=types.SimpleNamespace(
+                    field="status_filled", sources=["status"], default="unknown", output="status_filled"
+                )
+            ),
             _transformation(split=types.SimpleNamespace(field="order_id", delimiter="-", output="parts")),
             _transformation(explode=types.SimpleNamespace(field="parts", output="part")),
-            _transformation(map_values=types.SimpleNamespace(field="part", mapping={"A": "active"}, default="other", output="mapped")),
+            _transformation(
+                map_values=types.SimpleNamespace(
+                    field="part", mapping={"A": "active"}, default="other", output="mapped"
+                )
+            ),
             _transformation(filter=types.SimpleNamespace(sql="mapped IS NOT NULL")),
             _transformation(deduplicate=types.SimpleNamespace(on=["mapped"], sort_by=None)),
         ],
@@ -698,7 +714,16 @@ def test_spark_helper_post_transformations_cover_sql_lookup_and_filter(monkeypat
             _transformation(derive=types.SimpleNamespace(field="derived")),
             _transformation(bucket=types.SimpleNamespace(field="bucketed")),
             _transformation(date_diff=types.SimpleNamespace(field="days_open")),
-            _transformation(lookup=types.SimpleNamespace(field="status_name", reference="status_ref", on="status_id", key="id", value="name", default_value="unknown")),
+            _transformation(
+                lookup=types.SimpleNamespace(
+                    field="status_name",
+                    reference="status_ref",
+                    on="status_id",
+                    key="id",
+                    value="name",
+                    default_value="unknown",
+                )
+            ),
             _transformation(join=types.SimpleNamespace(reference="customer_ref")),
             _transformation(filter=types.SimpleNamespace(sql="status_name IS NOT NULL")),
         ],
@@ -709,9 +734,15 @@ def test_spark_helper_post_transformations_cover_sql_lookup_and_filter(monkeypat
     adapter._build_rollup_sql = lambda cfg, source_table="source": "SELECT id, SUM(amount) AS total_amount FROM source"
     adapter._build_pivot_sql = lambda cfg, source_table="source": "SELECT id, status FROM source"
     adapter._build_unpivot_sql = lambda cfg, source_table="source": "SELECT id, metric, value FROM source"
-    adapter._build_bucket_sql = lambda cfg, source_table="temp_src": "SELECT *, (CASE WHEN amount > 10 THEN 'high' ELSE 'low' END) AS bucketed FROM temp_src"
-    adapter._build_date_diff_sql = lambda cfg, source_table="temp_src": "SELECT *, (DATEDIFF(closed_at, opened_at)) AS days_open FROM temp_src"
-    adapter._build_join_sql = lambda join_cfg, broadcast=False, source_table="source": "SELECT source.*, ref.segment AS segment FROM source LEFT JOIN customer_ref ref ON source.customer_id = ref.id"
+    adapter._build_bucket_sql = lambda cfg, source_table="temp_src": (
+        "SELECT *, (CASE WHEN amount > 10 THEN 'high' ELSE 'low' END) AS bucketed FROM temp_src"
+    )
+    adapter._build_date_diff_sql = lambda cfg, source_table="temp_src": (
+        "SELECT *, (DATEDIFF(closed_at, opened_at)) AS days_open FROM temp_src"
+    )
+    adapter._build_join_sql = lambda join_cfg, broadcast=False, source_table="source": (
+        "SELECT source.*, ref.segment AS segment FROM source LEFT JOIN customer_ref ref ON source.customer_id = ref.id"
+    )
     adapter._should_broadcast = lambda reference: True
 
     spark = FakeSparkSessionExec()

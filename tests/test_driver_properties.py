@@ -11,6 +11,7 @@ Uses Hypothesis to fuzz-test:
     • format_prometheus — well-formedness
     • build_backfill_windows — window count and boundary invariants
 """
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -42,9 +43,7 @@ valid_layer_lists = st.lists(
     st.sampled_from(VALID_LAYERS),
     min_size=1,
     max_size=4,
-).filter(
-    lambda layers: layers == sorted(layers, key=VALID_LAYERS.index) and len(set(layers)) == len(layers)
-)
+).filter(lambda layers: layers == sorted(layers, key=VALID_LAYERS.index) and len(set(layers)) == len(layers))
 
 # Entity names: non-empty alphanumeric strings (no commas or whitespace)
 entity_names = st.text(
@@ -70,6 +69,7 @@ metric_values = st.one_of(st.integers(min_value=0, max_value=10_000), st.none())
 
 
 # ── parse_layers ─────────────────────────────────────────────────────────────
+
 
 class TestParseLayers:
     """Property-based tests for parse_layers."""
@@ -116,6 +116,7 @@ class TestParseLayers:
 
 # ── parse_entities ───────────────────────────────────────────────────────────
 
+
 class TestParseEntities:
     """Property tests for parse_entities."""
 
@@ -137,6 +138,7 @@ class TestParseEntities:
 
 
 # ── parse_metrics_tags ───────────────────────────────────────────────────────
+
 
 class TestParseMetricsTags:
     """Property tests for parse_metrics_tags."""
@@ -168,6 +170,7 @@ class TestParseMetricsTags:
 
 
 # ── parse_overrides ──────────────────────────────────────────────────────────
+
 
 class TestParseOverrides:
     """Property tests for parse_overrides."""
@@ -216,6 +219,7 @@ class TestParseOverrides:
 
 # ── parse_window ─────────────────────────────────────────────────────────────
 
+
 class TestParseWindow:
     """Property tests for parse_window modes."""
 
@@ -237,7 +241,12 @@ class TestParseWindow:
     def test_range_mode(self) -> None:
         """Window='range' with valid dates produces correct boundaries."""
         window, reprocess = parse_window(
-            "range", "2026-01-01", "2026-01-05", None, None, None,
+            "range",
+            "2026-01-01",
+            "2026-01-05",
+            None,
+            None,
+            None,
         )
         assert window.label == "range"
         assert window.start == datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -253,7 +262,12 @@ class TestParseWindow:
     def test_reprocess_date(self) -> None:
         """A single reprocess date produces a one-day reprocess window."""
         window, reprocess = parse_window(
-            "last_success", None, None, "2026-03-01", None, None,
+            "last_success",
+            None,
+            None,
+            "2026-03-01",
+            None,
+            None,
         )
         assert window.label == "reprocess"
         assert reprocess is True
@@ -262,7 +276,12 @@ class TestParseWindow:
     def test_reprocess_range(self) -> None:
         """A reprocess range produces the correct boundaries."""
         window, reprocess = parse_window(
-            "last_success", None, None, None, "2026-03-01", "2026-03-05",
+            "last_success",
+            None,
+            None,
+            None,
+            "2026-03-01",
+            "2026-03-05",
         )
         assert window.label == "reprocess"
         assert reprocess is True
@@ -278,6 +297,7 @@ class TestParseWindow:
 
 # ── flatten_summary ──────────────────────────────────────────────────────────
 
+
 class TestFlattenSummaryProperties:
     """Property-based tests for flatten_summary."""
 
@@ -289,7 +309,12 @@ class TestFlattenSummaryProperties:
         failed=st.integers(min_value=0, max_value=100),
     )
     def test_output_always_has_required_keys(
-        self, run_id: str, engine: str, total: int, success: int, failed: int,
+        self,
+        run_id: str,
+        engine: str,
+        total: int,
+        success: int,
+        failed: int,
     ) -> None:
         """flatten_summary output always contains the expected keys."""
         summary = {
@@ -311,10 +336,20 @@ class TestFlattenSummaryProperties:
         }
         record = flatten_summary(summary)
         expected_keys = {
-            "run_id", "started_at", "finished_at", "duration_seconds",
-            "engine", "total_contracts", "successful", "failed",
-            "skipped_missing_upstream", "skipped_no_sources", "full_loads",
-            "full_loads_due_to_missing_logs", "missing_upstreams", "summary_json",
+            "run_id",
+            "started_at",
+            "finished_at",
+            "duration_seconds",
+            "engine",
+            "total_contracts",
+            "successful",
+            "failed",
+            "skipped_missing_upstream",
+            "skipped_no_sources",
+            "full_loads",
+            "full_loads_due_to_missing_logs",
+            "missing_upstreams",
+            "summary_json",
         }
         assert set(record.keys()) == expected_keys
 
@@ -335,6 +370,7 @@ class TestFlattenSummaryProperties:
 
 
 # ── format_prometheus ────────────────────────────────────────────────────────
+
 
 class TestFormatPrometheusProperties:
     """Property-based tests for Prometheus exposition format."""
@@ -377,6 +413,7 @@ class TestFormatPrometheusProperties:
 
 
 # ── build_backfill_windows ───────────────────────────────────────────────────
+
 
 class TestBackfillWindowProperties:
     """Property-based tests for backfill window generation."""
