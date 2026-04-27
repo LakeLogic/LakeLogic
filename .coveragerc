@@ -3,10 +3,8 @@ omit =
     # Exclude experimental adapters and wrappers
     lakelogic/adapters/*
     
-    # Exclude CLI and tooling scripts that are tested manually
-    lakelogic/cli/*
-    lakelogic/cli.py
+    # Exclude tooling scripts
     lakelogic/tools/*
     
-    # Exclude AI module (if it relies heavily on external LLM calls)
+    # Exclude AI module
     lakelogic/ai/*
