@@ -22,6 +22,9 @@ class SLOFreshnessConfig(BaseModel):
     max_delay_minutes: int
     check_column: Union[str, List[str]] = "_lakelogic_loaded_at"
     max_source_delay_minutes: Optional[int] = None  # source-time freshness
+    source_check_columns: List[str] = Field(
+        default_factory=list
+    )  # candidate source timestamp columns (first match wins, skip if none found)
     exclude_tables: List[str] = Field(default_factory=list)
 
 
@@ -143,6 +146,21 @@ class EnvironmentConfig(BaseModel):
     storage_account: Optional[str] = None
     region: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_all_env_vars(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+
+        resolved = {}
+        for k, v in values.items():
+            if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
+                env_var = v[2:-1]
+                resolved[k] = os.environ.get(env_var, "")
+            else:
+                resolved[k] = v
+        return resolved
+
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -180,6 +198,95 @@ def _resolve_placeholders(obj: Any, vars_map: Dict[str, str]) -> Any:
     return obj
 
 
+_VALID_EMIT_ON = {"success", "partial", "failed"}
+_EMIT_ON_ALIASES = {"succeeded": "success", "succeed": "success"}
+
+
+def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yaml") -> Dict[str, Any]:
+    """
+    Validate and normalise the ``observatory`` configuration block.
+
+    Called at registry load time so that misconfigurations surface early
+    (before the first pipeline run completes) rather than silently preventing
+    telemetry pushes.
+
+    Returns the (potentially normalised) config dict.
+    """
+    if not cfg or not isinstance(cfg, dict):
+        return cfg
+
+    enabled = cfg.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        logger.warning(
+            f"⚠ Observatory ({source}): 'enabled' should be true/false, "
+            f"got {type(enabled).__name__} '{enabled}'. Treating as {bool(enabled)}."
+        )
+        cfg["enabled"] = bool(enabled)
+
+    if not cfg.get("enabled"):
+        return cfg  # remaining fields don't matter when disabled
+
+    # -- endpoint ---------------------------------------------------------
+    endpoint = cfg.get("endpoint")
+    if not endpoint or not isinstance(endpoint, str):
+        logger.warning(
+            f"⚠ Observatory ({source}): 'enabled: true' but no valid 'endpoint' URL. Telemetry will not be pushed."
+        )
+    elif not endpoint.startswith(("http://", "https://")):
+        logger.warning(f"⚠ Observatory ({source}): endpoint '{endpoint}' does not look like a valid HTTP(S) URL.")
+
+    # -- api_key ----------------------------------------------------------
+    api_key = cfg.get("api_key")
+    if not api_key:
+        logger.warning(
+            f"⚠ Observatory ({source}): no 'api_key' configured. "
+            f"The ingest endpoint will likely reject unauthenticated requests."
+        )
+
+    # -- emit_on ----------------------------------------------------------
+    emit_on = cfg.get("emit_on")
+    if emit_on is not None:
+        if not isinstance(emit_on, list):
+            logger.warning(
+                f"⚠ Observatory ({source}): 'emit_on' should be a list, got {type(emit_on).__name__}. Wrapping in list."
+            )
+            emit_on = [emit_on] if isinstance(emit_on, str) else list(emit_on)
+
+        normalised = []
+        for val in emit_on:
+            val_lower = str(val).lower()
+            mapped = _EMIT_ON_ALIASES.get(val_lower, val_lower)
+            if mapped not in _VALID_EMIT_ON:
+                logger.warning(
+                    f"⚠ Observatory ({source}): emit_on value '{val}' is not recognised. "
+                    f"Valid values: {sorted(_VALID_EMIT_ON)}. This status will never match."
+                )
+            normalised.append(mapped)
+        cfg["emit_on"] = normalised
+
+    # -- environments -----------------------------------------------------
+    envs = cfg.get("environments")
+    if envs is not None and not isinstance(envs, list):
+        logger.warning(f"⚠ Observatory ({source}): 'environments' should be a list, got {type(envs).__name__}.")
+
+    # -- include_quarantine_sample ----------------------------------------
+    iqs = cfg.get("include_quarantine_sample")
+    if iqs is not None and not isinstance(iqs, bool):
+        logger.warning(
+            f"⚠ Observatory ({source}): 'include_quarantine_sample' should be true/false, "
+            f"got {type(iqs).__name__} '{iqs}'."
+        )
+        cfg["include_quarantine_sample"] = bool(iqs)
+
+    logger.info(
+        f"✅ Observatory ({source}): config validated — "
+        f"endpoint={cfg.get('endpoint', 'MISSING')}, "
+        f"emit_on={cfg.get('emit_on', ['success', 'partial', 'failed'])}, "
+        f"environments={cfg.get('environments', [])}"
+    )
+    return cfg
+
+
 class DomainRegistry(BaseModel):
     """
     Typed representation of a Data Mesh Domain Registry (e.g., _registry.yaml).
@@ -208,6 +315,7 @@ class DomainRegistry(BaseModel):
     notifications: List[Dict[str, Any]] = Field(default_factory=list)  # system-wide notification channels
     server: Dict[str, Any] = Field(default_factory=dict)  # per-layer server config
     cost: Dict[str, Any] = Field(default_factory=dict)  # cost observability config
+    observatory: Dict[str, Any] = Field(default_factory=dict)  # observatory telemetry config
     # Cross-domain lineage: upstream tables not managed by this registry
     external_sources: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -271,6 +379,7 @@ class DomainRegistry(BaseModel):
             "materialization",
             "server",
             "cost",
+            "observatory",
         ]
         # Scalar keys: inherit only if the system doesn't define them
         _DOMAIN_SCALAR_KEYS = [
@@ -356,6 +465,10 @@ class DomainRegistry(BaseModel):
                 if "cost" in raw and isinstance(raw["cost"], dict):
                     raw["cost"]["currency"] = domain_currency
 
+        # ── Validate observatory config early ──────────────────────────
+        if raw.get("observatory") and isinstance(raw["observatory"], dict):
+            raw["observatory"] = _validate_observatory_config(raw["observatory"], source=str(yaml_path.name))
+
         # Parse into typed model
         registry = cls.model_validate(raw)
         registry.storage_mode = storage_mode
@@ -399,7 +512,7 @@ class DomainRegistry(BaseModel):
         for field, val in registry.storage.model_dump().items():
             if val is not None:
                 _full_vars[field] = val
-        for section_name in ("quarantine", "metadata", "lineage", "compliance"):
+        for section_name in ("quarantine", "metadata", "lineage", "compliance", "observatory"):
             section = getattr(registry, section_name, None)
             if section and isinstance(section, dict):
                 setattr(registry, section_name, _resolve_placeholders(section, _full_vars))
@@ -506,6 +619,16 @@ class DomainRegistry(BaseModel):
                             c_dict["metadata"].setdefault(k, v)
                     # Resolve any remaining placeholders in metadata values
                     c_dict["metadata"] = _resolve_placeholders(c_dict["metadata"], storage_vars)
+
+                # Inject system-level lineage and quarantine defaults
+                for section in ("lineage", "quarantine", "observatory"):
+                    sys_cfg = getattr(registry, section, None)
+                    if sys_cfg:
+                        if not c_dict.get(section):
+                            c_dict[section] = dict(sys_cfg)
+                        else:
+                            for k, v in sys_cfg.items():
+                                c_dict[section].setdefault(k, v)
 
                 # Inject system-level materialization defaults
                 if registry.materialization and c.layer in registry.materialization:

@@ -2,7 +2,7 @@
 Run-log persistence for LakeLogic.
 
 Handles writing run reports to JSON files and multi-backend table targets
-(Spark, DuckDB, SQLite), as well as reading watermarks for incremental loads.
+(Spark, DuckDB, SQLite, Delta, Iceberg), as well as reading watermarks for incremental loads.
 
 Supports cloud storage paths (ADLS, S3, GCS) via fsspec for JSON run logs.
 
@@ -10,6 +10,7 @@ Extracted from materialization.py to keep concerns focused.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -283,6 +284,8 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "counts_total": counts.get("total"),
         "counts_good": counts.get("good"),
         "counts_quarantined": counts.get("quarantined"),
+        "counts_aggregated": _int(counts.get("aggregated_rows")),
+        "counts_dropped": _int(counts.get("pre_transform_dropped")),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
         # ── Cost observability ────────────────────────────────────────
         "estimated_cost": _num(report.get("estimated_cost")),
@@ -829,40 +832,135 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 except Exception:
                     return False
 
-            if check_is_deltatable(table_name, storage_options=storage_options):
-                if merge_on_run_id:
-                    dt = DeltaTable(table_name, storage_options=storage_options)
-                    (
-                        dt.merge(
-                            source=arrow_table,
-                            predicate="target.run_id = source.run_id",
-                            source_alias="source",
-                            target_alias="target",
+            import time
+            import random
+
+            max_log_retries = 5
+            last_exc = None
+
+            for attempt in range(max_log_retries):
+                try:
+                    if check_is_deltatable(table_name, storage_options=storage_options):
+                        if merge_on_run_id:
+                            dt = DeltaTable(table_name, storage_options=storage_options)
+                            (
+                                dt.merge(
+                                    source=arrow_table,
+                                    predicate="target.run_id = source.run_id",
+                                    source_alias="source",
+                                    target_alias="target",
+                                )
+                                .when_matched_update_all()
+                                .when_not_matched_insert_all()
+                                .execute()
+                            )
+                        else:
+                            _safe_write_deltalake(
+                                table_name,
+                                arrow_table,
+                                mode="append",
+                                storage_options=storage_options,
+                                schema_mode="merge",
+                            )
+                    else:
+                        _safe_write_deltalake(
+                            table_name,
+                            arrow_table,
+                            mode="overwrite",
+                            storage_options=storage_options,
                         )
-                        .when_matched_update_all()
-                        .when_not_matched_insert_all()
-                        .execute()
-                    )
-                else:
-                    _safe_write_deltalake(
-                        table_name,
-                        arrow_table,
-                        mode="append",
-                        storage_options=storage_options,
-                        schema_mode="merge",
-                    )
-            else:
-                _safe_write_deltalake(
-                    table_name,
-                    arrow_table,
-                    mode="overwrite",
-                    storage_options=storage_options,
-                )
-            logger.info(f"Wrote run log to Delta table {table_name}")
-            return table_name
-        except Exception as exc:
-            logger.warning(f"Failed to write run log to Delta table {table_name}: {exc}")
+                    logger.info(f"Wrote run log to Delta table {table_name}")
+                    return table_name
+                except Exception as exc:
+                    last_exc = exc
+                    time.sleep((2**attempt) * 0.1 + random.uniform(0.05, 0.2))
+
+            logger.warning(f"Failed to write run log to Delta table {table_name}: {last_exc}")
             return None
+        except Exception as outer_exc:
+            logger.warning(f"Failed to write run log to Delta table {table_name}: {outer_exc}")
+            return None
+
+    if backend == "iceberg":
+        try:
+            from pyiceberg.catalog import load_catalog
+            import pyarrow as pa
+        except ImportError as exc:
+            logger.warning(
+                f"Run log table backend 'iceberg' requires 'pyiceberg' and 'pyarrow'. "
+                f"Install with: pip install pyiceberg pyarrow. Error: {exc}"
+            )
+            return None
+
+        catalog_name = metadata.get("iceberg_catalog_name") or os.getenv("ICEBERG_CATALOG_NAME", "default")
+        catalog_props = {}
+        catalog_uri = metadata.get("iceberg_catalog_uri") or os.getenv("ICEBERG_CATALOG_URI")
+        if catalog_uri:
+            catalog_props["uri"] = catalog_uri
+        catalog_warehouse = metadata.get("iceberg_catalog_warehouse") or os.getenv("ICEBERG_CATALOG_WAREHOUSE")
+        if catalog_warehouse:
+            catalog_props["warehouse"] = catalog_warehouse
+
+        catalog = load_catalog(catalog_name, **catalog_props)
+
+        # Reuse the Arrow schema from the delta backend
+        schema = pa.schema(
+            [
+                ("pipeline_run_id", pa.string()),
+                ("run_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("start_time", pa.string()),
+                ("end_time", pa.string()),
+                ("run_duration_seconds", pa.float64()),
+                ("engine", pa.string()),
+                ("contract", pa.string()),
+                ("stage", pa.string()),
+                ("dataset", pa.string()),
+                ("domain", pa.string()),
+                ("system", pa.string()),
+                ("environment", pa.string()),
+                ("data_layer", pa.string()),
+                ("status", pa.string()),
+                ("error_message", pa.string()),
+                ("source_path", pa.string()),
+                ("counts_source", pa.int64()),
+                ("counts_total", pa.int64()),
+                ("counts_good", pa.int64()),
+                ("counts_quarantined", pa.int64()),
+                ("quarantine_ratio", pa.float64()),
+                ("estimated_cost", pa.float64()),
+                ("cost_currency", pa.string()),
+                ("cost_confidence", pa.string()),
+                ("max_source_mtime", pa.float64()),
+                ("max_watermark_value", pa.string()),
+                ("dlt_state_json", pa.string()),
+                ("slo_json", pa.string()),
+                ("report_json", pa.string()),
+            ]
+        )
+
+        arrays = []
+        for field in schema:
+            val = record.get(field.name)
+            arrays.append(pa.array([val], type=field.type))
+        arrow_table = pa.table(arrays, schema=schema)
+
+        # Parse namespace and table
+        parts = table_name.split(".")
+        if len(parts) >= 2:
+            full_id = table_name
+        else:
+            full_id = f"default.{table_name}"
+
+        try:
+            iceberg_table = catalog.load_table(full_id)
+            iceberg_table.append(arrow_table)
+        except Exception:
+            iceberg_table = catalog.create_table(full_id, schema=arrow_table.schema)
+            iceberg_table.append(arrow_table)
+
+        logger.info(f"Wrote run log to Iceberg table {full_id}")
+        return full_id
 
     logger.warning(f"Unsupported run_log_backend: {backend}")
     return None
@@ -951,6 +1049,122 @@ def write_run_log(
 
     if _write_table:
         _write_run_log_table(report, contract, engine_name=engine_name)
+
+    # ── Observatory Telemetry Push ────────────────────────────────────────────────
+    observatory_cfg = getattr(contract, "observatory", None)
+    if not observatory_cfg and hasattr(contract, "model_dump"):
+        _dumped = contract.model_dump()
+        observatory_cfg = _dumped.get("observatory")
+        if not observatory_cfg:
+            # Check model_extra for extra="allow" fields
+            _extras = getattr(contract, "model_extra", None) or getattr(contract, "__fields_extra__", None) or {}
+            observatory_cfg = _extras.get("observatory") if isinstance(_extras, dict) else None
+
+    # Also check contract dict source (registry injects into contract_dict before parsing)
+    if not observatory_cfg:
+        _raw_dict = getattr(contract, "__dict__", {})
+        observatory_cfg = _raw_dict.get("observatory")
+
+    logger.info(f"📡 [1/5] Observatory config resolved: {observatory_cfg is not None}")
+
+    if observatory_cfg and isinstance(observatory_cfg, dict) and observatory_cfg.get("enabled"):
+        endpoint = observatory_cfg.get("endpoint")
+        emit_on = observatory_cfg.get("emit_on", ["success", "partial", "failed"])
+        target_envs = observatory_cfg.get("environments", [])
+
+        current_env = report.get("environment", "unknown")
+        status = str(report.get("status", "unknown")).lower()
+        # Normalise engine status aliases → emit_on values
+        _status_aliases = {"succeeded": "success", "succeed": "success"}
+        status = _status_aliases.get(status, status)
+
+        # Check environment and status triggers
+        is_target_env = not target_envs or current_env in target_envs
+        is_target_status = status in [e.lower() for e in emit_on]
+
+        logger.info(
+            f"📡 [2/5] Filters: env={current_env} in {target_envs} → {is_target_env} | "
+            f"status={status} in {emit_on} → {is_target_status}"
+        )
+
+        if endpoint and is_target_env and is_target_status:
+            try:
+                import requests as _requests
+
+                api_key = observatory_cfg.get("api_key")
+                headers = {"Content-Type": "application/json"}
+                if api_key:
+                    headers["X-API-Key"] = api_key
+
+                # ── Map engine report → RunLogIngest schema ──────────────
+                _counts = report.get("counts") or {}
+                _counts_good = _counts.get("good") or report.get("counts_good", 0) or 0
+                _counts_source = _counts.get("source") or report.get("counts_source", 0) or 0
+                _counts_quarantined = _counts.get("quarantined") or report.get("counts_quarantined", 0) or 0
+                _counts_total = _counts.get("total") or report.get("counts_total", 0) or 0
+
+                _quality = float(_counts_good) / float(_counts_source) if _counts_source > 0 else 1.0
+
+                # Build quarantined_rows list from report if configured
+                _quarantined_rows = None
+                include_quarantine = observatory_cfg.get("include_quarantine_sample", False)
+                if include_quarantine:
+                    _raw_failures = report.get("row_rule_failures") or []
+                    _quarantined_rows = _raw_failures[:50] if _raw_failures else None
+
+                payload = {
+                    "contract_name": report.get("contract") or report.get("dataset"),
+                    "status": status,
+                    "engine": report.get("engine"),
+                    "tier": report.get("data_layer"),
+                    "started_at": report.get("start_time"),
+                    "finished_at": report.get("end_time"),
+                    "duration_seconds": report.get("run_duration_seconds"),
+                    "rows_input": _counts_source,
+                    "rows_valid": _counts_good,
+                    "rows_quarantined": _counts_quarantined,
+                    "rows_output": _counts_total,
+                    "quality_score": round(_quality, 6),
+                    "error_message": report.get("error_message"),
+                    "quarantined_rows": _quarantined_rows,
+                    "metadata": {
+                        "domain": report.get("domain"),
+                        "system": report.get("system"),
+                        "environment": report.get("environment"),
+                        "source_path": report.get("source_path"),
+                        "pipeline_run_id": report.get("pipeline_run_id"),
+                        "run_id": report.get("run_id"),
+                        "slo_json": report.get("slo_json"),
+                    },
+                    # Cost observability
+                    "estimated_cost": report.get("estimated_cost"),
+                    "cost_currency": report.get("cost_currency"),
+                    "cost_confidence": report.get("cost_confidence"),
+                }
+
+                logger.info(f"📡 [3/5] Posting to {endpoint} (contract={payload['contract_name']})")
+
+                # Fire and forget (short timeout to prevent blocking the pipeline)
+                resp = _requests.post(endpoint, json=payload, headers=headers, timeout=3.0)
+                logger.info(f"📡 [4/5] Response: HTTP {resp.status_code}")
+                if resp.status_code < 300:
+                    logger.info(f"📡 [5/5] ✅ Ingested: {resp.text[:200]}")
+                else:
+                    logger.warning(f"📡 [5/5] ❌ Observatory returned {resp.status_code}: {resp.text[:500]}")
+            except Exception as exc:
+                logger.warning(f"📡 [ERR] Failed to push telemetry to observatory {endpoint}: {exc}")
+        else:
+            logger.info(
+                f"📡 [SKIP] Push skipped: endpoint={bool(endpoint)}, "
+                f"env_match={is_target_env}, status_match={is_target_status}"
+            )
+    else:
+        logger.info(
+            f"📡 [SKIP] Observatory disabled or not configured: "
+            f"cfg={observatory_cfg is not None}, "
+            f"enabled={observatory_cfg.get('enabled') if isinstance(observatory_cfg, dict) else 'N/A'}"
+        )
+
     return str(log_path) if log_path else None
 
 

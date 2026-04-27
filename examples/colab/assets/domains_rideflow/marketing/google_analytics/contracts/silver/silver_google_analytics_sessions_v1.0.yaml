@@ -1,0 +1,53 @@
+version: 1.0.0
+info:
+  title: "Silver \u2014 Google Analytics Sessions"
+  table_name: '{silver_layer}_google_analytics_sessions'
+  description: Cleaned, typed, and deduplicated data.
+  target_layer: silver
+  domain: marketing
+  system: google_analytics
+model:
+  fields:
+  - name: session_id
+    type: string
+    required: true
+  - name: user_pseudo_id
+    type: string
+    required: true
+  - name: user_id
+    type: string
+    pii: true
+    masking: hash
+  - name: ip_address
+    type: string
+    pii: true
+    masking: redact
+  - name: session_start
+    type: string
+  - name: session_duration_seconds
+    type: integer
+  - name: page_views
+    type: string
+  - name: traffic_source
+    type: string
+  - name: traffic_medium
+    type: string
+  - name: traffic_campaign
+    type: string
+  - name: device_category
+    type: string
+  - name: geo_country
+    type: string
+  - name: landing_page
+    type: string
+quality:
+  row_rules: []
+  dataset_rules:
+  - unique: session_id
+transformations:
+- deduplicate:
+    by:
+    - session_id
+source:
+  type: delta
+  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_sessions'

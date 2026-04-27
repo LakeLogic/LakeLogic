@@ -185,3 +185,133 @@ def test_quality_rule_category_normalization_warns(caplog):
         logger.remove(handler_id)
 
 
+def test_contract_interceptors_and_load_mode_validation(monkeypatch):
+    odcs_contract = DataContract(
+        **{
+            "kind": "DataContract",
+            "apiVersion": "v2",
+            "dataset": "orders",
+            "schema": [{"name": "id", "type": "int", "required": True}],
+            "customProperties": {"lakelogic": {"metadata": {"domain": "commerce"}}},
+        }
+    )
+    assert odcs_contract.version == "v2"
+    assert odcs_contract.info.title == "orders"
+    assert odcs_contract.model.fields[0].name == "id"
+    assert odcs_contract.metadata["domain"] == "commerce"
+
+    soft_delete_contract = DataContract(
+        version="1.0",
+        soft_deletes={"enabled": True, "flag_field": "is_deleted"},
+    )
+    assert soft_delete_contract.materialization.soft_delete_column == "is_deleted"
+    assert soft_delete_contract.materialization.soft_delete_time_column == "_lakelogic_deleted_at"
+    assert soft_delete_contract.materialization.soft_delete_reason_column == "_lakelogic_delete_reason"
+
+    migrated_contract = DataContract(
+        version="1.0",
+        server={"type": "local", "path": "data/orders", "schema_evolution": "strict", "allow_schema_drift": False},
+    )
+    assert migrated_contract.server.schema_policy.evolution == "strict"
+    assert migrated_contract.server.schema_policy.unknown_fields == "quarantine"
+
+    with pytest.raises(ValueError, match="no run-log backend"):
+        DataContract(version="1.0", source={"type": "file", "load_mode": "incremental"}, metadata={})
+
+    monkeypatch.setenv("LAKELOGIC_SKIP_INCREMENTAL_CHECK", "1")
+    skipped_incremental = DataContract(version="1.0", source={"type": "file", "load_mode": "incremental"}, metadata={})
+    assert skipped_incremental.source.load_mode == "incremental"
+    monkeypatch.delenv("LAKELOGIC_SKIP_INCREMENTAL_CHECK", raising=False)
+
+    warnings = []
+    monkeypatch.setattr("lakelogic.core.models.logger.warning", lambda message: warnings.append(message))
+    incremental_warn = DataContract(
+        version="1.0",
+        source={"type": "file", "load_mode": "incremental", "watermark_strategy": "lookback"},
+        metadata={"run_log_path": "logs/run_log.json"},
+    )
+    assert incremental_warn.source.load_mode == "incremental"
+    assert any("lookback duration is not set" in message for message in warnings)
+
+    with pytest.raises(ValueError, match="cdc_op_field nor cdc_timestamp_field"):
+        DataContract(version="1.0", source={"type": "file", "load_mode": "cdc"})
+
+
+def test_contract_from_yaml_reset_and_effective_server(monkeypatch, tmp_path):
+    contract_path = tmp_path / "contract.yaml"
+    contract_path.write_text(
+        "\n".join(
+            [
+                'version: "1.0"',
+                "info:",
+                '  title: "Orders"',
+                '  version: "1.0"',
+                "server:",
+                '  type: "local"',
+                '  path: "prod/orders"',
+                '  format: "parquet"',
+                "environments:",
+                "  dev:",
+                '    path: "dev/orders"',
+                '    format: "csv"',
+                "materialization:",
+                '  target_path: "outputs/good.parquet"',
+                '  location: "external/location"',
+                "quarantine:",
+                '  target: "quarantine/bad.parquet"',
+                "metadata:",
+                '  run_log_dir: "logs/runs"',
+                '  run_log_path: "logs/run_log.json"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    contract = DataContract.from_yaml(contract_path)
+    assert str(contract._base_path) == str(tmp_path)
+    assert str(contract._contract_path) == str(contract_path)
+
+    monkeypatch.setenv("LAKELOGIC_ENV", "dev")
+    effective = contract.effective_server()
+    assert effective.path == "dev/orders"
+    assert effective.format == "csv"
+    monkeypatch.delenv("LAKELOGIC_ENV", raising=False)
+
+    minimal_override = DataContract(version="1.0", environments={"qa": {"path": "qa/orders"}})
+    assert minimal_override.effective_server("qa").path == "qa/orders"
+    assert minimal_override.effective_server("qa").format == "parquet"
+
+    output_file = tmp_path / "outputs" / "good.parquet"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text("good", encoding="utf-8")
+    external_file = tmp_path / "external" / "location"
+    external_file.parent.mkdir(parents=True, exist_ok=True)
+    external_file.write_text("external", encoding="utf-8")
+    quarantine_file = tmp_path / "quarantine" / "bad.parquet"
+    quarantine_file.parent.mkdir(parents=True, exist_ok=True)
+    quarantine_file.write_text("bad", encoding="utf-8")
+    watermark_dir = tmp_path / ".lakelogic"
+    watermark_dir.mkdir(parents=True, exist_ok=True)
+    (watermark_dir / "watermark_orders.json").write_text("{}", encoding="utf-8")
+    run_log_dir = tmp_path / "logs" / "runs"
+    run_log_dir.mkdir(parents=True, exist_ok=True)
+    (run_log_dir / "run-1.json").write_text("{}", encoding="utf-8")
+    run_log_path = tmp_path / "logs" / "run_log.json"
+    run_log_path.write_text("{}", encoding="utf-8")
+
+    dry_run = contract.reset(dry_run=True)
+    assert dry_run["materialization"]["exists"] is True
+    assert dry_run["quarantine"]["exists"] is True
+    assert dry_run["watermark"]["dry_run"] is True
+
+    reset_report = contract.reset()
+    assert reset_report["materialization"]["deleted"] is True
+    assert reset_report["materialization_location"]["deleted"] is True
+    assert reset_report["quarantine"]["deleted"] is True
+    assert reset_report["watermark"]["deleted"]
+    assert all(item["deleted"] is True for item in reset_report["run_log"])
+    assert not output_file.exists()
+    assert not quarantine_file.exists()
+    assert not run_log_path.exists()
+
+

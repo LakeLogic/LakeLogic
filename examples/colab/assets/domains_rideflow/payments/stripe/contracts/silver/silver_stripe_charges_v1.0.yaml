@@ -1,0 +1,53 @@
+version: 1.0.0
+info:
+  title: "Silver \u2014 Stripe Charges"
+  table_name: '{silver_layer}_stripe_charges'
+  description: Cleaned, typed, and deduplicated data.
+  target_layer: silver
+  domain: payments
+  system: stripe
+model:
+  fields:
+  - name: charge_id
+    type: string
+    required: true
+  - name: rider_id
+    type: string
+    required: true
+  - name: trip_id
+    type: string
+  - name: amount
+    type: float
+  - name: currency
+    type: string
+  - name: status
+    type: string
+  - name: payment_method_type
+    type: string
+  - name: card_last_four
+    type: string
+    pii: true
+    masking: hash
+  - name: billing_email
+    type: string
+    pii: true
+    masking: hash
+  - name: billing_address
+    type: string
+    pii: true
+    masking: redact
+  - name: created_at
+    type: timestamp
+  - name: metadata_json
+    type: string
+quality:
+  row_rules: []
+  dataset_rules:
+  - unique: charge_id
+transformations:
+- deduplicate:
+    by:
+    - charge_id
+source:
+  type: delta
+  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_charges'

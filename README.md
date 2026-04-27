@@ -5,7 +5,7 @@
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LakeLogic.github.io/LakeLogic/)
 [![PyPI](https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white)](https://pypi.org/project/lakelogic/)
 [![CI](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?logo=codecov)](https://github.com/LakeLogic/LakeLogic)
+[![codecov](https://codecov.io/gh/LakeLogic/LakeLogic/graph/badge.svg)](https://codecov.io/gh/LakeLogic/LakeLogic)
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
@@ -60,7 +60,8 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 ### Compliance & Governance
 
 - **GDPR & HIPAA Compliance** — Contract-driven `forget_subjects()` with nullify, hash, or redact strategies and immutable audit trail
-- **Automatic Lineage** — Every row stamped with Run IDs and source paths — traceable from landing zone to Gold layer
+- **Zero-Retention Architecture** — Built-in `zero_retention_days` enforcement for transient data layers, automatically purging micro-batches after successful downstream processing
+- **Automated PII Handling** — Declarative encryption and hashing (`pii: true`, `masking: "encrypt"`) applied at the Bronze layer before data even reaches rest
 - **Pipeline Cost Intelligence** — Per-entity compute cost attribution with domain-level budget governance, autoscaling-aware estimation, and Databricks Unity Catalog billing integration
 
 > **[✏️ Try it out in Google Colab: Compliance & Governance](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb)**
@@ -68,6 +69,7 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 ### Engine & Scale
 
 - **Engine Agnostic** — Write once, run on [Spark](https://spark.apache.org/), [Polars](https://pola.rs/), or [DuckDB](https://duckdb.org/) — same contract, zero code changes
+- **Multi-Format Materialization** — Natively output validated data to **Apache Iceberg** or **Delta Lake** open-table formats without requiring pipeline rewrites
 - **Dimensional Modeling** — Native SCD Type 2 (slowly changing dimensions), merge/upsert (SCD1), append-only fact tables, periodic snapshot overwrites, and partition-aware writes — all declared in YAML, no manual `MERGE INTO` SQL required
 - **Incremental-First** — Built-in watermarking, CDC, and file-mtime tracking
 - **Parallel Processing** — Concurrent multi-contract execution with data-layer-aware orchestration and topological dependency ordering
@@ -115,7 +117,7 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 
 ## What a Contract Looks Like
 
-One YAML file replaces hundreds of lines of validation code:
+One YAML file replaces hundreds of lines of ingestion, validation, and materialization code:
 
 ```yaml
 version: "1.0"
@@ -151,7 +153,7 @@ quality:
 materialization:
   strategy: merge
   merge_keys: [customer_id]
-  format: delta
+  format: iceberg  # natively supports iceberg, delta, parquet, csv
 ```
 
 Same contract, **any engine** — swap `engine="polars"` for `"spark"` or `"duckdb"`. Zero code changes.

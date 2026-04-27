@@ -1,0 +1,61 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — RideFlow Driver Telemetry"
+  table_name: "{bronze_layer}_{system}_driver_telemetry"
+  description: >
+    Raw GPS telemetry pings from active drivers on the RideFlow platform.
+    High-frequency location data (every 5-15 seconds while on trip).
+  target_layer: bronze
+  domain: marketplace
+  system: rideflow
+
+model:
+  fields:
+    - name: telemetry_id
+      type: string
+      required: true
+      description: "Unique telemetry ping ID"
+    - name: driver_id
+      type: string
+      required: true
+      description: "FK to driver_profiles"
+    - name: gps_lat
+      type: string
+      description: "GPS latitude"
+    - name: gps_lng
+      type: string
+      description: "GPS longitude"
+    - name: speed_kmh
+      type: string
+      description: "Speed in km/h"
+    - name: heading
+      type: string
+      description: "Heading in degrees (0-360)"
+    - name: accuracy_meters
+      type: string
+      description: "GPS accuracy in meters"
+    - name: trip_id
+      type: string
+      description: "Active trip ID (null if idle)"
+    - name: status
+      type: string
+      description: "on_trip, idle, offline"
+    - name: city_code
+      type: string
+      description: "City code"
+    - name: timestamp
+      type: string
+      description: "Telemetry ping timestamp"
+
+source:
+  type: landing
+  path: "{landing_root}/driver_telemetry"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

@@ -142,10 +142,20 @@ Every `_system.yaml` follows this pattern. Customise the values to match your en
       quarantine_root: "abfss://quarantine@{storage_account}.dfs.core.windows.net"
 
     # ── Environments ────────────────────────────────────────────
+    # Use ${ENV_VAR} to resolve secrets from environment variables.
+    # This keeps infrastructure names out of source control.
     environments:
       dev:
-        catalog: "lakelogic-lakehouse-dev-001"
-        storage_account: "salakelogicdevadls001"
+        catalog: "${LAKELOGIC_DEV_CATALOG}"
+        storage_account: "${LAKELOGIC_DEV_STORAGE_ACCOUNT}"
+        <<: *azure_storage
+      staging:
+        catalog: "${LAKELOGIC_STG_CATALOG}"
+        storage_account: "${LAKELOGIC_STG_STORAGE_ACCOUNT}"
+        <<: *azure_storage
+      prod:
+        catalog: "${LAKELOGIC_PROD_CATALOG}"
+        storage_account: "${LAKELOGIC_PROD_STORAGE_ACCOUNT}"
         <<: *azure_storage
       local:
         catalog: "local"
@@ -214,6 +224,16 @@ Every `_system.yaml` follows this pattern. Customise the values to match your en
         enabled: false
     ```
 
+### Explicit vs. Implicit Dependencies (`depends_on`)
+
+LakeLogic pipelines execute sequentially by layer by default (**Landing → Bronze → Silver → Gold**). Because of this inherent layer-by-layer progression, a Silver contract will *always* process after its upstream Bronze contract has finished. 
+
+**Rule of Thumb:**
+* **Cross-layer edges are always inferred automatically.** The DAG generator reads each contract's `source.path` and `links:` block to draw the Bronze→Silver and Silver→Gold data-flow lines. You never need to manually declare these.
+* **`depends_on` is for intra-layer ordering only.** Use it to ensure dimensional tables (e.g., `silver_rideflow_driver_profiles`) are processed before fact tables (e.g., `silver_rideflow_trips`) within the same Silver layer. The DAG will draw these as blue dependency arrows alongside the automatically inferred cross-layer edges.
+
+Therefore, `depends_on` should primarily be reserved for orchestrating dependencies *within* a specific layer. You do not need to list upstream Bronze tables in a Silver contract's `depends_on` array — LakeLogic handles inter-layer sequencing and DAG visualization automatically.
+
 ---
 
 ## Global Defaults vs. Local Overrides
@@ -251,6 +271,125 @@ server:
 ```
 
 LakeLogic automatically merges them at runtime: inheriting the broad infrastructure defaults from the system registry, while respecting the fine-grained custom behaviors of an individual contract.
+
+---
+
+## Property Reference
+
+### `domain` / `system`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `domain` | `string` | **Yes** | Domain name (inherited from `_domain.yaml` if not set) |
+| `system` | `string` | **Yes** | Source system identifier (e.g. `"google_analytics"`, `"rideflow"`) |
+
+---
+
+### `metadata`
+
+Controls run logging and pipeline observability.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `run_log_table` | `string` | `null` | Path or table name for the run log (e.g. `"{log_path}"`) |
+| `run_log_backend` | `string` | `"delta"` | Storage backend for run logs (`"delta"`, `"json"`) |
+
+---
+
+### `server`
+
+Per-layer server configuration inherited by all contracts. Each layer (`bronze`, `silver`, `gold`) can have its own settings.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mode` | `string` | `"validate"` | `"ingest"` (raw-to-Bronze) or `"validate"` (Quality Gate) |
+| `format` | `string` | `"delta"` | Output format (`"delta"`, `"parquet"`, `"iceberg"`, `"csv"`, `"json"`) |
+| `cast_to_string` | `bool` | `false` | Cast all fields to string (Bronze raw ingestion) |
+
+#### `server.<layer>.schema_policy`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `evolution` | `string` | `"allow"` | `"strict"`, `"append"`, `"merge"`, `"overwrite"`, `"compatible"`, `"allow"` |
+| `unknown_fields` | `string` | `"allow"` | `"quarantine"` (route to quarantine), `"drop"` (silently discard), `"allow"` (keep) |
+
+#### `server.bronze.post_ingestion`
+
+Landing zone lifecycle policy — what to do with source files **after a successful Bronze commit**. See [Zero-Retention Architecture](data_product_contracts/ingestion.md#zero-retention-architecture-post-ingestion-lifecycle) for full details.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `action` | `string` | `"retain"` | `"delete"` (zero-retention), `"archive"` (move to archive), `"retain"` (no-op) |
+| `cleanup_is_blocking` | `bool` | `false` | If `true`, cleanup failure fails the pipeline |
+| `retry_orphaned_files` | `bool` | `true` | Retry cleanup of previously failed files on next run |
+
+!!! example "Example: GDPR zero-retention for all Bronze contracts"
+
+    ```yaml
+    server:
+      bronze:
+        cast_to_string: true
+        schema_policy:
+          evolution: append
+          unknown_fields: allow
+        post_ingestion:
+          action: delete
+          cleanup_is_blocking: false
+          retry_orphaned_files: true
+    ```
+
+---
+
+### `materialization`
+
+Per-layer materialization defaults controlling how data is written to the target.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `strategy` | `string` | — | `"append"`, `"merge"`, `"overwrite"`, `"snapshot"` |
+| `format` | `string` | `"delta"` | Output format |
+| `merge_dedup_guard` | `bool` | `false` | Deduplicate rows before merge (Silver/Gold) |
+
+---
+
+### `lineage`
+
+System-level lineage tracking defaults. Adds metadata columns to every processed table.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `true` | Enable lineage column injection |
+| `source_column_name` | `string` | `"_lakelogic_source"` | Column name for source file/table path |
+| `timestamp_column_name` | `string` | `"_lakelogic_processed_at"` | Column name for processing timestamp |
+
+---
+
+### `quarantine`
+
+System-level quarantine defaults for rows that fail validation rules.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `true` | Enable quarantine for failed rows |
+| `fail_on_quarantine` | `bool` | `false` | If `true`, pipeline fails when any rows are quarantined |
+| `include_error_reason` | `bool` | `false` | Include the validation error in quarantine records |
+| `target` | `string` | — | Quarantine table/path (e.g. `"{quarantine_path}"`) |
+| `format` | `string` | `"delta"` | Output format for quarantine table |
+| `mode` | `string` | `"append"` | Write mode for quarantine table |
+
+---
+
+### `compliance`
+
+System-level compliance defaults (GDPR, data residency). Inherited by all contracts.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `data_residency` | `string` | `null` | Required data residency region (e.g. `"EU"`, `"US"`) |
+| `gdpr.enabled` | `bool` | `false` | Enable GDPR right-to-erasure support |
+| `gdpr.erasure_strategy` | `string` | `"nullify"` | `"nullify"`, `"hash"`, `"delete"` |
+
+> **Residency enforcement:** If a contract requires `data_residency: EU` but the target environment's `region` is `US`, the engine logs a compliance violation warning at load time.
 
 ---
 
@@ -326,16 +465,19 @@ Use YAML anchors to define storage patterns once and reference them across envir
         log_path: "{data_root}/_run_logs"
 
     # ── Environments ─────────────────────────────────────────────
+    # Use ${ENV_VAR} syntax to keep secrets out of source control.
     environments:
       dev:
         <<: *azure_storage
-        catalog: "dev_catalog"
+        catalog: "${DEV_CATALOG}"
+        storage_account: "${DEV_STORAGE_ACCOUNT}"
       prod:
         <<: *azure_storage
-        catalog: "prod_catalog"
+        catalog: "${PROD_CATALOG}"
+        storage_account: "${PROD_STORAGE_ACCOUNT}"
       aws:
         <<: *aws_storage
-        catalog: "glue_catalog"
+        catalog: "${AWS_GLUE_CATALOG}"
       local:
         <<: *local_storage
         catalog: "local"
@@ -385,6 +527,73 @@ Contracts use `{placeholder}` syntax that resolves from the system registry. Thi
     metadata:
       run_log_table: "{log_path}"
     ```
+
+---
+
+## Environment Variable Resolution
+
+Any string value in the `environments:` block that uses the `${ENV_VAR}` syntax is automatically resolved from your system's environment variables at load time. This keeps infrastructure names, storage accounts, and catalog identifiers **out of source control**.
+
+### Syntax
+
+Wrap an environment variable name in `${...}`:
+
+```yaml
+environments:
+  prod:
+    catalog: "${MY_PROD_CATALOG}"           # resolves os.environ["MY_PROD_CATALOG"]
+    storage_account: "${MY_PROD_STORAGE}"   # resolves os.environ["MY_PROD_STORAGE"]
+```
+
+!!! warning "The entire value must be a single `${...}` expression"
+    Partial interpolation like `"prefix-${VAR}-suffix"` is **not** supported. Use `{placeholder}` syntax (see above) for template composition within storage paths.
+
+### Which Fields Support It?
+
+All string fields inside `environments.<env_name>` are resolved, including:
+
+| Field | Example |
+| --- | --- |
+| `catalog` | `"${RIDEFLOW_DEV_CATALOG}"` |
+| `storage_account` | `"${RIDEFLOW_DEV_STORAGE_ACCOUNT}"` |
+| `region` | `"${DEPLOY_REGION}"` |
+| Any extra field | Custom fields added via `ConfigDict(extra="allow")` |
+
+> **Note:** `local` and `colab` environments typically use hardcoded values since they don't contain real infrastructure secrets.
+
+### Where to Set the Variables
+
+| Runtime | How to Set |
+| --- | --- |
+| **Databricks** | Cluster environment variables or Databricks Secrets scope |
+| **Azure DevOps** | Pipeline variables / variable groups |
+| **GitHub Actions** | Repository secrets → `env:` block in workflow |
+| **Local development** | `.env` file, shell exports, or IDE run config |
+| **Google Colab** | `os.environ["KEY"] = "value"` in a setup cell |
+
+### Example: Before and After
+
+=== "❌ Hardcoded (secrets in source control)"
+
+    ```yaml
+    environments:
+      prod:
+        catalog: "rideflow-lakehouse-prod-001"
+        storage_account: "sarideflowprodadls001"
+    ```
+
+=== "✅ Environment Variables (secrets externalized)"
+
+    ```yaml
+    environments:
+      prod:
+        catalog: "${RIDEFLOW_PROD_CATALOG}"
+        storage_account: "${RIDEFLOW_PROD_STORAGE_ACCOUNT}"
+    ```
+
+### Missing Variables
+
+If an environment variable is not set, the value resolves to an **empty string** (`""`). This will typically surface as a clear error when the pipeline tries to connect to storage — e.g., `abfss://domain@.dfs.core.windows.net` (missing account name).
 
 ---
 

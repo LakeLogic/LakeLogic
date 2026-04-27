@@ -93,6 +93,48 @@ class PipelineRunSummary:
             "results": self.results,
         }
 
+    def __str__(self) -> str:
+        lines = []
+        lines.append("=" * 80)
+        lines.append(" PIPELINE RUN SUMMARY")
+        lines.append("=" * 80)
+        lines.append(f"  Pipeline run    : {self.run_id}")
+        lines.append(f"  Environment     : {self.environment}")
+        lines.append(f"  Dry run         : {self.dry_run}")
+        lines.append("")
+
+        if not self.results:
+            lines.append("  No contracts processed.")
+            lines.append("=" * 80)
+            return "\n".join(lines)
+
+        header = f"  {'Table Name':<38} {'Layer':<8} {'Status':<10} {'Rows':<8} {'Good/Qrtn':<12}"
+        lines.append(header)
+        lines.append("  " + "-" * 78)
+
+        for r in self.results:
+            t_name = str(r.get("table_name") or r.get("contract") or "")[:36]
+            layer = str(r.get("layer") or "")[:7]
+            status = str(r.get("status") or "")[:9]
+            rows = str(r.get("rows", "-"))[:7]
+
+            good = r.get("rows_good")
+            bad = r.get("rows_bad")
+            if good is not None and bad is not None:
+                dq_str = f"{good}/{bad}"
+            else:
+                dq_str = "-"
+
+            line = f"  {t_name:<38} {layer:<8} {status:<10} {rows:<8} {dq_str:<12}"
+            lines.append(line)
+
+            err = r.get("error")
+            if err:
+                lines.append(f"    └─ Error: {str(err)[:70]}")
+
+        lines.append("=" * 80)
+        return "\n".join(lines)
+
 
 class CircuitBreakerTripped(Exception):
     """Raised when too many consecutive entity failures indicate an infrastructure outage."""
@@ -287,7 +329,7 @@ class LakehousePipeline:
             if target_layer in ("silver", "gold"):
                 source = contract_dict.get("source") or {}
                 if _is_direct:
-                    if not source.get("path") and _layer_root:
+                    if not source.get("path") and source.get("type") != "sql" and _layer_root:
                         source["path"] = f"{_layer_root}/{table_name}"
                         source.setdefault("type", "landing")
                         source.setdefault("format", "delta")
@@ -433,7 +475,11 @@ class LakehousePipeline:
             if not c or not c.depends_on:
                 levels[entity] = 0
                 return 0
-            dep_level = max(_level(dep, visited) for dep in c.depends_on if dep in by_entity)
+            dep_levels = [_level(dep, visited) for dep in c.depends_on if dep in by_entity]
+            if not dep_levels:
+                levels[entity] = 0
+                return 0
+            dep_level = max(dep_levels)
             levels[entity] = dep_level + 1
             return dep_level + 1
 
@@ -1102,6 +1148,29 @@ class LakehousePipeline:
 
     # ── Phase 3: Compliance & Privacy ────────────────────────────────────────
 
+    def _resolve_erasure_strategy(self, contract_dict: Optional[Dict[str, Any]], fallback: str) -> str:
+        """Resolve the effective erasure strategy for a contract.
+
+        Resolution order (first non-None wins):
+          1. Contract-level: ``contract_dict.compliance.erasure.strategy``
+          2. Registry-level: ``self.registry.compliance.erasure.strategy``
+          3. Fallback parameter (from CLI or method default)
+        """
+        # 1. Contract-level override
+        if contract_dict:
+            c_strategy = (contract_dict.get("compliance") or {}).get("erasure", {}).get("strategy")
+            if c_strategy:
+                return c_strategy
+
+        # 2. Registry-level (domain / system)
+        reg_compliance = getattr(self.registry, "compliance", None) or {}
+        r_strategy = (reg_compliance.get("erasure") or {}).get("strategy")
+        if r_strategy:
+            return r_strategy
+
+        # 3. Fallback
+        return fallback
+
     def _execute_gdpr_pass(
         self,
         active_contracts: List[RegistryContract],
@@ -1132,6 +1201,15 @@ class LakehousePipeline:
             if not has_target:
                 continue
 
+            # Resolve per-contract effective strategy (contract → registry → CLI param)
+            effective_strategy = self._resolve_erasure_strategy(c.contract_dict, strategy)
+
+            if effective_strategy != strategy:
+                logger.info(
+                    f"  [{c.entity}] Using compliance config strategy '{effective_strategy}' "
+                    f"(overrides default '{strategy}')"
+                )
+
             mat_cfg = (c.contract_dict or {}).get("materialization", {})
             mat_target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
 
@@ -1141,13 +1219,13 @@ class LakehousePipeline:
 
                 set_clauses = []
                 for col in pii_cols:
-                    if col == subject_col and strategy == "nullify":
+                    if col == subject_col and effective_strategy == "nullify":
                         continue
-                    if strategy == "nullify":
+                    if effective_strategy == "nullify":
                         set_clauses.append(f"`{col}` = NULL")
-                    elif strategy == "redact":
+                    elif effective_strategy == "redact":
                         set_clauses.append(f"`{col}` = '***REDACTED***'")
-                    elif strategy == "hash":
+                    elif effective_strategy == "hash":
                         set_clauses.append(f"`{col}` = hex(sha2(concat('{salt}', `{col}`), 256))")
 
                 if not set_clauses:
@@ -1175,7 +1253,7 @@ class LakehousePipeline:
 
                 if affected > 0 or dry_run:
                     report = generate_erasure_report(
-                        dc, subject_col, subject_ids, strategy, affected, partition_filter=partition_filter
+                        dc, subject_col, subject_ids, effective_strategy, affected, partition_filter=partition_filter
                     )
                     report["pipeline_run_id"] = self.run_id
 
@@ -1225,6 +1303,15 @@ class LakehousePipeline:
             if not has_target:
                 continue
 
+            # Resolve per-contract effective strategy (contract → registry → CLI param)
+            effective_strategy = self._resolve_erasure_strategy(c.contract_dict, strategy)
+
+            if effective_strategy != strategy:
+                logger.info(
+                    f"  [{c.entity}] Using compliance config strategy '{effective_strategy}' "
+                    f"(overrides default '{strategy}')"
+                )
+
             mat_cfg = (c.contract_dict or {}).get("materialization", {})
             mat_target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
 
@@ -1234,13 +1321,13 @@ class LakehousePipeline:
 
                 set_clauses = []
                 for col in phi_cols:
-                    if col == patient_col and strategy == "nullify":
+                    if col == patient_col and effective_strategy == "nullify":
                         continue
-                    if strategy == "nullify":
+                    if effective_strategy == "nullify":
                         set_clauses.append(f"`{col}` = NULL")
-                    elif strategy == "redact":
+                    elif effective_strategy == "redact":
                         set_clauses.append(f"`{col}` = '***REDACTED_PHI***'")
-                    elif strategy == "hash":
+                    elif effective_strategy == "hash":
                         set_clauses.append(f"`{col}` = hex(sha2(concat('{salt}', `{col}`), 256))")
 
                 if not set_clauses:
@@ -1268,7 +1355,7 @@ class LakehousePipeline:
 
                 if affected > 0 or dry_run:
                     report = generate_hipaa_erasure_report(
-                        dc, patient_col, patient_ids, strategy, affected, partition_filter=partition_filter
+                        dc, patient_col, patient_ids, effective_strategy, affected, partition_filter=partition_filter
                     )
                     report["pipeline_run_id"] = self.run_id
 
@@ -1702,6 +1789,205 @@ class LakehousePipeline:
             label=getattr(c, "entity", str(c)),
         )
 
+    # ── Post-ingestion landing zone cleanup ────────────────────────────────
+
+    def _execute_post_ingestion_cleanup(self, c: RegistryContract, processor: Any) -> None:
+        """Execute landing zone cleanup after a successful Bronze commit.
+
+        Actions:
+          delete  — remove source files from the landing zone
+          archive — move source files to the archive path
+          retain  — no-op (files stay in place)
+
+        Safety:
+          - Only runs AFTER a successful Bronze Delta commit.
+          - If cleanup fails and cleanup_is_blocking is False (default),
+            the pipeline continues with a warning.
+          - If cleanup_is_blocking is True, a cleanup failure raises.
+        """
+        contract_dict = c.contract_dict or {}
+        server = contract_dict.get("server") or {}
+
+        # Resolve post_ingestion config:
+        #   1. source.post_ingestion (contract-level override, highest precedence)
+        #   2. server.post_ingestion (system-level default)
+        source = contract_dict.get("source") or {}
+        pi_config = source.get("post_ingestion") or server.get("post_ingestion") or {}
+        action = pi_config.get("action", "retain")
+
+        if action == "retain":
+            return  # Nothing to do
+
+        # Resolve the source landing path
+        source = contract_dict.get("source") or {}
+        landing_path = source.get("path")
+        if not landing_path:
+            logger.debug(f"  No source.path for {c.entity} — skipping post-ingestion cleanup")
+            return
+
+        cleanup_is_blocking = pi_config.get("cleanup_is_blocking", False)
+
+        try:
+            if action == "delete":
+                self._cleanup_landing_files(landing_path, c.entity, mode="delete")
+            elif action == "archive":
+                # Resolve archive_path: config-level > storage-level
+                archive_path = pi_config.get("archive_path")
+                if not archive_path:
+                    storage = self.registry.storage if self.registry else None
+                    archive_path = getattr(storage, "archive_path", None) if storage else None
+                if not archive_path:
+                    logger.warning(
+                        f"  ⚠️ post_ingestion.action=archive for {c.entity} but no "
+                        f"archive_path configured — skipping archive"
+                    )
+                    return
+                self._cleanup_landing_files(landing_path, c.entity, mode="archive", archive_path=archive_path)
+            else:
+                logger.warning(f"  Unknown post_ingestion action '{action}' for {c.entity} — skipping")
+                return
+
+            logger.info(f"  🧹 Post-ingestion: {action}d landing files for {c.entity}")
+
+        except Exception as cleanup_exc:
+            if cleanup_is_blocking:
+                raise RuntimeError(
+                    f"Post-ingestion cleanup ({action}) failed for {c.entity}: {cleanup_exc}"
+                ) from cleanup_exc
+            else:
+                logger.warning(
+                    f"  ⚠️ Post-ingestion cleanup ({action}) failed for {c.entity}: {cleanup_exc}. "
+                    f"Pipeline continues (cleanup_is_blocking=false). "
+                    f"Files remain in landing zone and will be retried on next run."
+                )
+
+    def _cleanup_landing_files(
+        self, landing_path: str, entity: str, mode: str = "delete", archive_path: Optional[str] = None
+    ) -> None:
+        """Physically delete or move files from the landing zone.
+
+        Supports three storage backends:
+          1. Local filesystem (pathlib) — for local/colab environments
+          2. Cloud storage (fsspec) — for Azure ADLS, S3, GCS
+          3. Databricks dbutils — when running on Databricks clusters
+        """
+        _is_cloud = any(
+            landing_path.startswith(pfx) for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
+        )
+        _is_local = not _is_cloud
+
+        if _is_local:
+            self._cleanup_local(landing_path, entity, mode, archive_path)
+        else:
+            # Try dbutils first (Databricks), then fall back to fsspec
+            if self.spark and self._try_cleanup_dbutils(landing_path, entity, mode, archive_path):
+                return
+            self._cleanup_cloud(landing_path, entity, mode, archive_path)
+
+    def _cleanup_local(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> None:
+        """Clean up landing files on local filesystem."""
+        import shutil
+        from pathlib import Path
+
+        src = Path(landing_path)
+        if not src.exists():
+            logger.debug(f"  Landing path {src} does not exist — nothing to clean up")
+            return
+
+        if mode == "delete":
+            if src.is_dir():
+                # Delete only the files, preserve the directory structure
+                for f in src.rglob("*"):
+                    if f.is_file():
+                        f.unlink()
+                logger.debug(f"  Deleted all files in {src}")
+            elif src.is_file():
+                src.unlink()
+                logger.debug(f"  Deleted file {src}")
+        elif mode == "archive" and archive_path:
+            dst = Path(archive_path)
+            dst.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                for f in src.rglob("*"):
+                    if f.is_file():
+                        target = dst / f.relative_to(src)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(f), str(target))
+                logger.debug(f"  Archived files from {src} → {dst}")
+            elif src.is_file():
+                shutil.move(str(src), str(dst / src.name))
+                logger.debug(f"  Archived {src} → {dst}")
+
+    def _try_cleanup_dbutils(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> bool:
+        """Attempt cleanup via Databricks dbutils. Returns True if successful."""
+        _dbutils = None
+        try:
+            _dbutils = self.spark._jvm.com.databricks.service.DBUtils(self.spark._jsc.sc())
+        except Exception:
+            try:
+                import IPython
+
+                _dbutils = IPython.get_ipython().user_ns.get("dbutils")
+            except Exception:
+                pass
+
+        if not _dbutils:
+            return False
+
+        try:
+            if mode == "delete":
+                _dbutils.fs.rm(landing_path, True)
+                logger.debug(f"  Deleted {landing_path} via dbutils")
+            elif mode == "archive" and archive_path:
+                # dbutils.fs.mv is an atomic move on ADLS/S3
+                _dbutils.fs.mv(landing_path, archive_path, True)
+                logger.debug(f"  Archived {landing_path} → {archive_path} via dbutils")
+            return True
+        except Exception as e:
+            logger.debug(f"  dbutils cleanup failed for {entity}: {e}")
+            return False
+
+    def _cleanup_cloud(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> None:
+        """Clean up landing files on cloud storage via fsspec."""
+        import os as _os_cleanup
+
+        try:
+            import fsspec
+        except ImportError:
+            raise RuntimeError(
+                "fsspec is required for cloud post-ingestion cleanup but is not installed. "
+                "Install it with: pip install fsspec adlfs  (or s3fs / gcsfs)"
+            )
+
+        # Build storage options from environment variables
+        storage_opts: dict = {}
+        if landing_path.startswith(("abfss://", "abfs://")):
+            for env_key, opt_key in [
+                ("AZURE_STORAGE_ACCOUNT_NAME", "account_name"),
+                ("AZURE_STORAGE_ACCOUNT", "account_name"),
+                ("AZURE_STORAGE_ACCOUNT_KEY", "account_key"),
+                ("AZURE_STORAGE_SAS_TOKEN", "sas_token"),
+                ("AZURE_CLIENT_ID", "client_id"),
+                ("AZURE_CLIENT_SECRET", "client_secret"),
+                ("AZURE_TENANT_ID", "tenant_id"),
+            ]:
+                val = _os_cleanup.environ.get(env_key)
+                if val:
+                    storage_opts[opt_key] = val
+
+        fs, _ = fsspec.core.url_to_fs(landing_path, **storage_opts)
+
+        if mode == "delete":
+            if fs.exists(landing_path):
+                fs.rm(landing_path, recursive=True)
+                logger.debug(f"  Deleted {landing_path} via fsspec")
+        elif mode == "archive" and archive_path:
+            if fs.exists(landing_path):
+                # For cross-container moves, use copy + delete
+                fs.copy(landing_path, archive_path, recursive=True)
+                fs.rm(landing_path, recursive=True)
+                logger.debug(f"  Archived {landing_path} → {archive_path} via fsspec")
+
     def _process_single_contract(
         self,
         c: RegistryContract,
@@ -1863,6 +2149,13 @@ class LakehousePipeline:
 
             logger.debug(f"✅ Materialized {row_count} rows for {c.entity}")
             layers_with_new_data.add(layer)
+
+            # ── Post-ingestion cleanup (Bronze only) ────────────────────────
+            # After a successful Bronze commit, execute the landing zone
+            # lifecycle action (delete / archive / retain).
+            if layer == "bronze":
+                self._execute_post_ingestion_cleanup(c, processor)
+
             summary.append(
                 c.entity,
                 layer,
@@ -1874,17 +2167,23 @@ class LakehousePipeline:
                 table_name=_table_name,
             )
 
-            # Write run log with final succeeded status
-            _report = getattr(processor, "last_report", None) or {}
-            _report["status"] = "succeeded"
-            try:
-                from lakelogic.core.run_log import write_run_log
+            # Write run log with final succeeded status.
+            # Skip if the processor already wrote its own log (e.g. no_new_data early-exit).
+            _already_logged = getattr(processor, "_run_log_already_written", False)
+            if not _already_logged:
+                _report = getattr(processor, "last_report", None) or {}
+                _report["status"] = "succeeded"
+                try:
+                    from lakelogic.core.run_log import write_run_log
 
-                write_run_log(
-                    _report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode
-                )
-            except Exception as log_exc:
-                logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
+                    write_run_log(
+                        _report,
+                        processor.contract,
+                        engine_name=processor.engine_name,
+                        run_log_mode=processor._run_log_mode,
+                    )
+                except Exception as log_exc:
+                    logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
 
         except Exception as e:
             # Enrich auth/permission errors with the active identity so
@@ -1934,6 +2233,7 @@ class LakehousePipeline:
                         "data_layer": layer,
                         "domain": getattr(self.registry, "domain", None),
                         "system": getattr(self.registry, "system", None),
+                        "environment": (c.contract_dict or {}).get("metadata", {}).get("environment", "unknown"),
                         "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                         "status": "failed",
                         "error_message": str(e)[:2000],
@@ -2017,10 +2317,11 @@ class LakehousePipeline:
 
     # ── DAG Visualization ────────────────────────────────────────────────────
 
-    def visualize_dag(self, *, entity_filter: str = "", layer_filter: str = "") -> str:
+    def visualize_dag(self, *, title: str = None, entity_filter: str = "", layer_filter: str = "") -> str:
         """Generate an inline HTML DAG visualization of the pipeline.
 
         Args:
+            title: Optional business value oriented label to override the default domain/system header.
             entity_filter: Comma-separated entity names to highlight (e.g. "sessions").
             layer_filter: Comma-separated layers to highlight (e.g. "bronze").
 
@@ -2032,8 +2333,8 @@ class LakehousePipeline:
             pipeline = LakehousePipeline(registry)
             displayHTML(pipeline.visualize_dag())
 
-            # Filtered view — highlight bronze sessions and its connections:
-            displayHTML(pipeline.visualize_dag(entity_filter="sessions", layer_filter="bronze"))
+            # Custom business label:
+            displayHTML(pipeline.visualize_dag(title="Marketplace Booking Engine"))
         """
 
         contracts = self.registry.get_active_contracts()
@@ -2053,12 +2354,24 @@ class LakehousePipeline:
 
         # Build node data
         nodes = []
+        # Build entity→node_id lookup for cross-layer depends_on resolution
+        _entity_to_node_id = {c.entity: f"{c.layer}_{c.entity}" for c in contracts}
+
         for c in contracts:
             cd = c.contract_dict or {}
             info = cd.get("info", {})
             pii_count = sum(1 for f in (cd.get("model", {}).get("fields", [])) if f.get("pii"))
             pipeline_config = cd.get("pipeline", {})
             frequency = pipeline_config.get("frequency", "") if isinstance(pipeline_config, dict) else ""
+            # Resolve depends_on: look up each dependency's actual layer via
+            # the entity map, falling back to same-layer prefix only as last resort.
+            resolved_deps = []
+            for d in c.depends_on:
+                if d in _entity_to_node_id:
+                    resolved_deps.append(_entity_to_node_id[d])
+                else:
+                    # Fallback: assume same layer (legacy behaviour)
+                    resolved_deps.append(f"{c.layer}_{d}")
             nodes.append(
                 {
                     "id": f"{c.layer}_{c.entity}",
@@ -2068,7 +2381,7 @@ class LakehousePipeline:
                     "version": cd.get("version", ""),
                     "pii": pii_count,
                     "frequency": frequency,
-                    "depends_on": [f"{c.layer}_{d}" for d in c.depends_on],
+                    "depends_on": resolved_deps,
                 }
             )
 
@@ -2102,12 +2415,68 @@ class LakehousePipeline:
             for dep_id in n["depends_on"]:
                 edges.append((dep_id, n["id"], "dependency"))
 
-        # Cross-layer lineage edges
+        # Cross-layer lineage edges — intelligent entity-name matching
+        # Always infer cross-layer edges from source.path, even when
+        # depends_on is present.  depends_on controls intra-layer
+        # ordering (e.g. dimensions before facts); source.path captures
+        # the primary Bronze→Silver or Silver→Gold data-flow edge.
         upstream_map = {"silver": "bronze", "gold": "silver"}
+        # Build set of (node_id, upstream_node_id) pairs already covered
+        # by explicit depends_on so we don't draw duplicate edges.
+        _existing_edges = {(dep_id, n["id"]) for n in nodes for dep_id in n["depends_on"]}
+
         for layer, upstream_layer in upstream_map.items():
             for n in layer_entities.get(layer, []):
-                for upstream_n in layer_entities.get(upstream_layer, []):
-                    edges.append((upstream_n["id"], n["id"], "lineage"))
+                # Try to extract source table name from contract YAML source.path
+                _matched = False
+                for c in contracts:
+                    if f"{c.layer}_{c.entity}" != n["id"]:
+                        continue
+                    cd = c.contract_dict or {}
+                    source_path = (cd.get("source") or {}).get("path", "")
+                    if source_path:
+                        # Extract the table/entity suffix from paths like
+                        # "{bronze_path}/{bronze_layer}_{system}_trip_completed"
+                        path_tail = source_path.rsplit("/", 1)[-1]
+                        # Strip template vars: "{bronze_layer}_rideflow_trips" → "rideflow_trips"
+                        import re as _re
+
+                        path_tail_clean = _re.sub(r"\{[^}]*\}_?", "", path_tail).strip("_")
+                        if path_tail_clean:
+                            for upstream_n in layer_entities.get(upstream_layer, []):
+                                u_entity = upstream_n["entity"].lower()
+                                # Match if upstream entity name is in the cleaned source path
+                                # or vice versa (bidirectional for system-prefixed names)
+                                if path_tail_clean.lower() in u_entity or u_entity in path_tail_clean.lower():
+                                    edge_pair = (upstream_n["id"], n["id"])
+                                    if edge_pair not in _existing_edges:
+                                        edges.append((upstream_n["id"], n["id"], "lineage"))
+                                        _existing_edges.add(edge_pair)
+                                    _matched = True
+                    break
+
+                # Fallback: bidirectional entity name matching
+                if not _matched:
+                    entity_lower = n["entity"].lower()
+                    # Strip the tier prefix and optional system prefix for matching
+                    _core = entity_lower
+                    for pfx in [f"{layer}_", f"{layer}_rideflow_", f"{layer}_olist_"]:
+                        if _core.startswith(pfx):
+                            _core = _core[len(pfx) :]
+                            break
+                    for upstream_n in layer_entities.get(upstream_layer, []):
+                        u_entity = upstream_n["entity"].lower()
+                        u_core = u_entity
+                        for pfx in [f"{upstream_layer}_", f"{upstream_layer}_rideflow_", f"{upstream_layer}_olist_"]:
+                            if u_core.startswith(pfx):
+                                u_core = u_core[len(pfx) :]
+                                break
+                        # Bidirectional: either core name is a substring of the other
+                        if _core and u_core and (_core in u_core or u_core in _core):
+                            edge_pair = (upstream_n["id"], n["id"])
+                            if edge_pair not in _existing_edges:
+                                edges.append((upstream_n["id"], n["id"], "lineage"))
+                                _existing_edges.add(edge_pair)
 
         # External source → consuming contract edges
         for ext in ext_sources:
@@ -2374,12 +2743,14 @@ class LakehousePipeline:
         else:
             subtitle = f"{std_contract_count} contracts • {std_layer_count} layers"
 
+        dag_title = title if title else f"{self.registry.domain} / {self.registry.system}"
+
         html = f"""
         <div style="font-family:'Inter','Segoe UI',sans-serif;background:#0d0d0f;
              background-image:radial-gradient(circle at 1px 1px,#1a1a1f 1px,transparent 0);
              background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;overflow-x:auto;">
           <h2 style="color:#fff;font-size:1.2rem;margin:0 0 4px;"
-              >📊 Pipeline DAG — {self.registry.domain} / {self.registry.system}</h2>
+              >📊 Pipeline DAG — {dag_title}</h2>
           <p style="color:#666;font-size:0.8rem;margin:0 0 24px;">{subtitle}</p>
           <div style="position:relative;width:{canvas_w}px;height:{canvas_h}px;">
             {header_html}

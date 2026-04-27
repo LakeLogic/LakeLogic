@@ -6,68 +6,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
-## [1.18.0] — 2026-04-16
+## [1.20.0] — 2026-04-27
 
 ### Added
 
+- Add core generation, processing, and SLO modules, bump version to 1.19.0, and include new executive and compliance dashboard examples.
+## [1.19.0] — 2026-04-27
+
+### Added
+
+- Implement run logging and engine abstractions for LakeLogic core and CLI
+- Implement core pipeline engine and expand rideflow domain examples with interactive notebooks and dashboards
 - Implement core data generation, processing, and bootstrapping modules with accompanying documentation and examples.
-
-### Documentation
-
-- Fix broken badge image rendering in README links
-## [1.17.1] — 2026-04-15
+- Implement AI-powered edge-case generation for data contract stress-testing
+- Add engine portability and dimensional modeling demonstration notebook
+- Add example notebooks for engine portability, developer experience, AI data generation, and integrations
+- Add engine portability demo notebook and implement core processor logic
+- Add sync script and populate documentation examples directory with flagship notebooks
+- Add engine portability examples and implement SCD2 materialization support in core models and LLM engine
 
 ### Changed
 
 - Update README links to use HTML anchor tags for improved compatibility
-## [1.17.0] — 2026-04-15
-
-### Added
-
-- Implement AI-powered edge-case generation for data contract stress-testing
-- Add engine portability and dimensional modeling demonstration notebook
-- Add example notebooks for engine portability, developer experience, AI data generation, and integrations
 
 ### Documentation
 
+- Fix broken badge image rendering in README links
 - Add comprehensive set of Colab example notebooks for LakeLogic features
-## [1.16.0] — 2026-04-15
-
-### Added
-
-- Add engine portability demo notebook and implement core processor logic
-- Add sync script and populate documentation examples directory with flagship notebooks
-## [1.15.0] — 2026-04-15
-
-### Added
-
-- Add engine portability examples and implement SCD2 materialization support in core models and LLM engine
 ## [1.14.0] — 2026-04-15
 
 ### Added
 
 - Implement core Pydantic data models and project documentation structure
 - Implement core LakeLogic framework with engine adapters, pipeline runner, and governance modules
+- Implement core engine components, notification system, and comprehensive data contract documentation
+- Implement core platform engine, notification system, and comprehensive data contract documentation with expanded examples
+- Implement core processing logic, dlt adapter, and quickstart examples with updated dependency resolution markers
 
 ### Documentation
 
 - Sync fixed python 3.9 syntax and lint configs
 - Add examples folder to version control and fix mkdocs links
-## [1.13.0] — 2026-04-14
-
-### Added
-
-- Implement core engine components, notification system, and comprehensive data contract documentation
-- Implement core platform engine, notification system, and comprehensive data contract documentation with expanded examples
 
 ### Fixed
 
 - **core**: Migrate legacy schema_evolution to allow correct quarantine dropping
-## [1.12.0] — 2026-04-07
-
-### Added
-
-- Implement core processing logic, dlt adapter, and quickstart examples with updated dependency resolution markers
 ## [1.11.1] — 2026-04-07
 
 ### Fixed
@@ -253,14 +236,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.18.0]: https://github.com/lakelogic/LakeLogic/compare/v1.17.1...v1.18.0
-[1.17.1]: https://github.com/lakelogic/LakeLogic/compare/v1.17.0...v1.17.1
-[1.17.0]: https://github.com/lakelogic/LakeLogic/compare/v1.16.0...v1.17.0
-[1.16.0]: https://github.com/lakelogic/LakeLogic/compare/v1.15.0...v1.16.0
-[1.15.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.15.0
-[1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.13.0...v1.14.0
-[1.13.0]: https://github.com/lakelogic/LakeLogic/compare/v1.12.0...v1.13.0
-[1.12.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.12.0
+[1.20.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.20.0
+[1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.19.0
+[1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.14.0
 [1.11.1]: https://github.com/lakelogic/LakeLogic/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.11.0
 [1.6.1]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.6.1

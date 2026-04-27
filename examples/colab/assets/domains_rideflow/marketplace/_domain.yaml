@@ -1,0 +1,108 @@
+domain: marketplace
+
+# ── Domain Ownership ────────────────────────────────────────────────────────
+ownership:
+  domain_owner: "Platform Data Engineering"
+  team: data_engineering
+  contacts:
+    - name: Platform Data Lead
+      role: oncall
+      email: collins_emetonjor@live.co.uk
+  cost_center: platform_engineering
+  jira_project: KAN
+
+# ── Service Level Objectives (SLOs) ──────────────────────────────────────
+slo:
+  freshness:
+    bronze:
+      max_delay_minutes: 30
+      check_column: "_lakelogic_loaded_at"
+      max_source_delay_minutes: 60
+      source_check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at"]
+    silver:
+      max_delay_minutes: 120
+      check_column: "_lakelogic_processed_at"
+      max_source_delay_minutes: 180
+      source_check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at"]
+
+  row_count:
+    bronze:
+      min_rows: 1
+      max_rows: 500000
+      warn_only: false
+      anomaly:
+        enabled: true
+        lookback_runs: 14
+        min_ratio: 0.5
+        max_ratio: 2.0
+        method: "median"
+        min_runs_before_enforcement: 5
+    silver:
+      min_rows: 10
+      max_rows: 500000
+      warn_only: false
+      anomaly:
+        enabled: true
+        lookback_runs: 14
+        min_ratio: 0.5
+        max_ratio: 2.0
+        method: "median"
+        min_runs_before_enforcement: 5
+
+  quality:
+    min_good_ratio: 0.92
+    max_quarantine_ratio: 0.08
+    by_severity:
+      critical:
+        min_good_ratio: 0.999
+      high:
+        min_good_ratio: 0.99
+      medium:
+        min_good_ratio: 0.95
+      low:
+        min_good_ratio: 0.90
+
+  schedule:
+    environments: ["dev", "prod", "staging"]
+    expected_start_utc: "04:00"
+    expected_completion_utc: "05:00"
+    expected_duration_minutes: 30
+    warn_if_duration_exceeds_minutes: 60
+    timezone: "UTC"
+
+# ── Cost Governance ──────────────────────────────────────────────────────────
+cost:
+  currency: "GBP"
+  budget:
+    daily_limit: 40.00
+    weekly_limit: 200.00
+    monthly_limit: 600.00
+    per_run_anomaly_multiplier: 3.0
+    alert_channels: ["slack", "email"]
+
+# ── Observatory Telemetry ────────────────────────────────────────────────────
+observatory:
+  enabled: false
+  environments: ["dev", "prod", "staging", "local"]
+  endpoint: "http://127.0.0.1:3007/api/v1/operations/run-logs/ingest"  # e.g., "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
+  api_key: "llc_sk_b3665de6822db5fa3b2e7f91eb74b989"   # e.g., "${LAKELOGIC_API_KEY}" for prod
+  emit_on: [success, partial, failed]
+  expected_delivery:                  # Telemetry Delivery Watchdog
+    cadence_minutes: 15
+    grace_minutes: 10
+    missing_after_minutes: 45
+    active_days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    active_hours_utc:
+      start: "00:00"
+      end: "23:59"
+
+# ── Compliance & Privacy ─────────────────────────────────────────────────────
+compliance:
+  erasure:
+    strategy: nullify
+
+# Layer aliases
+bronze_layer: bronze
+silver_layer: silver
+gold_layer: gold
+

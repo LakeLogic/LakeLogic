@@ -196,9 +196,10 @@ class DuckDBAdapter(EngineAdapter):
         missing = expected - existing_cols
         unknown = existing_cols - expected
 
-        # Exclude transient/lineage columns from unknown
+        # Exclude transient, framework, and lineage columns from unknown
         transient_cols = {"rn", "__index_level_0__", "_row_number"}
-        unknown = unknown - transient_cols - self._lineage_columns()
+        system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
+        unknown = unknown - transient_cols - system_cols - self._lineage_columns()
 
         # Add missing columns as NULL
         add_cols = []
@@ -276,16 +277,31 @@ class DuckDBAdapter(EngineAdapter):
             self.con.sql(f"CREATE OR REPLACE VIEW _typed AS SELECT {', '.join(casts)} FROM {table_name}")
             table_name = "_typed"
 
+        # ── Detect post-phase SQL transforms that reshape columns ────────────
+        # When a contract has a post-phase SQL transform (e.g. gold aggregation
+        # with GROUP BY), the model fields describe the *output* of the SQL, not
+        # the source.  Strict missing/unknown enforcement at this stage would
+        # produce false positives because the source columns haven't been
+        # transformed yet (post-transforms run AFTER schema enforcement).
+        _has_post_sql = False
+        if self.contract.transformations:
+            for _t in self.contract.transformations:
+                _phase = (getattr(_t, "phase", None) or "post").lower()
+                if _phase == "post" and getattr(_t, "sql", None):
+                    _has_post_sql = True
+                    break
+
         schema_errors: List[str] = []
-        if evolution == "strict" and missing:
+        if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
 
         if policy == "drop" and unknown:
-            keep_cols = [c for c in self._get_current_columns(table_name) if c not in unknown]
-            select = ", ".join(f'"{c}"' for c in keep_cols)
-            self.con.sql(f"CREATE OR REPLACE VIEW _pruned AS SELECT {select} FROM {table_name}")
-            table_name = "_pruned"
-        elif policy == "quarantine" and unknown:
+            if not _has_post_sql:
+                keep_cols = [c for c in self._get_current_columns(table_name) if c not in unknown]
+                select = ", ".join(f'"{c}"' for c in keep_cols)
+                self.con.sql(f"CREATE OR REPLACE VIEW _pruned AS SELECT {select} FROM {table_name}")
+                table_name = "_pruned"
+        elif policy == "quarantine" and unknown and not _has_post_sql:
             schema_errors.append(f"Unknown fields present: {', '.join(sorted(unknown))}")
 
         self.schema_drift = {
@@ -604,6 +620,11 @@ class DuckDBAdapter(EngineAdapter):
                 output_rows=post_output,
                 duration_ms=(time.perf_counter() - step_start) * 1000,
             )
+            # Prune type-error columns that no longer exist after
+            # transformations (e.g. GROUP BY replaces entire column set)
+            if getattr(self, "_type_err_cols", None):
+                surviving = set(self._get_current_columns(current_table))
+                self._type_err_cols = [c for c in self._type_err_cols if c in surviving]
 
         # 4. Row-level quality rules
         row_rules = self.get_row_rules()

@@ -1,0 +1,70 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — Google Analytics App Events"
+  table_name: "{bronze_layer}_{system}_app_events"
+  description: >
+    Raw GA4 app event-level data. Each row is a user interaction on the RideFlow mobile app.
+  target_layer: bronze
+  domain: marketing
+  system: google_analytics
+
+model:
+  fields:
+    - name: event_name
+      type: string
+      required: true
+      description: "GA4 event name"
+    - name: event_timestamp
+      type: string
+      required: true
+      description: "Event timestamp (microseconds)"
+    - name: event_date
+      type: string
+      description: "Event date YYYYMMDD"
+    - name: user_pseudo_id
+      type: string
+      required: true
+      description: "GA4 anonymous client ID"
+    - name: user_id
+      type: string
+      pii: true
+      description: "Authenticated user ID"
+    - name: device_id
+      type: string
+      pii: true
+      description: "Mobile device ID"
+    - name: ip_address
+      type: string
+      pii: true
+      description: "Client IP address"
+    - name: device_category
+      type: string
+      description: "mobile, tablet, desktop"
+    - name: device_os
+      type: string
+      description: "iOS, Android"
+    - name: geo_country
+      type: string
+      description: "User country"
+    - name: geo_city
+      type: string
+      description: "User city"
+    - name: app_version
+      type: string
+      description: "RideFlow app version"
+    - name: event_params_json
+      type: string
+      description: "Raw event parameters as JSON"
+
+source:
+  type: landing
+  path: "{landing_root}/app_events"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

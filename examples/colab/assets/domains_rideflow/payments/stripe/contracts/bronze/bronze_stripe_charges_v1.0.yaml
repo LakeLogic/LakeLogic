@@ -1,0 +1,66 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — Stripe Charges"
+  table_name: "{bronze_layer}_{system}_charges"
+  description: >
+    Raw payment charge events from Stripe. One row per rider payment.
+  target_layer: bronze
+  domain: payments
+  system: stripe
+
+model:
+  fields:
+    - name: charge_id
+      type: string
+      required: true
+      description: "Stripe charge ID"
+    - name: rider_id
+      type: string
+      required: true
+      description: "FK to marketplace rider"
+    - name: trip_id
+      type: string
+      description: "FK to marketplace trip"
+    - name: amount
+      type: string
+      description: "Charge amount in minor units"
+    - name: currency
+      type: string
+      description: "ISO 4217 currency code"
+    - name: status
+      type: string
+      description: "Charge status (succeeded, failed, pending)"
+    - name: payment_method_type
+      type: string
+      description: "card, apple_pay, google_pay"
+    - name: card_last_four
+      type: string
+      pii: true
+      description: "Last 4 digits of card"
+    - name: billing_email
+      type: string
+      pii: true
+      description: "Billing email address"
+    - name: billing_address
+      type: string
+      pii: true
+      description: "Billing address"
+    - name: created_at
+      type: string
+      description: "Charge creation timestamp"
+    - name: metadata_json
+      type: string
+      description: "Raw Stripe metadata as JSON"
+
+source:
+  type: landing
+  path: "{landing_root}/charges"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d"

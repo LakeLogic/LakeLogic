@@ -1,0 +1,60 @@
+version: 1.0.0
+
+info:
+  title: "Gold — Trip KPIs"
+  table_name: "{gold_layer}_rideflow_trip_kpis"
+  description: "Daily revenue, volume, and distance KPIs aggregated from completed trips."
+  target_layer: gold
+  domain: marketplace
+  system: rideflow
+
+source:
+  type: delta
+  path: "{silver_path}/silver_rideflow_trips"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+
+primary_key: [kpi_date, city_code]
+
+links:
+  - name: silver_trips_full
+    path: "{silver_path}/silver_rideflow_trips"
+    type: delta
+
+model:
+  fields:
+    - name: kpi_date
+      type: date
+      required: true
+    - name: city_code
+      type: string
+    - name: total_trips
+      type: integer
+    - name: total_revenue
+      type: float
+    - name: total_distance_km
+      type: float
+    - name: avg_fare
+      type: float
+    - name: avg_surge
+      type: float
+
+transformations:
+  - sql: |
+      SELECT
+          CAST(requested_at AS DATE) AS kpi_date,
+          city_code,
+          COUNT(*)                   AS total_trips,
+          SUM(fare_amount)           AS total_revenue,
+          SUM(distance_km)           AS total_distance_km,
+          AVG(fare_amount)           AS avg_fare,
+          AVG(surge_multiplier)      AS avg_surge
+      -- Read the FULL Silver table (via link) so aggregates
+      -- (COUNT, SUM, AVG) include ALL rows for each date —
+      -- not just the incremental slice.
+      FROM silver_trips_full
+      WHERE requested_at IS NOT NULL
+      -- Only re-aggregate dates that received new trips.
+      -- On a full load, `source` contains everything, so this safely selects all dates.
+      AND CAST(requested_at AS DATE) IN (SELECT DISTINCT CAST(requested_at AS DATE) FROM source)
+      GROUP BY CAST(requested_at AS DATE), city_code

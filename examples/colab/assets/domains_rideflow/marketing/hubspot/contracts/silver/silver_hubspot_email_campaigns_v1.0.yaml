@@ -1,0 +1,47 @@
+version: 1.0.0
+info:
+  title: "Silver \u2014 Hubspot Email Campaigns"
+  table_name: '{silver_layer}_hubspot_email_campaigns'
+  description: Cleaned, typed, and deduplicated data.
+  target_layer: silver
+  domain: marketing
+  system: hubspot
+model:
+  fields:
+  - name: campaign_id
+    type: string
+    required: true
+  - name: recipient_email
+    type: string
+    required: true
+    pii: true
+    masking: hash
+  - name: recipient_name
+    type: string
+    pii: true
+    masking: redact
+  - name: campaign_name
+    type: string
+  - name: subject_line
+    type: string
+  - name: sent_at
+    type: timestamp
+  - name: opened_at
+    type: timestamp
+  - name: clicked_at
+    type: timestamp
+  - name: bounced
+    type: boolean
+  - name: unsubscribed
+    type: boolean
+quality:
+  row_rules: []
+  dataset_rules:
+  - unique: campaign_id
+transformations:
+- deduplicate:
+    by:
+    - campaign_id
+source:
+  type: delta
+  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_email_campaigns'

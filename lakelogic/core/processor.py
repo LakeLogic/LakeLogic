@@ -779,10 +779,42 @@ class DataProcessor:
             ratio = counts.get("quarantine_ratio")
             ratio_display = f"{ratio:.2%}" if ratio is not None else "n/a"
             dropped = counts.get("pre_transform_dropped")
-            _dropped_display = f", Pre-Transform Dropped: {dropped}" if dropped is not None else ""  # noqa: F841
+
+            # Detect whether the transformations perform aggregation
+            # (GROUP BY, COUNT, SUM, AVG, etc.).  When aggregation is present,
+            # the row-count reduction is intentional summarisation — not data loss.
+            _is_aggregation = False
+            _transforms = getattr(self.contract, "transformations", None) or []
+            if not isinstance(_transforms, list):
+                try:
+                    _transforms = list(_transforms)
+                except Exception:
+                    _transforms = []
+            for _t in _transforms:
+                _sql = getattr(_t, "sql", None) or ""
+                if _sql and any(
+                    kw in _sql.upper() for kw in ("GROUP BY", "GROUP  BY", "SUM(", "COUNT(", "AVG(", "MIN(", "MAX(")
+                ):
+                    _is_aggregation = True
+                    break
+
+            # Choose the appropriate label and update counts dict for run log
+            if dropped is not None and dropped > 0:
+                if _is_aggregation:
+                    _dropped_label = "Aggregated"
+                    # Reclassify in counts so the run log and telemetry
+                    # correctly distinguish summarisation from data loss.
+                    counts["aggregated_rows"] = dropped
+                    counts["pre_transform_dropped"] = 0
+                else:
+                    _dropped_label = "Pre-Transform Dropped"
+                _dropped_line = f" | {_dropped_label}: {dropped}"
+            else:
+                _dropped_line = ""
+
+            _dropped_display = f", {_dropped_label}: {dropped}" if dropped is not None and dropped > 0 else ""  # noqa: F841
             _source_display = f"Source: {source_total}, " if source_total is not None else ""  # noqa: F841
             if quality_enabled:
-                _dropped_line = f" | Pre-Transform Dropped: {dropped}" if dropped is not None else ""
                 logger.info(
                     f"Run complete{tags_display} | "
                     f"Source: {source_total if source_total is not None else 'n/a'} | "
@@ -790,7 +822,6 @@ class DataProcessor:
                     f"Ratio: {ratio_display}"
                 )
             else:
-                _dropped_line = f" | Pre-Transform Dropped: {dropped}" if dropped is not None else ""
                 logger.info(
                     f"Run complete{tags_display} | "
                     f"Source: {source_total if source_total is not None else 'n/a'} | "
@@ -1297,6 +1328,7 @@ class DataProcessor:
             ValidationResult object (unpacks to good_df, bad_df).
         """
         self._active_trace_steps = []
+        self._run_log_already_written = False
 
         # Store reprocess range for downstream use by materialize
         self._reprocess_from = reprocess_from
@@ -1346,10 +1378,12 @@ class DataProcessor:
         # delta_version → reads Delta transaction log → only valid for table sources
         # Mismatches silently degrade to full reloads every run.
         _src_cfg = self.contract.source if self.contract.source else None
-        _is_table = str(path).startswith("table:") or (_src_cfg and getattr(_src_cfg, "type", None) == "table")
+        _is_table = str(path).startswith("table:") or (
+            _src_cfg and getattr(_src_cfg, "type", None) in ("table", "delta", "iceberg")
+        )
         _wm_strategy = getattr(_src_cfg, "watermark_strategy", None) if _src_cfg else None
         _load_mode = getattr(_src_cfg, "load_mode", "full") if _src_cfg else "full"
-        if _is_table and _wm_strategy == "pipeline_log" and _load_mode in ("incremental",):
+        if _is_table and _wm_strategy == "pipeline_log" and getattr(_src_cfg, "type", None) == "table":
             raise ValueError(
                 "Invalid configuration: source type 'table' cannot use "
                 "watermark_strategy 'pipeline_log' (it relies on file modification times "
@@ -1444,12 +1478,13 @@ class DataProcessor:
             if source_files is not None and len(source_files) == 0:
                 logger.info("No source files found in partitioned path; skipping run.")
                 self._write_empty_run_log("no_new_data")
+                self._run_log_already_written = True
                 return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
         else:
             # Force directory glob to calculate mtimes for incremental file reads
             # if a raw directory path was provided without an explicit glob.
             _is_table = str(path).startswith("table:") or (
-                self.contract.source and self.contract.source.type == "table"
+                self.contract.source and self.contract.source.type in ("table", "delta", "iceberg")
             )
             if (
                 self.contract.source
@@ -1467,8 +1502,11 @@ class DataProcessor:
                 _is_bare_dir = (
                     not any(ch in str(path) for ch in ["*", "?", "["])
                     and not _is_table
+                    and _src_type not in ("delta", "iceberg")
                     and not self._is_uri_path(str(path))
                     and Path(path).is_dir()
+                    and not (Path(path) / "_delta_log").exists()
+                    and not ((Path(path) / "metadata").exists() and (Path(path) / "data").exists())
                 )
                 if _is_bare_dir:
                     source_files = self._expand_source_files(str(path).rstrip("/") + "/**/*")
@@ -1484,6 +1522,7 @@ class DataProcessor:
             if not source_files:
                 logger.info("No new files detected for incremental load; skipping run.")
                 self._write_empty_run_log("no_new_data")
+                self._run_log_already_written = True
                 return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
 
         self._source_files = source_files or []
@@ -1705,53 +1744,71 @@ class DataProcessor:
                             if getattr(_src_cfg, "load_mode", None) in ("incremental", "cdc") and not os.environ.get(
                                 "LAKELOGIC_SKIP_INCREMENTAL_CHECK"
                             ):
+                                _wm_strategy = getattr(_src_cfg, "watermark_strategy", None)
                                 _wm_field = getattr(_src_cfg, "watermark_field", None)
                                 # Default to the configured lineage timestamp when no explicit watermark is set.
                                 if not _wm_field:
                                     _lin_cfg = getattr(self.contract, "lineage", None)
                                     _wm_base = (
-                                        getattr(_lin_cfg, "timestamp_column_name", "_lakelogic_processed_at")
+                                        getattr(_lin_cfg, "timestamp_column_name", None) or "_lakelogic_processed_at"
                                         if _lin_cfg
                                         else "_lakelogic_processed_at"
                                     )
-                                    _wm_field = getattr(_src_cfg, "cdc_timestamp_field", _wm_base)
+                                    _wm_field = getattr(_src_cfg, "cdc_timestamp_field", None) or _wm_base
 
                                 _mat = getattr(self.contract, "materialization", None)
                                 _tgt = getattr(_mat, "target_path", None) if _mat else None
-                                if _wm_field and _tgt:
+                                if _wm_field:
                                     _src_col, _tgt_col = self._resolve_watermark_columns(_wm_field)
                                     _max_wm = None
 
-                                    # Watermark checking on the target table (Delta)
-                                    # Skip Path() checks for URIs to avoid OSError on Windows
-                                    _tgt_is_delta_dir = False
-                                    if not self._is_uri_path(_tgt):
-                                        _tgt_delta = Path(_tgt)
-                                        _tgt_is_delta_dir = (_tgt_delta / "_delta_log").exists()
-                                    else:
-                                        _tgt_is_delta_dir = True  # Assume URI target is accessible if it's delta
+                                    if _wm_strategy == "pipeline_log":
+                                        _max_wm_val = self._get_last_source_watermark()
+                                        if _max_wm_val is not None:
+                                            try:
+                                                from datetime import datetime, timezone
 
-                                    if _tgt_is_delta_dir:
-                                        try:
-                                            # Use DeltaTable → Arrow → Polars to avoid
-                                            # deltalake/polars Schema iteration bug
-                                            from deltalake import DeltaTable as _DT
+                                                _max_wm_dt = datetime.fromtimestamp(float(_max_wm_val), tz=timezone.utc)
+                                                # Use ISO string when the source column is String-typed
+                                                # (Polars can't compare datetime to string directly).
+                                                _max_wm = _max_wm_dt.isoformat()
+                                                logger.debug(
+                                                    f"pipeline_log watermark: float={_max_wm_val} -> iso={_max_wm}"
+                                                )
+                                            except Exception as e:
+                                                logger.debug(f"Failed to parse pipeline_log watermark: {e}")
+                                                _max_wm = None
+                                    elif _tgt:
+                                        # Watermark checking on the target table (Delta)
+                                        # Skip Path() checks for URIs to avoid OSError on Windows
+                                        _tgt_is_delta_dir = False
+                                        if not self._is_uri_path(_tgt):
+                                            _tgt_delta = Path(_tgt)
+                                            _tgt_is_delta_dir = (_tgt_delta / "_delta_log").exists()
+                                        else:
+                                            _tgt_is_delta_dir = True  # Assume URI target is accessible if it's delta
 
-                                            _dt_opts = (
-                                                self._get_cloud_storage_options(str(_tgt))
-                                                if self._is_uri_path(str(_tgt))
-                                                else None
-                                            )
-                                            _dt_tgt = _DT(str(_tgt), storage_options=_dt_opts)
-                                            _tdf = pl.from_arrow(_dt_tgt.to_pyarrow_table())
-                                            if _tgt_col in _tdf.columns:
-                                                _max_wm = _tdf.select(pl.col(_tgt_col).max()).item()
-                                        except Exception as _wm_err:
-                                            logger.debug(f"Watermark read failed (full load): {_wm_err}")
+                                        if _tgt_is_delta_dir:
+                                            try:
+                                                # Use DeltaTable → Arrow → Polars to avoid
+                                                # deltalake/polars Schema iteration bug
+                                                from deltalake import DeltaTable as _DT
+
+                                                _dt_opts = (
+                                                    self._get_cloud_storage_options(str(_tgt))
+                                                    if self._is_uri_path(str(_tgt))
+                                                    else None
+                                                )
+                                                _dt_tgt = _DT(str(_tgt), storage_options=_dt_opts)
+                                                _tdf = pl.from_arrow(_dt_tgt.to_pyarrow_table())
+                                                if _tgt_col in _tdf.columns:
+                                                    _max_wm = _tdf.select(pl.col(_tgt_col).max()).item()
+                                            except Exception as _wm_err:
+                                                logger.debug(f"Watermark read failed (full load): {_wm_err}")
                                     if _max_wm is not None:
                                         logger.info(
                                             f"Incremental load: filtering {_src_col} > {_max_wm!r} "
-                                            f"(target column: '{_tgt_col}')"
+                                            f"(strategy: {_wm_strategy or 'max_target'})"
                                         )
                                         _wm_filter_expr = pl.col(_src_col) > _max_wm
                                     else:
@@ -1768,14 +1825,19 @@ class DataProcessor:
 
                             # Apply watermark filter immediately (before flatten/rename)
                             if _wm_filter_expr is not None:
-                                df = df.filter(_wm_filter_expr)
-                                if df.is_empty():
-                                    logger.info(
-                                        "Incremental load: no new rows since last run — "
-                                        "processing empty frame to preserve contract schema."
+                                if _src_col in df.columns:
+                                    df = df.filter(_wm_filter_expr)
+                                    if df.is_empty():
+                                        logger.info(
+                                            "Incremental load: no new rows since last run — "
+                                            "processing empty frame to preserve contract schema."
+                                        )
+                                    # Continue (don't return early): the empty-but-schemed df
+                                    # flows through transforms so result.good has correct dtypes.
+                                else:
+                                    logger.warning(
+                                        f"Watermark column '{_src_col}' not found in source — falling back to full load"
                                     )
-                                # Continue (don't return early): the empty-but-schemed df
-                                # flows through transforms so result.good has correct dtypes.
 
                             # Capture actual max value from source for pipeline log
                             if self._source_max_mtime is None and not df.is_empty():
@@ -1783,12 +1845,16 @@ class DataProcessor:
                                 if not _src_wm_field:
                                     _lin_cfg = getattr(self.contract, "lineage", None)
                                     _wm_base = (
-                                        getattr(_lin_cfg, "timestamp_column_name", "_lakelogic_processed_at")
+                                        getattr(_lin_cfg, "timestamp_column_name", None) or "_lakelogic_processed_at"
                                         if _lin_cfg
                                         else "_lakelogic_processed_at"
                                     )
-                                    _src_wm_field = getattr(_src_cfg, "cdc_timestamp_field", _wm_base)
+                                    _src_wm_field = getattr(_src_cfg, "cdc_timestamp_field", None) or _wm_base
 
+                                logger.debug(
+                                    f"Watermark capture: resolved field='{_src_wm_field}', "
+                                    f"available={_src_wm_field in df.columns if _src_wm_field else False}"
+                                )
                                 if _src_wm_field and _src_wm_field in df.columns:
                                     try:
                                         _val = df.select(pl.col(_src_wm_field).max()).item()
@@ -1803,8 +1869,12 @@ class DataProcessor:
                                                 ).timestamp()
                                             else:
                                                 self._source_max_mtime = float(_val)
-                                    except Exception:
-                                        pass
+                                            logger.debug(
+                                                f"Captured max_source_mtime={self._source_max_mtime} "
+                                                f"from '{_src_wm_field}'"
+                                            )
+                                    except Exception as _cap_err:
+                                        logger.debug(f"Watermark capture failed: {_cap_err}")
 
                         elif _scannable:
                             fmt = (
@@ -1813,10 +1883,13 @@ class DataProcessor:
                                 else ""
                             )
                             # Polars needs explicit glob if it's a directory
-                            if fmt == "parquet" and not path.endswith(".parquet"):
-                                path = f"{path.rstrip('/')}/*.parquet"
-                            elif fmt == "csv" and not path.endswith(".csv"):
-                                path = f"{path.rstrip('/')}/*.csv"
+                            _supported_globs = ["csv", "parquet", "json", "jsonl", "ndjson"]
+                            if (
+                                fmt in _supported_globs
+                                and not any(chr in path for chr in ["*", "?", "["])
+                                and not path.endswith(f".{fmt}")
+                            ):
+                                path = f"{path.rstrip('/')}/**/*.{fmt}"
 
                             # On Windows, Polars' internal glob misinterprets
                             # drive-letter colons (C:) as URI schemes, producing
@@ -2064,7 +2137,8 @@ class DataProcessor:
                                     if not _wm_field:
                                         _lin_cfg = getattr(self.contract, "lineage", None)
                                         _wm_field = (
-                                            getattr(_lin_cfg, "timestamp_column_name", "_lakelogic_processed_at")
+                                            getattr(_lin_cfg, "timestamp_column_name", None)
+                                            or "_lakelogic_processed_at"
                                             if _lin_cfg
                                             else "_lakelogic_processed_at"
                                         )
@@ -2366,7 +2440,90 @@ class DataProcessor:
                 prefix = getattr(lineage_cfg, "upstream_prefix", "_upstream") or "_upstream"
                 df = _preserve_upstream_lineage(df, preserve_cols, prefix, self.engine_name)
 
-        return self.run(df, source_path=path, reset_trace=False)
+        result = self.run(df, source_path=path, reset_trace=False)
+
+        # ── Post-ingestion cleanup (source-level) ────────────────────────
+        # When source.post_ingestion.action is set, clean up landing files
+        # after a successful run.  This mirrors PipelineRunner's server-level
+        # cleanup but works for standalone DataProcessor.run_source() calls.
+        _src_cfg = self.contract.source if self.contract.source else None
+        _pi = getattr(_src_cfg, "post_ingestion", None) if _src_cfg else None
+        if _pi and getattr(_pi, "action", "retain") != "retain":
+            _action = _pi.action
+            _source_path = str(path)
+            _archive_path = getattr(_pi, "archive_path", None)
+            _blocking = getattr(_pi, "cleanup_is_blocking", False)
+            try:
+                self._post_ingestion_cleanup(_source_path, _action, archive_path=_archive_path)
+            except Exception as _cleanup_exc:
+                if _blocking:
+                    raise RuntimeError(f"Post-ingestion cleanup ({_action}) failed: {_cleanup_exc}") from _cleanup_exc
+                else:
+                    logger.warning(
+                        f"Post-ingestion cleanup ({_action}) failed: {_cleanup_exc}. "
+                        f"Pipeline continues (cleanup_is_blocking=false)."
+                    )
+
+        return result
+
+    def _post_ingestion_cleanup(self, source_path: str, action: str, *, archive_path: Optional[str] = None) -> None:
+        """Clean up landing zone files after a successful run.
+
+        Only cleans up files that were actually ingested in this run
+        (tracked in self._source_files).  This prevents accidental
+        deletion of archive subdirectories or other unrelated files.
+
+        Supports local filesystem paths.  For cloud paths, this is
+        handled by PipelineRunner which has access to fsspec/dbutils.
+        """
+        from pathlib import Path as _Path
+        import shutil as _shutil
+
+        # Use the tracked source files from this run, filtered to only
+        # include direct children of the source directory.  This prevents
+        # accidental deletion of archive subdirectories or other managed
+        # directories within the landing zone.
+        src = _Path(source_path).resolve()
+        ingested_files = [
+            _Path(f["path"])
+            for f in (self._source_files or [])
+            if "path" in f and _Path(f["path"]).exists() and _Path(f["path"]).resolve().parent == src
+        ]
+
+        if not ingested_files:
+            logger.debug(f"Post-ingestion: no ingested files to clean up in {source_path}")
+            return
+
+        if action == "delete":
+            for f in ingested_files:
+                f.unlink()
+            logger.info(f"Post-ingestion: deleted {len(ingested_files)} ingested file(s) in {source_path}")
+
+        elif action == "archive":
+            if not archive_path:
+                raise ValueError(
+                    "post_ingestion.action is 'archive' but no archive_path was provided. "
+                    "Set archive_path in source.post_ingestion or use PipelineRunner "
+                    "with storage.archive_path in _system.yaml."
+                )
+            src = _Path(source_path)
+            dst = _Path(archive_path).resolve()
+            dst.mkdir(parents=True, exist_ok=True)
+            for f in ingested_files:
+                # Preserve relative path structure in archive
+                try:
+                    rel = f.relative_to(src)
+                except ValueError:
+                    rel = _Path(f.name)
+                target = dst / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _shutil.move(str(f), str(target))
+            logger.info(
+                f"Post-ingestion: archived {len(ingested_files)} ingested file(s) from {source_path} to {archive_path}"
+            )
+
+        else:
+            logger.warning(f"Post-ingestion: unknown action '{action}', skipping cleanup")
 
     def _resolve_reprocess_date_column(self) -> str:
         """Resolve which column to use for date-range reprocessing.
@@ -2762,8 +2919,11 @@ class DataProcessor:
         if source_type == "table":
             return None
         p = Path(path)
-        if p.is_dir() and (p / "_delta_log").exists():
-            return None  # Delta table directory — read as a whole, not individual files
+        if p.is_dir():
+            if (p / "_delta_log").exists():
+                return None  # Delta table directory
+            if (p / "metadata").exists() and (p / "data").exists():
+                return None  # Iceberg table directory
         if not any(ch in path for ch in ["*", "?", "["]):
             return None
 
@@ -2802,6 +2962,11 @@ class DataProcessor:
         Instead of globbing the entire landing directory, only scans the
         directories for [today - lookback_days ... today] (or start_date..end_date).
 
+        Supports sub-daily partitions (hourly via ``%H``, minute via ``%M``).
+        When the format string contains ``%H`` or ``%M``, iteration switches
+        from ``date`` to ``datetime`` with the appropriate step size so every
+        partition slot is enumerated.
+
         Args:
             base_path: Base source path (e.g. "/Volumes/.../events").
             partition_cfg: SourcePartition config with format, lookback_days, etc.
@@ -2811,32 +2976,67 @@ class DataProcessor:
         Returns:
             List of {path, mtime} dicts for all files found across partitions.
         """
-        from datetime import date, timedelta
+        from datetime import date, datetime, timedelta
 
         # Reprocessing dates take precedence over partition config dates
         eff_start = override_start or partition_cfg.start_date
         eff_end = override_end or partition_cfg.end_date
 
-        # Determine date range
-        if eff_start and eff_end:
-            start = date.fromisoformat(eff_start)
-            end = date.fromisoformat(eff_end)
-        elif eff_start:
-            start = date.fromisoformat(eff_start)
-            end = date.today()
-        elif eff_end:
-            end = date.fromisoformat(eff_end)
-            start = end - timedelta(days=partition_cfg.lookback_days or 30)
+        fmt = partition_cfg.format
+
+        # Detect sub-daily partition granularity from the format string.
+        # %H → hourly, %M → minute-level.  When present we iterate with
+        # datetime objects instead of date objects so strftime resolves
+        # the hour/minute tokens correctly.
+        _has_hour = "%H" in fmt
+        _has_minute = "%M" in fmt
+        _sub_daily = _has_hour or _has_minute
+
+        if _sub_daily:
+            # Use datetime for sub-daily iteration
+            if _has_minute:
+                step = timedelta(minutes=1)
+            else:
+                step = timedelta(hours=1)
+
+            if eff_start and eff_end:
+                start_dt = datetime.fromisoformat(eff_start)
+                end_dt = datetime.fromisoformat(eff_end)
+            elif eff_start:
+                start_dt = datetime.fromisoformat(eff_start)
+                end_dt = datetime.now()
+            elif eff_end:
+                end_dt = datetime.fromisoformat(eff_end)
+                start_dt = end_dt - timedelta(days=partition_cfg.lookback_days or 30)
+            else:
+                end_dt = datetime.now()
+                start_dt = end_dt - timedelta(days=partition_cfg.lookback_days or 30)
+
+            # Ensure we cover the full day range: snap start to midnight,
+            # snap end to end-of-day (23:59) so all hours are scanned.
+            start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=0)
         else:
-            end = date.today()
-            start = end - timedelta(days=partition_cfg.lookback_days or 30)
+            step = timedelta(days=1)
+            # Day-level iteration uses date objects
+            if eff_start and eff_end:
+                start_dt = datetime.combine(date.fromisoformat(eff_start), datetime.min.time())
+                end_dt = datetime.combine(date.fromisoformat(eff_end), datetime.min.time())
+            elif eff_start:
+                start_dt = datetime.combine(date.fromisoformat(eff_start), datetime.min.time())
+                end_dt = datetime.combine(date.today(), datetime.min.time())
+            elif eff_end:
+                end_dt = datetime.combine(date.fromisoformat(eff_end), datetime.min.time())
+                start_dt = end_dt - timedelta(days=partition_cfg.lookback_days or 30)
+            else:
+                end_dt = datetime.combine(date.today(), datetime.min.time())
+                start_dt = end_dt - timedelta(days=partition_cfg.lookback_days or 30)
 
         file_pattern = partition_cfg.file_pattern
         if not file_pattern:
             # Auto-derive from source.format (e.g. json → *.json)
             src_fmt = getattr(getattr(self.contract, "source", None), "format", None)
             file_pattern = f"*.{src_fmt}" if src_fmt else "*"
-        fmt = partition_cfg.format
 
         # Strip trailing glob from base_path if present (e.g. ".../events/*.json" -> ".../events")
         # The file_pattern from partition config will be used instead.
@@ -2849,24 +3049,29 @@ class DataProcessor:
                 file_pattern = parts[1]  # e.g. "*.json"
 
         all_files: List[Dict[str, Any]] = []
-        current = start
-        while current <= end:
+        seen_dirs: set = set()  # Deduplicate when step < 1 day but format has no hour token
+        current = start_dt
+        while current <= end_dt:
             partition_dir = current.strftime(fmt)
-            partition_path = f"{base_clean}/{partition_dir}/{file_pattern}"
-            logger.debug(f"Scanning partition: {partition_path}")
-            files = self._expand_source_files(partition_path)
-            if files:
-                all_files.extend(files)
-            current += timedelta(days=1)
+            if partition_dir not in seen_dirs:
+                seen_dirs.add(partition_dir)
+                partition_path = f"{base_clean}/{partition_dir}/{file_pattern}"
+                logger.debug(f"Scanning partition: {partition_path}")
+                files = self._expand_source_files(partition_path)
+                if files:
+                    all_files.extend(files)
+            current += step
 
+        _range_days = (end_dt - start_dt).days + 1
         if all_files:
             logger.info(
                 f"Date-partitioned scan: {len(all_files)} files found "
-                f"across {(end - start).days + 1} partitions ({start} to {end})"
+                f"across {len(seen_dirs)} partitions ({start_dt.date()} to {end_dt.date()})"
             )
         else:
             logger.info(
-                f"Date-partitioned scan: no files found in {(end - start).days + 1} partitions ({start} to {end})"
+                f"Date-partitioned scan: no files found in "
+                f"{len(seen_dirs)} partitions ({start_dt.date()} to {end_dt.date()})"
             )
 
         return all_files if all_files else []
@@ -3507,6 +3712,7 @@ class DataProcessor:
             "pipeline_run_id": self.pipeline_run_id,
             "engine": self.engine_name,
             "contract": contract_title,
+            "contract_file_name": getattr(self.contract, "contract_file_name", None),
             "contract_version": str(contract_version) if contract_version else None,
             "stage": _stage,
             "dataset": dataset,
@@ -3764,13 +3970,19 @@ class DataProcessor:
                 from pyspark.sql import functions as F
 
                 if error_col in bad_df.columns:
-                    rows = bad_df.select(F.explode(F.col(error_col)).alias("error")).distinct().collect()
-                    errors.extend([r["error"] for r in rows if r["error"]])
+                    rows = bad_df.select(F.explode(F.col(error_col)).alias("error")).groupBy("error").count().collect()
+                    for r in rows:
+                        if r["error"]:
+                            errors.extend([r["error"]] * r["count"])
             except Exception as exc:
                 logger.debug(f"Spark error extraction failed: {exc}")
 
+        from collections import Counter
+
+        error_counts = Counter(errors)
+
         failures = []
-        for err in set(errors):
+        for err, count in error_counts.items():
             if isinstance(err, str) and err.startswith("Rule failed: "):
                 payload = err[len("Rule failed: ") :]
                 name = payload
@@ -3778,9 +3990,9 @@ class DataProcessor:
                 if " (" in payload and payload.endswith(")"):
                     name, sql = payload.split(" (", 1)
                     sql = sql[:-1]
-                failures.append({"name": name, "sql": sql, "message": err})
+                failures.append({"name": name, "sql": sql, "message": err, "count": count})
             else:
-                failures.append({"message": str(err)})
+                failures.append({"message": str(err), "count": count})
         return failures
 
     # ── DDL Generation ───────────────────────────────────────────────────
@@ -4012,7 +4224,12 @@ class DataProcessor:
                 columns = ", ".join(f'"{c}"' for c in col_names)
                 logger.info(f"Column projection: selecting {len(col_names)} fields from contract model")
 
-        query = f'SELECT {columns} FROM "{dataset}"'
+        custom_query = getattr(self.contract.source, "query", None)
+        if custom_query:
+            query = f"SELECT {columns} FROM ({custom_query}) AS _lakelogic_src"
+        else:
+            query = f'SELECT {columns} FROM "{dataset}"'
+
         load_mode = getattr(self.contract.source, "load_mode", "full")
         watermark_field = getattr(self.contract.source, "watermark_field", None)
 

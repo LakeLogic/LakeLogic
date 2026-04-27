@@ -65,6 +65,7 @@ class RemoteObserver:
                 "good": counts.get("good"),
                 "quarantined": counts.get("quarantined"),
                 "pre_transform_dropped": counts.get("pre_transform_dropped"),
+                "aggregated_rows": counts.get("aggregated_rows"),
                 "ratio": counts.get("quarantine_ratio"),
             },
             # Per-rule failures

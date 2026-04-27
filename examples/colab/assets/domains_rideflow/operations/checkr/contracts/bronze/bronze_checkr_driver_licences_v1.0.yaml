@@ -1,0 +1,57 @@
+version: 1.0.0
+info:
+  title: "Bronze — Checkr Driver Licences Unstructured"
+  table_name: "{bronze_layer}_{system}_driver_licences"
+  description: "Extracting driver details from simulated raw PDF documents using pdfplumber regex."
+  target_layer: bronze
+  domain: operations
+  system: checkr
+
+dataset: "driver_licences"
+
+source:
+  type: landing
+  path: "{storage_root}/_data/{domain}/{system}/driver_licences/*.pdf"
+
+extraction:
+  provider: pdfplumber
+
+model:
+  fields:
+    - name: file_path
+      type: string
+      # implicitly populated by the pipeline
+
+    - name: full_name
+      type: string
+      required: true
+      extraction_task: metadata
+      extraction_examples: ['Name:\s+(.+)']
+      
+    - name: licence_number
+      type: string
+      required: true
+      extraction_task: metadata
+      extraction_examples: ['Licence No:\s+(\S+)']
+      
+    - name: date_of_birth
+      type: date
+      extraction_task: metadata
+      extraction_examples: ['DOB:\s+(\d{4}-\d{2}-\d{2})']
+      
+    - name: expiry_date
+      type: date
+      extraction_task: metadata
+      extraction_examples: ['EXP:\s+(\d{4}-\d{2}-\d{2})']
+      
+    - name: vehicle_classes
+      type: string
+      extraction_task: metadata
+      extraction_examples: ['Classes:\s+(.+)']
+
+quality:
+  row_rules:
+    - not_null: licence_number
+
+lineage:
+  enabled: true

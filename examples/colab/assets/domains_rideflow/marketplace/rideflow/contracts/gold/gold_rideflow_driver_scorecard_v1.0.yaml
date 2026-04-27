@@ -1,0 +1,57 @@
+version: 1.0.0
+
+info:
+  title: "Gold — Driver Scorecard"
+  table_name: "{gold_layer}_rideflow_driver_scorecard"
+  description: "Per-driver performance scorecard with trip counts, earnings, and ratings."
+  target_layer: gold
+  domain: marketplace
+  system: rideflow
+
+source:
+  type: delta
+  path: "{silver_path}/silver_rideflow_trips"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+
+primary_key: [driver_id]
+
+links:
+  - name: silver_trips_full
+    path: "{silver_path}/silver_rideflow_trips"
+    type: delta
+
+model:
+  fields:
+    - name: driver_id
+      type: string
+      required: true
+    - name: total_trips
+      type: integer
+    - name: total_earnings
+      type: float
+    - name: avg_driver_rating
+      type: float
+    - name: avg_distance_km
+      type: float
+    - name: avg_duration_minutes
+      type: float
+
+transformations:
+  - sql: |
+      SELECT
+          driver_id,
+          COUNT(*)                   AS total_trips,
+          SUM(fare_amount)           AS total_earnings,
+          AVG(driver_rating)         AS avg_driver_rating,
+          AVG(distance_km)           AS avg_distance_km,
+          AVG(duration_minutes)      AS avg_duration_minutes
+      -- Read the FULL Silver table (via link) so aggregates compute all-time
+      -- metrics accurately. The Jinja guard restricts the
+      -- recomputation only to drivers who had new trips.
+      FROM silver_trips_full
+      WHERE driver_id IS NOT NULL
+      -- Only re-aggregate drivers that received new trips.
+      -- On a full load, `source` contains everything, so this safely selects all drivers.
+      AND driver_id IN (SELECT DISTINCT driver_id FROM source)
+      GROUP BY driver_id

@@ -148,6 +148,42 @@ class SchemaPolicy(BaseModel):
     unknown_fields: Literal["quarantine", "drop", "allow"] = "allow"
 
 
+class PostIngestionConfig(BaseModel):
+    """Landing zone lifecycle policy — what to do with source files after
+    successful Bronze ingestion.
+
+    Actions:
+      delete  — remove source files after commit (zero-retention)
+      archive — move source files to archive_path after commit
+      retain  — leave source files in place (default / no-op)
+
+    Safety guarantees:
+      - Cleanup only executes AFTER a successful Bronze Delta commit.
+      - If cleanup fails, the pipeline still succeeds (unless
+        cleanup_is_blocking is True).
+      - Cleanup failures are logged as warnings for manual intervention.
+
+    Example YAML (system-level default)::
+
+        server:
+          bronze:
+            post_ingestion:
+              action: delete
+              cleanup_is_blocking: false
+
+    Example YAML (contract-level with archive)::
+
+        source:
+          post_ingestion:
+            action: archive
+            archive_path: "/archive/crm/customers"
+    """
+
+    action: Literal["delete", "archive", "retain"] = "retain"
+    cleanup_is_blocking: bool = False
+    archive_path: Optional[str] = None  # Required when action == "archive"
+
+
 class Server(BaseModel):
     """Storage and ingestion settings for a contract."""
 
@@ -159,6 +195,9 @@ class Server(BaseModel):
     mode: str = "validate"  # 'validate' for Quality Gate, 'ingest' for Raw-to-Bronze movement
     schema_policy: Optional[SchemaPolicy] = Field(default_factory=SchemaPolicy)
     cast_to_string: bool = False
+
+    # Landing zone lifecycle (Bronze layer only)
+    post_ingestion: Optional[PostIngestionConfig] = None
 
 
 class Environment(BaseModel):
@@ -261,6 +300,7 @@ class SourceConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     type: str  # landing | stream | table | dlt
+    query: Optional[str] = None
     path: Optional[str] = None
     format: Optional[str] = None
     load_mode: str = "full"  # full | incremental | cdc
@@ -368,8 +408,23 @@ class SourceConfig(BaseModel):
     #     flatten_nested: [derived, pricing, location]
     flatten_nested: Union[bool, List[str]] = False
 
+    # ── Landing zone lifecycle (Bronze layer) ──────────────────────────────────
+    # Contract-level shorthand for post-ingestion cleanup.  For simple
+    # single-contract pipelines this avoids needing a full ``server:`` block.
+    #
+    # Precedence: source.post_ingestion (contract) > server.post_ingestion (system)
+    #
+    # Example (contract YAML):
+    #   source:
+    #     type: local
+    #     path: /landing/events
+    #     post_ingestion:
+    #       action: delete
+    post_ingestion: Optional[PostIngestionConfig] = None
+
     _SOURCE_KNOWN_KEYS: set = {
         "type",
+        "query",
         "path",
         "format",
         "load_mode",
@@ -392,6 +447,7 @@ class SourceConfig(BaseModel):
         "partition_filters",
         "flatten_nested",
         "dlt",
+        "post_ingestion",
     }
 
     @model_validator(mode="after")
@@ -1615,6 +1671,7 @@ class DataContract(BaseModel):
 
     # EXTERNAL LOGIC
     external_logic: Optional[ExternalLogic] = None
+    observatory: Optional[Dict[str, Any]] = None
 
     # LLM EXTRACTION (unstructured → structured)
     extraction: Optional[ExtractionConfig] = None
@@ -1630,12 +1687,14 @@ class DataContract(BaseModel):
     transformations: List[Transformation] = Field(default_factory=list)
     service_levels: Optional[ServiceLevel] = None
     quarantine: Optional[Quarantine] = Field(default_factory=Quarantine)
+    compliance: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     # TIER / LAYER ── mandatory for single-contract mode
     tier: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("tier", "layer", "target_layer"),
     )
+    contract_file_name: Optional[str] = None
 
     @field_validator("tier", mode="before")
     @classmethod
@@ -1711,6 +1770,8 @@ class DataContract(BaseModel):
         "slaProperties",
         "tags",
         "customProperties",
+        "observatory",
+        "compliance",
     }
     _PRIVATE_EXTRA_KEYS: set = {
         "_base_path",

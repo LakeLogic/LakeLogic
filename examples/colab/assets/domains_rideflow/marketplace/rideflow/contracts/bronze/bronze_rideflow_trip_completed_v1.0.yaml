@@ -1,0 +1,93 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — RideFlow Trip Completed"
+  table_name: "{bronze_layer}_{system}_trip_completed"
+  description: >
+    Raw trip completion events from the RideFlow platform.
+    Each row represents a completed ride or food delivery.
+    Contains fare, distance, duration, surge, and rating data.
+  target_layer: bronze
+  domain: marketplace
+  system: rideflow
+
+model:
+  fields:
+    - name: trip_id
+      type: string
+      required: true
+      description: "Unique trip identifier"
+    - name: rider_id
+      type: string
+      required: true
+      description: "FK to rider_profiles"
+    - name: driver_id
+      type: string
+      required: true
+      description: "FK to driver_profiles"
+    - name: trip_type
+      type: string
+      description: "ride or eats_delivery"
+    - name: pickup_lat
+      type: string
+      description: "Pickup latitude"
+    - name: pickup_lng
+      type: string
+      description: "Pickup longitude"
+    - name: dropoff_lat
+      type: string
+      description: "Dropoff latitude"
+    - name: dropoff_lng
+      type: string
+      description: "Dropoff longitude"
+    - name: city_code
+      type: string
+      description: "City code (LON, NYC, BER, PAR, TYO, SYD)"
+    - name: requested_at
+      type: string
+      description: "Trip request timestamp"
+    - name: pickup_at
+      type: string
+      description: "Actual pickup timestamp"
+    - name: dropoff_at
+      type: string
+      description: "Actual dropoff timestamp"
+    - name: distance_km
+      type: string
+      description: "Trip distance in kilometres"
+    - name: duration_minutes
+      type: string
+      description: "Trip duration in minutes"
+    - name: fare_amount
+      type: string
+      description: "Total fare amount"
+    - name: surge_multiplier
+      type: string
+      description: "Surge pricing multiplier"
+    - name: tip_amount
+      type: string
+      description: "Tip amount"
+    - name: payment_method
+      type: string
+      description: "card, apple_pay, google_pay, cash"
+    - name: rider_rating
+      type: string
+      description: "Rating given by rider (1-5)"
+    - name: driver_rating
+      type: string
+      description: "Rating given by driver (1-5)"
+    - name: notes
+      type: string
+      description: "Free-text trip notes"
+
+source:
+  type: landing
+  path: "{landing_root}/trip_completed"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

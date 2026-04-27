@@ -40,6 +40,11 @@ class SLOCheckResult(BaseModel):
     row_count: Optional[int] = None
     slo_min_rows: Optional[int] = None
     slo_max_rows: Optional[int] = None
+    # Source freshness (upstream data staleness)
+    source_delay_minutes: Optional[float] = None
+    source_slo_max_minutes: Optional[int] = None
+    source_column_used: Optional[str] = None  # which source column was resolved
+    source_passed: Optional[bool] = None
     # Anomaly detection
     anomaly_ratio: Optional[float] = None  # actual / baseline
     anomaly_baseline: Optional[float] = None  # median/avg of lookback
@@ -233,7 +238,7 @@ class SLOValidator:
                 continue
 
             try:
-                # Calculate delay
+                # Calculate pipeline delay
                 if hasattr(latest_ts, "timestamp"):
                     latest_utc = datetime.datetime.fromtimestamp(latest_ts.timestamp(), tz=datetime.timezone.utc)
                 else:
@@ -242,15 +247,104 @@ class SLOValidator:
                 delay = (now - latest_utc).total_seconds() / 60
                 passed = delay <= max_delay
 
+                # ── Source freshness check (Tier 2) ──────────────────────
+                # Iterate through source_check_columns to find a valid
+                # business timestamp. Uses TRY_CAST-style safe parsing:
+                # if the column doesn't exist or can't be cast to a
+                # timestamp, it returns NULL and we skip gracefully.
+                source_delay_min = None
+                source_slo_max = getattr(layer_slo, "max_source_delay_minutes", None) if layer_slo else None
+                source_col_used = None
+                source_passed = None
+                source_cols = getattr(layer_slo, "source_check_columns", []) if layer_slo else []
+
+                if layer_slo and source_slo_max and source_cols:
+                    for src_col in source_cols:
+                        try:
+                            src_ts = None
+                            if self.spark:
+                                # TRY_CAST returns NULL if the column can't be cast
+                                src_row = self.spark.sql(
+                                    f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts FROM {table_name}"
+                                ).first()
+                                src_ts = src_row["src_ts"] if src_row else None
+                            elif self.duckdb_con:
+                                try:
+                                    src_result = self.duckdb_con.execute(
+                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts "
+                                        f"FROM delta_scan('{polars_path}')"
+                                    ).fetchone()
+                                except Exception:
+                                    src_result = self.duckdb_con.execute(
+                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts "
+                                        f"FROM parquet_scan('{polars_path}')"
+                                    ).fetchone()
+                                src_ts = src_result[0] if src_result else None
+                            else:
+                                import polars as pl
+
+                                storage_opts = self._resolve_storage_opts(polars_path)
+                                try:
+                                    src_df = pl.read_delta(polars_path, storage_options=storage_opts)
+                                except Exception:
+                                    src_df = pl.read_parquet(polars_path, storage_options=storage_opts)
+                                # Safe cast: str_to_datetime returns null on parse failure
+                                try:
+                                    src_ts = src_df.select(pl.col(src_col).cast(pl.Datetime, strict=False).max()).item()
+                                except Exception:
+                                    src_ts = None
+
+                            if src_ts is not None:
+                                if hasattr(src_ts, "timestamp"):
+                                    src_utc = datetime.datetime.fromtimestamp(
+                                        src_ts.timestamp(), tz=datetime.timezone.utc
+                                    )
+                                else:
+                                    src_utc = src_ts.replace(tzinfo=datetime.timezone.utc)
+                                source_delay_min = round((now - src_utc).total_seconds() / 60, 1)
+                                source_col_used = src_col
+                                source_passed = source_delay_min <= source_slo_max
+                                break  # first valid column wins
+                        except Exception:
+                            continue  # column missing or unparseable — try next
+
+                    if source_col_used:
+                        logger.debug(
+                            f"   🔎 [{layer}] {entity}: source freshness via '{source_col_used}' "
+                            f"(delay: {source_delay_min}min, SLO: {source_slo_max}min) "
+                            f"{'✅' if source_passed else '❌'}"
+                        )
+                    else:
+                        logger.debug(
+                            f"   ⏭️ [{layer}] {entity}: no source timestamp columns found "
+                            f"in {layer_slo.source_check_columns} — source freshness skipped"
+                        )
+
+                # Overall pass: pipeline freshness must pass.
+                # Source freshness is informational if columns are missing,
+                # but fails the check if a source column was found and breaches the SLO.
+                overall_passed = passed and (source_passed is not False)
+
+                if overall_passed:
+                    status = "✅ OK"
+                elif not passed:
+                    status = "❌ STALE"
+                else:
+                    status = f"❌ SOURCE STALE (via {source_col_used})"
+
                 results.append(
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status="✅ OK" if passed else "❌ STALE",
-                        passed=passed,
+                        status=status,
+                        passed=overall_passed,
                         latest_ts=str(latest_ts),
                         delay_minutes=round(delay, 1),
                         slo_max_minutes=max_delay,
+                        source_delay_minutes=source_delay_min,
+                        source_slo_max_minutes=source_slo_max,
+                        source_column_used=source_col_used,
+                        source_passed=source_passed,
                     )
                 )
 
@@ -275,12 +369,20 @@ class SLOValidator:
             f"✅ {n_pass} passed | ❌ {n_fail} failed | ⚠️ {n_err} errors"
         )
         for r in results:
+            source_info = ""
+            if r.source_column_used:
+                source_info = (
+                    f", source: {r.source_delay_minutes}min via "
+                    f"'{r.source_column_used}' (SLO: {r.source_slo_max_minutes}min)"
+                )
             if r.passed:
                 logger.info(
-                    f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min)"  # noqa: E501
+                    f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min{source_info})"  # noqa: E501
                 )
             else:
-                logger.warning(f"   ❌ [{r.layer}] {r.entity}: {r.status}")
+                logger.warning(
+                    f"   ❌ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min{source_info})"  # noqa: E501
+                )
 
         return results
 

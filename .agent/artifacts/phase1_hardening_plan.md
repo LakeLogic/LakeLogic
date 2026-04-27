@@ -53,6 +53,27 @@ Take LakeLogic from "wide-but-fragile beta" to "narrow-but-bulletproof core" in 
 - Extract `lineage.py` from lineage injection + add_columns ✅
 - Keep `processor.py` as orchestrator only (1712 → 1130 lines, -34%)
 
+### 10.1 Testing Coverage Assessment ⚠️ Insufficient
+- **Current Inventory:** 31 Python test files under `tests/`, including 4 smoke tests (`_smoke_*.py`), broad unit coverage for core modules such as `test_processor.py` and `test_driver.py`, driver-focused integration coverage, and end-to-end orchestration coverage in `test_driver_e2e.py`.
+- **Current Strategy:**
+	- Smoke tests for AI and contract inference flows
+	- Unit tests for core processing, driver, ingestion, models, notifications, and SLO helpers
+	- Integration-style tests for driver orchestration and selected engine paths
+	- Property-based testing exists, but is currently limited to `test_driver_properties.py`
+- **Still Missing / Under-covered:**
+	- Dedicated integration tests for each engine adapter, rather than mostly driver-level coverage
+	- Broader Hypothesis/property-based coverage across transformation, schema, and materialization paths
+	- Contract validation edge cases, especially malformed config combinations and boundary-value rule definitions
+	- Explicit SLO threshold breach and alerting scenarios beyond the current happy-path coverage
+- **Coverage Reality:**
+	- The README still advertises a `100%` coverage badge, but that is aspirational rather than verified from a checked-in coverage artifact.
+	- CI already runs tests on pull requests via `.github/workflows/ci-gate.yml`, but the coverage floor is effectively advisory today because the `--cov-fail-under=50` step is wrapped in `|| echo`, so low coverage does not currently fail the workflow.
+- **Recommendation:**
+	- Keep GitHub Actions running on every PR, but make the coverage gate blocking instead of advisory
+	- Add Codecov integration so coverage trends are visible per PR and over time
+	- Raise the enforced floor from the current soft `50%` check toward a real minimum of `80%`
+	- Prioritize adapter integration tests, contract validation edge cases, and SLO breach scenarios before expanding breadth elsewhere
+
 ## P2 — Backlog
 
 ### 11. Thread-safety audit for cloud credential resolver ✅

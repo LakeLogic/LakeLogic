@@ -1,0 +1,63 @@
+# ── Reference Data System Registry ───────────────────────────────────────────
+# Static reference data: cities, vehicle types, surge tiers, cancellation reasons.
+# Also includes Python-generated dimensions (dim_date).
+domain: _reference
+system: _internal
+
+metadata:
+  run_log_table: "{log_path}"
+  run_log_backend: "delta"
+
+storage:
+  domain_catalog: "`{catalog}`.reference"
+  external_location_root: "{data_root}"
+  landing_path: "{storage_root}/_data/_reference/_internal"
+  log_path: "{storage_root}/_logs/_reference"
+  quarantine_path: "{quarantine_root}/_reference"
+
+contracts:
+
+lineage:
+  enabled: true
+
+materialization:
+  gold:
+    strategy: overwrite
+    format: delta
+
+server:
+  gold:
+    schema_policy:
+      evolution: strict
+      unknown_fields: quarantine
+
+notifications_enabled: false
+
+x-azure-storage: &azure_storage
+  storage_root: "abfss://nondelta@{storage_account}.dfs.core.windows.net"
+  data_root: "abfss://reference@{storage_account}.dfs.core.windows.net"
+  quarantine_root: "abfss://quarantine@{storage_account}.dfs.core.windows.net"
+
+environments:
+  dev:
+    catalog: "rideflow-lakehouse-dev-001"
+    storage_account: "sarideflowdevadls001"
+    <<: *azure_storage
+  staging:
+    catalog: "rideflow-lakehouse-staging-001"
+    storage_account: "sarideflowstgadls001"
+    <<: *azure_storage
+  prod:
+    catalog: "rideflow-lakehouse-prod-001"
+    storage_account: "sarideflowprodadls001"
+    <<: *azure_storage
+  local:
+    catalog: "local"
+    storage_root: "./lakehouse"
+    data_root: "./lakehouse/reference"
+    quarantine_root: "./lakehouse/_quarantine"
+  colab:
+    catalog: "colab"
+    storage_root: "/content/lake"
+    data_root: "/content/lake/reference"
+    quarantine_root: "/content/lake/_quarantine"
