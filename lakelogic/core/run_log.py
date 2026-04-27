@@ -834,10 +834,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
             import time
             import random
-            
+
             max_log_retries = 5
             last_exc = None
-            
+
             for attempt in range(max_log_retries):
                 try:
                     if check_is_deltatable(table_name, storage_options=storage_options):
@@ -873,8 +873,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     return table_name
                 except Exception as exc:
                     last_exc = exc
-                    time.sleep((2 ** attempt) * 0.1 + random.uniform(0.05, 0.2))
-            
+                    time.sleep((2**attempt) * 0.1 + random.uniform(0.05, 0.2))
+
             logger.warning(f"Failed to write run log to Delta table {table_name}: {last_exc}")
             return None
         except Exception as outer_exc:
@@ -1059,7 +1059,7 @@ def write_run_log(
             # Check model_extra for extra="allow" fields
             _extras = getattr(contract, "model_extra", None) or getattr(contract, "__fields_extra__", None) or {}
             observatory_cfg = _extras.get("observatory") if isinstance(_extras, dict) else None
-    
+
     # Also check contract dict source (registry injects into contract_dict before parsing)
     if not observatory_cfg:
         _raw_dict = getattr(contract, "__dict__", {})
@@ -1071,17 +1071,17 @@ def write_run_log(
         endpoint = observatory_cfg.get("endpoint")
         emit_on = observatory_cfg.get("emit_on", ["success", "partial", "failed"])
         target_envs = observatory_cfg.get("environments", [])
-        
+
         current_env = report.get("environment", "unknown")
         status = str(report.get("status", "unknown")).lower()
         # Normalise engine status aliases → emit_on values
         _status_aliases = {"succeeded": "success", "succeed": "success"}
         status = _status_aliases.get(status, status)
-        
+
         # Check environment and status triggers
         is_target_env = not target_envs or current_env in target_envs
         is_target_status = status in [e.lower() for e in emit_on]
-        
+
         logger.info(
             f"📡 [2/5] Filters: env={current_env} in {target_envs} → {is_target_env} | "
             f"status={status} in {emit_on} → {is_target_status}"
@@ -1090,6 +1090,7 @@ def write_run_log(
         if endpoint and is_target_env and is_target_status:
             try:
                 import requests as _requests
+
                 api_key = observatory_cfg.get("api_key")
                 headers = {"Content-Type": "application/json"}
                 if api_key:
@@ -1102,10 +1103,7 @@ def write_run_log(
                 _counts_quarantined = _counts.get("quarantined") or report.get("counts_quarantined", 0) or 0
                 _counts_total = _counts.get("total") or report.get("counts_total", 0) or 0
 
-                _quality = (
-                    float(_counts_good) / float(_counts_source)
-                    if _counts_source > 0 else 1.0
-                )
+                _quality = float(_counts_good) / float(_counts_source) if _counts_source > 0 else 1.0
 
                 # Build quarantined_rows list from report if configured
                 _quarantined_rows = None
@@ -1152,9 +1150,7 @@ def write_run_log(
                 if resp.status_code < 300:
                     logger.info(f"📡 [5/5] ✅ Ingested: {resp.text[:200]}")
                 else:
-                    logger.warning(
-                        f"📡 [5/5] ❌ Observatory returned {resp.status_code}: {resp.text[:500]}"
-                    )
+                    logger.warning(f"📡 [5/5] ❌ Observatory returned {resp.status_code}: {resp.text[:500]}")
             except Exception as exc:
                 logger.warning(f"📡 [ERR] Failed to push telemetry to observatory {endpoint}: {exc}")
         else:

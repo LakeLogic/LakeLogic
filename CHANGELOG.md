@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.19.0] — 2026-04-27
+
+### Added
+
+- Implement run logging and engine abstractions for LakeLogic core and CLI
+- Implement core pipeline engine and expand rideflow domain examples with interactive notebooks and dashboards
 ## [1.18.0] — 2026-04-16
 
 ### Added
@@ -253,6 +259,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/lakelogic/LakeLogic/compare/v1.17.1...v1.18.0
 [1.17.1]: https://github.com/lakelogic/LakeLogic/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/lakelogic/LakeLogic/compare/v1.16.0...v1.17.0

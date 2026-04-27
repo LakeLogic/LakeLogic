@@ -793,8 +793,7 @@ class DataProcessor:
             for _t in _transforms:
                 _sql = getattr(_t, "sql", None) or ""
                 if _sql and any(
-                    kw in _sql.upper()
-                    for kw in ("GROUP BY", "GROUP  BY", "SUM(", "COUNT(", "AVG(", "MIN(", "MAX(")
+                    kw in _sql.upper() for kw in ("GROUP BY", "GROUP  BY", "SUM(", "COUNT(", "AVG(", "MIN(", "MAX(")
                 ):
                     _is_aggregation = True
                     break
@@ -1379,7 +1378,9 @@ class DataProcessor:
         # delta_version → reads Delta transaction log → only valid for table sources
         # Mismatches silently degrade to full reloads every run.
         _src_cfg = self.contract.source if self.contract.source else None
-        _is_table = str(path).startswith("table:") or (_src_cfg and getattr(_src_cfg, "type", None) in ("table", "delta", "iceberg"))
+        _is_table = str(path).startswith("table:") or (
+            _src_cfg and getattr(_src_cfg, "type", None) in ("table", "delta", "iceberg")
+        )
         _wm_strategy = getattr(_src_cfg, "watermark_strategy", None) if _src_cfg else None
         _load_mode = getattr(_src_cfg, "load_mode", "full") if _src_cfg else "full"
         if _is_table and _wm_strategy == "pipeline_log" and getattr(_src_cfg, "type", None) == "table":
@@ -1766,13 +1767,13 @@ class DataProcessor:
                                         if _max_wm_val is not None:
                                             try:
                                                 from datetime import datetime, timezone
+
                                                 _max_wm_dt = datetime.fromtimestamp(float(_max_wm_val), tz=timezone.utc)
                                                 # Use ISO string when the source column is String-typed
                                                 # (Polars can't compare datetime to string directly).
                                                 _max_wm = _max_wm_dt.isoformat()
                                                 logger.debug(
-                                                    f"pipeline_log watermark: float={_max_wm_val} -> "
-                                                    f"iso={_max_wm}"
+                                                    f"pipeline_log watermark: float={_max_wm_val} -> iso={_max_wm}"
                                                 )
                                             except Exception as e:
                                                 logger.debug(f"Failed to parse pipeline_log watermark: {e}")
@@ -1786,13 +1787,13 @@ class DataProcessor:
                                             _tgt_is_delta_dir = (_tgt_delta / "_delta_log").exists()
                                         else:
                                             _tgt_is_delta_dir = True  # Assume URI target is accessible if it's delta
-    
+
                                         if _tgt_is_delta_dir:
                                             try:
                                                 # Use DeltaTable → Arrow → Polars to avoid
                                                 # deltalake/polars Schema iteration bug
                                                 from deltalake import DeltaTable as _DT
-    
+
                                                 _dt_opts = (
                                                     self._get_cloud_storage_options(str(_tgt))
                                                     if self._is_uri_path(str(_tgt))
@@ -1835,8 +1836,7 @@ class DataProcessor:
                                     # flows through transforms so result.good has correct dtypes.
                                 else:
                                     logger.warning(
-                                        f"Watermark column '{_src_col}' not found in source — "
-                                        "falling back to full load"
+                                        f"Watermark column '{_src_col}' not found in source — falling back to full load"
                                     )
 
                             # Capture actual max value from source for pipeline log
@@ -1884,7 +1884,11 @@ class DataProcessor:
                             )
                             # Polars needs explicit glob if it's a directory
                             _supported_globs = ["csv", "parquet", "json", "jsonl", "ndjson"]
-                            if fmt in _supported_globs and not any(chr in path for chr in ["*", "?", "["]) and not path.endswith(f".{fmt}"):
+                            if (
+                                fmt in _supported_globs
+                                and not any(chr in path for chr in ["*", "?", "["])
+                                and not path.endswith(f".{fmt}")
+                            ):
                                 path = f"{path.rstrip('/')}/**/*.{fmt}"
 
                             # On Windows, Polars' internal glob misinterprets
@@ -2133,7 +2137,8 @@ class DataProcessor:
                                     if not _wm_field:
                                         _lin_cfg = getattr(self.contract, "lineage", None)
                                         _wm_field = (
-                                            getattr(_lin_cfg, "timestamp_column_name", None) or "_lakelogic_processed_at"
+                                            getattr(_lin_cfg, "timestamp_column_name", None)
+                                            or "_lakelogic_processed_at"
                                             if _lin_cfg
                                             else "_lakelogic_processed_at"
                                         )
@@ -2452,9 +2457,7 @@ class DataProcessor:
                 self._post_ingestion_cleanup(_source_path, _action, archive_path=_archive_path)
             except Exception as _cleanup_exc:
                 if _blocking:
-                    raise RuntimeError(
-                        f"Post-ingestion cleanup ({_action}) failed: {_cleanup_exc}"
-                    ) from _cleanup_exc
+                    raise RuntimeError(f"Post-ingestion cleanup ({_action}) failed: {_cleanup_exc}") from _cleanup_exc
                 else:
                     logger.warning(
                         f"Post-ingestion cleanup ({_action}) failed: {_cleanup_exc}. "
@@ -2463,9 +2466,7 @@ class DataProcessor:
 
         return result
 
-    def _post_ingestion_cleanup(
-        self, source_path: str, action: str, *, archive_path: Optional[str] = None
-    ) -> None:
+    def _post_ingestion_cleanup(self, source_path: str, action: str, *, archive_path: Optional[str] = None) -> None:
         """Clean up landing zone files after a successful run.
 
         Only cleans up files that were actually ingested in this run
@@ -2484,10 +2485,9 @@ class DataProcessor:
         # directories within the landing zone.
         src = _Path(source_path).resolve()
         ingested_files = [
-            _Path(f["path"]) for f in (self._source_files or [])
-            if "path" in f
-            and _Path(f["path"]).exists()
-            and _Path(f["path"]).resolve().parent == src
+            _Path(f["path"])
+            for f in (self._source_files or [])
+            if "path" in f and _Path(f["path"]).exists() and _Path(f["path"]).resolve().parent == src
         ]
 
         if not ingested_files:
@@ -2518,7 +2518,9 @@ class DataProcessor:
                 target = dst / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
                 _shutil.move(str(f), str(target))
-            logger.info(f"Post-ingestion: archived {len(ingested_files)} ingested file(s) from {source_path} to {archive_path}")
+            logger.info(
+                f"Post-ingestion: archived {len(ingested_files)} ingested file(s) from {source_path} to {archive_path}"
+            )
 
         else:
             logger.warning(f"Post-ingestion: unknown action '{action}', skipping cleanup")
@@ -2974,7 +2976,7 @@ class DataProcessor:
         Returns:
             List of {path, mtime} dicts for all files found across partitions.
         """
-        from datetime import date, datetime, timedelta, timezone
+        from datetime import date, datetime, timedelta
 
         # Reprocessing dates take precedence over partition config dates
         eff_start = override_start or partition_cfg.start_date
@@ -3975,6 +3977,7 @@ class DataProcessor:
                 logger.debug(f"Spark error extraction failed: {exc}")
 
         from collections import Counter
+
         error_counts = Counter(errors)
 
         failures = []

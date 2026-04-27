@@ -22,7 +22,9 @@ class SLOFreshnessConfig(BaseModel):
     max_delay_minutes: int
     check_column: Union[str, List[str]] = "_lakelogic_loaded_at"
     max_source_delay_minutes: Optional[int] = None  # source-time freshness
-    source_check_columns: List[str] = Field(default_factory=list)  # candidate source timestamp columns (first match wins, skip if none found)
+    source_check_columns: List[str] = Field(
+        default_factory=list
+    )  # candidate source timestamp columns (first match wins, skip if none found)
     exclude_tables: List[str] = Field(default_factory=list)
 
 
@@ -149,7 +151,7 @@ class EnvironmentConfig(BaseModel):
     def resolve_all_env_vars(cls, values: Any) -> Any:
         if not isinstance(values, dict):
             return values
-            
+
         resolved = {}
         for k, v in values.items():
             if isinstance(v, str) and v.startswith("${") and v.endswith("}"):
@@ -228,14 +230,10 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
     endpoint = cfg.get("endpoint")
     if not endpoint or not isinstance(endpoint, str):
         logger.warning(
-            f"⚠ Observatory ({source}): 'enabled: true' but no valid 'endpoint' URL. "
-            f"Telemetry will not be pushed."
+            f"⚠ Observatory ({source}): 'enabled: true' but no valid 'endpoint' URL. Telemetry will not be pushed."
         )
     elif not endpoint.startswith(("http://", "https://")):
-        logger.warning(
-            f"⚠ Observatory ({source}): endpoint '{endpoint}' does not look like a "
-            f"valid HTTP(S) URL."
-        )
+        logger.warning(f"⚠ Observatory ({source}): endpoint '{endpoint}' does not look like a valid HTTP(S) URL.")
 
     # -- api_key ----------------------------------------------------------
     api_key = cfg.get("api_key")
@@ -250,8 +248,7 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
     if emit_on is not None:
         if not isinstance(emit_on, list):
             logger.warning(
-                f"⚠ Observatory ({source}): 'emit_on' should be a list, "
-                f"got {type(emit_on).__name__}. Wrapping in list."
+                f"⚠ Observatory ({source}): 'emit_on' should be a list, got {type(emit_on).__name__}. Wrapping in list."
             )
             emit_on = [emit_on] if isinstance(emit_on, str) else list(emit_on)
 
@@ -270,10 +267,7 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
     # -- environments -----------------------------------------------------
     envs = cfg.get("environments")
     if envs is not None and not isinstance(envs, list):
-        logger.warning(
-            f"⚠ Observatory ({source}): 'environments' should be a list, "
-            f"got {type(envs).__name__}."
-        )
+        logger.warning(f"⚠ Observatory ({source}): 'environments' should be a list, got {type(envs).__name__}.")
 
     # -- include_quarantine_sample ----------------------------------------
     iqs = cfg.get("include_quarantine_sample")
@@ -287,7 +281,7 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
     logger.info(
         f"✅ Observatory ({source}): config validated — "
         f"endpoint={cfg.get('endpoint', 'MISSING')}, "
-        f"emit_on={cfg.get('emit_on', ['success','partial','failed'])}, "
+        f"emit_on={cfg.get('emit_on', ['success', 'partial', 'failed'])}, "
         f"environments={cfg.get('environments', [])}"
     )
     return cfg
@@ -473,9 +467,7 @@ class DomainRegistry(BaseModel):
 
         # ── Validate observatory config early ──────────────────────────
         if raw.get("observatory") and isinstance(raw["observatory"], dict):
-            raw["observatory"] = _validate_observatory_config(
-                raw["observatory"], source=str(yaml_path.name)
-            )
+            raw["observatory"] = _validate_observatory_config(raw["observatory"], source=str(yaml_path.name))
 
         # Parse into typed model
         registry = cls.model_validate(raw)

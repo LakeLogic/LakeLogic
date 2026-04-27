@@ -437,7 +437,7 @@ def forget_subjects(
         partition_msg = ""
         if partition_filter:
             partition_msg = f", partition={partition_filter['column']}='{partition_filter['value']}'"
-        
+
         timestamp_iso = datetime.now(timezone.utc).isoformat()
         logger.info(
             f"GDPR erasure request: strategy={erasure_strategy}, "
@@ -470,7 +470,7 @@ def forget_subjects(
             run_id = f"erasure_{uuid.uuid4().hex[:8]}"
             _audit_report = {
                 "run_id": run_id,
-                "pipeline_run_id": run_id, # standalone event
+                "pipeline_run_id": run_id,  # standalone event
                 "timestamp": timestamp_iso,
                 "start_time": timestamp_iso,
                 "end_time": timestamp_iso,
@@ -485,7 +485,7 @@ def forget_subjects(
                 "counts": {
                     "total": len(subject_ids),
                     "good": len(subject_ids),
-                    "quarantined": len(subject_ids), # repurpose to mean 'erased count' for easy dashboarding
+                    "quarantined": len(subject_ids),  # repurpose to mean 'erased count' for easy dashboarding
                     "quarantine_ratio": 1.0,
                 },
                 "erasure_report": erasure_report,
@@ -558,7 +558,14 @@ def forget_subjects(
 
                 pdf = df.fetchdf()
                 pdf_result = _forget_pandas(
-                    pdf, pii_columns, subject_column, subject_ids, erasure_strategy, hash_salt, partition_filter, delete_reason
+                    pdf,
+                    pii_columns,
+                    subject_column,
+                    subject_ids,
+                    erasure_strategy,
+                    hash_salt,
+                    partition_filter,
+                    delete_reason,
                 )
                 import duckdb
 

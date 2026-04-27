@@ -443,8 +443,7 @@ def _write_quarantine_table_iceberg(df: Any, contract, table_name: str, metadata
         import pyarrow as pa
     except ImportError as exc:
         raise ImportError(
-            "Iceberg quarantine backend requires pyiceberg and pyarrow: "
-            "pip install pyiceberg pyarrow"
+            "Iceberg quarantine backend requires pyiceberg and pyarrow: pip install pyiceberg pyarrow"
         ) from exc
 
     catalog_name = metadata.get("iceberg_catalog_name") or os.getenv("ICEBERG_CATALOG_NAME", "default")
@@ -465,10 +464,12 @@ def _write_quarantine_table_iceberg(df: Any, contract, table_name: str, metadata
         arrow_table = collected.to_arrow()
     elif hasattr(df, "to_pandas"):
         import pyarrow as pa
+
         arrow_table = pa.Table.from_pandas(df.to_pandas())
     else:
         from lakelogic.core.materialization import _to_pandas
         import pyarrow as pa
+
         arrow_table = pa.Table.from_pandas(_to_pandas(df))
 
     rows_written = arrow_table.num_rows
@@ -922,8 +923,7 @@ def materialize_quarantine(
             import pyarrow as pa
         except ImportError as exc:
             raise ImportError(
-                "Iceberg quarantine format requires pyiceberg and pyarrow: "
-                "pip install pyiceberg pyarrow"
+                "Iceberg quarantine format requires pyiceberg and pyarrow: pip install pyiceberg pyarrow"
             ) from exc
 
         metadata = contract.metadata or {}

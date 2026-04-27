@@ -102,36 +102,36 @@ class PipelineRunSummary:
         lines.append(f"  Environment     : {self.environment}")
         lines.append(f"  Dry run         : {self.dry_run}")
         lines.append("")
-        
+
         if not self.results:
             lines.append("  No contracts processed.")
             lines.append("=" * 80)
             return "\n".join(lines)
-            
+
         header = f"  {'Table Name':<38} {'Layer':<8} {'Status':<10} {'Rows':<8} {'Good/Qrtn':<12}"
         lines.append(header)
         lines.append("  " + "-" * 78)
-        
+
         for r in self.results:
             t_name = str(r.get("table_name") or r.get("contract") or "")[:36]
             layer = str(r.get("layer") or "")[:7]
             status = str(r.get("status") or "")[:9]
             rows = str(r.get("rows", "-"))[:7]
-            
+
             good = r.get("rows_good")
             bad = r.get("rows_bad")
             if good is not None and bad is not None:
                 dq_str = f"{good}/{bad}"
             else:
                 dq_str = "-"
-                
+
             line = f"  {t_name:<38} {layer:<8} {status:<10} {rows:<8} {dq_str:<12}"
             lines.append(line)
-            
+
             err = r.get("error")
             if err:
                 lines.append(f"    └─ Error: {str(err)[:70]}")
-                
+
         lines.append("=" * 80)
         return "\n".join(lines)
 
@@ -1158,11 +1158,7 @@ class LakehousePipeline:
         """
         # 1. Contract-level override
         if contract_dict:
-            c_strategy = (
-                (contract_dict.get("compliance") or {})
-                .get("erasure", {})
-                .get("strategy")
-            )
+            c_strategy = (contract_dict.get("compliance") or {}).get("erasure", {}).get("strategy")
             if c_strategy:
                 return c_strategy
 
@@ -1876,8 +1872,7 @@ class LakehousePipeline:
           3. Databricks dbutils — when running on Databricks clusters
         """
         _is_cloud = any(
-            landing_path.startswith(pfx)
-            for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
+            landing_path.startswith(pfx) for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
         )
         _is_local = not _is_cloud
 
@@ -1889,12 +1884,10 @@ class LakehousePipeline:
                 return
             self._cleanup_cloud(landing_path, entity, mode, archive_path)
 
-    def _cleanup_local(
-        self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]
-    ) -> None:
+    def _cleanup_local(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> None:
         """Clean up landing files on local filesystem."""
-        from pathlib import Path
         import shutil
+        from pathlib import Path
 
         src = Path(landing_path)
         if not src.exists():
@@ -1925,9 +1918,7 @@ class LakehousePipeline:
                 shutil.move(str(src), str(dst / src.name))
                 logger.debug(f"  Archived {src} → {dst}")
 
-    def _try_cleanup_dbutils(
-        self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]
-    ) -> bool:
+    def _try_cleanup_dbutils(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> bool:
         """Attempt cleanup via Databricks dbutils. Returns True if successful."""
         _dbutils = None
         try:
@@ -1935,6 +1926,7 @@ class LakehousePipeline:
         except Exception:
             try:
                 import IPython
+
                 _dbutils = IPython.get_ipython().user_ns.get("dbutils")
             except Exception:
                 pass
@@ -1955,9 +1947,7 @@ class LakehousePipeline:
             logger.debug(f"  dbutils cleanup failed for {entity}: {e}")
             return False
 
-    def _cleanup_cloud(
-        self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]
-    ) -> None:
+    def _cleanup_cloud(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> None:
         """Clean up landing files on cloud storage via fsspec."""
         import os as _os_cleanup
 
@@ -1965,8 +1955,8 @@ class LakehousePipeline:
             import fsspec
         except ImportError:
             raise RuntimeError(
-                f"fsspec is required for cloud post-ingestion cleanup but is not installed. "
-                f"Install it with: pip install fsspec adlfs  (or s3fs / gcsfs)"
+                "fsspec is required for cloud post-ingestion cleanup but is not installed. "
+                "Install it with: pip install fsspec adlfs  (or s3fs / gcsfs)"
             )
 
         # Build storage options from environment variables
@@ -2187,7 +2177,10 @@ class LakehousePipeline:
                     from lakelogic.core.run_log import write_run_log
 
                     write_run_log(
-                        _report, processor.contract, engine_name=processor.engine_name, run_log_mode=processor._run_log_mode
+                        _report,
+                        processor.contract,
+                        engine_name=processor.engine_name,
+                        run_log_mode=processor._run_log_mode,
                     )
                 except Exception as log_exc:
                     logger.warning(f"Failed to write run log for {c.entity}: {log_exc}")
@@ -2434,7 +2427,6 @@ class LakehousePipeline:
 
         for layer, upstream_layer in upstream_map.items():
             for n in layer_entities.get(layer, []):
-
                 # Try to extract source table name from contract YAML source.path
                 _matched = False
                 for c in contracts:
@@ -2448,14 +2440,14 @@ class LakehousePipeline:
                         path_tail = source_path.rsplit("/", 1)[-1]
                         # Strip template vars: "{bronze_layer}_rideflow_trips" → "rideflow_trips"
                         import re as _re
-                        path_tail_clean = _re.sub(r'\{[^}]*\}_?', '', path_tail).strip("_")
+
+                        path_tail_clean = _re.sub(r"\{[^}]*\}_?", "", path_tail).strip("_")
                         if path_tail_clean:
                             for upstream_n in layer_entities.get(upstream_layer, []):
                                 u_entity = upstream_n["entity"].lower()
                                 # Match if upstream entity name is in the cleaned source path
                                 # or vice versa (bidirectional for system-prefixed names)
-                                if (path_tail_clean.lower() in u_entity
-                                        or u_entity in path_tail_clean.lower()):
+                                if path_tail_clean.lower() in u_entity or u_entity in path_tail_clean.lower():
                                     edge_pair = (upstream_n["id"], n["id"])
                                     if edge_pair not in _existing_edges:
                                         edges.append((upstream_n["id"], n["id"], "lineage"))
@@ -2470,14 +2462,14 @@ class LakehousePipeline:
                     _core = entity_lower
                     for pfx in [f"{layer}_", f"{layer}_rideflow_", f"{layer}_olist_"]:
                         if _core.startswith(pfx):
-                            _core = _core[len(pfx):]
+                            _core = _core[len(pfx) :]
                             break
                     for upstream_n in layer_entities.get(upstream_layer, []):
                         u_entity = upstream_n["entity"].lower()
                         u_core = u_entity
                         for pfx in [f"{upstream_layer}_", f"{upstream_layer}_rideflow_", f"{upstream_layer}_olist_"]:
                             if u_core.startswith(pfx):
-                                u_core = u_core[len(pfx):]
+                                u_core = u_core[len(pfx) :]
                                 break
                         # Bidirectional: either core name is a substring of the other
                         if _core and u_core and (_core in u_core or u_core in _core):
@@ -2485,7 +2477,6 @@ class LakehousePipeline:
                             if edge_pair not in _existing_edges:
                                 edges.append((upstream_n["id"], n["id"], "lineage"))
                                 _existing_edges.add(edge_pair)
-
 
         # External source → consuming contract edges
         for ext in ext_sources:

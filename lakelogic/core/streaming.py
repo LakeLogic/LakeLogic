@@ -27,10 +27,10 @@ import os
 import random
 import string
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional
 
 from loguru import logger
 
@@ -43,6 +43,7 @@ except ImportError:
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration types
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class EntityStreamConfig:
@@ -85,10 +86,30 @@ class WindowResult:
 # 24-element list: multiplier for each hour (0–23).
 # Models a ride-sharing city: morning commute, lunch bump, evening peak.
 _DEMAND_CURVE: List[float] = [
-    0.15, 0.10, 0.08, 0.06, 0.05, 0.08,   # 00–05: late night / early morning
-    0.20, 0.55, 0.90, 0.75, 0.60, 0.65,   # 06–11: morning commute + mid-morning
-    0.70, 0.60, 0.55, 0.60, 0.75, 1.00,   # 12–17: lunch, afternoon, evening start
-    0.95, 0.80, 0.65, 0.50, 0.35, 0.20,   # 18–23: evening peak → wind-down
+    0.15,
+    0.10,
+    0.08,
+    0.06,
+    0.05,
+    0.08,  # 00–05: late night / early morning
+    0.20,
+    0.55,
+    0.90,
+    0.75,
+    0.60,
+    0.65,  # 06–11: morning commute + mid-morning
+    0.70,
+    0.60,
+    0.55,
+    0.60,
+    0.75,
+    1.00,  # 12–17: lunch, afternoon, evening start
+    0.95,
+    0.80,
+    0.65,
+    0.50,
+    0.35,
+    0.20,  # 18–23: evening peak → wind-down
 ]
 
 _CITY_CODES = ["LON", "NYC", "BER", "PAR", "TYO", "SYD"]
@@ -100,18 +121,35 @@ _VEHICLE_TYPES = ["sedan", "suv", "van", "motorcycle", "bicycle"]
 _RIDER_STATUSES = ["active", "inactive", "suspended"]
 _DRIVER_STATUSES = ["active", "inactive", "suspended", "pending_verification"]
 _CANCEL_REASONS = [
-    "driver_no_show", "rider_changed_mind", "wait_too_long",
-    "wrong_address", "price_too_high", "found_alternative",
-    "driver_cancelled", "safety_concern",
+    "driver_no_show",
+    "rider_changed_mind",
+    "wait_too_long",
+    "wrong_address",
+    "price_too_high",
+    "found_alternative",
+    "driver_cancelled",
+    "safety_concern",
 ]
 _CANCELLED_BY = ["rider", "driver"]
 _EVENT_NAMES = [
-    "screen_view", "button_tap", "search", "ride_request",
-    "payment_update", "profile_view", "promo_tap", "share_ride",
+    "screen_view",
+    "button_tap",
+    "search",
+    "ride_request",
+    "payment_update",
+    "profile_view",
+    "promo_tap",
+    "share_ride",
 ]
 _SCREEN_NAMES = [
-    "home", "ride_options", "trip_tracker", "payment",
-    "profile", "promotions", "trip_history", "settings",
+    "home",
+    "ride_options",
+    "trip_tracker",
+    "payment",
+    "profile",
+    "promotions",
+    "trip_history",
+    "settings",
 ]
 
 
@@ -152,6 +190,7 @@ _CITY_COORDS = {
 # ──────────────────────────────────────────────────────────────────────────────
 # Streaming Simulator
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class StreamingSimulator:
     """
@@ -197,9 +236,7 @@ class StreamingSimulator:
 
         # Simulation clock
         if start_time is None:
-            today = datetime.now(timezone.utc).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             self._current_time = today
         else:
             self._current_time = start_time
@@ -209,13 +246,17 @@ class StreamingSimulator:
         self._driver_ids: List[str] = []
         self._rider_cities: Dict[str, str] = {}
         self._driver_cities: Dict[str, str] = {}
-        self._active_trip_ids: List[str] = []      # trips in-progress
-        self._pending_requests: List[dict] = []     # requests awaiting completion
+        self._active_trip_ids: List[str] = []  # trips in-progress
+        self._pending_requests: List[dict] = []  # requests awaiting completion
 
         # City distribution weights (some cities busier than others)
         self._city_weights = {
-            "LON": 0.25, "NYC": 0.25, "BER": 0.15,
-            "PAR": 0.15, "TYO": 0.12, "SYD": 0.08,
+            "LON": 0.25,
+            "NYC": 0.25,
+            "BER": 0.15,
+            "PAR": 0.15,
+            "TYO": 0.12,
+            "SYD": 0.08,
         }
 
         # ── Seed initial dimension pools ─────────────────────────────────
@@ -267,19 +308,21 @@ class StreamingSimulator:
             self._rider_ids.append(rid)
             city = self._weighted_city()
             self._rider_cities[rid] = city
-            rows.append({
-                "rider_id": rid,
-                "name": f"Rider {rid[-4:]}",
-                "email": f"rider.{rid[-6:].lower()}@example.com",
-                "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
-                "date_of_birth": f"{self._rng.randint(1970, 2003)}-{self._rng.randint(1,12):02d}-{self._rng.randint(1,28):02d}",
-                "home_address": f"{self._rng.randint(1,200)} Example Street, {city}",
-                "city_code": city,
-                "signup_date": _random_ts(ts, self._window_minutes),
-                "status": "active",
-                "preferred_payment_method": self._rng.choice(_PAYMENT_METHODS),
-                "updated_at": _random_ts(ts, self._window_minutes),
-            })
+            rows.append(
+                {
+                    "rider_id": rid,
+                    "name": f"Rider {rid[-4:]}",
+                    "email": f"rider.{rid[-6:].lower()}@example.com",
+                    "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
+                    "date_of_birth": f"{self._rng.randint(1970, 2003)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}",
+                    "home_address": f"{self._rng.randint(1, 200)} Example Street, {city}",
+                    "city_code": city,
+                    "signup_date": _random_ts(ts, self._window_minutes),
+                    "status": "active",
+                    "preferred_payment_method": self._rng.choice(_PAYMENT_METHODS),
+                    "updated_at": _random_ts(ts, self._window_minutes),
+                }
+            )
         return rows
 
     def _gen_driver_profiles(self, num: int, ts: datetime) -> List[dict]:
@@ -290,23 +333,25 @@ class StreamingSimulator:
             self._driver_ids.append(did)
             city = self._weighted_city()
             self._driver_cities[did] = city
-            rows.append({
-                "driver_id": did,
-                "name": f"Driver {did[-4:]}",
-                "email": f"driver.{did[-6:].lower()}@example.com",
-                "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
-                "date_of_birth": f"{self._rng.randint(1965, 1998)}-{self._rng.randint(1,12):02d}-{self._rng.randint(1,28):02d}",
-                "home_address": f"{self._rng.randint(1,300)} Driver Lane, {city}",
-                "licence_number": f"LIC-{self._rng.randint(100000, 999999)}",
-                "licence_plate": f"{''.join(self._rng.choices(string.ascii_uppercase, k=2))}{self._rng.randint(10,99)} {''.join(self._rng.choices(string.ascii_uppercase, k=3))}",
-                "vehicle_type": self._rng.choice(_VEHICLE_TYPES),
-                "bank_account_last_four": f"{self._rng.randint(1000, 9999)}",
-                "city_code": city,
-                "signup_date": _random_ts(ts, self._window_minutes),
-                "status": "active",
-                "rating": f"{self._rng.uniform(4.0, 5.0):.2f}",
-                "updated_at": _random_ts(ts, self._window_minutes),
-            })
+            rows.append(
+                {
+                    "driver_id": did,
+                    "name": f"Driver {did[-4:]}",
+                    "email": f"driver.{did[-6:].lower()}@example.com",
+                    "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
+                    "date_of_birth": f"{self._rng.randint(1965, 1998)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}",
+                    "home_address": f"{self._rng.randint(1, 300)} Driver Lane, {city}",
+                    "licence_number": f"LIC-{self._rng.randint(100000, 999999)}",
+                    "licence_plate": f"{''.join(self._rng.choices(string.ascii_uppercase, k=2))}{self._rng.randint(10, 99)} {''.join(self._rng.choices(string.ascii_uppercase, k=3))}",
+                    "vehicle_type": self._rng.choice(_VEHICLE_TYPES),
+                    "bank_account_last_four": f"{self._rng.randint(1000, 9999)}",
+                    "city_code": city,
+                    "signup_date": _random_ts(ts, self._window_minutes),
+                    "status": "active",
+                    "rating": f"{self._rng.uniform(4.0, 5.0):.2f}",
+                    "updated_at": _random_ts(ts, self._window_minutes),
+                }
+            )
         return rows
 
     def _gen_trip_requests(self, num: int, ts: datetime) -> List[dict]:
@@ -341,18 +386,20 @@ class StreamingSimulator:
             rows.append(row)
 
             # Stash for potential completion/cancellation
-            self._pending_requests.append({
-                "request_id": req_id,
-                "rider_id": rider_id,
-                "trip_type": trip_type,
-                "city_code": city,
-                "pickup_lat": row["pickup_lat"],
-                "pickup_lng": row["pickup_lng"],
-                "dropoff_lat": row["dropoff_lat"],
-                "dropoff_lng": row["dropoff_lng"],
-                "requested_at": req_ts,
-                "surge_multiplier": row["surge_multiplier"],
-            })
+            self._pending_requests.append(
+                {
+                    "request_id": req_id,
+                    "rider_id": rider_id,
+                    "trip_type": trip_type,
+                    "city_code": city,
+                    "pickup_lat": row["pickup_lat"],
+                    "pickup_lng": row["pickup_lng"],
+                    "dropoff_lat": row["dropoff_lat"],
+                    "dropoff_lng": row["dropoff_lng"],
+                    "requested_at": req_ts,
+                    "surge_multiplier": row["surge_multiplier"],
+                }
+            )
         return rows
 
     def _gen_trip_completed(self, num: int, ts: datetime) -> List[dict]:
@@ -364,8 +411,7 @@ class StreamingSimulator:
         # Complete up to `num` pending requests
         completable = min(num, len(self._pending_requests))
         to_complete = self._rng.sample(
-            range(len(self._pending_requests)),
-            k=min(completable, len(self._pending_requests))
+            range(len(self._pending_requests)), k=min(completable, len(self._pending_requests))
         )
         completed_indices = sorted(to_complete, reverse=True)
 
@@ -387,29 +433,31 @@ class StreamingSimulator:
             fare = round(base_fare * surge, 2)
             tip = round(fare * self._rng.choice([0, 0, 0, 0.1, 0.15, 0.2]), 2)
 
-            rows.append({
-                "trip_id": trip_id,
-                "rider_id": req["rider_id"],
-                "driver_id": driver_id,
-                "trip_type": req["trip_type"],
-                "pickup_lat": req["pickup_lat"],
-                "pickup_lng": req["pickup_lng"],
-                "dropoff_lat": req["dropoff_lat"],
-                "dropoff_lng": req["dropoff_lng"],
-                "city_code": req["city_code"],
-                "requested_at": req["requested_at"],
-                "pickup_at": pickup_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-                "dropoff_at": dropoff_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-                "distance_km": str(distance),
-                "duration_minutes": str(duration),
-                "fare_amount": f"{fare:.2f}",
-                "surge_multiplier": req["surge_multiplier"],
-                "tip_amount": f"{tip:.2f}",
-                "payment_method": self._rng.choice(_PAYMENT_METHODS),
-                "rider_rating": str(self._rng.randint(3, 5)),
-                "driver_rating": str(self._rng.randint(3, 5)),
-                "notes": "",
-            })
+            rows.append(
+                {
+                    "trip_id": trip_id,
+                    "rider_id": req["rider_id"],
+                    "driver_id": driver_id,
+                    "trip_type": req["trip_type"],
+                    "pickup_lat": req["pickup_lat"],
+                    "pickup_lng": req["pickup_lng"],
+                    "dropoff_lat": req["dropoff_lat"],
+                    "dropoff_lng": req["dropoff_lng"],
+                    "city_code": req["city_code"],
+                    "requested_at": req["requested_at"],
+                    "pickup_at": pickup_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                    "dropoff_at": dropoff_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                    "distance_km": str(distance),
+                    "duration_minutes": str(duration),
+                    "fare_amount": f"{fare:.2f}",
+                    "surge_multiplier": req["surge_multiplier"],
+                    "tip_amount": f"{tip:.2f}",
+                    "payment_method": self._rng.choice(_PAYMENT_METHODS),
+                    "rider_rating": str(self._rng.randint(3, 5)),
+                    "driver_rating": str(self._rng.randint(3, 5)),
+                    "notes": "",
+                }
+            )
             self._active_trip_ids.append(trip_id)
 
         return rows
@@ -422,8 +470,7 @@ class StreamingSimulator:
 
         cancellable = min(num, len(self._pending_requests))
         to_cancel = self._rng.sample(
-            range(len(self._pending_requests)),
-            k=min(cancellable, len(self._pending_requests))
+            range(len(self._pending_requests)), k=min(cancellable, len(self._pending_requests))
         )
         cancelled_indices = sorted(to_cancel, reverse=True)
 
@@ -434,18 +481,22 @@ class StreamingSimulator:
             req_dt = datetime.fromisoformat(req["requested_at"].replace("Z", "+00:00"))
             cancel_dt = req_dt + timedelta(minutes=self._rng.randint(1, 10))
 
-            rows.append({
-                "cancellation_id": cancel_id,
-                "trip_id": "",  # pre-match cancellation
-                "rider_id": req["rider_id"],
-                "driver_id": self._rng.choice(self._driver_ids) if self._driver_ids and cancelled_by == "driver" else "",
-                "cancelled_by": cancelled_by,
-                "cancel_reason_code": self._rng.choice(_CANCEL_REASONS),
-                "city_code": req["city_code"],
-                "requested_at": req["requested_at"],
-                "cancelled_at": cancel_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-                "cancellation_fee": f"{self._rng.choice([0, 0, 0, 2.50, 5.00]):.2f}",
-            })
+            rows.append(
+                {
+                    "cancellation_id": cancel_id,
+                    "trip_id": "",  # pre-match cancellation
+                    "rider_id": req["rider_id"],
+                    "driver_id": self._rng.choice(self._driver_ids)
+                    if self._driver_ids and cancelled_by == "driver"
+                    else "",
+                    "cancelled_by": cancelled_by,
+                    "cancel_reason_code": self._rng.choice(_CANCEL_REASONS),
+                    "city_code": req["city_code"],
+                    "requested_at": req["requested_at"],
+                    "cancelled_at": cancel_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                    "cancellation_fee": f"{self._rng.choice([0, 0, 0, 2.50, 5.00]):.2f}",
+                }
+            )
 
         return rows
 
@@ -461,19 +512,21 @@ class StreamingSimulator:
             status = self._rng.choice(["on_trip", "on_trip", "on_trip", "idle", "offline"])
             trip_id = self._rng.choice(self._active_trip_ids) if self._active_trip_ids and status == "on_trip" else ""
 
-            rows.append({
-                "telemetry_id": _generate_id("TEL"),
-                "driver_id": driver_id,
-                "gps_lat": _random_coordinate(lat, 0.02),
-                "gps_lng": _random_coordinate(lng, 0.02),
-                "speed_kmh": str(self._rng.randint(0, 80)),
-                "heading": str(self._rng.randint(0, 360)),
-                "accuracy_meters": str(self._rng.randint(3, 25)),
-                "trip_id": trip_id,
-                "status": status,
-                "city_code": city,
-                "timestamp": _random_ts(ts, self._window_minutes),
-            })
+            rows.append(
+                {
+                    "telemetry_id": _generate_id("TEL"),
+                    "driver_id": driver_id,
+                    "gps_lat": _random_coordinate(lat, 0.02),
+                    "gps_lng": _random_coordinate(lng, 0.02),
+                    "speed_kmh": str(self._rng.randint(0, 80)),
+                    "heading": str(self._rng.randint(0, 360)),
+                    "accuracy_meters": str(self._rng.randint(3, 25)),
+                    "trip_id": trip_id,
+                    "status": status,
+                    "city_code": city,
+                    "timestamp": _random_ts(ts, self._window_minutes),
+                }
+            )
         return rows
 
     def _gen_rider_app_events(self, num: int, ts: datetime) -> List[dict]:
@@ -484,19 +537,21 @@ class StreamingSimulator:
         for _ in range(num):
             rider_id = self._rng.choice(self._rider_ids)
             city = self._rider_cities[rider_id]
-            rows.append({
-                "event_id": _generate_id("EVT"),
-                "rider_id": rider_id,
-                "device_id": f"DEV-{self._rng.randint(100000, 999999)}",
-                "ip_address": f"{self._rng.randint(10,220)}.{self._rng.randint(0,255)}.{self._rng.randint(0,255)}.{self._rng.randint(1,254)}",
-                "event_name": self._rng.choice(_EVENT_NAMES),
-                "screen_name": self._rng.choice(_SCREEN_NAMES),
-                "event_timestamp": _random_ts(ts, self._window_minutes),
-                "app_version": self._rng.choice(_APP_VERSIONS),
-                "platform": self._rng.choice(_PLATFORMS),
-                "city_code": city,
-                "event_properties_json": "{}",
-            })
+            rows.append(
+                {
+                    "event_id": _generate_id("EVT"),
+                    "rider_id": rider_id,
+                    "device_id": f"DEV-{self._rng.randint(100000, 999999)}",
+                    "ip_address": f"{self._rng.randint(10, 220)}.{self._rng.randint(0, 255)}.{self._rng.randint(0, 255)}.{self._rng.randint(1, 254)}",
+                    "event_name": self._rng.choice(_EVENT_NAMES),
+                    "screen_name": self._rng.choice(_SCREEN_NAMES),
+                    "event_timestamp": _random_ts(ts, self._window_minutes),
+                    "app_version": self._rng.choice(_APP_VERSIONS),
+                    "platform": self._rng.choice(_PLATFORMS),
+                    "city_code": city,
+                    "event_properties_json": "{}",
+                }
+            )
         return rows
 
     # ──────────────────────────────────────────────────────────────────
@@ -514,7 +569,10 @@ class StreamingSimulator:
     }
 
     def _write_csv(
-        self, entity: str, rows: List[dict], ts: datetime,
+        self,
+        entity: str,
+        rows: List[dict],
+        ts: datetime,
         micro_batches: int = 1,
     ) -> List[str]:
         """Write rows to partitioned CSV files in the landing zone.
@@ -541,12 +599,7 @@ class StreamingSimulator:
             return []
 
         # Build partition path: entity/y_YYYY/m_MM/d_DD/h_HH/
-        partition = (
-            f"y_{ts.strftime('%Y')}"
-            f"/m_{ts.strftime('%m')}"
-            f"/d_{ts.strftime('%d')}"
-            f"/h_{ts.strftime('%H')}"
-        )
+        partition = f"y_{ts.strftime('%Y')}/m_{ts.strftime('%m')}/d_{ts.strftime('%d')}/h_{ts.strftime('%H')}"
         out_dir = self._landing_root / entity / partition
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -605,10 +658,7 @@ class StreamingSimulator:
             entities["driver_profiles"] = len(driver_rows)
             files["driver_profiles"] = fps[0] if fps else ""
 
-        logger.info(
-            f"🌱 Seeded initial pools: {len(self._rider_ids)} riders, "
-            f"{len(self._driver_ids)} drivers"
-        )
+        logger.info(f"🌱 Seeded initial pools: {len(self._rider_ids)} riders, {len(self._driver_ids)} drivers")
 
         return WindowResult(
             index=-1,
@@ -701,10 +751,7 @@ class StreamingSimulator:
         for i in range(num_windows):
             # ── Time cap: stop if current window is past up_to ────────────
             if up_to is not None and self._current_time >= up_to:
-                logger.info(
-                    f"⏹ Stopping at window {i}: {self._current_time.isoformat()} "
-                    f">= up_to {up_to.isoformat()}"
-                )
+                logger.info(f"⏹ Stopping at window {i}: {self._current_time.isoformat()} >= up_to {up_to.isoformat()}")
                 break
 
             result = self._generate_window(i, micro_batches=micro_batches)
@@ -780,9 +827,7 @@ class StreamingSimulator:
                     continue
 
         # ── Find latest partition timestamp ───────────────────────────
-        hour_pattern = _re_mod.compile(
-            r"y_(\d{4})/m_(\d{2})/d_(\d{2})/h_(\d{2})"
-        )
+        hour_pattern = _re_mod.compile(r"y_(\d{4})/m_(\d{2})/d_(\d{2})/h_(\d{2})")
         latest: Optional[datetime] = None
 
         for dirpath, _, _ in os.walk(self._landing_root):
@@ -853,31 +898,38 @@ class StreamingSimulator:
         """
         config = {
             "rider_profiles": EntityStreamConfig(
-                rows_per_window=10, churn_rate=0.03,
+                rows_per_window=10,
+                churn_rate=0.03,
                 entity_type="dimension",
             ),
             "driver_profiles": EntityStreamConfig(
-                rows_per_window=5, churn_rate=0.02,
+                rows_per_window=5,
+                churn_rate=0.02,
                 entity_type="dimension",
             ),
             "trip_requests": EntityStreamConfig(
-                rows_per_window=80, peak_multiplier=4.0,
+                rows_per_window=80,
+                peak_multiplier=4.0,
                 entity_type="fact",
             ),
             "trip_completed": EntityStreamConfig(
-                rows_per_window=65, peak_multiplier=3.5,
+                rows_per_window=65,
+                peak_multiplier=3.5,
                 entity_type="fact",
             ),
             "trip_cancellations": EntityStreamConfig(
-                rows_per_window=15, peak_multiplier=2.0,
+                rows_per_window=15,
+                peak_multiplier=2.0,
                 entity_type="fact",
             ),
             "driver_telemetry": EntityStreamConfig(
-                rows_per_window=500, peak_multiplier=3.0,
+                rows_per_window=500,
+                peak_multiplier=3.0,
                 entity_type="event",
             ),
             "rider_app_events": EntityStreamConfig(
-                rows_per_window=200, peak_multiplier=2.5,
+                rows_per_window=200,
+                peak_multiplier=2.5,
                 entity_type="event",
             ),
         }

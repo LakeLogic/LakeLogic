@@ -92,9 +92,9 @@ REM Step 1: Bump version (creates tag + bump commit)
 echo.
 echo [1/6] Bumping version...
 if "%1"=="" (
-    cz bump --yes
+    python -m commitizen bump --yes
 ) else (
-    cz bump --increment %1 --yes
+    python -m commitizen bump --increment %1 --yes
 )
 if errorlevel 1 (
     echo.

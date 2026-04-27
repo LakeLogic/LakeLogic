@@ -253,10 +253,10 @@ class SLOValidator:
                 # if the column doesn't exist or can't be cast to a
                 # timestamp, it returns NULL and we skip gracefully.
                 source_delay_min = None
-                source_slo_max = getattr(layer_slo, 'max_source_delay_minutes', None) if layer_slo else None
+                source_slo_max = getattr(layer_slo, "max_source_delay_minutes", None) if layer_slo else None
                 source_col_used = None
                 source_passed = None
-                source_cols = getattr(layer_slo, 'source_check_columns', []) if layer_slo else []
+                source_cols = getattr(layer_slo, "source_check_columns", []) if layer_slo else []
 
                 if layer_slo and source_slo_max and source_cols:
                     for src_col in source_cols:
@@ -288,9 +288,7 @@ class SLOValidator:
                                     src_df = pl.read_parquet(polars_path, storage_options=storage_opts)
                                 # Safe cast: str_to_datetime returns null on parse failure
                                 try:
-                                    src_ts = src_df.select(
-                                        pl.col(src_col).cast(pl.Datetime, strict=False).max()
-                                    ).item()
+                                    src_ts = src_df.select(pl.col(src_col).cast(pl.Datetime, strict=False).max()).item()
                                 except Exception:
                                     src_ts = None
 

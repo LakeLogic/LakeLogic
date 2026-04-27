@@ -303,7 +303,7 @@ _CITY_GEO_COORDS: Dict[str, Tuple[float, float]] = {
     "hong kong": (22.3193, 114.1694),
     "bangkok": (13.7563, 100.5018),
     "istanbul": (41.0082, 28.9784),
-    "cape town": (- 33.9249, 18.4241),
+    "cape town": (-33.9249, 18.4241),
     "johannesburg": (-26.2041, 28.0473),
     "lagos": (6.5244, 3.3792),
     "nairobi": (-1.2921, 36.8219),
@@ -387,8 +387,39 @@ _CITY_GEO_COORDS: Dict[str, Tuple[float, float]] = {
 }
 
 # Field name patterns for geo-alignment detection
-_LAT_FIELD_PATTERNS = {"latitude", "lat", "gps_lat", "pickup_lat", "dropoff_lat", "start_lat", "end_lat", "origin_lat", "dest_lat", "destination_lat"}
-_LNG_FIELD_PATTERNS = {"longitude", "lng", "lon", "gps_lng", "gps_lon", "pickup_lng", "dropoff_lng", "pickup_lon", "dropoff_lon", "start_lng", "end_lng", "origin_lng", "dest_lng", "destination_lng", "start_lon", "end_lon", "origin_lon", "dest_lon", "destination_lon"}
+_LAT_FIELD_PATTERNS = {
+    "latitude",
+    "lat",
+    "gps_lat",
+    "pickup_lat",
+    "dropoff_lat",
+    "start_lat",
+    "end_lat",
+    "origin_lat",
+    "dest_lat",
+    "destination_lat",
+}
+_LNG_FIELD_PATTERNS = {
+    "longitude",
+    "lng",
+    "lon",
+    "gps_lng",
+    "gps_lon",
+    "pickup_lng",
+    "dropoff_lng",
+    "pickup_lon",
+    "dropoff_lon",
+    "start_lng",
+    "end_lng",
+    "origin_lng",
+    "dest_lng",
+    "destination_lng",
+    "start_lon",
+    "end_lon",
+    "origin_lon",
+    "dest_lon",
+    "destination_lon",
+}
 _CITY_FIELD_PATTERNS = {"city", "city_code", "city_name", "town", "metro", "metro_area", "location_city"}
 
 
@@ -3583,20 +3614,15 @@ class DataGenerator:
 
         # ── Resume: detect latest existing partition ──────────────────────
         if resume and output_dir is not None:
-            resume_from = self._detect_latest_partition(
-                Path(output_dir), partition_template, interval_minutes
-            )
+            resume_from = self._detect_latest_partition(Path(output_dir), partition_template, interval_minutes)
             if resume_from is not None:
                 # Start from the window AFTER the latest existing partition
                 cursor = resume_from + interval
                 logger.info(
-                    f"\u23ed\ufe0f  Resuming from {resume_from.isoformat()} "
-                    f"(next window: {cursor.isoformat()})"
+                    f"\u23ed\ufe0f  Resuming from {resume_from.isoformat()} (next window: {cursor.isoformat()})"
                 )
             else:
-                cursor = start_from if start_from is not None else (
-                    datetime.now() - (interval * batches)
-                )
+                cursor = start_from if start_from is not None else (datetime.now() - (interval * batches))
         elif start_from is not None:
             cursor = start_from
         else:
@@ -3693,14 +3719,15 @@ class DataGenerator:
         latest timestamp found, or None if the directory is empty.
         """
         import os as _os
+
         if not output_dir.exists():
             return None
 
         # Build a regex from the partition template to extract date parts
         import re as _re_mod
+
         pattern = (
-            partition_template
-            .replace("{Y}", r"(?P<Y>\d{4})")
+            partition_template.replace("{Y}", r"(?P<Y>\d{4})")
             .replace("{m}", r"(?P<m>\d{2})")
             .replace("{d}", r"(?P<d>\d{2})")
             .replace("{H}", r"(?P<H>\d{2})")
@@ -3731,7 +3758,6 @@ class DataGenerator:
                     continue
 
         return latest
-
 
     def generate_from_sample(
         self,
@@ -4694,6 +4720,7 @@ class DataGenerator:
             if invalid_ratio > 0 and reference_data:
                 if output_format == "polars":
                     import polars as pl
+
                     for fk_col in reference_data.keys():
                         if fk_col not in df.columns:
                             continue
@@ -4701,15 +4728,13 @@ class DataGenerator:
                             expr = pl.concat_str([pl.col(fk_col), pl.lit("_ORPHAN")])
                         else:
                             expr = pl.col(fk_col).cast(pl.Int64) + 999000
-                            
+
                         df = df.with_columns(
-                            pl.when(pl.col("_is_invalid") == True)
-                            .then(expr)
-                            .otherwise(pl.col(fk_col))
-                            .alias(fk_col)
+                            pl.when(pl.col("_is_invalid") == True).then(expr).otherwise(pl.col(fk_col)).alias(fk_col)
                         )
                 else:  # pandas
                     import pandas as pd
+
                     for fk_col in reference_data.keys():
                         if fk_col not in df.columns:
                             continue
@@ -5375,21 +5400,21 @@ class DataGenerator:
             if matched_lng:
                 used_lngs.add(matched_lng)
                 # Use first available city field (city_code, city, etc.)
-                alignments.append({
-                    "lat_field": lat_f,
-                    "lng_field": matched_lng,
-                    "city_field": city_fields[0],
-                })
+                alignments.append(
+                    {
+                        "lat_field": lat_f,
+                        "lng_field": matched_lng,
+                        "city_field": city_fields[0],
+                    }
+                )
 
         if alignments:
             try:
                 from loguru import logger as _logger
+
                 _logger.debug(
-                    f"\U0001f30d Geo-alignment detected: "
-                    + ", ".join(
-                        f"{a['lat_field']}/{a['lng_field']} ← {a['city_field']}"
-                        for a in alignments
-                    )
+                    "\U0001f30d Geo-alignment detected: "
+                    + ", ".join(f"{a['lat_field']}/{a['lng_field']} ← {a['city_field']}" for a in alignments)
                 )
             except ImportError:
                 pass
@@ -5556,7 +5581,7 @@ class DataGenerator:
                 is_pk = rules.get("primary_key", False)
                 is_int_type = ftype in ("integer", "int", "int32", "int64", "long")
                 is_id_field = "id" in name.lower()
-                
+
                 # If it's a primary key, we must avoid duplicates and match formatting
                 if is_pk or (is_id_field and is_int_type and len(pool) == 1):
                     if is_int_type:
@@ -5575,7 +5600,7 @@ class DataGenerator:
                             # Fallback: append a random suffix to preserve uniqueness
                             suffix = "".join(self._rng.choices(string.ascii_uppercase + string.digits, k=6))
                             return f"{base_val}-{suffix}"
-                
+
                 # Not a primary key — safely replay observed values
                 return self._rng.choice(pool)
 
@@ -6398,7 +6423,7 @@ class DataGenerator:
 
         # ── 0. Model-level primary key list ───────────────────────────────────
         _pk_fields: set = set()
-        for pk_col in (self._contract_raw.get("primary_key") or []):
+        for pk_col in self._contract_raw.get("primary_key") or []:
             _pk_fields.add(pk_col)
 
         # ── 1. Seed from field-level definitions ──────────────────────────────
