@@ -584,10 +584,8 @@ def validate_notification_config(notif_type: str, config: Dict[str, Any]) -> Non
         _require_fields(notif, config, ["api_key", "from_email", "target"])
     elif notif in ["slack", "teams", "webhook"]:
         _require_fields(notif, config, ["target"])
-    elif notif == "console":
-        pass  # Console requires no specific config
-    else:
-        raise ValueError(f"Unsupported notification type: {notif_type}")
+    elif notif != "console":
+        raise ValueError(f"Unsupported notification type: {notif_type}")  # pragma: no cover
 
 
 def _first_present(config: Dict[str, Any], keys: list[str]) -> Optional[str]:

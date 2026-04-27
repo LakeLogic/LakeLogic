@@ -326,7 +326,8 @@ __pycache__/
 _ref/
 
 .databricks
-
+.venv_ci
+.venv_docker
 .databricks
 
 .databricks
