@@ -1,7 +1,7 @@
-import pytest
 import polars as pl
+
 from lakelogic import DataProcessor
-from lakelogic.core.models import DataContract
+
 
 def test_processor_init():
     """Test processor initialization with different contract formats."""
@@ -21,10 +21,10 @@ def test_processor_run_mock():
         }
     }
     df = pl.DataFrame({"val": [1, None, 3]})
-    
+
     processor = DataProcessor(engine="polars", contract=contract_data)
     good_df, bad_df = processor.run(df)
-    
+
     assert len(good_df) == 2
     assert len(bad_df) == 1
 

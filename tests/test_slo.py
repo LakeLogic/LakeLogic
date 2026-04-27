@@ -2,16 +2,12 @@
 from __future__ import annotations
 
 import datetime
-import os
 import sys
-from unittest.mock import MagicMock, patch, PropertyMock
 from types import SimpleNamespace
-
-import pytest
+from unittest.mock import MagicMock
 
 from lakelogic.core import slo
-from lakelogic.core.slo import SLOValidator, SLOCheckResult, SLOReport
-
+from lakelogic.core.slo import SLOCheckResult, SLOReport, SLOValidator
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -20,9 +16,9 @@ def _make_registry(row_count_cfg: dict | None = None, contracts=None):
     """Build a minimal DomainRegistry-like object for SLO tests."""
     from lakelogic.core.registry import (
         DomainRegistry,
+        RegistryContract,
         RegistrySLO,
         RegistryStorage,
-        RegistryContract,
         SLORowCountConfig,
     )
 

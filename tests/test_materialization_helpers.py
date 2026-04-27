@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import types
 from datetime import datetime, timezone
@@ -664,7 +663,6 @@ def test_partition_aware_merge_delta_first_write_and_scd2_overwrite(monkeypatch,
     fake_deltalake.write_deltalake = lambda *args, **kwargs: None
     monkeypatch.setitem(sys.modules, "deltalake", fake_deltalake)
 
-    import pyarrow as pa
 
     merge_calls = []
     scd2_calls = []

@@ -2,9 +2,9 @@
 Core processor tests: run(), run_source(), tracing, and ValidationResult API.
 """
 import os
-import pytest
+
 import polars as pl
-from pathlib import Path
+import pytest
 
 from lakelogic import DataProcessor
 from lakelogic.core.processor import ValidationResult

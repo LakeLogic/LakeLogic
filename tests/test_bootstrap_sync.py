@@ -1,10 +1,10 @@
 from pathlib import Path
 
-import yaml
 import pytest
+import yaml
+
 typer = pytest.importorskip("typer")
 pd = pytest.importorskip("pandas")
-from lakelogic.cli import main as cli_main_module
 from lakelogic.cli.main import bootstrap
 
 

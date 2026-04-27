@@ -5,9 +5,6 @@ import sqlite3
 import sys
 import types
 from datetime import datetime
-from pathlib import Path
-
-import pytest
 
 from lakelogic.cli.run_log_reader import RunLogReader
 from lakelogic.core.models import DataContract, Info

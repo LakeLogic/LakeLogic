@@ -9,7 +9,7 @@ import pytest
 pl = pytest.importorskip("polars")
 
 from lakelogic.core import processor as proc_mod
-from lakelogic.core.models import DataContract, Materialization, Quality
+from lakelogic.core.models import DataContract, Quality
 
 
 def test_validation_result_counts_and_dunder_methods():

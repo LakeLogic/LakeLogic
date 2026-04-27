@@ -18,22 +18,17 @@ Coverage:
 """
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
 pd = pytest.importorskip("pandas")
 import yaml
 
 from lakelogic.cli import driver
 from lakelogic.cli.cli_parsers import (
     build_backfill_windows,
-    parse_contracts,
-    parse_entities,
-    parse_layers,
-    parse_metrics_tags,
-    parse_overrides,
-    parse_window,
 )
 from lakelogic.cli.observability import (
     emit_metrics,
@@ -42,7 +37,6 @@ from lakelogic.cli.observability import (
     format_prometheus,
 )
 from lakelogic.cli.run_log_reader import RunLogReader
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -986,9 +980,10 @@ class TestPrometheusServer:
 
     def test_non_metrics_endpoint_returns_404(self) -> None:
         """Requests to paths other than /metrics should return 404."""
-        from lakelogic.cli.observability import start_prometheus_server, stop_prometheus_server
-        import urllib.request
         import urllib.error
+        import urllib.request
+
+        from lakelogic.cli.observability import start_prometheus_server, stop_prometheus_server
 
         server, thread = start_prometheus_server(
             "127.0.0.1", 0,
@@ -1227,6 +1222,7 @@ class TestObservabilityBackends:
     def test_duckdb_summary_table_write_standalone(self, tmp_path: Path) -> None:
         """write_summary_table should write a row to DuckDB."""
         import duckdb
+
         from lakelogic.cli.observability import write_summary_table
 
         db_path = tmp_path / "pipeline_runs.duckdb"

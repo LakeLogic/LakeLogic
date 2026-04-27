@@ -8,8 +8,8 @@ import pytest
 
 pl = pytest.importorskip("polars")
 
-from lakelogic.core import quarantine as q
 from lakelogic.core import materialization as mat
+from lakelogic.core import quarantine as q
 
 
 def _contract(**overrides):

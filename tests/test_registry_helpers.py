@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import yaml
 import pytest
+import yaml
 
 from lakelogic.core.registry import (
     CloudReporting,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
 import sys
 import types
+from datetime import date
 
 import polars as pl
 import pytest
