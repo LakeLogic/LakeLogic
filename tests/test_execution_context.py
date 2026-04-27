@@ -188,7 +188,7 @@ def test_engine_version_and_peak_memory_helpers(monkeypatch):
     monkeypatch.setattr(ec.sys, "platform", "linux")
     assert ec._get_peak_memory_mb() == 2.0
 
-    monkeypatch.delitem(sys.modules, "resource", raising=False)
+    monkeypatch.setitem(sys.modules, "resource", None)
     monkeypatch.setitem(
         sys.modules,
         "psutil",
