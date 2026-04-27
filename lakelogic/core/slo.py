@@ -271,11 +271,13 @@ class SLOValidator:
                             elif self.duckdb_con:
                                 try:
                                     src_result = self.duckdb_con.execute(
-                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts FROM delta_scan('{polars_path}')"
+                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts "
+                                        f"FROM delta_scan('{polars_path}')"
                                     ).fetchone()
                                 except Exception:
                                     src_result = self.duckdb_con.execute(
-                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts FROM parquet_scan('{polars_path}')"
+                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts "
+                                        f"FROM parquet_scan('{polars_path}')"
                                     ).fetchone()
                                 src_ts = src_result[0] if src_result else None
                             else:
@@ -369,7 +371,10 @@ class SLOValidator:
         for r in results:
             source_info = ""
             if r.source_column_used:
-                source_info = f", source: {r.source_delay_minutes}min via '{r.source_column_used}' (SLO: {r.source_slo_max_minutes}min)"
+                source_info = (
+                    f", source: {r.source_delay_minutes}min via "
+                    f"'{r.source_column_used}' (SLO: {r.source_slo_max_minutes}min)"
+                )
             if r.passed:
                 logger.info(
                     f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min{source_info})"  # noqa: E501

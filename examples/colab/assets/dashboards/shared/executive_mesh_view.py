@@ -7,9 +7,13 @@ def create_executive_view():
 
     # Premium styled KPI Cards using custom HTML
     card_style = """
-    <div style="background-color: #1e1e1e; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-align: center; border-top: 4px solid {color};">
-        <div style="color: #a0a0a0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">{title}</div>
-        <div style="color: #ffffff; font-size: 32px; font-weight: bold; font-family: 'Inter', sans-serif;">{value}</div>
+    <div style="background-color: #1e1e1e; border-radius: 8px; padding: 20px;
+         box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-align: center;
+         border-top: 4px solid {color};">
+        <div style="color: #a0a0a0; font-size: 14px; text-transform: uppercase;
+             letter-spacing: 1px; margin-bottom: 10px;">{title}</div>
+        <div style="color: #ffffff; font-size: 32px; font-weight: bold;
+             font-family: 'Inter', sans-serif;">{value}</div>
     </div>
     """
 

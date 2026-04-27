@@ -314,7 +314,9 @@ class StreamingSimulator:
                     "name": f"Rider {rid[-4:]}",
                     "email": f"rider.{rid[-6:].lower()}@example.com",
                     "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
-                    "date_of_birth": f"{self._rng.randint(1970, 2003)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}",
+                    "date_of_birth": (
+                        f"{self._rng.randint(1970, 2003)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}"
+                    ),
                     "home_address": f"{self._rng.randint(1, 200)} Example Street, {city}",
                     "city_code": city,
                     "signup_date": _random_ts(ts, self._window_minutes),
@@ -339,10 +341,16 @@ class StreamingSimulator:
                     "name": f"Driver {did[-4:]}",
                     "email": f"driver.{did[-6:].lower()}@example.com",
                     "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
-                    "date_of_birth": f"{self._rng.randint(1965, 1998)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}",
+                    "date_of_birth": (
+                        f"{self._rng.randint(1965, 1998)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}"
+                    ),
                     "home_address": f"{self._rng.randint(1, 300)} Driver Lane, {city}",
                     "licence_number": f"LIC-{self._rng.randint(100000, 999999)}",
-                    "licence_plate": f"{''.join(self._rng.choices(string.ascii_uppercase, k=2))}{self._rng.randint(10, 99)} {''.join(self._rng.choices(string.ascii_uppercase, k=3))}",
+                    "licence_plate": (
+                        f"{''.join(self._rng.choices(string.ascii_uppercase, k=2))}"
+                        f"{self._rng.randint(10, 99)} "
+                        f"{''.join(self._rng.choices(string.ascii_uppercase, k=3))}"
+                    ),
                     "vehicle_type": self._rng.choice(_VEHICLE_TYPES),
                     "bank_account_last_four": f"{self._rng.randint(1000, 9999)}",
                     "city_code": city,
@@ -542,7 +550,12 @@ class StreamingSimulator:
                     "event_id": _generate_id("EVT"),
                     "rider_id": rider_id,
                     "device_id": f"DEV-{self._rng.randint(100000, 999999)}",
-                    "ip_address": f"{self._rng.randint(10, 220)}.{self._rng.randint(0, 255)}.{self._rng.randint(0, 255)}.{self._rng.randint(1, 254)}",
+                    "ip_address": (
+                        f"{self._rng.randint(10, 220)}."
+                        f"{self._rng.randint(0, 255)}."
+                        f"{self._rng.randint(0, 255)}."
+                        f"{self._rng.randint(1, 254)}"
+                    ),
                     "event_name": self._rng.choice(_EVENT_NAMES),
                     "screen_name": self._rng.choice(_SCREEN_NAMES),
                     "event_timestamp": _random_ts(ts, self._window_minutes),

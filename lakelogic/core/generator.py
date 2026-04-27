@@ -26,7 +26,7 @@ Python API
     df  = gen.generate_from_sample("data/orders_sample.csv", rows=5_000)
 
     # ── Shorthand Schema Initialization ─────────────────────────────────────
-    
+
     # DDL string
     gen = DataGenerator("order_id BIGINT, email STRING, amount DOUBLE, created_at TIMESTAMP")
     df  = gen.generate(rows=1000, invalid_ratio=0.10)
@@ -46,7 +46,7 @@ Python API
     df  = gen.generate(rows=50)
 
     # ── Reading from Unity Catalog / Database Tables ───────────────────────
-    
+
     from lakelogic import infer_contract
     # Chain directly to generator from a live catalog table
     gen = infer_contract("my_catalog.sales.orders").to_generator(seed=42)
@@ -4730,7 +4730,7 @@ class DataGenerator:
                             expr = pl.col(fk_col).cast(pl.Int64) + 999000
 
                         df = df.with_columns(
-                            pl.when(pl.col("_is_invalid") == True).then(expr).otherwise(pl.col(fk_col)).alias(fk_col)
+                            pl.when(pl.col("_is_invalid")).then(expr).otherwise(pl.col(fk_col)).alias(fk_col)
                         )
                 else:  # pandas
                     import pandas as pd
@@ -4738,7 +4738,7 @@ class DataGenerator:
                     for fk_col in reference_data.keys():
                         if fk_col not in df.columns:
                             continue
-                        mask = df["_is_invalid"] == True
+                        mask = df["_is_invalid"].astype(bool)
                         if pd.api.types.is_string_dtype(df[fk_col]):
                             df.loc[mask, fk_col] = df.loc[mask, fk_col].astype(str) + "_ORPHAN"
                         elif pd.api.types.is_numeric_dtype(df[fk_col]):
@@ -5365,7 +5365,7 @@ class DataGenerator:
         ``city_field``.
         """
         field_names = [f.get("name", "").lower() for f in self._fields]
-        field_name_set = set(field_names)
+        field_name_set = set(field_names)  # noqa: F841
 
         # Collect all lat, lng, and city fields
         lat_fields = [n for n in field_names if n in _LAT_FIELD_PATTERNS]

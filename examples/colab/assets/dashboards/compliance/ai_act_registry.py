@@ -75,7 +75,9 @@ def create_ai_registry_view():
     body = pn.Column(
         pn.pane.Markdown("### ⚖️ EU AI Act Compliance Registry (Regulation 2024/1689)"),
         pn.pane.Markdown(
-            "This live registry auto-discovers all LakeLogic data contracts globally tagged with `eu_ai_act` metadata. It tracks bias-examination, human-oversight tooling, and risk categorization across the mesh."
+            "This live registry auto-discovers all LakeLogic data contracts "
+            "globally tagged with `eu_ai_act` metadata. It tracks bias-examination, "
+            "human-oversight tooling, and risk categorization across the mesh."
         ),
         kpi_cards,
         pn.pane.Markdown("#### Registered AI/ML Pipeline Contracts", margin=(20, 0, 0, 0)),

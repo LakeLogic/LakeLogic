@@ -3070,7 +3070,8 @@ class DataProcessor:
             )
         else:
             logger.info(
-                f"Date-partitioned scan: no files found in {len(seen_dirs)} partitions ({start_dt.date()} to {end_dt.date()})"
+                f"Date-partitioned scan: no files found in "
+                f"{len(seen_dirs)} partitions ({start_dt.date()} to {end_dt.date()})"
             )
 
         return all_files if all_files else []
