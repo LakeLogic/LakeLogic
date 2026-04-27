@@ -2,7 +2,7 @@ version: 1.0.0
 info:
   title: "Silver \u2014 Rideflow Trips"
   table_name: '{silver_layer}_rideflow_trips'
-  description: Cleaned, typed, and deduplicated data.
+  description: Cleaned, typed, and deduplicated data
   target_layer: silver
   domain: marketplace
   system: rideflow
