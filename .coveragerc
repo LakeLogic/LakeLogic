@@ -1,0 +1,10 @@
+[run]
+omit =
+    # Exclude experimental adapters and wrappers
+    lakelogic/adapters/*
+    
+    # Exclude tooling scripts
+    lakelogic/tools/*
+    
+    # Exclude AI module
+    lakelogic/ai/*
