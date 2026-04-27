@@ -58,7 +58,7 @@ def test_gdpr_forget_pandas_partition_filter_and_metadata(monkeypatch):
         "",
         partition_filter={"column": "country_code", "value": "FR"},
     )
-    assert result.loc[0, "email"] is None
+    assert pd.isna(result.loc[0, "email"])
     assert result.loc[1, "email"] == "b@example.com"
     assert result.loc[0, gdpr.META_IS_DELETED] == True
     assert result.loc[1, gdpr.META_IS_DELETED] == False
