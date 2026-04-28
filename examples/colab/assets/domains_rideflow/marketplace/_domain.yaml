@@ -7,7 +7,7 @@ ownership:
   contacts:
     - name: Platform Data Lead
       role: oncall
-      email: collins_emetonjor@live.co.uk
+      email: oncall-data@example.com
   cost_center: platform_engineering
   jira_project: KAN
 
