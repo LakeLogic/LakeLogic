@@ -84,8 +84,8 @@ cost:
 observatory:
   enabled: false
   environments: ["dev", "prod", "staging", "local"]
-  endpoint: "http://127.0.0.1:3007/api/v1/operations/run-logs/ingest"  # e.g., "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
-  api_key: "llc_sk_b3665de6822db5fa3b2e7f91eb74b989"   # e.g., "${LAKELOGIC_API_KEY}" for prod
+  endpoint: "${LAKELOGIC_OBSERVATORY_ENDPOINT}"  # e.g., "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
+  api_key: "${LAKELOGIC_API_KEY}"   # e.g., "${LAKELOGIC_API_KEY}" for prod
   emit_on: [success, partial, failed]
   expected_delivery:                  # Telemetry Delivery Watchdog
     cadence_minutes: 15
