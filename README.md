@@ -7,7 +7,7 @@
 [![CI](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml)
 [![codecov](https://codecov.io/gh/LakeLogic/LakeLogic/graph/badge.svg)](https://codecov.io/gh/LakeLogic/LakeLogic)
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
 A declarative, contract-driven medallion pipeline engine for data mesh architectures.
 
@@ -211,4 +211,4 @@ See `CONTRIBUTING.md` to get started, or `docs/installation.md#developer-install
 
 ### License
 
-MIT
+Apache-2.0
