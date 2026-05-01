@@ -1006,19 +1006,19 @@ def materialize_quarantine(
             import pyarrow as pa
         except ImportError as exc:
             raise ImportError("dlt quarantine format requires the dlt package") from exc
-            
+
         dlt_config = contract.quarantine.model_extra or {} if hasattr(contract.quarantine, "model_extra") else {}
         destination = dlt_config.get("dlt_destination", "duckdb")
         dataset_name = dlt_config.get("dlt_dataset_name", "quarantine")
         credentials = dlt_config.get("dlt_credentials")
-        
+
         dest_kwargs = {}
         if credentials:
             dest_kwargs["credentials"] = credentials
         for k, v in dlt_config.items():
             if k.startswith("dlt_") and k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
                 dest_kwargs[k[4:]] = v
-                
+
         # Convert df to arrow
         if isinstance(df, pa.Table):
             arrow_data = df
@@ -1028,8 +1028,9 @@ def materialize_quarantine(
             arrow_data = pa.Table.from_pandas(df.to_pandas())
         else:
             from lakelogic.core.materialization import _to_pandas
+
             arrow_data = pa.Table.from_pandas(_to_pandas(df))
-            
+
         rows_written = arrow_data.num_rows if hasattr(arrow_data, "num_rows") else 0
         q_table_name = getattr(contract.quarantine, "table", None) or dataset_name
 
@@ -1042,7 +1043,9 @@ def materialize_quarantine(
 
         pipeline = _dlt.pipeline(
             pipeline_name=f"lakelogic_{q_table_name}_quarantine",
-            destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination,
+            destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
+            if dest_kwargs
+            else destination,
             dataset_name=dataset_name,
         )
 

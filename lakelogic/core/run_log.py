@@ -1020,14 +1020,14 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         destination = dlt_config.get("dlt_destination", "duckdb")
         dataset_name = dlt_config.get("dlt_dataset_name", "run_logs")
         credentials = dlt_config.get("dlt_credentials")
-        
+
         dest_kwargs = {}
         if credentials:
             dest_kwargs["credentials"] = credentials
         for k, v in dlt_config.items():
             if k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
                 dest_kwargs[k[4:]] = v
-        
+
         rl_table_name = table_name
 
         @_dlt.resource(
@@ -1039,7 +1039,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         pipeline = _dlt.pipeline(
             pipeline_name=f"lakelogic_{rl_table_name}_run_log",
-            destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination,
+            destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
+            if dest_kwargs
+            else destination,
             dataset_name=dataset_name,
         )
 
@@ -1157,24 +1159,37 @@ def write_run_log(
 
             # Build a single-row Arrow table from the flattened record
             _rl_cols = [
-                ("pipeline_run_id", pa.string()), ("run_id", pa.string()),
-                ("timestamp", pa.string()), ("start_time", pa.string()),
-                ("end_time", pa.string()), ("run_duration_seconds", pa.float64()),
-                ("engine", pa.string()), ("contract", pa.string()),
-                ("stage", pa.string()), ("dataset", pa.string()),
-                ("domain", pa.string()), ("system", pa.string()),
-                ("environment", pa.string()), ("data_layer", pa.string()),
-                ("status", pa.string()), ("error_message", pa.string()),
-                ("source_path", pa.string()), ("counts_source", pa.int64()),
-                ("counts_total", pa.int64()), ("counts_good", pa.int64()),
-                ("counts_quarantined", pa.int64()), ("quarantine_ratio", pa.float64()),
+                ("pipeline_run_id", pa.string()),
+                ("run_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("start_time", pa.string()),
+                ("end_time", pa.string()),
+                ("run_duration_seconds", pa.float64()),
+                ("engine", pa.string()),
+                ("contract", pa.string()),
+                ("stage", pa.string()),
+                ("dataset", pa.string()),
+                ("domain", pa.string()),
+                ("system", pa.string()),
+                ("environment", pa.string()),
+                ("data_layer", pa.string()),
+                ("status", pa.string()),
+                ("error_message", pa.string()),
+                ("source_path", pa.string()),
+                ("counts_source", pa.int64()),
+                ("counts_total", pa.int64()),
+                ("counts_good", pa.int64()),
+                ("counts_quarantined", pa.int64()),
+                ("quarantine_ratio", pa.float64()),
             ]
             schema = pa.schema(_rl_cols)
             arrays = [pa.array([_flat.get(f.name)], type=f.type) for f in schema]
             arrow_tbl = pa.table(arrays, schema=schema)
 
             write_to_secondary_targets(
-                sec_targets, arrow_tbl, "_run_logs",
+                sec_targets,
+                arrow_tbl,
+                "_run_logs",
                 strategy="append",
             )
     except Exception as _sec_exc:

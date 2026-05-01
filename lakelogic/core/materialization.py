@@ -789,7 +789,11 @@ def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[st
             primary_key = dlt_config.get("primary_key")
 
             # Derive table name from path
-            table_name = re.sub(r"[^a-zA-Z0-9_]", "_", str(Path(path).stem)) if not hasattr(path, "_dlt_table") else path._dlt_table
+            table_name = (
+                re.sub(r"[^a-zA-Z0-9_]", "_", str(Path(path).stem))
+                if not hasattr(path, "_dlt_table")
+                else path._dlt_table
+            )
             if not table_name:
                 table_name = "data"
 
@@ -822,14 +826,15 @@ def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[st
 
             pipeline = _dlt.pipeline(
                 pipeline_name=f"lakelogic_{table_name}",
-                destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination,
+                destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
+                if dest_kwargs
+                else destination,
                 dataset_name=dataset_name,
             )
 
             load_info = pipeline.run(_dlt_sink())
             logger.info(
-                f"dlt materialization complete: {table_name} → {destination} "
-                f"({write_disposition}) | {load_info}"
+                f"dlt materialization complete: {table_name} → {destination} ({write_disposition}) | {load_info}"
             )
 
         except ImportError:
@@ -3108,7 +3113,9 @@ def _partition_aware_merge(
     }
 
 
-def _run_secondary_targets(mat, contract, df, strategy: str, primary_key: list, rows_written: int, result: dict) -> dict:
+def _run_secondary_targets(
+    mat, contract, df, strategy: str, primary_key: list, rows_written: int, result: dict
+) -> dict:
     """
     Execute secondary materialization targets (dual-write) after the primary write.
 
@@ -3144,11 +3151,7 @@ def _run_secondary_targets(mat, contract, df, strategy: str, primary_key: list, 
         sec_format = sec.get("format", "dlt")
         _raw_table = sec.get("table_name")
         # "auto" or missing → derive from the contract's dataset name
-        sec_table = (
-            getattr(contract, "dataset", "data")
-            if (not _raw_table or _raw_table == "auto")
-            else _raw_table
-        )
+        sec_table = getattr(contract, "dataset", "data") if (not _raw_table or _raw_table == "auto") else _raw_table
         fail_on_error = sec.get("fail_on_error", False)
         try:
             if sec_format == "dlt":
@@ -3171,6 +3174,7 @@ def _run_secondary_targets(mat, contract, df, strategy: str, primary_key: list, 
                 if not credentials and destination not in _LOCAL_DESTINATIONS and "credentials" not in dest_kwargs:
                     # Check if dlt can resolve from env vars / secrets.toml
                     import os
+
                     env_key = f"DESTINATION__{destination.upper()}__CREDENTIALS"
                     env_cred = os.environ.get(env_key)
                     if not env_cred:
@@ -3184,7 +3188,8 @@ def _run_secondary_targets(mat, contract, df, strategy: str, primary_key: list, 
                         logger.warning(f"⚠️ {msg} — the write may fail.")
 
                 write_disp = {
-                    "merge": "merge", "append": "append",
+                    "merge": "merge",
+                    "append": "append",
                     "overwrite": "replace",
                 }.get(strategy, "append")
 
@@ -3210,29 +3215,34 @@ def _run_secondary_targets(mat, contract, df, strategy: str, primary_key: list, 
 
                 pipeline = _dlt.pipeline(
                     pipeline_name=f"lakelogic_{sec_table}_secondary",
-                    destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination,
+                    destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
+                    if dest_kwargs
+                    else destination,
                     dataset_name=dataset_name,
                 )
 
                 load_info = pipeline.run(_secondary_sink())
                 logger.info(
-                    f"Secondary target [{i}]: {sec_table} \u2192 {destination} "
-                    f"({write_disp}, {rows_written} rows)"
+                    f"Secondary target [{i}]: {sec_table} \u2192 {destination} ({write_disp}, {rows_written} rows)"
                 )
-                result["secondary_writes"].append({
-                    "target": f"{destination}:{dataset_name}.{sec_table}",
-                    "format": "dlt",
-                    "dlt_destination": destination,
-                    "rows_written": rows_written,
-                })
+                result["secondary_writes"].append(
+                    {
+                        "target": f"{destination}:{dataset_name}.{sec_table}",
+                        "format": "dlt",
+                        "dlt_destination": destination,
+                        "rows_written": rows_written,
+                    }
+                )
             else:
                 logger.warning(f"Secondary target [{i}]: unsupported format '{sec_format}' (only 'dlt' is supported)")
         except Exception as e:
             logger.error(f"Secondary target [{i}] ({sec_format}\u2192{sec.get('dlt_destination', '?')}): {e}")
-            result["secondary_writes"].append({
-                "target": sec.get("dlt_destination", sec_format),
-                "error": str(e),
-            })
+            result["secondary_writes"].append(
+                {
+                    "target": sec.get("dlt_destination", sec_format),
+                    "error": str(e),
+                }
+            )
             if fail_on_error:
                 raise
 
@@ -3291,6 +3301,7 @@ def write_to_secondary_targets(
                 # Credentials validation
                 if not credentials and destination not in _LOCAL_DESTINATIONS and "credentials" not in dest_kwargs:
                     import os
+
                     env_key = f"DESTINATION__{destination.upper()}__CREDENTIALS"
                     env_cred = os.environ.get(env_key)
                     if not env_cred:
@@ -3304,7 +3315,8 @@ def write_to_secondary_targets(
                         logger.warning(f"\u26a0\ufe0f {msg} \u2014 the write may fail.")
 
                 write_disp = {
-                    "merge": "merge", "append": "append",
+                    "merge": "merge",
+                    "append": "append",
                     "overwrite": "replace",
                 }.get(strategy, "append")
 
@@ -3332,29 +3344,26 @@ def write_to_secondary_targets(
 
                 pipeline = _dlt.pipeline(
                     pipeline_name=f"lakelogic_{sec_table}_secondary",
-                    destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination,
+                    destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
+                    if dest_kwargs
+                    else destination,
                     dataset_name=dataset_name,
                 )
 
                 pipeline.run(_sec_sink())
-                logger.info(
-                    f"Secondary target [{i}]: {sec_table} \u2192 {destination} "
-                    f"({write_disp}, {rows} rows)"
+                logger.info(f"Secondary target [{i}]: {sec_table} \u2192 {destination} ({write_disp}, {rows} rows)")
+                results.append(
+                    {
+                        "target": f"{destination}:{dataset_name}.{sec_table}",
+                        "format": "dlt",
+                        "dlt_destination": destination,
+                        "rows_written": rows,
+                    }
                 )
-                results.append({
-                    "target": f"{destination}:{dataset_name}.{sec_table}",
-                    "format": "dlt",
-                    "dlt_destination": destination,
-                    "rows_written": rows,
-                })
             else:
-                logger.warning(
-                    f"Secondary target [{i}]: unsupported format '{sec_format}'"
-                )
+                logger.warning(f"Secondary target [{i}]: unsupported format '{sec_format}'")
         except Exception as e:
-            logger.error(
-                f"Secondary target [{i}] ({table_name}\u2192{sec.get('dlt_destination', '?')}): {e}"
-            )
+            logger.error(f"Secondary target [{i}] ({table_name}\u2192{sec.get('dlt_destination', '?')}): {e}")
             results.append({"target": sec.get("dlt_destination", sec_format), "error": str(e)})
             if fail_on_error:
                 raise
@@ -4053,7 +4062,7 @@ def materialize_dataframe(
         "format": resolved_format,
     }
     # Use the final data (merged/pdf) for secondary targets
-    _sec_df = merged if 'merged' in locals() else pdf if 'pdf' in locals() else df
+    _sec_df = merged if "merged" in locals() else pdf if "pdf" in locals() else df
     return _run_secondary_targets(mat, contract, _sec_df, strategy, primary_key, rows_written, result)
 
 

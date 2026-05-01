@@ -3547,7 +3547,9 @@ class DataProcessor:
 
                     _q_table = f"_quarantine_{self.contract.dataset or 'data'}"
                     write_to_secondary_targets(
-                        sec_targets, bad_df, _q_table,
+                        sec_targets,
+                        bad_df,
+                        _q_table,
                         strategy="append",
                     )
             except Exception as _sec_exc:

@@ -6,12 +6,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.22.0] — 2026-05-01
+
+### Added
+
+- Add comprehensive Colab example suite for onboarding and integration workflows
+- Add new marketplace domain configuration for rideflow example
+
+### Documentation
+
+- Revert back to Apache-2.0 per user request
+- Standardize MIT license and finalize dlt observability patterns
+- Pre-execute data quality tutorial notebook for github rendering
+
+### Fixed
+
+- Resolve Linux-specific psutil fallback test failure in CI
+- Resolve test failures in CI due to missing optional dependencies and pandas 3.0 incompatibility
+
+### Styling
+
+- Resolve all ruff linting and formatting issues including line length violations
 ## [1.21.0] — 2026-04-27
 
 ### Added
 
 - Add CI quality gate workflow and compliance governance tutorial notebook
 - Add silver layer contract for rideflow trips and configure coverage exclusions
+- Add core generation, processing, and SLO modules, bump version to 1.19.0, and include new executive and compliance dashboard examples.
 
 ### CI/CD
 
@@ -24,11 +46,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Testing
 
 - Commit all missing test files by fixing gitignore exclusion
-## [1.20.0] — 2026-04-27
-
-### Added
-
-- Add core generation, processing, and SLO modules, bump version to 1.19.0, and include new executive and compliance dashboard examples.
 ## [1.19.0] — 2026-04-27
 
 ### Added
@@ -254,8 +271,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.21.0]: https://github.com/lakelogic/LakeLogic/compare/v1.20.0...v1.21.0
-[1.20.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.20.0
+[1.22.0]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.0
+[1.21.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.21.0
 [1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.19.0
 [1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.14.0
 [1.11.1]: https://github.com/lakelogic/LakeLogic/compare/v1.11.0...v1.11.1

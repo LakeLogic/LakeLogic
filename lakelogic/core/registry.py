@@ -228,6 +228,7 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
 
     # -- Resolve environment variables ------------------------------------
     import os
+
     for key in ("endpoint", "api_key"):
         val = cfg.get(key)
         if isinstance(val, str) and val.startswith("${") and val.endswith("}"):
@@ -637,8 +638,8 @@ class DomainRegistry(BaseModel):
                         else:
                             for k, v in sys_cfg.items():
                                 c_dict[section].setdefault(k, v)
-                                
-                # Ensure the contract's own observatory block resolves env vars 
+
+                # Ensure the contract's own observatory block resolves env vars
                 # and normalizes correctly.
                 if "observatory" in c_dict and isinstance(c_dict["observatory"], dict):
                     c_dict["observatory"] = _validate_observatory_config(

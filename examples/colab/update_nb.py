@@ -1,8 +1,10 @@
-import sys; sys.stdout.reconfigure(encoding='utf-8')
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8")
 import nbformat
 
-path = '07_dlt_prefect_pipeline.ipynb'
-with open(path, 'r', encoding='utf-8') as f:
+path = "07_dlt_prefect_pipeline.ipynb"
+with open(path, "r", encoding="utf-8") as f:
     nb = nbformat.read(f, as_version=4)
 
 new_cell_6 = '''os.makedirs('07_dlt_prefect_pipeline/contracts/weather', exist_ok=True)
@@ -133,7 +135,7 @@ print("✅ Weather contracts written: bronze.yaml, silver.yaml, gold.yaml")'''
 
 nb.cells[6].source = new_cell_6
 
-new_cell_14 = '''# The Gold contract already has secondary_targets configured.
+new_cell_14 = """# The Gold contract already has secondary_targets configured.
 # The pipeline run above wrote to BOTH Delta (primary) and DuckDB (secondary) via dlt.
 # Verify by querying the dlt-managed DuckDB database:
 
@@ -155,11 +157,11 @@ else:
     print("No secondary dlt database found yet.")
     print("Re-run the pipeline cell above to trigger dual-write.")
     print("To target PostgreSQL, change dlt_destination and add dlt_credentials.")
-'''
+"""
 
 nb.cells[14].source = new_cell_14
 
-with open(path, 'w', encoding='utf-8') as f:
+with open(path, "w", encoding="utf-8") as f:
     nbformat.write(nb, f)
 
-print('Updated cells 6 and 14 in notebook.')
+print("Updated cells 6 and 14 in notebook.")
