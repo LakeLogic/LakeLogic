@@ -82,7 +82,7 @@ cost:
 
 # ── Observatory Telemetry ────────────────────────────────────────────────────
 observatory:
-  enabled: false
+  enabled: true
   environments: ["dev", "prod", "staging", "local"]
   endpoint: "${LAKELOGIC_OBSERVATORY_ENDPOINT}"  # e.g., "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
   api_key: "${LAKELOGIC_API_KEY}"   # e.g., "${LAKELOGIC_API_KEY}" for prod

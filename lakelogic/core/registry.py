@@ -226,6 +226,15 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
     if not cfg.get("enabled"):
         return cfg  # remaining fields don't matter when disabled
 
+    # -- Resolve environment variables ------------------------------------
+    import os
+
+    for key in ("endpoint", "api_key"):
+        val = cfg.get(key)
+        if isinstance(val, str) and val.startswith("${") and val.endswith("}"):
+            env_var = val[2:-1]
+            cfg[key] = os.environ.get(env_var, "")
+
     # -- endpoint ---------------------------------------------------------
     endpoint = cfg.get("endpoint")
     if not endpoint or not isinstance(endpoint, str):
@@ -620,7 +629,7 @@ class DomainRegistry(BaseModel):
                     # Resolve any remaining placeholders in metadata values
                     c_dict["metadata"] = _resolve_placeholders(c_dict["metadata"], storage_vars)
 
-                # Inject system-level lineage and quarantine defaults
+                # Inject system-level lineage, quarantine, and observatory defaults
                 for section in ("lineage", "quarantine", "observatory"):
                     sys_cfg = getattr(registry, section, None)
                     if sys_cfg:
@@ -630,13 +639,29 @@ class DomainRegistry(BaseModel):
                             for k, v in sys_cfg.items():
                                 c_dict[section].setdefault(k, v)
 
+                # Ensure the contract's own observatory block resolves env vars
+                # and normalizes correctly.
+                if "observatory" in c_dict and isinstance(c_dict["observatory"], dict):
+                    c_dict["observatory"] = _validate_observatory_config(
+                        c_dict["observatory"], source=f"Contract: {c.entity}"
+                    )
+
                 # Inject system-level materialization defaults
-                if registry.materialization and c.layer in registry.materialization:
-                    if not c_dict.get("materialization"):
-                        c_dict["materialization"] = registry.materialization[c.layer]
-                    else:
-                        for k, v in registry.materialization[c.layer].items():
-                            c_dict["materialization"].setdefault(k, v)
+                # 1. Global defaults (materialization._all) — apply to all layers
+                # 2. Per-layer defaults (materialization.{layer}) — override globals
+                if registry.materialization:
+                    _global_mat = registry.materialization.get("_all", {})
+                    _layer_mat = registry.materialization.get(c.layer, {})
+
+                    # Merge: global base ← layer overrides
+                    _combined = {**_global_mat, **_layer_mat}
+
+                    if _combined:
+                        if not c_dict.get("materialization"):
+                            c_dict["materialization"] = dict(_combined)
+                        else:
+                            for k, v in _combined.items():
+                                c_dict["materialization"].setdefault(k, v)
 
                 # Inject arbitrary extra fields from _system.yaml's contract array
                 # (e.g. pipeline configs like schedule/frequency)

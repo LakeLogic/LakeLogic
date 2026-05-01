@@ -1013,6 +1013,8 @@ class Notification(BaseModel):
 class Quarantine(BaseModel):
     """Quarantine settings and notification routing."""
 
+    model_config = ConfigDict(extra="allow")
+
     target: Optional[str] = None
     table: Optional[str] = None  # shared quarantine table (e.g. "{domain_catalog}._quarantine")
     enabled: bool = True
@@ -1192,6 +1194,10 @@ class Materialization(BaseModel):
         "compaction",
         "unknown_member",
         "merge_dedup_guard",
+        "secondary_targets",
+        "dlt_destination",
+        "dlt_credentials",
+        "dlt_dataset_name",
     }
 
     @model_validator(mode="after")

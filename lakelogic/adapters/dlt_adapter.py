@@ -270,12 +270,26 @@ class DltAdapter:
     # ------------------------------------------------------------------
 
     def _resolve_credentials(self) -> dict:
-        """Resolve ``${ENV_VAR}`` references in credential values."""
-        resolved: Dict[str, str] = {}
+        """Resolve ``${ENV_VAR}`` references in credential values
+        and dynamically map any ``dlt_*`` root-level properties.
+        """
+        resolved: Dict[str, Any] = {}
+
+        # 1. Resolve explicitly nested credentials
         for key, value in self.cfg.credentials.items():
             resolved_val = _resolve_env_value(value)
             if resolved_val is not None:
                 resolved[key] = resolved_val
+
+        # 2. Merge root-level dlt_* properties (stripping the prefix)
+        if hasattr(self.cfg, "model_extra") and self.cfg.model_extra:
+            for key, value in self.cfg.model_extra.items():
+                if key.startswith("dlt_"):
+                    target_key = key[4:]  # Strip the 'dlt_' prefix
+                    resolved_val = _resolve_env_value(value)
+                    if resolved_val is not None:
+                        resolved[target_key] = resolved_val
+
         return resolved
 
     def _build_auth(self, credentials: dict) -> Optional[dict]:

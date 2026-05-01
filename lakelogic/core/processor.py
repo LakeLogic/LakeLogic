@@ -3538,6 +3538,23 @@ class DataProcessor:
                     f"Consider resetting the quarantine Delta table if schema has diverged."
                 )
 
+            # ── Secondary target fan-out for quarantine ──────────────────────
+            try:
+                mat_cfg = getattr(self.contract, "materialization", None)
+                sec_targets = getattr(mat_cfg, "secondary_targets", None) if mat_cfg else None
+                if sec_targets and isinstance(sec_targets, list):
+                    from lakelogic.core.materialization import write_to_secondary_targets
+
+                    _q_table = f"_quarantine_{self.contract.dataset or 'data'}"
+                    write_to_secondary_targets(
+                        sec_targets,
+                        bad_df,
+                        _q_table,
+                        strategy="append",
+                    )
+            except Exception as _sec_exc:
+                logger.debug(f"Quarantine secondary fan-out skipped: {_sec_exc}")
+
         return result
 
     def _compute_counts(self, source_df: Any, good_df: Any, bad_df: Any) -> Dict[str, Optional[int]]:
