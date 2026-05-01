@@ -58,6 +58,10 @@ quality:
       sql: "licence_number IS NOT NULL"
     - name: valid_email
       sql: "email like '%@%'"
+    - name: dob_not_null
+      sql: "date_of_birth is not null"
+    - name: rating_1_to_5
+      sql: "rating >= 1 and rating <= 5"
 
 transformations:
 - deduplicate:

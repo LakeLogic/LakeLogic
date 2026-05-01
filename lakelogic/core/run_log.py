@@ -962,6 +962,91 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         logger.info(f"Wrote run log to Iceberg table {full_id}")
         return full_id
 
+    if backend == "dlt":
+        try:
+            import dlt as _dlt
+            import pyarrow as pa
+        except ImportError as exc:
+            logger.warning(
+                f"Run log table backend 'dlt' requires 'dlt' and 'pyarrow'. "
+                f"Install with: pip install dlt pyarrow. Error: {exc}"
+            )
+            return None
+
+        # Build Arrow schema for run log
+        schema = pa.schema(
+            [
+                ("pipeline_run_id", pa.string()),
+                ("run_id", pa.string()),
+                ("timestamp", pa.string()),
+                ("start_time", pa.string()),
+                ("end_time", pa.string()),
+                ("run_duration_seconds", pa.float64()),
+                ("engine", pa.string()),
+                ("contract", pa.string()),
+                ("stage", pa.string()),
+                ("dataset", pa.string()),
+                ("domain", pa.string()),
+                ("system", pa.string()),
+                ("environment", pa.string()),
+                ("data_layer", pa.string()),
+                ("status", pa.string()),
+                ("error_message", pa.string()),
+                ("source_path", pa.string()),
+                ("counts_source", pa.int64()),
+                ("counts_total", pa.int64()),
+                ("counts_good", pa.int64()),
+                ("counts_quarantined", pa.int64()),
+                ("quarantine_ratio", pa.float64()),
+                ("estimated_cost", pa.float64()),
+                ("cost_currency", pa.string()),
+                ("cost_confidence", pa.string()),
+                ("max_source_mtime", pa.float64()),
+                ("max_watermark_value", pa.string()),
+                ("dlt_state_json", pa.string()),
+                ("slo_json", pa.string()),
+                ("report_json", pa.string()),
+            ]
+        )
+
+        arrays = []
+        for field in schema:
+            val = record.get(field.name)
+            arrays.append(pa.array([val], type=field.type))
+        arrow_table = pa.table(arrays, schema=schema)
+
+        # Build dlt config from metadata
+        dlt_config = {k: v for k, v in metadata.items() if k.startswith("dlt_")}
+        destination = dlt_config.get("dlt_destination", "duckdb")
+        dataset_name = dlt_config.get("dlt_dataset_name", "run_logs")
+        credentials = dlt_config.get("dlt_credentials")
+        
+        dest_kwargs = {}
+        if credentials:
+            dest_kwargs["credentials"] = credentials
+        for k, v in dlt_config.items():
+            if k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
+                dest_kwargs[k[4:]] = v
+        
+        rl_table_name = table_name
+
+        @_dlt.resource(
+            name=rl_table_name,
+            write_disposition="append",
+        )
+        def _rl_sink():
+            yield arrow_table
+
+        pipeline = _dlt.pipeline(
+            pipeline_name=f"lakelogic_{rl_table_name}_run_log",
+            destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination,
+            dataset_name=dataset_name,
+        )
+
+        pipeline.run(_rl_sink())
+        logger.info(f"Wrote run log via dlt to {destination}:{dataset_name}.{rl_table_name}")
+        return f"{destination}:{dataset_name}.{rl_table_name}"
+
     logger.warning(f"Unsupported run_log_backend: {backend}")
     return None
 
@@ -1049,6 +1134,51 @@ def write_run_log(
 
     if _write_table:
         _write_run_log_table(report, contract, engine_name=engine_name)
+
+    # ── Secondary target fan-out for run logs ────────────────────────────────────
+    # If the contract inherited global secondary_targets (via materialization._all),
+    # also write the run log record there so logs land in the same database.
+    try:
+        mat_cfg = getattr(contract, "materialization", None)
+        sec_targets = getattr(mat_cfg, "secondary_targets", None) if mat_cfg else None
+        if sec_targets and isinstance(sec_targets, list):
+            import pyarrow as pa
+            from lakelogic.core.materialization import write_to_secondary_targets
+
+            # Flatten nested counts → flat columns (same as _write_run_log_table)
+            _counts = report.get("counts") or {}
+            _flat = dict(report)
+            _flat["counts_source"] = _counts.get("source")
+            _flat["counts_total"] = _counts.get("total")
+            _flat["counts_good"] = _counts.get("good")
+            _flat["counts_quarantined"] = _counts.get("quarantined")
+            _qr = _counts.get("quarantine_ratio")
+            _flat["quarantine_ratio"] = float(_qr) if _qr is not None else None
+
+            # Build a single-row Arrow table from the flattened record
+            _rl_cols = [
+                ("pipeline_run_id", pa.string()), ("run_id", pa.string()),
+                ("timestamp", pa.string()), ("start_time", pa.string()),
+                ("end_time", pa.string()), ("run_duration_seconds", pa.float64()),
+                ("engine", pa.string()), ("contract", pa.string()),
+                ("stage", pa.string()), ("dataset", pa.string()),
+                ("domain", pa.string()), ("system", pa.string()),
+                ("environment", pa.string()), ("data_layer", pa.string()),
+                ("status", pa.string()), ("error_message", pa.string()),
+                ("source_path", pa.string()), ("counts_source", pa.int64()),
+                ("counts_total", pa.int64()), ("counts_good", pa.int64()),
+                ("counts_quarantined", pa.int64()), ("quarantine_ratio", pa.float64()),
+            ]
+            schema = pa.schema(_rl_cols)
+            arrays = [pa.array([_flat.get(f.name)], type=f.type) for f in schema]
+            arrow_tbl = pa.table(arrays, schema=schema)
+
+            write_to_secondary_targets(
+                sec_targets, arrow_tbl, "_run_logs",
+                strategy="append",
+            )
+    except Exception as _sec_exc:
+        logger.debug(f"Run log secondary fan-out skipped: {_sec_exc}")
 
     # ── Observatory Telemetry Push ────────────────────────────────────────────────
     observatory_cfg = getattr(contract, "observatory", None)

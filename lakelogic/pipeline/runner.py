@@ -390,11 +390,13 @@ class LakehousePipeline:
 
         # ── Step 5: Inherit per-layer materialization defaults ─────────
         if self.registry and self.registry.materialization and target_layer:
+            _global_mat = self.registry.materialization.get("_all", {})
             layer_defaults = self.registry.materialization.get(target_layer, {})
-            if layer_defaults:
+            # Global base ← layer overrides ← contract overrides
+            combined = {**_global_mat, **layer_defaults}
+            if combined:
                 existing_mat = contract_dict.get("materialization") or {}
-                # Layer defaults are base, contract-level overrides
-                merged = {**layer_defaults, **existing_mat}
+                merged = {**combined, **existing_mat}
                 contract_dict["materialization"] = merged
 
         # ── Step 6: Inherit per-layer server defaults ────────────────
