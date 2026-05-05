@@ -80,6 +80,19 @@ class ValidationResult:
         """Row count of records routed to quarantine."""
         return self._count_rows(self.bad)
 
+    @property
+    def quarantine_ratio(self) -> float:
+        """Ratio of bad records to total records (0.0 to 1.0)."""
+        total = self.source_count
+        if total == 0:
+            return 0.0
+        return self.bad_count / total
+
+    @property
+    def quality_score(self) -> float:
+        """Quality score as a percentage (0-100). Calculated as (1 - quarantine_ratio) * 100."""
+        return (1 - self.quarantine_ratio) * 100
+
     # ── Standard dunder methods ───────────────────────────────────
     def __iter__(self):
         yield self.good
@@ -1930,18 +1943,35 @@ class DataProcessor:
                                 else:
                                     logger.warning(f"Glob pattern matched 0 files: {path}")
                             else:
-                                if path.endswith(".parquet") or fmt == "parquet":
-                                    lf = pl.scan_parquet(path)
-                                    df = lf.collect()
-                                elif path.endswith((".ndjson", ".jsonl")):
-                                    lf = pl.scan_ndjson(path)
-                                    df = lf.collect()
-                                else:
-                                    if not self._is_uri_path(path):
-                                        df = pl.read_csv(path)
-                                    else:
-                                        lf = pl.scan_csv(path, glob=False)
+                                try:
+                                    if path.endswith(".parquet") or fmt == "parquet":
+                                        lf = pl.scan_parquet(path)
                                         df = lf.collect()
+                                    elif path.endswith((".ndjson", ".jsonl")):
+                                        lf = pl.scan_ndjson(path)
+                                        df = lf.collect()
+                                    else:
+                                        if not self._is_uri_path(path):
+                                            df = pl.read_csv(path)
+                                        else:
+                                            lf = pl.scan_csv(path, glob=False)
+                                            df = lf.collect()
+                                except Exception as e:
+                                    if (
+                                        "404 Not Found" in str(e)
+                                        or "not found" in str(e).lower()
+                                        or "no matching files" in str(e).lower()
+                                    ):
+                                        logger.info(
+                                            f"Source path not found or matched 0 files (Polars/DuckDB): {path}. Returning empty dataframe."
+                                        )
+                                        self._write_empty_run_log("no_new_data")
+                                        self._run_log_already_written = True
+                                        return ValidationResult(
+                                            self._empty_frame(), self._empty_frame(), self._empty_frame()
+                                        )
+                                    else:
+                                        raise e
                         else:
                             import json as _json
 

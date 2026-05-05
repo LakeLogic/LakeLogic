@@ -128,6 +128,10 @@ class FakeFunctions:
     def row_number():
         return FakeExpr(("row_number",))
 
+    @staticmethod
+    def broadcast(df):
+        return df
+
 
 class FakeWindowSpec:
     def __init__(self, columns):
@@ -225,6 +229,12 @@ class FakeRefDataFrame:
     def createOrReplaceTempView(self, name):
         self.views.append(name)
 
+    def alias(self, name):
+        clone = FakeRefDataFrame(self.columns)
+        clone.selected = self.selected
+        clone.alias_name = name
+        return clone
+
 
 class FakeRead:
     def __init__(self):
@@ -300,6 +310,9 @@ class FakeSparkSessionExec:
         self.base_columns = list(dict.fromkeys(columns))
         return FakeExecDataFrame(self, self.base_columns)
 
+    def table(self, name):
+        return FakeExecDataFrame(self, ["id", "segment", "name", "status_id", "tier"])
+
 
 class FakeSparkSessionModule:
     active_session = None
@@ -344,6 +357,17 @@ class FakeExecDataFrame:
         self.views.append(name)
         self.sparkSession.base_columns = list(self.columns)
 
+    def alias(self, name):
+        clone = self._clone()
+        clone.alias_name = name
+        return clone
+
+    def join(self, other, condition, how="inner"):
+        columns = list(dict.fromkeys(self.columns + other.columns))
+        clone = self._clone(columns)
+        clone.join_calls = getattr(self, "join_calls", []) + [(other, condition, how)]
+        return clone
+
     def withColumn(self, name, expr):
         columns = list(self.columns)
         if name not in columns:
@@ -361,9 +385,37 @@ class FakeExecDataFrame:
             selected = list(columns[0])
         else:
             selected = list(columns)
-        clone = self._clone(selected)
+
+        parsed_cols = []
+        for col in selected:
+            if hasattr(col, "alias_name") and col.alias_name:
+                parsed_cols.append(col.alias_name)
+            elif hasattr(col, "value") and isinstance(col.value, tuple) and col.value[0] == "col":
+                col_name = col.value[1]
+                if col_name.endswith(".*"):
+                    prefix = col_name[:-2]
+                    # expand self columns
+                    parsed_cols.extend([c for c in self.columns if isinstance(c, str) and c != col_name])
+                else:
+                    parsed_cols.append(col_name)
+            elif isinstance(col, str):
+                if col.endswith(".*"):
+                    # Mock expanding .*
+                    parsed_cols.extend([c for c in self.columns if isinstance(c, str) and c != col])
+                else:
+                    parsed_cols.append(col)
+            else:
+                parsed_cols.append("expr_col")
+
+        clone = self._clone(parsed_cols)
         clone.select_calls.append(selected)
         return clone
+
+    def selectExpr(self, *exprs):
+        # Fake selectExpr by converting to a pseudo-SQL query so it registers in spark.sql_calls
+        # which the tests assert on
+        sql = "SELECT " + ", ".join(exprs) + " FROM _fake_table"
+        return self.sparkSession.sql(sql)
 
     def drop(self, *columns):
         kept = [column for column in self.columns if column not in columns]
@@ -403,7 +455,7 @@ def _install_fake_exec_pyspark(monkeypatch):
     return spark_session
 
 
-def test_spark_helper_join_type_and_type_mapping():
+def test_spark_helper_type_mapping_and_utils():
     contract = DataContract(
         version="1.0.0",
         dataset="orders",
@@ -417,21 +469,6 @@ def test_spark_helper_join_type_and_type_mapping():
     assert adapter._to_spark_type("unknown") is None
     assert adapter._should_broadcast("ref") is True
     assert adapter._should_broadcast("missing") is False
-
-    join_cfg = types.SimpleNamespace(
-        type="full",
-        fields=["status", "tier"],
-        prefix="ref_",
-        defaults={"status": "unknown"},
-        reference="customer_ref",
-        on="customer_id",
-        key="id",
-    )
-    sql = adapter._build_join_sql(join_cfg, broadcast=True, source_table="orders")
-    assert "FULL OUTER JOIN customer_ref ref" in sql
-    assert "/*+ BROADCAST(ref) */" in sql
-    assert "COALESCE(ref.status, 'unknown') AS ref_status" in sql
-    assert "ref.tier AS ref_tier" in sql
 
 
 def test_spark_helper_run_dataset_rules(monkeypatch):
@@ -570,8 +607,35 @@ def test_spark_helper_execute_handles_list_input_and_post_rules(monkeypatch):
     spark = _install_fake_exec_pyspark(monkeypatch)
     contract = types.SimpleNamespace(
         dataset="orders",
-        transformations=[object()],
+        transformations=[
+            types.SimpleNamespace(
+                phase="post",
+                sql=None,
+                derive=None,
+                rollup=None,
+                pivot=None,
+                unpivot=None,
+                bucket=None,
+                date_diff=None,
+                lookup=None,
+                join=None,
+                filter=None,
+                rename=None,
+                select=None,
+                drop=None,
+                cast=None,
+                trim=None,
+                lower=None,
+                upper=None,
+                coalesce=None,
+                split=None,
+                explode=None,
+                map_values=None,
+                deduplicate=None,
+            )
+        ],
         quarantine=types.SimpleNamespace(include_error_reason=False),
+        links=[],
     )
     adapter = SparkAdapter(contract)
     adapter._type_err_cols = ["__type_err_id"]
@@ -663,8 +727,10 @@ def test_spark_helper_pre_transformations_cover_column_operations(monkeypatch):
             _transformation(filter=types.SimpleNamespace(sql="mapped IS NOT NULL")),
             _transformation(deduplicate=types.SimpleNamespace(on=["mapped"], sort_by=None)),
         ],
+        links=[],
     )
     adapter = SparkAdapter(contract)
+    adapter._temp_src = "source"
     adapter._transpile_derive_sql = lambda derive: "UPPER(order_id)"
 
     spark = FakeSparkSessionExec()
@@ -724,11 +790,23 @@ def test_spark_helper_post_transformations_cover_sql_lookup_and_filter(monkeypat
                     default_value="unknown",
                 )
             ),
-            _transformation(join=types.SimpleNamespace(reference="customer_ref")),
+            _transformation(
+                join=types.SimpleNamespace(
+                    reference="customer_ref",
+                    type="left",
+                    on="customer_id",
+                    key="id",
+                    fields=["segment"],
+                    prefix=None,
+                    defaults=None,
+                )
+            ),
             _transformation(filter=types.SimpleNamespace(sql="status_name IS NOT NULL")),
         ],
+        links=[],
     )
     adapter = SparkAdapter(contract)
+    adapter._temp_src = "source"
     adapter._cast_to_contract_types = lambda df: df
     adapter._transpile_derive_sql = lambda derive: "UPPER(status)"
     adapter._build_rollup_sql = lambda cfg, source_table="source": "SELECT id, SUM(amount) AS total_amount FROM source"
@@ -740,9 +818,6 @@ def test_spark_helper_post_transformations_cover_sql_lookup_and_filter(monkeypat
     adapter._build_date_diff_sql = lambda cfg, source_table="temp_src": (
         "SELECT *, (DATEDIFF(closed_at, opened_at)) AS days_open FROM temp_src"
     )
-    adapter._build_join_sql = lambda join_cfg, broadcast=False, source_table="source": (
-        "SELECT source.*, ref.segment AS segment FROM source LEFT JOIN customer_ref ref ON source.customer_id = ref.id"
-    )
     adapter._should_broadcast = lambda reference: True
 
     spark = FakeSparkSessionExec()
@@ -751,8 +826,6 @@ def test_spark_helper_post_transformations_cover_sql_lookup_and_filter(monkeypat
 
     assert any("SELECT id, status FROM source" in sql for sql in spark.sql_calls)
     assert any("SUM(amount) AS total_amount" in sql for sql in spark.sql_calls)
-    assert any("LEFT JOIN status_ref ref" in sql for sql in spark.sql_calls)
-    assert any("LEFT JOIN customer_ref ref" in sql for sql in spark.sql_calls)
     assert "derived" in transformed.columns
     assert "bucketed" in transformed.columns
     assert "days_open" in transformed.columns

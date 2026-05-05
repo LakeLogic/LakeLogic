@@ -164,6 +164,10 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
     elif table_format == "iceberg":
         writer = writer.option("merge-schema", "true")
 
+    q_location = getattr(contract.quarantine, "location", None) if getattr(contract, "quarantine", None) else None
+    if q_location:
+        writer = writer.option("path", q_location)
+
     writer.saveAsTable(table_name)
 
     logger.info(f"Wrote {rows_written} quarantined rows to {table_name} (format={table_format}, mode={mode})")

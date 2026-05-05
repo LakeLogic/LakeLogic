@@ -281,6 +281,9 @@ def test_polars_helper_apply_sql_transformation_duckdb_fallback_and_strict_mode(
 
             return pd.DataFrame({"id": [1, 2], "status": ["new", "done"], "next_id": [2, 3]})
 
+        def pl(self):
+            return pl.DataFrame({"id": [1, 2], "status": ["new", "done"], "next_id": [2, 3]})
+
     class FakeDuckConnection:
         def register(self, name, frame):
             return None

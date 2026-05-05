@@ -72,3 +72,40 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
           verbose: true
+
+  # Contract validation
+  contract-validation:
+    name: Contract Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install LakeLogic
+        run: |
+          uv pip install --system -e ".[cli,engines]"
+
+      - name: Validate Contracts
+        run: |
+          echo "Validating all contracts in the repository..."
+          find examples -name "*.yaml" -o -name "*.yml" | while read contract; do
+            echo "Validating: $contract"
+            lakelogic validate --contract "$contract" || exit 1
+          done
+          echo "✅ All contracts validated successfully"
+
+      - name: Check for Breaking Changes (gates enforcement)
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Checking for contract breaking changes..."
+          find examples -name "*.yaml" -o -name "*.yml" | while read contract; do
+            echo "Checking breaking changes: $contract"
+            lakelogic validate --contract "$contract" --gates breaking_change || echo "⚠️  Breaking change detected (informational only in this check)"
+          done

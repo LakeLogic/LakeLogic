@@ -55,6 +55,8 @@ dependencies = [
     "sqlglot>=20.0.0",
     "polars>=0.20.0",
     "typer>=0.9.0",
+    "deltalake>=0.15.0",
+    "pyarrow>=14.0.0",
 ]
 
 [project.optional-dependencies]
@@ -80,6 +82,8 @@ azure = [
     "azure-storage-blob>=12.19.0",
     "databricks-sdk>=0.18.0",
     "cryptography>=41.0.0",
+    "fsspec>=2023.10.0",
+    "adlfs>=2023.10.0",
 ]
 # Notifications — apprise + secrets backends
 notify = [

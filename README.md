@@ -9,12 +9,16 @@
 [![Python](https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
-A declarative, contract-driven medallion pipeline engine for data mesh architectures.
+**Executable + Enforceable Data Contracts. Validate at runtime. Block bad merges in CI/CD.**
 
 > Describe your data products in YAML — LakeLogic materializes them as Delta/Iceberg tables with lineage, quality, and SCD2 built in.
 >
 > Write once. Run on [Spark](https://spark.apache.org/), [Polars](https://pola.rs/), or [DuckDB](https://duckdb.org/).
-> **The vendor-neutral alternative to Databricks Lakeflow Pipelines.**
+> **Data Contracts as Code — the executable layer for data mesh.**
+
+![LakeLogic Architecture](docs/assets/lakelogic_architecture.png)
+
+> **One contract. Executed at runtime. Enforced in CI/CD.** Every row flows through the same gates — across Spark, Polars, or DuckDB — with bad data quarantined and breaking changes blocked before merge.
 
 ---
 
@@ -37,12 +41,25 @@ LakeLogic is the missing runtime layer for Data Mesh — where domain ownership 
 pip install lakelogic
 ```
 
+**Runtime — execute a contract against your data:**
+
 ```python
 from lakelogic import DataProcessor
 
 result = DataProcessor("contract.yaml").run_source()
-print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
+print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}  |  Quality: {result.quality_score:.1f}")
 ```
+
+**CI/CD — block bad contract changes before they merge:**
+
+```bash
+# Static validation — no data needed
+lakelogic validate \
+  --contract contract.yaml \
+  --gates breaking_change,pii_classification,lineage_break
+```
+
+Drop `lakelogic validate` into your GitHub Actions workflow to enforce schema, PII, and lineage standards on every pull request.
 
 ---
 
@@ -59,6 +76,7 @@ print(f"Valid: {result.good_count}  |  Quarantined: {result.bad_count}")
 
 ### Compliance & Governance
 
+- **Contract Gates (CI/CD Enforcement)** — Static-analysis gates that block PRs introducing breaking schema changes, unmasked PII, or broken lineage. Run via `lakelogic validate --gates breaking_change,pii_classification,lineage_break` before any data touches your pipeline
 - **GDPR & HIPAA Compliance** — Contract-driven `forget_subjects()` with nullify, hash, or redact strategies and immutable audit trail
 - **Zero-Retention Architecture** — Built-in `zero_retention_days` enforcement for transient data layers, automatically purging micro-batches after successful downstream processing
 - **Automated PII Handling** — Declarative encryption and hashing (`pii: true`, `masking: "encrypt"`) applied at the Bronze layer before data even reaches rest
@@ -166,9 +184,10 @@ Same contract, **any engine** — swap `engine="polars"` for `"spark"` or `"duck
 | :--- | :--- |
 | 500+ lines of PySpark/Pandas validation per table | 40 lines of YAML |
 | Bad rows silently dropped or crash the pipeline | Bad rows quarantined with error reasons |
-| Schema drift discovered in production dashboards | Schema drift caught at ingestion |
+| Schema drift discovered in production dashboards | Schema drift caught at ingestion **and blocked in CI/CD** |
 | Manual dedup scripts per team | `deduplicate: [key]` — one line |
 | PII scattered across notebooks | `pii: true, masking: hash` — automatic |
+| Breaking contract changes shipped to prod | `lakelogic validate --gates breaking_change` blocks the PR |
 | No audit trail | Every row stamped with run ID, source path, timestamp |
 
 > [!TIP]
@@ -178,11 +197,7 @@ Same contract, **any engine** — swap `engine="polars"` for `"spark"` or `"duck
 
 ## Architecture
 
-LakeLogic enforces Data Contracts as quality gates across the Medallion Architecture (Bronze → Silver → Gold).
-
-![LakeLogic Architecture](docs/assets/lakelogic_architecture.png)
-
-Each layer uses its own contract:
+LakeLogic enforces Data Contracts as quality gates across the Medallion Architecture (Bronze → Silver → Gold). Each layer uses its own contract:
 
 | Layer | Role | Guarantee |
 | :--- | :--- | :--- |

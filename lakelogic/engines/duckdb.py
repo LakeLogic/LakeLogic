@@ -57,7 +57,8 @@ class DuckDBAdapter(EngineAdapter):
             if isinstance(df, pl.LazyFrame):
                 df = df.collect()
             if isinstance(df, pl.DataFrame):
-                self.con.register(name, df.to_pandas())
+                # Use zero-copy Arrow registration to bypass pandas serialization
+                self.con.register(name, df.to_arrow())
                 return
         except ImportError:
             pass
@@ -75,9 +76,8 @@ class DuckDBAdapter(EngineAdapter):
         with the rest of the LakeLogic pipeline (materialization, lineage, etc.).
         """
         try:
-            import polars as pl
-
-            return pl.from_pandas(rel.df())
+            # Use DuckDB's native zero-copy Polars/Arrow integration
+            return rel.pl()
         except ImportError:
             return rel.df()
 
@@ -659,13 +659,13 @@ class DuckDBAdapter(EngineAdapter):
                 error_array = f"list_value({', '.join(error_parts)})"
                 # Filter out NULLs from the array
                 self.con.sql(
-                    f"CREATE OR REPLACE VIEW _with_errors AS "
+                    f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
                     f"SELECT *, list_filter({error_array}, x -> x IS NOT NULL) AS {self.ERROR_COLUMN} "
                     f"FROM _evaluated"
                 )
             else:
                 self.con.sql(
-                    f"CREATE OR REPLACE VIEW _with_errors AS "
+                    f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
                     f"SELECT *, list_value() AS {self.ERROR_COLUMN} "
                     f"FROM _evaluated"
                 )
@@ -680,7 +680,7 @@ class DuckDBAdapter(EngineAdapter):
             )
         else:
             self.con.sql(
-                f"CREATE OR REPLACE VIEW _with_errors AS "
+                f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
                 f"SELECT *, list_value() AS {self.ERROR_COLUMN} "
                 f"FROM {current_table}"
             )

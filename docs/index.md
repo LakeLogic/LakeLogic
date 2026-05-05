@@ -8,14 +8,14 @@ hide:
 # Your Data Estate. <span style="color: var(--md-accent-fg-color);">Under Contract.</span>
 
 <p class="hero-subtitle" style="font-size: 1.3rem; font-weight: 500;">
-A declarative, contract-driven medallion<br>
-pipeline engine for data mesh architectures.
+Executable + Enforceable Data Contracts.<br>
+Validate at runtime. Block bad merges in CI/CD.
 </p>
 
 <p class="hero-keyword-anchor" style="font-size: 0.95rem; opacity: 0.8; line-height: 1.5;" markdown="1">
 Describe your data products in YAML — LakeLogic materializes them as Delta/Iceberg tables with lineage, quality, and SCD2 built in.<br><br>
 Write once. Run on [Spark](https://spark.apache.org/){: target="_blank" }, [Polars](https://pola.rs/){: target="_blank" }, or [DuckDB](https://duckdb.org/){: target="_blank" }.<br>
-<strong style="color: var(--md-accent-fg-color); font-size: 1.05rem;">The vendor-neutral alternative to Databricks Lakeflow Pipelines.</strong>
+<strong style="color: var(--md-accent-fg-color); font-size: 1.05rem;">Data Contracts as Code — the executable layer for data mesh.</strong>
 </p>
 
 <div class="hero-cta" markdown>
@@ -101,6 +101,26 @@ Write once. Run on [Spark](https://spark.apache.org/){: target="_blank" }, [Pola
     |--------|----------------|---------------------------------|--------------------------------------------------|
     | C102   | not_an_email   | `["correctness"]`               | `["Rule failed: email LIKE '%@%.%'"]`            |
     | C103   | null           | `["completeness"]`              | `["Rule failed: email is required"]`             |
+
+=== "4. Enforce in CI/CD"
+
+    ```bash title="Pre-deployment validation (no data needed)"
+    lakelogic validate \
+      --contract contract.yaml \
+      --gates breaking_change,pii_classification,lineage_break
+    ```
+
+    ```yaml title=".github/workflows/contracts.yml"
+    - name: Validate Contracts
+      run: |
+        lakelogic validate \
+          --contract contracts/customers.yaml \
+          --gates breaking_change,pii_classification
+    ```
+
+    Block PRs that introduce schema breaks, unmasked PII, or
+    broken lineage — **before** they reach production.
+
 </div>
 
 </div>
@@ -151,6 +171,11 @@ Data mesh isn't a buzzword in LakeLogic — it's the **architecture**. The `doma
 ## Define Once. Enforce Everywhere.
 
 LakeLogic makes your **Data Contract the Single Source of Truth**. One YAML file replaces hundreds of lines of ingestion, validation, and materialization code, and it runs on any engine.
+
+Contracts enforce on **two surfaces**:
+
+- **Runtime** — `processor.run()` validates rows, quarantines bad data, emits a `quality_score`, and writes lineage stamps automatically.
+- **CI/CD** — `lakelogic validate --gates` runs static analysis on contract changes and blocks PRs that break the schema, expose PII, or sever upstream lineage.
 
 > **Think of a contract like a building code.** The architect (data engineer) writes the spec once. Every builder (Spark, Polars, DuckDB) follows the same code — no matter which team or tool runs the pipeline.
 
