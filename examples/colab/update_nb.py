@@ -1,4 +1,5 @@
 import sys
+
 import nbformat
 
 sys.stdout.reconfigure(encoding="utf-8")

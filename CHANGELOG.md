@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
-## [1.22.1] — 2026-05-05
+## [1.22.2] — 2026-05-05
 
 ### Fixed
 
@@ -276,7 +276,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.22.1]: https://github.com/lakelogic/LakeLogic/compare/v1.22.0...v1.22.1
+[1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.22.0...v1.22.2
 [1.22.0]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.21.0
 [1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.19.0
