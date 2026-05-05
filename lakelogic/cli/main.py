@@ -268,7 +268,8 @@ def validate(
         None,
         "--gates",
         "-g",
-        help="Comma-separated list of gates to enforce (e.g., 'breaking_change,pii_classification'). If not specified, runs structural validation only.",
+        help="Comma-separated list of gates to enforce (e.g., 'breaking_change,pii_classification'). "
+        "If not specified, runs structural validation only.",
     ),
     strict: bool = typer.Option(
         False,

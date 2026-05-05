@@ -471,7 +471,6 @@ def _write_quarantine_table_iceberg(df: Any, contract, table_name: str, metadata
 
         arrow_table = pa.Table.from_pandas(df.to_pandas())
     else:
-        from lakelogic.core.materialization import _to_pandas
         import pyarrow as pa
 
         arrow_table = pa.Table.from_pandas(_to_pandas(df))
@@ -1031,8 +1030,6 @@ def materialize_quarantine(
         elif hasattr(df, "to_pandas"):
             arrow_data = pa.Table.from_pandas(df.to_pandas())
         else:
-            from lakelogic.core.materialization import _to_pandas
-
             arrow_data = pa.Table.from_pandas(_to_pandas(df))
 
         rows_written = arrow_data.num_rows if hasattr(arrow_data, "num_rows") else 0

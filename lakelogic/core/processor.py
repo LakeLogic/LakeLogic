@@ -1963,7 +1963,8 @@ class DataProcessor:
                                         or "no matching files" in str(e).lower()
                                     ):
                                         logger.info(
-                                            f"Source path not found or matched 0 files (Polars/DuckDB): {path}. Returning empty dataframe."
+                                            f"Source path not found or matched 0 files (Polars/DuckDB): {path}. "
+                                            "Returning empty dataframe."
                                         )
                                         self._write_empty_run_log("no_new_data")
                                         self._run_log_already_written = True

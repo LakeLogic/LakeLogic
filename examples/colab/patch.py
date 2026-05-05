@@ -69,11 +69,13 @@ for cell in nb.get("cells", []):
                 new_source.append("\n")
                 new_source.append("# Load and resolve all contracts + paths\n")
                 new_source.append(
-                    "registry = DomainRegistry.from_yaml('07_dlt_prefect_pipeline/_registry.yaml', storage_mode='direct')\n"
+                    "registry = DomainRegistry.from_yaml("
+                    "'07_dlt_prefect_pipeline/_registry.yaml', storage_mode='direct')\n"
                 )
                 new_source.append("\n")
                 new_source.append(
-                    'print(f"✅ Registry loaded: {len(registry.contracts)} contracts across {registry.domain}/{registry.system}")\n'
+                    'print(f"✅ Registry loaded: {len(registry.contracts)} '
+                    'contracts across {registry.domain}/{registry.system}")\n'
                 )
                 new_source.append("print(f\"   Lineage: {registry.lineage.get('enabled', False)}\")")
                 cell["source"] = new_source
@@ -85,7 +87,7 @@ for cell in nb.get("cells", []):
             if "`%pip install dlt" in line:
                 cell["source"][i] = line.replace(
                     "`%pip install dlt", "`%pip install dlt"
-                )  # wait, the lint says use `%pip install` instead of `!pip install`. Did they say `!pip install` before?
+                )  # wait, the lint says use `%pip install`.
             if "`!pip install dlt" in line:
                 cell["source"][i] = line.replace("`!pip install dlt", "`%pip install dlt")
 
