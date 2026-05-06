@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.23.0] — 2026-05-06
+
+### Added
+
+- Enhance DuckDB and Polars integration with zero-copy Arrow registration
 ## [1.22.3] — 2026-05-06
 
 ### Fixed
@@ -281,6 +286,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.23.0]: https://github.com/lakelogic/LakeLogic/compare/v1.22.3...v1.23.0
 [1.22.3]: https://github.com/lakelogic/LakeLogic/compare/v1.22.2...v1.22.3
 [1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.22.0...v1.22.2
 [1.22.0]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.0

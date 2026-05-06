@@ -96,7 +96,9 @@ jobs:
       - name: Validate Contracts
         run: |
           echo "Validating all contracts in the repository..."
-          find examples -name "*.yaml" -o -name "*.yml" | while read contract; do
+          find examples \( -name "*.yaml" -o -name "*.yml" \) \
+            ! -iname "*domain.yaml" ! -iname "*domain.yml" \
+            ! -iname "*system.yaml" ! -iname "*system.yml" | while read contract; do
             echo "Validating: $contract"
             lakelogic validate --contract "$contract" || exit 1
           done
@@ -106,7 +108,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           echo "Checking for contract breaking changes..."
-          find examples -name "*.yaml" -o -name "*.yml" | while read contract; do
+          find examples \( -name "*.yaml" -o -name "*.yml" \) \
+            ! -iname "*domain.yaml" ! -iname "*domain.yml" \
+            ! -iname "*system.yaml" ! -iname "*system.yml" | while read contract; do
             echo "Checking breaking changes: $contract"
             lakelogic validate --contract "$contract" --gates breaking_change || echo "⚠️  Breaking change detected (informational only in this check)"
           done
