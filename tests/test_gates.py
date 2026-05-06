@@ -179,9 +179,7 @@ def test_pii_passes_when_no_pii_fields():
 
 def test_pii_fails_when_pii_field_missing_masking():
     gate = PIIClassificationGate()
-    contract = _contract(
-        fields=[_field("email", "string", pii=True, classification="restricted")]
-    )
+    contract = _contract(fields=[_field("email", "string", pii=True, classification="restricted")])
     result = gate.run(contract)
 
     assert result.status == GateStatus.FAILED
@@ -190,9 +188,7 @@ def test_pii_fails_when_pii_field_missing_masking():
 
 def test_pii_fails_when_pii_field_missing_classification():
     gate = PIIClassificationGate()
-    contract = _contract(
-        fields=[_field("email", "string", pii=True, masking="hash")]
-    )
+    contract = _contract(fields=[_field("email", "string", pii=True, masking="hash")])
     result = gate.run(contract)
 
     assert result.status == GateStatus.FAILED
@@ -201,9 +197,7 @@ def test_pii_fails_when_pii_field_missing_classification():
 
 def test_pii_fails_with_invalid_classification():
     gate = PIIClassificationGate()
-    contract = _contract(
-        fields=[_field("email", "string", pii=True, masking="hash", classification="bogus")]
-    )
+    contract = _contract(fields=[_field("email", "string", pii=True, masking="hash", classification="bogus")])
     result = gate.run(contract)
 
     assert result.status == GateStatus.FAILED
@@ -251,9 +245,7 @@ def test_pii_passes_with_valid_dict_masking_type():
 def test_pii_passes_with_compliant_phi_field():
     gate = PIIClassificationGate()
     contract = _contract(
-        fields=[
-            _field("diagnosis", "string", phi=True, masking="encrypt", classification="confidential")
-        ]
+        fields=[_field("diagnosis", "string", phi=True, masking="encrypt", classification="confidential")]
     )
     result = gate.run(contract)
 
