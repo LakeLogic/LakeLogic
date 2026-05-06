@@ -2,7 +2,7 @@ version: 1.0.0
 
 info:
   title: "Bronze — RideFlow Driver Profiles"
-  table_name: "{bronze_layer}_{system}_driver_profiles"
+  table_name: "bronze_rideflow_driver_profiles"
   description: >
     Raw driver profile data from the RideFlow platform.
     Contains extensive driver PII including name, email, phone,

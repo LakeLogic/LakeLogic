@@ -69,6 +69,6 @@ transformations:
     - driver_id
 source:
   type: delta
-  path: '{bronze_path}/{bronze_layer}_{system}_driver_profiles'
+  path: '{bronze_path}/bronze_rideflow_driver_profiles'
   load_mode: incremental
   watermark_strategy: pipeline_log
