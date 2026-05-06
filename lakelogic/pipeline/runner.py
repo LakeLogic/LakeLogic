@@ -314,16 +314,26 @@ class LakehousePipeline:
             # different domains don't collide in the shared quarantine schema.
             quar = contract_dict.get("quarantine") or {}
             if _is_direct:
-                if quar.get("enabled") and not quar.get("target") and _layer_root:
+                if quar.get("enabled") and not quar.get("target"):
                     _domain = info.get("domain", "")
                     _q_table = f"{_domain}_{table_name}" if _domain else table_name
-                    quar["target"] = f"{_layer_root}/_quarantine/{_q_table}"
+                    _q_path = getattr(storage, "quarantine_path", None)
+                    if _q_path:
+                        quar["target"] = f"{_q_path}/{_q_table}"
+                    elif _layer_root:
+                        quar["target"] = f"{_layer_root}/_quarantine/{_q_table}"
                     contract_dict["quarantine"] = quar
             else:
                 if quar.get("enabled") and not quar.get("target") and storage.quarantine_root:
                     _domain = info.get("domain", "")
                     _q_table = f"{_domain}_{table_name}" if _domain else table_name
                     quar["target"] = f"{storage.quarantine_root}.{_q_table}"
+
+                    # Ensure it creates an EXTERNAL table if quarantine_path is set
+                    _q_path = getattr(storage, "quarantine_path", None)
+                    if _q_path:
+                        quar["location"] = f"{_q_path}/{_q_table}"
+
                     contract_dict["quarantine"] = quar
 
             # Run log (from registry, not per-contract) — skip in direct mode
@@ -1504,6 +1514,33 @@ class LakehousePipeline:
 
         logger.info(f"Pipeline storage mode: {self.storage_mode}")
 
+        # ── 0. Native System Table Bootstrap (Unity Catalog) ──────────────────
+        if (
+            self.engine in ("spark", "databricks")
+            and self.spark
+            and getattr(self.registry.storage, "domain_catalog", None)
+        ):
+            catalog_schema = self.registry.storage.domain_catalog
+            sys_tables = {
+                "_logs": getattr(self.registry.storage, "log_path", None),
+                "_quarantine": getattr(self.registry.storage, "quarantine_path", None),
+            }
+            for tbl, path in sys_tables.items():
+                if not path:
+                    continue
+                # For non-table targets, wrap physical path as an external table
+                if not str(path).startswith("table:"):
+                    ddl = f"CREATE TABLE IF NOT EXISTS {catalog_schema}.{tbl} USING DELTA LOCATION '{path}'"
+                    if dry_run or ddl_only:
+                        logger.info(f"DRY RUN System DDL Preview for {tbl}:\n{ddl}")
+                    if not dry_run:
+                        try:
+                            self.spark.sql(ddl)
+                            if not ddl_only:
+                                logger.debug(f"Ensured Unity Catalog materialization for {catalog_schema}.{tbl}")
+                        except Exception as e:
+                            logger.warning(f"Could not natively bootstrap system table {tbl}: {e}")
+
         resets = {layer.strip().lower() for layer in reset_layers.split(",") if layer.strip()}
         reloads = {layer.strip().lower() for layer in reload_layers.split(",") if layer.strip()}
         entities = {entity.strip().lower() for entity in entity_filter.split(",") if entity.strip()}
@@ -1975,8 +2012,16 @@ class LakehousePipeline:
         # pragma: no cover
         try:  # pragma: no cover
             if mode == "delete":  # pragma: no cover
-                _dbutils.fs.rm(landing_path, True)  # pragma: no cover
-                logger.debug(f"  Deleted {landing_path} via dbutils")  # pragma: no cover
+                # Preserve the top-level directory (managed by Terraform)
+                try:
+                    children = _dbutils.fs.ls(landing_path)
+                    for child in children:
+                        _dbutils.fs.rm(child.path, True)
+                    logger.debug(f"  Deleted contents of {landing_path} via dbutils")
+                except Exception:
+                    # Fallback if landing_path is just a file or doesn't exist as dir
+                    _dbutils.fs.rm(landing_path, True)  # pragma: no cover
+                    logger.debug(f"  Deleted {landing_path} via dbutils")  # pragma: no cover
             elif mode == "archive" and archive_path:  # pragma: no cover
                 # dbutils.fs.mv is an atomic move on ADLS/S3  # pragma: no cover
                 _dbutils.fs.mv(landing_path, archive_path, True)  # pragma: no cover
@@ -2019,13 +2064,23 @@ class LakehousePipeline:
         # pragma: no cover
         if mode == "delete":  # pragma: no cover
             if fs.exists(landing_path):  # pragma: no cover
-                fs.rm(landing_path, recursive=True)  # pragma: no cover
-                logger.debug(f"  Deleted {landing_path} via fsspec")  # pragma: no cover
+                if fs.isdir(landing_path):
+                    # Delete only the contents to preserve the Terraform-managed parent dir
+                    for item in fs.ls(landing_path, detail=False):
+                        fs.rm(item, recursive=True)
+                    logger.debug(f"  Deleted contents of {landing_path} via fsspec")
+                else:
+                    fs.rm(landing_path, recursive=True)  # pragma: no cover
+                    logger.debug(f"  Deleted {landing_path} via fsspec")  # pragma: no cover
         elif mode == "archive" and archive_path:  # pragma: no cover
             if fs.exists(landing_path):  # pragma: no cover
                 # For cross-container moves, use copy + delete  # pragma: no cover
                 fs.copy(landing_path, archive_path, recursive=True)  # pragma: no cover
-                fs.rm(landing_path, recursive=True)  # pragma: no cover
+                if fs.isdir(landing_path):
+                    for item in fs.ls(landing_path, detail=False):
+                        fs.rm(item, recursive=True)
+                else:
+                    fs.rm(landing_path, recursive=True)  # pragma: no cover
                 logger.debug(f"  Archived {landing_path} → {archive_path} via fsspec")  # pragma: no cover
 
     def _process_single_contract(
@@ -2359,13 +2414,16 @@ class LakehousePipeline:
 
     # ── DAG Visualization ────────────────────────────────────────────────────
 
-    def visualize_dag(self, *, title: str = None, entity_filter: str = "", layer_filter: str = "") -> str:
+    def visualize_dag(
+        self, *, title: str = None, entity_filter: str = "", layer_filter: str = "", theme: str = "dark"
+    ) -> str:
         """Generate an inline HTML DAG visualization of the pipeline.
 
         Args:
             title: Optional business value oriented label to override the default domain/system header.
             entity_filter: Comma-separated entity names to highlight (e.g. "sessions").
             layer_filter: Comma-separated layers to highlight (e.g. "bronze").
+            theme: "dark" or "light" (default "dark").
 
         Returns HTML suitable for ``displayHTML()`` in Databricks notebooks
         or Jupyter's ``IPython.display.HTML()``.
@@ -2790,13 +2848,28 @@ class LakehousePipeline:
 
         dag_title = title if title else f"{self.registry.domain} / {self.registry.system}"
 
+        if theme == "light":
+            bg_color, bg_dot = "#f8f9fa", "#e5e7eb"
+            text_main, text_sub = "#111827", "#4b5563"
+            node_bg, node_border = "#ffffff", "#e5e7eb"
+            node_text, node_sys = "#1f2937", "#6b7280"
+            path_fill, flow_stroke = "#9ca3af", "#d1d5db"
+            badge_bg = "#f3f4f6"
+        else:
+            bg_color, bg_dot = "#121212", "#222222"
+            text_main, text_sub = "#ffffff", "#666666"
+            node_bg, node_border = "#1a1a1a", "#2a2a30"
+            node_text, node_sys = "#f0f0f0", "#555555"
+            path_fill, flow_stroke = "#555555", "#444444"
+            badge_bg = "#1e3a5f44"
+
         html = f"""
-        <div style="font-family:'Inter','Segoe UI',sans-serif;background:#0d0d0f;
-             background-image:radial-gradient(circle at 1px 1px,#1a1a1f 1px,transparent 0);
+        <div style="font-family:'Inter','Segoe UI',sans-serif;background:{bg_color};
+             background-image:radial-gradient(circle at 1px 1px,{bg_dot} 1px,transparent 0);
              background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;overflow-x:auto;">
-          <h2 style="color:#fff;font-size:1.2rem;margin:0 0 4px;"
-              >📊 Pipeline DAG — {dag_title}</h2>
-          <p style="color:#666;font-size:0.8rem;margin:0 0 24px;">{subtitle}</p>
+          <h2 style="color:{text_main};font-size:1.2rem;margin:0 0 4px;"
+              >Lakelogic Pipeline DAG — {dag_title}</h2>
+          <p style="color:{text_sub};font-size:0.8rem;margin:0 0 24px;">{subtitle}</p>
           <div style="position:relative;width:{canvas_w}px;height:{canvas_h}px;">
             {header_html}
             <svg style="position:absolute;top:0;left:0;width:100%;
@@ -2806,7 +2879,7 @@ class LakehousePipeline:
                 <marker id="dag-arrow" viewBox="0 0 12 10"
                         refX="11" refY="5" markerWidth="10"
                         markerHeight="8" orient="auto-start-reverse">
-                  <path d="M 0 0 L 12 5 L 0 10 z" fill="#555"/>
+                  <path d="M 0 0 L 12 5 L 0 10 z" fill="{path_fill}"/>
                 </marker>
                 <marker id="dag-arrow-dep" viewBox="0 0 12 10"
                         refX="11" refY="5" markerWidth="10"
@@ -2818,33 +2891,33 @@ class LakehousePipeline:
             </svg>
             {node_html}
           </div>
-          <div style="display:flex;gap:24px;font-size:0.7rem;color:#666;margin-top:16px;">
+          <div style="display:flex;gap:24px;font-size:0.7rem;color:{text_sub};margin-top:16px;">
             <span>◼ <span style="color:#2dd4bf">External</span></span>
             <span>◼ <span style="color:#daa520">Bronze</span></span>
             <span>◼ <span style="color:#8fa4b8">Silver</span></span>
             <span>◼ <span style="color:#ffd700">Gold</span></span>
             <span>◼ <span style="color:#a78bfa">Downstream</span></span>
             <span style="color:#4a9eff">━━ Dependency</span>
-            <span style="color:#555">╌╌ Data Flow</span>
+            <span style="color:{path_fill}">╌╌ Data Flow</span>
           </div>
         </div>
         <style>
-          .dag-node{{position:absolute;background:#16161a;border:2px solid #2a2a30;border-radius:12px;
+          .dag-node{{position:absolute;background:{node_bg};border:2px solid {node_border};border-radius:12px;
                      padding:14px 18px;width:{node_width}px;height:{node_height}px;box-sizing:border-box;
                      transition:all 0.2s ease;cursor:default;}}
           .dag-hdr{{display:flex;align-items:center;gap:10px;margin-bottom:6px;}}
           .dag-icon{{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;}}
-          .dag-ttl{{font-size:0.82rem;font-weight:600;color:#f0f0f0;line-height:1.25;}}
-          .dag-sys{{font-size:0.62rem;color:#555;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;}}
+          .dag-ttl{{font-size:0.82rem;font-weight:600;color:{node_text};line-height:1.25;}}
+          .dag-sys{{font-size:0.62rem;color:{node_sys};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;}}
           .dag-badges{{display:flex;gap:5px;flex-wrap:wrap;}}
           .dag-badge{{font-size:0.55rem;font-weight:600;padding:2px 7px;
                      border-radius:4px;text-transform:uppercase;
                      letter-spacing:0.04em;}}
-          .dag-badge-ver{{background:#1e3a5f44;color:#4a9eff;}}
+          .dag-badge-ver{{background:{badge_bg};color:#4a9eff;}}
           .dag-badge-freq{{background:#2dd4bf22;color:#2dd4bf;}}
           .dag-badge-pii{{background:#dc262633;color:#f87171;}}
           .dag-dot{{width:7px;height:7px;border-radius:50%;position:absolute;top:10px;right:12px;}}
-          svg .dag-flow{{fill:none;stroke:#444;stroke-width:2;stroke-dasharray:8 4;opacity:0.5;}}
+          svg .dag-flow{{fill:none;stroke:{flow_stroke};stroke-width:2;stroke-dasharray:8 4;opacity:0.5;}}
           svg .dag-dep{{fill:none;stroke:#4a9eff;stroke-width:2.5;opacity:0.85;stroke-dasharray:none;}}
         </style>
         """

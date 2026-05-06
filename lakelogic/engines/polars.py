@@ -78,9 +78,9 @@ class PolarsAdapter(EngineAdapter):
                     continue
 
                 if path.suffix.lower() == ".parquet":
-                    link_lf = pl.read_parquet(path).lazy()
+                    link_lf = pl.scan_parquet(path)
                 elif path.suffix.lower() == ".csv":
-                    link_lf = pl.read_csv(path).lazy()
+                    link_lf = pl.scan_csv(path)
                 else:
                     logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
                     continue
@@ -211,13 +211,13 @@ class PolarsAdapter(EngineAdapter):
             logger.warning(f"Polars SQL failed; falling back to DuckDB for SQL transform: {exc}")
             con = duckdb.connect(database=":memory:")
             df = lf.collect()
-            con.register("source", df)
+            con.register("source", df.to_arrow())
             if self.contract.dataset:
-                con.register(self.contract.dataset, df)
+                con.register(self.contract.dataset, df.to_arrow())
             # Register pre-loaded cloud tables in DuckDB context
             for _uri_key, _cloud_lf in _cloud_tables.items():
                 _safe_alias = _uri_key.rstrip("/").split("/")[-1]
-                con.register(_safe_alias, _cloud_lf.collect().to_pandas())
+                con.register(_safe_alias, _cloud_lf.collect().to_arrow())
             for link in self.contract.links:
                 try:
                     if link.table or (link.type and link.type.lower() == "table"):
@@ -248,7 +248,7 @@ class PolarsAdapter(EngineAdapter):
                 except Exception:
                     continue
             rel = con.query(sql)
-            out = pl.from_pandas(rel.df()).lazy()
+            out = rel.pl().lazy()
             con.close()
             return out
 

@@ -1,7 +1,8 @@
 import sys
 
-sys.stdout.reconfigure(encoding="utf-8")
 import nbformat
+
+sys.stdout.reconfigure(encoding="utf-8")
 
 path = "07_dlt_prefect_pipeline.ipynb"
 with open(path, "r", encoding="utf-8") as f:
@@ -147,7 +148,9 @@ import os
 db_path = "duckdb_test_db.duckdb"
 if os.path.exists(db_path):
     conn = duckdb.connect(db_path, read_only=True)
-    tables = conn.execute("SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='analytics'").fetchall()
+    tables = conn.execute(
+        "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='analytics'"
+    ).fetchall()
     print(f"✅ Dual-write verified! dlt created: {db_path}")
     print(f"   Tables in analytics schema: {[t[1] for t in tables]}")
     row_count = conn.execute("SELECT COUNT(*) FROM analytics.weather_summary").fetchone()[0]

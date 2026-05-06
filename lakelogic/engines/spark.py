@@ -68,8 +68,10 @@ class SparkAdapter(EngineAdapter):
 
         # 1. Register Source and Links in Spark Session
         spark = df.sparkSession
-        tbl_name = self.contract.dataset or "source"
+        self._temp_src = f"lakelogic_src_{id(self)}"
+        tbl_name = self.contract.dataset or self._temp_src
         df.createOrReplaceTempView(tbl_name)
+        df.createOrReplaceTempView(self._temp_src)
         self._register_links(spark)
 
         # 0. Apply pre-processing (renames, filters, deduplication)
@@ -98,13 +100,12 @@ class SparkAdapter(EngineAdapter):
         df_eval = df
         internal_cols = []
         if pre_rules:
-            rule_exprs = []
+            rule_exprs = ["*"]
             for i, rule in enumerate(pre_rules):
                 rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as _rule_{i}")
                 internal_cols.append(f"_rule_{i}")
 
-            eval_sql = f"SELECT *, {', '.join(rule_exprs)} FROM {tbl_name}"
-            df_eval = spark.sql(eval_sql)
+            df_eval = df.selectExpr(*rule_exprs)
 
             for i, rule in enumerate(pre_rules):
                 col_name = f"_rule_{i}"
@@ -152,18 +153,14 @@ class SparkAdapter(EngineAdapter):
 
         # 6. Evaluate post-phase rules (after transforms — can reference derived columns)
         if post_rules:
-            post_tbl = "__lakelogic_post_transform__"
-            good_df.createOrReplaceTempView(post_tbl)
-
-            post_rule_exprs = []
+            post_rule_exprs = ["*"]
             post_internal = []
             for i, rule in enumerate(post_rules):
                 col_id = f"_post_rule_{i}"
                 post_rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as {col_id}")
                 post_internal.append(col_id)
 
-            post_sql = f"SELECT *, {', '.join(post_rule_exprs)} FROM {post_tbl}"
-            good_eval = spark.sql(post_sql)
+            good_eval = good_df.selectExpr(*post_rule_exprs)
 
             post_error_exprs = []
             post_cat_exprs = []
@@ -196,16 +193,9 @@ class SparkAdapter(EngineAdapter):
             )
             # Union new bad rows with existing bad_df
             if bad_df is not None:
-                # Align schemas before union
-                for col in post_bad.columns:
-                    if col not in bad_df.columns:
-                        bad_df = bad_df.withColumn(col, F.lit(None))
-                for col in bad_df.columns:
-                    if col not in post_bad.columns:
-                        post_bad = post_bad.withColumn(col, F.lit(None))
-                bad_df = bad_df.select(sorted(bad_df.columns)).unionByName(
-                    post_bad.select(sorted(post_bad.columns)), allowMissingColumns=True
-                )
+                # Use native unionByName which natively handles missing columns in Spark 3.1+
+                # This avoids building a deeply nested Catalyst projection plan.
+                bad_df = bad_df.unionByName(post_bad, allowMissingColumns=True)
             else:
                 bad_df = post_bad
 
@@ -233,13 +223,16 @@ class SparkAdapter(EngineAdapter):
         if not rules:
             return
 
-        tbl_name = self.contract.dataset or "source"
+        tbl_name = self.contract.dataset or getattr(self, "_temp_src", "source")
         df.createOrReplaceTempView(tbl_name)
         spark = df.sparkSession
 
+        import re
+
         for rule in rules:
             try:
-                res = spark.sql(rule.sql).collect()
+                sql_str = re.sub(r"\bsource\b", tbl_name, rule.sql, flags=re.IGNORECASE)
+                res = spark.sql(sql_str).collect()
                 val = res[0][0]
 
                 passed = True
@@ -290,8 +283,15 @@ class SparkAdapter(EngineAdapter):
             # ── Execute Transformation ────────────────────────────────────────
             if trans.sql and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
-                current_df.createOrReplaceTempView("source")
-                current_df = current_df.sparkSession.sql(trans.sql)
+                current_df.createOrReplaceTempView(self._temp_src)
+                import re
+
+                sql_str = re.sub(r"\bsource\b", self._temp_src, trans.sql, flags=re.IGNORECASE)
+                for link in self.contract.links:
+                    sql_str = re.sub(
+                        rf"\b{re.escape(link.name)}\b", f"{link.name}_{id(self)}", sql_str, flags=re.IGNORECASE
+                    )
+                current_df = current_df.sparkSession.sql(sql_str)
                 existing = set(current_df.columns)
 
             elif trans.derive and trans_phase == "pre":
@@ -301,10 +301,10 @@ class SparkAdapter(EngineAdapter):
                 existing = set(current_df.columns)
 
             elif trans.pivot and trans_phase == "pre":
-                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or self._temp_src)
                 if pivot_sql:
                     logger.debug(f"Pre-Transform [Pivot]: {pivot_sql}")
-                    current_df.createOrReplaceTempView("source")
+                    current_df.createOrReplaceTempView(self._temp_src)
                     if self.contract.dataset:
                         current_df.createOrReplaceTempView(self.contract.dataset)
                     current_df = current_df.sparkSession.sql(pivot_sql)
@@ -312,10 +312,12 @@ class SparkAdapter(EngineAdapter):
                 continue
 
             if trans.unpivot and trans_phase == "pre":
-                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self.contract.dataset or "source")
+                unpivot_sql = self._build_unpivot_sql(
+                    trans.unpivot, source_table=self.contract.dataset or self._temp_src
+                )
                 if unpivot_sql:
                     logger.debug(f"Pre-Transform [Unpivot]: {unpivot_sql}")
-                    current_df.createOrReplaceTempView("source")
+                    current_df.createOrReplaceTempView(self._temp_src)
                     if self.contract.dataset:
                         current_df.createOrReplaceTempView(self.contract.dataset)
                     current_df = current_df.sparkSession.sql(unpivot_sql)
@@ -435,7 +437,7 @@ class SparkAdapter(EngineAdapter):
             # ── Post-Step Sync ──────────────────────────────────────────────
             # Re-register the updated DataFrame as 'source' so that the NEXT
             # transformation phase (especially SQL-based ones) sees the new columns.
-            current_df.createOrReplaceTempView("source")
+            current_df.createOrReplaceTempView(self._temp_src)
             if self.contract.dataset:
                 current_df.createOrReplaceTempView(self.contract.dataset)
 
@@ -516,35 +518,44 @@ class SparkAdapter(EngineAdapter):
             trans_phase = (trans.phase or "post").lower()
             if trans.sql and trans_phase != "pre":
                 logger.debug(f"Post-Transform [SQL]: {trans.sql}")
-                current_df.createOrReplaceTempView("source")
+                current_df.createOrReplaceTempView(self._temp_src)
                 if self.contract.dataset:
                     current_df.createOrReplaceTempView(self.contract.dataset)
-                current_df = current_df.sparkSession.sql(trans.sql)
+                import re
+
+                sql_str = re.sub(r"\bsource\b", self._temp_src, trans.sql, flags=re.IGNORECASE)
+                for link in self.contract.links:
+                    sql_str = re.sub(
+                        rf"\b{re.escape(link.name)}\b", f"{link.name}_{id(self)}", sql_str, flags=re.IGNORECASE
+                    )
+                current_df = current_df.sparkSession.sql(sql_str)
                 continue
             if trans.rollup and trans_phase != "pre":
-                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self.contract.dataset or "source")
+                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self.contract.dataset or self._temp_src)
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
-                current_df.createOrReplaceTempView("source")
+                current_df.createOrReplaceTempView(self._temp_src)
                 if self.contract.dataset:
                     current_df.createOrReplaceTempView(self.contract.dataset)
                 current_df = current_df.sparkSession.sql(rollup_sql)
                 continue
 
             if trans.pivot and trans_phase != "pre":
-                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or self._temp_src)
                 if pivot_sql:
                     logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
-                    current_df.createOrReplaceTempView("source")
+                    current_df.createOrReplaceTempView(self._temp_src)
                     if self.contract.dataset:
                         current_df.createOrReplaceTempView(self.contract.dataset)
                     current_df = current_df.sparkSession.sql(pivot_sql)
                 continue
 
             if trans.unpivot and trans_phase != "pre":
-                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self.contract.dataset or "source")
+                unpivot_sql = self._build_unpivot_sql(
+                    trans.unpivot, source_table=self.contract.dataset or self._temp_src
+                )
                 if unpivot_sql:
                     logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
-                    current_df.createOrReplaceTempView("source")
+                    current_df.createOrReplaceTempView(self._temp_src)
                     if self.contract.dataset:
                         current_df.createOrReplaceTempView(self.contract.dataset)
                     current_df = current_df.sparkSession.sql(unpivot_sql)
@@ -585,63 +596,60 @@ class SparkAdapter(EngineAdapter):
                     current_df = current_df.withColumn(trans.date_diff.field, F.expr(expr_str))
             elif trans.lookup:
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field}")
-                current_df.createOrReplaceTempView("src")
-                hint = ""
+                from pyspark.sql import functions as F
+
+                ref_name = f"{trans.lookup.reference}_{id(self)}"
+                ref_df = current_df.sparkSession.table(ref_name)
                 if self._should_broadcast(trans.lookup.reference):
-                    hint = "/*+ BROADCAST(ref) */ "
-                value_expr = f"ref.{trans.lookup.value}"
+                    ref_df = F.broadcast(ref_df)
+
+                # Alias DataFrames to avoid ambiguous columns
+                src_df = current_df.alias("src")
+                ref_df = ref_df.alias("ref")
+
+                joined = src_df.join(
+                    ref_df, F.col(f"src.{trans.lookup.on}") == F.col(f"ref.{trans.lookup.key}"), "left"
+                )
+
                 if trans.lookup.default_value is not None:
-                    value_expr = (
-                        f"COALESCE(ref.{trans.lookup.value}, {self._format_literal(trans.lookup.default_value)})"
-                    )
-                query = f"""
-                SELECT {hint}src.*, {value_expr} AS {trans.lookup.field}
-                FROM src
-                LEFT JOIN {trans.lookup.reference} ref ON src.{trans.lookup.on} = ref.{trans.lookup.key}
-                """
-                current_df = current_df.sparkSession.sql(query)
+                    value_col = F.coalesce(F.col(f"ref.{trans.lookup.value}"), F.lit(trans.lookup.default_value))
+                else:
+                    value_col = F.col(f"ref.{trans.lookup.value}")
+
+                current_df = joined.select("src.*", value_col.alias(trans.lookup.field))
             elif trans.join:
                 logger.debug(f"Post-Transform [Join]: {trans.join.reference}")
-                current_df.createOrReplaceTempView("source")
-                query = self._build_join_sql(trans.join, broadcast=self._should_broadcast(trans.join.reference))
-                current_df = current_df.sparkSession.sql(query)
+                from pyspark.sql import functions as F
+
+                ref_name = f"{trans.join.reference}_{id(self)}"
+                ref_df = current_df.sparkSession.table(ref_name)
+                if self._should_broadcast(trans.join.reference):
+                    ref_df = F.broadcast(ref_df)
+
+                src_df = current_df.alias("src")
+                ref_df = ref_df.alias("ref")
+
+                join_type = (trans.join.type or "left").lower()
+                if join_type == "full":
+                    join_type = "outer"
+
+                joined = src_df.join(ref_df, F.col(f"src.{trans.join.on}") == F.col(f"ref.{trans.join.key}"), join_type)
+
+                select_exprs = [F.col("src.*")]
+                for field in trans.join.fields:
+                    alias = f"{trans.join.prefix}{field}" if trans.join.prefix else field
+                    default = trans.join.defaults.get(field) if trans.join.defaults else None
+                    if default is not None:
+                        col_expr = F.coalesce(F.col(f"ref.{field}"), F.lit(default))
+                    else:
+                        col_expr = F.col(f"ref.{field}")
+                    select_exprs.append(col_expr.alias(alias))
+
+                current_df = joined.select(*select_exprs)
             elif trans.filter and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Filter]: {trans.filter.sql}")
                 current_df = current_df.filter(trans.filter.sql)
         return current_df
-
-    def _build_join_sql(self, join_cfg, broadcast: bool = False, source_table: str = "source") -> str:
-        """
-        Build SQL for a join transformation.
-
-        Args:
-            join_cfg: Join configuration.
-            broadcast: Whether to broadcast the reference table.
-            source_table: Source table/view name.
-
-        Returns:
-            SQL query string.
-        """
-        join_type = (join_cfg.type or "left").upper()
-        if join_type == "FULL":
-            join_type = "FULL OUTER"
-
-        select_fields = ["src.*"]
-        for field in join_cfg.fields:
-            alias = f"{join_cfg.prefix}{field}" if join_cfg.prefix else field
-            default = join_cfg.defaults.get(field) if join_cfg.defaults else None
-            if default is not None:
-                expr = f"COALESCE(ref.{field}, {self._format_literal(default)}) AS {alias}"
-            else:
-                expr = f"ref.{field} AS {alias}"
-            select_fields.append(expr)
-
-        hint = "/*+ BROADCAST(ref) */ " if broadcast else ""
-        return f"""
-        SELECT {hint}{", ".join(select_fields)}
-        FROM {source_table} src
-        {join_type} JOIN {join_cfg.reference} ref ON src.{join_cfg.on} = ref.{join_cfg.key}
-        """
 
     def _should_broadcast(self, reference: str) -> bool:
         """
@@ -680,7 +688,8 @@ class SparkAdapter(EngineAdapter):
                         select_cols = [c for c in link.columns if c in available]
                         if select_cols:
                             ref_df = ref_df.select(*select_cols)
-                    ref_df.createOrReplaceTempView(link.name)
+                    safe_link_name = f"{link.name}_{id(self)}"
+                    ref_df.createOrReplaceTempView(safe_link_name)
                     continue
 
                 if not link.path:
@@ -715,7 +724,8 @@ class SparkAdapter(EngineAdapter):
                         ref_df = ref_df.select(*select_cols)
                         logger.debug(f"Link '{link.name}' projected to {len(select_cols)} columns")
 
-                ref_df.createOrReplaceTempView(link.name)
+                safe_link_name = f"{link.name}_{id(self)}"
+                ref_df.createOrReplaceTempView(safe_link_name)
             except Exception as e:
                 logger.warning(f"Could not register link {link.name}: {e}")
 

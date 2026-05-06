@@ -124,6 +124,66 @@ class RegistryContract(BaseModel):
     contract_dict: Optional[Dict[str, Any]] = None
 
 
+def _resolve_env_or_secret(val: str) -> str:
+    """Resolve environment variables or Databricks secrets from strings."""
+    if not isinstance(val, str):
+        return val
+
+    # Environment variables: ${ENV_VAR}
+    if val.startswith("${") and val.endswith("}"):
+        env_var = val[2:-1]
+        return os.environ.get(env_var, "")
+
+    # Databricks secrets: {{secrets/scope/key}}
+    if val.startswith("{{secrets/") and val.endswith("}}"):
+        parts = val[10:-2].split("/")
+        if len(parts) == 2:
+            scope, key = parts
+            try:
+                import builtins
+
+                dbutils = getattr(builtins, "dbutils", None)
+                if not dbutils:
+                    try:
+                        from IPython import get_ipython
+
+                        ip = get_ipython()
+                        if ip:
+                            dbutils = ip.user_ns.get("dbutils")
+                    except Exception:
+                        pass
+                if dbutils:
+                    return dbutils.secrets.get(scope=scope, key=key)
+                else:
+                    # Fallback to Azure Key Vault directly when running locally (not in Databricks notebook)
+                    # For a Databricks KV-backed scope, the scope name is often the vault name.
+                    # Alternatively, set KV_<SCOPE_NAME> env var to point to the vault.
+                    try:
+                        from azure.identity import DefaultAzureCredential
+                        from azure.keyvault.secrets import SecretClient
+
+                        vault_name = os.environ.get(f"KV_{scope.upper()}", scope)
+                        if ".vault.azure.net" in vault_name:
+                            vault_url = f"https://{vault_name}"
+                        else:
+                            vault_url = f"https://{vault_name}.vault.azure.net"
+
+                        credential = DefaultAzureCredential()
+                        client = SecretClient(vault_url=vault_url, credential=credential)
+                        secret = client.get_secret(key)
+                        if secret and secret.value:
+                            return secret.value
+                    except ImportError:
+                        pass
+                    except Exception as fallback_exc:
+                        logger.debug(f"Direct Azure Key Vault fallback failed for '{scope}/{key}': {fallback_exc}")
+            except Exception as exc:
+                logger.debug(f"Failed to fetch secret '{scope}/{key}': {exc}")
+        return ""
+
+    return val
+
+
 class CloudReporting(BaseModel):
     enabled: bool = False
     report_url: Optional[str] = None
@@ -133,10 +193,7 @@ class CloudReporting(BaseModel):
     def resolve_env_vars(cls, v: Optional[str]) -> Optional[str]:
         if not v:
             return v
-        if v.startswith("${") and v.endswith("}"):
-            env_var = v[2:-1]
-            return os.environ.get(env_var, "")
-        return v
+        return _resolve_env_or_secret(v)
 
 
 class EnvironmentConfig(BaseModel):
@@ -238,11 +295,17 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
     # -- endpoint ---------------------------------------------------------
     endpoint = cfg.get("endpoint")
     if not endpoint or not isinstance(endpoint, str):
-        logger.warning(
-            f"⚠ Observatory ({source}): 'enabled: true' but no valid 'endpoint' URL. Telemetry will not be pushed."
+        logger.info(
+            f"ℹ Observatory ({source}): 'enabled' is true but no 'endpoint' URL provided (or env var missing). "
+            f"Telemetry will be disabled for this run."
         )
+        cfg["enabled"] = False
     elif not endpoint.startswith(("http://", "https://")):
-        logger.warning(f"⚠ Observatory ({source}): endpoint '{endpoint}' does not look like a valid HTTP(S) URL.")
+        logger.warning(
+            f"⚠ Observatory ({source}): endpoint '{endpoint}' does not look like a valid HTTP(S) URL. "
+            f"Telemetry will be disabled."
+        )
+        cfg["enabled"] = False
 
     # -- api_key ----------------------------------------------------------
     api_key = cfg.get("api_key")
@@ -288,10 +351,10 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
         cfg["include_quarantine_sample"] = bool(iqs)
 
     logger.info(
-        f"✅ Observatory ({source}): config validated — "
-        f"endpoint={cfg.get('endpoint', 'MISSING')}, "
-        f"emit_on={cfg.get('emit_on', ['success', 'partial', 'failed'])}, "
-        f"environments={cfg.get('environments', [])}"
+        f"✅ Observatory ({source}): config validated\n"
+        f"    ↳ endpoint     : {cfg.get('endpoint', 'MISSING')}\n"
+        f"    ↳ emit_on      : {cfg.get('emit_on', ['success', 'partial', 'failed'])}\n"
+        f"    ↳ environments : {cfg.get('environments', [])}"
     )
     return cfg
 

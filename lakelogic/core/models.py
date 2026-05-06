@@ -1017,6 +1017,7 @@ class Quarantine(BaseModel):
 
     target: Optional[str] = None
     table: Optional[str] = None  # shared quarantine table (e.g. "{domain_catalog}._quarantine")
+    location: Optional[str] = None  # physical path for Unity Catalog external tables
     enabled: bool = True
     include_error_reason: bool = True
     strict_notifications: bool = True

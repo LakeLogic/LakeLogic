@@ -164,6 +164,10 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
     elif table_format == "iceberg":
         writer = writer.option("merge-schema", "true")
 
+    q_location = getattr(contract.quarantine, "location", None) if getattr(contract, "quarantine", None) else None
+    if q_location:
+        writer = writer.option("path", q_location)
+
     writer.saveAsTable(table_name)
 
     logger.info(f"Wrote {rows_written} quarantined rows to {table_name} (format={table_format}, mode={mode})")
@@ -467,7 +471,6 @@ def _write_quarantine_table_iceberg(df: Any, contract, table_name: str, metadata
 
         arrow_table = pa.Table.from_pandas(df.to_pandas())
     else:
-        from lakelogic.core.materialization import _to_pandas
         import pyarrow as pa
 
         arrow_table = pa.Table.from_pandas(_to_pandas(df))
@@ -1027,8 +1030,6 @@ def materialize_quarantine(
         elif hasattr(df, "to_pandas"):
             arrow_data = pa.Table.from_pandas(df.to_pandas())
         else:
-            from lakelogic.core.materialization import _to_pandas
-
             arrow_data = pa.Table.from_pandas(_to_pandas(df))
 
         rows_written = arrow_data.num_rows if hasattr(arrow_data, "num_rows") else 0

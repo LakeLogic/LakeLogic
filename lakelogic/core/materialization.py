@@ -3221,7 +3221,7 @@ def _run_secondary_targets(
                     dataset_name=dataset_name,
                 )
 
-                load_info = pipeline.run(_secondary_sink())
+                pipeline.run(_secondary_sink())
                 logger.info(
                     f"Secondary target [{i}]: {sec_table} \u2192 {destination} ({write_disp}, {rows_written} rows)"
                 )
