@@ -45,7 +45,7 @@ class LineageBreakGate(ContractGate):
             )
 
         contract_root = context.get("contract_root") if context else None
-        registry = context.get("registry") if context else {}
+        registry = (context.get("registry") or {}) if context else {}
 
         for upstream in contract.lineage.upstream:
             upstream_count += 1

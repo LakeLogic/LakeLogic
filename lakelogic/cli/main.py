@@ -289,6 +289,15 @@ def validate(
     import time
     from lakelogic.core.models import DataContract
 
+    # Skip non-contract config files (data mesh hierarchy: *domain.yaml / *system.yaml)
+    SKIP_SUFFIXES = ("domain.yaml", "domain.yml", "system.yaml", "system.yml")
+    if contract.name.lower().endswith(SKIP_SUFFIXES):
+        typer.secho(
+            f"ℹ️  Skipping {contract.name} — data mesh config file, not a data contract.",
+            fg=typer.colors.CYAN,
+        )
+        raise typer.Exit(0)
+
     start_time = time.time()
     typer.echo("")
     typer.echo(typer.style(f"📋 Validating contract: {contract}", bold=True))
