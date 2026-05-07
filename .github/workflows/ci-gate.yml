@@ -62,7 +62,7 @@ jobs:
           uv pip install --system pytest pytest-cov
 
       - name: Run Tests
-        run: pytest tests/ -x -q --tb=short --cov=lakelogic --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=25
+        run: pytest tests/ -q --tb=short --cov=lakelogic --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=25
 
       - name: Upload coverage to Codecov
         if: always()

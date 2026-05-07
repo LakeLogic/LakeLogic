@@ -796,3 +796,59 @@ def test_generator_string_value_covers_domain_and_format_fallbacks(monkeypatch):
     assert "@" in email
     assert phone.startswith("+1")
     assert url.startswith("https://www.")
+
+
+def test_generator_inline_yaml_string_input(monkeypatch):
+    from lakelogic.core import generator as gen
+
+    yaml_str = """
+version: 1.0.0
+dataset: sample
+model:
+  fields:
+    - name: id
+      type: integer
+"""
+    monkeypatch.setattr(gen, "_try_faker", lambda: None)
+    monkeypatch.setattr(gen.DataGenerator, "_extract_fields", lambda self: self._contract_raw["model"]["fields"])
+    monkeypatch.setattr(gen.DataGenerator, "_extract_unique_integer_fields", lambda self: {"id"})
+    monkeypatch.setattr(gen.DataGenerator, "_detect_triplets", lambda self: [])
+    monkeypatch.setattr(gen.DataGenerator, "_detect_geo_alignment", lambda self: [])
+
+    instance = gen.DataGenerator(yaml_str, use_faker=False)
+    assert instance.contract_path.name == "_inline_yaml"
+    assert instance._fields[0]["name"] == "id"
+
+
+def test_generator_spark_output_format(monkeypatch):
+    from lakelogic.core import generator as gen
+
+    fields = [{"name": "id", "type": "integer"}]
+    instance = gen.DataGenerator.__new__(gen.DataGenerator)
+    instance._fields = fields
+
+    import types
+
+    fake_spark = types.ModuleType("pyspark.sql")
+
+    class FakeSparkSession:
+        @staticmethod
+        def getActiveSession():
+            return None
+
+        class builder:
+            @staticmethod
+            def getOrCreate():
+                return FakeSparkSession()
+
+        def createDataFrame(self, df):
+            return "spark_dataframe_result"
+
+    fake_spark.SparkSession = FakeSparkSession
+    monkeypatch.setitem(sys.modules, "pyspark.sql", fake_spark)
+
+    res = instance._to_frame([{"id": 1}], "spark")
+    assert res == "spark_dataframe_result"
+
+    with pytest.raises(ValueError, match="output_format must be 'polars', 'pandas', 'duckdb', or 'spark'"):
+        instance._to_frame([{"id": 1}], "invalid_fmt")

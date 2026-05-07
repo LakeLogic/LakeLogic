@@ -1,22 +1,12 @@
-import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import pytest
 
-# Mock pyspark before it's imported by lakelogic
-
+pytest.importorskip("pyspark")
 
 class MockSparkDataFrame(MagicMock):
     def count(self):
         return 0
 
-
-mock_pyspark = MagicMock()
-sys.modules["pyspark"] = mock_pyspark
-sys.modules["pyspark.sql"] = mock_pyspark.sql
-sys.modules["pyspark.sql"].DataFrame = MockSparkDataFrame
-
-from unittest.mock import patch
-
-import pytest
 
 from lakelogic import DataProcessor
 from lakelogic.core.models import DataContract

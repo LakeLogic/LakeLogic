@@ -6,11 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.26.0] — 2026-05-07
+
+### Fixed
+
+- **engines/duckdb**: Add CATEGORY_COLUMN to errors array, and properly type empty _lakelogic_errors as VARCHAR[] to match Polars/Spark output schemas
+- **tests**: Remove global sys.modules patch for PySpark and explicitly set PYSPARK_PYTHON
 ## [1.25.0] — 2026-05-07
 
 ### Added
 
 - **gdpr**: Fallback to contract compliance property if compliance_event missing
+- Add GDPR erasure and data backfill notebooks, test helpers, and coverage tracking utility
 - Add comprehensive suite of interactive Colab tutorial notebooks and remove obsolete compliance test file
 
 ### Fixed
@@ -296,7 +303,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.25.0]: https://github.com/lakelogic/LakeLogic/compare/v1.24.0...v1.25.0
+[1.26.0]: https://github.com/lakelogic/LakeLogic/compare/v1.25.0...v1.26.0
+[1.25.0]: https://github.com/lakelogic/LakeLogic/compare/v1.23.0...v1.25.0
 [1.23.0]: https://github.com/lakelogic/LakeLogic/compare/v1.22.3...v1.23.0
 [1.22.3]: https://github.com/lakelogic/LakeLogic/compare/v1.22.2...v1.22.3
 [1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.2
