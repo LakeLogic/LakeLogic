@@ -109,6 +109,7 @@ def print_report(processor: DataProcessor) -> dict:
 # ---------------------------------------------------------------------------
 def assert_reconciliation(source_df, good_df, bad_df):
     """Print and assert that source == good + bad."""
+
     def _count(df):
         if hasattr(df, "shape"):
             return df.shape[0]
@@ -118,7 +119,7 @@ def assert_reconciliation(source_df, good_df, bad_df):
             except Exception:
                 pass
         return len(df)
-        
+
     s = _count(source_df)
     g = _count(good_df)
     b = _count(bad_df)
@@ -135,6 +136,7 @@ def to_polars(df):
     if df is None:
         return None
     import polars as pl
+
     if hasattr(df, "toPandas"):
         # PySpark to Pandas to Polars
         return pl.DataFrame(df.toPandas())
@@ -144,6 +146,7 @@ def to_polars(df):
     if type(df).__name__ == "DataFrame" and "pandas" in str(type(df)):
         return pl.DataFrame(df)
     return df
+
 
 # ---------------------------------------------------------------------------
 # 8. Announce

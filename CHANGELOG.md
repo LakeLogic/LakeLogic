@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.25.0] — 2026-05-07
+
+### Added
+
+- **gdpr**: Fallback to contract compliance property if compliance_event missing
+- Add comprehensive suite of interactive Colab tutorial notebooks and remove obsolete compliance test file
+
+### Fixed
+
+- **engines**: Cross-engine compatibility fixes for test matrix
+
+### Testing
+
+- Fix data generator test formatting for new output formats
 ## [1.23.0] — 2026-05-06
 
 ### Added
@@ -17,11 +31,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Resolve incorrect rendering of driver profile contract table name
 ## [1.22.2] — 2026-05-05
-
-### Fixed
-
-- Resolve E2E tests and dependency regression bugs
-## [1.22.0] — 2026-05-01
 
 ### Added
 
@@ -36,6 +45,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Resolve E2E tests and dependency regression bugs
 - Resolve Linux-specific psutil fallback test failure in CI
 - Resolve test failures in CI due to missing optional dependencies and pandas 3.0 incompatibility
 
@@ -286,10 +296,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.25.0]: https://github.com/lakelogic/LakeLogic/compare/v1.24.0...v1.25.0
 [1.23.0]: https://github.com/lakelogic/LakeLogic/compare/v1.22.3...v1.23.0
 [1.22.3]: https://github.com/lakelogic/LakeLogic/compare/v1.22.2...v1.22.3
-[1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.22.0...v1.22.2
-[1.22.0]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.0
+[1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.2
 [1.21.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.21.0
 [1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.19.0
 [1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.14.0
