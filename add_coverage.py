@@ -1,5 +1,3 @@
-import os
-
 # 1. Add coverage for generator inline YAML
 with open("tests/test_generator_helpers.py", "a", encoding="utf-8") as f:
     f.write("""

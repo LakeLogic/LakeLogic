@@ -1,6 +1,6 @@
-
 from unittest.mock import MagicMock, patch
 import pytest
+
 
 class MockSparkDataFrame(MagicMock):
     def count(self):
