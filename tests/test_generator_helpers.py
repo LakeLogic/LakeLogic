@@ -583,8 +583,8 @@ def test_generator_save_partitioned_and_to_frame(monkeypatch, tmp_path):
     assert list(pandas_frame.columns)[:3] == ["id", "flag", "payload"]
     assert pandas_frame.iloc[0]["payload"] == "[1, 2]"
 
-    with pytest.raises(ValueError, match="output_format must be 'polars' or 'pandas'"):
-        instance._to_frame([{"id": 1}], "duckdb")
+    with pytest.raises(ValueError, match="output_format must be 'polars', 'pandas', 'duckdb', or 'spark'"):
+        instance._to_frame([{"id": 1}], "unknown")
 
 
 def test_generator_generate_stream_writes_micro_batches_and_resumes(monkeypatch, tmp_path):
