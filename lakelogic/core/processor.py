@@ -4392,7 +4392,7 @@ class DataProcessor:
                 extension = "sqlite"
                 scanner = "sqlite_scan"
 
-            duckdb.sql(f"INSTALL {extension} IF NOT EXISTS; LOAD {extension};")
+            duckdb.sql(f"INSTALL {extension}; LOAD {extension};")
             try:
                 # DuckDB sqlite_scan expects a raw path, not a URI
                 duckdb_uri = uri

@@ -62,6 +62,13 @@ class SparkAdapter(EngineAdapter):
 
             _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
             df = _spark.createDataFrame(df)
+            
+        # Auto-convert Polars DataFrames to Spark DataFrames via Pandas
+        elif type(df).__name__ == "DataFrame" and "polars" in type(df).__module__:
+            from pyspark.sql import SparkSession
+
+            _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+            df = _spark.createDataFrame(df.to_pandas())
 
         elif not isinstance(df, _df_types):
             raise TypeError(f"Expected Spark DataFrame, got {type(df)}")
@@ -819,13 +826,15 @@ class SparkAdapter(EngineAdapter):
                     err_col = f"__type_err_{field.name}"
                     self._type_err_cols.append(err_col)
                     msg = f"Type Mismatch: {field.name} cannot be cast to {field.type}"
-                    cast_expr = col_expr.cast(spark_type)
+                    # Use try_cast to return NULL on failure instead of crashing under ANSI strict mode
+                    cast_expr = F.expr(f"try_cast(`{field.name}` as {spark_type})")
                     select_exprs.append(
                         F.when(col_expr.isNotNull() & cast_expr.isNull(), F.lit(msg))
                         .otherwise(F.lit(None))
                         .alias(err_col)
                     )
-                col_expr = col_expr.cast(spark_type)
+                # Apply the safe cast to the final column as well
+                col_expr = F.expr(f"try_cast(`{field.name}` as {spark_type})") if field.name in existing else col_expr.cast(spark_type)
 
             select_exprs.append(col_expr.alias(field.name))
 
