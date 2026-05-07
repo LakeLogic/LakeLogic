@@ -645,28 +645,38 @@ class DuckDBAdapter(EngineAdapter):
 
             # Build error tracking
             error_parts = []
+            category_parts = []
             for err in schema_errors:
                 error_parts.append(f"'{err.replace(chr(39), chr(39) * 2)}'")
+                category_parts.append("'schema'")
 
             for i, rule in enumerate(row_rules):
                 err_msg = f"Rule failed: {rule.name} ({rule.sql})".replace("'", "''")
                 error_parts.append(f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{err_msg}' ELSE NULL END")
+                cat_msg = getattr(rule, "category", "data_quality").replace("'", "''")
+                category_parts.append(f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{cat_msg}' ELSE NULL END")
 
             for err_col in getattr(self, "_type_err_cols", []):
                 error_parts.append(f'"{err_col}"')
+                category_parts.append(f"CASE WHEN \"{err_col}\" IS NOT NULL THEN 'schema' ELSE NULL END")
 
             if error_parts:
                 error_array = f"list_value({', '.join(error_parts)})"
+                category_array = f"list_value({', '.join(category_parts)})"
                 # Filter out NULLs from the array
                 self.con.sql(
                     f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
-                    f"SELECT *, list_filter({error_array}, x -> x IS NOT NULL) AS {self.ERROR_COLUMN} "
+                    f"SELECT *, "
+                    f"list_filter({error_array}, x -> x IS NOT NULL) AS {self.ERROR_COLUMN}, "
+                    f"list_filter({category_array}, x -> x IS NOT NULL) AS {self.CATEGORY_COLUMN} "
                     f"FROM _evaluated"
                 )
             else:
                 self.con.sql(
                     f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
-                    f"SELECT *, list_value() AS {self.ERROR_COLUMN} "
+                    f"SELECT *, "
+                    f"CAST(list_value() AS VARCHAR[]) AS {self.ERROR_COLUMN}, "
+                    f"CAST(list_value() AS VARCHAR[]) AS {self.CATEGORY_COLUMN} "
                     f"FROM _evaluated"
                 )
 
@@ -681,13 +691,15 @@ class DuckDBAdapter(EngineAdapter):
         else:
             self.con.sql(
                 f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
-                f"SELECT *, list_value() AS {self.ERROR_COLUMN} "
+                f"SELECT *, "
+                f"CAST(list_value() AS VARCHAR[]) AS {self.ERROR_COLUMN}, "
+                f"CAST(list_value() AS VARCHAR[]) AS {self.CATEGORY_COLUMN} "
                 f"FROM {current_table}"
             )
 
         # 5. Split good/bad
         internal_cols = [f"_rule_{i}" for i in range(len(row_rules))] + getattr(self, "_type_err_cols", [])
-        drop_list = internal_cols + [self.ERROR_COLUMN]
+        drop_list = internal_cols + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
         drop_clause = ", ".join(f'"{c}"' for c in drop_list) if drop_list else ""
 
         # Good rows: no errors
@@ -726,7 +738,7 @@ class DuckDBAdapter(EngineAdapter):
         good_df = self._to_output_df(self.con.sql("SELECT * FROM _good"))
 
         if not include_errors:
-            bad_exclude_err = f' EXCLUDE ("{self.ERROR_COLUMN}")'
+            bad_exclude_err = f' EXCLUDE ("{self.ERROR_COLUMN}", "{self.CATEGORY_COLUMN}")'
             bad_df = self._to_output_df(self.con.sql(f"SELECT *{bad_exclude_err} FROM _bad"))
         else:
             bad_df = self._to_output_df(self.con.sql("SELECT * FROM _bad"))
