@@ -1,7 +1,14 @@
+import os
+import sys
+
+# Ensure PySpark uses the correct Python interpreter (fixes "Python was not found" store popup on Windows)
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 def test_spark_adapter_polars_cast():
     import pytest
     pyspark = pytest.importorskip("pyspark")
+
     import polars as pl
     from lakelogic.engines.spark import SparkAdapter
     from lakelogic.core.models import DataContract
