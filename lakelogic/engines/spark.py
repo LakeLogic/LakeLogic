@@ -62,7 +62,7 @@ class SparkAdapter(EngineAdapter):
 
             _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
             df = _spark.createDataFrame(df)
-            
+
         # Auto-convert Polars DataFrames to Spark DataFrames via Pandas
         elif type(df).__name__ == "DataFrame" and "polars" in type(df).__module__:
             from pyspark.sql import SparkSession
@@ -834,7 +834,11 @@ class SparkAdapter(EngineAdapter):
                         .alias(err_col)
                     )
                 # Apply the safe cast to the final column as well
-                col_expr = F.expr(f"try_cast(`{field.name}` as {spark_type})") if field.name in existing else col_expr.cast(spark_type)
+                col_expr = (
+                    F.expr(f"try_cast(`{field.name}` as {spark_type})")
+                    if field.name in existing
+                    else col_expr.cast(spark_type)
+                )
 
             select_exprs.append(col_expr.alias(field.name))
 
