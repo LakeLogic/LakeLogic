@@ -312,7 +312,7 @@ class DataProcessor:
         Loads the contract from various formats.
 
         Args:
-            contract: YAML path, dict, or DataContract instance.
+            contract: YAML path, inline YAML string, dict, or DataContract instance.
 
         Returns:
             Loaded DataContract.
@@ -326,10 +326,6 @@ class DataProcessor:
             loaded = self._apply_stage_overrides(loaded)
             loaded = self._apply_fact_governance(loaded)
             return self._apply_cdc_defaults(loaded)
-
-        path = Path(contract)
-        if not path.exists():
-            raise FileNotFoundError(f"Contract file not found: {path}")
 
         def _load_yaml_no_on_bool(handle):
             """
@@ -352,15 +348,27 @@ class DataProcessor:
 
             return yaml.load(handle, Loader=Loader)
 
+        # Handle inline YAML strings
+        if isinstance(contract, str) and ("\n" in contract or "version:" in contract):
+            data = _load_yaml_no_on_bool(contract)
+            contract_obj = DataContract(**data)
+            loaded = self._apply_stage_overrides(contract_obj)
+            loaded = self._apply_fact_governance(loaded)
+            return self._apply_cdc_defaults(loaded)
+
+        path = Path(contract)
+        if not path.exists():
+            raise FileNotFoundError(f"Contract file not found: {path}")
+
         with open(path, "r") as f:
             data = _load_yaml_no_on_bool(f)
-            contract = DataContract(**data)
+            contract_obj = DataContract(**data)
             try:
-                contract._base_path = path.parent
-                contract._contract_path = path
+                contract_obj._base_path = path.parent
+                contract_obj._contract_path = path
             except Exception:
                 pass
-            loaded = self._apply_stage_overrides(contract)
+            loaded = self._apply_stage_overrides(contract_obj)
             loaded = self._apply_fact_governance(loaded)
             return self._apply_cdc_defaults(loaded)
 
@@ -4116,6 +4124,7 @@ class DataProcessor:
         *,
         erasure_strategy: str = "nullify",
         hash_salt: str = "",
+        compliance_event: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """
         GDPR Right-to-be-Forgotten: erase PII for specific data subjects.
@@ -4129,20 +4138,27 @@ class DataProcessor:
             subject_ids: List of subject identifiers to erase.
             erasure_strategy: "nullify" (default), "hash", or "redact".
             hash_salt: Salt for hashing.
+            compliance_event: Optional compliance event metadata.
 
         Returns:
             DataFrame with PII erased for specified subjects.
         """
         from lakelogic.core.gdpr import forget_subjects
 
-        return forget_subjects(
+        report_out = []
+        result = forget_subjects(
             df,
             self.contract,
             subject_column,
             subject_ids,
             erasure_strategy=erasure_strategy,
             hash_salt=hash_salt,
+            compliance_event=compliance_event,
+            audit_report_out=report_out,
         )
+        if report_out:
+            self.last_report = report_out[0]
+        return result
 
     def mask_pii(
         self,
@@ -4376,7 +4392,7 @@ class DataProcessor:
                 extension = "sqlite"
                 scanner = "sqlite_scan"
 
-            duckdb.sql(f"INSTALL {extension} IF NOT EXISTS; LOAD {extension};")
+            duckdb.sql(f"INSTALL {extension}; LOAD {extension};")
             try:
                 # DuckDB sqlite_scan expects a raw path, not a URI
                 duckdb_uri = uri

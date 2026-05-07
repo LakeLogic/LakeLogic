@@ -109,15 +109,46 @@ def print_report(processor: DataProcessor) -> dict:
 # ---------------------------------------------------------------------------
 def assert_reconciliation(source_df, good_df, bad_df):
     """Print and assert that source == good + bad."""
-    s = len(source_df)
-    g = len(good_df)
-    b = len(bad_df)
+
+    def _count(df):
+        if hasattr(df, "shape"):
+            return df.shape[0]
+        if hasattr(df, "count") and callable(df.count):
+            try:
+                return df.count()
+            except Exception:
+                pass
+        return len(df)
+
+    s = _count(source_df)
+    g = _count(good_df)
+    b = _count(bad_df)
     print(f"source={s}  good={g}  bad={b}")
     print(f"{s} == {g} + {b} -> {s == g + b}")
     assert s == g + b, f"Reconciliation failed: {s} != {g} + {b}"
 
 
 # ---------------------------------------------------------------------------
-# 7. Announce
+# 7. Helper: Convert engine dataframes to Polars for unified notebook analysis
+# ---------------------------------------------------------------------------
+def to_polars(df):
+    """Convert Spark, Pandas, or DuckDB DataFrames into Polars for Colab analysis."""
+    if df is None:
+        return None
+    import polars as pl
+
+    if hasattr(df, "toPandas"):
+        # PySpark to Pandas to Polars
+        return pl.DataFrame(df.toPandas())
+    if hasattr(df, "to_pandas") and type(df).__name__ != "DataFrame":
+        # It might be DuckDB relation or something else
+        return pl.DataFrame(df.to_pandas())
+    if type(df).__name__ == "DataFrame" and "pandas" in str(type(df)):
+        return pl.DataFrame(df)
+    return df
+
+
+# ---------------------------------------------------------------------------
+# 8. Announce
 # ---------------------------------------------------------------------------
 print(f"lakelogic v{VERSION} | {'Colab' if IN_COLAB else 'Local'} | {WORKDIR}")

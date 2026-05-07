@@ -2885,8 +2885,12 @@ class DataGenerator:
         if self._faker and seed is not None:
             self._faker.seed_instance(seed)
 
+        # ── Inline YAML String ───────────────────────────────────────────────
+        if isinstance(contract_path, str) and ("\n" in contract_path or "version:" in contract_path):
+            self.contract_path = Path("_inline_yaml")
+            self._contract_raw = yaml.safe_load(contract_path) or {}
         # ── Schema-only input (DDL string, tuples, dict, StructType) ───────
-        if self._is_schema_input(contract_path):
+        elif self._is_schema_input(contract_path):
             self.contract_path = Path("_from_schema")
             self._contract_raw = self._contract_from_schema(contract_path)
         else:
@@ -3269,8 +3273,10 @@ class DataGenerator:
             Fraction of rows (0.0–1.0) that intentionally break quality rules.
             Useful for verifying quarantine logic.  e.g. ``0.1`` = 10% bad rows.
         output_format : str
-            ``"polars"``   → returns a ``polars.DataFrame``
+            ``"polars"``   → returns a ``polars.DataFrame`` (default)
             ``"pandas"``   → returns a ``pandas.DataFrame``
+            ``"spark"``    → returns a PySpark ``DataFrame``
+            ``"duckdb"``   → alias for "polars" (DuckDB queries Polars natively)
         reference_data : dict, optional
             FK-aware generation pool.  Maps FK column names to a list (or
             polars/pandas Series) of valid PK values drawn from the reference
@@ -6620,7 +6626,7 @@ class DataGenerator:
 
         clean_records = [{k: _normalise(v) for k, v in row.items()} for row in records]
 
-        if fmt == "polars":
+        if fmt in ("polars", "duckdb"):
             import polars as pl
 
             try:
@@ -6689,5 +6695,18 @@ class DataGenerator:
             final_cols = valid_cols + extra_cols
 
             return df[final_cols]
+        elif fmt == "spark":
+            from pyspark.sql import SparkSession
+            import pandas as pd
+
+            df = pd.DataFrame(clean_records)
+            ordered_cols = [f.get("name") for f in self._fields if f.get("name")]
+            valid_cols = [c for c in ordered_cols if c in df.columns]
+            extra_cols = [c for c in df.columns if c not in valid_cols]
+            final_cols = valid_cols + extra_cols
+            df = df[final_cols]
+
+            _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+            return _spark.createDataFrame(df)
         else:
-            raise ValueError(f"output_format must be 'polars' or 'pandas', got: {fmt!r}")
+            raise ValueError(f"output_format must be 'polars', 'pandas', 'duckdb', or 'spark', got: {fmt!r}")

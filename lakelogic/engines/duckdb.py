@@ -711,7 +711,12 @@ class DuckDBAdapter(EngineAdapter):
         )
 
         # 6. Dataset rules on good data
-        self._run_dataset_rules("_good")
+        dataset_name = self.contract.dataset or "source"
+        self.con.sql(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM _good")
+        if dataset_name != "source":
+            self.con.sql("CREATE OR REPLACE VIEW source AS SELECT * FROM _good")
+
+        self._run_dataset_rules(dataset_name)
 
         # 7. Collect results
         include_errors = True

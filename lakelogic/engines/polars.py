@@ -742,6 +742,8 @@ class PolarsAdapter(EngineAdapter):
 
         tbl_name = self.contract.dataset or "source"
         ctx.register(tbl_name, lf)
+        if tbl_name != "source":
+            ctx.register("source", lf)
 
         for rule in rules:
             try:
