@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 import pytest
 
+pytest.importorskip("pyspark")
 
 class MockSparkDataFrame(MagicMock):
     def count(self):
