@@ -88,6 +88,7 @@ def _forget_polars(
     hash_salt: str,
     partition_filter: Optional[Dict[str, str]] = None,
     delete_reason: str = DELETE_REASON_GDPR_ART17,
+    strategy_per_field: Optional[Dict[str, str]] = None,
 ):
     """Erase/mask PII for specific subjects in a Polars DataFrame."""
     import polars as pl
@@ -115,15 +116,18 @@ def _forget_polars(
         else:
             logger.warning(f"Partition column '{pcol}' not found in dataframe; ignoring partition filter.")
 
+    strategy_map = strategy_per_field or {}
     for col in present_pii:
-        if col == subject_column and erasure_strategy == "nullify":
+        col_strategy = strategy_map.get(col, erasure_strategy)
+
+        if col == subject_column and col_strategy == "nullify":
             # Don't nullify the subject column itself in nullify mode
             # (would lose the key needed for audit)
             continue
 
-        if erasure_strategy == "nullify":
+        if col_strategy == "nullify":
             df = df.with_columns(pl.when(mask).then(pl.lit(None)).otherwise(pl.col(col)).alias(col))
-        elif erasure_strategy == "hash":
+        elif col_strategy == "hash":
             # Hash values for matching subjects
             df = df.with_columns(
                 pl.when(mask)
@@ -138,7 +142,7 @@ def _forget_polars(
                 .otherwise(pl.col(col))
                 .alias(col)
             )
-        elif erasure_strategy == "redact":
+        elif col_strategy == "redact":
             df = df.with_columns(pl.when(mask).then(pl.lit("***REDACTED***")).otherwise(pl.col(col)).alias(col))
 
     affected_count = int(mask.sum())
@@ -174,6 +178,7 @@ def _forget_pandas(
     hash_salt: str,
     partition_filter: Optional[Dict[str, str]] = None,
     delete_reason: str = DELETE_REASON_GDPR_ART17,
+    strategy_per_field: Optional[Dict[str, str]] = None,
 ):
     """Erase/mask PII for specific subjects in a Pandas DataFrame."""
 
@@ -388,6 +393,8 @@ def forget_subjects(
     audit: bool = True,
     partition_filter: Optional[Dict[str, str]] = None,
     delete_reason: str = DELETE_REASON_GDPR_ART17,
+    compliance_event: Optional[Dict[str, Any]] = None,
+    audit_report_out: Optional[List[Dict[str, Any]]] = None,
 ) -> Any:
     """
     GDPR Right-to-be-Forgotten: erase PII for specific data subjects.
@@ -419,6 +426,14 @@ def forget_subjects(
     Raises:
         ValueError: If subject_column not in dataframe or no PII fields defined.
     """
+    if not compliance_event and getattr(contract, "compliance", None):
+        compliance_event = contract.compliance
+
+    strategy_per_field = None
+    if compliance_event:
+        erasure_strategy = compliance_event.get("strategy", erasure_strategy)
+        strategy_per_field = compliance_event.get("strategy_per_field")
+
     if erasure_strategy not in VALID_ERASURE_STRATEGIES:
         raise ValueError(f"Invalid erasure_strategy: {erasure_strategy}. Must be one of {VALID_ERASURE_STRATEGIES}.")
 
@@ -465,7 +480,10 @@ def forget_subjects(
                 subject_ids,
                 erasure_strategy,
                 partition_filter=partition_filter,
+                compliance_event=compliance_event,
             )
+            if strategy_per_field:
+                erasure_report["strategy_per_field"] = strategy_per_field
 
             run_id = f"erasure_{uuid.uuid4().hex[:8]}"
             _audit_report = {
@@ -481,6 +499,7 @@ def forget_subjects(
                 "domain": metadata.get("domain", ""),
                 "system": metadata.get("system", ""),
                 "stage": "gdpr_erasure",
+                "compliance_event": compliance_event,
                 "status": "ok",
                 "counts": {
                     "total": len(subject_ids),
@@ -490,6 +509,8 @@ def forget_subjects(
                 },
                 "erasure_report": erasure_report,
             }
+            if audit_report_out is not None:
+                audit_report_out.append(_audit_report)
         except Exception as e:
             logger.warning(f"Failed to build GDPR erasure audit report: {e}")
 
@@ -510,6 +531,7 @@ def forget_subjects(
                     hash_salt,
                     partition_filter,
                     delete_reason,
+                    strategy_per_field=strategy_per_field,
                 )
         except ImportError:
             pass
@@ -528,6 +550,7 @@ def forget_subjects(
                         hash_salt,
                         partition_filter,
                         delete_reason,
+                        strategy_per_field=strategy_per_field,
                     )
             except ImportError:
                 pass
@@ -683,6 +706,7 @@ def generate_erasure_report(
     erasure_strategy: str = "nullify",
     affected_rows: Optional[int] = None,
     partition_filter: Optional[Dict[str, str]] = None,
+    compliance_event: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Generate a GDPR-compliant audit report for an erasure operation.
@@ -715,6 +739,9 @@ def generate_erasure_report(
             "(Right to Erasure). This report should be retained for audit purposes."
         ),
     }
+
+    if compliance_event:
+        report["compliance_event"] = compliance_event
 
     if partition_filter:
         report["partition_filter"] = partition_filter
