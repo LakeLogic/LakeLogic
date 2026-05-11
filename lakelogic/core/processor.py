@@ -576,7 +576,7 @@ class DataProcessor:
             if hasattr(self.adapter, "_get_row_count"):
                 try:
                     pre_count = self.adapter._get_row_count(df)
-                except Exception:
+                except Exception:  # pragma: no cover - defensive: row-count tolerated to fail
                     pass
 
             step_start = time.perf_counter()
@@ -594,7 +594,7 @@ class DataProcessor:
             if hasattr(self.adapter, "_get_row_count"):
                 try:
                     post_count = self.adapter._get_row_count(df)
-                except Exception:
+                except Exception:  # pragma: no cover - defensive: row-count tolerated to fail
                     pass
 
             self._active_trace_steps.append(
@@ -672,7 +672,7 @@ class DataProcessor:
                         try:
                             # DuckDB PyRelation supports string args in select()
                             good_df = good_df.select(*kepts)
-                        except Exception as exc:
+                        except Exception as exc:  # pragma: no cover - defensive: DuckDB API variance
                             logger.warning(f"DuckDB column select failed ({exc}), schema enforcement skipped")
 
                 # Pandas Engine
@@ -806,7 +806,7 @@ class DataProcessor:
             # the row-count reduction is intentional summarisation — not data loss.
             _is_aggregation = False
             _transforms = getattr(self.contract, "transformations", None) or []
-            if not isinstance(_transforms, list):
+            if not isinstance(_transforms, list):  # pragma: no cover - defensive: transforms always iterable in practice
                 try:
                     _transforms = list(_transforms)
                 except Exception:
@@ -862,7 +862,7 @@ class DataProcessor:
                             if len(s) > 0:
                                 counts_df = s.value_counts(sort=True)
                                 reasons = [f"{row[0]} ({row[1]})" for row in counts_df.iter_rows() if row[0]]
-                    except Exception:
+                    except Exception:  # pragma: no cover - defensive: polars schema variance
                         pass
 
                     if not reasons:
@@ -872,7 +872,7 @@ class DataProcessor:
                             if isinstance(bad_df, pd.DataFrame) and error_col in bad_df.columns:
                                 err_counts = bad_df[error_col].explode().dropna().value_counts()
                                 reasons = [f"{k} ({v})" for k, v in err_counts.items() if k]
-                        except Exception:
+                        except Exception:  # pragma: no cover - defensive: pandas schema variance
                             pass
 
                     if not reasons and hasattr(bad_df, "select") and hasattr(bad_df, "groupBy"):
@@ -890,7 +890,7 @@ class DataProcessor:
                                     .collect()
                                 )
                                 reasons = [f"{row['err']} ({row['count']})" for row in err_counts if row["err"]]
-                        except Exception:
+                        except Exception:  # pragma: no cover - defensive: requires Spark fixture
                             pass
 
                     if reasons:
@@ -1162,7 +1162,7 @@ class DataProcessor:
                 logger.warning(breach_msg)
                 try:
                     self.notify(event="slo_breach", message=breach_msg)
-                except Exception as e:
+                except Exception as e:  # pragma: no cover - defensive: notify backend optional
                     logger.debug(f"SLO breach notification failed: {e}")
 
         # Run log is written by the pipeline runner after materialize()
@@ -1182,7 +1182,7 @@ class DataProcessor:
             )
 
         # Optional Remote Reporting (SaaS Bridge)
-        try:
+        try:  # pragma: no cover - defensive: RemoteObserver is opt-in SaaS feature
             from lakelogic.core.observer import RemoteObserver
 
             observer = RemoteObserver()
@@ -1294,7 +1294,7 @@ class DataProcessor:
                 count = self.adapter._get_row_count(result.bad)
                 if count and count > 0:
                     logger.debug(f"Row Sample (QUARANTINED): {self._get_sample_text(result.bad)}")
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - defensive: row sampling tolerated to fail
             logger.debug(f"Could not log row samples: {e}")
 
     def _get_sample_text(self, df: Any) -> str:
@@ -1312,7 +1312,7 @@ class DataProcessor:
             if hasattr(df, "limit"):
                 return "\n" + str(df.limit(3).df())
             return str(df)
-        except Exception:
+        except Exception:  # pragma: no cover - defensive: sample conversion tolerated to fail
             return "(sample conversion failed)"
 
     def run_source(

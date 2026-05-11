@@ -343,6 +343,11 @@ def _validate_observatory_config(
     if envs is not None and not isinstance(envs, list):
         logger.warning(f"⚠ Observatory ({source}): 'environments' should be a list, got {type(envs).__name__}.")
 
+    # -- layers -----------------------------------------------------------
+    layers = cfg.get("layers")
+    if layers is not None and not isinstance(layers, list):
+        logger.warning(f"⚠ Observatory ({source}): 'layers' should be a list, got {type(layers).__name__}.")
+
     # -- include_quarantine_sample ----------------------------------------
     iqs = cfg.get("include_quarantine_sample")
     if iqs is not None and not isinstance(iqs, bool):
@@ -356,7 +361,8 @@ def _validate_observatory_config(
         f"✅ Observatory ({source}): config validated\n"
         f"    ↳ endpoint     : {cfg.get('endpoint', 'MISSING')}\n"
         f"    ↳ emit_on      : {cfg.get('emit_on', ['success', 'partial', 'failed'])}\n"
-        f"    ↳ environments : {cfg.get('environments', [])}"
+        f"    ↳ environments : {cfg.get('environments', [])}\n"
+        f"    ↳ layers       : {cfg.get('layers', [])}"
     )
     return cfg
 

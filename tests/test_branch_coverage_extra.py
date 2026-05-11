@@ -348,6 +348,115 @@ def test_processor_reset_dry_run_delegates_to_contract(tmp_path) -> None:
     assert isinstance(result, dict)
 
 
+def test_processor_apply_fact_governance_accumulating_snapshot_creates_quality(caplog) -> None:
+    """Lines 411-416: accumulating_snapshot fact creates a Quality block if missing."""
+    from lakelogic.core.processor import DataProcessor
+
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        materialization={
+            "strategy": "merge",
+            "fact": {
+                "type": "accumulating_snapshot",
+                "milestone_dates": ["order_date", "ship_date", "delivery_date"],
+            },
+        },
+        model={
+            "fields": [
+                {"name": "id", "type": "integer"},
+                {"name": "order_date", "type": "date"},
+                {"name": "ship_date", "type": "date"},
+                {"name": "delivery_date", "type": "date"},
+            ]
+        },
+    )
+    proc = DataProcessor.__new__(DataProcessor)
+    out = proc._apply_fact_governance(contract)
+    # Quality block should now exist (created from None) with milestone rules
+    assert out.quality is not None
+    rule_names = [getattr(r, "name", "") for r in out.quality.row_rules]
+    assert any("fact_milestone" in n for n in rule_names)
+
+
+def test_processor_stage_overrides_returns_unchanged_when_stage_none() -> None:
+    """Lines 481-482: _apply_stage_overrides with no stage returns contract as-is."""
+    from lakelogic.core.processor import DataProcessor
+
+    contract = DataContract(version="1.0.0", dataset="x")
+    proc = DataProcessor.__new__(DataProcessor)
+    proc.stage = None
+    assert proc._apply_stage_overrides(contract) is contract
+
+
+def test_processor_stage_overrides_returns_unchanged_when_stage_empty() -> None:
+    """Line 485: empty/whitespace stage string is treated as no-op."""
+    from lakelogic.core.processor import DataProcessor
+
+    contract = DataContract(version="1.0.0", dataset="x")
+    proc = DataProcessor.__new__(DataProcessor)
+    proc.stage = "   "
+    assert proc._apply_stage_overrides(contract) is contract
+
+
+def test_processor_stage_overrides_returns_unchanged_when_no_stages_dict() -> None:
+    """Lines 491-492 / 503-504: when contract has no stages dict, return as-is."""
+    from lakelogic.core.processor import DataProcessor
+
+    contract = DataContract(version="1.0.0", dataset="x")
+    proc = DataProcessor.__new__(DataProcessor)
+    proc.stage = "bronze"
+    # No stages defined → returns contract unchanged
+    assert proc._apply_stage_overrides(contract) is contract
+
+
+def test_processor_get_sample_text_handles_none() -> None:
+    """Lines 1300-1303: _get_sample_text returns 'None' for None input."""
+    from lakelogic.core.processor import DataProcessor
+
+    proc = DataProcessor.__new__(DataProcessor)
+    assert proc._get_sample_text(None) == "None"
+
+
+def test_processor_get_sample_text_handles_polars_dataframe() -> None:
+    """Lines 1306-1307: Polars df with .head() returns a sampled string."""
+    from lakelogic.core.processor import DataProcessor
+
+    proc = DataProcessor.__new__(DataProcessor)
+    df = pl.DataFrame({"a": [1, 2, 3, 4]})
+    out = proc._get_sample_text(df)
+    assert out.startswith("\n")
+    assert "shape" in out  # Polars repr always includes 'shape'
+
+
+def test_processor_get_sample_text_falls_back_to_str() -> None:
+    """Line 1314: non-DataFrame, non-iloc, non-limit object → str(df)."""
+    from lakelogic.core.processor import DataProcessor
+
+    class Plain:
+        def __str__(self) -> str:
+            return "plain-text"
+
+    proc = DataProcessor.__new__(DataProcessor)
+    assert proc._get_sample_text(Plain()) == "plain-text"
+
+
+def test_processor_get_sample_text_handles_duckdb_like() -> None:
+    """Lines 1312-1313: DuckDB-like object with .limit() and .df()."""
+    from lakelogic.core.processor import DataProcessor
+
+    class FakeRel:
+        def limit(self, n):
+            class Df:
+                def df(self):
+                    return f"duckdb-{n}-rows"
+            return Df()
+
+    proc = DataProcessor.__new__(DataProcessor)
+    out = proc._get_sample_text(FakeRel())
+    assert out == "\nduckdb-3-rows"
+
+
 def test_processor_apply_fact_governance_factless_warns_on_metrics(caplog) -> None:
     """Lines 394-408: factless fact with numeric non-key columns emits a warning."""
     from lakelogic.core.processor import DataProcessor
