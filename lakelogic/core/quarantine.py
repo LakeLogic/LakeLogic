@@ -708,7 +708,7 @@ def materialize_quarantine(
     dataset_name = contract.dataset or (getattr(contract.info, "table_name", None) if contract.info else None)
     if dataset_name and not raw_target.startswith("table:"):
         _target_str = str(target_file).replace("\\", "/")
-        if not _target_str.endswith(f"/{dataset_name}"):
+        if not _target_str.endswith(dataset_name):
             target_file = target_file / dataset_name
 
     if target_file.suffix == "":

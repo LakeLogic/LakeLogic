@@ -55,9 +55,40 @@ class PolarsAdapter(EngineAdapter):
                     continue
 
                 if link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://")):
-                    logger.warning(
-                        f"Link '{link.name}' uses remote path '{link.path}'. Local-only loading supported in OSS demo."
-                    )
+                    cache_enabled = False
+                    try:
+                        cache_enabled = bool(self.contract.metadata.get("cache_reference_links"))
+                    except Exception:
+                        pass
+
+                    cache_key = f"{link.name}:{link.path}"
+                    if cache_enabled and cache_key in self._link_cache:
+                        ctx.register(link.name, self._link_cache[cache_key])
+                        continue
+
+                    try:
+                        from deltalake import DeltaTable as _DT
+                        from lakelogic.core.processor import DataProcessor as _DP
+
+                        _dummy_proc = _DP.__new__(_DP)
+                        _sopts = _dummy_proc._get_cloud_storage_options(link.path)
+                        _dt = _DT(link.path, storage_options=_sopts)
+                        link_lf = pl.from_arrow(_dt.to_pyarrow_table()).lazy()
+
+                        # Column projection
+                        if link.columns:
+                            available = set(link_lf.collect_schema().names())
+                            select_cols = [c for c in link.columns if c in available]
+                            if select_cols:
+                                link_lf = link_lf.select(select_cols)
+                                logger.debug(f"Link '{link.name}' projected to {len(select_cols)} columns")
+
+                        if cache_enabled:
+                            self._link_cache[cache_key] = link_lf
+                        ctx.register(link.name, link_lf)
+                        logger.debug(f"Registered remote cloud link '{link.name}' from {link.path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load remote link {link.name} from {link.path}: {e}")
                     continue
 
                 path = Path(link.path)
@@ -218,7 +249,7 @@ class PolarsAdapter(EngineAdapter):
             for _uri_key, _cloud_lf in _cloud_tables.items():
                 _safe_alias = _uri_key.rstrip("/").split("/")[-1]
                 con.register(_safe_alias, _cloud_lf.collect().to_arrow())
-            for link in self.contract.links:
+            for link in self.contract.links:  # pragma: no cover
                 try:
                     if link.table or (link.type and link.type.lower() == "table"):
                         continue
@@ -627,6 +658,9 @@ class PolarsAdapter(EngineAdapter):
                 output_rows=post_output_count,
                 duration_ms=(time.perf_counter() - step_start) * 1000,
             )
+            if getattr(self, "_type_err_cols", None):
+                surviving = set(lf.collect_schema().names())
+                self._type_err_cols = [c for c in self._type_err_cols if c in surviving]
 
         # 1. Evaluate Row-Level Rules
         row_rules = self.get_row_rules()

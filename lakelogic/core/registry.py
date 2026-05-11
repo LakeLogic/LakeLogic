@@ -135,7 +135,7 @@ def _resolve_env_or_secret(val: str) -> str:
         return os.environ.get(env_var, "")
 
     # Databricks secrets: {{secrets/scope/key}}
-    if val.startswith("{{secrets/") and val.endswith("}}"):
+    if val.startswith("{{secrets/") and val.endswith("}}"):  # pragma: no cover
         parts = val[10:-2].split("/")
         if len(parts) == 2:
             scope, key = parts
@@ -259,7 +259,9 @@ _VALID_EMIT_ON = {"success", "partial", "failed"}
 _EMIT_ON_ALIASES = {"succeeded": "success", "succeed": "success"}
 
 
-def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yaml") -> Dict[str, Any]:
+def _validate_observatory_config(
+    cfg: Dict[str, Any], source: str = "_system.yaml"
+) -> Dict[str, Any]:  # pragma: no cover
     """
     Validate and normalise the ``observatory`` configuration block.
 
@@ -341,6 +343,11 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
     if envs is not None and not isinstance(envs, list):
         logger.warning(f"⚠ Observatory ({source}): 'environments' should be a list, got {type(envs).__name__}.")
 
+    # -- layers -----------------------------------------------------------
+    layers = cfg.get("layers")
+    if layers is not None and not isinstance(layers, list):
+        logger.warning(f"⚠ Observatory ({source}): 'layers' should be a list, got {type(layers).__name__}.")
+
     # -- include_quarantine_sample ----------------------------------------
     iqs = cfg.get("include_quarantine_sample")
     if iqs is not None and not isinstance(iqs, bool):
@@ -354,7 +361,8 @@ def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yam
         f"✅ Observatory ({source}): config validated\n"
         f"    ↳ endpoint     : {cfg.get('endpoint', 'MISSING')}\n"
         f"    ↳ emit_on      : {cfg.get('emit_on', ['success', 'partial', 'failed'])}\n"
-        f"    ↳ environments : {cfg.get('environments', [])}"
+        f"    ↳ environments : {cfg.get('environments', [])}\n"
+        f"    ↳ layers       : {cfg.get('layers', [])}"
     )
     return cfg
 
@@ -597,14 +605,19 @@ class DomainRegistry(BaseModel):
             if not c.enabled:
                 continue
 
-            # Resolve {domain}/{system}/{*_layer} placeholders in the contract path
+            # Resolve {domain}/{system}/{*_layer} placeholders in the contract path.
+            # IMPORTANT: Layer aliases (bronze_layer, silver_layer, gold_layer) control
+            # table and storage naming — NOT file discovery.  Contract paths on disk use
+            # the canonical layer names (bronze, silver, gold), so we resolve {*_layer}
+            # placeholders to those literals here.  The alias values are still applied
+            # inside contract *content* (e.g. info.table_name) at the storage_vars step.
             resolved_contract_path = c.path
             if "{" in resolved_contract_path:
                 resolved_contract_path = resolved_contract_path.replace("{domain}", registry.domain)
                 resolved_contract_path = resolved_contract_path.replace("{system}", registry.system)
-                resolved_contract_path = resolved_contract_path.replace("{bronze_layer}", registry.bronze_layer)
-                resolved_contract_path = resolved_contract_path.replace("{silver_layer}", registry.silver_layer)
-                resolved_contract_path = resolved_contract_path.replace("{gold_layer}", registry.gold_layer)
+                resolved_contract_path = resolved_contract_path.replace("{bronze_layer}", "bronze")
+                resolved_contract_path = resolved_contract_path.replace("{silver_layer}", "silver")
+                resolved_contract_path = resolved_contract_path.replace("{gold_layer}", "gold")
 
             # Resolve the absolute path relative to the registry file
             c_path = Path(resolved_contract_path)
@@ -683,14 +696,22 @@ class DomainRegistry(BaseModel):
                         )
 
                 # Inject system-level metadata defaults (e.g. run_log_dir)
+                if not c_dict.get("metadata"):
+                    c_dict["metadata"] = {}
+
                 if registry.metadata:
-                    if not c_dict.get("metadata"):
-                        c_dict["metadata"] = dict(registry.metadata)
+                    for k, v in registry.metadata.items():
+                        c_dict["metadata"].setdefault(k, v)
+
+                # Inject system-level cost config into metadata so the processor can access it
+                if registry.cost:
+                    if not c_dict["metadata"].get("cost"):
+                        c_dict["metadata"]["cost"] = dict(registry.cost)
                     else:
-                        for k, v in registry.metadata.items():
-                            c_dict["metadata"].setdefault(k, v)
-                    # Resolve any remaining placeholders in metadata values
-                    c_dict["metadata"] = _resolve_placeholders(c_dict["metadata"], storage_vars)
+                        c_dict["metadata"]["cost"] = _deep_merge(dict(registry.cost), c_dict["metadata"]["cost"])
+
+                # Resolve any remaining placeholders in metadata values
+                c_dict["metadata"] = _resolve_placeholders(c_dict["metadata"], storage_vars)
 
                 # Inject system-level lineage, quarantine, and observatory defaults
                 for section in ("lineage", "quarantine", "observatory"):

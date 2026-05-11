@@ -4,7 +4,6 @@ import polars as pl
 
 # Create mock data or load real delta data for Executive View
 def create_executive_view():
-
     # Premium styled KPI Cards using custom HTML
     card_style = """
     <div style="background-color: #1e1e1e; border-radius: 8px; padding: 20px;

@@ -78,6 +78,7 @@ def test_format_yaml_fieldlist_and_contract_draft_helpers(tmp_path, monkeypatch)
 
 
 def test_reference_detection_spark_lookup_and_connection_dispatch(monkeypatch):
+    pytest.importorskip("pandas")
     inferrer = bs.ContractInferrer("dummy")
     assert inferrer._is_table_reference("catalog.schema.table") is True
     assert inferrer._is_table_reference("orders") is True

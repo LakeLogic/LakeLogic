@@ -1216,23 +1216,27 @@ def write_run_log(
         endpoint = observatory_cfg.get("endpoint")
         emit_on = observatory_cfg.get("emit_on", ["success", "partial", "failed"])
         target_envs = observatory_cfg.get("environments", [])
+        target_layers = observatory_cfg.get("layers", [])
 
         current_env = report.get("environment", "unknown")
+        current_layer = report.get("data_layer", "unknown")
         status = str(report.get("status", "unknown")).lower()
         # Normalise engine status aliases → emit_on values
         _status_aliases = {"succeeded": "success", "succeed": "success"}
         status = _status_aliases.get(status, status)
 
-        # Check environment and status triggers
+        # Check environment, layer, and status triggers
         is_target_env = not target_envs or current_env in target_envs
+        is_target_layer = not target_layers or current_layer in target_layers
         is_target_status = status in [e.lower() for e in emit_on]
 
         logger.info(
             f"📡 [2/5] Filters: env={current_env} in {target_envs} → {is_target_env} | "
+            f"layer={current_layer} in {target_layers} → {is_target_layer} | "
             f"status={status} in {emit_on} → {is_target_status}"
         )
 
-        if endpoint and is_target_env and is_target_status:
+        if endpoint and is_target_env and is_target_layer and is_target_status:
             try:
                 import requests as _requests
 
@@ -1301,7 +1305,7 @@ def write_run_log(
         else:
             logger.info(
                 f"📡 [SKIP] Push skipped: endpoint={bool(endpoint)}, "
-                f"env_match={is_target_env}, status_match={is_target_status}"
+                f"env_match={is_target_env}, layer_match={is_target_layer}, status_match={is_target_status}"
             )
     else:
         logger.info(

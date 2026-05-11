@@ -6,13 +6,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
-## [1.26.0] — 2026-05-07
+## [1.30.0] — 2026-05-11
+
+### Added
+
+- Add local configuration, coverage reporting, and registry branch tests
+## [1.29.0] — 2026-05-11
+
+### Added
+
+- Bump version to 1.28.0 and add integration tests for SparkAdapter schema casting
+
+### Testing
+
+- Add unit test suites for PolarsAdapter logic and code reviewer functionality
+- Add unit tests for code reviewer orchestration and Polars adapter logic
+## [1.28.0] — 2026-05-11
+
+### Added
+
+- Implement core registry, processing, and execution engines for LakeLogic pipeline system
+## [1.27.0] — 2026-05-11
+
+### Added
+
+- Implement core registry management and metadata-driven pipeline framework
+
+### CI/CD
+
+- Remove -x from pytest to ensure codecov report is generated on failure
 
 ### Fixed
 
-- **engines/duckdb**: Add CATEGORY_COLUMN to errors array, and properly type empty _lakelogic_errors as VARCHAR[] to match Polars/Spark output schemas
-- **tests**: Remove global sys.modules patch for PySpark and explicitly set PYSPARK_PYTHON
-## [1.25.0] — 2026-05-07
+- **tests**: Skip test_spark_delta_logic if pyspark is not installed
+## [1.26.0] — 2026-05-07
 
 ### Added
 
@@ -23,6 +50,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - **engines**: Cross-engine compatibility fixes for test matrix
+- **engines/duckdb**: Add CATEGORY_COLUMN to errors array, and properly type empty _lakelogic_errors as VARCHAR[] to match Polars/Spark output schemas
+- **tests**: Remove global sys.modules patch for PySpark and explicitly set PYSPARK_PYTHON
 
 ### Testing
 
@@ -303,8 +332,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.26.0]: https://github.com/lakelogic/LakeLogic/compare/v1.25.0...v1.26.0
-[1.25.0]: https://github.com/lakelogic/LakeLogic/compare/v1.23.0...v1.25.0
+[1.30.0]: https://github.com/lakelogic/LakeLogic/compare/v1.29.0...v1.30.0
+[1.29.0]: https://github.com/lakelogic/LakeLogic/compare/v1.28.0...v1.29.0
+[1.28.0]: https://github.com/lakelogic/LakeLogic/compare/v1.27.0...v1.28.0
+[1.27.0]: https://github.com/lakelogic/LakeLogic/compare/v1.26.0...v1.27.0
+[1.26.0]: https://github.com/lakelogic/LakeLogic/compare/v1.23.0...v1.26.0
 [1.23.0]: https://github.com/lakelogic/LakeLogic/compare/v1.22.3...v1.23.0
 [1.22.3]: https://github.com/lakelogic/LakeLogic/compare/v1.22.2...v1.22.3
 [1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.2

@@ -698,6 +698,13 @@ def test_process_single_contract_spark_conversion_and_fail_on_quarantine(monkeyp
     pl = pytest.importorskip("polars")
     materialized = []
 
+    class FakeDataFrame:
+        def __init__(self, cols):
+            self.columns = cols
+
+        def to_pandas(self):
+            return self
+
     class FakeProcessor:
         def __init__(self, contract, engine, pipeline_run_id, run_log_mode=None):
             self.contract = types.SimpleNamespace(quarantine=types.SimpleNamespace(fail_on_quarantine=True))
@@ -707,8 +714,8 @@ def test_process_single_contract_spark_conversion_and_fail_on_quarantine(monkeyp
             }
 
         def run_source(self, **kwargs):
-            good = pl.DataFrame({"id": [1, 2], "nullable": [None, None]})
-            bad = pl.DataFrame({"id": [3], "nullable": [None]})
+            good = FakeDataFrame(["id", "nullable"])
+            bad = FakeDataFrame(["id", "nullable"])
             return types.SimpleNamespace(good=good, bad=bad)
 
         def materialize(self, good_df, bad_df):
@@ -813,7 +820,12 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
         "lakelogic.core.hipaa",
         types.SimpleNamespace(
             _get_phi_column_names=lambda dc: ["diagnosis", "address"],
-            generate_hipaa_erasure_report=lambda dc, patient_col, patient_ids, strategy, affected, partition_filter=None: {
+            generate_hipaa_erasure_report=lambda dc,
+            patient_col,
+            patient_ids,
+            strategy,
+            affected,
+            partition_filter=None: {
                 "kind": "hipaa",
                 "strategy": strategy,
                 "affected": affected,

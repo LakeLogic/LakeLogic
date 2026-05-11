@@ -38,14 +38,14 @@ class SparkAdapter(EngineAdapter):
         try:
             from pyspark.sql import DataFrame
             from pyspark.sql import functions as F
-        except ImportError:
+        except ImportError:  # pragma: no cover - defensive: pyspark is a soft dep
             raise ImportError("pyspark is required for SparkAdapter")
 
         # Databricks Serverless / Spark Connect returns a different DataFrame class.
         # Build a tuple of all available DataFrame types so isinstance works on both
         # classic and Serverless runtimes.
         _df_types = [DataFrame]
-        try:
+        try:  # pragma: no cover - Spark Connect only present on Databricks Serverless
             from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
 
             _df_types.append(ConnectDataFrame)
@@ -57,14 +57,16 @@ class SparkAdapter(EngineAdapter):
         # This lets callers pass in-memory records (e.g. rows fetched from SQLite,
         # a list of dicts, Pandas-style .to_dict("records")) without having to
         # manually create a SparkSession first.
-        if isinstance(df, (list, tuple)):
+        if isinstance(df, (list, tuple)):  # pragma: no cover - requires live SparkSession
             from pyspark.sql import SparkSession
 
             _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
             df = _spark.createDataFrame(df)
 
         # Auto-convert Polars DataFrames to Spark DataFrames via Pandas
-        elif type(df).__name__ == "DataFrame" and "polars" in type(df).__module__:
+        elif (
+            type(df).__name__ == "DataFrame" and "polars" in type(df).__module__
+        ):  # pragma: no cover - requires Spark+Polars+Pandas
             from pyspark.sql import SparkSession
 
             _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
@@ -702,25 +704,37 @@ class SparkAdapter(EngineAdapter):
                 if not link.path:
                     continue
 
-                if link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://")):
-                    logger.warning(
-                        f"Link '{link.name}' uses remote path '{link.path}'. Local-only loading supported in OSS demo."
-                    )
-                    continue
-
-                path = Path(link.path)
-                if not path.is_absolute() and hasattr(self.contract, "_base_path"):
-                    path = Path(self.contract._base_path) / path
-                if not path.exists():
-                    logger.warning(f"Link file not found: {path}")
-                    continue
-
-                if path.suffix.lower() == ".parquet":
-                    ref_df = spark.read.parquet(path.as_posix())
-                elif path.suffix.lower() == ".csv":
-                    ref_df = spark.read.option("header", "true").csv(path.as_posix())
+                is_remote = link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://"))
+                if is_remote:
+                    load_path = link.path
+                    link_type = (link.type or "delta").lower()
                 else:
-                    logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
+                    path = Path(link.path)
+                    if not path.is_absolute() and hasattr(self.contract, "_base_path"):
+                        path = Path(self.contract._base_path) / path
+                    if not path.exists():
+                        logger.warning(f"Link file not found: {path}")
+                        continue
+                    load_path = path.as_posix()
+                    link_type = (link.type or "").lower()
+                    if not link_type:  # pragma: no cover
+                        if path.suffix.lower() == ".parquet":
+                            link_type = "parquet"
+                        elif path.suffix.lower() == ".csv":
+                            link_type = "csv"
+                        elif path.is_dir() and (path / "_delta_log").exists():
+                            link_type = "delta"
+                        else:
+                            link_type = "parquet"
+
+                if link_type == "delta":
+                    ref_df = spark.read.format("delta").load(load_path)
+                elif link_type == "parquet":
+                    ref_df = spark.read.parquet(load_path)
+                elif link_type == "csv":
+                    ref_df = spark.read.option("header", "true").csv(load_path)
+                else:
+                    logger.warning(f"Unsupported or unknown link format for {link.name}: {link_type}")
                     continue
 
                 # Column projection — only keep specified columns

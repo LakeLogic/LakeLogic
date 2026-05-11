@@ -493,6 +493,7 @@ def test_materialize_quarantine_delta_and_iceberg_file_modes(monkeypatch, tmp_pa
 
 
 def test_materialize_quarantine_delta_aligns_to_existing_schema(monkeypatch, tmp_path):
+    pytest.importorskip("pandas")
     pa = pytest.importorskip("pyarrow")
     monkeypatch.setattr(q, "_stamp_quarantine_lineage", lambda frame, contract: frame)
     monkeypatch.setattr(q, "_frame_has_columns", lambda frame: True)

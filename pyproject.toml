@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "1.26.0"
+version = "1.30.0"
 description = "A declarative, contract-driven medallion pipeline engine for data mesh architectures. Write once. Run on Spark, Polars, or DuckDB."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -53,6 +53,7 @@ dependencies = [
     "Jinja2>=3.1.0",
     "sqlglot>=20.0.0",
     "polars>=0.20.0",
+    "duckdb>=0.9.0",
     "typer>=0.9.0",
     "deltalake>=0.15.0",
     "pyarrow>=14.0.0",
@@ -66,7 +67,6 @@ cli = [
 # Engine extras — install what you need: pip install lakelogic[engines]
 engines = [
     "polars>=0.20.0",
-    "pandas>=2.0.0",
     "duckdb>=0.9.0",
     "pyarrow>=14.0.0",
     "deltalake>=0.15.0",
@@ -102,7 +102,6 @@ delta = [
     "google-cloud-storage>=2.10.0",  # GCP GCS access
 ]
 polars = ["polars>=0.20.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
-pandas = ["pandas>=2.0.0", "duckdb>=0.9.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
 duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=14.0.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
 spark = ["pyspark>=3.3.0"]
 # Database CDC connectors
@@ -178,7 +177,6 @@ dev = [
 all = [
     "typer>=0.9.0",
     "polars>=0.20.0",
-    "pandas>=2.0.0",
     "duckdb>=0.9.0",
     "pyarrow>=14.0.0",
     "deltalake>=0.15.0",
@@ -207,6 +205,15 @@ ai = [
     "anthropic>=0.18.0",
     "google-genai>=0.5.0",
     "typing-extensions>=4.12.0",  # PEP 728 TypedDict support for google-genai on Python <3.12
+    "instructor>=1.5.0",  # typed LLM output + auto-retry for `lakelogic review` Tier 2
+]
+# Tiered code reviewer (`lakelogic review`).
+# Tier 1 = deterministic (ruff + sqlfluff + PII regex), no API key required.
+# Tier 2 = LLM (lands in P2; install lakelogic[ai] alongside for the SDKs).
+review = [
+    "ruff>=0.6,<0.14",
+    "sqlfluff>=3,<4",
+    "datacontract-cli>=0.10",  # P4: schema breaking-change detection
 ]
 enterprise = [
     "pyspark>=3.3.0",
@@ -295,7 +302,7 @@ dev = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "1.26.0"
+version         = "1.30.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = false
@@ -331,7 +338,6 @@ ignore = []
 "lakelogic/engines/database_connectors.py" = ["I001"]
 "lakelogic/engines/duckdb.py" = ["I001"]
 "lakelogic/engines/integration_connectors.py" = ["I001"]
-"lakelogic/engines/pandas.py" = ["I001"]
 "lakelogic/engines/polars.py" = ["I001"]
 "lakelogic/engines/snowflake.py" = ["I001"]
 "lakelogic/engines/streaming_connectors.py" = ["I001"]
