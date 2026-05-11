@@ -806,7 +806,7 @@ class DataProcessor:
             # the row-count reduction is intentional summarisation — not data loss.
             _is_aggregation = False
             _transforms = getattr(self.contract, "transformations", None) or []
-            if not isinstance(_transforms, list):  # pragma: no cover - defensive: transforms always iterable in practice
+            if not isinstance(_transforms, list):  # pragma: no cover - defensive
                 try:
                     _transforms = list(_transforms)
                 except Exception:
