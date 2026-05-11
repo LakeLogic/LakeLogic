@@ -3,6 +3,7 @@ import pytest
 
 pytest.importorskip("pyspark")
 
+
 class MockSparkDataFrame(MagicMock):
     def count(self):
         return 0

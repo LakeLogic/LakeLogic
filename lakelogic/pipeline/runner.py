@@ -161,16 +161,8 @@ class LakehousePipeline:
         self.run_id = str(uuid.uuid4())
 
         # ── Engine / storage mode compatibility check ─────────────────────
-        # Unity Catalog (uc) mode requires Spark for Volume access, table
-        # materialization, and Delta writes.  Polars and DuckDB engines only
-        # support 'direct' (cloud storage) or 'local' modes.
-        if self.storage_mode == "uc" and self.engine in ("polars", "duckdb"):
-            raise ValueError(
-                f"Engine '{self.engine}' is not compatible with storage_mode='uc' (Unity Catalog). "
-                f"Unity Catalog requires Spark for Volume access and table operations.\n"
-                f"  → Use engine='spark' for storage_mode='uc'\n"
-                f"  → Use storage_mode='direct' for engine='{self.engine}'"
-            )
+        # Unity Catalog (uc) mode defaults to Spark, but other engines (Polars, DuckDB)
+        # can now access remote cloud links dynamically.
 
         if self.engine == "spark" and not self.spark:
             # Try to auto-resolve if inside Databricks
@@ -184,18 +176,24 @@ class LakehousePipeline:
 
         if self.engine == "spark" and self.storage_mode == "direct" and self.spark:
             import os
-            
+
             client_id = os.environ.get("AZURE_CLIENT_ID") or os.environ.get("ARM_CLIENT_ID")
             client_secret = os.environ.get("AZURE_CLIENT_SECRET") or os.environ.get("ARM_CLIENT_SECRET")
             tenant_id = os.environ.get("AZURE_TENANT_ID") or os.environ.get("ARM_TENANT_ID")
             account_key = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY")
-            
+
             if client_id and client_secret and tenant_id:
                 self.spark.conf.set("fs.azure.account.auth.type", "OAuth")
-                self.spark.conf.set("fs.azure.account.oauth.provider.type", "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider")
+                self.spark.conf.set(
+                    "fs.azure.account.oauth.provider.type",
+                    "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+                )
                 self.spark.conf.set("fs.azure.account.oauth2.client.id", client_id)
                 self.spark.conf.set("fs.azure.account.oauth2.client.secret", client_secret)
-                self.spark.conf.set("fs.azure.account.oauth2.client.endpoint", f"https://login.microsoftonline.com/{tenant_id}/oauth2/token")
+                self.spark.conf.set(
+                    "fs.azure.account.oauth2.client.endpoint",
+                    f"https://login.microsoftonline.com/{tenant_id}/oauth2/token",
+                )
             elif not account_key:
                 raise ValueError(
                     "Spark in 'direct' mode requires Azure credentials. "
@@ -752,7 +750,7 @@ class LakehousePipeline:
             if self.spark:
                 _is_uri = _rl_table.startswith(("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://", "file://"))
                 _table_ref = f"delta.`{_rl_table}`" if _is_uri else _rl_table
-                
+
                 _exists = False
                 if _is_uri:
                     try:
@@ -2259,6 +2257,7 @@ class LakehousePipeline:
                     if isinstance(df_good, pl.DataFrame):
                         if df_good.is_empty() and len(df_good.columns) == 0:
                             from pyspark.sql.types import StructType
+
                             df_good = self.spark.createDataFrame([], StructType([]))
                         else:
                             void_cols = [
@@ -2276,6 +2275,7 @@ class LakehousePipeline:
                         if isinstance(df_bad, pl.DataFrame):
                             if df_bad.is_empty() and len(df_bad.columns) == 0:
                                 from pyspark.sql.types import StructType
+
                                 df_bad = self.spark.createDataFrame([], StructType([]))
                             else:
                                 void_cols = [
@@ -2307,9 +2307,9 @@ class LakehousePipeline:
             row_count = rows_good if rows_good is not None else "?"
 
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
-            
+
             _is_empty_run = (is_good_empty or rows_good == 0) and (is_bad_empty or rows_bad == 0 or rows_bad is None)
-            
+
             if _is_empty_run:
                 # Avoid empty Delta transactions that increment version numbers unnecessarily.
                 # Use DDL engine to ensure target tables exist instead.

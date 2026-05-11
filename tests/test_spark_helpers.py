@@ -523,9 +523,9 @@ def test_spark_helper_register_links_and_apply_schema(monkeypatch, tmp_path):
             {"name": "table_ref", "table": "catalog.table", "columns": ["id", "status"]},
             {"name": "remote_ref", "path": "abfss://container/ref.csv"},
             {"name": "missing_ref", "path": str(tmp_path / "missing.csv")},
-            {"name": "csv_ref", "path": str(csv_path), "columns": ["id", "name"]},
+            {"name": "csv_ref", "type": "csv", "path": str(csv_path), "columns": ["id", "name"]},
             {"name": "pq_ref", "path": str(parquet_path)},
-            {"name": "bad_ref", "path": str(txt_path)},
+            {"name": "bad_ref", "type": "unknown_format", "path": str(txt_path)},
         ],
         model={
             "fields": [
@@ -548,9 +548,8 @@ def test_spark_helper_register_links_and_apply_schema(monkeypatch, tmp_path):
     assert spark.tables == ["catalog.table"]
     assert ("csv", csv_path.as_posix()) in spark.read.paths
     assert ("parquet", parquet_path.as_posix()) in spark.read.paths
-    assert any("remote path" in message for message in warnings)
     assert any("Link file not found" in message for message in warnings)
-    assert any("Unsupported link format" in message for message in warnings)
+    assert any("Unsupported or unknown link format" in message for message in warnings)
     assert any("projected to 2 columns" in message for message in debugs)
 
     schema_df = FakeSelectableDataFrame(

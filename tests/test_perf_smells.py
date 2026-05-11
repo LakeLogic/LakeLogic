@@ -15,9 +15,7 @@ def _write(path: Path, content: str) -> Path:
 def test_flags_spark_collect_in_pyspark_file(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "job.py",
-        "from pyspark.sql import SparkSession\n"
-        "df = spark.read.parquet('s3://x')\n"
-        "rows = df.collect()\n",
+        "from pyspark.sql import SparkSession\ndf = spark.read.parquet('s3://x')\nrows = df.collect()\n",
     )
     findings = scan_perf_smells([f])
     rules = [x.rule for x in findings]
@@ -27,9 +25,7 @@ def test_flags_spark_collect_in_pyspark_file(tmp_path: Path) -> None:
 def test_ignores_collect_in_non_pyspark_file(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "garbage.py",
-        "from gc import collect\n"
-        "collect()\n"
-        "stats.collect()\n",  # not a Spark DF
+        "from gc import collect\ncollect()\nstats.collect()\n",  # not a Spark DF
     )
     assert not any(x.rule == "spark_collect" for x in scan_perf_smells([f]))
 
@@ -37,8 +33,7 @@ def test_ignores_collect_in_non_pyspark_file(tmp_path: Path) -> None:
 def test_flags_to_pandas(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "job.py",
-        "import pyspark\n"
-        "pdf = df.toPandas()\n",
+        "import pyspark\npdf = df.toPandas()\n",
     )
     assert any(x.rule == "spark_to_pandas" for x in scan_perf_smells([f]))
 
@@ -46,9 +41,7 @@ def test_flags_to_pandas(tmp_path: Path) -> None:
 def test_flags_count_used_for_boolean(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "job.py",
-        "from pyspark.sql import functions as F\n"
-        "if df.count() > 0:\n"
-        "    do_thing()\n",
+        "from pyspark.sql import functions as F\nif df.count() > 0:\n    do_thing()\n",
     )
     assert any(x.rule == "spark_count_for_bool" for x in scan_perf_smells([f]))
 
@@ -56,8 +49,7 @@ def test_flags_count_used_for_boolean(tmp_path: Path) -> None:
 def test_flags_read_csv_without_chunksize(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "load.py",
-        "import pandas as pd\n"
-        "df = pd.read_csv('huge.csv')\n",
+        "import pandas as pd\ndf = pd.read_csv('huge.csv')\n",
     )
     assert any(x.rule == "pandas_read_csv_no_chunksize" for x in scan_perf_smells([f]))
 
@@ -65,9 +57,7 @@ def test_flags_read_csv_without_chunksize(tmp_path: Path) -> None:
 def test_does_not_flag_read_csv_with_chunksize(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "load.py",
-        "import pandas as pd\n"
-        "for chunk in pd.read_csv('huge.csv', chunksize=10_000):\n"
-        "    process(chunk)\n",
+        "import pandas as pd\nfor chunk in pd.read_csv('huge.csv', chunksize=10_000):\n    process(chunk)\n",
     )
     assert not any(x.rule == "pandas_read_csv_no_chunksize" for x in scan_perf_smells([f]))
 
@@ -75,8 +65,7 @@ def test_does_not_flag_read_csv_with_chunksize(tmp_path: Path) -> None:
 def test_skips_commented_out_lines(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "job.py",
-        "import pyspark\n"
-        "# rows = df.collect()  # disabled for now\n",
+        "import pyspark\n# rows = df.collect()  # disabled for now\n",
     )
     assert not any(x.rule == "spark_collect" for x in scan_perf_smells([f]))
 

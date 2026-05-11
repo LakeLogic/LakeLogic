@@ -13,7 +13,6 @@ Supports:
 from __future__ import annotations
 
 import json
-import sys
 from typing import Any
 
 from loguru import logger
@@ -35,13 +34,9 @@ def format_terminal(report: dict[str, Any]) -> str:
     lines.append(" " + "─" * 70)
     lines.append("")
     lines.append(
-        f" Scanned: {report['files_scanned']} files | "
-        f"Provider: {report['ai_provider']} / {report['ai_model']}"
+        f" Scanned: {report['files_scanned']} files | Provider: {report['ai_provider']} / {report['ai_model']}"
     )
-    lines.append(
-        f" Duration: {report['duration_seconds']:.1f}s | "
-        f"Tokens: {report['token_usage'].get('total', 0):,}"
-    )
+    lines.append(f" Duration: {report['duration_seconds']:.1f}s | Tokens: {report['token_usage'].get('total', 0):,}")
     lines.append("")
     lines.append(" " + "─" * 70)
 
@@ -173,9 +168,7 @@ def format_sarif(report: dict[str, Any]) -> str:
 
         location: dict[str, Any] = {}
         if finding.get("file"):
-            physical: dict[str, Any] = {
-                "artifactLocation": {"uri": finding["file"]}
-            }
+            physical: dict[str, Any] = {"artifactLocation": {"uri": finding["file"]}}
             if finding.get("line"):
                 physical["region"] = {"startLine": finding["line"]}
             location = {"physicalLocation": physical}
@@ -277,8 +270,8 @@ def _azure_pr_payload(report: dict[str, Any]) -> dict[str, Any]:
 
 _ADO_STATUS_MAP = {
     "critical": 1,  # active
-    "warning": 1,   # active
-    "info": 4,      # informational comment, no thread status
+    "warning": 1,  # active
+    "info": 4,  # informational comment, no thread status
 }
 
 
@@ -302,10 +295,7 @@ def _post_azure_threads(
         "Authorization": f"Basic {auth}",
         "Content-Type": "application/json",
     }
-    base = (
-        f"{org_url}/{project}/_apis/git/repositories/{repo_id}"
-        f"/pullRequests/{pr_id}/threads?api-version=7.1"
-    )
+    base = f"{org_url}/{project}/_apis/git/repositories/{repo_id}/pullRequests/{pr_id}/threads?api-version=7.1"
 
     posted = 0
     with httpx.Client(timeout=15) as client:
@@ -355,10 +345,7 @@ def _post_azure_threads(
                 if r.status_code < 300:
                     posted += 1
                 else:
-                    logger.warning(
-                        f"ADO inline thread for {file_path}:{line} failed: "
-                        f"{r.status_code} {r.text[:200]}"
-                    )
+                    logger.warning(f"ADO inline thread for {file_path}:{line} failed: {r.status_code} {r.text[:200]}")
             except httpx.HTTPError as e:
                 logger.warning(f"ADO inline thread for {file_path}:{line} failed: {e}")
 

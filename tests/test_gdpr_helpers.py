@@ -3,8 +3,9 @@ from __future__ import annotations
 import sys
 import types
 
-import pandas as pd
 import pytest
+
+pd = pytest.importorskip("pandas")
 
 from lakelogic.core import gdpr
 from lakelogic.core.models import DataContract, FieldDefinition, Info, Model

@@ -24,31 +24,21 @@ def review_command(
     diff: Optional[str] = typer.Option(
         None, "--diff", help="Only review files changed vs this git ref (e.g. origin/main)."
     ),
-    include: Optional[list[str]] = typer.Option(
-        None, "--include", help="Glob to include (repeatable)."
-    ),
-    exclude: Optional[list[str]] = typer.Option(
-        None, "--exclude", help="Glob to exclude (repeatable)."
-    ),
+    include: Optional[list[str]] = typer.Option(None, "--include", help="Glob to include (repeatable)."),
+    exclude: Optional[list[str]] = typer.Option(None, "--exclude", help="Glob to exclude (repeatable)."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Skip Tier 2 LLM review."),
     provider: Optional[str] = typer.Option(
         None, "--provider", help="LLM provider: anthropic | openai (default: env auto-detect)."
     ),
     model: Optional[str] = typer.Option(None, "--model", help="Model name override."),
-    output_format: str = typer.Option(
-        "terminal", "--format", help="terminal | json | sarif | github"
-    ),
-    output: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Output file (default: stdout)."
-    ),
+    output_format: str = typer.Option("terminal", "--format", help="terminal | json | sarif | github"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file (default: stdout)."),
     fail_on: Optional[str] = typer.Option(
         None,
         "--fail-on",
         help="Exit 1 on findings at: critical | warning | info | never (default: critical).",
     ),
-    max_files: Optional[int] = typer.Option(
-        None, "--max-files", help="Cap on files reviewed per run (default: 50)."
-    ),
+    max_files: Optional[int] = typer.Option(None, "--max-files", help="Cap on files reviewed per run (default: 50)."),
     config: Optional[Path] = typer.Option(
         None, "--config", help="Path to .lakelogic-review.toml (default: ./.lakelogic-review.toml)."
     ),

@@ -148,7 +148,7 @@ def test_polars_helper_register_links_handles_projection_cache_and_warnings(monk
     assert second_registered["csv_ref"] is first_registered["csv_ref"]
     assert "csv_ref:" in next(iter(adapter._link_cache))
     assert any("references table" in message for message in warnings)
-    assert any("remote path" in message for message in warnings)
+    assert any("Failed to load remote link" in message for message in warnings)
     assert any("Link file not found" in message for message in warnings)
     assert any("Unsupported link format" in message for message in warnings)
     assert any("projected to 2 columns" in message for message in debugs)
@@ -267,6 +267,7 @@ def test_polars_helper_run_dataset_rules_evaluates_thresholds_and_errors(monkeyp
 def test_polars_helper_apply_sql_transformation_duckdb_fallback_and_strict_mode(monkeypatch):
     adapter = PolarsAdapter(types.SimpleNamespace(dataset="orders", links=[], metadata={}, contract=None))
     lf = pl.DataFrame({"id": [1, 2], "status": ["new", "done"]}).lazy()
+    monkeypatch.setattr(pl.DataFrame, "to_arrow", lambda self: self)
 
     class BrokenSQLContext:
         def register(self, name, frame):

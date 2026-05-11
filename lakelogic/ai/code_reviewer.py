@@ -64,9 +64,7 @@ def _summarise(findings: list[ReviewFinding]) -> dict[str, int]:
     }
 
 
-def _apply_severity_overrides(
-    findings: list[ReviewFinding], overrides: dict[str, str]
-) -> list[ReviewFinding]:
+def _apply_severity_overrides(findings: list[ReviewFinding], overrides: dict[str, str]) -> list[ReviewFinding]:
     """Remap finding severities based on the rule-id → severity override map."""
     if not overrides:
         return findings

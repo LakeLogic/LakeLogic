@@ -40,9 +40,7 @@ def test_config_env_detect_anthropic(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert cfg.api_key_present is True
 
 
-def test_config_env_detect_openai_when_no_anthropic(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_config_env_detect_openai_when_no_anthropic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     cfg = load_config(tmp_path / "missing.toml")
@@ -53,13 +51,13 @@ def test_config_file_overrides_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     f = tmp_path / ".lakelogic-review.toml"
     f.write_text(
-        '[review]\n'
+        "[review]\n"
         'provider = "openai"\n'
         'model = "gpt-4o-mini"\n'
         'fail_on = "warning"\n'
         'custom_rules = ["No SELECT * in marts"]\n'
-        '\n'
-        '[review.severity]\n'
+        "\n"
+        "[review.severity]\n"
         'select_star = "info"\n'
     )
     cfg = load_config(f)
@@ -141,7 +139,10 @@ def test_severity_overrides_ignore_invalid_value() -> None:
 
 def test_severity_overrides_noop_when_empty() -> None:
     findings = [ReviewFinding(file="a", severity="warning", category="x", rule="r", message="m")]
-    assert _apply_severity_overrides(findings, {}) is findings or _apply_severity_overrides(findings, {})[0].severity == "warning"
+    assert (
+        _apply_severity_overrides(findings, {}) is findings
+        or _apply_severity_overrides(findings, {})[0].severity == "warning"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -187,9 +188,7 @@ def test_run_review_no_llm_skips_call_even_with_key(tmp_path: Path) -> None:
     f = tmp_path / "x.py"
     f.write_text("x = 1\n")
     with patch("lakelogic.ai.llm_client.review_batch") as mock_call:
-        report = run_review(
-            [f], no_llm=True, api_key_present=True, provider="anthropic", model="m"
-        )
+        report = run_review([f], no_llm=True, api_key_present=True, provider="anthropic", model="m")
     mock_call.assert_not_called()
     assert not any(x.rule == "llm_review_skipped" for x in report.findings)
 
@@ -205,9 +204,7 @@ def test_review_batch_skips_when_estimated_tokens_exceed_budget(tmp_path: Path) 
     big = tmp_path / "huge.py"
     big.write_text("x = 1\n" * 50_000)  # ~300KB → ~75K tokens at 4 chars/token
 
-    findings, usage = review_batch(
-        [big], provider="anthropic", model="claude-sonnet-4-6", max_tokens=1000
-    )
+    findings, usage = review_batch([big], provider="anthropic", model="claude-sonnet-4-6", max_tokens=1000)
     assert any(x.rule == "batch_too_large" for x in findings)
     assert usage["total"] == 0
 

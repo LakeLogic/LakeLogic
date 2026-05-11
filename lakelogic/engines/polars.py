@@ -60,21 +60,21 @@ class PolarsAdapter(EngineAdapter):
                         cache_enabled = bool(self.contract.metadata.get("cache_reference_links"))
                     except Exception:
                         pass
-                        
+
                     cache_key = f"{link.name}:{link.path}"
                     if cache_enabled and cache_key in self._link_cache:
                         ctx.register(link.name, self._link_cache[cache_key])
                         continue
-                        
+
                     try:
                         from deltalake import DeltaTable as _DT
                         from lakelogic.core.processor import DataProcessor as _DP
-                        
+
                         _dummy_proc = _DP.__new__(_DP)
                         _sopts = _dummy_proc._get_cloud_storage_options(link.path)
                         _dt = _DT(link.path, storage_options=_sopts)
                         link_lf = pl.from_arrow(_dt.to_pyarrow_table()).lazy()
-                        
+
                         # Column projection
                         if link.columns:
                             available = set(link_lf.collect_schema().names())
@@ -82,7 +82,7 @@ class PolarsAdapter(EngineAdapter):
                             if select_cols:
                                 link_lf = link_lf.select(select_cols)
                                 logger.debug(f"Link '{link.name}' projected to {len(select_cols)} columns")
-                                
+
                         if cache_enabled:
                             self._link_cache[cache_key] = link_lf
                         ctx.register(link.name, link_lf)

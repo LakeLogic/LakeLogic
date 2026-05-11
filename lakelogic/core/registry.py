@@ -690,11 +690,11 @@ class DomainRegistry(BaseModel):
                 # Inject system-level metadata defaults (e.g. run_log_dir)
                 if not c_dict.get("metadata"):
                     c_dict["metadata"] = {}
-                
+
                 if registry.metadata:
                     for k, v in registry.metadata.items():
                         c_dict["metadata"].setdefault(k, v)
-                
+
                 # Inject system-level cost config into metadata so the processor can access it
                 if registry.cost:
                     if not c_dict["metadata"].get("cost"):

@@ -59,10 +59,7 @@ def _read_truncated(path: Path) -> str:
 
 
 def _build_payload(files: list[Path]) -> list[dict[str, str]]:
-    return [
-        {"path": str(p), "type": _file_type(p), "content": _read_truncated(p)}
-        for p in files
-    ]
+    return [{"path": str(p), "type": _file_type(p), "content": _read_truncated(p)} for p in files]
 
 
 def _estimate_tokens(prompt: str) -> int:
@@ -91,9 +88,7 @@ def review_batch(
     estimated = _estimate_tokens(SYSTEM_PROMPT + user_prompt)
 
     if estimated > max_tokens:
-        logger.warning(
-            f"Batch ~{estimated} tokens exceeds --max-tokens={max_tokens}; skipping LLM call"
-        )
+        logger.warning(f"Batch ~{estimated} tokens exceeds --max-tokens={max_tokens}; skipping LLM call")
         skip = ReviewFinding(
             file=str(files[0]) if files else ".",
             severity="warning",
@@ -121,26 +116,20 @@ def _build_client(provider: str):
     try:
         import instructor  # type: ignore[import-not-found]
     except ImportError as e:
-        raise LLMUnavailableError(
-            "instructor not installed. pip install lakelogic[ai] to enable Tier 2."
-        ) from e
+        raise LLMUnavailableError("instructor not installed. pip install lakelogic[ai] to enable Tier 2.") from e
 
     if provider == "anthropic":
         try:
             from anthropic import Anthropic  # type: ignore[import-not-found]
         except ImportError as e:
-            raise LLMUnavailableError(
-                "anthropic SDK not installed. pip install lakelogic[ai]"
-            ) from e
+            raise LLMUnavailableError("anthropic SDK not installed. pip install lakelogic[ai]") from e
         return instructor.from_anthropic(Anthropic())
 
     if provider == "openai":
         try:
             from openai import OpenAI  # type: ignore[import-not-found]
         except ImportError as e:
-            raise LLMUnavailableError(
-                "openai SDK not installed. pip install lakelogic[ai]"
-            ) from e
+            raise LLMUnavailableError("openai SDK not installed. pip install lakelogic[ai]") from e
         return instructor.from_openai(OpenAI())
 
     raise LLMUnavailableError(f"Unknown provider: {provider}")

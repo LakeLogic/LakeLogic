@@ -1616,7 +1616,9 @@ class DataProcessor:
                                 if _tag_source:
                                     df = pl.concat(
                                         [
-                                            pl.read_parquet(p, **_read_opts).with_columns(pl.lit(p).alias("_source_file"))
+                                            pl.read_parquet(p, **_read_opts).with_columns(
+                                                pl.lit(p).alias("_source_file")
+                                            )
                                             for p in file_paths
                                         ],
                                         how=_concat_how,
@@ -1628,7 +1630,9 @@ class DataProcessor:
                                 if _tag_source:
                                     df = pl.concat(
                                         [
-                                            pl.read_ndjson(p, **_read_opts).with_columns(pl.lit(p).alias("_source_file"))
+                                            pl.read_ndjson(p, **_read_opts).with_columns(
+                                                pl.lit(p).alias("_source_file")
+                                            )
                                             for p in file_paths
                                         ],
                                         how=_concat_how,
@@ -1657,7 +1661,9 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(
                                             [
-                                                pl.read_csv(p, **_read_opts).with_columns(pl.lit(p).alias("_source_file"))
+                                                pl.read_csv(p, **_read_opts).with_columns(
+                                                    pl.lit(p).alias("_source_file")
+                                                )
                                                 for p in file_paths
                                             ],
                                             how=_concat_how,
@@ -2363,7 +2369,9 @@ class DataProcessor:
                             else:
                                 logger.warning("⚠ Contract model.fields found but produced 0 Spark fields")
                         elif _fields_list:
-                            logger.info(f"✅ Contract schema exists but bypassed for native '{fmt}' format schema inference.")
+                            logger.info(
+                                f"✅ Contract schema exists but bypassed for native '{fmt}' format schema inference."
+                            )
                         else:
                             logger.warning("⚠ No contract model.fields found — Spark will infer schema")
 
@@ -2921,7 +2929,7 @@ class DataProcessor:
                     # adlfs drops the @account suffix from paths. If original URI had it, put it back.
                     if "@" in original_authority and p.startswith(original_authority.split("@")[0]):
                         container = original_authority.split("@")[0]
-                        reconstructed_path = p[len(container):]
+                        reconstructed_path = p[len(container) :]
                         if not reconstructed_path.startswith("/"):
                             reconstructed_path = "/" + reconstructed_path
                         full_uri = f"{protocol}://{original_authority}{reconstructed_path}"
@@ -3242,9 +3250,9 @@ class DataProcessor:
                 acct = netloc.split("@", 1)[-1].split(".", 1)[0]
 
             if acct:
-                # adlfs (used by pandas) will error if account_name is passed in kwargs 
-                # but already present in the URI. 
-                # Polars (Rust object_store) *requires* account_name in kwargs when 
+                # adlfs (used by pandas) will error if account_name is passed in kwargs
+                # but already present in the URI.
+                # Polars (Rust object_store) *requires* account_name in kwargs when
                 # using Service Principal auth, regardless of the URI format.
                 if getattr(self, "engine_name", "spark") in ("polars", "duckdb") or not uri_has_account:
                     opts["account_name"] = acct

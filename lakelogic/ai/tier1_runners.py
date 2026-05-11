@@ -546,9 +546,7 @@ def _parse_datacontract_diff(text: str, file_path: str) -> list["ReviewFinding"]
     return findings
 
 
-def run_datacontract_diff(
-    files: list[Path], *, base_ref: Optional[str] = None
-) -> list["ReviewFinding"]:
+def run_datacontract_diff(files: list[Path], *, base_ref: Optional[str] = None) -> list["ReviewFinding"]:
     """Run ``datacontract diff <base> <head>`` on each changed contract file.
 
     Args:
@@ -567,9 +565,7 @@ def run_datacontract_diff(
         if base_content is None:
             continue  # newly added contract — nothing to diff against
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as tmp:
             tmp.write(base_content)
             base_path = Path(tmp.name)
 
@@ -583,8 +579,7 @@ def run_datacontract_diff(
                 )
             except FileNotFoundError:
                 logger.warning(
-                    "datacontract CLI not installed; skipping breaking-change check. "
-                    "pip install lakelogic[review]"
+                    "datacontract CLI not installed; skipping breaking-change check. pip install lakelogic[review]"
                 )
                 return []
             except subprocess.TimeoutExpired:

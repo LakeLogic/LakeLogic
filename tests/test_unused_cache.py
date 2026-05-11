@@ -26,8 +26,7 @@ def test_flags_cache_never_used(tmp_path: Path) -> None:
 def test_flags_cache_used_once_as_info(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "j.py",
-        "df = spark.read.parquet('s3://x').cache()\n"
-        "df.write.parquet('s3://out')\n",
+        "df = spark.read.parquet('s3://x').cache()\ndf.write.parquet('s3://out')\n",
     )
     findings = scan_unused_cache([f])
     assert len(findings) == 1
@@ -37,9 +36,7 @@ def test_flags_cache_used_once_as_info(tmp_path: Path) -> None:
 def test_does_not_flag_cache_reused_multiple_times(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "j.py",
-        "df = spark.read.parquet('s3://x').cache()\n"
-        "a = df.filter('x > 0').count()\n"
-        "b = df.filter('x < 0').count()\n",
+        "df = spark.read.parquet('s3://x').cache()\na = df.filter('x > 0').count()\nb = df.filter('x < 0').count()\n",
     )
     assert scan_unused_cache([f]) == []
 

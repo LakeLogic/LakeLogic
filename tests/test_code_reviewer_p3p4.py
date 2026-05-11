@@ -99,9 +99,7 @@ def test_cache_key_changes_when_content_changes(tmp_path: Path) -> None:
 def test_cache_key_changes_when_provider_changes(tmp_path: Path) -> None:
     f = tmp_path / "x.py"
     f.write_text("x = 1\n")
-    assert review_cache.compute_cache_key([f], extra="anthropic") != review_cache.compute_cache_key(
-        [f], extra="openai"
-    )
+    assert review_cache.compute_cache_key([f], extra="anthropic") != review_cache.compute_cache_key([f], extra="openai")
 
 
 def test_cache_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,9 +109,7 @@ def test_cache_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert review_cache.load_cached_report("missing") is None
 
 
-def test_orchestrator_uses_cache_when_available(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_orchestrator_uses_cache_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LAKELOGIC_REVIEW_CACHE_DIR", str(tmp_path / "cache"))
     f = tmp_path / "x.py"
     f.write_text("x = 1\n")
@@ -141,9 +137,7 @@ def test_orchestrator_uses_cache_when_available(
     assert report.files_scanned == 99
 
 
-def test_orchestrator_skips_cache_with_no_cache_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_orchestrator_skips_cache_with_no_cache_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LAKELOGIC_REVIEW_CACHE_DIR", str(tmp_path / "cache"))
     f = tmp_path / "x.py"
     f.write_text("x = 1\n")

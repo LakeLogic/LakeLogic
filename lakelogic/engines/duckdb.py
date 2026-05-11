@@ -115,7 +115,7 @@ class DuckDBAdapter(EngineAdapter):
                         _dummy_proc = _DP.__new__(_DP)
                         _sopts = _dummy_proc._get_cloud_storage_options(link.path)
                         _dt = _DT(link.path, storage_options=_sopts)
-                        
+
                         pa_table = _dt.to_pyarrow_table()
                         if link.columns:
                             available = set(pa_table.column_names)

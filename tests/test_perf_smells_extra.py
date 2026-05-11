@@ -36,8 +36,7 @@ def test_flags_itertuples(tmp_path: Path) -> None:
 def test_flags_coalesce_one_in_pyspark_file(tmp_path: Path) -> None:
     f = _w(
         tmp_path / "j.py",
-        "import pyspark\n"
-        "df.coalesce(1).write.parquet('out')\n",
+        "import pyspark\ndf.coalesce(1).write.parquet('out')\n",
     )
     assert any(x.rule == "spark_coalesce_one" for x in scan_perf_smells([f]))
 
@@ -45,8 +44,7 @@ def test_flags_coalesce_one_in_pyspark_file(tmp_path: Path) -> None:
 def test_flags_repartition_one(tmp_path: Path) -> None:
     f = _w(
         tmp_path / "j.py",
-        "from pyspark.sql import SparkSession\n"
-        "df.repartition(1).write.parquet('out')\n",
+        "from pyspark.sql import SparkSession\ndf.repartition(1).write.parquet('out')\n",
     )
     assert any(x.rule == "spark_coalesce_one" for x in scan_perf_smells([f]))
 
@@ -64,8 +62,7 @@ def test_does_not_flag_coalesce_one_outside_pyspark(tmp_path: Path) -> None:
 def test_flags_show_in_production_file(tmp_path: Path) -> None:
     f = _w(
         tmp_path / "pipeline.py",
-        "import pyspark\n"
-        "df.show()\n",
+        "import pyspark\ndf.show()\n",
     )
     assert any(x.rule == "spark_show_in_prod" for x in scan_perf_smells([f]))
 
@@ -75,8 +72,7 @@ def test_does_not_flag_show_in_test_file(tmp_path: Path) -> None:
     test_dir.mkdir()
     f = _w(
         test_dir / "test_pipeline.py",
-        "import pyspark\n"
-        "df.show()\n",
+        "import pyspark\ndf.show()\n",
     )
     assert not any(x.rule == "spark_show_in_prod" for x in scan_perf_smells([f]))
 
@@ -84,8 +80,7 @@ def test_does_not_flag_show_in_test_file(tmp_path: Path) -> None:
 def test_does_not_flag_show_in_test_named_file(tmp_path: Path) -> None:
     f = _w(
         tmp_path / "test_pipeline.py",
-        "import pyspark\n"
-        "df.printSchema()\n",
+        "import pyspark\ndf.printSchema()\n",
     )
     assert not any(x.rule == "spark_show_in_prod" for x in scan_perf_smells([f]))
 
@@ -118,8 +113,7 @@ def test_does_not_flag_local_glob(tmp_path: Path) -> None:
 def test_flags_withcolumn_in_for_loop(tmp_path: Path) -> None:
     f = _w(
         tmp_path / "j.py",
-        "for col in cols:\n"
-        "    df = df.withColumn(col, F.upper(F.col(col)))\n",
+        "for col in cols:\n    df = df.withColumn(col, F.upper(F.col(col)))\n",
     )
     findings = scan_withcolumn_in_loop([f])
     assert findings and findings[0].rule == "withcolumn_in_loop"
@@ -128,9 +122,7 @@ def test_flags_withcolumn_in_for_loop(tmp_path: Path) -> None:
 def test_flags_withcolumn_in_while_loop(tmp_path: Path) -> None:
     f = _w(
         tmp_path / "j.py",
-        "while cond:\n"
-        "    df = df.withColumn('x', F.lit(1))\n"
-        "    cond = check(df)\n",
+        "while cond:\n    df = df.withColumn('x', F.lit(1))\n    cond = check(df)\n",
     )
     assert scan_withcolumn_in_loop([f])
 

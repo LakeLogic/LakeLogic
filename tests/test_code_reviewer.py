@@ -91,9 +91,7 @@ def test_collect_truncates_to_max_files(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_review_no_key_emits_skip_notice(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_review_no_key_emits_skip_notice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     f = tmp_path / "ok.py"
@@ -103,9 +101,7 @@ def test_run_review_no_key_emits_skip_notice(
     assert report.ai_provider == "none"
 
 
-def test_run_review_no_llm_flag_skips_silently(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_review_no_llm_flag_skips_silently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     f = tmp_path / "ok.py"
     f.write_text("x = 1\n")
