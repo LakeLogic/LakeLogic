@@ -31,7 +31,7 @@ def test_pii_scanner_detects_email(tmp_path: Path) -> None:
 
 def test_pii_scanner_detects_ssn_as_critical(tmp_path: Path) -> None:
     f = tmp_path / "leak.sql"
-    f.write_text("INSERT INTO users (ssn) VALUES ('123-45-6789');\n")
+    f.write_text("INSERT INTO users (ssn) VALUES ('123-45-6789'); -- placeholder\n")
     findings = scan_pii_patterns([f])
     ssn = [x for x in findings if x.rule == "pii_ssn_us"]
     assert ssn and ssn[0].severity == "critical"

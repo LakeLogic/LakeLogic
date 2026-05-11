@@ -23,7 +23,7 @@ def test_polars_helper_sql_normalization_and_native_derives():
     assert "AS VARCHAR" in normalized
     assert "AS BIGINT" in normalized
 
-    lf = pl.DataFrame({"dt_text": ["20240131"], "ts_micros": [1700000000000000], "id": ["A"], "suffix": [7]}).lazy()
+    lf = pl.DataFrame({"dt_text": ["20240131"], "ts_micros": [1700000000000000], "id": ["A"], "suffix": [7]}).lazy()  # placeholder
     date_lf = adapter._try_native_polars_derive("try_to_date(CAST(dt_text AS STRING), 'yyyyMMdd')", "parsed_date", lf)
     date_df = date_lf.collect()
     assert "parsed_date" in date_df.columns
