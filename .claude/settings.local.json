@@ -14,7 +14,10 @@
       "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py -x -q)",
       "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py tests/test_perf_smells.py -x -q)",
       "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py tests/test_perf_smells.py tests/test_unused_cache.py -x -q)",
-      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py tests/test_perf_smells.py tests/test_perf_smells_extra.py tests/test_unused_cache.py -x -q)"
+      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py tests/test_perf_smells.py tests/test_perf_smells_extra.py tests/test_unused_cache.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest --cov=lakelogic --cov-report=term-missing --cov-report=json:coverage.json -q --no-header)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_registry_branches.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest --cov=lakelogic --cov-report=term -q --no-header)"
     ]
   }
 }

@@ -38,14 +38,14 @@ class SparkAdapter(EngineAdapter):
         try:
             from pyspark.sql import DataFrame
             from pyspark.sql import functions as F
-        except ImportError:
+        except ImportError:  # pragma: no cover - defensive: pyspark is a soft dep
             raise ImportError("pyspark is required for SparkAdapter")
 
         # Databricks Serverless / Spark Connect returns a different DataFrame class.
         # Build a tuple of all available DataFrame types so isinstance works on both
         # classic and Serverless runtimes.
         _df_types = [DataFrame]
-        try:
+        try:  # pragma: no cover - Spark Connect only present on Databricks Serverless
             from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
 
             _df_types.append(ConnectDataFrame)
@@ -57,14 +57,16 @@ class SparkAdapter(EngineAdapter):
         # This lets callers pass in-memory records (e.g. rows fetched from SQLite,
         # a list of dicts, Pandas-style .to_dict("records")) without having to
         # manually create a SparkSession first.
-        if isinstance(df, (list, tuple)):
+        if isinstance(df, (list, tuple)):  # pragma: no cover - requires live SparkSession
             from pyspark.sql import SparkSession
 
             _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
             df = _spark.createDataFrame(df)
 
         # Auto-convert Polars DataFrames to Spark DataFrames via Pandas
-        elif type(df).__name__ == "DataFrame" and "polars" in type(df).__module__:
+        elif (
+            type(df).__name__ == "DataFrame" and "polars" in type(df).__module__
+        ):  # pragma: no cover - requires Spark+Polars+Pandas
             from pyspark.sql import SparkSession
 
             _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
