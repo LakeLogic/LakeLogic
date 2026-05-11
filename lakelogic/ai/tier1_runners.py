@@ -246,7 +246,7 @@ _PERF_PATTERNS: list[tuple[str, str, re.Pattern[str], str, str, bool, bool]] = [
     (
         "pandas_read_csv_no_chunksize",
         "info",
-        re.compile(r"\bread_csv\s*\((?![^)]*chunksize\s*=)"),
+        re.compile(r"(?<!pl\.)\bread_csv\s*\((?![^)]*chunksize\s*=)"),
         "pd.read_csv without chunksize loads the whole file into memory.",
         "Pass chunksize=N for large files, or switch to polars/duckdb.",
         False,
@@ -383,7 +383,10 @@ def scan_withcolumn_in_loop(files: list[Path]) -> list["ReviewFinding"]:
                                 ".withColumn() inside a loop adds one logical-plan node per "
                                 "iteration — slow planning, risk of stack overflow on large loops."
                             ),
-                            suggestion="Use .select() with a list comprehension of columns, or chain .withColumns({...}) once.",
+                            suggestion=(
+                                "Use .select() with a list comprehension of columns, "
+                                "or chain .withColumns({...}) once."
+                            ),
                         )
                     )
                     break  # one finding per loop is enough

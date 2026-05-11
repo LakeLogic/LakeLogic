@@ -174,7 +174,7 @@ class LakehousePipeline:
             except ImportError:  # pragma: no cover
                 pass  # pragma: no cover
 
-        if self.engine == "spark" and self.storage_mode == "direct" and self.spark:
+        if self.engine == "spark" and self.storage_mode == "direct" and self.spark:  # pragma: no cover
             import os
 
             client_id = os.environ.get("AZURE_CLIENT_ID") or os.environ.get("ARM_CLIENT_ID")

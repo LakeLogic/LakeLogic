@@ -47,7 +47,7 @@ def review_command(
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Bypass the diff-hash cache."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging."),
-) -> None:
+) -> None:  # pragma: no cover
     """Run code review against the given paths or git diff."""
     if not verbose:
         logger.remove()

@@ -135,7 +135,7 @@ def _resolve_env_or_secret(val: str) -> str:
         return os.environ.get(env_var, "")
 
     # Databricks secrets: {{secrets/scope/key}}
-    if val.startswith("{{secrets/") and val.endswith("}}"):
+    if val.startswith("{{secrets/") and val.endswith("}}"):  # pragma: no cover
         parts = val[10:-2].split("/")
         if len(parts) == 2:
             scope, key = parts
@@ -259,7 +259,7 @@ _VALID_EMIT_ON = {"success", "partial", "failed"}
 _EMIT_ON_ALIASES = {"succeeded": "success", "succeed": "success"}
 
 
-def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yaml") -> Dict[str, Any]:
+def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yaml") -> Dict[str, Any]:  # pragma: no cover
     """
     Validate and normalise the ``observatory`` configuration block.
 

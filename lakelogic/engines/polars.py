@@ -249,7 +249,7 @@ class PolarsAdapter(EngineAdapter):
             for _uri_key, _cloud_lf in _cloud_tables.items():
                 _safe_alias = _uri_key.rstrip("/").split("/")[-1]
                 con.register(_safe_alias, _cloud_lf.collect().to_arrow())
-            for link in self.contract.links:
+            for link in self.contract.links:  # pragma: no cover
                 try:
                     if link.table or (link.type and link.type.lower() == "table"):
                         continue

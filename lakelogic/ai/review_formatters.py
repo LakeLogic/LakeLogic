@@ -327,7 +327,10 @@ def _post_azure_threads(
             if not file_path or not line:
                 continue  # need both to anchor an inline comment
 
-            content = f"**[{f.get('severity', 'info').upper()}] {f.get('category')}/{f.get('rule')}**\n\n{f.get('message', '')}"
+            content = (
+                f"**[{f.get('severity', 'info').upper()}] {f.get('category')}/"
+                f"{f.get('rule')}**\n\n{f.get('message', '')}"
+            )
             if f.get("suggestion"):
                 content += f"\n\n**Fix:** {f['suggestion']}"
 

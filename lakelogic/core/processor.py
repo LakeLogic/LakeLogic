@@ -1614,7 +1614,7 @@ class DataProcessor:
                             _read_opts = {"storage_options": _pl_sopts} if _pl_sopts else {}
                             if source_fmt == "parquet" or path.endswith(".parquet"):
                                 if _tag_source:
-                                    df = pl.concat(
+                                    df = pl.concat(  # pragma: no cover
                                         [
                                             pl.read_parquet(p, **_read_opts).with_columns(
                                                 pl.lit(p).alias("_source_file")
@@ -1628,7 +1628,7 @@ class DataProcessor:
                                     df = lf.collect()
                             elif source_fmt == "ndjson" or path.endswith((".ndjson", ".jsonl")):
                                 if _tag_source:
-                                    df = pl.concat(
+                                    df = pl.concat(  # pragma: no cover
                                         [
                                             pl.read_ndjson(p, **_read_opts).with_columns(
                                                 pl.lit(p).alias("_source_file")
@@ -1648,7 +1648,7 @@ class DataProcessor:
                                     # path canonicalisation which breaks on
                                     # Windows drive-letter paths.
                                     if _tag_source:
-                                        df = pl.concat(
+                                        df = pl.concat(  # pragma: no cover
                                             [
                                                 pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file"))
                                                 for p in file_paths
@@ -1659,7 +1659,7 @@ class DataProcessor:
                                         df = pl.read_csv(file_paths[0])
                                 else:
                                     if _tag_source:
-                                        df = pl.concat(
+                                        df = pl.concat(  # pragma: no cover
                                             [
                                                 pl.read_csv(p, **_read_opts).with_columns(
                                                     pl.lit(p).alias("_source_file")

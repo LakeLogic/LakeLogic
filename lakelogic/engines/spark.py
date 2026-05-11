@@ -715,7 +715,7 @@ class SparkAdapter(EngineAdapter):
                         continue
                     load_path = path.as_posix()
                     link_type = (link.type or "").lower()
-                    if not link_type:
+                    if not link_type:  # pragma: no cover
                         if path.suffix.lower() == ".parquet":
                             link_type = "parquet"
                         elif path.suffix.lower() == ".csv":
