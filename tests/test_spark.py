@@ -50,13 +50,16 @@ def test_spark_adapter_try_cast():
     from pyspark.sql import SparkSession
 
     spark = SparkSession.builder.getOrCreate()
-    df = spark.createDataFrame([{"my_int": "1"}, {"my_int": "invalid"}])
+    try:
+        df = spark.createDataFrame([{"my_int": "1"}, {"my_int": "invalid"}])
 
-    # Apply schema should use try_cast and not crash
-    result_df, rules_res = adapter._apply_schema(df)
+        # Apply schema should use try_cast and not crash
+        result_df, rules_res = adapter._apply_schema(df)
 
-    # "invalid" should be cast to null, and the error column should be populated
-    rows = result_df.collect()
-    assert rows[0]["my_int"] == 1
-    assert rows[1]["my_int"] is None
-    assert rows[1]["__type_err_my_int"] is not None
+        # "invalid" should be cast to null, and the error column should be populated
+        rows = result_df.collect()
+        assert rows[0]["my_int"] == 1
+        assert rows[1]["my_int"] is None
+        assert rows[1]["__type_err_my_int"] is not None
+    finally:
+        spark.stop()
