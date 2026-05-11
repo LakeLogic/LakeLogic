@@ -67,3 +67,55 @@ REGULATION_HIPAA = "hipaa"
 REGULATION_CCPA = "ccpa"
 REGULATION_SOX = "sox"
 REGULATION_PCI_DSS = "pci_dss"
+
+
+# ── System Table Schemas (Spark DDL) ─────────────────────────────────────────
+# Used by the pipeline runner to bootstrap system tables in Unity Catalog.
+# The runner generates CREATE TABLE IF NOT EXISTS ... (schema) USING DELTA.
+# These must match the schemas written by run_log.py and the engine adapters.
+
+SYSTEM_TABLE_SCHEMA_LOGS = (
+    "  pipeline_run_id STRING,\n"
+    "  run_id STRING,\n"
+    "  timestamp STRING,\n"
+    "  start_time STRING,\n"
+    "  end_time STRING,\n"
+    "  run_duration_seconds DOUBLE,\n"
+    "  engine STRING,\n"
+    "  contract STRING,\n"
+    "  contract_version STRING,\n"
+    "  stage STRING,\n"
+    "  dataset STRING,\n"
+    "  domain STRING,\n"
+    "  system STRING,\n"
+    "  environment STRING,\n"
+    "  data_layer STRING,\n"
+    "  status STRING,\n"
+    "  error_message STRING,\n"
+    "  source_path STRING,\n"
+    "  counts_source BIGINT,\n"
+    "  counts_total BIGINT,\n"
+    "  counts_good BIGINT,\n"
+    "  counts_quarantined BIGINT,\n"
+    "  quarantine_ratio DOUBLE,\n"
+    "  estimated_cost DOUBLE,\n"
+    "  cost_currency STRING,\n"
+    "  cost_confidence STRING,\n"
+    "  max_source_mtime DOUBLE,\n"
+    "  max_watermark_value STRING,\n"
+    "  dlt_state_json STRING,\n"
+    "  slo_json STRING,\n"
+    "  report_json STRING"
+)
+
+SYSTEM_TABLE_SCHEMA_QUARANTINE = (
+    "  _lakelogic_errors STRING,\n"
+    "  _lakelogic_categories STRING,\n"
+    "  quarantine_state STRING,\n"
+    "  quarantine_reprocessed BOOLEAN,\n"
+    "  _lakelogic_source STRING,\n"
+    "  _lakelogic_run_id STRING,\n"
+    "  _lakelogic_processed_at TIMESTAMP,\n"
+    "  _lakelogic_entity STRING,\n"
+    "  _lakelogic_layer STRING"
+)

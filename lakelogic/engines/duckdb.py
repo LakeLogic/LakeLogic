@@ -106,12 +106,26 @@ class DuckDBAdapter(EngineAdapter):
                 if not link.path:
                     continue
 
-                # Skip remote paths for now
+                # Load remote paths using deltalake and register via PyArrow
                 if link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://")):
-                    logger.warning(
-                        f"Link '{link.name}' uses remote path '{link.path}'. "
-                        "Remote link loading not yet supported in DuckDB engine."
-                    )
+                    try:
+                        from deltalake import DeltaTable as _DT
+                        from lakelogic.core.processor import DataProcessor as _DP
+
+                        _dummy_proc = _DP.__new__(_DP)
+                        _sopts = _dummy_proc._get_cloud_storage_options(link.path)
+                        _dt = _DT(link.path, storage_options=_sopts)
+                        
+                        pa_table = _dt.to_pyarrow_table()
+                        if link.columns:
+                            available = set(pa_table.column_names)
+                            keep = [c for c in link.columns if c in available]
+                            if keep:
+                                pa_table = pa_table.select(keep)
+                        self.con.register(link.name, pa_table)
+                        logger.info(f"Registered remote link '{link.name}' from {link.path}")
+                    except Exception as e:
+                        logger.warning(f"Could not load remote link '{link.name}' from {link.path}: {e}")
                     continue
 
                 path = Path(link.path)

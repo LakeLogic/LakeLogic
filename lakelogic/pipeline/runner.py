@@ -160,6 +160,18 @@ class LakehousePipeline:
         self.storage_mode = getattr(registry, "storage_mode", "uc")
         self.run_id = str(uuid.uuid4())
 
+        # ── Engine / storage mode compatibility check ─────────────────────
+        # Unity Catalog (uc) mode requires Spark for Volume access, table
+        # materialization, and Delta writes.  Polars and DuckDB engines only
+        # support 'direct' (cloud storage) or 'local' modes.
+        if self.storage_mode == "uc" and self.engine in ("polars", "duckdb"):
+            raise ValueError(
+                f"Engine '{self.engine}' is not compatible with storage_mode='uc' (Unity Catalog). "
+                f"Unity Catalog requires Spark for Volume access and table operations.\n"
+                f"  → Use engine='spark' for storage_mode='uc'\n"
+                f"  → Use storage_mode='direct' for engine='{self.engine}'"
+            )
+
         if self.engine == "spark" and not self.spark:
             # Try to auto-resolve if inside Databricks
             try:  # pragma: no cover
@@ -169,6 +181,27 @@ class LakehousePipeline:
                 self.spark = SparkSession.builder.getOrCreate()  # pragma: no cover
             except ImportError:  # pragma: no cover
                 pass  # pragma: no cover
+
+        if self.engine == "spark" and self.storage_mode == "direct" and self.spark:
+            import os
+            
+            client_id = os.environ.get("AZURE_CLIENT_ID") or os.environ.get("ARM_CLIENT_ID")
+            client_secret = os.environ.get("AZURE_CLIENT_SECRET") or os.environ.get("ARM_CLIENT_SECRET")
+            tenant_id = os.environ.get("AZURE_TENANT_ID") or os.environ.get("ARM_TENANT_ID")
+            account_key = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY")
+            
+            if client_id and client_secret and tenant_id:
+                self.spark.conf.set("fs.azure.account.auth.type", "OAuth")
+                self.spark.conf.set("fs.azure.account.oauth.provider.type", "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider")
+                self.spark.conf.set("fs.azure.account.oauth2.client.id", client_id)
+                self.spark.conf.set("fs.azure.account.oauth2.client.secret", client_secret)
+                self.spark.conf.set("fs.azure.account.oauth2.client.endpoint", f"https://login.microsoftonline.com/{tenant_id}/oauth2/token")
+            elif not account_key:
+                raise ValueError(
+                    "Spark in 'direct' mode requires Azure credentials. "
+                    "Please provide AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_TENANT_ID "
+                    "(or AZURE_STORAGE_ACCOUNT_KEY) in os.environ."
+                )
 
         if self.spark:
             try:
@@ -717,9 +750,21 @@ class LakehousePipeline:
         where_clause = " AND ".join(conditions)
         try:
             if self.spark:
-                # Check if the run_log table exists before attempting DELETE
-                if self.spark.catalog.tableExists(_rl_table):
-                    self.spark.sql(f"DELETE FROM {_rl_table} WHERE {where_clause}")
+                _is_uri = _rl_table.startswith(("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://", "file://"))
+                _table_ref = f"delta.`{_rl_table}`" if _is_uri else _rl_table
+                
+                _exists = False
+                if _is_uri:
+                    try:
+                        self.spark.read.format("delta").load(_rl_table).limit(1)
+                        _exists = True
+                    except Exception:
+                        _exists = False
+                else:
+                    _exists = self.spark.catalog.tableExists(_rl_table)
+
+                if _exists:
+                    self.spark.sql(f"DELETE FROM {_table_ref} WHERE {where_clause}")
                     logger.info(f"  Cleared run log entries ({', '.join(params_desc)}) from {_rl_table}")
                 else:
                     logger.debug(
@@ -1515,22 +1560,49 @@ class LakehousePipeline:
         logger.info(f"Pipeline storage mode: {self.storage_mode}")
 
         # ── 0. Native System Table Bootstrap (Unity Catalog) ──────────────────
+        # Uses the same pattern as generate_ddl: CREATE TABLE with an explicit
+        # schema + LOCATION, so tables are always created with or without data.
+        # Schemas are defined centrally in core.constants to stay in sync with
+        # run_log.py and the engine adapters.
         if (
             self.engine in ("spark", "databricks")
             and self.spark
             and getattr(self.registry.storage, "domain_catalog", None)
         ):
+            from lakelogic.core.constants import (
+                SYSTEM_TABLE_SCHEMA_LOGS,
+                SYSTEM_TABLE_SCHEMA_QUARANTINE,
+            )
+
             catalog_schema = self.registry.storage.domain_catalog
+
+            # When quarantine_root is configured, per-contract quarantine tables
+            # are written to a dedicated UC schema (e.g. `catalog.quarantine`).
+            # A system-level _quarantine table at quarantine_path would overlap
+            # with those per-entity tables, causing LOCATION_OVERLAP errors.
+            # Only bootstrap _quarantine when there is NO quarantine_root.
+            has_quarantine_root = bool(getattr(self.registry.storage, "quarantine_root", None))
+
             sys_tables = {
-                "_logs": getattr(self.registry.storage, "log_path", None),
-                "_quarantine": getattr(self.registry.storage, "quarantine_path", None),
+                "_logs": (getattr(self.registry.storage, "log_path", None), SYSTEM_TABLE_SCHEMA_LOGS),
             }
-            for tbl, path in sys_tables.items():
+            if not has_quarantine_root:
+                sys_tables["_quarantine"] = (
+                    getattr(self.registry.storage, "quarantine_path", None),
+                    SYSTEM_TABLE_SCHEMA_QUARANTINE,
+                )
+
+            for tbl, (path, schema_def) in sys_tables.items():
                 if not path:
                     continue
-                # For non-table targets, wrap physical path as an external table
                 if not str(path).startswith("table:"):
-                    ddl = f"CREATE TABLE IF NOT EXISTS {catalog_schema}.{tbl} USING DELTA LOCATION '{path}'"
+                    ddl = (
+                        f"CREATE TABLE IF NOT EXISTS {catalog_schema}.{tbl} (\n"
+                        f"{schema_def}\n"
+                        f")\n"
+                        f"USING DELTA\n"
+                        f"LOCATION '{path}'"
+                    )
                     if dry_run or ddl_only:
                         logger.info(f"DRY RUN System DDL Preview for {tbl}:\n{ddl}")
                     if not dry_run:
@@ -1539,7 +1611,7 @@ class LakehousePipeline:
                             if not ddl_only:
                                 logger.debug(f"Ensured Unity Catalog materialization for {catalog_schema}.{tbl}")
                         except Exception as e:
-                            logger.warning(f"Could not natively bootstrap system table {tbl}: {e}")
+                            logger.warning(f"Could not bootstrap system table {tbl}: {e}")
 
         resets = {layer.strip().lower() for layer in reset_layers.split(",") if layer.strip()}
         reloads = {layer.strip().lower() for layer in reload_layers.split(",") if layer.strip()}
@@ -2158,6 +2230,7 @@ class LakehousePipeline:
                 or (isinstance(df_good, list) and len(df_good) == 0)
                 or (hasattr(df_good, "is_empty") and df_good.is_empty())
                 or (hasattr(df_good, "__len__") and len(df_good) == 0)
+                or (hasattr(df_good, "isEmpty") and df_good.isEmpty())
             )
 
             is_bad_empty = (
@@ -2165,6 +2238,7 @@ class LakehousePipeline:
                 or (isinstance(df_bad, list) and len(df_bad) == 0)
                 or (hasattr(df_bad, "is_empty") and df_bad.is_empty())
                 or (hasattr(df_bad, "__len__") and len(df_bad) == 0)
+                or (hasattr(df_bad, "isEmpty") and df_bad.isEmpty())
             )
 
             _status = "success"
@@ -2183,27 +2257,35 @@ class LakehousePipeline:
                     import polars as pl
 
                     if isinstance(df_good, pl.DataFrame):
-                        void_cols = [
-                            col
-                            for col, t in zip(df_good.columns, df_good.dtypes)
-                            if str(t) in ("Null", "null", "Void", "void")
-                        ]
-                        if void_cols:
-                            df_good = df_good.with_columns([pl.col(c).cast(pl.Utf8) for c in void_cols])
-                        df_good = self.spark.createDataFrame(df_good.to_pandas())
+                        if df_good.is_empty() and len(df_good.columns) == 0:
+                            from pyspark.sql.types import StructType
+                            df_good = self.spark.createDataFrame([], StructType([]))
+                        else:
+                            void_cols = [
+                                col
+                                for col, t in zip(df_good.columns, df_good.dtypes)
+                                if str(t) in ("Null", "null", "Void", "void")
+                            ]
+                            if void_cols:
+                                df_good = df_good.with_columns([pl.col(c).cast(pl.Utf8) for c in void_cols])
+                            df_good = self.spark.createDataFrame(df_good.to_pandas())
                     else:
                         df_good = self.spark.createDataFrame(df_good)  # pragma: no cover
 
                     if df_bad is not None and not hasattr(df_bad, "sparkSession"):
                         if isinstance(df_bad, pl.DataFrame):
-                            void_cols = [
-                                col
-                                for col, t in zip(df_bad.columns, df_bad.dtypes)
-                                if str(t) in ("Null", "null", "Void", "void")
-                            ]
-                            if void_cols:
-                                df_bad = df_bad.with_columns([pl.col(c).cast(pl.Utf8) for c in void_cols])
-                            df_bad = self.spark.createDataFrame(df_bad.to_pandas())
+                            if df_bad.is_empty() and len(df_bad.columns) == 0:
+                                from pyspark.sql.types import StructType
+                                df_bad = self.spark.createDataFrame([], StructType([]))
+                            else:
+                                void_cols = [
+                                    col
+                                    for col, t in zip(df_bad.columns, df_bad.dtypes)
+                                    if str(t) in ("Null", "null", "Void", "void")
+                                ]
+                                if void_cols:
+                                    df_bad = df_bad.with_columns([pl.col(c).cast(pl.Utf8) for c in void_cols])
+                                df_bad = self.spark.createDataFrame(df_bad.to_pandas())
                         else:
                             df_bad = self.spark.createDataFrame(df_bad)  # pragma: no cover
 
@@ -2225,7 +2307,19 @@ class LakehousePipeline:
             row_count = rows_good if rows_good is not None else "?"
 
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
-            processor.materialize(df_good, df_bad)
+            
+            _is_empty_run = (is_good_empty or rows_good == 0) and (is_bad_empty or rows_bad == 0 or rows_bad is None)
+            
+            if _is_empty_run:
+                # Avoid empty Delta transactions that increment version numbers unnecessarily.
+                # Use DDL engine to ensure target tables exist instead.
+                try:
+                    processor.create_table(backend=self.engine)
+                    logger.debug(f"Ensured target schema exists via DDL for {c.entity}")
+                except Exception as ddl_e:
+                    logger.debug(f"DDL check failed for {c.entity}: {ddl_e}")
+            else:
+                processor.materialize(df_good, df_bad)
 
             if rows_bad and rows_bad > 0:
                 _q_config = getattr(processor.contract, "quarantine", None)

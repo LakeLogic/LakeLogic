@@ -597,14 +597,19 @@ class DomainRegistry(BaseModel):
             if not c.enabled:
                 continue
 
-            # Resolve {domain}/{system}/{*_layer} placeholders in the contract path
+            # Resolve {domain}/{system}/{*_layer} placeholders in the contract path.
+            # IMPORTANT: Layer aliases (bronze_layer, silver_layer, gold_layer) control
+            # table and storage naming — NOT file discovery.  Contract paths on disk use
+            # the canonical layer names (bronze, silver, gold), so we resolve {*_layer}
+            # placeholders to those literals here.  The alias values are still applied
+            # inside contract *content* (e.g. info.table_name) at the storage_vars step.
             resolved_contract_path = c.path
             if "{" in resolved_contract_path:
                 resolved_contract_path = resolved_contract_path.replace("{domain}", registry.domain)
                 resolved_contract_path = resolved_contract_path.replace("{system}", registry.system)
-                resolved_contract_path = resolved_contract_path.replace("{bronze_layer}", registry.bronze_layer)
-                resolved_contract_path = resolved_contract_path.replace("{silver_layer}", registry.silver_layer)
-                resolved_contract_path = resolved_contract_path.replace("{gold_layer}", registry.gold_layer)
+                resolved_contract_path = resolved_contract_path.replace("{bronze_layer}", "bronze")
+                resolved_contract_path = resolved_contract_path.replace("{silver_layer}", "silver")
+                resolved_contract_path = resolved_contract_path.replace("{gold_layer}", "gold")
 
             # Resolve the absolute path relative to the registry file
             c_path = Path(resolved_contract_path)
@@ -683,14 +688,22 @@ class DomainRegistry(BaseModel):
                         )
 
                 # Inject system-level metadata defaults (e.g. run_log_dir)
+                if not c_dict.get("metadata"):
+                    c_dict["metadata"] = {}
+                
                 if registry.metadata:
-                    if not c_dict.get("metadata"):
-                        c_dict["metadata"] = dict(registry.metadata)
+                    for k, v in registry.metadata.items():
+                        c_dict["metadata"].setdefault(k, v)
+                
+                # Inject system-level cost config into metadata so the processor can access it
+                if registry.cost:
+                    if not c_dict["metadata"].get("cost"):
+                        c_dict["metadata"]["cost"] = dict(registry.cost)
                     else:
-                        for k, v in registry.metadata.items():
-                            c_dict["metadata"].setdefault(k, v)
-                    # Resolve any remaining placeholders in metadata values
-                    c_dict["metadata"] = _resolve_placeholders(c_dict["metadata"], storage_vars)
+                        c_dict["metadata"]["cost"] = _deep_merge(dict(registry.cost), c_dict["metadata"]["cost"])
+
+                # Resolve any remaining placeholders in metadata values
+                c_dict["metadata"] = _resolve_placeholders(c_dict["metadata"], storage_vars)
 
                 # Inject system-level lineage, quarantine, and observatory defaults
                 for section in ("lineage", "quarantine", "observatory"):

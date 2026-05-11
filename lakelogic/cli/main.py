@@ -22,6 +22,7 @@ import yaml
 import json
 
 from lakelogic.core.processor import DataProcessor
+from lakelogic.cli.review import review_command
 
 app = typer.Typer(
     name="lakelogic",
@@ -36,6 +37,8 @@ app = typer.Typer(
     rich_markup_mode="rich",  # enable Rich markup in help strings
     pretty_exceptions_enable=False,
 )
+
+app.command(name="review", rich_help_panel="Code Quality")(review_command)
 
 
 @app.command(rich_help_panel="Contract Execution")

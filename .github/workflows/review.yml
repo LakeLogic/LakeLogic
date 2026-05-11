@@ -1,0 +1,49 @@
+name: LakeLogic Review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # for SARIF upload
+  pull-requests: write     # for inline annotations
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # required for --diff against origin/main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache LakeLogic review results
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/lakelogic/review
+          key: lakelogic-review-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            lakelogic-review-
+
+      - name: Install
+        run: pip install -e .[review]
+
+      - name: Run review (Tier 1 always; Tier 2 if ANTHROPIC_API_KEY set)
+        run: |
+          lakelogic review \
+            --diff origin/${{ github.base_ref }} \
+            --format sarif \
+            -o review.sarif \
+            --fail-on critical
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: review.sarif

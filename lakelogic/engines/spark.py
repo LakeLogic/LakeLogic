@@ -702,25 +702,37 @@ class SparkAdapter(EngineAdapter):
                 if not link.path:
                     continue
 
-                if link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://")):
-                    logger.warning(
-                        f"Link '{link.name}' uses remote path '{link.path}'. Local-only loading supported in OSS demo."
-                    )
-                    continue
-
-                path = Path(link.path)
-                if not path.is_absolute() and hasattr(self.contract, "_base_path"):
-                    path = Path(self.contract._base_path) / path
-                if not path.exists():
-                    logger.warning(f"Link file not found: {path}")
-                    continue
-
-                if path.suffix.lower() == ".parquet":
-                    ref_df = spark.read.parquet(path.as_posix())
-                elif path.suffix.lower() == ".csv":
-                    ref_df = spark.read.option("header", "true").csv(path.as_posix())
+                is_remote = link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://"))
+                if is_remote:
+                    load_path = link.path
+                    link_type = (link.type or "delta").lower()
                 else:
-                    logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
+                    path = Path(link.path)
+                    if not path.is_absolute() and hasattr(self.contract, "_base_path"):
+                        path = Path(self.contract._base_path) / path
+                    if not path.exists():
+                        logger.warning(f"Link file not found: {path}")
+                        continue
+                    load_path = path.as_posix()
+                    link_type = (link.type or "").lower()
+                    if not link_type:
+                        if path.suffix.lower() == ".parquet":
+                            link_type = "parquet"
+                        elif path.suffix.lower() == ".csv":
+                            link_type = "csv"
+                        elif path.is_dir() and (path / "_delta_log").exists():
+                            link_type = "delta"
+                        else:
+                            link_type = "parquet"
+
+                if link_type == "delta":
+                    ref_df = spark.read.format("delta").load(load_path)
+                elif link_type == "parquet":
+                    ref_df = spark.read.parquet(load_path)
+                elif link_type == "csv":
+                    ref_df = spark.read.option("header", "true").csv(load_path)
+                else:
+                    logger.warning(f"Unsupported or unknown link format for {link.name}: {link_type}")
                     continue
 
                 # Column projection — only keep specified columns

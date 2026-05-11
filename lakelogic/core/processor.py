@@ -1611,11 +1611,12 @@ class DataProcessor:
                             # rather than just the parent directory.
                             _tag_source = len(file_paths) > 1
 
+                            _read_opts = {"storage_options": _pl_sopts} if _pl_sopts else {}
                             if source_fmt == "parquet" or path.endswith(".parquet"):
                                 if _tag_source:
                                     df = pl.concat(
                                         [
-                                            pl.read_parquet(p).with_columns(pl.lit(p).alias("_source_file"))
+                                            pl.read_parquet(p, **_read_opts).with_columns(pl.lit(p).alias("_source_file"))
                                             for p in file_paths
                                         ],
                                         how=_concat_how,
@@ -1627,7 +1628,7 @@ class DataProcessor:
                                 if _tag_source:
                                     df = pl.concat(
                                         [
-                                            pl.read_ndjson(p).with_columns(pl.lit(p).alias("_source_file"))
+                                            pl.read_ndjson(p, **_read_opts).with_columns(pl.lit(p).alias("_source_file"))
                                             for p in file_paths
                                         ],
                                         how=_concat_how,
@@ -1656,7 +1657,7 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(
                                             [
-                                                pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file"))
+                                                pl.read_csv(p, **_read_opts).with_columns(pl.lit(p).alias("_source_file"))
                                                 for p in file_paths
                                             ],
                                             how=_concat_how,
@@ -2316,7 +2317,7 @@ class DataProcessor:
                             f"fields_list={len(_fields_list) if _fields_list else 'None'}"
                         )
 
-                        if _fields_list:
+                        if _fields_list and str(fmt).lower() not in ("delta", "iceberg", "hudi"):
                             from pyspark.sql.types import (
                                 StructType,
                                 StructField,
@@ -2361,6 +2362,8 @@ class DataProcessor:
                                 logger.info(f"✅ Applied contract schema ({len(spark_fields)} fields) to Spark reader")
                             else:
                                 logger.warning("⚠ Contract model.fields found but produced 0 Spark fields")
+                        elif _fields_list:
+                            logger.info(f"✅ Contract schema exists but bypassed for native '{fmt}' format schema inference.")
                         else:
                             logger.warning("⚠ No contract model.fields found — Spark will infer schema")
 
@@ -2908,11 +2911,22 @@ class DataProcessor:
                 _sopts = self._get_cloud_storage_options(path)
                 fs, _, paths = fsspec.get_fs_token_paths(path, storage_options=_sopts)
                 results = []
-                protocol = path.split("://")[0]
+                parsed_uri_parts = path.split("://", 1)
+                protocol = parsed_uri_parts[0]
+                original_authority = parsed_uri_parts[1].split("/", 1)[0]
+
                 for p in sorted(paths):
                     info = fs.info(p)
                     # Reconstruct the full URI for each matched file
-                    full_uri = f"{protocol}://{p}"
+                    # adlfs drops the @account suffix from paths. If original URI had it, put it back.
+                    if "@" in original_authority and p.startswith(original_authority.split("@")[0]):
+                        container = original_authority.split("@")[0]
+                        reconstructed_path = p[len(container):]
+                        if not reconstructed_path.startswith("/"):
+                            reconstructed_path = "/" + reconstructed_path
+                        full_uri = f"{protocol}://{original_authority}{reconstructed_path}"
+                    else:
+                        full_uri = f"{protocol}://{p}"
                     mtime = info.get("last_modified", 0)
                     if hasattr(mtime, "timestamp"):
                         mtime = mtime.timestamp()
@@ -3167,6 +3181,7 @@ class DataProcessor:
             report["stage"] = stage
             report["status"] = stage  # e.g. "no_new_data"
             report["max_source_mtime"] = None
+            self.last_report = report
             write_run_log(report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
         except Exception as e:
             logger.debug(f"Could not write empty run log: {e}")
@@ -3185,8 +3200,9 @@ class DataProcessor:
         if self.engine_name == "spark":
             try:
                 from pyspark.sql import SparkSession
+                from pyspark.sql.types import StructType
 
-                return SparkSession.builder.getOrCreate().createDataFrame([], schema=None)
+                return SparkSession.builder.getOrCreate().createDataFrame([], schema=StructType([]))
             except Exception:
                 return []
         return []
@@ -3217,11 +3233,21 @@ class DataProcessor:
         if p.startswith("abfss://") or p.startswith("az://"):
             # Determine whether the URI already embeds the account name
             # (``abfss://container@account.dfs.core.windows.net/...``).
-            uri_has_account = "@" in p.split("//", 1)[-1].split("/", 1)[0]
+            netloc = p.split("//", 1)[-1].split("/", 1)[0]
+            uri_has_account = "@" in netloc
 
             acct = os.getenv("AZURE_STORAGE_ACCOUNT_NAME") or os.getenv("AZURE_STORAGE_ACCOUNT")
-            if acct and not uri_has_account:
-                opts["account_name"] = acct
+            if not acct and uri_has_account:
+                # Extract account name from URL: container@account.dfs.core.windows.net
+                acct = netloc.split("@", 1)[-1].split(".", 1)[0]
+
+            if acct:
+                # adlfs (used by pandas) will error if account_name is passed in kwargs 
+                # but already present in the URI. 
+                # Polars (Rust object_store) *requires* account_name in kwargs when 
+                # using Service Principal auth, regardless of the URI format.
+                if getattr(self, "engine_name", "spark") in ("polars", "duckdb") or not uri_has_account:
+                    opts["account_name"] = acct
 
             acct_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
             if acct_key:

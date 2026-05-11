@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Read(//c/Users/colli/.gemini/antigravity/brain/fe0a3709-f9a8-4abe-ba46-9e045339d716/artifacts/**)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py -x -q)",
+      "Bash(.venv/Scripts/python -m lakelogic review --help)",
+      "Bash(.venv/Scripts/python -m lakelogic review --no-llm lakelogic/ai/code_reviewer.py --format json)",
+      "Bash(.venv/Scripts/lakelogic review *)",
+      "Bash(.venv/Scripts/python -c \"import instructor; print\\(instructor.__version__\\)\")",
+      "Bash(.venv/Scripts/python -c \"import anthropic; print\\(anthropic.__version__\\)\")",
+      "Bash(.venv/Scripts/python -c \"import sys; print\\(sys.version_info\\)\")",
+      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py tests/test_perf_smells.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py tests/test_perf_smells.py tests/test_unused_cache.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_code_reviewer.py tests/test_code_reviewer_p2.py tests/test_code_reviewer_p3p4.py tests/test_perf_smells.py tests/test_perf_smells_extra.py tests/test_unused_cache.py -x -q)"
+    ]
+  }
+}

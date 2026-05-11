@@ -1,0 +1,71 @@
+# LakeLogic Review — Azure DevOps pipeline
+#
+# Add this pipeline as a Build validation policy on the target branch
+# so PRs are gated by the exit code.
+#
+# For inline PR comments (--format azure_pr), the System.AccessToken must be
+# explicitly exposed via env (see the Run review step).
+#
+# Optional: install the marketplace extension "SARIF SAST Scans Tab"
+# to render review.sarif as a tab on the build summary.
+
+trigger: none
+
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip
+  LAKELOGIC_REVIEW_CACHE_DIR: $(Pipeline.Workspace)/.lakelogic-review
+
+steps:
+  - checkout: self
+    fetchDepth: 0          # CRITICAL: shallow clone breaks --diff
+    persistCredentials: true
+
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.11'
+
+  - task: Cache@2
+    inputs:
+      key: 'lakelogic-review | $(System.PullRequest.PullRequestId) | $(Build.SourceVersion)'
+      restoreKeys: |
+        lakelogic-review | $(System.PullRequest.PullRequestId)
+        lakelogic-review
+      path: $(LAKELOGIC_REVIEW_CACHE_DIR)
+    displayName: Cache review results
+
+  - script: pip install -e .[review]
+    displayName: Install lakelogic[review]
+
+  - script: |
+      lakelogic review \
+        --diff origin/$(System.PullRequest.TargetBranch) \
+        --format sarif \
+        -o review.sarif \
+        --fail-on critical
+    displayName: Run review (SARIF)
+    env:
+      ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)   # define as a secret pipeline variable
+
+  - script: |
+      lakelogic review \
+        --diff origin/$(System.PullRequest.TargetBranch) \
+        --format azure_pr \
+        --fail-on never
+    displayName: Post inline PR comments
+    condition: succeededOrFailed()
+    env:
+      ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)   # required for the REST API call
+
+  - task: PublishBuildArtifacts@1
+    condition: always()
+    inputs:
+      pathToPublish: review.sarif
+      artifactName: sarif
