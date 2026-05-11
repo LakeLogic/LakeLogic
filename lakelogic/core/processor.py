@@ -366,7 +366,7 @@ class DataProcessor:
             try:
                 contract_obj._base_path = path.parent
                 contract_obj._contract_path = path
-            except Exception:
+            except Exception:  # pragma: no cover - defensive: pydantic models permit attr set
                 pass
             loaded = self._apply_stage_overrides(contract_obj)
             loaded = self._apply_fact_governance(loaded)

@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.30.0] — 2026-05-11
+
+### Added
+
+- Add local configuration, coverage reporting, and registry branch tests
 ## [1.29.0] — 2026-05-11
 
 ### Added
@@ -327,6 +332,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.30.0]: https://github.com/lakelogic/LakeLogic/compare/v1.29.0...v1.30.0
 [1.29.0]: https://github.com/lakelogic/LakeLogic/compare/v1.28.0...v1.29.0
 [1.28.0]: https://github.com/lakelogic/LakeLogic/compare/v1.27.0...v1.28.0
 [1.27.0]: https://github.com/lakelogic/LakeLogic/compare/v1.26.0...v1.27.0

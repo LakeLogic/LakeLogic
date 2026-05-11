@@ -18,7 +18,11 @@
       "Bash(.venv/Scripts/python -m pytest --cov=lakelogic --cov-report=term-missing --cov-report=json:coverage.json -q --no-header)",
       "Bash(.venv/Scripts/python -m pytest tests/test_registry_branches.py -x -q)",
       "Bash(.venv/Scripts/python -m pytest --cov=lakelogic --cov-report=term -q --no-header)",
-      "Bash(.venv/Scripts/python -m ruff check lakelogic/engines/spark.py)"
+      "Bash(.venv/Scripts/python -m ruff check lakelogic/engines/spark.py)",
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_branch_coverage_extra.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest --cov=lakelogic --cov-report=json:coverage.json -q --no-header)",
+      "Bash(.venv/Scripts/python -m pytest --cov=lakelogic --cov-report=json:coverage.json --cov-report=term -q --no-header)"
     ]
   }
 }
