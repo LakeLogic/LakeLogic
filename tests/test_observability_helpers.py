@@ -4,6 +4,8 @@ import json
 import sys
 import types
 
+import pytest
+
 from lakelogic.cli import observability as obs
 
 
@@ -98,6 +100,7 @@ def test_write_summary_spark_create_and_merge_paths(monkeypatch):
 
 
 def test_write_summary_snowflake_and_bigquery_backends(monkeypatch):
+    pytest.importorskip("pandas")
     warnings = []
     infos = []
     monkeypatch.setattr(obs.logger, "warning", warnings.append)

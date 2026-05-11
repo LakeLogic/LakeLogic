@@ -384,8 +384,7 @@ def scan_withcolumn_in_loop(files: list[Path]) -> list["ReviewFinding"]:
                                 "iteration — slow planning, risk of stack overflow on large loops."
                             ),
                             suggestion=(
-                                "Use .select() with a list comprehension of columns, "
-                                "or chain .withColumns({...}) once."
+                                "Use .select() with a list comprehension of columns, or chain .withColumns({...}) once."
                             ),
                         )
                     )

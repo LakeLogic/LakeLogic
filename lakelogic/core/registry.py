@@ -259,7 +259,9 @@ _VALID_EMIT_ON = {"success", "partial", "failed"}
 _EMIT_ON_ALIASES = {"succeeded": "success", "succeed": "success"}
 
 
-def _validate_observatory_config(cfg: Dict[str, Any], source: str = "_system.yaml") -> Dict[str, Any]:  # pragma: no cover
+def _validate_observatory_config(
+    cfg: Dict[str, Any], source: str = "_system.yaml"
+) -> Dict[str, Any]:  # pragma: no cover
     """
     Validate and normalise the ``observatory`` configuration block.
 
