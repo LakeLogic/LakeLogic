@@ -537,9 +537,7 @@ def format_github_pr(report: dict[str, Any]) -> str:
         )
         return _json.dumps(_github_pr_payload(report), indent=2)
 
-    review_id, summary_id = _post_github_pr_review(
-        report=report, token=token, repo=repo, pr_number=pr_number
-    )
+    review_id, summary_id = _post_github_pr_review(report=report, token=token, repo=repo, pr_number=pr_number)
     return f"Posted GitHub PR review {review_id} + summary comment {summary_id} on PR #{pr_number}"
 
 

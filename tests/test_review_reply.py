@@ -217,9 +217,7 @@ def test_explain_with_non_file_line_args_falls_through_to_general_context(tmp_pa
         out = _explain("how does idempotency work?", tmp_path)
 
     user_msg = next(
-        m["content"]
-        for m in fake_client.chat.completions.create.call_args.kwargs["messages"]
-        if m["role"] == "user"
+        m["content"] for m in fake_client.chat.completions.create.call_args.kwargs["messages"] if m["role"] == "user"
     )
     assert "User asked about: how does idempotency work?" in user_msg
     assert "Could not parse as file:line" in user_msg
@@ -235,9 +233,7 @@ def test_explain_with_no_args_uses_general_context(tmp_path: Path) -> None:
         _explain(None, tmp_path)
 
     user_msg = next(
-        m["content"]
-        for m in fake_client.chat.completions.create.call_args.kwargs["messages"]
-        if m["role"] == "user"
+        m["content"] for m in fake_client.chat.completions.create.call_args.kwargs["messages"] if m["role"] == "user"
     )
     assert "No specific file/line provided" in user_msg
 
@@ -245,9 +241,7 @@ def test_explain_with_no_args_uses_general_context(tmp_path: Path) -> None:
 def test_explain_returns_friendly_message_when_build_client_raises(tmp_path: Path) -> None:
     """If _build_client itself raises (e.g. provider not configured), the user
     gets a 'Could not initialise LLM' message instead of a stack trace (L98-99)."""
-    with patch(
-        "lakelogic.ai.llm_client._build_client", side_effect=RuntimeError("no provider")
-    ):
+    with patch("lakelogic.ai.llm_client._build_client", side_effect=RuntimeError("no provider")):
         out = _explain("foo.py:1", tmp_path)
     assert out.startswith("🤖")
     assert "Could not initialise LLM" in out
@@ -321,9 +315,7 @@ def _run_reply_cli(monkeypatch: pytest.MonkeyPatch, *args: str, env: dict | None
     return runner.invoke(app, list(args))
 
 
-def test_cli_dry_run_with_inline_body_for_unknown_command(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_dry_run_with_inline_body_for_unknown_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """--body skips fetch; --dry-run skips post. Unknown command produces a
     usage-hint reply (lines 270-280)."""
     result = _run_reply_cli(
@@ -338,9 +330,7 @@ def test_cli_dry_run_with_inline_body_for_unknown_command(
     assert "Unknown command `frobnicate`" in result.output
 
 
-def test_cli_dry_run_with_explain_command_uses_explain(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_dry_run_with_explain_command_uses_explain(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`@lakelogic explain` dispatches to _explain in dry-run mode."""
     with patch("lakelogic.cli.review_reply._explain", return_value="### Stub"):
         result = _run_reply_cli(
@@ -355,9 +345,7 @@ def test_cli_dry_run_with_explain_command_uses_explain(
     assert "### Stub" in result.output
 
 
-def test_cli_dry_run_with_ignore_command_writes_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_dry_run_with_ignore_command_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`@lakelogic ignore <rule>` writes the ignore file even in dry-run."""
     result = _run_reply_cli(
         monkeypatch,
@@ -371,9 +359,7 @@ def test_cli_dry_run_with_ignore_command_writes_file(
     assert (tmp_path / ".lakelogic-review-ignore").read_text(encoding="utf-8").strip() == "ruff_e501"
 
 
-def test_cli_no_at_mention_exits_zero_without_action(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_no_at_mention_exits_zero_without_action(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A comment with no @lakelogic mention exits 0 with a polite no-op message."""
     result = _run_reply_cli(
         monkeypatch,
@@ -387,9 +373,7 @@ def test_cli_no_at_mention_exits_zero_without_action(
     assert "No @lakelogic mention" in result.output
 
 
-def test_cli_errors_when_body_and_env_both_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_errors_when_body_and_env_both_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No --body, no GITHUB_TOKEN/REPOSITORY/--comment-id → exit 2 with usage hint."""
     for v in ("GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_EVENT_PATH"):
         monkeypatch.delenv(v, raising=False)
@@ -398,9 +382,7 @@ def test_cli_errors_when_body_and_env_both_missing(
     assert "Need either --body" in result.output
 
 
-def test_cli_resolves_pr_from_github_event_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_resolves_pr_from_github_event_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When --pr is omitted, the PR number is read from GITHUB_EVENT_PATH JSON."""
     import json as _json
 
@@ -423,13 +405,9 @@ def test_cli_resolves_pr_from_github_event_path(
     assert "Added" in result.output  # ignore command's confirmation
 
 
-def test_cli_posts_reply_when_token_pr_provided(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_posts_reply_when_token_pr_provided(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Non-dry-run path: token + repo + pr present → _post_pr_comment is called."""
-    with patch(
-        "lakelogic.cli.review_reply._post_pr_comment", return_value=12345
-    ) as mock_post:
+    with patch("lakelogic.cli.review_reply._post_pr_comment", return_value=12345) as mock_post:
         result = _run_reply_cli(
             monkeypatch,
             "--body",
@@ -445,9 +423,7 @@ def test_cli_posts_reply_when_token_pr_provided(
     assert "Posted reply comment 12345" in result.output
 
 
-def test_cli_exits_one_when_post_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_exits_one_when_post_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """If _post_pr_comment returns None (failure), exit 1."""
     with patch("lakelogic.cli.review_reply._post_pr_comment", return_value=None):
         result = _run_reply_cli(
@@ -464,9 +440,7 @@ def test_cli_exits_one_when_post_fails(
     assert "Reply post failed" in result.output
 
 
-def test_cli_fetches_body_when_not_provided_inline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_fetches_body_when_not_provided_inline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No --body but full env → _fetch_comment_body is called and its result
     drives parse_command (covers the fetch branch at L256)."""
     with patch(
@@ -490,9 +464,7 @@ def test_cli_fetches_body_when_not_provided_inline(
     assert (tmp_path / ".lakelogic-review-ignore").read_text(encoding="utf-8").strip() == "from_remote"
 
 
-def test_cli_tolerates_malformed_github_event_payload(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_cli_tolerates_malformed_github_event_payload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A garbage GITHUB_EVENT_PATH JSON shouldn't crash — pr stays None and
     the CLI falls back to the dry-run / no-post path (covers L245-246)."""
     bad_event = tmp_path / "broken.json"

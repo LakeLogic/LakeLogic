@@ -31,7 +31,6 @@ from typing import Optional
 import typer
 from loguru import logger
 
-
 # ---------------------------------------------------------------------------
 # Command parsing
 # ---------------------------------------------------------------------------
@@ -124,7 +123,7 @@ def _file_context(path: Path, line_no: int, window: int = 10) -> str:
         return f"(Could not read {path}: {e})"
     start = max(0, line_no - window - 1)
     end = min(len(lines), line_no + window)
-    out = [f"```", f"# {path.as_posix()}"]
+    out = ["```", f"# {path.as_posix()}"]
     for i in range(start, end):
         marker = ">" if (i + 1) == line_no else " "
         out.append(f"{marker} {i + 1:4d}  {lines[i]}")
@@ -143,10 +142,7 @@ _IGNORE_FILE = ".lakelogic-review-ignore"
 def _ignore(args: Optional[str], repo_root: Path) -> str:
     """Append a rule ID to the ignore file. Returns a markdown reply body."""
     if not args:
-        return (
-            "🤖 Usage: `@lakelogic ignore <rule_id>`\n\n"
-            "Example: `@lakelogic ignore ruff_e501`"
-        )
+        return "🤖 Usage: `@lakelogic ignore <rule_id>`\n\nExample: `@lakelogic ignore ruff_e501`"
     rule = args.strip().split()[0]
     target = repo_root / _IGNORE_FILE
     existing = []
@@ -214,16 +210,12 @@ def _fetch_comment_body(*, token: str, repo: str, comment_id: int) -> Optional[s
 
 
 def review_reply_command(
-    comment_id: Optional[int] = typer.Option(
-        None, "--comment-id", help="GitHub comment ID that triggered this run."
-    ),
+    comment_id: Optional[int] = typer.Option(None, "--comment-id", help="GitHub comment ID that triggered this run."),
     pr: Optional[int] = typer.Option(None, "--pr", help="PR number to post the reply to."),
     body: Optional[str] = typer.Option(
         None, "--body", help="Inline comment body (skips fetch; useful for local testing)."
     ),
-    repo_root: Path = typer.Option(
-        Path("."), "--repo-root", help="Path to the repo (default: cwd)."
-    ),
+    repo_root: Path = typer.Option(Path("."), "--repo-root", help="Path to the repo (default: cwd)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the reply instead of posting."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging."),
 ) -> None:

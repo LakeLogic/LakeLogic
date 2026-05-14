@@ -23,7 +23,6 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel, Field
 
-
 _WALKTHROUGH_SYSTEM_PROMPT = """\
 You are a senior data platform engineer writing a concise PR walkthrough for
 human reviewers. Read the unified diff and produce:

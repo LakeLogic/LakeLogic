@@ -189,9 +189,7 @@ def test_summary_markdown_no_walkthrough_section_when_absent() -> None:
 
 
 def test_summary_markdown_walkthrough_appears_above_findings() -> None:
-    finding = ReviewFinding(
-        file="x.py", line=1, severity="warning", category="x", rule="r", message="m"
-    ).model_dump()
+    finding = ReviewFinding(file="x.py", line=1, severity="warning", category="x", rule="r", message="m").model_dump()
     md = _build_summary_markdown(
         _report_with_wt(
             {"summary": "S.", "highlights": [], "mermaid": ""},

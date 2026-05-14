@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.31.0] — 2026-05-14
+
+### Added
+
+- Add interactive PR comment handler for explain and ignore commands
+- Implement DataProcessor core class and ValidationResult for engine-agnostic data contract execution
+- Add processor, registry, and run_log modules with comprehensive branch coverage testing
+
+### Testing
+
+- Add targeted branch coverage tests for validation, runner, and processor components
 ## [1.30.0] — 2026-05-11
 
 ### Added
@@ -332,6 +343,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.31.0]: https://github.com/lakelogic/LakeLogic/compare/v1.30.0...v1.31.0
 [1.30.0]: https://github.com/lakelogic/LakeLogic/compare/v1.29.0...v1.30.0
 [1.29.0]: https://github.com/lakelogic/LakeLogic/compare/v1.28.0...v1.29.0
 [1.28.0]: https://github.com/lakelogic/LakeLogic/compare/v1.27.0...v1.28.0

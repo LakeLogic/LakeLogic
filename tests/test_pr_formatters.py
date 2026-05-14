@@ -99,9 +99,7 @@ def test_github_pr_falls_back_to_json_when_env_missing(monkeypatch: pytest.Monke
     assert payload["inline_comments"][0]["path"] == "src/x.py"
 
 
-def test_github_pr_creates_review_and_summary_on_first_run(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_github_pr_creates_review_and_summary_on_first_run(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"pull_request": {"number": 42}}))
     monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
@@ -130,9 +128,7 @@ def test_github_pr_creates_review_and_summary_on_first_run(
     assert review_post_kwargs["json"]["event"] == "REQUEST_CHANGES"
 
 
-def test_github_pr_updates_existing_summary_on_rerun(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_github_pr_updates_existing_summary_on_rerun(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"pull_request": {"number": 7}}))
     monkeypatch.setenv("GITHUB_TOKEN", "ghs_x")
@@ -157,9 +153,7 @@ def test_github_pr_updates_existing_summary_on_rerun(
     assert "summary comment 111" in result
 
 
-def test_github_pr_uses_comment_event_when_no_critical(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_github_pr_uses_comment_event_when_no_critical(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     event = tmp_path / "e.json"
     event.write_text(json.dumps({"pull_request": {"number": 1}}))
     monkeypatch.setenv("GITHUB_TOKEN", "x")

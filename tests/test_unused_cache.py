@@ -83,11 +83,11 @@ def test_use_count_is_scoped_to_enclosing_function(tmp_path: Path) -> None:
     f = _write(
         tmp_path / "j.py",
         "def func_a(spark):\n"
-        "    df = spark.read.parquet('a').cache()\n"   # used once → info
+        "    df = spark.read.parquet('a').cache()\n"  # used once → info
         "    return df.write.parquet('out')\n"
         "\n"
         "def func_b(spark):\n"
-        "    df = spark.read.parquet('b').cache()\n"   # reused 3× → no finding
+        "    df = spark.read.parquet('b').cache()\n"  # reused 3× → no finding
         "    a = df.filter('x > 0').count()\n"
         "    b = df.filter('x < 0').count()\n"
         "    c = df.filter('x = 0').count()\n"
@@ -125,7 +125,7 @@ def test_module_level_cache_still_handled(tmp_path: Path) -> None:
         tmp_path / "j.py",
         "import pyspark\n"
         "spark = pyspark.sql.SparkSession.builder.getOrCreate()\n"
-        "df = spark.read.parquet('x').cache()\n",   # never read → warning
+        "df = spark.read.parquet('x').cache()\n",  # never read → warning
     )
     findings = scan_unused_cache([f])
     assert len(findings) == 1
