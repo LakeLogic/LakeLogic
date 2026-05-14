@@ -23,6 +23,7 @@ import json
 
 from lakelogic.core.processor import DataProcessor
 from lakelogic.cli.review import review_command
+from lakelogic.cli.review_reply import review_reply_command
 
 app = typer.Typer(
     name="lakelogic",
@@ -39,6 +40,7 @@ app = typer.Typer(
 )
 
 app.command(name="review", rich_help_panel="Code Quality")(review_command)
+app.command(name="review-reply", rich_help_panel="Code Quality")(review_reply_command)
 
 
 @app.command(rich_help_panel="Contract Execution")

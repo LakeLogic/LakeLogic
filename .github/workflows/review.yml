@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
   security-events: write   # for SARIF upload
-  pull-requests: write     # for inline annotations
+  pull-requests: write     # for inline review comments + summary
 
 jobs:
   review:
@@ -30,9 +30,10 @@ jobs:
             lakelogic-review-
 
       - name: Install
-        run: pip install -e .[review]
+        run: pip install -e .[review,ai]
 
-      - name: Run review (Tier 1 always; Tier 2 if ANTHROPIC_API_KEY set)
+      # 1. SARIF run — gates the build via exit code
+      - name: Run review (SARIF, gating)
         run: |
           lakelogic review \
             --diff origin/${{ github.base_ref }} \
@@ -47,3 +48,15 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: review.sarif
+
+      # 2. PR review run — posts inline comments + updating summary (CodeRabbit-style)
+      - name: Post inline review + summary comment
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          lakelogic review \
+            --diff origin/${{ github.base_ref }} \
+            --format github_pr \
+            --fail-on never
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

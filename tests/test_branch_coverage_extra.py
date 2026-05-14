@@ -450,6 +450,7 @@ def test_processor_get_sample_text_handles_duckdb_like() -> None:
             class Df:
                 def df(self):
                     return f"duckdb-{n}-rows"
+
             return Df()
 
     proc = DataProcessor.__new__(DataProcessor)

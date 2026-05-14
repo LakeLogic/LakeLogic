@@ -78,6 +78,18 @@ def run_ruff(files: list[Path]) -> list["ReviewFinding"]:
     findings: list[ReviewFinding] = []
     for item in raw:
         code = item.get("code") or "unknown"
+        fix = item.get("fix") or {}
+        # ruff's "edits" array contains {content, location, end_location}.
+        # When all edits target the same line(s) and supply replacement text,
+        # we can emit a clickable GitHub ```suggestion``` block.
+        edits = fix.get("edits") or []
+        code_suggestion: Optional[str] = None
+        end_line: Optional[int] = None
+        if edits:
+            replacement = "".join(e.get("content", "") for e in edits).rstrip("\n")
+            if replacement:
+                code_suggestion = replacement
+                end_line = (edits[-1].get("end_location") or {}).get("row")
         findings.append(
             ReviewFinding(
                 file=item.get("filename", ""),
@@ -86,7 +98,9 @@ def run_ruff(files: list[Path]) -> list["ReviewFinding"]:
                 category="python_quality",
                 rule=f"ruff_{code.lower()}",
                 message=item.get("message", ""),
-                suggestion=(item.get("fix") or {}).get("message"),
+                suggestion=fix.get("message"),
+                code_suggestion=code_suggestion,
+                end_line=end_line,
             )
         )
     return findings
@@ -282,7 +296,7 @@ _PERF_PATTERNS: list[tuple[str, str, re.Pattern[str], str, str, bool, bool]] = [
     (
         "glob_on_cloud_storage",
         "warning",
-        re.compile(r"glob\.(?:glob|iglob)\s*\(\s*['\"](?:s3|gs|abfss?|wasbs?)://"),
+        re.compile(r"""glob\.(?:glob|iglob)\s*\(\s*[fFrRbBuU]{0,2}['"](?:s3|gs|abfss?|wasbs?)://"""),
         "glob.glob() on cloud storage URLs is extremely slow — listing dominates over reading.",
         "Use the engine's native path globbing (spark.read.parquet path patterns, fsspec, boto3 paginator).",
         False,
@@ -410,10 +424,16 @@ def _ends_with_cache(node: ast.AST) -> Optional[str]:
     return None
 
 
-def _count_loads(tree: ast.AST, name: str, after_line: int) -> int:
-    """Count ast.Name(Load) references to ``name`` after ``after_line``."""
+def _count_loads(scope: ast.AST, name: str, after_line: int) -> int:
+    """Count ast.Name(Load) references to ``name`` after ``after_line``.
+
+    The walk is bounded by ``scope`` — pass a FunctionDef/AsyncFunctionDef
+    to limit counting to a single function body, or the module tree to
+    count across the whole file (used as the fallback for module-level
+    cache assignments).
+    """
     count = 0
-    for n in ast.walk(tree):
+    for n in ast.walk(scope):
         if (
             isinstance(n, ast.Name)
             and n.id == name
@@ -424,12 +444,40 @@ def _count_loads(tree: ast.AST, name: str, after_line: int) -> int:
     return count
 
 
+def _build_parent_map(tree: ast.AST) -> dict[int, ast.AST]:
+    """Map each node id() to its parent. Used to walk up to the enclosing scope."""
+    parents: dict[int, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+    return parents
+
+
+def _enclosing_scope(node: ast.AST, parents: dict[int, ast.AST]) -> ast.AST:
+    """Walk up from ``node`` to the nearest FunctionDef / AsyncFunctionDef.
+
+    If the node lives at module level (no enclosing function), returns the
+    Module node so counting still works — falsely sharing across module-level
+    cache assignments is rare in practice and not worth special-casing.
+    """
+    cur = parents.get(id(node))
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+            return cur
+        cur = parents.get(id(cur))
+    return node  # shouldn't happen — Module is always reachable
+
+
 def scan_unused_cache(files: list[Path]) -> list["ReviewFinding"]:
     """Flag ``var = X.cache()`` (or .persist()) where ``var`` is read 0-1 times.
 
     Heuristic: a cache that's used once or never adds materialisation cost
     with no reuse benefit — usually a copy-paste leftover or a misunderstanding
     of when caching pays off (caching pays when a DataFrame is reused 2+ times).
+
+    Uses count is **scoped to the enclosing function** so that two functions
+    in the same module that happen to reuse the same cache variable name
+    (e.g. both binding ``df = source.cache()``) are tracked independently.
     """
     from lakelogic.ai.code_reviewer import ReviewFinding
 
@@ -441,6 +489,8 @@ def scan_unused_cache(files: list[Path]) -> list["ReviewFinding"]:
         except (OSError, SyntaxError):
             continue
 
+        parents = _build_parent_map(tree)
+
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue
@@ -451,7 +501,8 @@ def scan_unused_cache(files: list[Path]) -> list["ReviewFinding"]:
             if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
                 continue
             var_name = node.targets[0].id
-            uses = _count_loads(tree, var_name, after_line=node.lineno)
+            scope = _enclosing_scope(node, parents)
+            uses = _count_loads(scope, var_name, after_line=node.lineno)
 
             if uses == 0:
                 msg = (

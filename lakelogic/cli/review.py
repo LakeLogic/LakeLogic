@@ -31,7 +31,11 @@ def review_command(
         None, "--provider", help="LLM provider: anthropic | openai (default: env auto-detect)."
     ),
     model: Optional[str] = typer.Option(None, "--model", help="Model name override."),
-    output_format: str = typer.Option("terminal", "--format", help="terminal | json | sarif | github"),
+    output_format: str = typer.Option(
+        "terminal",
+        "--format",
+        help="terminal | json | sarif | github | github_pr | azure_pr",
+    ),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file (default: stdout)."),
     fail_on: Optional[str] = typer.Option(
         None,
@@ -46,6 +50,9 @@ def review_command(
         False, "--check-config", help="Print resolved config and exit (never prints key value)."
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Bypass the diff-hash cache."),
+    no_walkthrough: bool = typer.Option(
+        False, "--no-walkthrough", help="Skip the LLM-generated PR walkthrough section."
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging."),
 ) -> None:  # pragma: no cover
     """Run code review against the given paths or git diff."""
@@ -94,6 +101,7 @@ def review_command(
         max_tokens=cfg.max_tokens_per_batch,
         base_ref=diff,
         use_cache=not no_cache,
+        walkthrough=not no_walkthrough,
     )
 
     rendered = write_output(report.model_dump(), output_format)

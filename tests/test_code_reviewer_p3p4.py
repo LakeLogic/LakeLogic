@@ -59,11 +59,13 @@ def test_azure_pr_posts_when_env_present(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("BUILD_REPOSITORY_ID", "abc-123")
     monkeypatch.setenv("SYSTEM_ACCESSTOKEN", "tok")
 
-    fake_response = MagicMock(status_code=200, text="ok")
+    fake_response = MagicMock(status_code=200, text="ok", json=lambda: {})
     fake_client = MagicMock()
     fake_client.__enter__.return_value = fake_client
     fake_client.__exit__.return_value = None
     fake_client.post.return_value = fake_response
+    # Marker lookup returns no existing summary → create path is taken
+    fake_client.get.return_value = MagicMock(status_code=200, json=lambda: {"value": []})
 
     with patch("httpx.Client", return_value=fake_client):
         out = format_azure_pr(_sample_report())
