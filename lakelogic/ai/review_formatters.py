@@ -13,7 +13,7 @@ Supports:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -299,26 +299,40 @@ def _post_azure_threads(
 
     posted = 0
     with httpx.Client(timeout=15) as client:
-        # Summary comment (always posted, even if no findings)
-        summary_body = (
-            f"**LakeLogic Review** — {summary.get('critical', 0)} critical, "
-            f"{summary.get('warning', 0)} warnings, {summary.get('info', 0)} info"
-        )
-        try:
-            r = client.post(
-                base,
-                headers=headers,
-                json={
-                    "comments": [{"parentCommentId": 0, "content": summary_body, "commentType": 1}],
-                    "status": 1,
-                },
+        # Summary thread — find existing (by sentinel marker) and update,
+        # else create. Same UX as GitHub: one persistent comment per PR.
+        summary_body = _build_summary_markdown({"findings": findings, "summary": summary})
+        existing = _find_existing_ado_summary(client, base, headers)
+        if existing:
+            update_url = (
+                f"{org_url}/{project}/_apis/git/repositories/{repo_id}"
+                f"/pullRequests/{pr_id}/threads/{existing['thread_id']}"
+                f"/comments/{existing['comment_id']}?api-version=7.1"
             )
-            if r.status_code < 300:
-                posted += 1
-            else:
-                logger.warning(f"ADO summary thread failed: {r.status_code} {r.text[:200]}")
-        except httpx.HTTPError as e:
-            logger.warning(f"ADO summary thread failed: {e}")
+            try:
+                r = client.patch(update_url, headers=headers, json={"content": summary_body})
+                if r.status_code < 300:
+                    posted += 1
+                else:
+                    logger.warning(f"ADO summary update failed: {r.status_code} {r.text[:200]}")
+            except httpx.HTTPError as e:
+                logger.warning(f"ADO summary update failed: {e}")
+        else:
+            try:
+                r = client.post(
+                    base,
+                    headers=headers,
+                    json={
+                        "comments": [{"parentCommentId": 0, "content": summary_body, "commentType": 1}],
+                        "status": 1,
+                    },
+                )
+                if r.status_code < 300:
+                    posted += 1
+                else:
+                    logger.warning(f"ADO summary thread failed: {r.status_code} {r.text[:200]}")
+            except httpx.HTTPError as e:
+                logger.warning(f"ADO summary thread failed: {e}")
 
         # Per-finding inline threads
         for f in findings:
@@ -327,12 +341,7 @@ def _post_azure_threads(
             if not file_path or not line:
                 continue  # need both to anchor an inline comment
 
-            content = (
-                f"**[{f.get('severity', 'info').upper()}] {f.get('category')}/"
-                f"{f.get('rule')}**\n\n{f.get('message', '')}"
-            )
-            if f.get("suggestion"):
-                content += f"\n\n**Fix:** {f['suggestion']}"
+            content = _inline_comment_body(f)
 
             payload = {
                 "comments": [{"parentCommentId": 0, "content": content, "commentType": 1}],
@@ -355,12 +364,312 @@ def _post_azure_threads(
     return posted
 
 
+def _find_existing_ado_summary(client, base: str, headers: dict) -> Optional[dict]:
+    """Find a prior LakeLogic summary thread on this PR (by sentinel marker).
+
+    Returns ``{'thread_id', 'comment_id'}`` or None.
+    """
+    import httpx
+
+    try:
+        r = client.get(base, headers=headers)
+    except httpx.HTTPError:
+        return None
+    if r.status_code >= 300:
+        return None
+    for thread in (r.json() or {}).get("value", []):
+        for comment in thread.get("comments") or []:
+            if SUMMARY_MARKER in (comment.get("content") or ""):
+                return {"thread_id": thread.get("id"), "comment_id": comment.get("id")}
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers — markdown summary table + sentinel marker for update-on-rerun
+# ---------------------------------------------------------------------------
+
+# Sentinel HTML comment included in summary bodies so we can find and update
+# the previous comment on subsequent CI runs instead of duplicating.
+SUMMARY_MARKER = "<!-- lakelogic-review:summary -->"
+
+_SEVERITY_ICON = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
+
+
+def _build_summary_markdown(report: dict[str, Any], heading: str = "LakeLogic Review") -> str:
+    """Return a CodeRabbit-style markdown summary with counts + per-file table."""
+    findings = report.get("findings", [])
+    summary = report.get("summary", {})
+    crit = summary.get("critical", 0)
+    warn = summary.get("warning", 0)
+    info = summary.get("info", 0)
+
+    lines = [SUMMARY_MARKER, "", f"## 🔍 {heading}", ""]
+
+    # P6: walkthrough section (rendered above findings if present)
+    walkthrough = report.get("walkthrough")
+    if walkthrough:
+        from lakelogic.ai.walkthrough import WalkthroughResult, render_walkthrough_markdown
+
+        try:
+            lines.append(render_walkthrough_markdown(WalkthroughResult.model_validate(walkthrough)))
+            lines.append("")
+        except Exception as e:  # pragma: no cover - defensive: never block findings on walkthrough
+            logger.warning(f"Could not render walkthrough: {e}")
+
+    if not findings:
+        lines.append("✅ **No issues found.** Nice work.")
+        lines.append("")
+        lines.append(_engine_footer(report))
+        return "\n".join(lines)
+
+    lines.append(f"**{crit}** 🔴 critical · **{warn}** 🟡 warning · **{info}** 🔵 info")
+    lines.append("")
+
+    # Per-file breakdown
+    by_file: dict[str, dict[str, int]] = {}
+    for f in findings:
+        path = f.get("file") or "(unknown)"
+        bucket = by_file.setdefault(path, {"critical": 0, "warning": 0, "info": 0})
+        bucket[f.get("severity", "info")] = bucket.get(f.get("severity", "info"), 0) + 1
+
+    if by_file:
+        lines.append("### Findings by file")
+        lines.append("")
+        lines.append("| File | 🔴 | 🟡 | 🔵 |")
+        lines.append("| --- | ---: | ---: | ---: |")
+        for path in sorted(by_file):
+            b = by_file[path]
+            lines.append(f"| `{path}` | {b['critical']} | {b['warning']} | {b['info']} |")
+        lines.append("")
+
+    # Top 10 critical/warning details
+    important = [f for f in findings if f.get("severity") in ("critical", "warning")][:10]
+    if important:
+        lines.append("<details><summary>Top issues</summary>")
+        lines.append("")
+        for f in important:
+            loc = f.get("file", "?")
+            if f.get("line"):
+                loc += f":{f['line']}"
+            icon = _SEVERITY_ICON.get(f.get("severity", "info"), "·")
+            rule = f"{f.get('category')}/{f.get('rule')}"
+            lines.append(f"- {icon} `{loc}` — **{rule}** — {f.get('message', '')}")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+
+    lines.append(_engine_footer(report))
+    return "\n".join(lines)
+
+
+def _engine_footer(report: dict[str, Any]) -> str:
+    provider = report.get("ai_provider", "none")
+    model = report.get("ai_model", "none")
+    tokens = (report.get("token_usage") or {}).get("total", 0)
+    duration = report.get("duration_seconds", 0.0)
+    return (
+        f"<sub>Scanned {report.get('files_scanned', 0)} file(s) in {duration:.1f}s · "
+        f"engine: {provider}/{model} · tokens: {tokens:,}</sub>"
+    )
+
+
+def _inline_comment_body(f: dict[str, Any]) -> str:
+    """Markdown body for a single inline review comment."""
+    icon = _SEVERITY_ICON.get(f.get("severity", "info"), "·")
+    rule = f"{f.get('category')}/{f.get('rule')}"
+    parts = [f"{icon} **[{f.get('severity', 'info').upper()}] {rule}**", "", f.get("message", "")]
+    if f.get("suggestion"):
+        parts += ["", f"**How to fix:** {f['suggestion']}"]
+    if f.get("code_suggestion"):
+        # GitHub renders this as a one-click "Apply suggestion" button.
+        # ADO doesn't render the block but it still reads as a code fence.
+        parts += ["", "```suggestion", f["code_suggestion"], "```"]
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# format_github_pr — CodeRabbit-style review (real PR review comments + summary)
+# ---------------------------------------------------------------------------
+
+
+def format_github_pr(report: dict[str, Any]) -> str:
+    """Post a GitHub PR review with inline comments and an updating summary.
+
+    Reads from standard GitHub Actions env vars:
+    * ``GITHUB_TOKEN``       — workflow token (needs ``pull-requests: write``)
+    * ``GITHUB_REPOSITORY``  — ``owner/repo``
+    * ``GITHUB_EVENT_PATH``  — JSON file containing the PR number under
+      ``pull_request.number`` (set automatically on ``pull_request`` triggers)
+
+    Behaviour:
+    * Creates one PR Review (``POST /pulls/{n}/reviews``) carrying every
+      inline comment in a single batch.
+    * Maintains a *single* summary issue comment, edited in place on every
+      re-run (identified by an HTML-comment marker).
+    * Findings with ``code_suggestion`` get GitHub's one-click ```suggestion```
+      block — works for ruff autofixes and any LLM finding that proposes
+      replacement code.
+
+    Falls back to the JSON payload (for local dev) if env vars are missing.
+    Network failures are logged but never raise.
+    """
+    import json as _json
+    import os
+
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+
+    pr_number: Optional[int] = None
+    if event_path and os.path.exists(event_path):
+        try:
+            with open(event_path, encoding="utf-8") as f:
+                event = _json.load(f)
+            pr_number = (event.get("pull_request") or {}).get("number")
+        except (OSError, _json.JSONDecodeError) as e:
+            logger.warning(f"Could not read GITHUB_EVENT_PATH: {e}")
+
+    if not (token and repo and pr_number):
+        logger.warning(
+            "format=github_pr requested but GitHub env vars are missing "
+            "(GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_EVENT_PATH→pull_request.number); "
+            "returning JSON payload instead."
+        )
+        return _json.dumps(_github_pr_payload(report), indent=2)
+
+    review_id, summary_id = _post_github_pr_review(
+        report=report, token=token, repo=repo, pr_number=pr_number
+    )
+    return f"Posted GitHub PR review {review_id} + summary comment {summary_id} on PR #{pr_number}"
+
+
+def _github_pr_payload(report: dict[str, Any]) -> dict[str, Any]:
+    """JSON dump returned when GitHub env is missing (local dev / debugging)."""
+    return {
+        "summary_markdown": _build_summary_markdown(report),
+        "inline_comments": [
+            {
+                "path": f.get("file"),
+                "line": f.get("line"),
+                "side": "RIGHT",
+                "body": _inline_comment_body(f),
+            }
+            for f in report.get("findings", [])
+            if f.get("file") and f.get("line")
+        ],
+    }
+
+
+def _post_github_pr_review(
+    *,
+    report: dict[str, Any],
+    token: str,
+    repo: str,
+    pr_number: int,
+) -> tuple[Any, Any]:
+    """POST one PR review with all inline comments + upsert the summary comment."""
+    import httpx
+
+    base = f"https://api.github.com/repos/{repo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    findings = report.get("findings", [])
+    inline = []
+    for f in findings:
+        if not f.get("file") or not f.get("line"):
+            continue
+        comment: dict[str, Any] = {
+            "path": f["file"],
+            "side": "RIGHT",
+            "line": int(f["line"]),
+            "body": _inline_comment_body(f),
+        }
+        if f.get("end_line") and int(f["end_line"]) > int(f["line"]):
+            comment["start_line"] = int(f["line"])
+            comment["start_side"] = "RIGHT"
+            comment["line"] = int(f["end_line"])
+        inline.append(comment)
+
+    review_id: Any = None
+    summary_id: Any = None
+
+    with httpx.Client(timeout=20) as client:
+        # 1. Inline review (request changes if any critical, comment otherwise)
+        if inline:
+            event = "REQUEST_CHANGES" if any(f.get("severity") == "critical" for f in findings) else "COMMENT"
+            try:
+                r = client.post(
+                    f"{base}/pulls/{pr_number}/reviews",
+                    headers=headers,
+                    json={
+                        "event": event,
+                        "body": f"LakeLogic Review — {len(inline)} inline finding(s).",
+                        "comments": inline,
+                    },
+                )
+                if r.status_code < 300:
+                    review_id = r.json().get("id")
+                else:
+                    logger.warning(f"GitHub PR review failed: {r.status_code} {r.text[:300]}")
+            except httpx.HTTPError as e:
+                logger.warning(f"GitHub PR review POST failed: {e}")
+
+        # 2. Upsert summary issue comment (PRs are issues for comment endpoints)
+        summary_body = _build_summary_markdown(report)
+        existing_id = _find_existing_marker_comment(client, base, headers, pr_number)
+        try:
+            if existing_id:
+                r = client.patch(
+                    f"{base}/issues/comments/{existing_id}",
+                    headers=headers,
+                    json={"body": summary_body},
+                )
+            else:
+                r = client.post(
+                    f"{base}/issues/{pr_number}/comments",
+                    headers=headers,
+                    json={"body": summary_body},
+                )
+            if r.status_code < 300:
+                summary_id = r.json().get("id")
+            else:
+                logger.warning(f"GitHub summary comment failed: {r.status_code} {r.text[:300]}")
+        except httpx.HTTPError as e:
+            logger.warning(f"GitHub summary comment POST failed: {e}")
+
+    return review_id, summary_id
+
+
+def _find_existing_marker_comment(client, base: str, headers: dict, pr_number: int) -> Optional[int]:
+    """Find a prior LakeLogic summary comment on this PR (by sentinel marker)."""
+    import httpx
+
+    try:
+        r = client.get(
+            f"{base}/issues/{pr_number}/comments?per_page=100",
+            headers=headers,
+        )
+    except httpx.HTTPError:
+        return None
+    if r.status_code >= 300:
+        return None
+    for c in r.json() or []:
+        if SUMMARY_MARKER in (c.get("body") or ""):
+            return c.get("id")
+    return None
+
+
 def write_output(report: dict[str, Any], output_format: str) -> str:
     """Route to the appropriate formatter and return the output string.
 
     Args:
         report: ReviewReport dict.
-        output_format: One of ``terminal``, ``json``, ``sarif``, ``github``, ``azure_pr``.
+        output_format: One of ``terminal``, ``json``, ``sarif``, ``github``,
+            ``github_pr``, ``azure_pr``.
 
     Returns:
         Formatted output string.
@@ -370,6 +679,7 @@ def write_output(report: dict[str, Any], output_format: str) -> str:
         "json": format_json,
         "sarif": format_sarif,
         "github": format_github,
+        "github_pr": format_github_pr,
         "azure_pr": format_azure_pr,
     }
 

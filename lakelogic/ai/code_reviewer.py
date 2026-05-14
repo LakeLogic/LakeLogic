@@ -41,6 +41,12 @@ class ReviewFinding(BaseModel):
     message: str
     suggestion: Optional[str] = None
     code_snippet: Optional[str] = None
+    # Replacement text for the affected line(s). When present, the GitHub PR
+    # formatter emits a ```suggestion``` block the reviewer can click "Apply".
+    # Tier 1 fills this from ruff's autofix edits; Tier 2 LLM fills it when
+    # the model proposes a concrete code change.
+    code_suggestion: Optional[str] = None
+    end_line: Optional[int] = None  # for multi-line suggestions
 
 
 class ReviewReport(BaseModel):
@@ -53,6 +59,10 @@ class ReviewReport(BaseModel):
     ai_model: str = "none"
     duration_seconds: float = 0.0
     token_usage: dict[str, int] = Field(default_factory=lambda: {"total": 0})
+    # Optional LLM-generated PR walkthrough (P6). Populated only when an API
+    # key is present and the user hasn't passed --no-walkthrough. The summary
+    # markdown formatter renders this above the per-file findings table.
+    walkthrough: Optional[dict] = None
 
 
 def _summarise(findings: list[ReviewFinding]) -> dict[str, int]:
@@ -91,6 +101,7 @@ def run_review(
     max_tokens: int = 30_000,
     base_ref: Optional[str] = None,
     use_cache: bool = True,
+    walkthrough: bool = True,
 ) -> ReviewReport:
     """Run Tier 1 (and Tier 2 if available) over the given files.
 
@@ -177,6 +188,15 @@ def run_review(
         duration_seconds=duration,
         token_usage=token_usage,
     )
+
+    # P6: optional walkthrough — runs after Tier 1+2 to keep the gating
+    # exit code purely based on findings, not on walkthrough success.
+    if walkthrough and not no_llm and api_key_present and provider != "none" and base_ref:
+        from lakelogic.ai.walkthrough import generate_walkthrough
+
+        wt = generate_walkthrough(base_ref, provider=provider, model=model)
+        if wt is not None:
+            report.walkthrough = wt.model_dump()
 
     if cache_key:
         review_cache.save_cached_report(cache_key, report.model_dump())
