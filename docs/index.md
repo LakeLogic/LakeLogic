@@ -1,21 +1,23 @@
 ---
+title: LakeLogic Data Contract Framework
+description: Open-source data contracts for reliable data pipelines. Define schema, data quality rules, lineage, SLOs, PII handling, and materialization once, then enforce them across Spark, Polars, DuckDB, Delta Lake, and Iceberg.
 hide:
   - navigation
 ---
 <div class="hero-section" markdown>
 
 <div class="hero-content" markdown>
-# Your Data Estate. <span style="color: var(--md-accent-fg-color);">Under Contract.</span>
+# LakeLogic Data Contracts. <span style="color: var(--md-accent-fg-color);">Reliable Pipelines.</span>
 
 <p class="hero-subtitle" style="font-size: 1.3rem; font-weight: 500;">
-Executable + Enforceable Data Contracts.<br>
-Validate at runtime. Block bad merges in CI/CD.
+Open-source data contract framework for reliable data pipelines.<br>
+Validate at runtime. Block bad merges in CI/CD. Ship trusted data faster.
 </p>
 
 <p class="hero-keyword-anchor" style="font-size: 0.95rem; opacity: 0.8; line-height: 1.5;" markdown="1">
-Describe your data products in YAML — LakeLogic materializes them as Delta/Iceberg tables with lineage, quality, and SCD2 built in.<br><br>
+Define schema, data quality rules, lineage, SLOs, PII handling, and materialization once in YAML.<br><br>
 Write once. Run on [Spark](https://spark.apache.org/){: target="_blank" }, [Polars](https://pola.rs/){: target="_blank" }, or [DuckDB](https://duckdb.org/){: target="_blank" }.<br>
-<strong style="color: var(--md-accent-fg-color); font-size: 1.05rem;">Data Contracts as Code — the executable layer for data mesh.</strong>
+<strong style="color: var(--md-accent-fg-color); font-size: 1.05rem;">Data contracts as code for Delta Lake, Iceberg, and modern lakehouse pipelines.</strong>
 </p>
 
 <div class="hero-cta" markdown>
@@ -137,34 +139,65 @@ pip install "lakelogic"
 
 ---
 
-## Data Mesh Is Structural — Not Just a Principle
+## Data Contracts That Ship Business Outcomes
 
-Data mesh isn't a buzzword in LakeLogic — it's the **architecture**. The `domain → system → contract` hierarchy enforces ownership boundaries at every level:
+LakeLogic turns data contracts into executable controls for quality, governance, cost, and delivery speed. Instead of rewriting validation and materialization logic in every pipeline, teams declare the rules once and enforce them everywhere.
 
-```
-🏢 Domain (Marketing, Sales, Finance)
-│   "Who owns this data?"
-│   → _domain.yaml — ownership, SLOs, contacts, alerts
-│
-├── 🏗️ System (Google Analytics, Salesforce, SAP)
-│   "Where does this data come from?"
-│   → _system.yaml — storage, environments, settings
-│
-└── 📄 Data Product (events, customers, orders)
-    "What does this specific table look like?"
-    → entity_v1.0.yaml — schema, quality rules, transforms
-```
-
-> **Analogy:** A domain is like a department (Marketing). A system is like a tool that department uses (Google Analytics). A data product is like a specific report from that tool (website sessions).
-
-| Data Mesh Principle | What It Means (Plain English) | How LakeLogic Enables This |
+| Outcome | LakeLogic Capability | Business Value |
 | --- | --- | --- |
-| **Domain Ownership** | The people closest to the data own it | `_domain.yaml` names the owner, their contacts, and cost centre |
-| **Data as a Product** | Treat each dataset like a product with quality guarantees | Each contract declares schema, quality rules, and SLOs |
-| **Self-Serve Platform** | Give teams tools so they don't wait on a central team | Write YAML → run pipeline. No tickets, no handoffs |
-| **Federated Governance** | Consistent rules without a bottleneck | Domain-level SLOs inherited automatically by every table |
+| **Trusted dashboards** | Row-level quality rules, schema checks, and quarantine | Bad records are isolated before they reach reports, ML features, or downstream teams |
+| **Faster delivery** | YAML contracts, SQL-first transformations, and CI/CD gates | Engineers ship reliable pipelines without repeating boilerplate validation code |
+| **Lower platform cost** | Spark, Polars, and DuckDB execution from the same contract | Use lightweight engines where they fit instead of defaulting every job to a cluster |
+| **Audit-ready data** | Lineage stamps, ownership metadata, SLOs, and PII handling | Every dataset carries the evidence needed for governance, compliance, and incident review |
+| **Portable lakehouse pipelines** | Delta Lake, Iceberg, Parquet, CSV, and catalog-aware materialization | Contracts move across tools and storage formats without rewriting business rules |
 
+### Data Quality & Trust
 
+- **Prevent bad data from reaching production** — enforce schema, required fields, SQL rules, SLOs, anomaly checks, and quarantine behavior from the contract.
+- **Account for every row** — reconcile `source = good + bad` so records are validated, accepted, or quarantined without silent loss.
+- **Catch broken contracts early** — strict model validation and CI/CD gates block unsafe schema, PII, and lineage changes before deployment.
+
+[ :simple-googlecolab: Run the Data Quality & Trust Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/01_data_quality_trust.ipynb){: target="_blank" .md-button }
+
+### Compliance & Governance
+
+- **Make ownership explicit** — domain, system, and contract files define owners, contacts, SLOs, lineage, and governance rules.
+- **Protect sensitive data by default** — declarative PII handling, masking, encryption, and subject-forgetting workflows are part of the pipeline.
+- **Track operating cost** — attribute compute cost by entity and domain so governance includes spend, not just policy.
+
+[ :simple-googlecolab: Run the Compliance & Governance Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb){: target="_blank" .md-button }
+
+### Engine & Scale
+
+- **Avoid engine lock-in** — run the same contract on [Spark](https://spark.apache.org/){: target="_blank" }, [Polars](https://pola.rs/){: target="_blank" }, or [DuckDB](https://duckdb.org/){: target="_blank" }.
+- **Materialize without hand-coded merge logic** — declare append, merge/upsert, SCD2, snapshots, partitioning, Delta Lake, and Iceberg behavior in YAML.
+- **Operate production pipelines** — use incremental loads, CDC watermarks, backfills, retries, timeouts, circuit breakers, and dependency-aware execution.
+
+[ :simple-googlecolab: Run the Engine & Scale Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/03_engine_scale.ipynb){: target="_blank" .md-button }
+
+### Developer Experience
+
+- **Debug faster** — structured logs, dry runs, execution previews, DAG views, and reset/reload commands reduce pipeline triage time.
+- **Automate schema operations** — generate and apply DDL from contracts without running the full pipeline.
+- **Route alerts to the right owners** — send contract-aware notifications through Slack, email, Teams, webhooks, and other Apprise targets.
+
+[ :simple-googlecolab: Run the Developer Experience Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/04_developer_experience.ipynb){: target="_blank" .md-button }
+
+### Data Generation & AI
+
+- **Test quality rules before production** — generate realistic synthetic records, edge cases, and referentially valid datasets from the contract.
+- **Bootstrap contracts faster** — infer contracts from sample data with AI-assisted descriptions, PII detection, and quality rule suggestions.
+- **Apply contracts to unstructured data** — validate LLM extraction from PDFs, images, and audio with the same lineage and quality controls.
+
+[ :simple-googlecolab: Run the Data Generation & AI Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/05_data_generation_ai.ipynb){: target="_blank" .md-button }
+
+### Integrations
+
+- **Reuse existing definitions** — import dbt `schema.yml` models and sources as LakeLogic contracts.
+- **Ingest from operational systems** — connect to dlt sources, REST APIs, databases, Kafka, webhooks, cloud storage, and streaming feeds.
+- **Extract only what the contract declares** — apply projection pushdown, chunked reads, CDC filters, and cloud credential resolution automatically.
+
+[ :simple-googlecolab: Run the Integrations Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb){: target="_blank" .md-button }
 
 ---
 
@@ -191,75 +224,6 @@ Contracts enforce on **two surfaces**:
 | **Compliance** (GDPR, EU AI Act) | Regulatory metadata baked into the data layer |
 
 [:octicons-arrow-right-24: See the full contract reference](contracts/data_product_contracts/index.md) · [:octicons-arrow-right-24: Complete annotated template](contract_template.md)
-
----
-
-## Technical Capabilities
-
-### Data Quality & Trust
-
-- **100% Reconciliation** — Mathematically guaranteed: `source = good + bad`. Every row is accounted for — nothing silently dropped
-- **[Pydantic](https://docs.pydantic.dev/){: target="_blank" }-Powered Validation** — Every contract, system & domain configs are parsed through strict Pydantic models with `Literal` type enforcement — invalid YAML is caught at load time, not at runtime
-- **SQL-First Rules** — Define business logic in the language your team already speaks — no SDK, no custom DSL
-- **SLO Monitoring & Anomaly Detection** — Native freshness, row count, and statistical anomaly detection with automatic multi-channel alerting when thresholds breach
-- **Schema Drift Protection** — Configurable `schema_policy` controls how the pipeline reacts to unknown columns and schema evolution — default `"allow"` for frictionless prototyping, opt in to `"strict"` / `"quarantine"` to lock down production contracts
-
-[ :simple-googlecolab: Run the Data Quality & Trust Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/01_data_quality_trust.ipynb){: target="_blank" .md-button }
-
-### Compliance & Governance
-
-- **GDPR & HIPAA Compliance** — Contract-driven `forget_subjects()` with nullify, hash, or redact strategies and immutable audit trail
-- **Zero-Retention Architecture** — Built-in `zero_retention_days` enforcement for transient data layers, automatically purging micro-batches after successful downstream processing
-- **Automated PII Handling** — Declarative encryption and hashing (`pii: true`, `masking: "encrypt"`) applied at the Bronze layer before data even reaches rest
-- **Pipeline Cost Intelligence** — Per-entity compute cost attribution with domain-level budget governance, autoscaling-aware estimation, and Databricks Unity Catalog billing integration
-
-[ :simple-googlecolab: Run the Compliance & Governance Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/02_compliance_governance.ipynb){: target="_blank" .md-button }
-
-### Engine & Scale
-
-- **Engine Agnostic** — Write once, run on [Spark](https://spark.apache.org/){: target="_blank" }, [Polars](https://pola.rs/){: target="_blank" }, or [DuckDB](https://duckdb.org/){: target="_blank" } — same contract, zero code changes
-- **Multi-Format Materialization** — Natively output validated data to **Apache Iceberg** or **Delta Lake** open-table formats without requiring pipeline rewrites
-- **Dimensional Modeling** — Native SCD Type 2 (slowly changing dimensions), merge/upsert (SCD1), append-only fact tables, periodic snapshot overwrites, and partition-aware writes — all declared in YAML, no manual `MERGE INTO` SQL required
-- **Incremental-First** — Built-in watermarking, CDC, and file-mtime tracking
-- **Parallel Processing** — Concurrent multi-contract execution with data-layer-aware orchestration and topological dependency ordering
-- **Backfill & Reprocessing** — Targeted late-arriving data reprocessing with partition-aware filters — no full reload required
-- **External Logic** — Plug in custom Python scripts or notebooks for complex Gold-layer transformations while preserving full contract validation and lineage
-- **Production Resilience** — Built-in exponential-backoff retries, per-entity timeouts, and circuit-breaker thresholds (`max_consecutive_failures`) — pipelines self-heal transient failures without operator intervention
-
-[ :simple-googlecolab: Run the Engine & Scale Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/03_engine_scale.ipynb){: target="_blank" .md-button }
-
-### Developer Experience
-
-- **Structured Diagnostics & Observability** — Deep contextual logging out-of-the-box (powered by [`loguru`](https://loguru.readthedocs.io/){: target="_blank" }) featuring precise timestamps, severity levels, exact function paths, and execution tags to drastically cut troubleshooting time
-- **Dry Run Mode** — Validate contracts, resolve dependencies, and preview execution plans without touching any data
-- **DDL-Only Mode** — Generate and apply schema DDL (CREATE/ALTER) from contracts without running the pipeline — perfect for CI/CD migrations
-- **DAG Dependency Viewer** — Visualize cross-contract lineage and execution order before running — understand your pipeline graph at a glance
-- **Data Reset & Reload** — Surgically reset and reload specific entities or data layers (Bronze/Silver/Gold) without impacting the rest of the lakehouse
-- **Multi-Channel Alerts** — Powered by [Apprise](https://github.com/caronc/apprise){: target="_blank" } for Slack, Email (SMTP/SendGrid), Teams, and Webhook notifications with ownership-based auto-routing and full [Jinja2](https://jinja.palletsprojects.com/){: target="_blank" } templating support for custom formatting
-
-[ :simple-googlecolab: Run the Developer Experience Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/04_developer_experience.ipynb){: target="_blank" .md-button }
-### Data Generation & AI
-
-- **Synthetic Data** — Built-in `DataGenerator` (powered by [Faker](https://faker.readthedocs.io/){: target="_blank" }) with streaming simulation, time-windowed output, referential integrity, and edge case injection — generate realistic error rows (SQL injection, type confusion, boundary values) for stress testing and quarantine validation
-- **Descriptive AI Test Data** — Steer synthetic data generation with natural language prompts (e.g. *"Generate users who are French or Japanese only, enterprise-tier, over 60 years old with SQL injection attempts in email fields"*) — output strictly adheres to the YAML contract schema
-- **AI Contract Onboarding** — `lakelogic infer` auto-generates contracts from sample data with LLM-powered enrichment: automatic PII detection, column labelling, and quality rule suggestions
-- **Unstructured Processing** — LLM extraction from PDFs, images, audio with same contract validation + lineage
-- **Automated Run Logs** — Every pipeline run emits structured JSON with row counts, quality scores, durations, and error details — queryable as a Delta table
-
-[ :simple-googlecolab: Run the Data Generation & AI Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/05_data_generation_ai.ipynb){: target="_blank" .md-button }
-
-### Integrations
-
-- **[dbt](https://www.getdbt.com/){: target="_blank" } Adapter** — Import dbt `schema.yml` models and sources as LakeLogic contracts — reuse existing dbt definitions without rewriting
-- **[dlt](https://dlthub.com/){: target="_blank" } (Data Load Tool)** — Native `DltAdapter` supporting 100+ verified sources (Stripe, Shopify, SQL databases, Google Analytics, and more) plus declarative REST API ingestion — all with contract-driven quality gates on arrival
-- **Native Streaming Connectors** — Built-in `WebSocketConnector`, `SSEConnector`, `KafkaConnector`, `WebhookConnector` (plus Azure Event Grid, Service Bus, AWS SQS, GCP Pub/Sub) for real-time data feeds piped directly into contract validation with pre-validation rename transformations
-- **Native Database Ingestion** — High-performance SQL extraction via [Polars/ConnectorX](https://pola.rs/){: target="_blank" } and [DuckDB](https://duckdb.org/){: target="_blank" } — supports PostgreSQL, MySQL, SQL Server, SQLite, and more with automatic dialect detection
-- **Incremental CDC** — Watermark-based change data capture with automatic state tracking — injects `WHERE updated_at > last_watermark` into the SQL engine before data leaves the database
-- **Batch Processing** — Memory-safe chunked ingestion via `fetch_size` for massive initial loads — processes 100GB+ tables without OOM errors
-- **Column Projection Pushdown** — Automatically constructs precise `SELECT "col1", "col2"` queries from your contract's `model.fields` — only extracts what the contract declares, zero configuration
-- **Cloud Data Sources** — Native `abfss://`, `s3://`, `gs://` URI support with automatic credential resolution via `CloudCredentialResolver` — Azure AD, AWS IAM roles, GCP ADC, service principals, and Databricks secret scopes all work out of the box
-
-[ :simple-googlecolab: Run the Integrations Guide in Google Colab ](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb){: target="_blank" .md-button }
 
 ---
 
@@ -352,6 +316,21 @@ With LakeLogic, your **Data Contract is the Source of Truth**.
 
 !!! tip "Full Pipeline Transparency"
     Eliminate the "Black Box" problem. LakeLogic provides visual drill-downs from board-level KPIs back to the raw source records, ensuring every number is auditable and explainable.
+
+---
+
+## Data Mesh Without the Slideware
+
+LakeLogic makes data mesh practical by turning ownership, quality, SLOs, and governance into files that run in production. The `domain → system → contract` hierarchy keeps responsibility close to the teams that know the data.
+
+| Data Mesh Principle | LakeLogic Implementation |
+| --- | --- |
+| **Domain Ownership** | `_domain.yaml` declares owners, contacts, alerts, budgets, and SLOs |
+| **Data as a Product** | Each contract defines schema, quality rules, lineage, and service guarantees |
+| **Self-Serve Platform** | Teams write YAML and run pipelines without waiting on central platform tickets |
+| **Federated Governance** | Shared rules inherit across domains and systems without creating a bottleneck |
+
+[:octicons-arrow-right-24: Learn how to organize contracts at scale](organization.md) · [:octicons-arrow-right-24: Read the data mesh guide](https://lakelogic.org/blog/data-mesh-data-contracts/){: target="_blank" }
 
 
 ## Go Further with LakeLogic
