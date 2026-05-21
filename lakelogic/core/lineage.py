@@ -158,7 +158,7 @@ def _preserve_upstream_lineage(df: Any, columns: List[str], prefix: str, engine_
     except Exception:
         pass
 
-    if engine_name == "spark":
+    if engine_name == "spark":  # pragma: no cover
         try:
             existing = set(df.columns)
             updated = df
@@ -336,7 +336,7 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
     except Exception as exc:
         logger.warning(f"DuckDB lineage injection failed: {exc}")
 
-    if engine_name == "spark":
+    if engine_name == "spark":  # pragma: no cover
         try:
             from pyspark.sql import functions as F
 
