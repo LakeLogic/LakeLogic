@@ -6,22 +6,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.32.0] — 2026-05-21
+
+### Added
+
+- Knowledge scanner, DuckDB adapter tests, notebook hooks, registry/processor refactors
+
+### Testing
+
+- Add 15 tests for quarantine dlt + guards; fix unreachable dlt branch
+- Add 20 tests for lineage.py uncovered branches; exclude Spark
+- Add 24 tests for gdpr.py polars + dispatch branches; exclude Spark
+- Add 19 tests for materialize_dataframe public entry point
+- Add 24 tests for _write_frame dispatcher + fix UnboundLocalError bug
+- Add 40 tests for materialization secondary-targets and Delta compaction
+- Skip pandas-dependent duckdb test when pandas isn't installed
+
+### Coverage
+
+- Exclude Spark-only branches from processor.py coverage
+- Exclude Spark-only functions from coverage measurement
+
+### Security
+
+- Bump sqlfluff to 4.2.1 to fix parser DoS CVEs
 ## [1.31.0] — 2026-05-14
 
 ### Added
 
 - Add interactive PR comment handler for explain and ignore commands
-- Implement DataProcessor core class and ValidationResult for engine-agnostic data contract execution
-- Add processor, registry, and run_log modules with comprehensive branch coverage testing
-
-### Testing
-
-- Add targeted branch coverage tests for validation, runner, and processor components
 ## [1.30.0] — 2026-05-11
 
 ### Added
 
+- Implement DataProcessor core class and ValidationResult for engine-agnostic data contract execution
+- Add processor, registry, and run_log modules with comprehensive branch coverage testing
 - Add local configuration, coverage reporting, and registry branch tests
+
+### Testing
+
+- Add targeted branch coverage tests for validation, runner, and processor components
 ## [1.29.0] — 2026-05-11
 
 ### Added
@@ -54,15 +78,22 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **gdpr**: Fallback to contract compliance property if compliance_event missing
 - Add GDPR erasure and data backfill notebooks, test helpers, and coverage tracking utility
+
+### Fixed
+
+- **engines/duckdb**: Add CATEGORY_COLUMN to errors array, and properly type empty _lakelogic_errors as VARCHAR[] to match Polars/Spark output schemas
+- **tests**: Remove global sys.modules patch for PySpark and explicitly set PYSPARK_PYTHON
+## [1.25.0] — 2026-05-07
+
+### Added
+
+- **gdpr**: Fallback to contract compliance property if compliance_event missing
 - Add comprehensive suite of interactive Colab tutorial notebooks and remove obsolete compliance test file
 
 ### Fixed
 
 - **engines**: Cross-engine compatibility fixes for test matrix
-- **engines/duckdb**: Add CATEGORY_COLUMN to errors array, and properly type empty _lakelogic_errors as VARCHAR[] to match Polars/Spark output schemas
-- **tests**: Remove global sys.modules patch for PySpark and explicitly set PYSPARK_PYTHON
 
 ### Testing
 
@@ -79,6 +110,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Resolve incorrect rendering of driver profile contract table name
 ## [1.22.2] — 2026-05-05
 
+### Fixed
+
+- Resolve E2E tests and dependency regression bugs
+## [1.22.0] — 2026-05-01
+
 ### Added
 
 - Add comprehensive Colab example suite for onboarding and integration workflows
@@ -92,7 +128,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Resolve E2E tests and dependency regression bugs
 - Resolve Linux-specific psutil fallback test failure in CI
 - Resolve test failures in CI due to missing optional dependencies and pandas 3.0 incompatibility
 
@@ -105,11 +140,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add CI quality gate workflow and compliance governance tutorial notebook
 - Add silver layer contract for rideflow trips and configure coverage exclusions
-- Add core generation, processing, and SLO modules, bump version to 1.19.0, and include new executive and compliance dashboard examples.
-
-### CI/CD
-
-- Add GitHub Actions CI workflow and constrain dependency python version markers in uv.lock
 
 ### Changed
 
@@ -118,46 +148,83 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Testing
 
 - Commit all missing test files by fixing gitignore exclusion
+## [1.20.0] — 2026-04-27
+
+### Added
+
+- Add core generation, processing, and SLO modules, bump version to 1.19.0, and include new executive and compliance dashboard examples.
+
+### CI/CD
+
+- Add GitHub Actions CI workflow and constrain dependency python version markers in uv.lock
 ## [1.19.0] — 2026-04-27
 
 ### Added
 
 - Implement run logging and engine abstractions for LakeLogic core and CLI
 - Implement core pipeline engine and expand rideflow domain examples with interactive notebooks and dashboards
+## [1.18.0] — 2026-04-16
+
+### Added
+
 - Implement core data generation, processing, and bootstrapping modules with accompanying documentation and examples.
-- Implement AI-powered edge-case generation for data contract stress-testing
-- Add engine portability and dimensional modeling demonstration notebook
-- Add example notebooks for engine portability, developer experience, AI data generation, and integrations
-- Add engine portability demo notebook and implement core processor logic
-- Add sync script and populate documentation examples directory with flagship notebooks
-- Add engine portability examples and implement SCD2 materialization support in core models and LLM engine
-
-### Changed
-
-- Update README links to use HTML anchor tags for improved compatibility
 
 ### Documentation
 
 - Fix broken badge image rendering in README links
+## [1.17.1] — 2026-04-15
+
+### Changed
+
+- Update README links to use HTML anchor tags for improved compatibility
+## [1.17.0] — 2026-04-15
+
+### Added
+
+- Implement AI-powered edge-case generation for data contract stress-testing
+- Add engine portability and dimensional modeling demonstration notebook
+- Add example notebooks for engine portability, developer experience, AI data generation, and integrations
+
+### Documentation
+
 - Add comprehensive set of Colab example notebooks for LakeLogic features
+## [1.16.0] — 2026-04-15
+
+### Added
+
+- Add engine portability demo notebook and implement core processor logic
+- Add sync script and populate documentation examples directory with flagship notebooks
+## [1.15.0] — 2026-04-15
+
+### Added
+
+- Add engine portability examples and implement SCD2 materialization support in core models and LLM engine
 ## [1.14.0] — 2026-04-15
 
 ### Added
 
 - Implement core Pydantic data models and project documentation structure
-- Implement core LakeLogic framework with engine adapters, pipeline runner, and governance modules
-- Implement core engine components, notification system, and comprehensive data contract documentation
-- Implement core platform engine, notification system, and comprehensive data contract documentation with expanded examples
-- Implement core processing logic, dlt adapter, and quickstart examples with updated dependency resolution markers
 
 ### Documentation
 
 - Sync fixed python 3.9 syntax and lint configs
 - Add examples folder to version control and fix mkdocs links
+## [1.13.0] — 2026-04-14
+
+### Added
+
+- Implement core LakeLogic framework with engine adapters, pipeline runner, and governance modules
+- Implement core engine components, notification system, and comprehensive data contract documentation
+- Implement core platform engine, notification system, and comprehensive data contract documentation with expanded examples
 
 ### Fixed
 
 - **core**: Migrate legacy schema_evolution to allow correct quarantine dropping
+## [1.12.0] — 2026-04-07
+
+### Added
+
+- Implement core processing logic, dlt adapter, and quickstart examples with updated dependency resolution markers
 ## [1.11.1] — 2026-04-07
 
 ### Fixed
@@ -169,18 +236,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Implement core data contract engine with multi-engine support, CLI, and documentation
 - Implement incremental processing boundary resolution and tracking logic
+- Implement core Lakelogic framework including registry management, pipeline execution, multi-engine support, and documentation styling.
 - Add quickstart example with YAML contract and hello world notebook
 - Add quickstart notebook examples for basic data processing and dbt-based quality workflows
 - Implement pipeline runner and add medallion architecture quickstart examples
-- Implement core pipeline framework including materialization, incremental processing, masking, and run logging with documentation.
-- Implement core Lakelogic framework including registry management, pipeline execution, multi-engine support, and documentation styling.
-- Add LakehousePipeline engine for declarative data mesh execution.
-- Add `lakelogic/core/constants.py` and pin `anyio` to `3.7.1` and `google-genai` to `1.4.0` in `uv.lock`.
-- Add Polars, Snowflake, and DuckDB execution engines, and core pipeline components.
-
-### Build
-
-- Update project configuration and dependencies.
 
 ### Documentation
 
@@ -193,21 +252,53 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **tests**: Skip deprecated DuckDB tests, fix merge soft_delete scope, fix unknown_member test
 - **tests**: Correct quarantine path assertion and mkdir ordering
 - **tests**: Resolve collection failures, obsolete execution engines, and windows path limits
+## [1.10.0] — 2026-03-30
+
+### Added
+
+- Implement core pipeline framework including materialization, incremental processing, masking, and run logging with documentation.
+## [1.9.0] — 2026-03-27
+
+### Added
+
+- Add LakehousePipeline engine for declarative data mesh execution.
+## [1.8.0] — 2026-03-27
+
+### Added
+
+- Add `lakelogic/core/constants.py` and pin `anyio` to `3.7.1` and `google-genai` to `1.4.0` in `uv.lock`.
+
+### Build
+
+- Update project configuration and dependencies.
+## [1.7.0] — 2026-03-27
+
+### Added
+
+- Add Polars, Snowflake, and DuckDB execution engines, and core pipeline components.
 ## [1.6.1] — 2026-03-27
 
 ### Added
 
 - Introduce core data processing, materialization, and AI-driven contract generation features with comprehensive tests.
-- Implement materialization core logic and bootstrap tests, updating dependencies for anthropic, boto3, botocore, and streamlining cryptography.
-- Implement core data processing, materialization, and governance framework including a pipeline runner, CLI, and AI contract enrichment.
-- Add new quickstart example notebooks for basic data governance and data pipelines.
-- Add GitHub Actions CI quality gate for Python linting and tests.
-- Add GitHub Actions CI quality gate for backend linting and core tests with coverage checks.
-- Add quickstart and pipeline examples including notebooks and associated data contracts for bronze, silver, and gold layers.
 
 ### Clean
 
 - Delete stale test output and artifact files.
+## [1.6.0] — 2026-03-26
+
+### Added
+
+- Implement materialization core logic and bootstrap tests, updating dependencies for anthropic, boto3, botocore, and streamlining cryptography.
+- Implement core data processing, materialization, and governance framework including a pipeline runner, CLI, and AI contract enrichment.
+- Add new quickstart example notebooks for basic data governance and data pipelines.
+## [1.5.0] — 2026-03-24
+
+### Added
+
+- Add GitHub Actions CI quality gate for Python linting and tests.
+- Add GitHub Actions CI quality gate for backend linting and core tests with coverage checks.
+- Add quickstart and pipeline examples including notebooks and associated data contracts for bronze, silver, and gold layers.
 ## [1.4.0] — 2026-03-24
 
 ### Added
@@ -232,20 +323,36 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Add documentation for engine capabilities, lakehouse catalog table name resolution, and a contract template.
 - Add documentation for engine capabilities, lakehouse catalog table name resolution, and a contract template.
 - Add LLM extraction engine and model registry for unstructured data processing
+## [1.2.0] — 2026-03-08
+
+### Added
+
 - Enhance schema validation and add GenericSQL adapter
-- Add core materialization utilities for data persistence, including Spark table management, path resolution, and dataframe output.
 
 ### Changed
 
 - Clean up import statements and exception handling in GenericSQLAdapter
-## [1.0.0] — 2026-03-05
+## [1.1.0] — 2026-03-07
+
+### Added
+
+- Add core materialization utilities for data persistence, including Spark table management, path resolution, and dataframe output.
+## [0.14.0] — 2026-03-04
 
 ### Added
 
 - Add Spark engine adapter for data contract execution and transformation.
 - Add Spark engine row-level validation and engine-agnostic row counts, implement automated changelog and release workflows, and fix Spark `.isFalse()` bug and CHANGELOG structure.
 - Implement core processor for remote data ingestion, add quickstart examples, and set up automated changelog generation.
+## [0.13.0] — 2026-03-04
+
+### Added
+
 - Introduce Spark execution engine for data contract validation and transformation.
+## [0.12.0] — 2026-03-03
+
+### Added
+
 - Add "Hello World" example notebook for remote data ingestion and quality validation, and update the changelog.
 ## [0.11.0] — 2026-03-03
 
@@ -254,17 +361,29 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Add PII masking hook with direct and NLP-based replacement modes, and refine changelog documentation.
 - Add tutorials for HIPAA, GDPR compliance, and PII masking.
 - Add tutorials demonstrating HIPAA/GDPR compliance and PII masking.
+## [0.10.0] — 2026-03-01
+
+### Added
+
 - Introduce the foundational LakeLogic data processing framework, including core modules, engine integrations, AI, and CLI.
 - Add script to synchronize flagship examples to the documentation directory.
+## [0.9.0] — 2026-03-01
+
+### Added
+
 - Add a script to synchronize flagship examples to the documentation and update MkDocs navigation to feature new interactive examples.
 - Add new core materialization module, comprehensive examples, and initial documentation, while updating the main README.
 - Add 01_hello_world.ipynb quickstart example for remote data ingestion.
 - Add quickstart examples for remote data ingestion, database governance, and dbt PII quality, supported by new core materialization and models.
-- Add BigQuery and Snowflake engine adapters along with a dependency management utility for optional packages.
 
 ### Documentation
 
 - Add documentation index page
+## [0.8.0] — 2026-02-28
+
+### Added
+
+- Add BigQuery and Snowflake engine adapters along with a dependency management utility for optional packages.
 ## [0.7.0] — 2026-02-28
 
 ### Added
@@ -275,6 +394,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Add CI quality gate and PyPI publish workflows, and update documentation examples via a new sync script.
+## [0.5.0] — 2026-02-28
+
+### Added
+
 - Add extensive examples for quickstart, core patterns, advanced workflows, and compliance, alongside new documentation and a schema API.
 ## [0.4.0] — 2026-02-28
 
@@ -286,19 +409,27 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Implement the initial command-line interface for contract execution, output management, and environment setup.
+## [0.2.0] — 2026-02-27
+
+### Added
+
 - Implement a universal notification system using Apprise with new Jinja2 templates and a base adapter.
 - Add quickstart examples for data ingestion across various file formats using contracts and notebooks.
 - Add new documentation for notifications & secrets, playbooks, and a main index, and update mkdocs navigation.
 - Add extensive documentation including comparison, installation, and architecture guides, update project branding, and introduce core processor logic.
-- Introduce new examples covering advanced workflows and compliance/governance scenarios, including data, contracts, and notebooks.
-- Implement initial LakeLogic framework with contract inference, multi-engine support, and Databricks deployment configuration.
-- Establish core data contract models and initial data processing infrastructure with engine support.
-- Implement contract inference from data files, add dbt adapter, schema API, and advanced workflow examples.
 
 ### Documentation
 
 - Add initial documentation index page.
 - Add `docs/index.md` and correct capitalization of 'LakeLogic' in `mkdocs.yml` URLs and repository names.
+## [0.2.0b0] — 2026-02-26
+
+### Added
+
+- Introduce new examples covering advanced workflows and compliance/governance scenarios, including data, contracts, and notebooks.
+- Implement initial LakeLogic framework with contract inference, multi-engine support, and Databricks deployment configuration.
+- Establish core data contract models and initial data processing infrastructure with engine support.
+- Implement contract inference from data files, add dbt adapter, schema API, and advanced workflow examples.
 ## [0.1.0] — 2026-02-22
 
 ### Added
@@ -306,6 +437,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Add extensive examples for data sources, core patterns, and advanced workflows, along with new core engine and CLI components.
 - Add extensive examples for data sources, core patterns, and advanced workflows, along with new data engines and core utilities.
 - Introduce new quickstart examples for remote data ingestion and database governance, add notebook cleaning utilities, and expand installation documentation.
+## [0.1.0b2] — 2026-02-14
+
+### Added
+
 - Implement comprehensive documentation site with custom styling and introduce a base engine adapter for data quality rule processing with updated quickstart examples.
 - Add final_cleanup.py script to remove specific example files and directories.
 - Introduce core data processing logic with engine auto-discovery, `ValidationResult`, and new DuckDB engine, alongside comprehensive examples for data sources and compliance.
@@ -343,29 +478,57 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.32.0]: https://github.com/lakelogic/LakeLogic/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/lakelogic/LakeLogic/compare/v1.30.0...v1.31.0
 [1.30.0]: https://github.com/lakelogic/LakeLogic/compare/v1.29.0...v1.30.0
 [1.29.0]: https://github.com/lakelogic/LakeLogic/compare/v1.28.0...v1.29.0
 [1.28.0]: https://github.com/lakelogic/LakeLogic/compare/v1.27.0...v1.28.0
 [1.27.0]: https://github.com/lakelogic/LakeLogic/compare/v1.26.0...v1.27.0
-[1.26.0]: https://github.com/lakelogic/LakeLogic/compare/v1.23.0...v1.26.0
+[1.26.0]: https://github.com/lakelogic/LakeLogic/compare/v1.25.0...v1.26.0
+[1.25.0]: https://github.com/lakelogic/LakeLogic/compare/v1.24.0...v1.25.0
 [1.23.0]: https://github.com/lakelogic/LakeLogic/compare/v1.22.3...v1.23.0
 [1.22.3]: https://github.com/lakelogic/LakeLogic/compare/v1.22.2...v1.22.3
-[1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.2
-[1.21.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.21.0
-[1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.19.0
-[1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.14.0
+[1.22.2]: https://github.com/lakelogic/LakeLogic/compare/v1.22.0...v1.22.2
+[1.22.0]: https://github.com/lakelogic/LakeLogic/compare/v1.21.0...v1.22.0
+[1.21.0]: https://github.com/lakelogic/LakeLogic/compare/v1.20.0...v1.21.0
+[1.20.0]: https://github.com/lakelogic/LakeLogic/compare/v1.19.0...v1.20.0
+[1.19.0]: https://github.com/lakelogic/LakeLogic/compare/v1.18.0...v1.19.0
+[1.18.0]: https://github.com/lakelogic/LakeLogic/compare/v1.17.1...v1.18.0
+[1.17.1]: https://github.com/lakelogic/LakeLogic/compare/v1.17.0...v1.17.1
+[1.17.0]: https://github.com/lakelogic/LakeLogic/compare/v1.16.0...v1.17.0
+[1.16.0]: https://github.com/lakelogic/LakeLogic/compare/v1.15.0...v1.16.0
+[1.15.0]: https://github.com/lakelogic/LakeLogic/compare/v1.14.0...v1.15.0
+[1.14.0]: https://github.com/lakelogic/LakeLogic/compare/v1.13.0...v1.14.0
+[1.13.0]: https://github.com/lakelogic/LakeLogic/compare/v1.12.0...v1.13.0
+[1.12.0]: https://github.com/lakelogic/LakeLogic/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/lakelogic/LakeLogic/compare/v1.11.0...v1.11.1
-[1.11.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.11.0
-[1.6.1]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.6.1
+[1.11.0]: https://github.com/lakelogic/LakeLogic/compare/v1.10.0...v1.11.0
+[1.10.0]: https://github.com/lakelogic/LakeLogic/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/lakelogic/LakeLogic/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/lakelogic/LakeLogic/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/lakelogic/LakeLogic/compare/v1.6.1...v1.7.0
+[1.6.1]: https://github.com/lakelogic/LakeLogic/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/lakelogic/LakeLogic/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/lakelogic/LakeLogic/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/lakelogic/LakeLogic/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.3.0
-[1.0.0]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...v1.0.0
-[0.11.0]: https://github.com/lakelogic/LakeLogic/compare/v0.7.0...v0.11.0
+[1.3.0]: https://github.com/lakelogic/LakeLogic/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/lakelogic/LakeLogic/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/lakelogic/LakeLogic/compare/v1.0.0...v1.1.0
+[0.14.0]: https://github.com/lakelogic/LakeLogic/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/lakelogic/LakeLogic/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/lakelogic/LakeLogic/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/lakelogic/LakeLogic/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/lakelogic/LakeLogic/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/lakelogic/LakeLogic/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/lakelogic/LakeLogic/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/lakelogic/LakeLogic/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/lakelogic/LakeLogic/compare/v0.4.0...v0.6.0
+[0.6.0]: https://github.com/lakelogic/LakeLogic/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/lakelogic/LakeLogic/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lakelogic/LakeLogic/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0...v0.3.0
-[0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b1...v0.1.0
+[0.3.0]: https://github.com/lakelogic/LakeLogic/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/lakelogic/LakeLogic/compare/v0.2.0b0...v0.2.0
+[0.2.0b0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0...v0.2.0b0
+[0.1.0]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b2...v0.1.0
+[0.1.0b2]: https://github.com/lakelogic/LakeLogic/compare/v0.1.0b1...v0.1.0b2
 [0.1.0b1]: https://github.com/lakelogic/LakeLogic/releases/tag/v0.1.0b1
 

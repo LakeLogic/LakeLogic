@@ -69,9 +69,7 @@ class TestForgetPolars:
 
     def test_no_pii_columns_present_returns_unchanged(self):
         df = self._df()
-        out = gdpr._forget_polars(
-            df, ["ssn", "national_id"], "customer_id", ["c1"], "nullify", ""
-        )
+        out = gdpr._forget_polars(df, ["ssn", "national_id"], "customer_id", ["c1"], "nullify", "")
         # No matching PII columns → returned as-is; compliance metadata NOT injected.
         assert gdpr.META_IS_DELETED not in out.columns
         # All original rows preserved
@@ -84,9 +82,7 @@ class TestForgetPolars:
 
     def test_hash_strategy(self):
         df = self._df()
-        out = gdpr._forget_polars(df, ["email"], "customer_id", ["c1"], "hash", "salt").sort(
-            "customer_id"
-        )
+        out = gdpr._forget_polars(df, ["email"], "customer_id", ["c1"], "hash", "salt").sort("customer_id")
         expected = gdpr._hash_value("a@example.com", "salt")
         assert out["email"].to_list()[0] == expected
         # Non-matched rows unchanged
@@ -94,9 +90,7 @@ class TestForgetPolars:
 
     def test_redact_strategy(self):
         df = self._df()
-        out = gdpr._forget_polars(df, ["email"], "customer_id", ["c2"], "redact", "").sort(
-            "customer_id"
-        )
+        out = gdpr._forget_polars(df, ["email"], "customer_id", ["c2"], "redact", "").sort("customer_id")
         assert out["email"].to_list()[1] == "***REDACTED***"
 
     def test_partition_filter_scopes_erasure(self):
@@ -137,9 +131,9 @@ class TestForgetPolars:
         df = self._df()
         # If subject_column is in pii_columns AND strategy is nullify, that column
         # should be preserved (otherwise we lose the audit key).
-        out = gdpr._forget_polars(
-            df, ["customer_id", "email"], "customer_id", ["c1"], "nullify", ""
-        ).sort("customer_id")
+        out = gdpr._forget_polars(df, ["customer_id", "email"], "customer_id", ["c1"], "nullify", "").sort(
+            "customer_id"
+        )
         # customer_id NOT nullified
         assert out["customer_id"].to_list()[0] == "c1"
         # email IS nullified
@@ -161,9 +155,7 @@ class TestForgetPolars:
 
     def test_compliance_metadata_columns_are_set_on_affected_rows(self):
         df = self._df()
-        out = gdpr._forget_polars(
-            df, ["email"], "customer_id", ["c1"], "nullify", ""
-        ).sort("customer_id")
+        out = gdpr._forget_polars(df, ["email"], "customer_id", ["c1"], "nullify", "").sort("customer_id")
         # Metadata columns added on the affected row only
         is_deleted = out[gdpr.META_IS_DELETED].to_list()
         assert is_deleted == [True, False, False]
@@ -208,18 +200,14 @@ class TestForgetSubjectsDispatch:
             pass
 
         with pytest.raises(TypeError, match="Unsupported dataframe type"):
-            gdpr.forget_subjects(
-                WeirdFrame(), contract, "customer_id", ["c1"], audit=False
-            )
+            gdpr.forget_subjects(WeirdFrame(), contract, "customer_id", ["c1"], audit=False)
 
     def test_no_pii_in_contract_warns_and_returns_df_unchanged(self, monkeypatch):
         warnings = []
         monkeypatch.setattr(gdpr.logger, "warning", warnings.append)
 
         pd = pytest.importorskip("pandas")
-        no_pii = DataContract(
-            version="1.0", info=Info(title="Plain", version="1.0"), dataset="plain"
-        )
+        no_pii = DataContract(version="1.0", info=Info(title="Plain", version="1.0"), dataset="plain")
         df = pd.DataFrame({"customer_id": ["c1"]})
         out = gdpr.forget_subjects(df, no_pii, "customer_id", ["c1"], audit=False)
         assert out is df  # untouched
@@ -230,8 +218,14 @@ class TestForgetSubjectsDispatch:
         captured = {}
 
         def fake_forget_polars(
-            df, pii_columns, subject_column, subject_ids, erasure_strategy,
-            hash_salt, partition_filter=None, delete_reason=gdpr.DELETE_REASON_GDPR_ART17,
+            df,
+            pii_columns,
+            subject_column,
+            subject_ids,
+            erasure_strategy,
+            hash_salt,
+            partition_filter=None,
+            delete_reason=gdpr.DELETE_REASON_GDPR_ART17,
             strategy_per_field=None,
         ):
             captured["strategy"] = erasure_strategy
@@ -263,8 +257,14 @@ class TestForgetSubjectsDispatch:
         captured = {}
 
         def fake_forget_polars(
-            df, pii_columns, subject_column, subject_ids, erasure_strategy,
-            hash_salt, partition_filter=None, delete_reason=gdpr.DELETE_REASON_GDPR_ART17,
+            df,
+            pii_columns,
+            subject_column,
+            subject_ids,
+            erasure_strategy,
+            hash_salt,
+            partition_filter=None,
+            delete_reason=gdpr.DELETE_REASON_GDPR_ART17,
             strategy_per_field=None,
         ):
             captured["strategy"] = erasure_strategy
@@ -290,9 +290,7 @@ class TestForgetSubjectsDispatch:
         contract = _contract_with_pii()
         df = pl.DataFrame({"customer_id": ["c1"], "email": ["a@x.com"], "phone": ["1"]})
         out = []
-        gdpr.forget_subjects(
-            df, contract, "customer_id", ["c1"], audit=True, audit_report_out=out
-        )
+        gdpr.forget_subjects(df, contract, "customer_id", ["c1"], audit=True, audit_report_out=out)
         assert len(out) == 1
         assert out[0]["status"] == "ok"
         assert out[0]["engine"] == "polars"
@@ -303,8 +301,12 @@ class TestForgetSubjectsDispatch:
         df = pl.DataFrame({"customer_id": ["c1"], "email": ["a@x.com"], "phone": ["1"]})
         with pytest.raises(ValueError, match="Invalid erasure_strategy"):
             gdpr.forget_subjects(
-                df, contract, "customer_id", ["c1"],
-                erasure_strategy="evaporate", audit=False,
+                df,
+                contract,
+                "customer_id",
+                ["c1"],
+                erasure_strategy="evaporate",
+                audit=False,
             )
 
 
@@ -330,9 +332,7 @@ class TestMaskPiiColumnsBranches:
 
     def test_lazyframe_input_is_supported(self):
         contract = _contract_with_pii()
-        lazy = pl.DataFrame(
-            {"customer_id": ["c1"], "email": ["a@x.com"], "phone": ["1"]}
-        ).lazy()
+        lazy = pl.DataFrame({"customer_id": ["c1"], "email": ["a@x.com"], "phone": ["1"]}).lazy()
         out = gdpr.mask_pii_columns(lazy, contract, strategy="redact")
         # _mask_polars collects LazyFrames internally
         materialized = out.collect() if hasattr(out, "collect") else out
@@ -357,9 +357,7 @@ class TestGenerateErasureReport:
     def test_compliance_event_included_when_provided(self):
         contract = _contract_with_pii()
         ce = {"framework": "GDPR", "article": "Article 17"}
-        report = gdpr.generate_erasure_report(
-            contract, "customer_id", ["c1"], compliance_event=ce
-        )
+        report = gdpr.generate_erasure_report(contract, "customer_id", ["c1"], compliance_event=ce)
         assert report["compliance_event"] == ce
 
     def test_compliance_event_omitted_when_not_provided(self):
@@ -370,10 +368,14 @@ class TestGenerateErasureReport:
     def test_contract_without_info_uses_unknown_title(self):
         # Build a contract with info=None to exercise the fallback path
         plain = DataContract(
-            version="1.0", dataset="plain", model=Model(fields=[
-                FieldDefinition(name="customer_id", type="string"),
-                FieldDefinition(name="email", type="string", pii=True),
-            ])
+            version="1.0",
+            dataset="plain",
+            model=Model(
+                fields=[
+                    FieldDefinition(name="customer_id", type="string"),
+                    FieldDefinition(name="email", type="string", pii=True),
+                ]
+            ),
         )
         # Pydantic may have populated info with defaults; force it to None
         plain.info = None  # type: ignore[assignment]

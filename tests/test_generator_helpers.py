@@ -743,7 +743,9 @@ def test_generator_save_supports_polars_formats_and_pandas_report_fallback(monke
     instance._last_generation_summary = {"total_rows": 1, "invalid_rows": 0}
     instance._last_test_case_manifest = []
     saved = []
-    monkeypatch.setattr(instance, "save", lambda df, output, format="csv": saved.append((list(df.columns), output.name)))
+    monkeypatch.setattr(
+        instance, "save", lambda df, output, format="csv": saved.append((list(df.columns), output.name))
+    )
 
     data_path, invalid_path, report_path = instance.save_with_report(
         pd.DataFrame({"id": [1], "name": ["alice"]}),
@@ -839,9 +841,17 @@ def test_generator_related_generation_covers_pandas_orphans_and_circular_depende
         invalid_count = int(rows * invalid_ratio)
         invalid_flags = [False] * (rows - invalid_count) + [True] * invalid_count
         if self.contract_path.stem == "customers":
-            return pd.DataFrame({"id": list(range(1, rows + 1)), "order_id": list(range(10, 10 + rows)), "_is_invalid": invalid_flags})
+            return pd.DataFrame(
+                {"id": list(range(1, rows + 1)), "order_id": list(range(10, 10 + rows)), "_is_invalid": invalid_flags}
+            )
         pool = list((reference_data or {}).get("cust_id", [1]))
-        return pd.DataFrame({"id": list(range(10, 10 + rows)), "cust_id": [pool[i % len(pool)] for i in range(rows)], "_is_invalid": invalid_flags})
+        return pd.DataFrame(
+            {
+                "id": list(range(10, 10 + rows)),
+                "cust_id": [pool[i % len(pool)] for i in range(rows)],
+                "_is_invalid": invalid_flags,
+            }
+        )
 
     monkeypatch.setattr(gen.DataGenerator, "__init__", fake_init)
     monkeypatch.setattr(gen.DataGenerator, "generate", fake_generate)
@@ -912,7 +922,9 @@ def test_generator_valid_value_branches_for_types_ranges_and_lengths(monkeypatch
         "inactive",
     }
 
-    fixed = instance._make_valid_value("short_code", "string", {"regex_match": None, "min_length": 12, "max_length": 4}, False)
+    fixed = instance._make_valid_value(
+        "short_code", "string", {"regex_match": None, "min_length": 12, "max_length": 4}, False
+    )
     assert len(fixed) >= 12
 
 

@@ -33,9 +33,7 @@ def _install_fake_dlt(monkeypatch, *, raise_on_run=False):
     rec = SimpleNamespace(resource_calls=[], pipeline_calls=[], last_data=None)
 
     def fake_resource(*, name, write_disposition, primary_key):
-        rec.resource_calls.append(
-            {"name": name, "write_disposition": write_disposition, "primary_key": primary_key}
-        )
+        rec.resource_calls.append({"name": name, "write_disposition": write_disposition, "primary_key": primary_key})
 
         def decorator(fn):
             def wrapped():
@@ -175,10 +173,13 @@ class TestWriteFrameParquetFallbacks:
             def __init__(self):
                 self.connection = con
                 # Trigger fallback by raising on to_parquet
+
             def to_parquet(self, path, index=False):
                 raise RuntimeError("pyarrow not installed")
+
             def sql_query(self):
                 return "SELECT * FROM t"
+
             @property
             def columns(self):
                 return ["a"]
@@ -226,9 +227,7 @@ class TestWriteFrameParquetFallbacks:
             raise RuntimeError("pyarrow missing")
 
         monkeypatch.setattr(pd.DataFrame, "to_parquet", boom)
-        monkeypatch.setattr(
-            "polars.from_pandas", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("polars failed"))
-        )
+        monkeypatch.setattr("polars.from_pandas", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("polars failed")))
 
         with pytest.raises(ValueError, match="pyarrow/fastparquet, duckdb, or polars"):
             mat._write_frame(df, tmp_path / "x.parquet", "parquet")
@@ -248,6 +247,7 @@ class TestWriteFrameIceberg:
         class FakeRelation:
             def __init__(self):
                 self.connection = con
+
             def sql_query(self):
                 return "SELECT 1 AS x"
 
@@ -399,8 +399,10 @@ class TestWriteFrameDlt:
                 }
                 self._dlt_table = "explicit_table"
                 self.stem = "ignored"
+
             def __str__(self):
                 return str(self._p)
+
             def __fspath__(self):
                 return str(self._p)
 

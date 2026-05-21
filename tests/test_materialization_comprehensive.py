@@ -31,9 +31,7 @@ class TestSanitizeArrowNulls:
 
     def test_sanitize_preserves_non_null_types(self):
         """Verify that columns with data types are unchanged."""
-        table = pa.table(
-            {"id": pa.array([1, 2]), "name": pa.array(["Alice", "Bob"])}
-        )
+        table = pa.table({"id": pa.array([1, 2]), "name": pa.array(["Alice", "Bob"])})
         sanitized = mat._sanitize_arrow_nulls(table)
         assert sanitized == table
 
@@ -282,9 +280,7 @@ class TestSeedSoftDeleteColumnsPandas:
 
     def test_seed_soft_delete_with_none_df(self):
         """Verify handling of None DataFrame."""
-        result = mat._seed_soft_delete_columns_pandas(
-            None, soft_delete_col="is_deleted"
-        )
+        result = mat._seed_soft_delete_columns_pandas(None, soft_delete_col="is_deleted")
         assert result is None
 
     def test_seed_soft_delete_without_soft_delete_col(self):
@@ -299,7 +295,7 @@ class TestSeedSoftDeleteColumnsSpark:
 
     @pytest.mark.skipif(
         os.getenv("CI") is not None or os.getenv("SKIP_SPARK_TESTS") is not None,
-        reason="Spark tests disabled in CI; set RUN_SPARK_TESTS=1 to enable locally"
+        reason="Spark tests disabled in CI; set RUN_SPARK_TESTS=1 to enable locally",
     )
     def test_seed_soft_delete_spark_adds_columns(self):
         """Verify soft-delete columns are added to Spark DataFrame."""
@@ -308,13 +304,9 @@ class TestSeedSoftDeleteColumnsSpark:
 
         spark = SparkSession.builder.appName("test").master("local").getOrCreate()
         try:
-            df = spark.createDataFrame(
-                [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-            )
+            df = spark.createDataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])
 
-            result = mat._seed_soft_delete_columns_spark(
-                df, soft_delete_col="is_deleted"
-            )
+            result = mat._seed_soft_delete_columns_spark(df, soft_delete_col="is_deleted")
 
             assert "is_deleted" in result.columns
         finally:
@@ -322,7 +314,7 @@ class TestSeedSoftDeleteColumnsSpark:
 
     @pytest.mark.skipif(
         os.getenv("CI") is not None or os.getenv("SKIP_SPARK_TESTS") is not None,
-        reason="Spark tests disabled in CI; set RUN_SPARK_TESTS=1 to enable locally"
+        reason="Spark tests disabled in CI; set RUN_SPARK_TESTS=1 to enable locally",
     )
     def test_seed_soft_delete_spark_with_cdc_signals(self):
         """Verify Spark soft-delete populated from CDC delete signals."""
@@ -373,9 +365,7 @@ class TestMergeFrames:
 
     def test_merge_with_cdc_deletes(self):
         """Verify merge handles CDC delete signals."""
-        existing = pd.DataFrame(
-            {"id": [1, 2, 3], "value": [10, 20, 30], "is_deleted": [False, False, False]}
-        )
+        existing = pd.DataFrame({"id": [1, 2, 3], "value": [10, 20, 30], "is_deleted": [False, False, False]})
         incoming = pd.DataFrame(
             {
                 "id": [2, 4],
@@ -455,7 +445,7 @@ class TestBuildStorageOptions:
         for key in list(monkeypatch._setattr):
             if key.startswith(("AZURE_", "GOOGLE_", "AWS_")):
                 monkeypatch.delenv(key, raising=False)
-        
+
         # Clear Azure and GCS env vars explicitly
         monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
         monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
@@ -464,7 +454,7 @@ class TestBuildStorageOptions:
         monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
-        
+
         monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
         monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
         monkeypatch.setenv("AWS_REGION", "us-east-1")
@@ -487,7 +477,7 @@ class TestBuildStorageOptions:
         monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
         monkeypatch.delenv("AWS_REGION", raising=False)
         monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
-        
+
         monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_KEY", "/path/to/key.json")
 
         opts = mat._build_storage_options()
@@ -573,9 +563,9 @@ class TestIsRemotePath:
     def test_is_remote_path_with_cloud_uris(self, monkeypatch):
         """Verify cloud URIs are detected as remote."""
         monkeypatch.setattr(
-            mat, "_is_remote_path", lambda p: any(
-                str(p).startswith(prefix) for prefix in ["s3://", "abfss://", "gs://"]
-            )
+            mat,
+            "_is_remote_path",
+            lambda p: any(str(p).startswith(prefix) for prefix in ["s3://", "abfss://", "gs://"]),
         )
 
         assert mat._is_remote_path("s3://bucket/path") is True
@@ -584,9 +574,7 @@ class TestIsRemotePath:
 
     def test_is_remote_path_with_local_paths(self, monkeypatch):
         """Verify local paths are not detected as remote."""
-        monkeypatch.setattr(
-            mat, "_is_remote_path", lambda p: str(p).startswith(("s3://", "abfss://", "gs://"))
-        )
+        monkeypatch.setattr(mat, "_is_remote_path", lambda p: str(p).startswith(("s3://", "abfss://", "gs://")))
 
         assert mat._is_remote_path("/local/path") is False
         assert mat._is_remote_path("./relative/path") is False

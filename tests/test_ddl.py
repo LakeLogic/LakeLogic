@@ -437,7 +437,9 @@ class TestAlterDDL:
 
     def test_alter_backend_specific_type_changes_removed_columns_and_errors(self, monkeypatch):
         with pytest.raises(ValueError, match="no table name"):
-            generate_alter_ddl(DataContract(version="1.0", model=Model(fields=[FieldDefinition(name="id", type="int")])), "duckdb", [])
+            generate_alter_ddl(
+                DataContract(version="1.0", model=Model(fields=[FieldDefinition(name="id", type="int")])), "duckdb", []
+            )
 
         strict_contract = _make_contract(fields=[FieldDefinition(name="amount", type="bigint")])
         strict_contract.server = type("MockServer", (), {})()
@@ -448,9 +450,9 @@ class TestAlterDDL:
         append_contract = _make_contract(fields=[FieldDefinition(name="amount", type="bigint")])
         append_contract.server = type("MockServer", (), {})()
         append_contract.server.schema_policy = type("MockPolicy", (), {"evolution": "append"})()
-        assert generate_alter_ddl(
-            append_contract, "spark", ["amount"], existing_column_types={"amount": "INT"}
-        ) == ["ALTER TABLE bronze.orders ALTER COLUMN amount TYPE BIGINT;"]
+        assert generate_alter_ddl(append_contract, "spark", ["amount"], existing_column_types={"amount": "INT"}) == [
+            "ALTER TABLE bronze.orders ALTER COLUMN amount TYPE BIGINT;"
+        ]
         assert generate_alter_ddl(
             append_contract, "snowflake", ["amount"], existing_column_types={"amount": "INTEGER"}
         ) == ["ALTER TABLE bronze.orders MODIFY COLUMN amount BIGINT;"]
@@ -461,12 +463,17 @@ class TestAlterDDL:
         infos = []
         monkeypatch.setattr("lakelogic.core.ddl.logger.info", infos.append)
         assert (
-            generate_alter_ddl(append_contract, "bigquery", ["amount"], existing_column_types={"amount": "INT64"})
-            == []
+            generate_alter_ddl(append_contract, "bigquery", ["amount"], existing_column_types={"amount": "INT64"}) == []
         )
-        add_stmt = generate_alter_ddl(_make_contract(fields=[FieldDefinition(name="added", type="string")]), "spark", [])
+        add_stmt = generate_alter_ddl(
+            _make_contract(fields=[FieldDefinition(name="added", type="string")]), "spark", []
+        )
         assert add_stmt == ["ALTER TABLE bronze.orders ADD COLUMN added STRING;"]
-        generate_alter_ddl(_make_contract(fields=[FieldDefinition(name="id", type="int")]), "duckdb", ["id", "old_col", "_lakelogic_source"])
+        generate_alter_ddl(
+            _make_contract(fields=[FieldDefinition(name="id", type="int")]),
+            "duckdb",
+            ["id", "old_col", "_lakelogic_source"],
+        )
         assert any("old_col" in message for message in infos)
 
 
@@ -924,6 +931,7 @@ class TestDeltaInitialization:
         assert any("deltalake and pyarrow are required" in message for message in warnings)
 
         monkeypatch.setattr("builtins.__import__", original_import)
+
         class FakeMissingDeltaTable:
             def __init__(self, target, storage_options=None):
                 raise RuntimeError("not found")

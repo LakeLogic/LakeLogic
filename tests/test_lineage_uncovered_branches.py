@@ -134,9 +134,7 @@ class TestInjectLineageGuards:
         contract = _contract(cfg)
         good = pl.DataFrame({"a": [1]})
         bad = pl.DataFrame({"a": [2]})
-        g, _ = lineage.inject_lineage(
-            good, bad, contract, "polars", "row-run", pipeline_run_id="pipeline-run-99"
-        )
+        g, _ = lineage.inject_lineage(good, bad, contract, "polars", "row-run", pipeline_run_id="pipeline-run-99")
         assert g[cfg.run_id_column_name].to_list()[0] == "pipeline-run-99"
 
     def test_contract_name_with_version_format(self):
@@ -187,6 +185,7 @@ class TestInjectLineageGuards:
 
     def test_contract_path_exception_falls_back_to_none(self, monkeypatch):
         cfg = _lineage_cfg()
+
         # Use a contract whose _contract_path getattr raises
         class WeirdContract:
             lineage = cfg
@@ -214,9 +213,7 @@ class TestPreserveUpstreamBranches:
     def test_non_lakelogic_prefixed_col_gets_underscore_join(self):
         # Lines 135-137: cols not starting with "_lakelogic_" get joined with "_"
         df = pl.DataFrame({"custom_provenance": ["x"], "other": [1]})
-        out = lineage._preserve_upstream_lineage(
-            df, ["custom_provenance"], "_upstream", "polars"
-        )
+        out = lineage._preserve_upstream_lineage(df, ["custom_provenance"], "_upstream", "polars")
         # _upstream + custom_provenance → _upstream_custom_provenance
         assert "_upstream_custom_provenance" in out.columns
         assert "custom_provenance" not in out.columns
@@ -227,9 +224,7 @@ class TestPreserveUpstreamBranches:
     def test_returns_unchanged_when_no_matching_columns(self):
         # The column being requested doesn't exist in df → no-op rename
         df = pl.DataFrame({"a": [1], "b": [2]})
-        out = lineage._preserve_upstream_lineage(
-            df, ["_lakelogic_source"], "_upstream", "polars"
-        )
+        out = lineage._preserve_upstream_lineage(df, ["_lakelogic_source"], "_upstream", "polars")
         # df returned as-is (mapping is empty so the function short-circuits)
         assert out.columns == ["a", "b"]
 
@@ -244,12 +239,8 @@ class TestAddColumnsBranches:
         assert lineage.add_columns(None, {"_lakelogic_source": "x"}, "polars") is None
 
     def test_lakelogic_cols_moved_to_far_right(self):
-        df = pl.DataFrame(
-            {"_lakelogic_existing": ["old"], "business_col": [1], "other": [2]}
-        )
-        out = lineage.add_columns(
-            df, {"_lakelogic_source": "/path/file.csv", "_lakelogic_run_id": "r-1"}, "polars"
-        )
+        df = pl.DataFrame({"_lakelogic_existing": ["old"], "business_col": [1], "other": [2]})
+        out = lineage.add_columns(df, {"_lakelogic_source": "/path/file.csv", "_lakelogic_run_id": "r-1"}, "polars")
         # Business cols first, then _lakelogic_* (current layer) at the far right
         cols = out.columns
         idx_business = cols.index("business_col")
@@ -341,6 +332,7 @@ class TestAddColumnsDuckDB:
         real_con = duckdb.connect()
         real_rel = real_con.sql("SELECT 1 AS a, 2 AS b")
         try:
+
             class FakeConnection:
                 def sql(self, query):
                     raise RuntimeError("simulated sql failure")

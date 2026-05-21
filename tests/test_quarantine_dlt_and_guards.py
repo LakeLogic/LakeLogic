@@ -70,9 +70,16 @@ def _install_fake_dlt(monkeypatch, *, raise_on_run=False):
     return rec
 
 
-def _contract_with_quarantine(*, target="quarantine_demo/bad.parquet", format="dlt", table=None,
-                              dlt_destination=None, dlt_credentials=None,
-                              dlt_dataset_name=None, **dlt_extras):
+def _contract_with_quarantine(
+    *,
+    target="quarantine_demo/bad.parquet",
+    format="dlt",
+    table=None,
+    dlt_destination=None,
+    dlt_credentials=None,
+    dlt_dataset_name=None,
+    **dlt_extras,
+):
     """Build a contract whose quarantine config carries dlt settings."""
     quarantine_kwargs: dict = {"target": target, "format": format}
     if table is not None:
@@ -105,9 +112,7 @@ def _contract_with_quarantine(*, target="quarantine_demo/bad.parquet", format="d
 
 class TestQuarantineEmptyGuard:
     def test_empty_polars_df_returns_zero_rows(self, tmp_path):
-        contract = _contract_with_quarantine(
-            target=str(tmp_path / "bad.parquet"), format="parquet"
-        )
+        contract = _contract_with_quarantine(target=str(tmp_path / "bad.parquet"), format="parquet")
         empty_df = pl.DataFrame(schema={"id": pl.Int64})  # 0 rows, schema present
         result = q.materialize_quarantine(empty_df, contract)
         assert result["rows_written"] == 0
@@ -222,17 +227,13 @@ class TestMaterializeQuarantineGuards:
         assert q.materialize_quarantine(pl.DataFrame({"id": [1]}), None) == {}
 
     def test_no_quarantine_config_returns_empty(self):
-        contract = DataContract(
-            version="1.0", info=Info(title="t", version="1.0"), dataset="t"
-        )
+        contract = DataContract(version="1.0", info=Info(title="t", version="1.0"), dataset="t")
         # quarantine is None by default
         assert q.materialize_quarantine(pl.DataFrame({"id": [1]}), contract) == {}
 
     def test_table_mode_without_table_name_falls_back_to_path(self, monkeypatch, tmp_path):
         # quarantine.table is None → table mode falls back to path mode and writes
-        contract = _contract_with_quarantine(
-            target=str(tmp_path / "bad.parquet"), format="parquet", table=None
-        )
+        contract = _contract_with_quarantine(target=str(tmp_path / "bad.parquet"), format="parquet", table=None)
         warnings = []
         monkeypatch.setattr(q.logger, "warning", warnings.append)
 
@@ -244,9 +245,7 @@ class TestMaterializeQuarantineGuards:
         assert any("falling back to path" in m for m in warnings)
 
     def test_table_mode_with_table_name_routes_to_table_writer(self, monkeypatch):
-        contract = _contract_with_quarantine(
-            target="q/bad", format="parquet", table="my_q_table"
-        )
+        contract = _contract_with_quarantine(target="q/bad", format="parquet", table="my_q_table")
         calls = []
         monkeypatch.setattr(
             q,
@@ -255,16 +254,12 @@ class TestMaterializeQuarantineGuards:
             or {"target": "table", "rows_written": 1},
         )
         df = pl.DataFrame({"id": [1]})
-        result = q.materialize_quarantine(
-            df, contract, quarantine_mode="table", engine_name="polars"
-        )
+        result = q.materialize_quarantine(df, contract, quarantine_mode="table", engine_name="polars")
         assert calls == ["my_q_table"]
         assert result["target"] == "table"
 
     def test_table_prefix_in_target_routes_to_table_writer(self, monkeypatch):
-        contract = _contract_with_quarantine(
-            target="table:catalog.schema.quarantine_audit", format="parquet"
-        )
+        contract = _contract_with_quarantine(target="table:catalog.schema.quarantine_audit", format="parquet")
         calls = []
         monkeypatch.setattr(
             q,
@@ -278,9 +273,7 @@ class TestMaterializeQuarantineGuards:
 
     def test_unresolved_template_target_raises_value_error(self):
         # quarantine.target with unresolved {placeholder} → ValueError
-        contract = _contract_with_quarantine(
-            target="{quarantine_path}/orders/bad.parquet", format="parquet"
-        )
+        contract = _contract_with_quarantine(target="{quarantine_path}/orders/bad.parquet", format="parquet")
         df = pl.DataFrame({"id": [1]})
         with pytest.raises(ValueError, match="Quarantine target not fully resolved"):
             q.materialize_quarantine(df, contract)

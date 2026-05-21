@@ -1281,7 +1281,9 @@ def test_processor_class_constructors_reset_and_adapter_variants(monkeypatch):
     assert processor.stage == "silver"
 
     reset_calls = []
-    processor.contract.reset = lambda targets=None, dry_run=False: reset_calls.append((targets, dry_run)) or {"ok": True}
+    processor.contract.reset = lambda targets=None, dry_run=False: reset_calls.append((targets, dry_run)) or {
+        "ok": True
+    }
     assert processor.reset(targets=["data"], dry_run=True) == {"ok": True}
     assert reset_calls == [(["data"], True)]
 
@@ -1511,9 +1513,12 @@ def test_processor_delegates_for_ddl_gdpr_hipaa_external_logic_and_dim_date(monk
     assert processor._load_output_frame(Path("out.parquet"), "parquet")[0] == "loaded"
 
     fake_gdpr = types.ModuleType("lakelogic.core.gdpr")
-    fake_gdpr.forget_subjects = lambda *args, audit_report_out=None, **kwargs: (
-        audit_report_out.append({"audit": True}) if audit_report_out is not None else None
-    ) or "forgotten"
+    fake_gdpr.forget_subjects = (
+        lambda *args, audit_report_out=None, **kwargs: (
+            audit_report_out.append({"audit": True}) if audit_report_out is not None else None
+        )
+        or "forgotten"
+    )
     fake_gdpr.mask_pii_columns = lambda *args, **kwargs: ("masked", args, kwargs)
     monkeypatch.setitem(sys.modules, "lakelogic.core.gdpr", fake_gdpr)
     assert processor.forget("df", "customer_id", ["1"]) == "forgotten"

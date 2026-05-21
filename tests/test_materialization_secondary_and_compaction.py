@@ -45,9 +45,7 @@ def _install_fake_dlt(monkeypatch: pytest.MonkeyPatch, *, raise_on_run: bool = F
     )
 
     def fake_resource(*, name: str, write_disposition: str, primary_key: Any) -> Any:
-        rec.resource_calls.append(
-            {"name": name, "write_disposition": write_disposition, "primary_key": primary_key}
-        )
+        rec.resource_calls.append({"name": name, "write_disposition": write_disposition, "primary_key": primary_key})
 
         def decorator(fn):
             def wrapped():
@@ -132,9 +130,7 @@ class TestWriteToSecondaryTargetsCredentialValidation:
         with pytest.raises(ValueError, match="No credentials for 'postgres'"):
             mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "t")
 
-    def test_warning_only_when_credentials_missing_and_fail_on_error_false(
-        self, monkeypatch, caplog
-    ):
+    def test_warning_only_when_credentials_missing_and_fail_on_error_false(self, monkeypatch, caplog):
         _install_fake_dlt(monkeypatch)
         targets = [
             {
@@ -175,14 +171,10 @@ class TestWriteToSecondaryTargetsStrategyMapping:
             ("something_unknown", "append"),  # default fallback
         ],
     )
-    def test_strategy_maps_to_dlt_write_disposition(
-        self, monkeypatch, in_strategy, expected_disposition
-    ):
+    def test_strategy_maps_to_dlt_write_disposition(self, monkeypatch, in_strategy, expected_disposition):
         rec = _install_fake_dlt(monkeypatch)
         targets = [{"format": "dlt", "dlt_destination": "duckdb"}]
-        mat.write_to_secondary_targets(
-            targets, pl.DataFrame({"a": [1]}), "t", strategy=in_strategy
-        )
+        mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "t", strategy=in_strategy)
         assert rec.resource_calls[0]["write_disposition"] == expected_disposition
 
 
@@ -222,9 +214,7 @@ class TestWriteToSecondaryTargetsErrorHandling:
 
     def test_dlt_run_failure_captured_when_fail_on_error_false(self, monkeypatch):
         _install_fake_dlt(monkeypatch, raise_on_run=True)
-        targets = [
-            {"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": False}
-        ]
+        targets = [{"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": False}]
         results = mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "t")
         assert len(results) == 1
         assert "error" in results[0]
@@ -232,9 +222,7 @@ class TestWriteToSecondaryTargetsErrorHandling:
 
     def test_dlt_run_failure_reraises_when_fail_on_error_true(self, monkeypatch):
         _install_fake_dlt(monkeypatch, raise_on_run=True)
-        targets = [
-            {"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": True}
-        ]
+        targets = [{"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": True}]
         with pytest.raises(RuntimeError, match="simulated dlt run failure"):
             mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "t")
 
@@ -249,17 +237,13 @@ class TestWriteToSecondaryTargetsTableName:
                 "table_name": "custom_table",
             }
         ]
-        mat.write_to_secondary_targets(
-            targets, pl.DataFrame({"a": [1]}), "fallback_table"
-        )
+        mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "fallback_table")
         assert rec.resource_calls[0]["name"] == "custom_table"
 
     def test_falls_back_to_caller_table_name_when_omitted(self, monkeypatch):
         rec = _install_fake_dlt(monkeypatch)
         targets = [{"format": "dlt", "dlt_destination": "duckdb"}]
-        mat.write_to_secondary_targets(
-            targets, pl.DataFrame({"a": [1]}), "fallback_table"
-        )
+        mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "fallback_table")
         assert rec.resource_calls[0]["name"] == "fallback_table"
 
 
@@ -275,9 +259,7 @@ class TestRunSecondaryTargetsGuards:
         contract = SimpleNamespace(dataset="orders")
         mat_cfg = SimpleNamespace()  # no `secondary_targets` attribute
         result = {"foo": "bar"}
-        got = mat._run_secondary_targets(
-            mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result
-        )
+        got = mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result)
         assert got is result
         assert "secondary_writes" not in got
 
@@ -285,9 +267,7 @@ class TestRunSecondaryTargetsGuards:
         contract = SimpleNamespace(dataset="orders")
         mat_cfg = SimpleNamespace(secondary_targets=[])
         result = {"foo": "bar"}
-        got = mat._run_secondary_targets(
-            mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result
-        )
+        got = mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result)
         assert got is result
         assert "secondary_writes" not in got
 
@@ -295,9 +275,7 @@ class TestRunSecondaryTargetsGuards:
         contract = SimpleNamespace(dataset="orders")
         mat_cfg = SimpleNamespace(secondary_targets={"format": "dlt"})  # dict, not list
         result: dict = {}
-        got = mat._run_secondary_targets(
-            mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result
-        )
+        got = mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result)
         assert "secondary_writes" not in got
 
 
@@ -308,26 +286,18 @@ class TestRunSecondaryTargetsTableResolution:
     def test_auto_uses_contract_dataset(self, monkeypatch, raw):
         rec = _install_fake_dlt(monkeypatch)
         contract = SimpleNamespace(dataset="orders_dataset")
-        mat_cfg = SimpleNamespace(
-            secondary_targets=[{"format": "dlt", "dlt_destination": "duckdb", "table_name": raw}]
-        )
+        mat_cfg = SimpleNamespace(secondary_targets=[{"format": "dlt", "dlt_destination": "duckdb", "table_name": raw}])
         result: dict = {}
-        mat._run_secondary_targets(
-            mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result
-        )
+        mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result)
         assert rec.resource_calls[0]["name"] == "orders_dataset"
 
     def test_explicit_table_name_overrides_dataset(self, monkeypatch):
         rec = _install_fake_dlt(monkeypatch)
         contract = SimpleNamespace(dataset="orders_dataset")
         mat_cfg = SimpleNamespace(
-            secondary_targets=[
-                {"format": "dlt", "dlt_destination": "duckdb", "table_name": "explicit"}
-            ]
+            secondary_targets=[{"format": "dlt", "dlt_destination": "duckdb", "table_name": "explicit"}]
         )
-        mat._run_secondary_targets(
-            mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, {}
-        )
+        mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, {})
         assert rec.resource_calls[0]["name"] == "explicit"
 
 
@@ -336,14 +306,10 @@ class TestRunSecondaryTargetsErrorPropagation:
         _install_fake_dlt(monkeypatch, raise_on_run=True)
         contract = SimpleNamespace(dataset="orders")
         mat_cfg = SimpleNamespace(
-            secondary_targets=[
-                {"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": False}
-            ]
+            secondary_targets=[{"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": False}]
         )
         result: dict = {}
-        got = mat._run_secondary_targets(
-            mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result
-        )
+        got = mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result)
         assert len(got["secondary_writes"]) == 1
         assert "error" in got["secondary_writes"][0]
 
@@ -351,14 +317,10 @@ class TestRunSecondaryTargetsErrorPropagation:
         _install_fake_dlt(monkeypatch, raise_on_run=True)
         contract = SimpleNamespace(dataset="orders")
         mat_cfg = SimpleNamespace(
-            secondary_targets=[
-                {"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": True}
-            ]
+            secondary_targets=[{"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": True}]
         )
         with pytest.raises(RuntimeError, match="simulated dlt run failure"):
-            mat._run_secondary_targets(
-                mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, {}
-            )
+            mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, {})
 
     def test_unsupported_format_records_no_write(self, monkeypatch):
         contract = SimpleNamespace(dataset="orders")
@@ -366,9 +328,7 @@ class TestRunSecondaryTargetsErrorPropagation:
             secondary_targets=[{"format": "parquet"}]  # not dlt → branch logs and skips
         )
         result: dict = {}
-        got = mat._run_secondary_targets(
-            mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result
-        )
+        got = mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, result)
         # The branch only logs a warning; secondary_writes is initialised but stays empty
         assert got["secondary_writes"] == []
 
@@ -424,12 +384,8 @@ class TestOptimizeDelta:
 
     def test_storage_options_forwarded_to_delta_table(self, monkeypatch):
         fake_dt = _install_fake_deltalake(monkeypatch)
-        mat.optimize_delta(
-            "abfss://x@y.dfs.core.windows.net/z", storage_options={"k": "v"}
-        )
-        fake_dt.assert_called_once_with(
-            "abfss://x@y.dfs.core.windows.net/z", storage_options={"k": "v"}
-        )
+        mat.optimize_delta("abfss://x@y.dfs.core.windows.net/z", storage_options={"k": "v"})
+        fake_dt.assert_called_once_with("abfss://x@y.dfs.core.windows.net/z", storage_options={"k": "v"})
 
     def test_compact_returning_non_dict_yields_empty_metrics(self, monkeypatch):
         _install_fake_deltalake(monkeypatch)
@@ -468,9 +424,7 @@ class TestMaybeCompactDelta:
         assert mat._maybe_compact_delta("/tmp/x", contract) is None
 
     def test_returns_none_when_compaction_auto_is_false(self):
-        contract = SimpleNamespace(
-            materialization=SimpleNamespace(compaction={"auto": False})
-        )
+        contract = SimpleNamespace(materialization=SimpleNamespace(compaction={"auto": False}))
         assert mat._maybe_compact_delta("/tmp/x", contract) is None
 
     def test_auto_true_invokes_optimize_delta_with_defaults(self, monkeypatch):
@@ -481,9 +435,7 @@ class TestMaybeCompactDelta:
             return {"ok": True}
 
         monkeypatch.setattr(mat, "optimize_delta", fake_optimize_delta)
-        contract = SimpleNamespace(
-            materialization=SimpleNamespace(compaction={"auto": True})
-        )
+        contract = SimpleNamespace(materialization=SimpleNamespace(compaction={"auto": True}))
         result = mat._maybe_compact_delta("/tmp/x", contract)
         assert result == {"ok": True}
         assert calls == [{"target": "/tmp/x", "vacuum": True, "retention": 168}]
@@ -497,9 +449,7 @@ class TestMaybeCompactDelta:
 
         monkeypatch.setattr(mat, "optimize_delta", fake_optimize_delta)
         contract = SimpleNamespace(
-            materialization=SimpleNamespace(
-                compaction={"auto": True, "vacuum": False, "vacuum_retention_hours": 24}
-            )
+            materialization=SimpleNamespace(compaction={"auto": True, "vacuum": False, "vacuum_retention_hours": 24})
         )
         mat._maybe_compact_delta("/tmp/x", contract)
         assert calls == [{"vacuum": False, "retention": 24}]

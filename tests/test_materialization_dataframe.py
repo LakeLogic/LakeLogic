@@ -96,9 +96,7 @@ class TestMaterializeDataframeTableTarget:
             "_resolve_target",
             lambda c, p=None: (mat.URIPath("table:catalog.schema.t"), "delta"),
         )
-        result = mat.materialize_dataframe(
-            pl.DataFrame({"a": [1]}), contract, engine_name="polars"
-        )
+        result = mat.materialize_dataframe(pl.DataFrame({"a": [1]}), contract, engine_name="polars")
         assert result == {}
 
     # Note: the success path for table:→location fallback isn't tested at unit-test
@@ -120,7 +118,9 @@ class TestMaterializeDataframeFormatOverride:
         monkeypatch.setattr(mat, "_resolve_target", lambda c, p=None: (out, "csv"))
         df = pl.DataFrame({"a": [1, 2, 3]})
         result = mat.materialize_dataframe(
-            df, contract, output_format="parquet"  # override wins
+            df,
+            contract,
+            output_format="parquet",  # override wins
         )
         assert result["format"] == "parquet"
 
@@ -206,14 +206,10 @@ class TestMaterializeDataframeNativePolars:
 
 class TestMaterializeDataframePartitionedMerge:
     @pytest.mark.parametrize("strategy", ["merge", "scd2"])
-    def test_partitioned_merge_or_scd2_dispatches_to_partition_aware_merge(
-        self, monkeypatch, tmp_path, strategy
-    ):
+    def test_partitioned_merge_or_scd2_dispatches_to_partition_aware_merge(self, monkeypatch, tmp_path, strategy):
         captured = {}
 
-        def fake_partition_aware_merge(
-            df, contract, target, fmt, strat, partition_by, primary_key, mat_cfg, scd2_cfg
-        ):
+        def fake_partition_aware_merge(df, contract, target, fmt, strat, partition_by, primary_key, mat_cfg, scd2_cfg):
             captured["dispatched"] = True
             captured["strategy"] = strat
             captured["partition_by"] = partition_by
