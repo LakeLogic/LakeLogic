@@ -335,3 +335,6 @@ _ref/
 databricks.yml
 
 .agent/
+.claude/
+playwright-mcp/
+.playwright-mcp/

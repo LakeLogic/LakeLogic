@@ -9,6 +9,7 @@ Supports cloud storage paths (ADLS, S3, GCS) via fsspec for JSON run logs.
 Extracted from materialization.py to keep concerns focused.
 """
 
+import datetime
 import json
 import os
 from pathlib import Path
@@ -1051,6 +1052,358 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
     logger.warning(f"Unsupported run_log_backend: {backend}")
     return None
+
+
+# ── SLO Checks table ──
+
+
+_SLO_CHECKS_COLUMNS = [
+    "check_run_id",
+    "pipeline_run_id",
+    "checked_at",
+    "domain",
+    "system",
+    "layer",
+    "entity",
+    "check_type",
+    "passed",
+    "severity",
+    "status",
+    "delay_minutes",
+    "slo_max_minutes",
+    "source_delay_minutes",
+    "source_slo_max_minutes",
+    "source_column_used",
+    "row_count",
+    "slo_min_rows",
+    "slo_max_rows",
+    "anomaly_ratio",
+    "anomaly_baseline",
+    "quality_ratio",
+    "quality_severity",
+    "duration_seconds",
+    "details_json",
+]
+
+
+def _flatten_slo_check(
+    result: Any,
+    check_run_id: str,
+    pipeline_run_id: Optional[str],
+    checked_at: str,
+    domain: str,
+    system: str,
+) -> Dict[str, Any]:
+    """Flatten one SLOCheckResult into a row dict for _slo_checks."""
+    return {
+        "check_run_id": check_run_id,
+        "pipeline_run_id": pipeline_run_id,
+        "checked_at": checked_at,
+        "domain": domain,
+        "system": system,
+        "layer": result.layer,
+        "entity": result.entity,
+        "check_type": result.check_type,
+        "passed": result.passed,
+        "severity": result.severity,
+        "status": result.status,
+        "delay_minutes": result.delay_minutes,
+        "slo_max_minutes": result.slo_max_minutes,
+        "source_delay_minutes": result.source_delay_minutes,
+        "source_slo_max_minutes": result.source_slo_max_minutes,
+        "source_column_used": result.source_column_used,
+        "row_count": result.row_count,
+        "slo_min_rows": result.slo_min_rows,
+        "slo_max_rows": result.slo_max_rows,
+        "anomaly_ratio": result.anomaly_ratio,
+        "anomaly_baseline": result.anomaly_baseline,
+        "quality_ratio": result.quality_ratio,
+        "quality_severity": result.quality_severity,
+        "duration_seconds": result.duration_seconds,
+        "details_json": result.model_dump_json(),
+    }
+
+
+def _write_slo_checks_table(
+    registry: Any,
+    records: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    Append a batch of SLO check results to the configured _slo_checks table.
+
+    Reads slo_checks_table and slo_checks_backend from registry.storage /
+    registry.metadata — mirroring the run_log_table / run_log_backend pattern.
+    Pure append — no merge. check_run_id groups results from one invocation.
+    """
+    if not records:
+        return None
+
+    storage = getattr(registry, "storage", None)
+    metadata = getattr(registry, "metadata", {}) or {}
+
+    table_name = (getattr(storage, "slo_checks_table", None) if storage else None) or metadata.get("slo_checks_table")
+    if not table_name:
+        return None
+
+    backend = (metadata.get("slo_checks_backend") or "delta").lower()
+
+    # ── Spark ──────────────────────────────────────────────────────────────
+    if backend == "spark":
+        try:
+            from pyspark.sql import SparkSession
+            from pyspark.sql.types import (
+                BooleanType,
+                DoubleType,
+                LongType,
+                StringType,
+                StructField,
+                StructType,
+            )
+        except Exception as exc:
+            logger.warning(f"SLO checks Spark backend unavailable: {exc}")
+            return None
+
+        spark = SparkSession.builder.getOrCreate()
+        schema = StructType(
+            [
+                StructField("check_run_id", StringType(), True),
+                StructField("pipeline_run_id", StringType(), True),
+                StructField("checked_at", StringType(), True),
+                StructField("domain", StringType(), True),
+                StructField("system", StringType(), True),
+                StructField("layer", StringType(), True),
+                StructField("entity", StringType(), True),
+                StructField("check_type", StringType(), True),
+                StructField("passed", BooleanType(), True),
+                StructField("severity", StringType(), True),
+                StructField("status", StringType(), True),
+                StructField("delay_minutes", DoubleType(), True),
+                StructField("slo_max_minutes", LongType(), True),
+                StructField("source_delay_minutes", DoubleType(), True),
+                StructField("source_slo_max_minutes", LongType(), True),
+                StructField("source_column_used", StringType(), True),
+                StructField("row_count", LongType(), True),
+                StructField("slo_min_rows", LongType(), True),
+                StructField("slo_max_rows", LongType(), True),
+                StructField("anomaly_ratio", DoubleType(), True),
+                StructField("anomaly_baseline", DoubleType(), True),
+                StructField("quality_ratio", DoubleType(), True),
+                StructField("quality_severity", StringType(), True),
+                StructField("duration_seconds", DoubleType(), True),
+                StructField("details_json", StringType(), True),
+            ]
+        )
+        df = spark.createDataFrame(records, schema=schema)
+        if spark.catalog.tableExists(table_name):
+            df.write.mode("append").format("delta").saveAsTable(table_name)
+        else:
+            df.write.mode("overwrite").format("delta").saveAsTable(table_name)
+        logger.info(f"Wrote {len(records)} SLO check rows to Spark table {table_name}")
+        return table_name
+
+    # ── DuckDB ─────────────────────────────────────────────────────────────
+    if backend == "duckdb":
+        try:
+            import duckdb
+        except Exception as exc:
+            logger.warning(f"SLO checks DuckDB backend unavailable: {exc}")
+            return None
+
+        db_path = (
+            metadata.get("slo_checks_database")
+            or metadata.get("run_log_database")
+            or "logs/lakelogic_slo_checks.duckdb"
+        )
+        db_path = Path(db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        tbl = _prepare_table_name(table_name, "duckdb")
+        parts = tbl.split(".")
+        schema_name = parts[-2] if len(parts) >= 2 else None
+        table_only = parts[-1]
+        con = duckdb.connect(database=str(db_path))
+        if schema_name:
+            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+            full_table = f"{schema_name}.{table_only}"
+        else:
+            full_table = table_only
+        con.execute(f"""
+            CREATE TABLE IF NOT EXISTS {full_table} (
+                check_run_id VARCHAR, pipeline_run_id VARCHAR, checked_at VARCHAR,
+                domain VARCHAR, system VARCHAR, layer VARCHAR, entity VARCHAR,
+                check_type VARCHAR, passed BOOLEAN, severity VARCHAR, status VARCHAR,
+                delay_minutes DOUBLE, slo_max_minutes BIGINT,
+                source_delay_minutes DOUBLE, source_slo_max_minutes BIGINT,
+                source_column_used VARCHAR, row_count BIGINT,
+                slo_min_rows BIGINT, slo_max_rows BIGINT,
+                anomaly_ratio DOUBLE, anomaly_baseline DOUBLE,
+                quality_ratio DOUBLE, quality_severity VARCHAR,
+                duration_seconds DOUBLE, details_json VARCHAR
+            )
+        """)
+        placeholders = ", ".join(["?"] * len(_SLO_CHECKS_COLUMNS))
+        for rec in records:
+            values = [rec.get(c) for c in _SLO_CHECKS_COLUMNS]
+            con.execute(
+                f"INSERT INTO {full_table} ({', '.join(_SLO_CHECKS_COLUMNS)}) VALUES ({placeholders})",
+                values,
+            )
+        con.close()
+        logger.info(f"Wrote {len(records)} SLO check rows to DuckDB {db_path}:{full_table}")
+        return f"{db_path}:{full_table}"
+
+    # ── SQLite ─────────────────────────────────────────────────────────────
+    if backend == "sqlite":
+        import sqlite3
+
+        db_path = metadata.get("slo_checks_database") or "logs/lakelogic_slo_checks.sqlite"
+        db_path = Path(db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        tbl = _prepare_table_name(table_name, "sqlite")
+        con = sqlite3.connect(str(db_path))
+        con.execute(f"""
+            CREATE TABLE IF NOT EXISTS {tbl} (
+                check_run_id TEXT, pipeline_run_id TEXT, checked_at TEXT,
+                domain TEXT, system TEXT, layer TEXT, entity TEXT,
+                check_type TEXT, passed INTEGER, severity TEXT, status TEXT,
+                delay_minutes REAL, slo_max_minutes INTEGER,
+                source_delay_minutes REAL, source_slo_max_minutes INTEGER,
+                source_column_used TEXT, row_count INTEGER,
+                slo_min_rows INTEGER, slo_max_rows INTEGER,
+                anomaly_ratio REAL, anomaly_baseline REAL,
+                quality_ratio REAL, quality_severity TEXT,
+                duration_seconds REAL, details_json TEXT
+            )
+        """)
+        placeholders = ", ".join(["?"] * len(_SLO_CHECKS_COLUMNS))
+        for rec in records:
+            values = [
+                int(rec[c]) if c == "passed" and rec.get(c) is not None else rec.get(c) for c in _SLO_CHECKS_COLUMNS
+            ]
+            con.execute(
+                f"INSERT INTO {tbl} ({', '.join(_SLO_CHECKS_COLUMNS)}) VALUES ({placeholders})",
+                values,
+            )
+        con.commit()
+        con.close()
+        logger.info(f"Wrote {len(records)} SLO check rows to SQLite {db_path}:{tbl}")
+        return f"{db_path}:{tbl}"
+
+    # ── Delta (default) ────────────────────────────────────────────────────
+    if backend == "delta":
+        table_name = table_name.replace("\\", "/")
+
+        if not table_name or table_name == "None" or "{" in table_name:
+            logger.warning(
+                f"SLO checks table path not fully resolved: '{table_name}'. "
+                f"Check that metadata.slo_checks_table template variables are defined."
+            )
+            return None
+
+        try:
+            import pyarrow as pa
+            from deltalake import DeltaTable, write_deltalake
+        except ImportError as exc:
+            logger.warning(f"SLO checks Delta backend requires 'deltalake' and 'pyarrow': {exc}")
+            return None
+
+        storage_options = _build_cloud_opts(table_name) if _is_cloud_path(table_name) else None
+
+        schema = pa.schema(
+            [
+                ("check_run_id", pa.string()),
+                ("pipeline_run_id", pa.string()),
+                ("checked_at", pa.string()),
+                ("domain", pa.string()),
+                ("system", pa.string()),
+                ("layer", pa.string()),
+                ("entity", pa.string()),
+                ("check_type", pa.string()),
+                ("passed", pa.bool_()),
+                ("severity", pa.string()),
+                ("status", pa.string()),
+                ("delay_minutes", pa.float64()),
+                ("slo_max_minutes", pa.int64()),
+                ("source_delay_minutes", pa.float64()),
+                ("source_slo_max_minutes", pa.int64()),
+                ("source_column_used", pa.string()),
+                ("row_count", pa.int64()),
+                ("slo_min_rows", pa.int64()),
+                ("slo_max_rows", pa.int64()),
+                ("anomaly_ratio", pa.float64()),
+                ("anomaly_baseline", pa.float64()),
+                ("quality_ratio", pa.float64()),
+                ("quality_severity", pa.string()),
+                ("duration_seconds", pa.float64()),
+                ("details_json", pa.string()),
+            ]
+        )
+
+        arrays = []
+        for field in schema:
+            vals = [rec.get(field.name) for rec in records]
+            arrays.append(pa.array(vals, type=field.type))
+        arrow_table = pa.table(arrays, schema=schema)
+
+        import time
+        import random
+
+        for attempt in range(5):
+            try:
+                try:
+                    DeltaTable(table_name, storage_options=storage_options)
+                    exists = True
+                except Exception:
+                    exists = False
+
+                write_deltalake(
+                    table_name,
+                    arrow_table,
+                    mode="append" if exists else "overwrite",
+                    storage_options=storage_options,
+                    schema_mode="overwrite" if not exists else None,
+                )
+                logger.info(f"Wrote {len(records)} SLO check rows to Delta {table_name}")
+                return table_name
+            except Exception as exc:
+                if attempt == 4:
+                    logger.warning(f"Failed to write SLO checks to Delta {table_name}: {exc}")
+                    return None
+                time.sleep((2**attempt) * 0.1 + random.uniform(0.05, 0.2))
+
+    logger.warning(f"Unsupported slo_checks_backend: {backend}")
+    return None
+
+
+def write_slo_checks(
+    registry: Any,
+    results: List[Any],
+    check_run_id: str,
+    pipeline_run_id: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Write SLO check results to the configured _slo_checks table.
+
+    Args:
+        registry:        DomainRegistry instance.
+        results:         List of SLOCheckResult from SLOValidator.run_checks().
+        check_run_id:    UUID grouping all results from one run_checks() call.
+        pipeline_run_id: Optional FK to run_log — set when triggered post-pipeline,
+                         None when running independently on a schedule.
+
+    Returns:
+        Table identifier written to, or None if not configured / write failed.
+    """
+    if not results:
+        return None
+
+    checked_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    domain = getattr(registry, "domain", "")
+    system = getattr(registry, "system", "")
+
+    records = [_flatten_slo_check(r, check_run_id, pipeline_run_id, checked_at, domain, system) for r in results]
+    return _write_slo_checks_table(registry, records)
 
 
 # ── Public API ──

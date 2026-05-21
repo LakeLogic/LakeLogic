@@ -33,11 +33,15 @@ class ValidationResult:
     engine-agnostic row counts (works with Polars, Pandas, Spark, DuckDB).
     """
 
-    def __init__(self, good, bad, raw=None, trace=None):
+    def __init__(self, good, bad, raw=None, trace=None, auto_fix_hint: Optional[str] = None):
         self.good = good
         self.bad = bad
         self.raw = raw
         self.trace = trace
+        # Populated from contract-defined remediation templates.
+        # SaaS layer uses this to surface Zeus AI fix suggestions
+        # without embedding LLM calls in the OSS engine.
+        self.auto_fix_hint: Optional[str] = auto_fix_hint
 
     # ── Engine-agnostic row counting ──────────────────────────────
     @staticmethod

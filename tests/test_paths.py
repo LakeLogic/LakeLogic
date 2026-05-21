@@ -63,6 +63,9 @@ def test_resolve_materialization_path_priority_and_fallbacks():
         paths.resolve_materialization_path(registry_storage=storage, layer="bronze", system="crm", entity="orders")
         == "/root/orders"
     )
+
+    storage = types.SimpleNamespace(external_location_root="abfss://lake", bronze_path=None, bronze_root=None)
+    assert paths.resolve_materialization_path(registry_storage=storage, entity="orders") == "abfss://lake/orders"
     assert paths.resolve_materialization_path() is None
 
 

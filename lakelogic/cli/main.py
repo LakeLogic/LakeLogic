@@ -348,31 +348,49 @@ def validate(
 
         # Run gates if specified
         if gates:
+            from lakelogic.gates import GATE_REGISTRY, GateStatus
+
             typer.echo("")
             typer.echo(typer.style("🚪 Running contract gates...", bold=True))
 
             gate_names = [g.strip() for g in gates.split(",")]
-            gate_results = {}
+            any_failed = False
 
             for gate_name in gate_names:
+                gate_cls = GATE_REGISTRY.get(gate_name)
+                if not gate_cls:
+                    available = ", ".join(GATE_REGISTRY.keys())
+                    typer.secho(
+                        f"  ⚠️  Unknown gate '{gate_name}'. Available: {available}",
+                        fg=typer.colors.YELLOW,
+                    )
+                    continue
+
+                typer.echo(f"  → {gate_name}...", nl=False)
                 try:
-                    # Import gate dynamically (gates would be in lakelogic.gates module)
-                    gate_module = importlib.util.find_spec(f"lakelogic.gates.{gate_name}")
-                    if not gate_module:
-                        typer.secho(f"  ⚠️  Gate not found: {gate_name}", fg=typer.colors.YELLOW)
-                        continue
+                    result = gate_cls(strict=strict).run(dc, context={"contract_root": contract.parent})
+                except Exception as exc:
+                    typer.secho(f" ERROR — {exc}", fg=typer.colors.RED)
+                    any_failed = True
+                    continue
 
-                    typer.echo(f"  → {gate_name}...", nl=False)
-                    # Placeholder: actual gate invocation would go here
-                    # For now, just mark as pending
-                    typer.secho(" (not yet implemented)", fg=typer.colors.CYAN)
-                    gate_results[gate_name] = "pending"
+                if result.status == GateStatus.PASSED:
+                    typer.secho(" PASSED", fg=typer.colors.GREEN)
+                elif result.status == GateStatus.SKIPPED:
+                    typer.secho(f" SKIPPED — {result.message}", fg=typer.colors.CYAN)
+                elif result.status == GateStatus.WARNING:
+                    typer.secho(f" WARNING — {result.message}", fg=typer.colors.YELLOW)
+                    for v in result.violations:
+                        typer.secho(f"      • {v}", fg=typer.colors.YELLOW)
+                    if strict:
+                        any_failed = True
+                else:  # FAILED
+                    typer.secho(f" FAILED — {result.message}", fg=typer.colors.RED)
+                    for v in result.violations:
+                        typer.secho(f"      • {v}", fg=typer.colors.RED)
+                    any_failed = True
 
-                except Exception as e:
-                    typer.secho(f"  ❌ Gate {gate_name} failed: {e}", fg=typer.colors.RED)
-                    gate_results[gate_name] = "failed"
-
-            if any(r == "failed" for r in gate_results.values()):
+            if any_failed:
                 raise typer.Exit(1)
 
         elapsed = time.time() - start_time
@@ -1536,6 +1554,109 @@ def doctor():
 
     typer.echo("  " + "═" * 45)
     typer.echo("")
+
+
+@app.command(rich_help_panel="Observability")
+def scan(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to scanner.yaml"),
+    connection: Optional[str] = typer.Option(
+        None, "--connection", help="Connection type: delta | unity_catalog | duckdb"
+    ),
+    path: Optional[str] = typer.Option(None, "--path", help="Storage root path (for delta/duckdb connections)"),
+    host: Optional[str] = typer.Option(None, "--host", help="Databricks host URL (for unity_catalog)"),
+    catalog: Optional[str] = typer.Option(None, "--catalog", help="Catalog name (for unity_catalog)"),
+    token: Optional[str] = typer.Option(None, "--token", help="Access token (for unity_catalog)"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write JSON report to file"),
+    push: bool = typer.Option(False, "--push", help="Push results to Observatory (requires observatory config)"),
+    fail_on_breach: bool = typer.Option(True, "--fail/--no-fail", help="Exit 1 if any SLO check fails"),
+):
+    """
+    Scan lakehouse tables and check SLOs without pipeline instrumentation.
+
+    Connects directly to Delta Lake, Unity Catalog, or DuckDB and runs
+    freshness, volume, schema drift, and retention checks using only
+    table metadata and lightweight SQL aggregates.
+
+    No contracts, no DataProcessor, no YAML authoring required.
+
+    Examples:
+
+        lakelogic scan --config scanner.yaml
+
+        lakelogic scan --connection delta --path ./lakehouse/
+
+        lakelogic scan --connection unity_catalog --catalog prod-001 \\
+          --host https://adb-xxx.azuredatabricks.net --token $DBT
+
+    """
+    from lakelogic.scanner import Scanner
+
+    try:
+        if config:
+            scanner = Scanner.from_yaml(config)
+        elif connection:
+            scanner = Scanner.from_args(
+                connection_type=connection,
+                path=path,
+                host=host,
+                catalog=catalog,
+                token=token,
+            )
+        else:
+            typer.secho(
+                "Provide --config scanner.yaml or --connection <type> with connection args.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        typer.echo(typer.style("🔍 LakeLogic Scanner", bold=True))
+
+        report = scanner.run()
+
+        # ── Summary output ──
+        typer.echo("")
+        total = len(report.results)
+        failed = len(report.failures)
+        passed_count = total - failed
+
+        typer.echo(f"  Domain  : {report.domain}")
+        typer.echo(f"  Run ID  : {report.check_run_id[:8]}...")
+        typer.echo(f"  Tables  : {total} checks across scanned tables")
+        typer.echo("")
+
+        # Print failures
+        if report.failures:
+            typer.secho("  Failures:", fg=typer.colors.RED, bold=True)
+            for r in report.failures:
+                typer.secho(f"    • [{r.check_type}] {r.entity}: {r.status}", fg=typer.colors.RED)
+            typer.echo("")
+
+        # Summary line
+        if report.passed:
+            typer.secho(f"  ✅ All {passed_count} checks passed", fg=typer.colors.GREEN, bold=True)
+        else:
+            typer.secho(
+                f"  ❌ {failed} of {total} checks failed",
+                fg=typer.colors.RED,
+                bold=True,
+            )
+
+        # JSON output
+        if output:
+            import json
+
+            out_path = Path(output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(report.model_dump(), f, indent=2, default=str)
+            typer.echo(f"\n  Report written to {out_path}")
+
+        if fail_on_breach and not report.passed:
+            raise typer.Exit(1)
+
+    except (FileNotFoundError, ValueError, ConnectionError) as exc:
+        typer.secho(f"Scanner error: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

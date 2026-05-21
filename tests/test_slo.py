@@ -7,6 +7,8 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from lakelogic.core import slo
 from lakelogic.core.slo import SLOCheckResult, SLOReport, SLOValidator
 
@@ -647,3 +649,400 @@ def test_notify_breaches_uses_registered_targets_and_smtp_env(monkeypatch):
     assert "https://hook" in added
     assert "mailto://smtp.example.com/ops@example.com" in added
     assert sent and "LakeLogic Domain SLO Breach (marketing)" == sent[0][0]
+
+
+def test_check_row_counts_duckdb_polars_and_configuration_edges(monkeypatch):
+    import polars as pl
+
+    now = datetime.datetime(2026, 3, 26, 12, 0, tzinfo=datetime.timezone.utc)
+    contracts = [
+        SimpleNamespace(layer="bronze", entity="orders"),
+        SimpleNamespace(layer="bronze", entity="empty"),
+        SimpleNamespace(layer="silver", entity="skipped"),
+    ]
+    row_count = {
+        "bronze": SimpleNamespace(
+            min_rows=10,
+            max_rows=100,
+            check_field="counts_good",
+            exclude_tables=[],
+            anomaly=None,
+        ),
+        "silver": SimpleNamespace(
+            min_rows=None,
+            max_rows=None,
+            check_field="counts_good",
+            exclude_tables=[],
+            anomaly=None,
+        ),
+    }
+    registry = SimpleNamespace(
+        slo=SimpleNamespace(row_count=row_count),
+        storage=SimpleNamespace(run_log_table="run_logs"),
+        get_active_contracts=lambda: contracts,
+    )
+
+    class DuckResult:
+        def __init__(self, value):
+            self._value = value
+
+        def fetchone(self):
+            return self._value
+
+    class DuckCon:
+        def execute(self, query):
+            if "dataset = 'orders'" in query:
+                return DuckResult((150, now))
+            if "dataset = 'empty'" in query:
+                return DuckResult(None)
+            raise AssertionError(query)
+
+    duck_results = SLOValidator(registry, duckdb_con=DuckCon()).check_row_counts()
+    assert {r.entity: r.status for r in duck_results} == {
+        "orders": "❌ TOO MANY ROWS (150 > 100)",
+        "empty": "⚠️ NO DATA",
+    }
+
+    log_df = pl.DataFrame(
+        {
+            "data_layer": ["bronze", "bronze", "bronze"],
+            "dataset": ["orders", "orders", "empty"],
+            "stage": ["ok", "no_new_data", "ok"],
+            "counts_good": [25, 999, None],
+            "timestamp": [now, now + datetime.timedelta(minutes=1), now],
+        }
+    )
+    monkeypatch.setattr(SLOValidator, "_resolve_storage_opts", lambda self, path: {})
+    monkeypatch.setattr(slo, "_read_delta_local", lambda path, storage_options=None: log_df)
+    polars_results = SLOValidator(registry, polars=True).check_row_counts()
+    by_entity = {r.entity: r for r in polars_results}
+    assert by_entity["orders"].passed is True
+    assert by_entity["orders"].row_count == 25
+    assert by_entity["empty"].status == "⚠️ NO DATA"
+
+    missing_run_log = SimpleNamespace(
+        slo=SimpleNamespace(row_count=row_count),
+        storage=SimpleNamespace(run_log_table=None),
+        get_active_contracts=lambda: contracts,
+    )
+    assert SLOValidator(missing_run_log, polars=True).check_row_counts() == []
+
+
+def test_row_count_anomaly_duckdb_polars_and_disabled_edges(monkeypatch):
+    import polars as pl
+
+    anomaly = SimpleNamespace(
+        enabled=True,
+        lookback_runs=4,
+        min_ratio=0.5,
+        max_ratio=1.5,
+        method="rolling_average",
+        min_runs_before_enforcement=2,
+        check_field="counts_good",
+    )
+    registry = SimpleNamespace(storage=SimpleNamespace(run_log_table="run_logs"))
+
+    class DuckRows:
+        def __init__(self, values):
+            self._values = values
+
+        def fetchall(self):
+            return [(v,) for v in self._values]
+
+    duck_validator = SLOValidator(
+        registry,
+        duckdb_con=SimpleNamespace(execute=lambda query: DuckRows([100, 100, 100, None])),
+    )
+    drop = duck_validator.check_row_count_anomaly("orders", "bronze", 10, anomaly)
+    assert drop is not None
+    assert drop.passed is False
+    assert "VOLUME DROP" in drop.status
+
+    zero_validator = SLOValidator(
+        registry,
+        duckdb_con=SimpleNamespace(execute=lambda query: DuckRows([0, 0, 0])),
+    )
+    assert zero_validator.check_row_count_anomaly("orders", "bronze", 10, anomaly) is None
+    assert (
+        SLOValidator(registry, duckdb_con=zero_validator.duckdb_con).check_row_count_anomaly(
+            "orders", "bronze", 10, SimpleNamespace(enabled=False)
+        )
+        is None
+    )
+    assert (
+        SLOValidator(
+            SimpleNamespace(storage=SimpleNamespace(run_log_table=None)), duckdb_con=zero_validator.duckdb_con
+        ).check_row_count_anomaly("orders", "bronze", 10, anomaly)
+        is None
+    )
+
+    log_df = pl.DataFrame(
+        {
+            "data_layer": ["bronze", "bronze", "bronze", "silver"],
+            "dataset": ["orders", "orders", "orders", "orders"],
+            "stage": ["ok", "reprocess", "ok", "ok"],
+            "counts_good": [90, 999, 110, 1000],
+            "timestamp": [3, 4, 2, 1],
+        }
+    )
+    monkeypatch.setattr(SLOValidator, "_resolve_storage_opts", lambda self, path: {})
+    monkeypatch.setattr(slo, "_read_delta_local", lambda path, storage_options=None: log_df)
+    ok = SLOValidator(registry, polars=True).check_row_count_anomaly("orders", "bronze", 100, anomaly)
+    assert ok is not None
+    assert ok.passed is True
+    assert ok.anomaly_baseline == 100.0
+
+
+def test_check_retention_duckdb_and_polars_paths(monkeypatch):
+    import polars as pl
+
+    now = datetime.datetime(2026, 3, 26, 12, 0, tzinfo=datetime.timezone.utc)
+
+    class FakeDateTime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(slo.datetime, "datetime", FakeDateTime)
+    monkeypatch.setattr(slo, "resolve_materialization_path", lambda **kwargs: f"/warehouse/{kwargs['entity']}")
+    monkeypatch.setattr(slo, "make_table_name", lambda layer, system, entity: f"{layer}_{entity}")
+    monkeypatch.setattr(slo, "to_sql_table_ref", lambda path, engine: path)
+
+    contracts = [
+        SimpleNamespace(layer="bronze", entity="fresh"),
+        SimpleNamespace(layer="bronze", entity="old"),
+        SimpleNamespace(layer="bronze", entity="none"),
+        SimpleNamespace(layer="silver", entity="no_source_columns"),
+        SimpleNamespace(layer="gold", entity="bad_period"),
+    ]
+    freshness = {
+        "bronze": SimpleNamespace(source_check_columns=["event_ts"]),
+        "silver": SimpleNamespace(source_check_columns=[]),
+        "gold": SimpleNamespace(source_check_columns=["event_ts"]),
+    }
+    registry = SimpleNamespace(
+        domain="commerce",
+        system="erp",
+        retention={"bronze": "PT1H", "silver": "P1D", "gold": "not-a-period"},
+        slo=SimpleNamespace(freshness=freshness),
+        storage=SimpleNamespace(bronze_root=None, silver_root=None, gold_root=None),
+        get_active_contracts=lambda: contracts,
+    )
+
+    class DuckResult:
+        def __init__(self, value):
+            self._value = value
+
+        def fetchone(self):
+            return self._value
+
+    class DuckCon:
+        def execute(self, query):
+            if "delta_scan('/warehouse/fresh')" in query:
+                raise RuntimeError("delta unavailable")
+            if "parquet_scan('/warehouse/fresh')" in query:
+                return DuckResult((now - datetime.timedelta(minutes=30),))
+            if "delta_scan('/warehouse/old')" in query:
+                return DuckResult((now - datetime.timedelta(hours=3),))
+            if "delta_scan('/warehouse/none')" in query:
+                return DuckResult((None,))
+            raise AssertionError(query)
+
+    duck_results = SLOValidator(registry, duckdb_con=DuckCon()).check_retention()
+    by_entity = {r.entity: r for r in duck_results}
+    assert by_entity["fresh"].passed is True
+    assert by_entity["old"].passed is False
+    assert "RETENTION BREACH" in by_entity["old"].status
+    assert "none" not in by_entity
+    assert "no_source_columns" not in by_entity
+    assert "bad_period" not in by_entity
+
+    monkeypatch.setattr(SLOValidator, "_resolve_storage_opts", lambda self, path: {})
+    monkeypatch.setattr(
+        slo, "_read_delta_local", lambda path, storage_options=None: (_ for _ in ()).throw(RuntimeError("delta"))
+    )
+    parquet = pl.DataFrame({"event_ts": [now - datetime.timedelta(minutes=45)]})
+    monkeypatch.setattr(pl, "read_parquet", lambda path, storage_options=None: parquet)
+    polars_results = SLOValidator(registry, polars=True).check_retention()
+    assert {r.entity for r in polars_results} == {"fresh", "old", "none"}
+    assert all(r.passed for r in polars_results)
+
+
+def test_run_checks_includes_retention_and_tolerates_write_failure(monkeypatch):
+    registry = SimpleNamespace(
+        domain="marketing",
+        system="ads",
+        retention={"bronze": "PT1H"},
+        slo=SimpleNamespace(freshness={}, row_count={}, schedule=None, quality=None),
+    )
+    validator = SLOValidator(registry)
+    monkeypatch.setattr(
+        validator,
+        "check_retention",
+        lambda: [
+            SLOCheckResult(
+                layer="bronze",
+                entity="orders",
+                check_type="retention",
+                status="❌ RETENTION BREACH",
+                passed=False,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "lakelogic.core.run_log.write_slo_checks", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+
+    report = validator.run_checks(pipeline_run_id="pipe-1")
+
+    assert report.passed is False
+    assert report.pipeline_run_id == "pipe-1"
+    assert report.failures[0].check_type == "retention"
+
+
+def test_notify_breaches_noop_import_error_and_missing_smtp(monkeypatch):
+    validator = SLOValidator(SimpleNamespace(domain="marketing", notifications=[], ownership={}))
+    validator.notify_breaches([SLOCheckResult(layer="bronze", entity="orders", status="OK", passed=True)])
+
+    monkeypatch.delitem(sys.modules, "apprise", raising=False)
+    monkeypatch.setitem(sys.modules, "apprise", None)
+    validator.notify_breaches([SLOCheckResult(layer="bronze", entity="orders", status="bad", passed=False)])
+
+    added = []
+
+    class FakeApprise:
+        def add(self, target):
+            added.append(target)
+
+        def notify(self, body=None, title=None):
+            raise AssertionError("should not notify without valid channels")
+
+    monkeypatch.setitem(sys.modules, "apprise", SimpleNamespace(Apprise=lambda: FakeApprise()))
+    monkeypatch.delenv("LAKELOGIC_SMTP_URI", raising=False)
+    no_channels = SimpleNamespace(
+        domain="marketing",
+        notifications=[{"target": "slack://ignored", "on_events": ["pipeline_done"]}],
+        ownership={"contacts": [{"email": "ops@example.com"}]},
+    )
+    SLOValidator(no_channels).notify_breaches(
+        [SLOCheckResult(layer="bronze", entity="orders", status="bad", passed=False)]
+    )
+    assert added == []
+
+
+def test_standalone_slo_helpers_parse_coerce_and_compute_polars(monkeypatch):
+    import polars as pl
+
+    now = datetime.datetime(2026, 3, 26, 12, 0, tzinfo=datetime.timezone.utc)
+
+    class FakeDateTime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(slo.datetime, "datetime", FakeDateTime)
+
+    assert slo._parse_duration_seconds(None) is None
+    assert slo._parse_duration_seconds(2) == 7200.0
+    assert slo._parse_duration_seconds("2h") == 7200.0
+    assert slo._parse_duration_seconds("15m") == 900.0
+    assert slo._parse_duration_seconds("30s") == 30.0
+    assert slo._parse_duration_seconds("1d") == 86400.0
+    assert slo._parse_duration_seconds("3") == 10800.0
+    assert slo._parse_duration_seconds("nope") is None
+
+    assert slo._coerce_datetime(None) is None
+    assert slo._coerce_datetime("bad-date") is None
+    assert slo._coerce_datetime("2026-03-26T11:30:00Z").tzinfo is not None
+    assert slo._coerce_datetime(datetime.datetime(2026, 3, 26, 11, 30)).tzinfo is not None
+
+    df = pl.DataFrame(
+        {
+            "loaded_at": [now - datetime.timedelta(minutes=10), now - datetime.timedelta(minutes=5)],
+            "source_at": [now - datetime.timedelta(minutes=40), now - datetime.timedelta(minutes=30)],
+            "present": [1, None],
+        }
+    )
+    contract = SimpleNamespace(
+        service_levels={
+            "freshness": {
+                "field": "loaded_at",
+                "threshold": "10m",
+                "source_field": "source_at",
+                "source_threshold": "20m",
+            },
+            "availability": {"field": "present", "threshold": 75},
+        }
+    )
+
+    result = slo.compute_slos(contract, df.lazy(), {"good": 2}, "polars")
+
+    assert result["freshness"]["passed"] is True
+    assert result["freshness"]["source_passed"] is False
+    assert result["availability"] == {
+        "field": "present",
+        "threshold": 75.0,
+        "actual_pct": 50.0,
+        "passed": False,
+    }
+    assert slo._get_max_timestamp(df, "missing", "polars") is None
+    assert slo._non_null_ratio(pl.DataFrame(), "present", "polars") is None
+    assert slo._compute_freshness(df, None, "polars") == {}
+    assert slo._compute_freshness(df, {}, "polars") == {}
+    assert slo._compute_freshness(df, {"field": "missing", "threshold": "1h"}, "polars") == {
+        "field": "missing",
+        "passed": False,
+        "reason": "no_data_or_threshold",
+    }
+    assert slo._compute_availability(df, {}, None, "polars") == {}
+    assert slo._compute_availability(df, {}, {"field": "missing", "threshold": 90}, "polars") == {
+        "field": "missing",
+        "passed": False,
+        "reason": "no_data",
+    }
+
+
+def test_standalone_slo_helpers_duckdb_and_merge_paths():
+    duckdb = pytest.importorskip("duckdb")
+
+    con = duckdb.connect(database=":memory:")
+    rel = con.sql(
+        """
+        SELECT * FROM (
+            VALUES
+                (TIMESTAMP '2026-03-26 11:00:00', 1),
+                (TIMESTAMP '2026-03-26 11:30:00', NULL)
+        ) AS t(loaded_at, present)
+        """
+    )
+
+    assert slo._get_max_timestamp(rel, "loaded_at", "duckdb").isoformat().startswith("2026-03-26T11:30")
+    assert slo._non_null_ratio(rel, "present", "duckdb") == 0.5
+    assert slo._get_max_timestamp(object(), "loaded_at", "unknown") is None
+    assert slo._non_null_ratio(object(), "present", "unknown") is None
+
+    contract_slo = SimpleNamespace(
+        model_dump=lambda: {
+            "freshness": {"field": "contract_loaded_at"},
+            "availability": None,
+            "row_count": {"min": 5},
+        }
+    )
+    merged = slo._merge_slo_config(
+        {"freshness": {"threshold": "1h"}, "availability": {"field": "id", "threshold": 90}},
+        contract_slo,
+    )
+    assert merged == {
+        "freshness": {"threshold": "1h", "field": "contract_loaded_at"},
+        "availability": {"field": "id", "threshold": 90},
+        "row_count": {"min": 5},
+    }
+
+    registry_slo = SimpleNamespace(model_dump=lambda: {"freshness": {"field": "missing", "threshold": "1h"}})
+    assert (
+        slo.compute_slos(SimpleNamespace(service_levels=None), rel, {}, "duckdb", registry_slo)["freshness"]["passed"]
+        is False
+    )
+    assert slo.compute_slos(SimpleNamespace(service_levels=None), rel, {}, "duckdb") == {}
+
+    con.close()

@@ -1,0 +1,4 @@
+{
+  "_comment": "OSS ships empty. Cloud tier populates via LAKELOGIC_KB_PATH. Add your own entries here or point LAKELOGIC_KB_PATH at a separate file.",
+  "entries": []
+}

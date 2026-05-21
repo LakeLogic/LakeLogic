@@ -712,12 +712,16 @@ class TestDeltaInitialization:
         monkeypatch.setitem(sys.modules, "deltalake", fake_deltalake)
         _init_delta_table_from_contract(contract)
 
-        schema = create_calls[0]["schema"]
-        assert create_calls[0]["partition_by"] == ["id"]
+        assert not create_calls
+        target, table, kwargs = write_calls[-1]
+        schema = table.schema
+        assert target == str(tmp_path / "delta_orders")
+        assert kwargs["partition_by"] == ["id"]
+        assert kwargs["mode"] == "overwrite"
+        assert kwargs["engine"] == "pyarrow"
         assert schema.field("id").nullable is False
         assert schema.get_field_index("src_path") >= 0
         assert schema.get_field_index("processed_at") >= 0
-        assert not write_calls
 
         class FakeFallbackDeltaTable(FakeDeltaTable):
             @staticmethod
@@ -740,6 +744,7 @@ class TestDeltaInitialization:
         assert write_calls[-1][0] == str(tmp_path / "delta_orders")
         assert write_calls[-1][1].num_rows == 0
         assert write_calls[-1][2]["mode"] == "overwrite"
+        assert write_calls[-1][2]["engine"] == "pyarrow"
         assert any("Initialized Delta table schema" in message for message in info_logs)
 
     def test_processor_defaults_to_own_engine(self, tmp_path):

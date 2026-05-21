@@ -27,10 +27,30 @@ from lakelogic.core.paths import (
 from lakelogic.core.registry import DomainRegistry
 
 
+def _read_delta_local(path: str, storage_options: Optional[dict] = None):
+    """Read a Delta table using the most compatible API available.
+
+    pl.read_delta() has Schema compatibility issues with deltalake 0.17.x.
+    For local paths, DeltaTable.to_pyarrow_table() is used instead.
+    """
+    import polars as pl
+    from pathlib import Path as _P
+
+    _cloud = any(path.startswith(p) for p in ("abfss://", "s3://", "gs://", "adl://", "https://"))
+    if not _cloud and _P(path).exists():
+        try:
+            from deltalake import DeltaTable as _DT
+
+            return pl.from_arrow(_DT(path).to_pyarrow_table())
+        except Exception:
+            pass
+    return pl.read_delta(path, storage_options=storage_options)
+
+
 class SLOCheckResult(BaseModel):
     layer: str
     entity: str
-    check_type: str = "freshness"  # freshness | row_count | quality | schedule
+    check_type: str = "freshness"  # freshness | row_count | quality | schedule | retention
     status: str
     passed: bool
     severity: str = "fail"  # "pass" | "warn" | "fail"
@@ -60,6 +80,8 @@ class SLOReport(BaseModel):
     system: str
     timestamp: str
     passed: bool
+    check_run_id: str = ""
+    pipeline_run_id: Optional[str] = None
     failures: List[SLOCheckResult] = Field(default_factory=list)
     results: List[SLOCheckResult] = Field(default_factory=list)
 
@@ -194,10 +216,9 @@ class SLOValidator:
 
                         storage_opts = self._resolve_storage_opts(polars_path)
                         try:
-                            df = pl.read_delta(polars_path, storage_options=storage_opts)
+                            df = _read_delta_local(polars_path, storage_options=storage_opts)
                             latest_ts = df.select(pl.col(col).max()).item()
                         except Exception as delta_e:
-                            # Attempt to read as parquet directory
                             try:
                                 df = pl.read_parquet(polars_path, storage_options=storage_opts)
                                 latest_ts = df.select(pl.col(col).max()).item()
@@ -241,6 +262,10 @@ class SLOValidator:
                 # Calculate pipeline delay
                 if hasattr(latest_ts, "timestamp"):
                     latest_utc = datetime.datetime.fromtimestamp(latest_ts.timestamp(), tz=datetime.timezone.utc)
+                elif isinstance(latest_ts, str):
+                    # ISO string from Delta/polars string columns — parse then add UTC if naive
+                    _parsed = datetime.datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
+                    latest_utc = _parsed if _parsed.tzinfo else _parsed.replace(tzinfo=datetime.timezone.utc)
                 else:
                     latest_utc = latest_ts.replace(tzinfo=datetime.timezone.utc)
 
@@ -285,7 +310,7 @@ class SLOValidator:
 
                                 storage_opts = self._resolve_storage_opts(polars_path)
                                 try:
-                                    src_df = pl.read_delta(polars_path, storage_options=storage_opts)
+                                    src_df = _read_delta_local(polars_path, storage_options=storage_opts)
                                 except Exception:
                                     src_df = pl.read_parquet(polars_path, storage_options=storage_opts)
                                 # Safe cast: str_to_datetime returns null on parse failure
@@ -299,6 +324,9 @@ class SLOValidator:
                                     src_utc = datetime.datetime.fromtimestamp(
                                         src_ts.timestamp(), tz=datetime.timezone.utc
                                     )
+                                elif isinstance(src_ts, str):
+                                    _p = datetime.datetime.fromisoformat(src_ts.replace("Z", "+00:00"))
+                                    src_utc = _p if _p.tzinfo else _p.replace(tzinfo=datetime.timezone.utc)
                                 else:
                                     src_utc = src_ts.replace(tzinfo=datetime.timezone.utc)
                                 source_delay_min = round((now - src_utc).total_seconds() / 60, 1)
@@ -463,7 +491,7 @@ class SLOValidator:
 
                     storage_opts = self._resolve_storage_opts(run_log_table)
                     try:
-                        df = pl.read_delta(run_log_table, storage_options=storage_opts)
+                        df = _read_delta_local(run_log_table, storage_options=storage_opts)
                     except Exception as delta_e:
                         try:
                             df = pl.read_parquet(run_log_table, storage_options=storage_opts)
@@ -738,7 +766,7 @@ class SLOValidator:
 
                 storage_opts = self._resolve_storage_opts(run_log_table)
                 try:
-                    df = pl.read_delta(run_log_table, storage_options=storage_opts)
+                    df = _read_delta_local(run_log_table, storage_options=storage_opts)
                 except Exception as delta_e:
                     try:
                         df = pl.read_parquet(run_log_table, storage_options=storage_opts)
@@ -805,10 +833,174 @@ class SLOValidator:
             anomaly_baseline=round(baseline, 1),
         )
 
-    def run_checks(self, environment: Optional[str] = None, report: Optional[Dict[str, Any]] = None) -> SLOReport:
+    def check_retention(self) -> List[SLOCheckResult]:
+        """
+        Check that no table contains records older than its layer's retention period.
+
+        Retention is a MIN-timestamp check: queries MIN(source_check_column) and
+        fails if the oldest record exceeds the ISO 8601 retention window defined in
+        registry.retention (e.g. bronze: P7D, silver: P90D, gold: P7Y).
+
+        This is distinct from freshness (MAX check) — it detects data that should
+        have been purged but is still present in the table.
+        """
+        from lakelogic.core.registry import _iso_period_to_minutes
+
+        if not self.registry.retention:
+            return []
+        if not self.spark and not self.polars and not self.duckdb_con:
+            logger.warning(
+                "SLOValidator.check_retention requires a Spark session, polars=True, or duckdb_con. Skipping."
+            )
+            return []
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        results = []
+        storage = self.registry.storage
+        freshness_config = self.registry.slo.freshness
+
+        layer_roots = {
+            "bronze": storage.bronze_root,
+            "silver": storage.silver_root,
+            "gold": storage.gold_root,
+        }
+
+        for reg_contract in self.registry.get_active_contracts():
+            layer = reg_contract.layer
+            entity = reg_contract.entity
+
+            iso_period = self.registry.retention.get(layer)
+            if not iso_period:
+                continue
+
+            retention_minutes = _iso_period_to_minutes(iso_period)
+            if not retention_minutes:
+                logger.warning(f"  ⚠ Retention [{layer}]: could not parse period '{iso_period}' — skipping {entity}")
+                continue
+
+            # Source columns to probe — prefer freshness SLO config, fall back to common names
+            layer_slo = freshness_config.get(layer)
+            source_cols = (getattr(layer_slo, "source_check_columns", None) or []) if layer_slo else []
+            if not source_cols:
+                logger.debug(f"  ⏭ Retention [{layer}] {entity}: no source_check_columns configured — skipped")
+                continue
+
+            schema_root = layer_roots.get(layer)
+            polars_path = resolve_materialization_path(
+                contract=reg_contract,
+                registry_storage=storage,
+                layer=layer,
+                system=self.registry.system,
+                entity=entity,
+            )
+
+            entity_table = make_table_name(layer, self.registry.system, entity)
+            table_name = (
+                f"{schema_root}.{entity_table}".replace("`", "")
+                if schema_root
+                else to_sql_table_ref(polars_path, "spark")
+            )
+
+            min_ts = None
+            col_used = None
+
+            for src_col in source_cols:
+                try:
+                    if self.spark:
+                        row = self.spark.sql(
+                            f"SELECT MIN(TRY_CAST({src_col} AS TIMESTAMP)) AS min_ts FROM {table_name}"
+                        ).first()
+                        min_ts = row["min_ts"] if row else None
+                    elif self.duckdb_con:
+                        try:
+                            res = self.duckdb_con.execute(
+                                f"SELECT MIN(TRY_CAST({src_col} AS TIMESTAMP)) AS min_ts "
+                                f"FROM delta_scan('{polars_path}')"
+                            ).fetchone()
+                        except Exception:
+                            res = self.duckdb_con.execute(
+                                f"SELECT MIN(TRY_CAST({src_col} AS TIMESTAMP)) AS min_ts "
+                                f"FROM parquet_scan('{polars_path}')"
+                            ).fetchone()
+                        min_ts = res[0] if res else None
+                    else:
+                        import polars as pl
+
+                        storage_opts = self._resolve_storage_opts(polars_path)
+                        try:
+                            src_df = _read_delta_local(polars_path, storage_options=storage_opts)
+                        except Exception:
+                            src_df = pl.read_parquet(polars_path, storage_options=storage_opts)
+                        try:
+                            min_ts = src_df.select(pl.col(src_col).cast(pl.Datetime, strict=False).min()).item()
+                        except Exception:
+                            min_ts = None
+
+                    if min_ts is not None:
+                        col_used = src_col
+                        break
+                except Exception:
+                    continue
+
+            if min_ts is None:
+                logger.debug(f"  ⏭ Retention [{layer}] {entity}: no valid timestamp found in {source_cols} — skipped")
+                continue
+
+            if hasattr(min_ts, "timestamp"):
+                min_utc = datetime.datetime.fromtimestamp(min_ts.timestamp(), tz=datetime.timezone.utc)
+            else:
+                min_utc = min_ts.replace(tzinfo=datetime.timezone.utc)
+
+            age_minutes = round((now - min_utc).total_seconds() / 60, 1)
+            passed = age_minutes <= retention_minutes
+
+            status = (
+                f"✅ OK (oldest record {age_minutes:.0f}min, limit {retention_minutes}min via '{col_used}')"
+                if passed
+                else (
+                    f"? RETENTION BREACH: oldest record {age_minutes:.0f}min old exceeds "
+                    f"{iso_period} ({retention_minutes}min) via '{col_used}'"
+                )
+            )
+            logger.debug(f"   🗄 Retention [{layer}] {entity}: {status}")
+
+            results.append(
+                SLOCheckResult(
+                    layer=layer,
+                    entity=entity,
+                    check_type="retention",
+                    status=status,
+                    passed=passed,
+                    severity="pass" if passed else "fail",
+                    source_delay_minutes=age_minutes,
+                    source_slo_max_minutes=retention_minutes,
+                    source_column_used=col_used,
+                    source_passed=passed,
+                )
+            )
+
+        return results
+
+    def run_checks(
+        self,
+        environment: Optional[str] = None,
+        report: Optional[Dict[str, Any]] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> SLOReport:
         """
         Run all configured SLO checks and return a unified report.
+
+        Args:
+            environment:     Target environment name (dev/staging/prod).
+            report:          Pipeline run report dict — enables quality checks
+                             when called post-pipeline. None when running
+                             independently (quality checks read from run_log instead).
+            pipeline_run_id: Optional FK to run_log. Populated when triggered
+                             post-pipeline; None for scheduled independent runs.
         """
+        from uuid import uuid4
+
+        check_run_id = str(uuid4())
         now = datetime.datetime.now(datetime.timezone.utc)
         results = []
 
@@ -818,6 +1010,9 @@ class SLOValidator:
         if self.registry.slo.row_count:
             results.extend(self.check_row_counts())
 
+        if self.registry.retention:
+            results.extend(self.check_retention())
+
         schedule_results = self.check_schedule(environment=environment)
         results.extend(schedule_results)
 
@@ -826,11 +1021,21 @@ class SLOValidator:
 
         failures = [r for r in results if not r.passed]
 
+        # Write results to _slo_checks table — non-blocking, never raises
+        try:
+            from lakelogic.core.run_log import write_slo_checks
+
+            write_slo_checks(self.registry, results, check_run_id, pipeline_run_id)
+        except Exception as exc:
+            logger.warning(f"SLO checks write failed (results still returned): {exc}")
+
         return SLOReport(
             domain=self.registry.domain,
             system=self.registry.system,
             timestamp=now.isoformat(),
             passed=len(failures) == 0,
+            check_run_id=check_run_id,
+            pipeline_run_id=pipeline_run_id,
             failures=failures,
             results=results,
         )
