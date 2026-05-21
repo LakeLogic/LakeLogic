@@ -652,8 +652,11 @@ def _write_frame(
                         if owns_connection and con is not None:
                             con.close()
                     return
-                except Exception as exc:
-                    logger.debug(f"DuckDB parquet write fallback failed: {exc}")
+                except Exception as duckdb_exc:
+                    # Use a distinct name so we don't shadow the outer `exc` —
+                    # the final `raise ... from exc` below needs the ORIGINAL
+                    # to_parquet failure as the cause, not this fallback failure.
+                    logger.debug(f"DuckDB parquet write fallback failed: {duckdb_exc}")
                 try:
                     import polars as pl
 
