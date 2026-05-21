@@ -212,7 +212,7 @@ ai = [
 # Tier 2 = LLM (lands in P2; install lakelogic[ai] alongside for the SDKs).
 review = [
     "ruff>=0.6,<0.14",
-    "sqlfluff>=3,<4",
+    "sqlfluff>=4.2.1,<5",
     "datacontract-cli>=0.10",  # P4: schema breaking-change detection
 ]
 enterprise = [
