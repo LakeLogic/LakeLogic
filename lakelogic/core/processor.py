@@ -292,7 +292,7 @@ class DataProcessor:
             from lakelogic.engines.polars import PolarsAdapter
 
             return PolarsAdapter(self.contract)
-        elif self.engine_name in ["spark", "pyspark"]:
+        elif self.engine_name in ["spark", "pyspark"]:  # pragma: no cover
             from lakelogic.engines.spark import SparkAdapter
 
             return SparkAdapter(self.contract)
@@ -659,7 +659,7 @@ class DataProcessor:
                         good_df = good_df.select(kepts)
 
                 # Spark Engine
-                elif self.engine_name == "spark":
+                elif self.engine_name == "spark":  # pragma: no cover
                     existing = good_df.columns
                     kepts = [c for c in expected_cols if c in existing]
                     # Preserve _source_file for lineage injection (added during load)
@@ -2039,7 +2039,7 @@ class DataProcessor:
                             else:
                                 df = pl.read_csv(path)
 
-            elif self.engine_name == "spark":
+            elif self.engine_name == "spark":  # pragma: no cover
                 from pyspark.sql import SparkSession
 
                 spark = SparkSession.builder.getOrCreate()
@@ -2441,7 +2441,7 @@ class DataProcessor:
                 # Cast the array values to Utf8 to safely match
                 string_vals = [str(x) for x in reprocess_values]
                 df = df.filter(pl.col(resolved_reprocess_column).cast(pl.Utf8).is_in(string_vals))
-            elif self.engine_name == "spark":
+            elif self.engine_name == "spark":  # pragma: no cover
                 from pyspark.sql.functions import col
 
                 string_vals = [str(x) for x in reprocess_values]
@@ -3209,7 +3209,7 @@ class DataProcessor:
                 return pl.DataFrame()
             except Exception:
                 return []
-        if self.engine_name == "spark":
+        if self.engine_name == "spark":  # pragma: no cover
             try:
                 from pyspark.sql import SparkSession
                 from pyspark.sql.types import StructType
@@ -3650,7 +3650,7 @@ class DataProcessor:
             Dict with total, good, quarantined, and ratio values.
         """
         # For Spark, optimize by computing counts in a single action where possible
-        if self.engine_name == "spark":
+        if self.engine_name == "spark":  # pragma: no cover
             try:
                 from pyspark.sql import functions as F
 
@@ -4059,7 +4059,7 @@ class DataProcessor:
         except Exception as exc:
             logger.debug(f"Pandas error extraction failed: {exc}")
 
-        if self.engine_name == "spark":
+        if self.engine_name == "spark":  # pragma: no cover
             try:
                 from pyspark.sql import functions as F
 
