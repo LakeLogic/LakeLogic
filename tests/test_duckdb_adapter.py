@@ -143,6 +143,7 @@ def test_duckdb_adapter_pre_and_post_transformations_cover_sql_derive_filter_ren
 
 
 def test_duckdb_adapter_links_and_register_df_variants(tmp_path: Path) -> None:
+    pd = pytest.importorskip("pandas")
     parquet_path = tmp_path / "lookup.parquet"
     csv_path = tmp_path / "lookup.csv"
     pl.DataFrame({"id": [1], "name": ["alpha"], "unused": ["x"]}).write_parquet(parquet_path)
@@ -180,15 +181,11 @@ def test_duckdb_adapter_links_and_register_df_variants(tmp_path: Path) -> None:
             self.columns = ("id",)
 
         def toPandas(self):
-            import pandas as pd
-
             return pd.DataFrame({"id": [1]})
 
     adapter._register_df("spark_like", SparkLike())
     assert adapter._get_columns(SparkLike()) == ["id"]
     assert adapter._get_columns(object()) == []
-
-    import pandas as pd
 
     adapter._register_df("pandas_like", pd.DataFrame({"id": [2]}))
     assert adapter.con.sql("SELECT id FROM pandas_like").fetchone()[0] == 2
