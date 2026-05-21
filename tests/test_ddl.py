@@ -133,6 +133,18 @@ class TestTypeResolution:
         assert _resolve_type("GEOGRAPHY", "bigquery") == "GEOGRAPHY"
         assert _resolve_type("custom_type", "spark") == "CUSTOM_TYPE"
 
+    def test_additional_widening_and_parameterized_type_branches(self):
+        assert is_safe_widening("VARCHAR", "VARCHAR") is True
+        assert is_safe_widening("VARCHAR", "VARCHAR(10)") is False
+        assert is_safe_widening("VARCHAR(10)", "VARCHAR") is True
+        assert is_safe_widening("NUMERIC(8,2)", "NUMERIC(8,2)") is True
+
+        assert _resolve_type("decimal(12)", "spark") == "DECIMAL(12)"
+        assert _resolve_type("numeric(12,4)", "snowflake") == "NUMBER(12,4)"
+        assert _resolve_type("char(5)", "duckdb") == "VARCHAR(5)"
+        assert _resolve_type("char(5)", "bigquery") == "STRING"
+        assert _resolve_type("map<string,string>", "spark") == "MAP<STRING,STRING>"
+
 
 # ── DDL Generation Tests ─────────────────────────────────────────────────────
 
@@ -289,6 +301,60 @@ class TestGenerateDDL:
         assert "COMMENT 'PII'" in ddl  # email gets PII comment
         assert "COMMENT 'Full name'" in ddl  # name gets its description
 
+    def test_lineage_soft_delete_properties_and_backend_specific_options(self):
+        fields = [
+            FieldDefinition(name="id", type="int", required=True),
+            FieldDefinition(name="_lakelogic_source", type="string"),
+            FieldDefinition(name="email", type="string", pii=True),
+        ]
+        contract = _make_contract(
+            fields=fields,
+            table_name="bronze.events",
+            primary_key=["id"],
+            partition_by=["event_date", "region"],
+            cluster_by=["id"],
+        )
+        contract.lineage = type(
+            "Lineage",
+            (),
+            {
+                "enabled": True,
+                "capture_source_path": True,
+                "source_column_name": "_lakelogic_source",
+                "capture_timestamp": True,
+                "timestamp_column_name": "_processed_at",
+                "capture_run_id": True,
+                "run_id_column_name": "_run_id",
+                "capture_contract_name": True,
+                "contract_name_column_name": "_contract_name",
+                "capture_domain": True,
+                "domain_column_name": "_domain",
+                "capture_system": True,
+                "system_column_name": "_system",
+            },
+        )()
+        contract.materialization.soft_delete_column = "_is_deleted"
+        contract.materialization.soft_delete_time_column = "_deleted_at"
+        contract.materialization.soft_delete_reason_column = "_delete_reason"
+        contract.materialization.table_properties = {"delta.enableChangeDataFeed": "true", "custom": "x"}
+
+        spark_ddl = generate_ddl(contract, "spark")
+        assert "_processed_at TIMESTAMP" in spark_ddl
+        assert "_run_id STRING" in spark_ddl
+        assert "_contract_name STRING" in spark_ddl
+        assert "_domain STRING" in spark_ddl
+        assert "_system STRING" in spark_ddl
+        assert "_is_deleted BOOLEAN" in spark_ddl
+        assert "_deleted_at STRING" in spark_ddl
+        assert "_delete_reason STRING" in spark_ddl
+        assert "PARTITIONED BY (event_date, region)" in spark_ddl
+        assert "CLUSTERED BY (id) INTO 32 BUCKETS" in spark_ddl
+        assert "'delta.enableChangeDataFeed' = true" in spark_ddl
+
+        bq_ddl = generate_ddl(contract, "bigquery")
+        assert "PARTITION BY event_date, region" in bq_ddl
+        assert "email STRING /* PII */" in bq_ddl
+
 
 # ── DROP & ALTER Tests ───────────────────────────────────────────────────────
 
@@ -303,6 +369,10 @@ class TestDropDDL:
         contract = _make_contract()
         ddl = generate_drop_ddl(contract, "spark", if_exists=False)
         assert ddl == "DROP TABLE bronze.orders;"
+
+    def test_drop_without_table_name_raises(self):
+        with pytest.raises(ValueError, match="no table name"):
+            generate_drop_ddl(DataContract(version="1.0"), "duckdb")
 
 
 class TestAlterDDL:
@@ -364,6 +434,40 @@ class TestAlterDDL:
         )
         assert stmts == []
         assert any("UNSAFE type change detected" in message for message in warned)
+
+    def test_alter_backend_specific_type_changes_removed_columns_and_errors(self, monkeypatch):
+        with pytest.raises(ValueError, match="no table name"):
+            generate_alter_ddl(DataContract(version="1.0", model=Model(fields=[FieldDefinition(name="id", type="int")])), "duckdb", [])
+
+        strict_contract = _make_contract(fields=[FieldDefinition(name="amount", type="bigint")])
+        strict_contract.server = type("MockServer", (), {})()
+        strict_contract.server.schema_policy = type("MockPolicy", (), {"evolution": "strict"})()
+        with pytest.raises(ValueError, match="Type mismatch"):
+            generate_alter_ddl(strict_contract, "duckdb", ["amount"], existing_column_types={"amount": "INTEGER"})
+
+        append_contract = _make_contract(fields=[FieldDefinition(name="amount", type="bigint")])
+        append_contract.server = type("MockServer", (), {})()
+        append_contract.server.schema_policy = type("MockPolicy", (), {"evolution": "append"})()
+        assert generate_alter_ddl(
+            append_contract, "spark", ["amount"], existing_column_types={"amount": "INT"}
+        ) == ["ALTER TABLE bronze.orders ALTER COLUMN amount TYPE BIGINT;"]
+        assert generate_alter_ddl(
+            append_contract, "snowflake", ["amount"], existing_column_types={"amount": "INTEGER"}
+        ) == ["ALTER TABLE bronze.orders MODIFY COLUMN amount BIGINT;"]
+        assert generate_alter_ddl(
+            append_contract, "postgresql", ["amount"], existing_column_types={"amount": "INTEGER"}
+        ) == ["ALTER TABLE bronze.orders ALTER COLUMN amount TYPE BIGINT;"]
+
+        infos = []
+        monkeypatch.setattr("lakelogic.core.ddl.logger.info", infos.append)
+        assert (
+            generate_alter_ddl(append_contract, "bigquery", ["amount"], existing_column_types={"amount": "INT64"})
+            == []
+        )
+        add_stmt = generate_alter_ddl(_make_contract(fields=[FieldDefinition(name="added", type="string")]), "spark", [])
+        assert add_stmt == ["ALTER TABLE bronze.orders ADD COLUMN added STRING;"]
+        generate_alter_ddl(_make_contract(fields=[FieldDefinition(name="id", type="int")]), "duckdb", ["id", "old_col", "_lakelogic_source"])
+        assert any("old_col" in message for message in infos)
 
 
 # ── Table Name Resolution Tests ──────────────────────────────────────────────
@@ -522,6 +626,48 @@ class TestCreateTableSQLite:
         assert str(contract_dir / "other.yml") in results
         assert results[str(contract_dir / "good.yaml")] == "DDL::sample_table::duckdb"
 
+    def test_create_table_error_paths_and_duckdb_delta(self, monkeypatch, tmp_path):
+        init_calls = []
+        monkeypatch.setattr(
+            "lakelogic.core.ddl._init_delta_table_from_contract",
+            lambda contract: init_calls.append(_resolve_table_name(contract)),
+        )
+
+        delta_contract = _make_contract(table_name="delta.orders", fmt="delta")
+        create_table(delta_contract, "duckdb")
+        assert init_calls == ["delta.orders"]
+
+        with pytest.raises(ValueError, match="Snowflake backend requires"):
+            create_table(_make_contract(table_name="snow.orders"), "snowflake")
+        with pytest.raises(ValueError, match="BigQuery backend requires"):
+            create_table(_make_contract(table_name="bq.orders"), "bigquery")
+        with pytest.raises(ValueError, match="PostgreSQL backend requires"):
+            create_table(_make_contract(table_name="pg.orders"), "postgresql")
+        with pytest.raises(ValueError, match="Unsupported backend"):
+            create_table(_make_contract(table_name="x.orders"), "unknown")
+
+        contract_dir = tmp_path / "not_a_dir"
+        with pytest.raises(ValueError, match="Not a directory"):
+            init_tables_from_directory(contract_dir, "duckdb")
+
+    def test_init_tables_directory_error_and_yml_skip_paths(self, monkeypatch, tmp_path):
+        contract_dir = tmp_path / "contracts"
+        contract_dir.mkdir()
+        (contract_dir / "nofields.yaml").write_text('version: "1.0"\ndataset: empty\n', encoding="utf-8")
+        (contract_dir / "broken.yaml").write_text("version: [", encoding="utf-8")
+        (contract_dir / "list.yml").write_text("[]", encoding="utf-8")
+        (contract_dir / "empty.yml").write_text('version: "1.0"\ndataset: empty_yml\n', encoding="utf-8")
+        (contract_dir / "broken_yml.yml").write_text("version: [", encoding="utf-8")
+
+        results = init_tables_from_directory(contract_dir, "duckdb")
+
+        assert str(contract_dir / "broken.yaml") in results
+        assert str(contract_dir / "broken_yml.yml") in results
+        assert results[str(contract_dir / "broken.yaml")].startswith("-- ERROR:")
+        assert str(contract_dir / "nofields.yaml") not in results
+        assert str(contract_dir / "list.yml") not in results
+        assert str(contract_dir / "empty.yml") not in results
+
 
 # ── DataProcessor Integration Tests ──────────────────────────────────────────
 
@@ -594,7 +740,17 @@ class TestDeltaInitialization:
         pa = pytest.importorskip("pyarrow")
 
         assert _resolve_arrow_type("decimal(10,2)") == pa.decimal128(10, 2)
+        assert _resolve_arrow_type("decimal(10)") == pa.decimal128(10, 0)
         assert _resolve_arrow_type("varchar(255)") == pa.string()
+        assert _resolve_arrow_type("tinyint") == pa.int8()
+        assert _resolve_arrow_type("smallint") == pa.int16()
+        assert _resolve_arrow_type("int") == pa.int32()
+        assert _resolve_arrow_type("bigint") == pa.int64()
+        assert _resolve_arrow_type("float") == pa.float32()
+        assert _resolve_arrow_type("double") == pa.float64()
+        assert _resolve_arrow_type("boolean") == pa.bool_()
+        assert _resolve_arrow_type("date") == pa.date32()
+        assert _resolve_arrow_type("timestamp") == pa.timestamp("us")
         assert _resolve_arrow_type("binary") == pa.binary()
         assert _resolve_arrow_type("timestamp_tz") == pa.timestamp("us")
 
@@ -746,6 +902,55 @@ class TestDeltaInitialization:
         assert write_calls[-1][2]["mode"] == "overwrite"
         assert write_calls[-1][2]["engine"] == "pyarrow"
         assert any("Initialized Delta table schema" in message for message in info_logs)
+
+    def test_init_delta_table_import_and_runtime_error_paths(self, monkeypatch, tmp_path):
+        warnings = []
+        monkeypatch.setattr("lakelogic.core.ddl.logger.warning", warnings.append)
+
+        original_import = __import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyarrow" or name == "deltalake":
+                raise ImportError("missing dependency")
+            return original_import(name, *args, **kwargs)
+
+        contract = DataContract(
+            version="1.0",
+            model=Model(fields=[FieldDefinition(name="id", type="int")]),
+            materialization=Materialization(target_path=str(tmp_path / "delta_missing_deps")),
+        )
+        monkeypatch.setattr("builtins.__import__", fake_import)
+        _init_delta_table_from_contract(contract)
+        assert any("deltalake and pyarrow are required" in message for message in warnings)
+
+        monkeypatch.setattr("builtins.__import__", original_import)
+        class FakeMissingDeltaTable:
+            def __init__(self, target, storage_options=None):
+                raise RuntimeError("not found")
+
+            @staticmethod
+            def create(**kwargs):
+                raise RuntimeError("create failed")
+
+        fake_deltalake = type(
+            "FakeDeltaLakeRuntime",
+            (),
+            {
+                "write_deltalake": staticmethod(
+                    lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("write failed"))
+                ),
+                "DeltaTable": FakeMissingDeltaTable,
+            },
+        )
+
+        def fake_runtime_import(name, *args, **kwargs):
+            if name == "deltalake":
+                return fake_deltalake
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.__import__", fake_runtime_import)
+        _init_delta_table_from_contract(contract)
+        assert any("Could not initialize Delta table" in message for message in warnings)
 
     def test_processor_defaults_to_own_engine(self, tmp_path):
         import yaml

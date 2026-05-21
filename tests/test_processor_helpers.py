@@ -1241,3 +1241,618 @@ def test_processor_compute_counts_spark_optimized_and_fallback(monkeypatch):
         "quarantine_ratio": 1 / 3,
         "pre_transform_dropped": None,
     }
+
+
+def test_validation_result_edge_counts_quality_and_repr():
+    class CursorCount:
+        def fetchone(self):
+            return [7]
+
+    class RelationLike:
+        def count(self):
+            return CursorCount()
+
+    class BrokenLen:
+        def __len__(self):
+            raise RuntimeError("no length")
+
+    assert proc_mod.ValidationResult._count_rows(None) == 0
+    assert proc_mod.ValidationResult._count_rows(RelationLike()) == 7
+    assert proc_mod.ValidationResult._count_rows(BrokenLen()) == 0
+
+    empty = proc_mod.ValidationResult(good=[], bad=[], raw=[])
+    assert empty.quarantine_ratio == 0.0
+    assert empty.quality_score == 100.0
+
+    result = proc_mod.ValidationResult(good=[1, 2], bad=[3, 4], raw=[1, 2, 3, 4], auto_fix_hint="fix it")
+    assert result.quarantine_ratio == 0.5
+    assert result.quality_score == 50.0
+    assert result.trace is None
+    assert result.auto_fix_hint == "fix it"
+
+
+def test_processor_class_constructors_reset_and_adapter_variants(monkeypatch):
+    fake_dbt = types.ModuleType("lakelogic.adapters.dbt")
+    fake_dbt.load_contract_from_dbt = lambda *args, **kwargs: DataContract(version="1.0.0", dataset="from_dbt")
+    monkeypatch.setitem(sys.modules, "lakelogic.adapters.dbt", fake_dbt)
+
+    processor = proc_mod.DataProcessor.from_dbt("schema.yml", model="orders", engine="polars", stage="silver")
+    assert processor.contract.dataset == "from_dbt"
+    assert processor.stage == "silver"
+
+    reset_calls = []
+    processor.contract.reset = lambda targets=None, dry_run=False: reset_calls.append((targets, dry_run)) or {"ok": True}
+    assert processor.reset(targets=["data"], dry_run=True) == {"ok": True}
+    assert reset_calls == [(["data"], True)]
+
+    fake_modules = {
+        "lakelogic.engines.spark": ("SparkAdapter", "spark"),
+        "lakelogic.engines.snowflake": ("SnowflakeAdapter", "snowflake"),
+        "lakelogic.engines.bigquery": ("BigQueryAdapter", "bigquery"),
+    }
+    for module_name, (class_name, value) in fake_modules.items():
+        module = types.ModuleType(module_name)
+        setattr(module, class_name, lambda contract, value=value: (value, contract))
+        monkeypatch.setitem(sys.modules, module_name, module)
+
+    adapter_processor = object.__new__(proc_mod.DataProcessor)
+    adapter_processor.contract = {"contract": True}
+    adapter_processor.engine_name = "spark"
+    assert adapter_processor._get_adapter() == ("spark", {"contract": True})
+    adapter_processor.engine_name = "pyspark"
+    assert adapter_processor._get_adapter() == ("spark", {"contract": True})
+    adapter_processor.engine_name = "snowflake"
+    assert adapter_processor._get_adapter() == ("snowflake", {"contract": True})
+    adapter_processor.engine_name = "bigquery"
+    assert adapter_processor._get_adapter() == ("bigquery", {"contract": True})
+
+
+def test_processor_load_contract_inline_yaml_file_missing_and_stage_noops(monkeypatch, tmp_path):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.stage = None
+    monkeypatch.setattr(processor, "_apply_fact_governance", lambda contract: contract)
+    monkeypatch.setattr(processor, "_apply_cdc_defaults", lambda contract: contract)
+
+    loaded = processor._load_contract(DataContract(version="1.0.0", dataset="direct"))
+    assert loaded.dataset == "direct"
+
+    inline = """
+version: "1.0.0"
+dataset: inline
+metadata:
+  mode: on
+source:
+  type: file
+  path: input.csv
+  options:
+    flag: true
+"""
+    loaded_inline = processor._load_contract(inline)
+    assert loaded_inline.metadata["mode"] == "on"
+    assert loaded_inline.source.options["flag"] is True
+
+    with pytest.raises(FileNotFoundError):
+        processor._load_contract(tmp_path / "missing.yaml")
+
+    no_stage = DataContract(version="1.0.0", dataset="base", stages={"silver": {"dataset": "silver"}})
+    processor.stage = " "
+    assert processor._apply_stage_overrides(no_stage).dataset == "base"
+    processor.stage = "gold"
+    assert processor._apply_stage_overrides(no_stage).dataset == "base"
+    processor.stage = "silver"
+    assert processor._apply_stage_overrides(no_stage).dataset == "silver"
+
+
+def test_processor_cleanup_partition_expansion_cloud_globs_and_source_paths(monkeypatch, tmp_path):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor.contract = types.SimpleNamespace(
+        _base_path=tmp_path,
+        source=types.SimpleNamespace(type="file", format="json"),
+    )
+
+    landing = tmp_path / "landing"
+    landing.mkdir()
+    keep = landing / "keep.csv"
+    delete_me = landing / "delete.csv"
+    nested = landing / "archive" / "nested.csv"
+    nested.parent.mkdir()
+    keep.write_text("id\n1\n", encoding="utf-8")
+    delete_me.write_text("id\n2\n", encoding="utf-8")
+    nested.write_text("id\n3\n", encoding="utf-8")
+    processor._source_files = [{"path": str(delete_me)}, {"path": str(nested)}, {"path": str(tmp_path / "missing.csv")}]
+
+    processor._post_ingestion_cleanup(str(landing), "delete")
+    assert not delete_me.exists()
+    assert nested.exists()
+
+    archive_me = landing / "archive_me.csv"
+    archive_me.write_text("id\n4\n", encoding="utf-8")
+    processor._source_files = [{"path": str(archive_me)}]
+    archive_dir = tmp_path / "archive_out"
+    processor._post_ingestion_cleanup(str(landing), "archive", archive_path=str(archive_dir))
+    assert (archive_dir / "archive_me.csv").exists()
+
+    missing_archive = landing / "missing_archive.csv"
+    missing_archive.write_text("id\n5\n", encoding="utf-8")
+    processor._source_files = [{"path": str(missing_archive)}]
+    with pytest.raises(ValueError, match="archive_path"):
+        processor._post_ingestion_cleanup(str(landing), "archive")
+    processor._post_ingestion_cleanup(str(landing), "unknown")
+
+    processor._is_uri_path = lambda path: path.startswith("abfss://")
+    assert processor._resolve_source_path("table:catalog.orders") == "table:catalog.orders"
+    assert processor._resolve_source_path("abfss://container/path") == "abfss://container/path"
+    assert processor._resolve_source_path(tmp_path / "absolute.csv") == str(tmp_path / "absolute.csv")
+
+    local_glob_dir = tmp_path / "glob"
+    local_glob_dir.mkdir()
+    (local_glob_dir / "a.json").write_text("{}", encoding="utf-8")
+    (local_glob_dir / "b.json").write_text("{}", encoding="utf-8")
+    local_files = processor._expand_source_files(str(local_glob_dir / "*.json"))
+    assert len(local_files) == 2
+
+    processor.contract.source.type = "table"
+    assert processor._expand_source_files(str(local_glob_dir / "*.json")) is None
+    processor.contract.source.type = "file"
+
+    delta_dir = tmp_path / "delta"
+    (delta_dir / "_delta_log").mkdir(parents=True)
+    assert processor._expand_source_files(str(delta_dir)) is None
+
+    iceberg_dir = tmp_path / "iceberg"
+    (iceberg_dir / "metadata").mkdir(parents=True)
+    (iceberg_dir / "data").mkdir()
+    assert processor._expand_source_files(str(iceberg_dir)) is None
+
+    class FakeFs:
+        def info(self, path):
+            return {"last_modified": types.SimpleNamespace(timestamp=lambda: 123.0)}
+
+    fake_fsspec = types.ModuleType("fsspec")
+    fake_fsspec.get_fs_token_paths = lambda path, storage_options=None: (
+        FakeFs(),
+        None,
+        ["container/path/a.json"],
+    )
+    monkeypatch.setitem(sys.modules, "fsspec", fake_fsspec)
+    processor._get_cloud_storage_options = lambda path: {"account_key": "key"}
+    cloud_files = processor._expand_source_files("abfss://container@acct.dfs.core.windows.net/path/*.json")
+    assert cloud_files[0]["path"].startswith("abfss://container@acct.dfs.core.windows.net")
+
+    fake_fsspec.get_fs_token_paths = lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("403 forbidden"))
+    with pytest.raises(RuntimeError, match="Cloud storage access failed"):
+        processor._expand_source_files("abfss://container/path/*.json")
+
+    fake_fsspec.get_fs_token_paths = lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("empty glob"))
+    assert processor._expand_source_files("abfss://container/path/*.json") is None
+
+    calls = []
+    processor._expand_source_files = lambda path: calls.append(path) or [{"path": path, "mtime": 1.0}]
+    partition_cfg = types.SimpleNamespace(
+        format="year=%Y/month=%m/day=%d/hour=%H",
+        start_date=None,
+        end_date=None,
+        lookback_days=0,
+        file_pattern=None,
+    )
+    files = processor._expand_partitioned_paths(
+        str(tmp_path / "events" / "*.json"),
+        partition_cfg,
+        override_start="2026-01-01",
+        override_end="2026-01-01",
+    )
+    assert files
+    assert all(path.endswith("/*.json") for path in calls)
+
+
+def test_processor_reprocess_spark_filter_and_unsupported_frame(monkeypatch):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.contract = types.SimpleNamespace(
+        materialization=types.SimpleNamespace(reprocess_date_column="event_date", partition_by=[])
+    )
+    processor._reprocess_column = None
+
+    fake_functions = types.SimpleNamespace(
+        col=lambda name: ("col", name),
+        lit=lambda value: ("lit", value),
+    )
+    fake_sql_module = types.ModuleType("pyspark.sql")
+    fake_sql_module.functions = fake_functions
+    monkeypatch.setitem(sys.modules, "pyspark", types.ModuleType("pyspark"))
+    monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
+
+    class FakeSparkDf:
+        sparkSession = object()
+
+        def __init__(self):
+            self.filters = []
+
+        def count(self):
+            return 5 - len(self.filters)
+
+        def filter(self, expr):
+            self.filters.append(expr)
+            return self
+
+    spark_df = FakeSparkDf()
+    filtered = processor._apply_reprocess_date_filter(spark_df, "2026-01-01", "2026-01-02")
+    assert filtered is spark_df
+    assert len(spark_df.filters) == 2
+
+    unsupported = object()
+    assert processor._apply_reprocess_date_filter(unsupported, "2026-01-01", None) is unsupported
+
+
+def test_processor_delegates_for_ddl_gdpr_hipaa_external_logic_and_dim_date(monkeypatch):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor.contract = types.SimpleNamespace(name="contract")
+    processor.last_run_id = "run-1"
+    processor.last_source_path = "source.csv"
+    processor._active_trace_steps = []
+
+    fake_ddl = types.ModuleType("lakelogic.core.ddl")
+    fake_ddl.generate_ddl = lambda contract, backend, **kwargs: ("ddl", contract, backend, kwargs)
+    fake_ddl.create_table = lambda contract, backend, **kwargs: ("create", contract, backend, kwargs)
+    monkeypatch.setitem(sys.modules, "lakelogic.core.ddl", fake_ddl)
+    assert processor.generate_ddl(table_name="orders")[0] == "ddl"
+    assert processor.create_table(backend="duckdb", dry_run=True)[0] == "create"
+
+    fake_external = types.ModuleType("lakelogic.core.external_logic")
+    fake_external.apply_external_logic = lambda *args, **kwargs: ("external", args, kwargs)
+    fake_external._run_python_logic = lambda *args, **kwargs: ("python", args, kwargs)
+    fake_external._run_notebook_logic = lambda *args, **kwargs: ("notebook", args, kwargs)
+    fake_external._load_output_frame = lambda *args, **kwargs: ("loaded", args, kwargs)
+    monkeypatch.setitem(sys.modules, "lakelogic.core.external_logic", fake_external)
+    assert processor._apply_external_logic("df")[0] == "external"
+    assert processor._run_python_logic(Path("logic.py"), "logic", "df")[0] == "python"
+    assert processor._run_notebook_logic(Path("logic.ipynb"), "logic", "df")[0] == "notebook"
+    assert processor._load_output_frame(Path("out.parquet"), "parquet")[0] == "loaded"
+
+    fake_gdpr = types.ModuleType("lakelogic.core.gdpr")
+    fake_gdpr.forget_subjects = lambda *args, audit_report_out=None, **kwargs: (
+        audit_report_out.append({"audit": True}) if audit_report_out is not None else None
+    ) or "forgotten"
+    fake_gdpr.mask_pii_columns = lambda *args, **kwargs: ("masked", args, kwargs)
+    monkeypatch.setitem(sys.modules, "lakelogic.core.gdpr", fake_gdpr)
+    assert processor.forget("df", "customer_id", ["1"]) == "forgotten"
+    assert processor.last_report == {"audit": True}
+    assert processor.mask_pii("df", columns=["email"])[0] == "masked"
+    assert processor.forget_hipaa("df", "patient_id", ["p1"]) == "forgotten"
+    assert processor.mask_pii_hipaa("df", columns=["email"])[0] == "masked"
+
+    fake_hipaa = types.ModuleType("lakelogic.core.hipaa")
+    fake_hipaa.forget_patients = lambda *args, **kwargs: ("forgot-patient", args, kwargs)
+    fake_hipaa.mask_phi_columns = lambda *args, **kwargs: ("masked-phi", args, kwargs)
+    monkeypatch.setitem(sys.modules, "lakelogic.core.hipaa", fake_hipaa)
+    assert processor.forget_patient("df", "patient_id", ["p1"])[0] == "forgot-patient"
+    assert processor.mask_phi("df", columns=["mrn"])[0] == "masked-phi"
+
+    fake_dim_date = types.ModuleType("lakelogic.core.dim_date")
+    fake_dim_date.generate_date_dimension = lambda **kwargs: ("dim-date", kwargs)
+    monkeypatch.setitem(sys.modules, "lakelogic.core.dim_date", fake_dim_date)
+    assert processor.generate_date_dimension(start_date="2026-01-01")[0] == "dim-date"
+
+
+def test_processor_trace_error_and_logging_branches(monkeypatch):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor._active_trace_steps = []
+    with pytest.raises(RuntimeError, match="boom"):
+        with processor.trace_step("failing"):
+            raise RuntimeError("boom")
+    assert processor._active_trace_steps[-1].status == "error"
+    assert processor._active_trace_steps[-1].details["error"] == "boom"
+
+    removed = []
+    added = []
+    monkeypatch.setattr(proc_mod.logger, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(proc_mod.logger, "add", lambda *args, **kwargs: added.append((args, kwargs)))
+    monkeypatch.setenv("LAKELOGIC_DEBUG", "false")
+    processor._configure_logging()
+    assert removed and added
+
+    monkeypatch.setenv("LAKELOGIC_DEBUG", "true")
+    removed.clear()
+    processor._configure_logging()
+    assert removed == []
+
+
+def test_processor_run_source_dispatch_config_errors_and_partition_early_return(monkeypatch, tmp_path):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor._resolved_data_layer = "bronze"
+    processor._resolve_source_path = lambda value: str(value)
+    processor._is_uri_path = lambda path: False
+    processor._empty_frame = lambda: pl.DataFrame(schema={"id": pl.Int64})
+    writes = []
+    processor._write_empty_run_log = lambda stage="no_new_data": writes.append(stage)
+
+    processor.contract = types.SimpleNamespace(
+        source=types.SimpleNamespace(type="dlt", path=None),
+        materialization=None,
+    )
+    processor._run_dlt_source = lambda: "dlt-result"
+    assert processor.run_source() == "dlt-result"
+
+    processor.contract.source = types.SimpleNamespace(type="database", path="postgresql://db/orders")
+    processor._run_database_source = lambda: "db-result"
+    assert processor.run_source() == "db-result"
+
+    processor.contract.source = None
+    with pytest.raises(ValueError, match="No source path provided"):
+        processor.run_source()
+
+    fake_catalog = types.ModuleType("lakelogic.engines.catalog_resolver")
+    fake_catalog.resolve_catalog_path = lambda path: path
+    monkeypatch.setitem(sys.modules, "lakelogic.engines.catalog_resolver", fake_catalog)
+
+    processor.contract = types.SimpleNamespace(
+        source=types.SimpleNamespace(
+            type="table",
+            path="table:catalog.orders",
+            load_mode="incremental",
+            watermark_strategy="pipeline_log",
+            partition=None,
+        ),
+        materialization=None,
+    )
+    with pytest.raises(ValueError, match="source type 'table' cannot use"):
+        processor.run_source()
+
+    processor.contract.source = types.SimpleNamespace(
+        type="file",
+        path=str(tmp_path / "orders.csv"),
+        load_mode="incremental",
+        watermark_strategy="delta_version",
+        partition=None,
+    )
+    with pytest.raises(ValueError, match="file-based source cannot use"):
+        processor.run_source()
+
+    processor.contract.source = types.SimpleNamespace(
+        type="file",
+        path=str(tmp_path / "landing"),
+        load_mode="full",
+        watermark_strategy=None,
+        partition=types.SimpleNamespace(format="year=%Y", lookback_days=1),
+    )
+    processor._expand_partitioned_paths = lambda *args, **kwargs: []
+    result = processor.run_source()
+    assert isinstance(result, proc_mod.ValidationResult)
+    assert writes[-1] == "no_new_data"
+
+
+def test_processor_run_source_incremental_empty_and_not_found_paths(monkeypatch, tmp_path):
+    fake_catalog = types.ModuleType("lakelogic.engines.catalog_resolver")
+    fake_catalog.resolve_catalog_path = lambda path: path
+    monkeypatch.setitem(sys.modules, "lakelogic.engines.catalog_resolver", fake_catalog)
+
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor._active_trace_steps = []
+    processor._resolved_data_layer = "bronze"
+    processor._resolve_source_path = lambda value: str(value)
+    processor._is_uri_path = lambda path: False
+    processor._empty_frame = lambda: pl.DataFrame(schema={"id": pl.Int64})
+    writes = []
+    processor._write_empty_run_log = lambda stage="no_new_data": writes.append(stage)
+    processor._get_last_source_watermark = lambda: 100.0
+
+    processor.contract = types.SimpleNamespace(
+        source=types.SimpleNamespace(
+            type="file",
+            path=str(tmp_path / "landing"),
+            load_mode="incremental",
+            watermark_strategy="pipeline_log",
+            partition=None,
+            format="csv",
+        ),
+        materialization=None,
+        server=None,
+        lineage=None,
+    )
+    processor._expand_source_files = lambda path: [{"path": str(tmp_path / "old.csv"), "mtime": 1.0}]
+    result = processor.run_source()
+    assert isinstance(result, proc_mod.ValidationResult)
+    assert writes[-1] == "no_new_data"
+
+    processor.contract.source.load_mode = "full"
+    processor._expand_source_files = lambda path: None
+    missing_path = tmp_path / "missing.csv"
+    processor.contract.source.path = str(missing_path)
+    monkeypatch.setattr(
+        pl,
+        "read_csv",
+        lambda path: (_ for _ in ()).throw(FileNotFoundError("not found")),
+    )
+    result = processor.run_source()
+    assert isinstance(result, proc_mod.ValidationResult)
+    assert processor._run_log_already_written is True
+
+
+def test_processor_database_source_error_fetch_and_duckdb_paths(monkeypatch):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor._resolved_data_layer = "bronze"
+    processor.contract = types.SimpleNamespace(
+        info=types.SimpleNamespace(title="Orders"),
+        dataset=None,
+        model=None,
+        source=types.SimpleNamespace(path="postgresql://db/orders", query=None, load_mode="full", options={}),
+    )
+    with pytest.raises(ValueError, match="dataset"):
+        processor._run_database_source()
+
+    processor.contract.dataset = "orders"
+    processor.contract.source.path = None
+    with pytest.raises(ValueError, match="source.path"):
+        processor._run_database_source()
+
+    processor.contract.source.path = "postgresql://db/orders"
+    processor.contract.source.load_mode = "incremental"
+    processor.contract.source.watermark_field = None
+    with pytest.raises(ValueError, match="watermark_field"):
+        processor._run_database_source()
+
+    processor.contract.source.watermark_field = "updated_at"
+    processor.contract.source.options = {"fetch_size": 2}
+    processor._get_last_source_watermark = lambda: None
+
+    fake_sqlalchemy = types.ModuleType("sqlalchemy")
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeEngine:
+        def execution_options(self, **kwargs):
+            return self
+
+        def connect(self):
+            return FakeConnection()
+
+    fake_sqlalchemy.create_engine = lambda uri: FakeEngine()
+    monkeypatch.setitem(sys.modules, "sqlalchemy", fake_sqlalchemy)
+    monkeypatch.setattr(
+        pl,
+        "read_database",
+        lambda query, connection=None, iter_batches=False, batch_size=None: iter(
+            [pl.DataFrame({"id": [1]}), pl.DataFrame({"id": [2]})]
+        ),
+    )
+    processor.run = lambda df, source_path=None: proc_mod.ValidationResult(df, pl.DataFrame())
+    result = processor._run_database_source()
+    assert result.good["id"].to_list() == [1, 2]
+
+    processor.contract.source.options = {}
+    monkeypatch.setattr(
+        pl,
+        "read_database_uri",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("connector missing")),
+    )
+    with pytest.raises(RuntimeError, match="Polars DB extraction failed"):
+        processor._run_database_source()
+
+    duck = object.__new__(proc_mod.DataProcessor)
+    duck.engine_name = "duckdb"
+    duck._resolved_data_layer = "bronze"
+    duck._get_last_source_watermark = lambda: 1.0
+    duck.contract = types.SimpleNamespace(
+        info=types.SimpleNamespace(title="Orders"),
+        dataset="orders",
+        model=None,
+        source=types.SimpleNamespace(
+            path="sqlite:///tmp/orders.db",
+            query=None,
+            load_mode="incremental",
+            watermark_field="updated_at",
+            options={},
+        ),
+    )
+    duck.run = lambda df, source_path=None: proc_mod.ValidationResult(df, pl.DataFrame())
+
+    queries = []
+    fake_duckdb = types.ModuleType("duckdb")
+    fake_duckdb.sql = lambda query: queries.append(query) or types.SimpleNamespace(pl=lambda: pl.DataFrame({"id": [1]}))
+    monkeypatch.setitem(sys.modules, "duckdb", fake_duckdb)
+    duck_result = duck._run_database_source()
+    assert duck_result.good["id"].to_list() == [1]
+    assert any("sqlite_scan" in query for query in queries)
+
+    bad_engine = object.__new__(proc_mod.DataProcessor)
+    bad_engine.engine_name = "spark"
+    bad_engine._resolved_data_layer = "bronze"
+    bad_engine.contract = duck.contract
+    bad_engine._get_last_source_watermark = lambda: None
+    with pytest.raises(ValueError, match="natively supports"):
+        bad_engine._run_database_source()
+
+
+def test_processor_dlt_import_error_and_streaming_parquet_outputs(monkeypatch, tmp_path):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor._resolved_data_layer = "bronze"
+    processor.contract = types.SimpleNamespace(
+        info=types.SimpleNamespace(title="Orders"),
+        dataset="orders",
+        source=types.SimpleNamespace(dlt=types.SimpleNamespace(source=None, base_url="https://example.test")),
+    )
+
+    original_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "lakelogic.adapters.dlt_adapter":
+            raise ImportError("missing dlt")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    with pytest.raises(ImportError, match="dlt integration requires"):
+        processor._run_dlt_source()
+    monkeypatch.setattr("builtins.__import__", original_import)
+
+    parquet_path = tmp_path / "orders.parquet"
+    pl.DataFrame({"id": [1, 2]}).write_parquet(parquet_path)
+
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor.contract = types.SimpleNamespace(source=types.SimpleNamespace(path=str(parquet_path)))
+    processor._resolve_source_path = lambda value: str(value)
+    processor.run = lambda lf, source_path=None: proc_mod.ValidationResult(lf, pl.DataFrame())
+
+    out_parquet = tmp_path / "out.parquet"
+    result = processor.run_source_streaming(output_path=str(out_parquet))
+    assert result == {"target": str(out_parquet), "format": "parquet"}
+    assert out_parquet.exists()
+
+    out_default = tmp_path / "out.default"
+    result = processor.run_source_streaming(output_path=str(out_default))
+    assert result == {"target": str(out_default), "format": "default"}
+    assert out_default.exists()
+
+
+def test_processor_run_source_table_backend_dispatch_and_load_failure(monkeypatch):
+    fake_catalog = types.ModuleType("lakelogic.engines.catalog_resolver")
+    fake_catalog.resolve_catalog_path = lambda path: path
+    monkeypatch.setitem(sys.modules, "lakelogic.engines.catalog_resolver", fake_catalog)
+
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "snowflake"
+    processor._active_trace_steps = []
+    processor._resolved_data_layer = "silver"
+    processor._resolve_source_path = lambda value: str(value)
+    processor._is_uri_path = lambda path: False
+    processor._expand_source_files = lambda path: None
+    processor.contract = types.SimpleNamespace(
+        source=types.SimpleNamespace(
+            type="table",
+            path="table:analytics.orders",
+            load_mode="full",
+            watermark_strategy=None,
+            partition=None,
+        ),
+        materialization=None,
+        server=None,
+        lineage=None,
+    )
+    captured = {}
+    processor.run = lambda table_name, source_path=None, reset_trace=False: (
+        captured.update({"table_name": table_name, "source_path": source_path, "reset_trace": reset_trace})
+        or "table-result"
+    )
+    assert processor.run_source() == "table-result"
+    assert captured == {"table_name": "analytics.orders", "source_path": "analytics.orders", "reset_trace": False}
+
+    processor.engine_name = "unknown"
+    processor.run = lambda *args, **kwargs: "should-not-run"
+    with pytest.raises(ValueError, match="Could not load data"):
+        processor.run_source(source="landing/orders.csv")
+
+    streamer = object.__new__(proc_mod.DataProcessor)
+    streamer.engine_name = "polars"
+    streamer.contract = types.SimpleNamespace(source=None)
+    with pytest.raises(ValueError, match="No source path provided"):
+        streamer.run_source_streaming()
