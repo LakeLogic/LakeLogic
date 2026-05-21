@@ -70,6 +70,14 @@ def test_contract_gate_is_abstract():
         ContractGate(name="x")  # cannot instantiate ABC directly
 
 
+def test_contract_gate_base_run_is_noop_when_called_by_subclass():
+    class NoopGate(ContractGate):
+        def run(self, contract, context=None):
+            return super().run(contract, context)
+
+    assert NoopGate("noop").run(object()) is None
+
+
 def test_gate_status_enum_values():
     assert GateStatus.PASSED.value == "passed"
     assert GateStatus.FAILED.value == "failed"

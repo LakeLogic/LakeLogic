@@ -1035,17 +1035,22 @@ def _init_delta_table_from_contract(contract: DataContract) -> None:
     table_label = _resolve_table_name(contract) or target
 
     try:
-        # Prefer DeltaTable.create() — purpose-built for schema-only init
-        create_kwargs: Dict[str, Any] = {
-            "table_uri": target,
-            "schema": schema,
-        }
-        if partition_by:
-            create_kwargs["partition_by"] = partition_by
-        if storage_opts:
-            create_kwargs["storage_options"] = storage_opts
+        # Use write_deltalake with engine="pyarrow" for local paths to ensure
+        # minReaderVersion: 1 (compatible with Delta Spark 4.0.x). The Rust
+        # engine defaults to v3 (timestampNtz) which Delta Spark 4.0 cannot read.
+        _is_cloud = any(target.startswith(p) for p in ("abfss://", "s3://", "gs://", "adl://"))
+        _ddl_engine = "rust" if _is_cloud else "pyarrow"
 
-        DeltaTable.create(**create_kwargs)
+        empty_table = pa.table(
+            {f.name: pa.array([], type=f.type) for f in schema},
+            schema=schema,
+        )
+        wdl_kwargs_init: Dict[str, Any] = {"mode": "overwrite", "engine": _ddl_engine}
+        if partition_by:
+            wdl_kwargs_init["partition_by"] = partition_by
+        if storage_opts:
+            wdl_kwargs_init["storage_options"] = storage_opts
+        write_deltalake(target, empty_table, **wdl_kwargs_init)
 
         logger.info(f"Initialized Delta table schema for {table_label} ({len(fields)} columns, 0 rows) at {target}")
     except TypeError:

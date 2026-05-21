@@ -592,7 +592,13 @@ def _safe_write_deltalake(path, data, **kwargs):
         raise e
 
 
-def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[str, str]] = None) -> None:
+def _write_frame(
+    df,
+    path,
+    output_format: str,
+    storage_options: Optional[Dict[str, str]] = None,
+    mode_override: Optional[str] = None,
+) -> None:
     """
     Write a DataFrame-like object to disk or remote storage (ADLS/S3/GCS).
 
@@ -692,26 +698,32 @@ def _write_frame(df, path, output_format: str, storage_options: Optional[Dict[st
                 )
                 return
 
-            # If it's a DuckDB relation, we need to bring it to memory (Arrow preferred)
-            data = df
-            if hasattr(df, "to_arrow_table"):
-                data = df.to_arrow_table()
-            elif hasattr(df, "to_pandas"):
-                data = df.to_pandas()
-
-            # Ensure no Arrow Null-typed columns (Delta Lake rejects them)
+            # Convert to Arrow without pandas — Polars, DuckDB and PyArrow all
+            # support zero-copy Arrow conversion. Never route through pandas.
             import pyarrow as pa
 
+            data = df
+            if hasattr(df, "to_arrow"):  # Polars DataFrame
+                data = df.to_arrow()
+            elif hasattr(df, "to_arrow_table"):  # DuckDB relation
+                data = df.to_arrow_table()
+
             if not isinstance(data, pa.Table):
-                data = pa.Table.from_pandas(data) if hasattr(data, "columns") else data
+                data = pa.Table.from_pydict({})  # last resort empty table
             if isinstance(data, pa.Table):
                 data = _sanitize_arrow_nulls(data)
 
+            delta_mode = mode_override or "overwrite"
+            # Use pyarrow engine for local paths — it writes at protocol v1/v2
+            # (no timestampNtz reader feature), keeping tables readable by
+            # Delta Spark 4.0.x without a DeltaTableFeatureException.
+            _engine = "rust" if is_remote else "pyarrow"
             write_deltalake(
                 path_str if is_remote else path,
                 data,
-                mode="overwrite",
+                mode=delta_mode,
                 schema_mode="overwrite",
+                engine=_engine,
                 storage_options=opts,
             )
         except ImportError:
@@ -924,13 +936,20 @@ def _append_without_pandas(df: Any, target_file: Path, output_format: str) -> in
     if target_file.exists():
         if output_format == "csv":
             existing = pl.read_csv(target_file)
+            combined = pl.concat([existing, df], how="vertical")
+            _write_frame(combined, target_file, output_format)
+            return int(combined.height)
         elif output_format == "parquet":
             existing = pl.read_parquet(target_file)
+            combined = pl.concat([existing, df], how="vertical")
+            _write_frame(combined, target_file, output_format)
+            return int(combined.height)
+        elif output_format == "delta":
+            # Delta append: write_deltalake with mode="append" handles this natively
+            _write_frame(df, target_file, output_format, mode_override="append")
+            return int(df.height)
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
-        combined = pl.concat([existing, df], how="vertical")
-        _write_frame(combined, target_file, output_format)
-        return int(combined.height)
 
     _write_frame(df, target_file, output_format)
     return int(df.height)
@@ -3488,7 +3507,12 @@ def materialize_dataframe(
 
     if is_dir_target:
         resolved_target.mkdir(parents=True, exist_ok=True)
-        target_file = resolved_target / f"data.{resolved_format}"
+        # Delta tables ARE the directory — never append data.delta to the path.
+        # The _delta_log lives directly inside resolved_target.
+        if resolved_format == "delta":
+            target_file = resolved_target
+        else:
+            target_file = resolved_target / f"data.{resolved_format}"
     else:
         target_file = resolved_target
         if target_file.suffix == "":
@@ -3506,11 +3530,47 @@ def materialize_dataframe(
     if not _pandas_available():
         if partition_by:
             raise ValueError("Partitioned materialization requires pandas (or Spark). Install pandas to proceed.")
-        if strategy not in ["overwrite", "append"]:
+        if resolved_format == "delta" and strategy == "merge" and primary_key:
+            # Delta merge without pandas: use DeltaTable.merge() + pyarrow directly.
+            import pyarrow as pa
+            from deltalake import DeltaTable, write_deltalake
+
+            target_str = str(target_file)
+            if _is_polars_frame(df):
+                arrow_data = (df.collect() if hasattr(df, "collect") else df).to_arrow()
+            elif hasattr(df, "to_arrow"):
+                arrow_data = df.to_arrow()
+            else:
+                raise ValueError("Delta merge without pandas requires a Polars or Arrow frame.")
+            arrow_data = _sanitize_arrow_nulls(arrow_data)
+            _dt_opts = _build_storage_options() if _is_remote_path(target_str) else None
+            table_exists = Path(target_file / "_delta_log").exists() if not _is_remote_path(target_str) else False
+            _local_engine = "rust" if _is_remote_path(target_str) else "pyarrow"
+            if not table_exists:
+                write_deltalake(
+                    target_str,
+                    arrow_data,
+                    mode="overwrite",
+                    schema_mode="overwrite",
+                    storage_options=_dt_opts,
+                    engine=_local_engine,
+                )
+            else:
+                pk_predicate = " AND ".join(f"source.{pk} = target.{pk}" for pk in primary_key)
+                dt = DeltaTable(target_str, storage_options=_dt_opts)
+                dt.merge(
+                    source=arrow_data,
+                    predicate=pk_predicate,
+                    source_alias="source",
+                    target_alias="target",
+                ).when_matched_update_all().when_not_matched_insert_all().execute()
+            rows_written = len(arrow_data)
+        elif strategy not in ["overwrite", "append"]:
             raise ValueError(
-                f"Materialization strategy '{strategy}' requires pandas (or Spark). Install pandas to proceed."
+                f"Materialization strategy '{strategy}' for format '{resolved_format}' requires pandas "
+                "(or Spark). Install pandas to proceed."
             )
-        if strategy == "append" and target_file.exists():
+        elif strategy == "append" and target_file.exists():
             rows_written = _append_without_pandas(df, target_file, resolved_format)
         else:
             _write_frame(df, target_file, resolved_format)

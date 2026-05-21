@@ -9,6 +9,7 @@ Can also scaffold a registry from a directory of loose contracts.
 from __future__ import annotations
 
 import os
+import re as _re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -108,6 +109,8 @@ class RegistryStorage(BaseModel):
     gold_path: Optional[str] = None
     log_path: Optional[str] = None
     quarantine_path: Optional[str] = None
+    slo_checks_path: Optional[str] = None  # cloud/local path for _slo_checks table
+    slo_checks_table: Optional[str] = None  # UC table name (e.g. "`catalog`.domain._slo_checks")
 
 
 class RegistryContract(BaseModel):
@@ -182,6 +185,30 @@ def _resolve_env_or_secret(val: str) -> str:
         return ""
 
     return val
+
+
+_ISO_PERIOD_RE = _re.compile(
+    r"^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$",
+    _re.IGNORECASE,
+)
+
+
+def _iso_period_to_minutes(period: str) -> Optional[int]:
+    """Convert an ISO 8601 duration string (e.g. 'P7D', 'P90D', 'P7Y') to minutes."""
+    m = _ISO_PERIOD_RE.fullmatch(period.strip())
+    if not m:
+        return None
+    years, months, weeks, days, hours, mins, secs = (int(x) if x else 0 for x in m.groups())
+    total = (
+        years * 365 * 24 * 60
+        + months * 30 * 24 * 60
+        + weeks * 7 * 24 * 60
+        + days * 24 * 60
+        + hours * 60
+        + mins
+        + secs // 60
+    )
+    return total or None
 
 
 class CloudReporting(BaseModel):
@@ -396,6 +423,7 @@ class DomainRegistry(BaseModel):
     server: Dict[str, Any] = Field(default_factory=dict)  # per-layer server config
     cost: Dict[str, Any] = Field(default_factory=dict)  # cost observability config
     observatory: Dict[str, Any] = Field(default_factory=dict)  # observatory telemetry config
+    retention: Dict[str, str] = Field(default_factory=dict)  # ISO 8601 periods per layer, e.g. {bronze: P7D}
     # Cross-domain lineage: upstream tables not managed by this registry
     external_sources: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -460,6 +488,7 @@ class DomainRegistry(BaseModel):
             "server",
             "cost",
             "observatory",
+            "retention",
         ]
         # Scalar keys: inherit only if the system doesn't define them
         _DOMAIN_SCALAR_KEYS = [

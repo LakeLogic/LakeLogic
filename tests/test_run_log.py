@@ -15,10 +15,13 @@ from lakelogic.core.run_log import (
     _prepare_table_name,
     _resolve_path,
     _write_run_log_table,
+    _write_slo_checks_table,
     get_last_run_dlt_state,
     get_last_run_watermark,
+    write_slo_checks,
     write_run_log,
 )
+from lakelogic.core.slo import SLOCheckResult
 
 
 def _make_contract(tmp_path: Path, metadata: dict) -> types.SimpleNamespace:
@@ -204,6 +207,60 @@ def test_write_run_log_to_directory_and_read_back_watermark(tmp_path: Path):
     payload = json.loads(Path(log_path).read_text(encoding="utf-8"))
     assert payload["run_id"] == "dir-1"
     assert get_last_run_watermark(contract, "orders_contract", "silver") == 1713355200.0
+
+
+def test_write_run_log_secondary_targets_and_observatory_push(monkeypatch, tmp_path: Path):
+    secondary_calls = []
+    posts = []
+    infos = []
+
+    fake_materialization = types.ModuleType("lakelogic.core.materialization")
+    fake_materialization.write_to_secondary_targets = lambda targets, table, name, strategy: secondary_calls.append(
+        (targets, name, strategy, table)
+    )
+    monkeypatch.setitem(sys.modules, "lakelogic.core.materialization", fake_materialization)
+
+    class FakeResponse:
+        status_code = 201
+        text = "created"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        types.SimpleNamespace(post=lambda *args, **kwargs: posts.append((args, kwargs)) or FakeResponse()),
+    )
+    monkeypatch.setattr("lakelogic.core.run_log.logger.info", infos.append)
+
+    contract = types.SimpleNamespace(
+        metadata={"run_log_dir": "logs"},
+        _base_path=tmp_path,
+        materialization=types.SimpleNamespace(secondary_targets=[{"path": "secondary"}]),
+        observatory={
+            "enabled": True,
+            "endpoint": "https://obs.example/ingest",
+            "api_key": "key",
+            "emit_on": ["success"],
+            "environments": ["dev"],
+            "layers": ["silver"],
+            "include_quarantine_sample": True,
+        },
+    )
+    report = _sample_report(run_id="obs-1")
+    report["status"] = "succeeded"
+    report["row_rule_failures"] = [{"id": 1}, {"id": 2}]
+
+    path = write_run_log(report, contract, engine_name="polars", run_log_mode="dir")
+
+    assert Path(path).name == "run_obs-1.json"
+    assert secondary_calls[0][0] == [{"path": "secondary"}]
+    assert secondary_calls[0][1:3] == ("_run_logs", "append")
+    assert posts[0][0][0] == "https://obs.example/ingest"
+    payload = posts[0][1]["json"]
+    assert payload["status"] == "success"
+    assert payload["quality_score"] == round(118 / 120, 6)
+    assert payload["quarantined_rows"] == [{"id": 1}, {"id": 2}]
+    assert posts[0][1]["headers"]["X-API-Key"] == "key"
+    assert any("Ingested" in message for message in infos)
 
 
 def test_write_run_log_to_cloud_directory_and_read_back_watermark(monkeypatch, tmp_path: Path):
@@ -847,3 +904,195 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
     assert get_last_run_dlt_state(
         delta_contract, "orders_contract", "silver", dataset="orders", data_layer="silver"
     ) == json.dumps({"cursor": "delta"})
+
+
+def _sample_slo_result() -> SLOCheckResult:
+    return SLOCheckResult(
+        layer="silver",
+        entity="orders",
+        check_type="freshness",
+        status="OK",
+        passed=True,
+        severity="pass",
+        delay_minutes=3.5,
+        slo_max_minutes=60,
+        row_count=100,
+        anomaly_ratio=1.1,
+        anomaly_baseline=95.0,
+        quality_ratio=0.01,
+        quality_severity="info",
+        duration_seconds=2.0,
+    )
+
+
+def test_write_slo_checks_duckdb_sqlite_and_empty_paths(tmp_path: Path):
+    result = _sample_slo_result()
+
+    assert write_slo_checks(types.SimpleNamespace(domain="d", system="s"), [], "check-1") is None
+    assert _write_slo_checks_table(types.SimpleNamespace(storage=None, metadata={}), []) is None
+    assert _write_slo_checks_table(types.SimpleNamespace(storage=None, metadata={}), [{"check_run_id": "x"}]) is None
+
+    duck_db = tmp_path / "slo.duckdb"
+    duck_registry = types.SimpleNamespace(
+        domain="sales",
+        system="erp",
+        storage=types.SimpleNamespace(slo_checks_table="analytics.slo_checks"),
+        metadata={"slo_checks_backend": "duckdb", "slo_checks_database": str(duck_db)},
+    )
+    duck_target = write_slo_checks(duck_registry, [result], "check-1", "pipe-1")
+    assert duck_target == f"{duck_db}:analytics.slo_checks"
+
+    import duckdb
+
+    con = duckdb.connect(str(duck_db))
+    assert con.execute("SELECT check_run_id, passed FROM analytics.slo_checks").fetchone() == ("check-1", True)
+    con.close()
+
+    sqlite_db = tmp_path / "slo.sqlite"
+    sqlite_registry = types.SimpleNamespace(
+        domain="sales",
+        system="erp",
+        storage=types.SimpleNamespace(slo_checks_table="analytics.slo_checks"),
+        metadata={"slo_checks_backend": "sqlite", "slo_checks_database": str(sqlite_db)},
+    )
+    sqlite_target = write_slo_checks(sqlite_registry, [result], "check-2")
+    assert sqlite_target == f"{sqlite_db}:analytics_slo_checks"
+
+    import sqlite3
+
+    con = sqlite3.connect(str(sqlite_db))
+    assert con.execute("SELECT check_run_id, passed FROM analytics_slo_checks").fetchone() == ("check-2", 1)
+    con.close()
+
+
+def test_write_slo_checks_spark_and_delta_backends(monkeypatch, tmp_path: Path):
+    records = [
+        {
+            "check_run_id": "check-1",
+            "pipeline_run_id": None,
+            "checked_at": "now",
+            "domain": "sales",
+            "system": "erp",
+            "layer": "silver",
+            "entity": "orders",
+            "check_type": "freshness",
+            "passed": True,
+            "severity": "pass",
+            "status": "OK",
+        }
+    ]
+
+    writes = []
+
+    class FakeWriter:
+        def mode(self, value):
+            writes.append(("mode", value))
+            return self
+
+        def format(self, value):
+            writes.append(("format", value))
+            return self
+
+        def saveAsTable(self, table):
+            writes.append(("saveAsTable", table))
+
+    class FakeSpark:
+        def __init__(self):
+            self.catalog = types.SimpleNamespace(tableExists=lambda table: False)
+
+        def createDataFrame(self, rows, schema=None):
+            assert rows == records
+            return types.SimpleNamespace(write=FakeWriter())
+
+    fake_sql_module = types.ModuleType("pyspark.sql")
+    fake_sql_module.SparkSession = types.SimpleNamespace(builder=types.SimpleNamespace(getOrCreate=lambda: FakeSpark()))
+    fake_types_module = types.ModuleType("pyspark.sql.types")
+    fake_types_module.StructType = lambda fields: fields
+    fake_types_module.StructField = lambda name, data_type, nullable=True: (name, data_type, nullable)
+    fake_types_module.StringType = lambda: "string"
+    fake_types_module.BooleanType = lambda: "bool"
+    fake_types_module.DoubleType = lambda: "double"
+    fake_types_module.LongType = lambda: "long"
+    monkeypatch.setitem(sys.modules, "pyspark", types.ModuleType("pyspark"))
+    monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
+    monkeypatch.setitem(sys.modules, "pyspark.sql.types", fake_types_module)
+
+    spark_registry = types.SimpleNamespace(
+        storage=types.SimpleNamespace(slo_checks_table="catalog.slo_checks"),
+        metadata={"slo_checks_backend": "spark"},
+    )
+    assert _write_slo_checks_table(spark_registry, records) == "catalog.slo_checks"
+    assert ("mode", "overwrite") in writes
+    assert ("saveAsTable", "catalog.slo_checks") in writes
+
+    delta_writes = []
+    exists = {"value": False}
+
+    class FakeDeltaTable:
+        def __init__(self, table_name, storage_options=None):
+            if not exists["value"]:
+                raise RuntimeError("missing")
+
+    def fake_write_deltalake(table_name, arrow_table, **kwargs):
+        delta_writes.append((table_name, kwargs))
+        exists["value"] = True
+
+    monkeypatch.setitem(
+        sys.modules,
+        "deltalake",
+        types.SimpleNamespace(DeltaTable=FakeDeltaTable, write_deltalake=fake_write_deltalake),
+    )
+
+    delta_registry = types.SimpleNamespace(
+        storage=types.SimpleNamespace(slo_checks_table=str(tmp_path / "slo_delta")),
+        metadata={"slo_checks_backend": "delta"},
+    )
+    delta_target = str(tmp_path / "slo_delta").replace("\\", "/")
+    assert _write_slo_checks_table(delta_registry, records) == delta_target
+    assert delta_writes[0][1]["mode"] == "overwrite"
+    assert _write_slo_checks_table(delta_registry, records) == delta_target
+    assert delta_writes[-1][1]["mode"] == "append"
+
+    unresolved = types.SimpleNamespace(
+        storage=types.SimpleNamespace(slo_checks_table="{missing}"),
+        metadata={"slo_checks_backend": "delta"},
+    )
+    assert _write_slo_checks_table(unresolved, records) is None
+
+
+def test_write_run_log_table_dlt_backend(monkeypatch, tmp_path: Path):
+    resource_calls = []
+    pipeline_calls = []
+
+    class FakePipeline:
+        def run(self, resource):
+            pipeline_calls.append(resource)
+
+    class FakeDestinations:
+        def __init__(self):
+            self.__dict__["duckdb"] = lambda **kwargs: ("duckdb-dest", kwargs)
+
+    fake_dlt = types.SimpleNamespace(
+        destinations=FakeDestinations(),
+        resource=lambda name, write_disposition: lambda fn: resource_calls.append((name, write_disposition)) or fn,
+        pipeline=lambda **kwargs: pipeline_calls.append(kwargs) or FakePipeline(),
+    )
+    monkeypatch.setitem(sys.modules, "dlt", fake_dlt)
+
+    contract = _make_contract(
+        tmp_path,
+        {
+            "run_log_table": "run_logs",
+            "run_log_backend": "dlt",
+            "dlt_destination": "duckdb",
+            "dlt_dataset_name": "lake",
+            "dlt_credentials": "secret",
+            "dlt_extra_option": "x",
+        },
+    )
+
+    target = _write_run_log_table(_sample_report(), contract, engine_name="polars")
+
+    assert target == "duckdb:lake.run_logs"
+    assert resource_calls == [("run_logs", "append")]
+    assert pipeline_calls[0]["destination"] == ("duckdb-dest", {"credentials": "secret", "extra_option": "x"})

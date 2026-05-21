@@ -820,12 +820,7 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
         "lakelogic.core.hipaa",
         types.SimpleNamespace(
             _get_phi_column_names=lambda dc: ["diagnosis", "address"],
-            generate_hipaa_erasure_report=lambda dc,
-            patient_col,
-            patient_ids,
-            strategy,
-            affected,
-            partition_filter=None: {
+            generate_hipaa_erasure_report=lambda dc, patient_col, patient_ids, strategy, affected, partition_filter=None: {
                 "kind": "hipaa",
                 "strategy": strategy,
                 "affected": affected,

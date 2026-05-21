@@ -209,15 +209,30 @@ def resolve_materialization_path(
 
     # 5–7. Registry storage fallbacks
     if registry_storage:
-        table_name = make_table_name(layer, system, entity) if (layer and system and entity) else entity
+        # If the entity name already contains the layer+system prefix (e.g. silver/gold
+        # contracts whose entity IS the full table name), use it directly to avoid
+        # double-prefixing like silver_rideflow_silver_rideflow_driver_profiles.
+        if layer and system and entity:
+            _prefix = f"{layer}_{system}_"
+            table_name = entity if entity.startswith(_prefix) else make_table_name(layer, system, entity)
+        else:
+            table_name = entity
 
-        # 5. external_location_root
+        # 6. Layer-specific path (e.g. storage.bronze_path) — checked first for local
+        # paths since external_location_root conflates all layers into one directory.
+        layer_path = getattr(registry_storage, f"{layer}_path", None)
         ext_root = getattr(registry_storage, "external_location_root", None)
+        # Prefer layer_path for local (non-cloud) paths; ext_root for cloud URIs.
+        _is_cloud = ext_root and any(
+            str(ext_root).startswith(p) for p in ("abfss://", "s3://", "gs://", "adl://", "https://")
+        )
+        if layer_path and not _is_cloud:
+            return f"{layer_path}/{table_name}"
+
+        # 5. external_location_root (cloud paths)
         if ext_root:
             return f"{ext_root}/{table_name}"
 
-        # 6. Layer-specific path (e.g. storage.bronze_path)
-        layer_path = getattr(registry_storage, f"{layer}_path", None)
         if layer_path:
             return f"{layer_path}/{table_name}"
 

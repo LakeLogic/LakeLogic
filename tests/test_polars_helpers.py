@@ -83,6 +83,10 @@ def test_polars_helper_dtype_schema_and_join_sql():
     assert adapter._to_polars_dtype("string") == pl.Utf8
     assert adapter._to_polars_dtype("boolean") == pl.Boolean
     assert adapter._to_polars_dtype("unknown") is None
+    assert adapter._format_sql_literal(None) == "NULL"
+    assert adapter._format_sql_literal(True) == "TRUE"
+    assert adapter._format_sql_literal(False) == "FALSE"
+    assert adapter._format_sql_literal(3.5) == "3.5"
     assert adapter._format_sql_literal("O'Brien") == "'O''Brien'"
 
     join_cfg = types.SimpleNamespace(
@@ -566,3 +570,172 @@ def test_polars_helper_post_transformations_date_range_and_derive_failure_paths(
     assert transformed["broken_field"].to_list() == [None, None]
     assert any("FAILED all engines" in message for message in warnings_seen)
     assert transformed["active_date"].len() == 2
+
+
+def test_polars_schema_post_sql_skips_strict_drift_before_reshape():
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        model={"fields": [{"name": "final_id", "type": "integer"}]},
+        server={
+            "type": "local",
+            "path": "x",
+            "schema_policy": {"unknown_fields": "quarantine", "evolution": "strict"},
+        },
+        transformations=[{"phase": "post", "sql": "SELECT id AS final_id FROM {source}"}],
+    )
+    adapter = PolarsAdapter(contract)
+
+    lf, errors = adapter._apply_schema(pl.DataFrame({"id": [1], "source_only": ["kept"]}).lazy())
+    df = lf.collect()
+
+    assert errors == []
+    assert "source_only" in df.columns
+    assert "final_id" in df.columns
+    assert adapter.schema_drift["missing_fields"] == ["final_id"]
+    assert adapter.schema_drift["unknown_fields"] == ["id", "source_only"]
+
+
+def test_polars_pre_transform_left_right_trim_select_drop_and_failure_branches(monkeypatch):
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        transformations=[
+            {"phase": "pre", "rename": {"from": "missing", "to": "ignored"}},
+            {"phase": "pre", "json_extract": {"source": "missing_payload", "path": "$.x", "field": "ignored"}},
+            {"phase": "pre", "trim": {"fields": ["left_text"], "side": "left"}},
+            {"phase": "pre", "trim": {"fields": ["right_text"], "side": "right"}},
+            {"phase": "pre", "cast": {"columns": {"missing_cast": "integer"}}},
+            {"phase": "pre", "filter": {"sql": "this is not sql"}},
+            {"phase": "pre", "select": {"columns": ["id", "left_text", "right_text", "drop_me"]}},
+            {"phase": "pre", "drop": {"columns": ["drop_me"]}},
+        ],
+    )
+    warnings_seen = []
+    monkeypatch.setattr("lakelogic.engines.polars.logger.warning", warnings_seen.append)
+
+    adapter = PolarsAdapter(contract)
+    df = adapter._apply_pre_transformations(
+        pl.DataFrame(
+            {
+                "id": [1],
+                "left_text": ["  x  "],
+                "right_text": ["  y  "],
+                "drop_me": ["gone"],
+                "payload": ['{"x": 1}'],
+            }
+        ).lazy()
+    ).collect()
+
+    assert df.columns == ["id", "left_text", "right_text"]
+    assert df["left_text"].to_list() == ["x  "]
+    assert df["right_text"].to_list() == ["  y"]
+    assert any("Rename" in message for message in warnings_seen)
+    assert any("JsonExtract" in message for message in warnings_seen)
+    assert any("Filter" in message for message in warnings_seen)
+
+
+def test_polars_pre_transform_derive_duckdb_failure_raises(monkeypatch):
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        transformations=[{"phase": "pre", "derive": {"field": "broken", "sql": "UNSUPPORTED(id)"}}],
+    )
+    adapter = PolarsAdapter(contract)
+    monkeypatch.setattr(adapter, "_try_native_polars_derive", lambda raw_sql, field_name, lf: None)
+    monkeypatch.setattr(
+        adapter, "_apply_sql_transformation", lambda lf, sql: (_ for _ in ()).throw(RuntimeError("duckdb failed"))
+    )
+
+    class BrokenContext:
+        def register(self, name, frame):
+            return None
+
+        def execute(self, sql):
+            raise RuntimeError("polars failed")
+
+    monkeypatch.setattr(pl, "SQLContext", BrokenContext)
+
+    with pytest.raises(RuntimeError, match="failed in both Polars SQL and DuckDB"):
+        adapter._apply_pre_transformations(pl.DataFrame({"id": [1]}).lazy())
+
+
+def test_polars_execute_routes_type_errors_and_can_hide_error_reason():
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        model={"fields": [{"name": "id", "type": "integer"}]},
+        server={"type": "local", "path": "x"},
+        quarantine={"include_error_reason": False},
+    )
+    adapter = PolarsAdapter(contract)
+
+    good, bad = adapter.execute(pl.DataFrame({"id": ["1", "not-an-int"]}))
+
+    assert good["id"].to_list() == [1]
+    assert bad["id"].to_list() == [None]
+    assert adapter.ERROR_COLUMN not in bad.columns
+    assert adapter.CATEGORY_COLUMN not in bad.columns
+    assert bad["quarantine_state"].to_list() == ["active"]
+
+
+def test_polars_execute_row_rules_collects_rule_and_schema_errors():
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        model={"fields": [{"name": "id", "type": "integer"}, {"name": "required_name", "type": "string"}]},
+        server={"type": "local", "path": "x", "schema_policy": {"evolution": "strict"}},
+        quality={"row_rules": [{"name": "positive_id", "sql": "id > 0", "category": "validity"}]},
+    )
+    adapter = PolarsAdapter(contract)
+
+    good, bad = adapter.execute(pl.DataFrame({"id": [1, -1]}))
+
+    assert good.is_empty()
+    assert bad.height == 2
+    errors = bad[adapter.ERROR_COLUMN].to_list()
+    categories = bad[adapter.CATEGORY_COLUMN].to_list()
+    assert all(any("Missing fields" in err for err in row_errors) for row_errors in errors)
+    assert any(any("positive_id" in err for err in row_errors) for row_errors in errors)
+    assert all("schema" in row_categories for row_categories in categories)
+    assert any("validity" in row_categories for row_categories in categories)
+
+
+def test_polars_post_derive_regex_fallbacks_for_cast_and_extract(monkeypatch):
+    class BrokenContext:
+        def register(self, name, frame):
+            return None
+
+        def execute(self, sql):
+            raise RuntimeError("sql failed")
+
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        transformations=[
+            {"phase": "post", "derive": {"field": "id_int", "sql": "CAST(id AS INTEGER)"}},
+            {"phase": "post", "derive": {"field": "year_part", "sql": "EXTRACT(YEAR FROM CAST(dt AS DATE))"}},
+        ],
+    )
+    adapter = PolarsAdapter(contract)
+    monkeypatch.setattr(adapter, "_try_native_polars_derive", lambda raw_sql, field_name, lf: None)
+    monkeypatch.setattr(adapter, "_transpile_derive_sql", lambda derive: derive.sql)
+    monkeypatch.setattr(pl, "SQLContext", BrokenContext)
+    monkeypatch.setitem(
+        sys.modules,
+        "duckdb",
+        types.SimpleNamespace(
+            connect=lambda database=":memory:": types.SimpleNamespace(
+                register=lambda *args, **kwargs: None,
+                execute=lambda sql: (_ for _ in ()).throw(RuntimeError("duckdb failed")),
+            )
+        ),
+    )
+
+    transformed = adapter._apply_post_transformations(
+        pl.DataFrame({"id": ["7"], "dt": ["2026-03-26"]}).lazy(),
+        BrokenContext(),
+    ).collect()
+
+    assert transformed["id_int"].to_list() == [7]
+    assert transformed["year_part"].to_list() == [2026]

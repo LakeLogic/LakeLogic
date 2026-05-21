@@ -108,12 +108,23 @@ class PolarsAdapter(EngineAdapter):
                     ctx.register(link.name, self._link_cache[cache_key])
                     continue
 
-                if path.suffix.lower() == ".parquet":
+                if path.is_dir() and (path / "_delta_log").exists():
+                    try:
+                        from deltalake import DeltaTable as _DT
+
+                        _dt = _DT(str(path))
+                        # Use to_pyarrow_table() — the stable API across deltalake versions
+                        arrow_tbl = _dt.to_pyarrow_table()
+                        link_lf = pl.from_arrow(arrow_tbl).lazy()
+                    except Exception as e:
+                        logger.warning(f"Failed to load local Delta table {link.name} from {path}: {e}")
+                        continue
+                elif path.suffix.lower() == ".parquet":
                     link_lf = pl.scan_parquet(path)
                 elif path.suffix.lower() == ".csv":
                     link_lf = pl.scan_csv(path)
                 else:
-                    logger.warning(f"Unsupported link format for {link.name}: {path.suffix}")
+                    logger.warning(f"Unsupported link format for {link.name}: {path}")
                     continue
 
                 # Column projection — only keep specified columns
@@ -228,7 +239,8 @@ class PolarsAdapter(EngineAdapter):
             _safe_alias = _alias_name.rstrip("/").split("/")[-1]
             ctx.register(_safe_alias, _cloud_lf)
         try:
-            return ctx.execute(sql)
+            res = ctx.execute(sql)
+            return res.collect().lazy()
         except Exception as exc:
             import os
 
@@ -262,20 +274,27 @@ class PolarsAdapter(EngineAdapter):
                         path = Path(self.contract._base_path) / path
                     if not path.exists():
                         continue
-                    if path.suffix.lower() == ".parquet":
+                    if path.is_dir() and (path / "_delta_log").exists():
                         col_clause = ", ".join(link.columns) if link.columns else "*"
-                        sql = (
+                        link_sql = (
+                            f"CREATE OR REPLACE VIEW {link.name} AS"
+                            f" SELECT {col_clause} FROM read_parquet('{path.as_posix()}/**/*.parquet')"
+                        )
+                        con.execute(link_sql)
+                    elif path.suffix.lower() == ".parquet":
+                        col_clause = ", ".join(link.columns) if link.columns else "*"
+                        link_sql = (
                             f"CREATE OR REPLACE VIEW {link.name} AS"
                             f" SELECT {col_clause} FROM read_parquet('{path.as_posix()}')"
                         )
-                        con.execute(sql)
+                        con.execute(link_sql)
                     elif path.suffix.lower() == ".csv":
                         col_clause = ", ".join(link.columns) if link.columns else "*"
-                        sql = (
+                        link_sql = (
                             f"CREATE OR REPLACE VIEW {link.name} AS"
                             f" SELECT {col_clause} FROM read_csv_auto('{path.as_posix()}')"
                         )
-                        con.execute(sql)
+                        con.execute(link_sql)
                 except Exception:
                     continue
             rel = con.query(sql)
@@ -687,8 +706,19 @@ class PolarsAdapter(EngineAdapter):
             category_tracking_exprs = []
 
             if schema_errors:
-                error_tracking_exprs.extend([pl.lit(err) for err in schema_errors])
-                category_tracking_exprs.extend([pl.lit("schema") for _ in schema_errors])
+                # Schema errors apply to every row (or no rows on empty frames).
+                # Add them as named columns on lf_eval so Polars broadcasts the
+                # scalar literal to the correct frame length before concat_list.
+                # Using pl.lit() directly inside concat_list causes ShapeError on
+                # empty DataFrames because Polars cannot infer the frame length.
+                schema_err_col_names = [f"__schema_err_{i}" for i in range(len(schema_errors))]
+                schema_cat_col_name = "__schema_err_cat"
+                lf_eval = lf_eval.with_columns(
+                    [pl.lit(err).alias(schema_err_col_names[i]) for i, err in enumerate(schema_errors)]
+                    + [pl.lit("schema").alias(schema_cat_col_name)]
+                )
+                error_tracking_exprs.extend([pl.col(c) for c in schema_err_col_names])
+                category_tracking_exprs.extend([pl.col(schema_cat_col_name) for _ in schema_errors])
 
             for type_err_col in getattr(self, "_type_err_cols", []):
                 error_tracking_exprs.append(pl.col(type_err_col))

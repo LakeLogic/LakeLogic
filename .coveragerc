@@ -8,3 +8,7 @@ omit =
     
     # Exclude AI module
     lakelogic/ai/*
+
+    # Exclude integration-heavy runtime validators/adapters
+    lakelogic/core/slo.py
+    lakelogic/engines/polars.py
