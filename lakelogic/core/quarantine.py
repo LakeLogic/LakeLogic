@@ -971,38 +971,10 @@ def materialize_quarantine(
             "write_mode": write_mode,
         }
 
-    # ── File formats: csv / parquet ───────────────────────────────────────────
-    if resolved_format not in ["csv", "parquet"]:
-        raise ValueError(
-            f"Unsupported quarantine format '{resolved_format}'. "
-            "Supported: parquet, csv, delta (requires deltalake), "
-            "iceberg (requires pyiceberg), or use Spark for json."
-        )
-
-    # Prefer native Polars writes to avoid pyarrow dependency.
-    if _is_polars_frame(df):
-        if write_mode == "overwrite" or not target_file.exists():
-            _write_frame(df, target_file, resolved_format)
-            rows_written = _row_count(df)
-            if rows_written is None and hasattr(df, "collect"):
-                try:
-                    rows_written = int(df.collect().height)
-                except Exception:
-                    pass
-        else:
-            rows_written = _append_without_pandas(df, target_file, resolved_format)
-        logger.info(
-            f"Wrote {rows_written if rows_written is not None else '?'} "
-            f"quarantined rows to {target_file} (mode={write_mode})"
-        )
-        return {
-            "target": str(target_file),
-            "rows_written": rows_written,
-            "format": resolved_format,
-            "write_mode": write_mode,
-        }
-
     # ── dlt format ────────────────────────────────────────────────────────
+    # This branch must run BEFORE the csv/parquet allowlist below; previously
+    # it sat after and was therefore dead code (the allowlist always raised
+    # 'Unsupported quarantine format dlt' first).
     if resolved_format == "dlt":
         try:
             import dlt as _dlt
@@ -1057,6 +1029,38 @@ def materialize_quarantine(
             "rows_written": rows_written,
             "format": "dlt",
             "dlt_destination": destination,
+        }
+
+    # ── File formats: csv / parquet ───────────────────────────────────────────
+    if resolved_format not in ["csv", "parquet"]:
+        raise ValueError(
+            f"Unsupported quarantine format '{resolved_format}'. "
+            "Supported: parquet, csv, delta (requires deltalake), "
+            "iceberg (requires pyiceberg), dlt (requires dlt), "
+            "or use Spark for json."
+        )
+
+    # Prefer native Polars writes to avoid pyarrow dependency.
+    if _is_polars_frame(df):
+        if write_mode == "overwrite" or not target_file.exists():
+            _write_frame(df, target_file, resolved_format)
+            rows_written = _row_count(df)
+            if rows_written is None and hasattr(df, "collect"):
+                try:
+                    rows_written = int(df.collect().height)
+                except Exception:
+                    pass
+        else:
+            rows_written = _append_without_pandas(df, target_file, resolved_format)
+        logger.info(
+            f"Wrote {rows_written if rows_written is not None else '?'} "
+            f"quarantined rows to {target_file} (mode={write_mode})"
+        )
+        return {
+            "target": str(target_file),
+            "rows_written": rows_written,
+            "format": resolved_format,
+            "write_mode": write_mode,
         }
 
     if not _pandas_available():

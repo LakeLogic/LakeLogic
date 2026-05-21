@@ -3845,10 +3845,10 @@ class DataGenerator:
         n_invalid = int(rows * invalid_ratio)
         n_valid = rows - n_invalid
 
-        valid_rows = [self._make_row(invalid=False, sample_pools=sample_pools) for _ in range(n_valid)]
-        invalid_rows = [self._make_row(invalid=True, sample_pools=sample_pools) for _ in range(n_invalid)]
+        valid_results = [self._make_row(invalid=False, sample_pools=sample_pools) for _ in range(n_valid)]
+        invalid_results = [self._make_row(invalid=True, sample_pools=sample_pools) for _ in range(n_invalid)]
 
-        all_records = valid_rows + invalid_rows
+        all_records = [row for row, _test_cases in valid_results + invalid_results]
         self._rng.shuffle(all_records)
         return self._to_frame(all_records, output_format)
 

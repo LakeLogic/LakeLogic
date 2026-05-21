@@ -291,7 +291,7 @@ def _mask_pandas(df, pii_columns: List[str], strategy: str, hash_salt: str):
 # ── PySpark implementations ─────────────────────────────────────────────
 
 
-def _forget_pyspark(
+def _forget_pyspark(  # pragma: no cover
     df,
     pii_columns: List[str],
     subject_column: str,
@@ -358,7 +358,7 @@ def _forget_pyspark(
     return df
 
 
-def _mask_pyspark(df, pii_columns: List[str], strategy: str, hash_salt: str):
+def _mask_pyspark(df, pii_columns: List[str], strategy: str, hash_salt: str):  # pragma: no cover
     """Mask all PII columns in a PySpark DataFrame (all rows)."""
     from pyspark.sql import functions as F
 

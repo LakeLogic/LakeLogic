@@ -724,6 +724,525 @@ def test_generator_save_supports_pandas_and_rejects_unsupported_format(monkeypat
         instance.save(pandas_df, tmp_path / "orders.txt", format="txt")
 
 
+def test_generator_save_supports_polars_formats_and_pandas_report_fallback(monkeypatch, tmp_path):
+    instance = _make_generator(monkeypatch, seed=33)
+    polars_df = pl.DataFrame({"id": [1, 2], "name": ["alice", "bob"]})
+
+    parquet_path = instance.save(polars_df, tmp_path / "orders.parquet", format="parquet")
+    csv_path = instance.save(polars_df, tmp_path / "orders.csv", format="csv")
+    json_path = instance.save(polars_df, tmp_path / "orders.json", format="json")
+
+    assert parquet_path.exists()
+    assert csv_path.read_text(encoding="utf-8").startswith("id,name")
+    assert "alice" in json_path.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unsupported format"):
+        instance.save(polars_df, tmp_path / "orders.bad", format="bad")
+
+    instance._contract_raw = {"info": {"title": "Pandas Orders"}}
+    instance._last_generation_summary = {"total_rows": 1, "invalid_rows": 0}
+    instance._last_test_case_manifest = []
+    saved = []
+    monkeypatch.setattr(
+        instance, "save", lambda df, output, format="csv": saved.append((list(df.columns), output.name))
+    )
+
+    data_path, invalid_path, report_path = instance.save_with_report(
+        pd.DataFrame({"id": [1], "name": ["alice"]}),
+        tmp_path / "report",
+        format="csv",
+    )
+
+    assert data_path.name == "pandas_orders_test.csv"
+    assert invalid_path.name == "pandas_orders_invalid.csv"
+    assert report_path.exists()
+    assert saved == [(["id", "name"], "pandas_orders_test.csv"), (["id", "name"], "pandas_orders_invalid.csv")]
+
+
+def test_generator_generate_falls_back_when_ai_helpers_fail_and_normalises_reference_data(monkeypatch):
+    instance = _make_generator(monkeypatch, fields=[{"name": "id", "type": "integer"}], seed=35)
+    instance._contract_raw = {"dataset": "orders"}
+    instance._quality = {}
+
+    fake_ai_data = types.ModuleType("lakelogic.ai.data_generator")
+    fake_ai_data.generate_realistic_pools = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no ai data"))
+    fake_ai_edge = types.ModuleType("lakelogic.ai.edge_case_generator")
+    fake_ai_edge.generate_edge_cases = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no edge cases"))
+    monkeypatch.setitem(sys.modules, "lakelogic.ai.data_generator", fake_ai_data)
+    monkeypatch.setitem(sys.modules, "lakelogic.ai.edge_case_generator", fake_ai_edge)
+
+    class ToListPool:
+        def to_list(self):
+            return [1, 2]
+
+    class ToListMethodPool:
+        def tolist(self):
+            return [3, 4]
+
+    calls = []
+
+    def fake_make_row(invalid=False, fk_pools=None, sample_pools=None, edge_case_pools=None):
+        calls.append((invalid, fk_pools, sample_pools, edge_case_pools))
+        row = {"id": -1 if invalid else 10, "_is_invalid": invalid}
+        cases = [gen.TestCaseInfo("RANGE_VIOLATION", "id", -1, "bad id", "id range")] if invalid else []
+        return row, cases
+
+    monkeypatch.setattr(instance, "_make_row", fake_make_row)
+
+    frame = instance.generate(
+        rows=3,
+        invalid_ratio=1 / 3,
+        output_format="polars",
+        reference_data={"a": ToListPool(), "b": ToListMethodPool(), "c": (5, 6)},
+        ai=True,
+        window_start=gen.datetime(2026, 1, 1, 0, 0, 0),
+    )
+
+    assert frame.height == 3
+    assert calls[0][1] == {"a": [1, 2], "b": [3, 4], "c": [5, 6]}
+    assert calls[-1][2] is None
+    assert calls[-1][3] is None
+    assert instance._window_start == gen.datetime(2026, 1, 1, 0, 0, 0)
+    assert instance._window_end is not None
+    assert instance._last_generation_summary["invalid_rows"] == 1
+    assert instance._last_test_case_manifest[0].row_index >= 0
+
+
+def test_generator_regex_emit_covers_quantifiers_shorthands_and_negated_classes(monkeypatch):
+    instance = _make_generator(monkeypatch, seed=45)
+
+    emitted = instance._generate_from_regex(r"^(ab|cd)[^X]\w+\s?\d{2,3}.$")
+
+    assert emitted[:2] in {"ab", "cd"}
+    assert any(ch.isdigit() for ch in emitted)
+    assert "X" in instance._expand_char_class("^X")
+    assert instance._generate_from_regex(r"\d{bad}") is None
+
+
+def test_generator_related_generation_covers_pandas_orphans_and_circular_dependencies(monkeypatch):
+    raw_contracts = {
+        "customers": {
+            "model": {"fields": [{"name": "id", "type": "integer", "primary_key": True}, {"name": "order_id"}]},
+            "links": [{"name": "orders", "columns": ["order_id"]}],
+        },
+        "orders": {
+            "primary_key": ["id"],
+            "model": {"fields": [{"name": "id", "type": "integer"}, {"name": "cust_id", "type": "integer"}]},
+            "links": [{"name": "customers", "columns": ["cust_id"]}],
+        },
+    }
+
+    def fake_init(self, contract_path, seed=None, use_faker=True):
+        self._contract_raw = raw_contracts[contract_path]
+        self.seed = seed
+        self.contract_path = gen.Path(f"{contract_path}.yaml")
+
+    def fake_generate(self, rows=100, invalid_ratio=0.0, output_format="polars", reference_data=None, **kwargs):
+        invalid_count = int(rows * invalid_ratio)
+        invalid_flags = [False] * (rows - invalid_count) + [True] * invalid_count
+        if self.contract_path.stem == "customers":
+            return pd.DataFrame(
+                {"id": list(range(1, rows + 1)), "order_id": list(range(10, 10 + rows)), "_is_invalid": invalid_flags}
+            )
+        pool = list((reference_data or {}).get("cust_id", [1]))
+        return pd.DataFrame(
+            {
+                "id": list(range(10, 10 + rows)),
+                "cust_id": [pool[i % len(pool)] for i in range(rows)],
+                "_is_invalid": invalid_flags,
+            }
+        )
+
+    monkeypatch.setattr(gen.DataGenerator, "__init__", fake_init)
+    monkeypatch.setattr(gen.DataGenerator, "generate", fake_generate)
+
+    related = gen.DataGenerator.generate_related(
+        contracts={"customers": "customers", "orders": "orders"},
+        rows=3,
+        invalid_ratio=1 / 3,
+        seed=5,
+        output_format="pandas",
+        relationships=[
+            {"child": "orders", "child_column": "cust_id", "parent": "customers", "parent_column": "id"},
+            {"child": "customers", "child_column": "order_id", "parent": "orders", "parent_column": "id"},
+        ],
+    )
+
+    assert set(related) == {"customers", "orders"}
+    assert related["orders"]["cust_id"].iloc[-1] >= 999001
+
+
+def test_generator_from_file_and_load_sample_pools_cover_more_formats(monkeypatch, tmp_path):
+    monkeypatch.setattr(gen, "_try_faker", lambda: None)
+
+    json_path = tmp_path / "seed.json"
+    json_path.write_text('[{"id": 1, "active": true, "amount": 1.5}]', encoding="utf-8")
+    ndjson_path = tmp_path / "seed.jsonl"
+    ndjson_path.write_text('{"id": 2, "active": false, "amount": 2.5}\n', encoding="utf-8")
+    parquet_path = tmp_path / "seed.parquet"
+    pl.DataFrame({"id": [3], "active": [True], "amount": [3.5]}).write_parquet(parquet_path)
+
+    json_instance = gen.DataGenerator.from_file(json_path, seed=1, use_faker=False)
+    ndjson_instance = gen.DataGenerator.from_file(ndjson_path, seed=1, use_faker=False)
+    parquet_instance = gen.DataGenerator.from_file(parquet_path, seed=1, use_faker=False)
+
+    assert {field["name"] for field in json_instance._fields} == {"id", "active", "amount"}
+    assert ndjson_instance._auto_sample_pools["id"] == [2]
+    assert parquet_instance._auto_sample_pools["amount"] == [3.5]
+
+    pools = parquet_instance._load_sample_pools(
+        pd.DataFrame({"id": [1, 1, None], "amount": [10.0, 20.0, 20.0], "ignored": ["x", "y", "z"]}),
+        columns=["amount", "ignored"],
+    )
+    assert pools == {"amount": [10.0, 20.0]}
+
+
+def test_generator_valid_value_branches_for_types_ranges_and_lengths(monkeypatch):
+    fields = [
+        {"name": "event_epoch_us", "type": "integer"},
+        {"name": "event_epoch_ms", "type": "integer"},
+        {"name": "event_timestamp", "type": "integer", "description": "microseconds since epoch"},
+    ]
+    instance = _make_generator(monkeypatch, fields=fields, seed=47)
+    instance._window_start = gen.datetime(2026, 1, 1, 0, 0, 0)
+    instance._window_end = gen.datetime(2026, 1, 1, 0, 1, 0)
+
+    assert instance._make_valid_value("customer_id", "integer", {"min": 7, "max": 7}, False) >= 7
+    assert 1 <= instance._make_valid_value("processing_days", "integer", {}, False) <= 180
+    assert 1 <= instance._make_valid_value("processing_hours", "integer", {}, False) <= 720
+    assert 1 <= instance._make_valid_value("processing_weeks", "integer", {}, False) <= 52
+    assert 1 <= instance._make_valid_value("processing_months", "integer", {}, False) <= 60
+    assert instance._make_valid_value("event_epoch_us", "integer", {}, False) % 1_000_000 == 0
+    assert instance._make_valid_value("event_epoch_ms", "integer", {}, False) % 1_000 == 0
+    assert instance._make_valid_value("event_timestamp", "integer", {}, False) % 1_000_000 == 0
+    assert instance._make_valid_value("quantity_backordered", "double", {"min": 2, "max": 5}, False) in range(2, 6)
+    assert isinstance(instance._make_valid_value("active", "boolean", {}, False), bool)
+    assert instance._make_valid_value("status", "string", {"accepted_values": ["active", "inactive"]}, False) in {
+        "active",
+        "inactive",
+    }
+
+    fixed = instance._make_valid_value(
+        "short_code", "string", {"regex_match": None, "min_length": 12, "max_length": 4}, False
+    )
+    assert len(fixed) >= 12
+
+
+def test_generator_invalid_value_edge_profiles_and_strategy_factories(monkeypatch):
+    instance = _make_generator(monkeypatch, seed=49)
+
+    original_random = instance._rng.random
+    instance._rng.random = lambda: 0.0
+    patched_profiles = {
+        **gen._EDGE_CASE_PROFILES,
+        "type_confusion": {
+            **gen._EDGE_CASE_PROFILES["type_confusion"],
+            "fields": ["custom_confusion"],
+        },
+    }
+    monkeypatch.setattr(gen, "_EDGE_CASE_PROFILES", patched_profiles)
+    try:
+        email_val, email_tc = instance._make_invalid_value("email", "string", {}, False)
+        future_val, future_tc = instance._make_invalid_value("created_at", "date", {}, False)
+        boundary_val, boundary_tc = instance._make_invalid_value("score", "integer", {}, False)
+        confusion_val, confusion_tc = instance._make_invalid_value("custom_confusion", "string", {}, False)
+    finally:
+        instance._rng.random = original_random
+
+    assert email_val in gen._EDGE_CASE_PROFILES["format_violations"]["email"]
+    assert email_tc.type == "REGEX_VIOLATION"
+    assert future_tc.type == "TEMPORAL_VIOLATION"
+    assert "-" in future_val
+    assert boundary_tc.type == "BOUNDARY_VALUE"
+    assert boundary_val in gen._EDGE_CASE_PROFILES["numeric_boundaries"]["values"]
+    assert confusion_tc.type == "TYPE_CONFUSION"
+    assert confusion_val in gen._EDGE_CASE_PROFILES["type_confusion"]["values"]
+
+    original_random = instance._rng.random
+    original_choice = instance._rng.choice
+    instance._rng.random = lambda: 0.99
+    try:
+        instance._rng.choice = lambda seq: seq[1]
+        accepted_val, accepted_tc = instance._make_invalid_value(
+            "status", "string", {"accepted_values": ["active"]}, False
+        )
+        int_low_val, int_low_tc = instance._make_invalid_value("age", "integer", {"min": 18, "max": 65}, False)
+        float_low_val, float_low_tc = instance._make_invalid_value("price", "double", {"min": 1.0, "max": 5.0}, False)
+
+        instance._rng.choice = lambda seq: seq[-1]
+        int_high_val, int_high_tc = instance._make_invalid_value("age", "integer", {"min": 18, "max": 65}, False)
+        float_high_val, float_high_tc = instance._make_invalid_value("price", "double", {"min": 1.0, "max": 5.0}, False)
+        empty_val, empty_tc = instance._make_invalid_value("name", "string", {}, False)
+    finally:
+        instance._rng.random = original_random
+        instance._rng.choice = original_choice
+
+    assert accepted_val.startswith("INVALID_")
+    assert accepted_tc.type == "ACCEPTED_VALUE_VIOLATION"
+    assert int_low_val < 18 and int_low_tc.type == "RANGE_VIOLATION"
+    assert float_low_val < 1.0 and float_low_tc.type == "RANGE_VIOLATION"
+    assert int_high_val > 65 and int_high_tc.type == "RANGE_VIOLATION"
+    assert float_high_val > 5.0 and float_high_tc.type == "RANGE_VIOLATION"
+    assert empty_val == ""
+    assert empty_tc.type == "EMPTY_STRING"
+
+
+def test_generator_geo_detection_and_temporal_triplet_branches(monkeypatch):
+    fields = [
+        {"name": "city", "type": "string"},
+        {"name": "lat", "type": "double"},
+        {"name": "lon", "type": "double"},
+        {"name": "pickup_lat", "type": "string"},
+        {"name": "pickup_lng", "type": "string"},
+    ]
+    instance = gen.DataGenerator.__new__(gen.DataGenerator)
+    instance._fields = fields
+    instance._rng = gen.random.Random(51)
+    alignments = instance._detect_geo_alignment()
+    assert {"lat_field": "lat", "lng_field": "lon", "city_field": "city"} in alignments
+    assert {"lat_field": "pickup_lat", "lng_field": "pickup_lng", "city_field": "city"} in alignments
+
+    instance._geo_alignments = [{"city_field": "city", "lat_field": "pickup_lat", "lng_field": "pickup_lng"}]
+    row = {"city": "paris", "pickup_lat": "0", "pickup_lng": "0"}
+    instance._apply_geo_alignment(row)
+    assert isinstance(row["pickup_lat"], str)
+    assert row["pickup_lat"].startswith("48.")
+
+    instance._window_start = None
+    instance._window_end = None
+    cfg = {"start": "started_at", "end": "ended_at", "duration": "duration", "unit": "months", "nullable_end": True}
+    nullable_random = instance._rng.random
+    instance._rng.random = lambda: 0.0
+    try:
+        nullable_triplet = instance._generate_temporal_triplet(cfg, True)
+    finally:
+        instance._rng.random = nullable_random
+    assert nullable_triplet["ended_at"] is None
+    assert nullable_triplet["duration"] is None
+
+    original_choice = instance._rng.choice
+    patterns = [
+        "end_before_start",
+        "duration_mismatch",
+        "null_duration",
+        "null_end_with_duration",
+        "zero_duration",
+        "impossibly_long",
+        "future_end",
+    ]
+    try:
+        for pattern in patterns:
+            instance._rng.choice = lambda seq, pattern=pattern: pattern if pattern in seq else original_choice(seq)
+            triplet = instance._generate_temporal_triplet(
+                {"start": "started_at", "end": "ended_at", "duration": "duration", "max_duration": 10},
+                False,
+            )
+            assert set(triplet) == {"started_at", "ended_at", "duration"}
+    finally:
+        instance._rng.choice = original_choice
+
+
+def test_generator_field_consistency_and_correlation_branches(monkeypatch):
+    fields = [
+        {"name": "delete_reason", "type": "string"},
+        {"name": "archived_at", "type": "timestamp"},
+        {"name": "support_note", "type": "string"},
+        {"name": "credit_hold", "type": "double"},
+    ]
+    instance = _make_generator(monkeypatch, fields=fields, seed=53)
+    monkeypatch.setitem(
+        gen._FIELD_CONSISTENCY_RULES,
+        "delete_reason",
+        {"condition_field": "status", "condition_value": ["deleted"], "behaviour": "must_be_populated"},
+    )
+    monkeypatch.setitem(
+        gen._FIELD_CONSISTENCY_RULES,
+        "archived_at",
+        {"condition_field": "status", "condition_not_value": "archived", "behaviour": "must_be_null"},
+    )
+    monkeypatch.setitem(
+        gen._FIELD_CONSISTENCY_RULES,
+        "support_note",
+        {"condition_field": "ticket_age_days", "condition_gt": 30, "behaviour": "set_to_zero"},
+    )
+    monkeypatch.setitem(
+        gen._FIELD_CONSISTENCY_RULES,
+        "formatted_currency",
+        {
+            "target_field": "formatted_currency",
+            "format_lookup": "_TEST_FORMAT_LOOKUP",
+            "correlates_with": "country_code",
+        },
+    )
+    monkeypatch.setitem(
+        gen._FIELD_CONSISTENCY_RULES,
+        "total_due",
+        {"derived_from": ["subtotal", "tax"], "formula": "subtotal + tax"},
+    )
+    monkeypatch.setitem(
+        gen._FIELD_CONSISTENCY_RULES,
+        "broken_total",
+        {"derived_from": ["subtotal", "zero"], "formula": "subtotal / zero"},
+    )
+    monkeypatch.setattr(gen, "_TEST_FORMAT_LOOKUP", {"GB": {"formatted_currency": "GBP"}}, raising=False)
+    monkeypatch.setitem(gen._NUMERIC_CONSISTENCY, ("quantity_committed", "quantity_on_hand"), "lte")
+
+    row = {
+        "status": "deleted",
+        "delete_reason": None,
+        "archived_at": "2026-01-01T00:00:00",
+        "ticket_age_days": 45,
+        "support_note": "needs attention",
+        "country_code": "GB",
+        "formatted_currency": "seed",
+        "subtotal": 10,
+        "tax": 2,
+        "total_due": 0,
+        "zero": 0,
+        "broken_total": 99,
+        "quantity_committed": 10,
+        "quantity_on_hand": 3,
+    }
+
+    instance._apply_field_consistency(row)
+
+    assert row["delete_reason"] is not None
+    assert row["archived_at"] is None
+    assert row["support_note"] == 0
+    assert row["formatted_currency"] == "GBP"
+    assert row["total_due"] == 12
+    assert row["broken_total"] == 99
+    assert row["quantity_committed"] <= row["quantity_on_hand"]
+
+    monkeypatch.setitem(
+        gen._CORRELATED_INDEX,
+        "dependent_list",
+        [("driver", {"A": ["x", "y"]})],
+    )
+    monkeypatch.setitem(
+        gen._CORRELATED_INDEX,
+        "dependent_template",
+        [("driver", {"A": "AB##"})],
+    )
+    monkeypatch.setitem(
+        gen._CORRELATED_INDEX,
+        "dependent_literal",
+        [("driver", {"A": "literal"})],
+    )
+    corr_row = {
+        "driver": "A",
+        "dependent_list": "seed",
+        "dependent_template": "seed",
+        "dependent_literal": "seed",
+    }
+    instance._apply_correlations(corr_row)
+    assert corr_row["dependent_list"] in {"x", "y"}
+    assert corr_row["dependent_template"].startswith("AB")
+    assert corr_row["dependent_literal"] == "literal"
+
+
+def test_generator_fk_detection_covers_links_descriptions_and_shared_ids():
+    relationships = gen.DataGenerator._detect_fk_relationships(
+        "orders",
+        {
+            "model": {
+                "fields": [
+                    {"name": "customer_id", "type": "integer"},
+                    {"name": "warehouse_ref", "description": "FK to warehouses table"},
+                    {"name": "product_id", "type": "integer"},
+                    {"name": "not_an_fk", "type": "integer"},
+                ]
+            },
+            "links": [{"name": "customers", "columns": ["customer_id"]}],
+            "transformations": [{"sql": ""}],
+        },
+        ["orders", "customers", "warehouses", "products"],
+        {"customers": ["customer_id"], "warehouses": ["warehouse_ref"], "products": ["product_id"]},
+    )
+
+    assert {"fk_column": "customer_id", "ref_entity": "customers", "ref_column": "customer_id"} in relationships
+    assert {"fk_column": "warehouse_ref", "ref_entity": "warehouses", "ref_column": "warehouse_ref"} in relationships
+    assert {"fk_column": "product_id", "ref_entity": "products", "ref_column": "product_id"} in relationships
+
+
+def test_generator_stream_without_output_dir_and_single_batch_save(monkeypatch, tmp_path):
+    instance = _make_generator(monkeypatch, fields=[{"name": "id", "type": "integer"}], seed=55)
+    generated = []
+
+    def fake_generate(rows=100, invalid_ratio=0.0, output_format="polars", **kwargs):
+        generated.append((rows, kwargs["window_start"], kwargs["window_end"]))
+        return pl.DataFrame({"id": list(range(rows))})
+
+    saved = []
+    monkeypatch.setattr(instance, "generate", fake_generate)
+    monkeypatch.setattr(instance, "save", lambda frame, path, format="parquet": saved.append((path.name, len(frame))))
+
+    no_save_batches = list(
+        instance.generate_stream(
+            rows_per_batch=2,
+            interval_minutes=5,
+            batches=1,
+            output_dir=None,
+            start_from=gen.datetime(2026, 1, 1, 0, 0, 0),
+        )
+    )
+    assert len(no_save_batches) == 1
+    assert saved == []
+
+    saved_batches = list(
+        instance.generate_stream(
+            rows_per_batch=2,
+            interval_minutes=5,
+            batches=1,
+            output_dir=tmp_path,
+            start_from=gen.datetime(2026, 1, 1, 0, 0, 0),
+            micro_batches=1,
+            format="csv",
+        )
+    )
+    assert len(saved_batches) == 1
+    assert saved[0][0].startswith("batch_")
+    assert saved[0][1] == 2
+    assert len(generated) == 2
+
+
+def test_generator_small_remaining_branch_coverage(monkeypatch):
+    original_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "faker":
+            raise ImportError("missing faker")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    assert gen._try_faker() is None
+
+    instance = _make_generator(
+        monkeypatch,
+        fields=[
+            {},
+            {"name": "customer_id", "type": "integer", "foreign_key": {"contract": "customers", "column": "id"}},
+            {"name": "status", "type": "string", "accepted_values": ["active", "inactive"]},
+        ],
+        seed=57,
+    )
+    instance._quality = {"row_rules": ["not-a-dict"]}
+
+    assert instance.generation_report() == {}
+    rules = instance._build_field_rules()
+    assert rules["customer_id"]["_fk_surrogate"] is True
+    assert rules["status"]["accepted_values"] == ["active", "inactive"]
+
+    dob = instance._generate_date("date_of_birth")
+    assert len(dob.split("-")) == 3
+    assert "T" in instance._generate_timestamp("custom_submitted_at")
+
+    instance._window_start = gen.datetime(2026, 1, 1, 0, 0, 0)
+    instance._window_end = gen.datetime(2026, 1, 1, 1, 0, 0)
+    assert instance._string_value("created_at").startswith("2026-01-01T")
+    assert instance._string_value("ship_date").startswith("2026-01-01")
+
+
 def test_generator_load_sample_pools_preserves_nested_json_and_ndjson(monkeypatch, tmp_path):
     fields = [
         {"name": "id", "type": "integer"},
@@ -755,6 +1274,77 @@ def test_generator_load_sample_pools_preserves_nested_json_and_ndjson(monkeypatc
     assert json_pools["tags"] == [["a", "b"]]
     assert ndjson_pools["payload"] == [{"city": "paris"}]
     assert ndjson_pools["tags"] == [["x"]]
+
+
+def test_generator_generate_from_sample_unpacks_rows_and_honours_invalid_ratio(monkeypatch):
+    fields = [{"name": "status", "type": "string"}, {"name": "amount", "type": "double"}]
+    instance = _make_generator(monkeypatch, fields=fields, seed=41)
+    monkeypatch.setattr(instance, "_load_sample_pools", lambda source, columns=None: {"status": ["active"]})
+
+    calls = []
+
+    def fake_make_row(invalid=False, sample_pools=None, **kwargs):
+        calls.append((invalid, sample_pools))
+        return (
+            {
+                "status": sample_pools["status"][0],
+                "amount": -1.0 if invalid else 10.0,
+                "_is_invalid": invalid,
+            },
+            [gen.TestCaseInfo("RANGE_VIOLATION", "amount")] if invalid else [],
+        )
+
+    monkeypatch.setattr(instance, "_make_row", fake_make_row)
+
+    frame = instance.generate_from_sample("seed.csv", rows=5, invalid_ratio=0.4)
+
+    assert frame.height == 5
+    assert frame["status"].to_list() == ["active"] * 5
+    assert frame["_is_invalid"].sum() == 2
+    assert [invalid for invalid, _sample_pools in calls].count(True) == 2
+    assert all(sample_pools == {"status": ["active"]} for _invalid, sample_pools in calls)
+
+
+def test_generator_build_field_rules_merges_structured_sql_and_fk_rules(monkeypatch):
+    fields = [
+        {"name": "order_id", "type": "integer"},
+        {"name": "status", "type": "string", "accepted_values": ["field-level"]},
+        {"name": "amount", "type": "double", "accepted_values": [10.0], "min": 1.0, "max": 100.0},
+        {"name": "customer_id", "type": "integer", "foreign_key": {"contract": "customers", "column": "id"}},
+        {"name": "agent_id", "type": "integer"},
+        {"name": "region_id", "type": "integer"},
+        {"name": "code", "type": "string", "pattern": "[A-Z]{3}"},
+    ]
+    instance = _make_generator(monkeypatch, fields=fields, seed=43)
+    instance._contract_raw["primary_key"] = ["order_id"]
+    instance._quality = {
+        "row_rules": [
+            {"accepted_values": {"field": "status", "values": ["active", "inactive"]}},
+            {"range": {"field": "amount", "min": 5.0, "max": 50.0}},
+            {"regex_match": {"field": "code", "pattern": "ORD-[0-9]{3}"}},
+            {"min_length": {"field": "code", "value": 7}},
+            {"max_length": {"field": "code", "value": 7}},
+            {"referential_integrity": {"field": "customer_id"}},
+            {"sql": "agent_id IN (SELECT id FROM agents)", "category": "integrity"},
+            {"sql": "region_id IN (1, 2, 'EMEA')", "category": "validity"},
+        ]
+    }
+
+    rules = instance._build_field_rules(fk_pools={"customer_id": [101, 102], "agent_id": [201]})
+
+    assert rules["order_id"]["primary_key"] is True
+    assert rules["status"]["accepted_values"] == ["active", "inactive"]
+    assert "accepted_values" not in rules["amount"]
+    assert rules["amount"]["min"] == 5.0
+    assert rules["amount"]["max"] == 50.0
+    assert rules["customer_id"]["accepted_values"] == [101, 102]
+    assert rules["customer_id"]["_fk_contract"] == "customers"
+    assert rules["agent_id"]["accepted_values"] == [201]
+    assert rules["agent_id"]["_fk_from_sql"] is True
+    assert rules["region_id"]["accepted_values"] == ["1", "2", "EMEA"]
+    assert rules["code"]["regex_match"] == "ORD-[0-9]{3}"
+    assert rules["code"]["min_length"] == 7
+    assert rules["code"]["max_length"] == 7
 
 
 def test_generator_extract_unique_integer_fields_and_detect_triplets(monkeypatch):
