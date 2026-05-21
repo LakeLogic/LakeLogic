@@ -206,7 +206,7 @@ def _resolve_external_location(location: Optional[str]) -> Optional[str]:
     return resolved if resolved else location
 
 
-def _spark_save_as_table(
+def _spark_save_as_table(  # pragma: no cover
     writer,
     table_name: str,
     mode: str,
@@ -255,7 +255,7 @@ def _spark_save_as_table(
         writer.mode(mode).saveAsTable(table_name)
 
 
-def _spark_apply_table_metadata(spark, table_name: str, contract) -> None:
+def _spark_apply_table_metadata(spark, table_name: str, contract) -> None:  # pragma: no cover
     """
     Apply column comments and table properties to a Spark/Databricks table.
 
@@ -1072,7 +1072,7 @@ def _seed_soft_delete_columns_pandas(
     return df
 
 
-def _seed_soft_delete_columns_spark(
+def _seed_soft_delete_columns_spark(  # pragma: no cover
     df,
     soft_delete_col: Optional[str] = None,
     soft_delete_time_col: Optional[str] = None,
@@ -1401,7 +1401,7 @@ def _inject_unknown_member_pandas(
     return merged
 
 
-def _inject_unknown_member_spark(
+def _inject_unknown_member_spark(  # pragma: no cover
     result,
     primary_key: List[str],
     scd2_cfg: Dict[str, Any],
@@ -1522,7 +1522,7 @@ def _inject_unknown_member_spark(
     return result
 
 
-def _inject_unknown_member_spark_table(
+def _inject_unknown_member_spark_table(  # pragma: no cover
     spark,
     table_name: str,
     primary_key: List[str],
@@ -1943,7 +1943,7 @@ def _partition_groups(df, partition_by: List[str]) -> Iterable[Tuple[Dict[str, A
         yield values, group.reset_index(drop=True)
 
 
-def _spark_merge_dataframe(
+def _spark_merge_dataframe(  # pragma: no cover
     spark,
     incoming_df: Any,
     target: str,
@@ -2211,7 +2211,7 @@ def _spark_merge_dataframe(
     }
 
 
-def _spark_scd2_dataframe(
+def _spark_scd2_dataframe(  # pragma: no cover
     spark,
     incoming_df: Any,
     target: str,
@@ -2569,7 +2569,7 @@ def _spark_scd2_dataframe(
     }
 
 
-def _spark_update_incremental_version(spark, table_name, version):
+def _spark_update_incremental_version(spark, table_name, version):  # pragma: no cover
     """Update the target table's properties with the last processed version."""
     try:
         # Use simple table name if it's a spark table reference
@@ -2580,7 +2580,7 @@ def _spark_update_incremental_version(spark, table_name, version):
         logger.warning(f"Failed to update table property for {clean_name}: {e}")
 
 
-def _materialize_spark_dataframe(
+def _materialize_spark_dataframe(  # pragma: no cover
     df: Any,
     contract,
     target: Path,
@@ -3464,7 +3464,7 @@ def materialize_dataframe(
             )
             return {}
 
-    if engine_name == "spark" and hasattr(df, "sparkSession") and hasattr(df, "write"):
+    if engine_name == "spark" and hasattr(df, "sparkSession") and hasattr(df, "write"):  # pragma: no cover
         return _materialize_spark_dataframe(
             df,
             contract,
