@@ -196,12 +196,14 @@ def _write_quarantine_table_duckdb(df: Any, contract, table_name: str, metadata:
     except Exception as exc:
         raise ValueError("DuckDB backend requires duckdb installed.") from exc
 
-    base_path = getattr(contract, "_base_path", None)
+    # Storage paths are resolved by the registry's storage block, not by the
+    # contract YAML's directory. _base_path is for contract-local files
+    # (external scripts, fixtures), never for output / cache locations.
     db_path = metadata.get("quarantine_table_database")
     if db_path:
-        db_path = _resolve_path(str(db_path), base_path)
+        db_path = _resolve_path(str(db_path), None)
     else:
-        db_path = _default_quarantine_db(base_path, "duckdb")
+        db_path = _default_quarantine_db(None, "duckdb")
 
     pdf = _to_pandas(df)
     table_name = _prepare_table_name(table_name, "duckdb")
@@ -285,12 +287,13 @@ def _write_quarantine_table_sqlite(df: Any, contract, table_name: str, metadata:
     """
     import sqlite3
 
-    base_path = getattr(contract, "_base_path", None)
+    # Same rationale as the duckdb branch above — storage paths are not
+    # anchored on the contract YAML's location.
     db_path = metadata.get("quarantine_table_database")
     if db_path:
-        db_path = _resolve_path(str(db_path), base_path)
+        db_path = _resolve_path(str(db_path), None)
     else:
-        db_path = _default_quarantine_db(base_path, "sqlite")
+        db_path = _default_quarantine_db(None, "sqlite")
 
     pdf = _to_pandas(df)
     table_name = _prepare_table_name(table_name, "sqlite")
@@ -658,7 +661,9 @@ def materialize_quarantine(
     if not q.target:
         return {}
 
-    base_path = getattr(contract, "_base_path", None)
+    # Quarantine target is a STORAGE path — fully resolved by the registry
+    # from {quarantine_root}/{domain}/{system} placeholders. Don't anchor it
+    # on the contract YAML's directory.
     raw_target = str(target_path or contract.quarantine.target)
 
     # Guard: reject unresolved or invalid targets — quarantine data loss is
@@ -684,7 +689,7 @@ def materialize_quarantine(
     if raw_target.startswith("table:") or "://" in raw_target:
         quarantine_target = URIPath(raw_target)
     else:
-        quarantine_target = _resolve_path(raw_target, base_path)
+        quarantine_target = _resolve_path(raw_target, None)
 
     metadata = contract.metadata or {}
 
@@ -756,6 +761,35 @@ def materialize_quarantine(
             "rows_written": 0,
             "format": resolved_format,
         }
+
+    # ── Table backends (duckdb / sqlite) ──────────────────────────────────────
+    # Mirrors the run_log "backend as format" UX: setting `quarantine.format:
+    # duckdb` in _system.yaml routes here instead of erroring at the file-format
+    # dispatch below. The target path is reused as the duckdb/sqlite file
+    # directory; a default table name `quarantine_rows` is created.
+    if resolved_format in ("duckdb", "sqlite"):
+        try:
+            from pathlib import Path as _P
+
+            backend_name = resolved_format
+            dir_path = _P(str(quarantine_target))
+            dir_path.mkdir(parents=True, exist_ok=True)
+            db_file = "quarantine.duckdb" if backend_name == "duckdb" else "quarantine.sqlite"
+            db_path = dir_path / db_file
+            # Per-dataset table so multiple contracts don't collide.
+            tbl_name = (dataset_name or "quarantine_rows").replace("-", "_")
+
+            _table_metadata = dict(metadata or {})
+            _table_metadata["quarantine_table_backend"] = backend_name
+            _table_metadata["quarantine_table_database"] = str(db_path)
+            _table_metadata["quarantine_table_mode"] = write_mode
+
+            if backend_name == "duckdb":
+                return _write_quarantine_table_duckdb(df, contract, tbl_name, _table_metadata)
+            else:
+                return _write_quarantine_table_sqlite(df, contract, tbl_name, _table_metadata)
+        except Exception as exc:
+            raise ValueError(f"{resolved_format} quarantine backend failed: {exc}") from exc
 
     # ── Delta format (Polars / DuckDB via deltalake) ──────────────────────────
     if resolved_format == "delta":
@@ -899,7 +933,17 @@ def materialize_quarantine(
 
             except Exception as e:
                 err_str = str(e).lower()
-                if "no log files" in err_str or "doesn't exist" in err_str:
+                # All flavors of "target dir not yet on disk" — common right
+                # after a reset wipes the per-contract quarantine path.
+                _missing_markers = (
+                    "no log files",
+                    "doesn't exist",
+                    "invalid table location",
+                    "no such file",
+                    "the system cannot find the file",  # Windows
+                    "kind: notfound",  # delta-rs OS error
+                )
+                if any(m in err_str for m in _missing_markers):
                     logger.debug(f"Quarantine table does not exist yet at {delta_path}. Skipping alignment.")
                 else:
                     logger.warning(f"Quarantine schema alignment failed: {e}")
@@ -1035,7 +1079,7 @@ def materialize_quarantine(
     if resolved_format not in ["csv", "parquet"]:
         raise ValueError(
             f"Unsupported quarantine format '{resolved_format}'. "
-            "Supported: parquet, csv, delta (requires deltalake), "
+            "Supported: parquet, csv, duckdb, sqlite, delta (requires deltalake), "
             "iceberg (requires pyiceberg), dlt (requires dlt), "
             "or use Spark for json."
         )

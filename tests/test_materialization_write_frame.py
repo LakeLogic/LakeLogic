@@ -71,7 +71,17 @@ def _install_fake_deltalake(monkeypatch, *, raise_on_write=False):
     fake_mod = types.ModuleType("deltalake")
     calls = []
 
-    def fake_write(path, data, **kwargs):
+    # NB: `engine` is declared as an explicit keyword parameter (rather than
+    # being absorbed into **kwargs) so that
+    # `inspect.signature(write_deltalake).parameters` reports it.
+    # `_safe_write_deltalake` strips the `engine` kwarg when the underlying
+    # write_deltalake signature doesn't list it (deltalake 1.x removed the
+    # parameter) — without this explicit declaration the mock would look
+    # like the deltalake-1.x flavour and `engine` would never reach
+    # `calls[…]["kwargs"]`, hiding what the engine actually picked.
+    def fake_write(path, data, *, engine=None, **kwargs):
+        if engine is not None:
+            kwargs["engine"] = engine
         calls.append({"path": path, "data": data, "kwargs": kwargs})
         if raise_on_write:
             raise RuntimeError("simulated delta write failure")

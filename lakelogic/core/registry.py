@@ -728,6 +728,15 @@ class DomainRegistry(BaseModel):
                 if not c_dict.get("metadata"):
                     c_dict["metadata"] = {}
 
+                # Propagate the registry's active environment into each
+                # contract's metadata so the processor's _resolved_environment
+                # picks it up (was None → "unknown" otherwise, which broke
+                # observatory environment-filter matches like
+                # `environments: [dev, prod, staging, local, local_polars]`).
+                # setdefault so per-contract overrides still win.
+                if environment:
+                    c_dict["metadata"].setdefault("environment", environment)
+
                 if registry.metadata:
                     for k, v in registry.metadata.items():
                         c_dict["metadata"].setdefault(k, v)

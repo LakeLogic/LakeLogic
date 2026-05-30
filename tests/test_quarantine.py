@@ -216,6 +216,10 @@ def test_materialize_quarantine_table_prefix_and_spark_path(monkeypatch, tmp_pat
 
 
 def test_quarantine_table_duckdb_and_sqlite_writers(monkeypatch, tmp_path):
+    # Storage default DB paths now resolve from CWD (not _base_path).
+    # chdir to tmp_path so the legacy assertion at the end of this test
+    # (`_default_quarantine_db(tmp_path, "sqlite").exists()`) still passes.
+    monkeypatch.chdir(tmp_path)
     pd = pytest.importorskip("pandas")
     pdf = pd.DataFrame({"id": [1], "new_col": ["x"]})
     monkeypatch.setattr(q, "_to_pandas", lambda frame: pdf)

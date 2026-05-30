@@ -247,6 +247,25 @@ extraction-ocr = [
     "spacy>=3.7.0",
     "textblob>=0.18.0",
 ]
+# Synthetic test-data generators — used by the test_data_driver notebooks
+# to produce file-based source fixtures (PDFs, images, richer CSVs) that
+# bronze contracts can ingest. Kept separate from runtime extras because
+# nothing in lakelogic itself writes PDFs — only the demo / test orchestrators do.
+synthetic = [
+    "reportlab>=4.0.0",   # synthetic PDF generation (driver licences, invoices, etc.)
+    "faker>=24.0.0",      # realistic names / addresses / IDs for richer fixtures
+]
+# Demo meta-extra — one-shot install for the test_data_driver notebooks +
+# the LakehousePipeline runtime they orchestrate. Use when cloning the
+# repo for the first time or onboarding a new partner — gets everything
+# needed to run the end-to-end orchestrator + extract PDFs the pipeline ingests.
+# Composition is intentional: engines for compute, extraction-ocr for the
+# unstructured-source side, synthetic for the generators that feed them.
+demo = [
+    "lakelogic[engines]",
+    "lakelogic[extraction-ocr]",
+    "lakelogic[synthetic]",
+]
 
 [project.scripts]
 lakelogic = "lakelogic.cli.main:app"

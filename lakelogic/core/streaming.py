@@ -246,7 +246,14 @@ class StreamingSimulator:
         self._driver_ids: List[str] = []
         self._rider_cities: Dict[str, str] = {}
         self._driver_cities: Dict[str, str] = {}
-        self._active_trip_ids: List[str] = []  # trips in-progress
+        self._active_trip_ids: List[str] = []  # trips in-progress (chronological)
+        # Per-trip metadata so telemetry rows can preserve FK integrity:
+        # a single trip_id MUST always emit telemetry under the same
+        # driver_id + city_code throughout its lifetime, mirroring reality.
+        # Without this, telemetry was picking random drivers per row which
+        # made the data look broken to anyone inspecting bronze and made
+        # downstream FK-consistency quality rules fire on every row.
+        self._active_trips: Dict[str, Dict[str, str]] = {}
         self._pending_requests: List[dict] = []  # requests awaiting completion
 
         # City distribution weights (some cities busier than others)
@@ -467,6 +474,12 @@ class StreamingSimulator:
                 }
             )
             self._active_trip_ids.append(trip_id)
+            # Pin the (driver, city) for this trip so telemetry stays
+            # consistent for every subsequent ping under this trip_id.
+            self._active_trips[trip_id] = {
+                "driver_id": driver_id,
+                "city_code": req["city_code"],
+            }
 
         return rows
 
@@ -509,16 +522,30 @@ class StreamingSimulator:
         return rows
 
     def _gen_driver_telemetry(self, num: int, ts: datetime) -> List[dict]:
-        """Generate GPS telemetry pings."""
+        """Generate GPS telemetry pings with FK-consistent trip/driver/city."""
         rows = []
         if not self._driver_ids:
             return rows
         for _ in range(num):
-            driver_id = self._rng.choice(self._driver_ids)
-            city = self._driver_cities[driver_id]
-            lat, lng = _CITY_COORDS[city]
             status = self._rng.choice(["on_trip", "on_trip", "on_trip", "idle", "offline"])
-            trip_id = self._rng.choice(self._active_trip_ids) if self._active_trip_ids and status == "on_trip" else ""
+
+            # FK integrity: when emitting an `on_trip` ping, we MUST source
+            # the driver_id and city_code from the trip itself, not pick
+            # them at random. Real telemetry from `TRP-X` always shows the
+            # same driver in the same city for the trip's lifetime.
+            if status == "on_trip" and self._active_trips:
+                trip_id = self._rng.choice(list(self._active_trips.keys()))
+                trip_meta = self._active_trips[trip_id]
+                driver_id = trip_meta["driver_id"]
+                city = trip_meta["city_code"]
+            else:
+                # Idle / offline pings are not tied to a trip — pick any
+                # driver from the global pool and use that driver's home city.
+                driver_id = self._rng.choice(self._driver_ids)
+                city = self._driver_cities[driver_id]
+                trip_id = ""
+
+            lat, lng = _CITY_COORDS[city]
 
             rows.append(
                 {
@@ -782,6 +809,9 @@ class StreamingSimulator:
             # Trim active trips (old trips expire after a few windows)
             if len(self._active_trip_ids) > 500:
                 self._active_trip_ids = self._active_trip_ids[-200:]
+                # Drop metadata for evicted trips so the dict doesn't leak.
+                _keep = set(self._active_trip_ids)
+                self._active_trips = {k: v for k, v in self._active_trips.items() if k in _keep}
 
     def run_all(self, num_windows: int = 24, **kwargs) -> List[WindowResult]:
         """Non-generator version — returns all windows as a list."""

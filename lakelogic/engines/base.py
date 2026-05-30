@@ -131,6 +131,44 @@ class EngineAdapter(ABC):
         """
         pass
 
+    def _scd2_injected_columns(self) -> set:
+        """
+        Names of columns the SCD2 materializer injects (surrogate key, effective
+        from/to, current flag, version, change reason). These won't exist on the
+        source dataframe at validation time, so checks that run BEFORE
+        materialization (auto-`_required` row rules, strict "missing fields"
+        schema enforcement) must treat them as derived — not missing.
+
+        Mirrors the suppression in
+        lakelogic.core.processor:_handle_drift (the drift warning already
+        skips these); this extends the same awareness to the engine.
+        """
+        mat = getattr(self.contract, "materialization", None)
+        strategy = getattr(mat, "strategy", None) if mat else None
+        if strategy != "scd2":
+            return set()
+        scd2_cfg = getattr(mat, "scd2", None)
+        if scd2_cfg is None:
+            return set()
+        cfg = (
+            scd2_cfg
+            if isinstance(scd2_cfg, dict)
+            else (scd2_cfg.model_dump() if hasattr(scd2_cfg, "model_dump") else {})
+        )
+        injected = set()
+        for key, default in (
+            ("surrogate_key", "_sk"),
+            ("effective_from_field", "effective_from"),
+            ("effective_to_field", "effective_to"),
+            ("current_flag_field", "is_current"),
+            ("version_column", "_version"),
+            ("change_reason_column", "_change_reason"),
+        ):
+            val = cfg.get(key, default)
+            if val:
+                injected.add(val)
+        return injected
+
     def get_row_rules(self) -> List[QualityRule]:
         """
         Returns all rules that should trigger row-level quarantine.
@@ -141,9 +179,13 @@ class EngineAdapter(ABC):
         if self.contract.quality is not None:
             enforce_required = bool(getattr(self.contract.quality, "enforce_required", True))
 
+        # SCD2 mechanics columns are injected AFTER validation, so auto-generated
+        # `_required` (IS NOT NULL) rules on them would always fail. Skip them.
+        scd2_injected = self._scd2_injected_columns()
+
         if enforce_required and self.contract.model and self.contract.model.fields:
             for field in self.contract.model.fields:
-                if field.required:
+                if field.required and field.name not in scd2_injected:
                     rules.append(
                         QualityRule(
                             name=f"{field.name}_required",

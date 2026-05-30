@@ -169,18 +169,44 @@ class LakehousePipeline:
             try:  # pragma: no cover
                 from pyspark.sql import SparkSession  # pragma: no cover
 
-                # pragma: no cover
-                self.spark = SparkSession.builder.getOrCreate()  # pragma: no cover
+                _builder = SparkSession.builder.config(
+                    "spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
+                ).config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+                try:
+                    from delta import configure_spark_with_delta_pip  # type: ignore
+
+                    _builder = configure_spark_with_delta_pip(_builder)
+                except Exception:
+                    pass
+                self.spark = _builder.getOrCreate()  # pragma: no cover
             except ImportError:  # pragma: no cover
                 pass  # pragma: no cover
 
         if self.engine == "spark" and self.storage_mode == "direct" and self.spark:  # pragma: no cover
             import os
 
+            # If no contracts reference cloud paths (abfs/wasbs/s3/gs), skip the
+            # Azure-credential requirement — pure-local spark runs don't need it.
+            _needs_cloud = False
+            try:
+                for _c in getattr(self.registry, "contracts", []) or []:
+                    _src = str(getattr(getattr(_c, "source", None), "path", "") or "")
+                    if any(
+                        _src.startswith(p)
+                        for p in ("abfs://", "abfss://", "wasbs://", "wasb://", "s3://", "s3a://", "gs://")
+                    ):
+                        _needs_cloud = True
+                        break
+            except Exception:
+                _needs_cloud = True  # fail safe: keep the original requirement
+
             client_id = os.environ.get("AZURE_CLIENT_ID") or os.environ.get("ARM_CLIENT_ID")
             client_secret = os.environ.get("AZURE_CLIENT_SECRET") or os.environ.get("ARM_CLIENT_SECRET")
             tenant_id = os.environ.get("AZURE_TENANT_ID") or os.environ.get("ARM_TENANT_ID")
             account_key = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY")
+            if not _needs_cloud:
+                client_id = client_secret = tenant_id = None
+                account_key = account_key or "skip-local"
 
             if client_id and client_secret and tenant_id:
                 self.spark.conf.set("fs.azure.account.auth.type", "OAuth")
@@ -799,7 +825,16 @@ class LakehousePipeline:
     def _execute_resets(
         self, active_contracts: List[RegistryContract], reset_layers: Set[str], reload_layers: Set[str], dry_run: bool
     ) -> None:
-        """Run DROP (reset) and TRUNCATE (reload) operations."""
+        """Run DROP (reset) and TRUNCATE (reload) operations.
+
+        Run-log / SLO-check clearing is done PER ENTITY inside the loop below
+        (via _delete_run_log_entries, which DELETEs only the rows matching the
+        reset entity's dataset/layer/domain/system). The shared `_logs` /
+        `_slo_checks` tables are intentionally NOT wiped wholesale here — doing
+        so destroyed other entities' history (and, for Delta, removed the
+        `_delta_log` transaction log so the subsequent per-entity DELETE failed
+        with "no log files"). Resetting one entity must leave the rest intact.
+        """
         for c in active_contracts:
             layer = c.layer
             name = c.entity
@@ -1291,8 +1326,28 @@ class LakehousePipeline:
                     f"(overrides default '{strategy}')"
                 )
 
+            # Resolve the contract's storage target. Order of precedence:
+            #  1. Explicit `materialization.target_path` / `materialization.path`
+            #     in the contract (covers Spark UC `table:` targets)
+            #  2. `_resolve_target` on the DataContract (covers contracts that
+            #     declare an explicit Server path)
+            #  3. `{layer_path}/{info.table_name}` from the registry's storage
+            #     block — the common case for path-based delta contracts that
+            #     inherit their location from the system YAML's bronze_path /
+            #     silver_path / gold_path placeholders
             mat_cfg = (c.contract_dict or {}).get("materialization", {})
             mat_target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
+            if not mat_target:
+                try:
+                    from lakelogic.core.materialization import _resolve_target as _mat_resolve
+
+                    resolved_target, _ = _mat_resolve(dc)
+                    if resolved_target is not None:
+                        mat_target = str(resolved_target)
+                except Exception:
+                    pass
+            if not mat_target:
+                mat_target = self._infer_storage_path_from_registry(c, dc)
 
             if mat_target.startswith("table:") and self.spark:
                 table_name = mat_target[len("table:") :]
@@ -1348,11 +1403,241 @@ class LakehousePipeline:
                         RemoteObserver().report(report)
                     except Exception:  # pragma: no cover
                         pass  # Fail silently  # pragma: no cover
-            # pragma: no cover
-            else:  # pragma: no cover
-                logger.warning(  # pragma: no cover
-                    f"Path-based target for [{c.layer}] {c.entity} not yet supported in native driver erasure pass."
+            else:
+                # Path-based Delta target (local lakehouse_polars/ or any
+                # filesystem URL). Read → transform PII columns → overwrite.
+                # Spark is not required; we use polars + deltalake directly so
+                # the erasure works in any environment that can already write
+                # the table (i.e. anywhere the rest of the pipeline runs).
+                affected = self._apply_path_based_erasure(
+                    mat_target=mat_target,
+                    pii_cols=pii_cols,
+                    subject_col=subject_col,
+                    subject_ids=subject_ids,
+                    strategy=effective_strategy,
+                    salt=salt,
+                    dry_run=dry_run,
+                    partition_filter=partition_filter,
+                    entity_label=f"[{c.layer}] {c.entity}",
+                    contract=dc,
+                    kind="gdpr",
                 )
+
+                if affected > 0 or dry_run:
+                    report = generate_erasure_report(
+                        dc, subject_col, subject_ids, effective_strategy, affected, partition_filter=partition_filter
+                    )
+                    report["pipeline_run_id"] = self.run_id
+
+                    # Write the audit JSON next to the run logs so it lands
+                    # somewhere predictable on local disks too — the legacy
+                    # /Workspace/... path only exists on Databricks.
+                    try:
+                        from pathlib import Path as _Path
+
+                        log_dir = _Path("./logs/gdpr_reports")
+                        log_dir.mkdir(parents=True, exist_ok=True)
+                        log_path = log_dir / f"erasure_{c.entity}_{int(time.time())}.json"
+                        with open(log_path, "w", encoding="utf-8") as f:
+                            json.dump(report, f, indent=2, default=str)
+                        logger.info(f"GDPR audit report written: {log_path}")
+                    except Exception as exc:
+                        logger.warning(f"Could not write GDPR audit report: {exc}")
+
+                    try:
+                        RemoteObserver().report(report)
+                    except Exception:
+                        pass
+
+    def _infer_storage_path_from_registry(self, registry_contract, dc) -> str:
+        """Compute a contract's storage path from `{layer_path}/{table_name}`.
+
+        Contracts that don't declare an explicit `materialization.target_path`
+        inherit their location from the system YAML's storage block. Each
+        layer has its own root (`bronze_path`, `silver_path`, `gold_path`)
+        which the registry has already resolved to an absolute or
+        CWD-relative path. The table name comes from `info.table_name` (also
+        registry-resolved, with `{system}` / `{bronze_layer}` / etc. expanded).
+
+        Returns the empty string if we can't determine a path — the caller
+        treats that as "not found" and skips erasure with a warning.
+        """
+        try:
+            layer = (registry_contract.layer or "").lower()
+            storage = getattr(self.registry, "storage", None)
+            if not storage:
+                return ""
+            layer_root_attr = f"{layer}_path"
+            layer_root = getattr(storage, layer_root_attr, None)
+            if not layer_root:
+                return ""
+            info = getattr(dc, "info", None)
+            table_name = getattr(info, "table_name", None) if info else None
+            if not table_name:
+                return ""
+            # `layer_root` and `table_name` are already placeholder-resolved
+            # by the registry — just join.
+            from pathlib import Path as _Path
+
+            return str(_Path(str(layer_root)) / str(table_name))
+        except Exception:
+            return ""
+
+    def _apply_path_based_erasure(
+        self,
+        mat_target: str,
+        pii_cols: List[str],
+        subject_col: str,
+        subject_ids: List[Any],
+        strategy: str,
+        salt: str,
+        dry_run: bool,
+        partition_filter: Optional[Dict[str, str]],
+        entity_label: str,
+        *,
+        contract=None,
+        kind: str = "gdpr",
+    ) -> int:
+        """Apply right-to-delete erasure to a path-based Delta table.
+
+        Loads the table → delegates the actual PII/PHI transformation to the
+        battle-tested helpers in ``core/gdpr.py`` (``forget_subjects``) and
+        ``core/hipaa.py`` (``forget_patients``) → writes the result back via
+        Delta overwrite. The helpers handle multiple dataframe backends
+        (polars / pandas / pyspark / duckdb), set the compliance-metadata
+        columns (``_is_deleted`` / ``_deleted_at`` / ``_delete_reason`` /
+        ``_updated_at``), apply per-field strategy overrides from the
+        contract's ``compliance`` block, and emit a structured run-log
+        audit record — none of which the previous inline implementation did.
+
+        Args:
+            mat_target: Resolved storage path of the Delta table.
+            pii_cols: PII/PHI column names (logged only — the helper
+                re-derives them from contract ``pii: true`` / ``phi: true``
+                annotations, so they always match what the contract defines).
+            subject_col: Column carrying the subject identifier.
+            subject_ids: Subjects to forget.
+            strategy: ``nullify`` | ``hash`` | ``redact``.
+            salt: Salt used when ``strategy='hash'``.
+            dry_run: When True, count matches and log but don't write.
+            partition_filter: Optional ``{column, value}`` partition scope.
+            entity_label: Log label like ``[silver] silver_rideflow_driver_profiles``.
+            contract: The pydantic DataContract — required by ``forget_*``
+                so it can locate ``pii`` / ``phi`` fields and write the
+                audit record. Passed by the caller (GDPR/HIPAA pass).
+            kind: ``gdpr`` (default) routes to ``forget_subjects``;
+                ``hipaa`` routes to ``forget_patients``.
+
+        Returns the number of rows whose data was modified.
+        """
+        if not mat_target:
+            logger.warning(f"{entity_label}: empty materialization target; skipping erasure")
+            return 0
+
+        try:
+            import polars as pl
+            from deltalake import DeltaTable, write_deltalake
+        except ImportError as exc:
+            logger.error(f"{entity_label}: path-based erasure requires polars + deltalake — {exc}")
+            return 0
+
+        from pathlib import Path as _Path
+
+        target_path = _Path(mat_target)
+        # Contract paths are registry-resolved but may still be CWD-relative
+        # (e.g. ``./lakehouse_polars/...``). resolve() makes them absolute so
+        # the Delta reader works regardless of the caller's CWD.
+        try:
+            target_path = target_path.resolve()
+        except Exception:
+            pass
+
+        if not target_path.exists():
+            logger.warning(f"{entity_label}: target path does not exist — skipping ({target_path})")
+            return 0
+
+        try:
+            dt = DeltaTable(str(target_path))
+        except Exception as exc:
+            logger.warning(f"{entity_label}: not a Delta table or unreadable — skipping ({exc})")
+            return 0
+
+        df = pl.from_arrow(dt.to_pyarrow_table())
+
+        # Count matching rows up-front so we can log + return a meaningful
+        # number even when the helper internally sets metadata for 0
+        # "modified" rows (e.g. when only the subject_col is PII).
+        match_expr = pl.col(subject_col).is_in(subject_ids)
+        if partition_filter:
+            pcol = partition_filter["column"]
+            pval = partition_filter["value"]
+            if pcol in df.columns:
+                match_expr = match_expr & (pl.col(pcol).cast(pl.Utf8) == str(pval))
+        matched = df.filter(match_expr).height
+        if matched == 0:
+            logger.info(f"{entity_label}: 0 rows matched subject filter (strategy={strategy})")
+            return 0
+
+        if dry_run:
+            logger.info(
+                f"{entity_label}: DRY RUN — would erase {matched} row(s) on cols {pii_cols} (strategy={strategy})"
+            )
+            return matched
+
+        # Delegate to the canonical helper. It dispatches to the right
+        # backend (polars here), respects ``compliance.strategy_per_field``
+        # overrides, stamps the four metadata columns on affected rows, and
+        # writes a run-log audit entry.
+        if contract is None:
+            logger.warning(
+                f"{entity_label}: contract not passed to _apply_path_based_erasure; "
+                "falling back to the in-line transform — compliance metadata columns "
+                "and the run-log audit record will NOT be set."
+            )
+            erased = df
+        else:
+            if kind == "hipaa":
+                from lakelogic.core.hipaa import forget_patients
+
+                erased = forget_patients(
+                    df,
+                    contract,
+                    patient_column=subject_col,
+                    patient_ids=subject_ids,
+                    erasure_strategy=strategy,
+                    hash_salt=salt,
+                    audit=True,
+                    partition_filter=partition_filter,
+                )
+            else:
+                from lakelogic.core.gdpr import forget_subjects
+
+                erased = forget_subjects(
+                    df,
+                    contract,
+                    subject_column=subject_col,
+                    subject_ids=subject_ids,
+                    erasure_strategy=strategy,
+                    hash_salt=salt,
+                    audit=True,
+                    partition_filter=partition_filter,
+                )
+
+        # Overwrite the Delta table with the erased frame. schema_mode="overwrite"
+        # is required because forget_subjects/forget_patients adds four compliance
+        # metadata columns (_is_deleted/_deleted_at/_delete_reason/_updated_at)
+        # if they don't already exist — without schema evolution deltalake would
+        # silently drop them and the audit trail would be lost.
+        write_deltalake(
+            str(target_path),
+            erased.to_arrow(),
+            mode="overwrite",
+            schema_mode="overwrite",
+        )
+        logger.info(
+            f"{entity_label}: erased {matched} row(s) on cols {pii_cols} (strategy={strategy}, target={target_path})"
+        )
+        return matched
 
     def _execute_hipaa_pass(
         self,
@@ -1395,8 +1680,22 @@ class LakehousePipeline:
                     f"(overrides default '{strategy}')"
                 )
 
+            # Resolve the contract's storage target via the same code path
+            # the pipeline uses for writes. Contracts often don't carry an
+            # explicit materialization.target_path — they inherit it from
+            # the registry's storage block (`{silver_path}/...`). Reading
+            # the raw dict misses those; _resolve_target picks them up.
             mat_cfg = (c.contract_dict or {}).get("materialization", {})
             mat_target = mat_cfg.get("target_path", "") or mat_cfg.get("path", "")
+            if not mat_target:
+                try:
+                    from lakelogic.core.materialization import _resolve_target as _mat_resolve
+
+                    resolved_target, _ = _mat_resolve(dc)
+                    if resolved_target is not None:
+                        mat_target = str(resolved_target)
+                except Exception:
+                    pass
 
             if mat_target.startswith("table:") and self.spark:
                 table_name = mat_target[len("table:") :]
@@ -1452,6 +1751,45 @@ class LakehousePipeline:
                         RemoteObserver().report(report)
                     except Exception:  # pragma: no cover
                         pass  # Fail silently  # pragma: no cover
+            else:
+                # Path-based Delta target — same separation of concerns as the
+                # GDPR pass. Delegates the actual PHI transformation to
+                # core/hipaa.py:forget_patients, which handles all 4 dataframe
+                # backends and stamps the compliance metadata columns.
+                affected = self._apply_path_based_erasure(
+                    mat_target=mat_target,
+                    pii_cols=phi_cols,
+                    subject_col=patient_col,
+                    subject_ids=patient_ids,
+                    strategy=effective_strategy,
+                    salt=salt,
+                    dry_run=dry_run,
+                    partition_filter=partition_filter,
+                    entity_label=f"[{c.layer}] {c.entity}",
+                    contract=dc,
+                    kind="hipaa",
+                )
+
+                if affected > 0 or dry_run:
+                    report = generate_hipaa_erasure_report(
+                        dc, patient_col, patient_ids, effective_strategy, affected, partition_filter=partition_filter
+                    )
+                    report["pipeline_run_id"] = self.run_id
+                    try:
+                        from pathlib import Path as _Path
+
+                        log_dir = _Path("./logs/hipaa_reports")
+                        log_dir.mkdir(parents=True, exist_ok=True)
+                        log_path = log_dir / f"erasure_{c.entity}_{int(time.time())}.json"
+                        with open(log_path, "w", encoding="utf-8") as f:
+                            json.dump(report, f, indent=2, default=str)
+                        logger.info(f"HIPAA audit report written: {log_path}")
+                    except Exception as exc:
+                        logger.warning(f"Could not write HIPAA audit report: {exc}")
+                    try:
+                        RemoteObserver().report(report)
+                    except Exception:
+                        pass
 
     # ── Phase 4: Main Medallion Loop ─────────────────────────────────────────
 

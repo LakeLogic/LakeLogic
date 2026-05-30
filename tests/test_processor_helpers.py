@@ -665,6 +665,10 @@ def test_processor_run_source_rejects_invalid_watermark_strategies(monkeypatch):
 
 
 def test_processor_expand_source_files_and_partitioned_paths(monkeypatch, tmp_path):
+    # Source-glob resolution now uses CWD, not _base_path (source paths are
+    # storage paths resolved by the registry). chdir so the test fixtures
+    # created under tmp_path are discovered.
+    monkeypatch.chdir(tmp_path)
     processor = object.__new__(proc_mod.DataProcessor)
     processor.contract = types.SimpleNamespace(
         _base_path=tmp_path,
@@ -1664,6 +1668,11 @@ def test_processor_run_source_incremental_empty_and_not_found_paths(monkeypatch,
 
     processor.contract.source.load_mode = "full"
     processor._expand_source_files = lambda path: None
+    # The processor now applies _resolve_empty_source_behavior, which fails
+    # on missing sources for `load_mode=full` by default. Opt the test
+    # contract into the "skip" policy so the FileNotFoundError is treated
+    # as benign no_new_data (matching this test's pre-existing assertion).
+    processor.contract.source.empty_behavior = "skip"
     missing_path = tmp_path / "missing.csv"
     processor.contract.source.path = str(missing_path)
     monkeypatch.setattr(

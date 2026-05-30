@@ -327,6 +327,25 @@ class DataProcessor:
             return self._apply_cdc_defaults(loaded)
         if isinstance(contract, dict):
             loaded = DataContract(**contract)
+            # Anchor _base_path to the contract YAML's directory so packaging
+            # artefacts referenced by relative path (external_logic.path,
+            # schema includes, contract-bundled fixtures) resolve consistently
+            # regardless of how the contract was loaded.
+            #
+            # Storage targets (materialization, quarantine, run_log) are
+            # explicitly NOT affected — those resolve from registry placeholders
+            # ({storage_root}/{bronze_path}/etc) and are independent of where
+            # the contract YAML happens to live. See materialization.py /
+            # quarantine.py / run_log.py for the explicit `_resolve_path(...,
+            # None)` calls that enforce this separation.
+            _file = contract.get("__file__")
+            if _file:
+                from pathlib import Path as _Path
+
+                try:
+                    loaded._base_path = _Path(_file).resolve().parent
+                except Exception:
+                    pass
             loaded = self._apply_stage_overrides(loaded)
             loaded = self._apply_fact_governance(loaded)
             return self._apply_cdc_defaults(loaded)
@@ -1558,6 +1577,27 @@ class DataProcessor:
         df = None
         file_paths = [f["path"] for f in source_files] if source_files else None
 
+        # Non-tabular sources (PDF, image, etc.) with zero matched files must
+        # NOT fall through to pl.read_csv — Polars then throws a confusing
+        # "csv: expanded paths were empty" error that masks the real cause.
+        # Honour the empty-source policy explicitly so operators see "0 PDF
+        # files matched" instead of a CSV reader complaint.
+        _early_fmt = (
+            (getattr(self.contract.source, "format", None) if getattr(self.contract, "source", None) else None) or ""
+        ).lower()
+        _early_ext_cfg = getattr(self.contract, "extraction", None)
+        _early_ext_prov = str(getattr(_early_ext_cfg, "provider", "") or "").lower()
+        _is_non_tabular = _early_fmt in {"pdf", "image", "pptx", "docx", "html"} or _early_ext_prov in {
+            "pdfplumber",
+            "easyocr",
+        }
+        if _is_non_tabular and not file_paths:
+            _msg = f"0 {_early_fmt or 'extraction-source'} files matched glob: {path}"
+            _empty_result = self._handle_empty_source(path, _msg)
+            if _empty_result is not None:
+                return _empty_result
+            raise FileNotFoundError(_msg)
+
         with self.trace_step("Load Source", path=str(path)):
             if self.engine_name in ("polars", "duckdb"):
                 import polars as pl
@@ -1598,7 +1638,52 @@ class DataProcessor:
                         if _pl_sopts:
                             _scan_kw["storage_options"] = _pl_sopts
 
-                        if _scannable:
+                        # ── File-based extraction (PDFs, images) ─────────────
+                        # If the contract has an `extraction:` block with a file
+                        # provider (pdfplumber / easyocr), route each matched
+                        # file through extract_file() instead of any tabular
+                        # reader. Returns one or more dict rows per file.
+                        _ext_cfg = getattr(self.contract, "extraction", None)
+                        _ext_prov = str(getattr(_ext_cfg, "provider", "") or "").lower()
+                        # If the contract author put extraction_task /
+                        # extraction_examples on model.fields (the natural
+                        # "schema as contract" place) rather than under
+                        # extraction.output_schema, mirror them so the engine
+                        # sees the metadata mapping. Without this, every
+                        # extracted PDF row is empty {} → 100% quarantine.
+                        if _ext_cfg and _ext_prov in {"pdfplumber", "easyocr"}:
+                            if not getattr(_ext_cfg, "output_schema", None):
+                                _model = getattr(self.contract, "model", None)
+                                _model_fields = getattr(_model, "fields", None) if _model else None
+                                if _model_fields:
+                                    try:
+                                        _ext_cfg.output_schema = list(_model_fields)
+                                        logger.info(
+                                            f"extraction.output_schema empty — mirrored {len(_model_fields)} "
+                                            f"field(s) from model.fields so {_ext_prov} sees the metadata mapping."
+                                        )
+                                    except Exception as _mirror_exc:
+                                        logger.warning(
+                                            "Could not mirror model.fields into "
+                                            f"extraction.output_schema: {_mirror_exc}"
+                                        )
+                            try:
+                                from ..engines.llm import extract_file as _extract_file
+                            except Exception as _imp_err:
+                                logger.error(
+                                    f"extraction.provider={_ext_prov} requires lakelogic.engines.llm — {_imp_err}"
+                                )
+                                df = pl.DataFrame()
+                            else:
+                                logger.info(f"File extraction: provider={_ext_prov}, files={len(file_paths)}")
+                                _all_rows: list[dict] = []
+                                for _fp in file_paths:
+                                    try:
+                                        _all_rows.extend(_extract_file(_fp, _ext_cfg))
+                                    except Exception as _fe:
+                                        logger.warning(f"extract_file failed for {_fp}: {_fe}")
+                                df = pl.DataFrame(_all_rows) if _all_rows else pl.DataFrame()
+                        elif _scannable:
                             # Lazy: scan each file and concat lazily.
                             # Use diagonal_relaxed so type-inference differences
                             # across CSV files (e.g. Int64 vs Float64) are
@@ -1842,7 +1927,7 @@ class DataProcessor:
                                             f"Incremental load: filtering {_src_col} > {_max_wm!r} "
                                             f"(strategy: {_wm_strategy or 'max_target'})"
                                         )
-                                        _wm_filter_expr = pl.col(_src_col) > _max_wm
+                                        _wm_filter_expr = pl.col(_src_col).cast(pl.Utf8) > str(_max_wm)
                                     else:
                                         logger.info("Incremental load: first run or target empty — loading all rows.")
 
@@ -1960,7 +2045,16 @@ class DataProcessor:
                                             )
                                             df = lf.collect()
                                 else:
-                                    logger.warning(f"Glob pattern matched 0 files: {path}")
+                                    # Glob resolved to zero files. By default this
+                                    # is a benign no_new_data for incremental/cdc
+                                    # contracts (scheduled hourly pipelines on
+                                    # low-volume feeds will hit this often); set
+                                    # source.empty_behavior: fail to override.
+                                    _empty_result = self._handle_empty_source(path, "Glob pattern matched 0 files")
+                                    if _empty_result is not None:
+                                        return _empty_result
+                                    # Fall through to the df-is-None ValueError
+                                    # below — operator opted into hard-fail.
                             else:
                                 try:
                                     if path.endswith(".parquet") or fmt == "parquet":
@@ -1981,15 +2075,15 @@ class DataProcessor:
                                         or "not found" in str(e).lower()
                                         or "no matching files" in str(e).lower()
                                     ):
-                                        logger.info(
-                                            f"Source path not found or matched 0 files (Polars/DuckDB): {path}. "
-                                            "Returning empty dataframe."
+                                        # Path not reachable / zero matches.
+                                        # Same policy as the glob-empty branch
+                                        # above: skip by default, fail on opt-in.
+                                        _empty_result = self._handle_empty_source(
+                                            path, "Source path not found or matched 0 files (Polars/DuckDB)"
                                         )
-                                        self._write_empty_run_log("no_new_data")
-                                        self._run_log_already_written = True
-                                        return ValidationResult(
-                                            self._empty_frame(), self._empty_frame(), self._empty_frame()
-                                        )
+                                        if _empty_result is not None:
+                                            return _empty_result
+                                        raise e
                                     else:
                                         raise e
                         else:
@@ -2294,6 +2388,36 @@ class DataProcessor:
                                     return self.run(df, source_path=path, reset_trace=False)
                             except Exception as _cdf_err:
                                 logger.debug(f"Delta CDF read failed, falling back to standard read: {_cdf_err}")
+
+                        # ── File-based extraction (PDFs, images) ─────────────
+                        # Mirrors the polars branch above: if the contract has an
+                        # `extraction:` block with a file provider (pdfplumber /
+                        # easyocr), route each matched file through extract_file()
+                        # and build a Spark DataFrame from the resulting rows.
+                        _ext_cfg = getattr(self.contract, "extraction", None)
+                        _ext_prov = str(getattr(_ext_cfg, "provider", "") or "").lower()
+                        if _ext_cfg and _ext_prov in {"pdfplumber", "easyocr"} and file_paths:
+                            try:
+                                from ..engines.llm import extract_file as _extract_file
+                            except Exception as _imp_err:
+                                logger.error(
+                                    f"extraction.provider={_ext_prov} requires lakelogic.engines.llm — {_imp_err}"
+                                )
+                                df = spark.createDataFrame([], schema="value string").limit(0)
+                            else:
+                                logger.info(f"File extraction (Spark): provider={_ext_prov}, files={len(file_paths)}")
+                                _all_rows: list[dict] = []
+                                for _fp in file_paths:
+                                    try:
+                                        _all_rows.extend(_extract_file(_fp, _ext_cfg))
+                                    except Exception as _fe:
+                                        logger.warning(f"extract_file failed for {_fp}: {_fe}")
+                                if _all_rows:
+                                    df = spark.createDataFrame(_all_rows)
+                                else:
+                                    df = spark.createDataFrame([], schema="value string").limit(0)
+                            # Skip the regular tabular reader path below
+                            return self.run(df, source_path=path, reset_trace=False)
 
                         reader = spark.read.format(fmt)
                         if fmt == "csv":
@@ -2994,11 +3118,11 @@ class DataProcessor:
 
         from glob import glob
 
+        # Source patterns are STORAGE paths — resolved by the registry from
+        # {landing_root}/{bronze_path}/etc placeholders. Don't anchor them on
+        # the contract YAML's directory; same separation as materialization,
+        # quarantine, run_log, and the engine link resolvers.
         pattern = path
-        base = getattr(self.contract, "_base_path", None)
-        if base and not Path(pattern).is_absolute():
-            pattern = str(Path(base) / pattern)
-
         files = [f for f in glob(pattern, recursive=True) if Path(f).is_file()]
         results = []
         for file in sorted(files):
@@ -3178,6 +3302,46 @@ class DataProcessor:
             dataset=dataset,
             data_layer=data_layer,
         )
+
+    def _resolve_empty_source_behavior(self) -> str:
+        """Decide whether an empty source resolves to a benign skip or a hard fail.
+
+        Default policy:
+          - load_mode in {incremental, cdc} → skip   (empty ticks are normal)
+          - load_mode == full / one-shot    → fail   (empty reload is anomalous)
+
+        A contract may override either way via `source.empty_behavior: skip|fail`.
+        Sustained absence is the freshness-SLO check's responsibility, not the
+        per-run executor's — failing here just generates noise that Zeus has to
+        re-diagnose every tick.
+        """
+        src = getattr(self.contract, "source", None)
+        override = getattr(src, "empty_behavior", None) if src else None
+        if override in ("skip", "fail"):
+            return override
+        load_mode = (getattr(src, "load_mode", "full") or "full").lower()
+        return "skip" if load_mode in ("incremental", "cdc") else "fail"
+
+    def _handle_empty_source(self, path: str, reason: str) -> Optional["ValidationResult"]:
+        """Apply the empty-source policy and return an empty ValidationResult
+        when the policy is `skip`, or None when the caller should raise.
+
+        `reason` is included in the INFO log for operator context (e.g.
+        "Glob pattern matched 0 files", "Path not found").
+        """
+        behavior = self._resolve_empty_source_behavior()
+        if behavior == "fail":
+            return None
+        logger.info(
+            f"📭 {reason}: {path}. Treating as no_new_data "
+            f"(source.empty_behavior={behavior}, load_mode="
+            f"{getattr(self.contract.source, 'load_mode', 'full')}). "
+            "Run log will record status=no_new_data; freshness SLO catches "
+            "prolonged absence."
+        )
+        self._write_empty_run_log("no_new_data")
+        self._run_log_already_written = True
+        return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
 
     def _write_empty_run_log(self, stage: str = "no_new_data") -> None:
         """Write a minimal run log entry for runs that found no new data.
@@ -4023,16 +4187,27 @@ class DataProcessor:
         """
         Extract row-level rule failures from quarantined data.
 
+        Reads the parallel `_lakelogic_errors` + `_lakelogic_categories`
+        list columns so each emitted failure carries its CATEGORY
+        (correctness | completeness | consistency | validity | …) in
+        addition to the rule name + SQL. SaaS surfaces like the Rules
+        Tuning page and Zeus diagnosis depend on the category to group
+        and prioritise; without it the SaaS sees only generic
+        "N Rule(s) Failed" rows.
+
         Args:
             bad_df: Quarantined dataframe.
 
         Returns:
-            List of rule failure descriptors.
+            List of rule failure descriptors:
+              {name, sql, message, count, category}
         """
         if bad_df is None:
             return []
         error_col = getattr(self.adapter, "ERROR_COLUMN", "_lakelogic_errors")
-        errors = []
+        cat_col = getattr(self.adapter, "CATEGORY_COLUMN", "_lakelogic_categories")
+        # pairs of (error_str, category_str|None) aligned positionally
+        pairs: list = []
 
         try:
             import polars as pl
@@ -4040,11 +4215,25 @@ class DataProcessor:
             if isinstance(bad_df, pl.DataFrame):
                 logger.debug(f"_extract_row_rule_failures: Polars DF with columns={bad_df.columns}, rows={len(bad_df)}")
                 if error_col in bad_df.columns:
-                    # Explode the list column into individual error strings
-                    exploded = bad_df.select(pl.col(error_col)).explode(error_col).drop_nulls()
-                    if not exploded.is_empty():
-                        errors.extend(exploded.to_series().to_list())
-                    logger.debug(f"_extract_row_rule_failures: extracted {len(errors)} error(s)")
+                    has_cat = cat_col in bad_df.columns
+                    if has_cat:
+                        # Explode both list columns in lockstep so each error
+                        # keeps its matching category. Polars preserves
+                        # alignment when exploding multiple list columns in
+                        # a single call.
+                        exploded = (
+                            bad_df.select(pl.col(error_col), pl.col(cat_col))
+                            .explode([error_col, cat_col])
+                            .drop_nulls(error_col)
+                        )
+                        for err, cat in exploded.iter_rows():
+                            pairs.append((err, cat))
+                    else:
+                        exploded = bad_df.select(pl.col(error_col)).explode(error_col).drop_nulls()
+                        if not exploded.is_empty():
+                            for err in exploded.to_series().to_list():
+                                pairs.append((err, None))
+                    logger.debug(f"_extract_row_rule_failures: extracted {len(pairs)} error(s) (has_cat={has_cat})")
                 else:
                     logger.debug(f"_extract_row_rule_failures: '{error_col}' not in columns")
         except Exception as exc:
@@ -4054,8 +4243,17 @@ class DataProcessor:
             import pandas as pd
 
             if isinstance(bad_df, pd.DataFrame) and error_col in bad_df.columns:
-                for item in bad_df[error_col].explode().dropna().tolist():
-                    errors.append(item)
+                if cat_col in bad_df.columns:
+                    # Explode both columns side-by-side; .explode on a list
+                    # of columns keeps row alignment in pandas ≥1.3.
+                    df_ex = bad_df[[error_col, cat_col]].explode([error_col, cat_col])
+                    for err, cat in zip(df_ex[error_col].tolist(), df_ex[cat_col].tolist()):
+                        if err is None or (isinstance(err, float) and err != err):  # NaN check
+                            continue
+                        pairs.append((err, cat))
+                else:
+                    for item in bad_df[error_col].explode().dropna().tolist():
+                        pairs.append((item, None))
         except Exception as exc:
             logger.debug(f"Pandas error extraction failed: {exc}")
 
@@ -4064,19 +4262,39 @@ class DataProcessor:
                 from pyspark.sql import functions as F
 
                 if error_col in bad_df.columns:
-                    rows = bad_df.select(F.explode(F.col(error_col)).alias("error")).groupBy("error").count().collect()
-                    for r in rows:
-                        if r["error"]:
-                            errors.extend([r["error"]] * r["count"])
+                    if cat_col in bad_df.columns:
+                        # arrays_zip keeps the parallel error+category pairs aligned
+                        rows = (
+                            bad_df.select(F.arrays_zip(F.col(error_col), F.col(cat_col)).alias("pair"))
+                            .select(F.explode("pair").alias("p"))
+                            .groupBy("p")
+                            .count()
+                            .collect()
+                        )
+                        for r in rows:
+                            err = r["p"][error_col] if r["p"] else None
+                            cat = r["p"][cat_col] if r["p"] else None
+                            if err:
+                                pairs.extend([(err, cat)] * r["count"])
+                    else:
+                        rows = (
+                            bad_df.select(F.explode(F.col(error_col)).alias("error")).groupBy("error").count().collect()
+                        )
+                        for r in rows:
+                            if r["error"]:
+                                pairs.extend([(r["error"], None)] * r["count"])
             except Exception as exc:
                 logger.debug(f"Spark error extraction failed: {exc}")
 
+        # Group by (error_text, category) so two identical errors with
+        # different category labels stay distinguishable. In practice the
+        # category is deterministic per rule, so this collapses cleanly.
         from collections import Counter
 
-        error_counts = Counter(errors)
+        pair_counts = Counter((p[0], p[1]) for p in pairs)
 
         failures = []
-        for err, count in error_counts.items():
+        for (err, cat), count in pair_counts.items():
             if isinstance(err, str) and err.startswith("Rule failed: "):
                 payload = err[len("Rule failed: ") :]
                 name = payload
@@ -4084,9 +4302,12 @@ class DataProcessor:
                 if " (" in payload and payload.endswith(")"):
                     name, sql = payload.split(" (", 1)
                     sql = sql[:-1]
-                failures.append({"name": name, "sql": sql, "message": err, "count": count})
+                entry = {"name": name, "sql": sql, "message": err, "count": count}
             else:
-                failures.append({"message": str(err), "count": count})
+                entry = {"message": str(err), "count": count}
+            if cat:
+                entry["category"] = cat
+            failures.append(entry)
         return failures
 
     # ── DDL Generation ───────────────────────────────────────────────────

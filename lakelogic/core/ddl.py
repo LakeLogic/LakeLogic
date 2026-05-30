@@ -1050,6 +1050,11 @@ def _init_delta_table_from_contract(contract: DataContract) -> None:
             wdl_kwargs_init["partition_by"] = partition_by
         if storage_opts:
             wdl_kwargs_init["storage_options"] = storage_opts
+        # deltalake 1.0+ removed the `engine` kwarg; drop it if unsupported.
+        import inspect as _inspect
+
+        if "engine" not in _inspect.signature(write_deltalake).parameters:
+            wdl_kwargs_init.pop("engine", None)
         write_deltalake(target, empty_table, **wdl_kwargs_init)
 
         logger.info(f"Initialized Delta table schema for {table_label} ({len(fields)} columns, 0 rows) at {target}")

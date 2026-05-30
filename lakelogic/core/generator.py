@@ -6473,10 +6473,23 @@ class DataGenerator:
                     entry["_fk_contract"] = fk.get("contract")
                     entry["_fk_column"] = fk.get("column")
                 elif "accepted_values" not in entry:
-                    # No pool supplied — generate surrogate integers for CI safety
-                    # (valid type, referentially meaningless, but won't break type checks)
+                    # No pool supplied — generate a type-appropriate surrogate
+                    # pool so the FK column matches the declared field type.
+                    # Previously this always produced integers, which crashed
+                    # the polars CSV reader when the contract declared string
+                    # (it inferred i64 from the digits, then failed to cast).
                     surrogate_n = max(10, len(self._fields) * 5)
-                    entry["accepted_values"] = list(range(1, surrogate_n + 1))
+                    ftype = str(field.get("type", "")).lower()
+                    if ftype in {"string", "str", "varchar", "text"}:
+                        # Readable string IDs that match the human-friendly
+                        # fallback convention used elsewhere in this class
+                        # (e.g. "CUS-1001"). Prefix derived from the column name.
+                        name_lower = fname.lower()
+                        prefix = name_lower[:3].upper() if len(name_lower) >= 3 else name_lower.upper()
+                        entry["accepted_values"] = [f"{prefix}-{1000 + i}" for i in range(surrogate_n)]
+                    else:
+                        # int / long / numeric / unknown — keep the integer pool
+                        entry["accepted_values"] = list(range(1, surrogate_n + 1))
                     entry["_fk_contract"] = fk.get("contract")
                     entry["_fk_column"] = fk.get("column")
                     entry["_fk_surrogate"] = True  # flag: values are synthetic, not real
