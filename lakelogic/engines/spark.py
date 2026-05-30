@@ -709,9 +709,10 @@ class SparkAdapter(EngineAdapter):
                     load_path = link.path
                     link_type = (link.type or "delta").lower()
                 else:
+                    # Link paths are STORAGE references — resolved by the
+                    # registry, not anchored on the contract YAML directory.
+                    # Same rule as materialization.py / quarantine.py.
                     path = Path(link.path)
-                    if not path.is_absolute() and hasattr(self.contract, "_base_path"):
-                        path = Path(self.contract._base_path) / path
                     if not path.exists():
                         logger.warning(f"Link file not found: {path}")
                         continue

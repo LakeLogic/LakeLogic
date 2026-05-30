@@ -498,22 +498,39 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             logger.warning(f"Run log table backend 'duckdb' unavailable: {exc}")
             return None
 
-        base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
-        db_path = _resolve_path(str(db_path), base_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Storage path — resolved by registry placeholders, not by the contract YAML dir.
 
-        table_name = _prepare_table_name(table_name, backend)
-        schema_name = None
-        table_only = table_name
-        parts = table_name.split(".")
-        if len(parts) >= 2:
-            schema_name = parts[-2]
-            table_only = parts[-1]
-            logger.warning(
-                f"DuckDB backend uses schema '{schema_name}' and table "
-                f"'{table_only}' (ignoring catalog parts if provided)."
-            )
+        base_path = None  # see materialization.py and quarantine.py for rationale
+
+        # When `run_log_table` is a filesystem-style path (e.g. resolved from
+        # `{log_path}` → `./lakehouse_polars/marketplace/_logs`), treat the path
+        # as the directory for the .duckdb file and use a default `run_logs`
+        # table inside it. This lets users keep one set of storage variables
+        # in _system.yaml whether they pick delta or duckdb as the backend.
+        _looks_like_path = "/" in table_name or "\\" in table_name or table_name.startswith(".") or "://" in table_name
+
+        if _looks_like_path:
+            dir_path = _resolve_path(str(table_name), base_path)
+            dir_path.mkdir(parents=True, exist_ok=True)
+            db_path = dir_path / "lakelogic_run_logs.duckdb"
+            schema_name = None
+            table_only = "run_logs"
+        else:
+            db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
+            db_path = _resolve_path(str(db_path), base_path)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            table_name = _prepare_table_name(table_name, backend)
+            schema_name = None
+            table_only = table_name
+            parts = table_name.split(".")
+            if len(parts) >= 2:
+                schema_name = parts[-2]
+                table_only = parts[-1]
+                logger.warning(
+                    f"DuckDB backend uses schema '{schema_name}' and table "
+                    f"'{table_only}' (ignoring catalog parts if provided)."
+                )
         con = duckdb.connect(database=str(db_path))
         if schema_name:
             con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
@@ -623,7 +640,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
     if backend == "sqlite":
         import sqlite3
 
-        base_path = getattr(contract, "_base_path", None)
+        # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+        base_path = None  # see materialization.py and quarantine.py for rationale
         db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
         db_path = _resolve_path(str(db_path), base_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1209,18 +1228,32 @@ def _write_slo_checks_table(
             logger.warning(f"SLO checks DuckDB backend unavailable: {exc}")
             return None
 
-        db_path = (
-            metadata.get("slo_checks_database")
-            or metadata.get("run_log_database")
-            or "logs/lakelogic_slo_checks.duckdb"
-        )
-        db_path = Path(db_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Same convenience as the run_log path-style fix: when the configured
+        # slo_checks_table looks like a filesystem path (e.g. resolved from
+        # `{slo_checks_path}` → `./lakehouse_polars/marketplace/_slo_checks`),
+        # treat it as the directory for the .duckdb file and use a default
+        # `slo_checks` table inside. Avoids `Parser Error: syntax error at "/"`.
+        _looks_like_path = "/" in table_name or "\\" in table_name or table_name.startswith(".") or "://" in table_name
 
-        tbl = _prepare_table_name(table_name, "duckdb")
-        parts = tbl.split(".")
-        schema_name = parts[-2] if len(parts) >= 2 else None
-        table_only = parts[-1]
+        if _looks_like_path:
+            dir_path = Path(str(table_name))
+            dir_path.mkdir(parents=True, exist_ok=True)
+            db_path = dir_path / "lakelogic_slo_checks.duckdb"
+            schema_name = None
+            table_only = "slo_checks"
+        else:
+            db_path = (
+                metadata.get("slo_checks_database")
+                or metadata.get("run_log_database")
+                or "logs/lakelogic_slo_checks.duckdb"
+            )
+            db_path = Path(db_path)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            tbl = _prepare_table_name(table_name, "duckdb")
+            parts = tbl.split(".")
+            schema_name = parts[-2] if len(parts) >= 2 else None
+            table_only = parts[-1]
         con = duckdb.connect(database=str(db_path))
         if schema_name:
             con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
@@ -1474,7 +1507,9 @@ def write_run_log(
                 logger.warning(f"Failed to write cloud run log to {cloud_target}: {exc}")
         else:
             # ── Local filesystem ──
-            base_path = getattr(contract, "_base_path", None)
+            # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+            base_path = None  # see materialization.py and quarantine.py for rationale
             if path_value:
                 log_path = _resolve_path(str(path_value), base_path)
             else:
@@ -1701,7 +1736,9 @@ def get_last_run_watermark(
             import duckdb
         except Exception:
             return None
-        base_path = getattr(contract, "_base_path", None)
+        # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+        base_path = None  # see materialization.py and quarantine.py for rationale
         db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
@@ -1750,7 +1787,9 @@ def get_last_run_watermark(
     if table_value and backend == "sqlite":
         import sqlite3
 
-        base_path = getattr(contract, "_base_path", None)
+        # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+        base_path = None  # see materialization.py and quarantine.py for rationale
         db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
@@ -1879,7 +1918,9 @@ def get_last_run_watermark(
                 return None
         else:
             # ── Local directory scan ──
-            base_path = getattr(contract, "_base_path", None)
+            # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+            base_path = None  # see materialization.py and quarantine.py for rationale
             log_dir = _resolve_path(raw_dir, base_path)
             if not log_dir.exists():
                 return None
@@ -1910,7 +1951,9 @@ def get_last_run_watermark(
                 return data.get("max_source_mtime")
         else:
             # ── Local single file ──
-            base_path = getattr(contract, "_base_path", None)
+            # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+            base_path = None  # see materialization.py and quarantine.py for rationale
             log_path = _resolve_path(raw_path, base_path)
             if log_path.exists():
                 try:
@@ -1952,7 +1995,9 @@ def get_last_run_dlt_state(
             import duckdb
         except Exception:
             return None
-        base_path = getattr(contract, "_base_path", None)
+        # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+        base_path = None  # see materialization.py and quarantine.py for rationale
         db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
@@ -1999,7 +2044,9 @@ def get_last_run_dlt_state(
     if table_value and backend == "sqlite":
         import sqlite3
 
-        base_path = getattr(contract, "_base_path", None)
+        # Storage path — resolved by registry placeholders, not by the contract YAML dir.
+
+        base_path = None  # see materialization.py and quarantine.py for rationale
         db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():

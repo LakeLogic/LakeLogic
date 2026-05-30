@@ -412,14 +412,19 @@ def _resolve_target(contract, override_path: Optional[Path] = None) -> Tuple[Opt
     if not target:
         return None, None
 
-    base_path = getattr(contract, "_base_path", None)
+    # Storage targets are fully resolved by the registry at load time via
+    # {storage_root}/{bronze_path}/etc placeholders — they're not relative
+    # to the contract YAML's directory. `_base_path` is for contract-local
+    # files (external scripts, fixtures). Passing it here used to prefix
+    # CWD-relative storage paths like `./lakehouse_polars/...` with the
+    # contract YAML dir, producing nonsense paths.
     target_str = str(target)
     if target_str.startswith("table:") or _is_remote_path(target_str):
         # Don't wrap cloud URIs or table: paths in Path() — it corrupts
         # forward slashes to backslashes on Windows.
         target_path = URIPath(target_str)
     else:
-        target_path = _resolve_path(target_str, base_path)
+        target_path = _resolve_path(target_str, None)
 
     output_format = None
     if contract and contract.materialization:
@@ -689,7 +694,7 @@ def _write_frame(
             raise ValueError(f"Iceberg materialization failed: {e}")
     elif output_format == "delta":
         try:
-            from deltalake import write_deltalake
+            import deltalake  # noqa: F401  # availability probe — raises ImportError if not installed
 
             # Polars native write_delta for remote paths
             if is_remote and hasattr(df, "write_delta"):
@@ -710,6 +715,13 @@ def _write_frame(
                 data = df.to_arrow()
             elif hasattr(df, "to_arrow_table"):  # DuckDB relation
                 data = df.to_arrow_table()
+            elif "pandas" in type(df).__module__:
+                # Pandas DataFrame — convert to Arrow so the empty-table
+                # fallback below isn't accidentally hit for non-empty input.
+                # Without this branch a 1-row pandas frame became an empty
+                # pa.Table.from_pydict({}) which then triggered
+                # _safe_write_deltalake's empty-data schema_mode strip.
+                data = pa.Table.from_pandas(df, preserve_index=False)
 
             if not isinstance(data, pa.Table):
                 data = pa.Table.from_pydict({})  # last resort empty table
@@ -717,15 +729,16 @@ def _write_frame(
                 data = _sanitize_arrow_nulls(data)
 
             delta_mode = mode_override or "overwrite"
-            # Use pyarrow engine for local paths — it writes at protocol v1/v2
-            # (no timestampNtz reader feature), keeping tables readable by
-            # Delta Spark 4.0.x without a DeltaTableFeatureException.
             _engine = "rust" if is_remote else "pyarrow"
-            write_deltalake(
+            # deltalake 1.x: schema_mode='overwrite' is only valid with
+            # mode='overwrite'. For append we use 'merge' so new columns can be
+            # added without rewriting existing data.
+            _schema_mode = "overwrite" if delta_mode == "overwrite" else "merge"
+            _safe_write_deltalake(
                 path_str if is_remote else path,
                 data,
                 mode=delta_mode,
-                schema_mode="overwrite",
+                schema_mode=_schema_mode,
                 engine=_engine,
                 storage_options=opts,
             )
@@ -3550,7 +3563,7 @@ def materialize_dataframe(
             table_exists = Path(target_file / "_delta_log").exists() if not _is_remote_path(target_str) else False
             _local_engine = "rust" if _is_remote_path(target_str) else "pyarrow"
             if not table_exists:
-                write_deltalake(
+                _safe_write_deltalake(
                     target_str,
                     arrow_data,
                     mode="overwrite",

@@ -105,6 +105,11 @@ def test_polars_helper_dtype_schema_and_join_sql():
 
 
 def test_polars_helper_register_links_handles_projection_cache_and_warnings(monkeypatch, tmp_path):
+    # Link paths are STORAGE references; the engine resolves them from CWD
+    # (after the registry expands {silver_path}/etc placeholders), NOT from
+    # _base_path. chdir to tmp_path so the CWD-relative "lookup.csv" /
+    # "lookup.txt" / "missing.csv" paths land where the test expects.
+    monkeypatch.chdir(tmp_path)
     csv_path = tmp_path / "lookup.csv"
     pl.DataFrame({"id": [1], "name": ["A"], "extra": ["x"]}).write_csv(csv_path)
     parquet_path = tmp_path / "lookup.parquet"

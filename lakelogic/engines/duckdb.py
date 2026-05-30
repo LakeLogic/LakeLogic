@@ -128,9 +128,11 @@ class DuckDBAdapter(EngineAdapter):
                         logger.warning(f"Could not load remote link '{link.name}' from {link.path}: {e}")
                     continue
 
+                # Link paths are STORAGE references — resolved by the
+                # registry from {silver_path}/{bronze_path}/etc, not anchored
+                # on the contract YAML's location. See materialization.py /
+                # quarantine.py / run_log.py for the same separation.
                 path = Path(link.path)
-                if not path.is_absolute() and hasattr(self.contract, "_base_path"):
-                    path = Path(self.contract._base_path) / path
                 if not path.exists():
                     logger.warning(f"Link file/directory not found: {path}")
                     continue
@@ -304,6 +306,12 @@ class DuckDBAdapter(EngineAdapter):
                 if _phase == "post" and getattr(_t, "sql", None):
                     _has_post_sql = True
                     break
+
+        # SCD2 mechanics columns are injected by the materializer AFTER this
+        # check runs, so don't flag them as missing here.
+        _scd2_injected = self._scd2_injected_columns()
+        if _scd2_injected:
+            missing = missing - _scd2_injected
 
         schema_errors: List[str] = []
         if evolution == "strict" and missing and not _has_post_sql:

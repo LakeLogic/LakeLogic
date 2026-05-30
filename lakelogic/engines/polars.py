@@ -91,9 +91,12 @@ class PolarsAdapter(EngineAdapter):
                         logger.warning(f"Failed to load remote link {link.name} from {link.path}: {e}")
                     continue
 
+                # Link paths are STORAGE references — resolved by the
+                # registry from {silver_path}/{bronze_path}/etc placeholders.
+                # Not anchored on the contract YAML's directory; see
+                # materialization.py / quarantine.py / run_log.py for the
+                # same _base_path-is-only-for-contract-local-files rule.
                 path = Path(link.path)
-                if not path.is_absolute() and hasattr(self.contract, "_base_path"):
-                    path = Path(self.contract._base_path) / path
                 if not path.exists():
                     logger.warning(f"Link file not found: {path}")
                     continue
@@ -269,9 +272,8 @@ class PolarsAdapter(EngineAdapter):
                         continue
                     if link.path.startswith(("s3://", "gs://", "abfss://", "adl://", "https://")):
                         continue
+                    # Link paths are STORAGE references — see note above.
                     path = Path(link.path)
-                    if not path.is_absolute() and hasattr(self.contract, "_base_path"):
-                        path = Path(self.contract._base_path) / path
                     if not path.exists():
                         continue
                     if path.is_dir() and (path / "_delta_log").exists():
@@ -582,6 +584,13 @@ class PolarsAdapter(EngineAdapter):
                     _has_post_sql = True
                     break
 
+        # SCD2 mechanics columns (rider_sk, effective_from/to, is_current,
+        # version_number, _change_reason) are injected by the materializer AFTER
+        # this check runs, so don't flag them as missing here.
+        _scd2_injected = self._scd2_injected_columns()
+        if _scd2_injected:
+            missing = missing - _scd2_injected
+
         schema_errors: List[str] = []
         if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
@@ -704,6 +713,9 @@ class PolarsAdapter(EngineAdapter):
 
             error_tracking_exprs = []
             category_tracking_exprs = []
+            _schema_aux_cols: List[
+                str
+            ] = []  # internal scratch — must be dropped before yielding quarantine/good frames
 
             if schema_errors:
                 # Schema errors apply to every row (or no rows on empty frames).
@@ -713,6 +725,7 @@ class PolarsAdapter(EngineAdapter):
                 # empty DataFrames because Polars cannot infer the frame length.
                 schema_err_col_names = [f"__schema_err_{i}" for i in range(len(schema_errors))]
                 schema_cat_col_name = "__schema_err_cat"
+                _schema_aux_cols.extend(schema_err_col_names + [schema_cat_col_name])
                 lf_eval = lf_eval.with_columns(
                     [pl.lit(err).alias(schema_err_col_names[i]) for i, err in enumerate(schema_errors)]
                     + [pl.lit("schema").alias(schema_cat_col_name)]
@@ -767,16 +780,27 @@ class PolarsAdapter(EngineAdapter):
         # 2. Split Good and Bad
         has_errors = pl.col(self.ERROR_COLUMN).list.len() > 0
 
-        bad_lf = lf_with_errors.filter(has_errors).with_columns(
-            [
-                pl.lit("active").alias("quarantine_state"),
-                pl.lit(False).alias("quarantine_reprocessed"),
-            ]
+        # Drop the scratch __schema_err_* columns from BOTH frames — they were
+        # only there to feed the public ERROR_COLUMN / CATEGORY_COLUMN above and
+        # were leaking into the quarantine table as double-underscored columns.
+        _aux_to_drop = locals().get("_schema_aux_cols", []) or []
+
+        bad_lf = (
+            lf_with_errors.filter(has_errors)
+            .drop(_aux_to_drop)
+            .with_columns(
+                [
+                    pl.lit("active").alias("quarantine_state"),
+                    pl.lit(False).alias("quarantine_reprocessed"),
+                ]
+            )
         )
 
         # Clean up internal columns
         internal_cols = [f"_rule_{i}" for i in range(len(row_rules))] + getattr(self, "_type_err_cols", [])
-        good_lf = lf_with_errors.filter(~has_errors).drop(internal_cols + [self.ERROR_COLUMN, self.CATEGORY_COLUMN])
+        good_lf = lf_with_errors.filter(~has_errors).drop(
+            internal_cols + _aux_to_drop + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
+        )
 
         # 3. Apply Dataset-Level (Aggregate) Checks
         self._run_dataset_rules(good_lf, ctx)
@@ -1119,6 +1143,18 @@ class PolarsAdapter(EngineAdapter):
                 current_lf = self._apply_sql_transformation(current_lf, sql)
                 continue
             if trans.rollup and trans_phase != "pre":
+                # Defensive: blank out upstream lineage cols on the rollup config
+                # if the source doesn't carry them, so the generated SQL doesn't
+                # reference non-existent columns. Cheaper than runtime SQL repair.
+                try:
+                    source_cols = set(current_lf.collect_schema().names())
+                except Exception:
+                    source_cols = set()
+                uid = getattr(trans.rollup, "upstream_run_id_column", None)
+                if uid and source_cols and uid not in source_cols:
+                    logger.debug(f"rollup: source has no '{uid}' column — skipping upstream-run-id aggregation.")
+                    trans.rollup.upstream_run_id_column = None
+                    trans.rollup.upstream_run_ids_column = None
                 rollup_sql = self._build_rollup_sql(trans.rollup, source_table=tbl_name)
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
                 current_lf = self._apply_sql_transformation(current_lf, rollup_sql)

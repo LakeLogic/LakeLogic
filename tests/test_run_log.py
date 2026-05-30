@@ -287,7 +287,11 @@ def test_write_run_log_to_cloud_directory_and_read_back_watermark(monkeypatch, t
     assert get_last_run_watermark(contract, "orders_contract", "silver") == 1713355200.0
 
 
-def test_write_run_log_to_sqlite_table_and_fetch_precise_state(tmp_path: Path):
+def test_write_run_log_to_sqlite_table_and_fetch_precise_state(tmp_path: Path, monkeypatch):
+    # Storage paths now resolve from CWD (not _base_path). chdir so the
+    # existing assertion `(tmp_path / "db" / "run_logs.sqlite").exists()`
+    # still holds — the file lands under tmp_path because CWD == tmp_path.
+    monkeypatch.chdir(tmp_path)
     contract = _make_contract(
         tmp_path,
         {
@@ -321,7 +325,9 @@ def test_write_run_log_to_sqlite_table_and_fetch_precise_state(tmp_path: Path):
     ) == json.dumps({"cursor": "abc123"})
 
 
-def test_write_run_log_to_duckdb_and_ignore_failed_or_reprocess_rows(tmp_path: Path):
+def test_write_run_log_to_duckdb_and_ignore_failed_or_reprocess_rows(tmp_path: Path, monkeypatch):
+    # Storage paths now resolve from CWD — see sqlite test above.
+    monkeypatch.chdir(tmp_path)
     contract = _make_contract(
         tmp_path,
         {
@@ -380,7 +386,9 @@ def test_write_run_log_table_returns_none_for_unsupported_backend(tmp_path: Path
     assert _write_run_log_table(_sample_report(), contract, engine_name="polars") is None
 
 
-def test_get_last_run_watermark_skips_invalid_and_non_matching_local_json(tmp_path: Path):
+def test_get_last_run_watermark_skips_invalid_and_non_matching_local_json(tmp_path: Path, monkeypatch):
+    # Storage paths now resolve from CWD — see other watermark tests above.
+    monkeypatch.chdir(tmp_path)
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
     (log_dir / "run_bad.json").write_text("{not-json", encoding="utf-8")

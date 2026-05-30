@@ -316,6 +316,27 @@ class SourceConfig(BaseModel):
     # Date-partitioned landing support
     partition: Optional[SourcePartition] = None
 
+    # ── Behaviour when the source resolves to zero files / rows ──────────────
+    # An empty source is normally a *benign* operational state — scheduled
+    # incremental pipelines on low-volume feeds will frequently have nothing to
+    # ingest on a given tick. Failing the run in that case poisons incident
+    # telemetry (Zeus would diagnose the same false alert hourly) and trains
+    # operators to ignore bronze failures.
+    #
+    # Prolonged absence is the real signal, and that belongs to the freshness
+    # SLO check — not to the per-run executor.
+    #
+    # Modes:
+    #   skip  — log INFO, write a run log with status=no_new_data, return empty
+    #           frames. The runner then propagates the empty signal downstream
+    #           (silver/gold will already log "Upstream had no new data — skipping").
+    #   fail  — raise ValueError as before. Reserve for one-shot reloads or
+    #           contracts that genuinely cannot tolerate an empty tick.
+    #
+    # Default resolution lives in the processor: `skip` for incremental/cdc,
+    # `fail` for one-shot (full) loads. Setting this field overrides the default.
+    empty_behavior: Optional[Literal["skip", "fail"]] = None
+
     # ── Incremental processing strategy ──────────────────────────────────────
     # Declares HOW the pipeline resolves the (from_dt, to_dt) window for
     # incremental reads.  Consumed by IncrementalBoundary.from_contract().
@@ -616,7 +637,14 @@ class TransformationRollup(BaseModel):
     key_expr: Optional[str] = None
     rollup_keys_column: Optional[str] = "_lakelogic_rollup_keys"
     rollup_keys_count_column: Optional[str] = "_lakelogic_rollup_keys_count"
-    upstream_run_id_column: Optional[str] = "_upstream_run_id"
+    # Source-side column the lineage system rewrote upstream run_ids into.
+    # Convention from lakelogic.core.lineage._new_name():
+    #   bronze writes "_lakelogic_run_id"
+    #   silver/gold reading bronze rename it to "_upstream_lakelogic_run_id"
+    # The previous default "_upstream_run_id" caused DuckDB binder errors
+    # ("Referenced column '_upstream_run_id' not found in FROM clause") when
+    # rollup tried to ARRAY_AGG a column that never existed.
+    upstream_run_id_column: Optional[str] = "_upstream_lakelogic_run_id"
     upstream_run_ids_column: Optional[str] = "_upstream_lakelogic_run_ids"
     distinct: bool = True
 

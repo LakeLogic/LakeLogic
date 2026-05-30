@@ -81,13 +81,17 @@ def test_frame_has_columns_uses_collect_schema_and_sequence_fallbacks():
 
 
 def test_resolve_target_and_to_pandas(monkeypatch, tmp_path):
+    # Storage targets are NOT anchored on _base_path even when it's set —
+    # they're resolved from registry placeholders ({storage_root}/etc) at
+    # contract-load time. _base_path is reserved for contract-local files
+    # (external_logic.path). See materialization.py docstring for the rule.
     contract = types.SimpleNamespace(
         materialization=types.SimpleNamespace(target_path="out/orders", path=None, format="csv"),
         _base_path=tmp_path,
         effective_server=lambda: types.SimpleNamespace(path="server/path", format="parquet"),
     )
     target, output_format = mat._resolve_target(contract)
-    assert target == tmp_path / "out" / "orders"
+    assert target == Path("out/orders")  # NOT tmp_path / "out" / "orders"
     assert output_format == "csv"
 
     remote_contract = types.SimpleNamespace(

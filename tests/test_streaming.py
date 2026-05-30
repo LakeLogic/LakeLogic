@@ -304,6 +304,11 @@ def test_telemetry_and_app_event_generators_emit_rows(tmp_path):
     simulator._driver_ids = ["DRV-001"]
     simulator._driver_cities = {"DRV-001": "LON"}
     simulator._active_trip_ids = ["TRP-001"]
+    # _active_trips: per-trip (driver, city) lookup. `_gen_driver_telemetry`
+    # reads from this dict (not _active_trip_ids) so on-trip pings keep the
+    # same driver_id + city_code throughout a trip's lifetime — FK integrity
+    # for downstream silver/gold facts. Stub it alongside the legacy list.
+    simulator._active_trips = {"TRP-001": {"driver_id": "DRV-001", "city_code": "LON"}}
     simulator._rider_ids = ["RDR-001"]
     simulator._rider_cities = {"RDR-001": "NYC"}
     simulator._rng = types.SimpleNamespace(

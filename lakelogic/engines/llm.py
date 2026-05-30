@@ -430,6 +430,14 @@ def _extract_pdfplumber(
                     col_map[fn] = idx
                     break
 
+        # Skip pseudo-tables that don't actually map to any schema field —
+        # pdfplumber's table detector over-fires on structured prose (e.g.
+        # "Name: X / Licence No: Y / DOB: Z" PDFs that aren't really tables),
+        # which previously emitted N duplicate metadata-only rows per PDF.
+        # If no schema columns matched, treat this "table" as noise.
+        if not col_map:
+            continue
+
         for data_row in table[1:]:
             row: Dict[str, Any] = {}
             row.update(metadata_values)

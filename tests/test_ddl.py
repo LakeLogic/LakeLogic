@@ -862,13 +862,23 @@ class TestDeltaInitialization:
             def create(**kwargs):
                 create_calls.append(kwargs)
 
+        # NB: `engine` is declared as an explicit kw parameter so
+        # `inspect.signature(write_deltalake).parameters` reports it.
+        # `_safe_write_deltalake` strips the `engine` kwarg when the underlying
+        # write_deltalake signature doesn't list it (deltalake 1.x removed
+        # that param) — without this explicit declaration the mock would
+        # look like the deltalake-1.x flavour and `engine` would never reach
+        # `write_calls[…]`, hiding what the engine actually picked.
+        def _fake_write_deltalake(target, table, *, engine=None, **kwargs):
+            if engine is not None:
+                kwargs["engine"] = engine
+            write_calls.append((target, table, kwargs))
+
         fake_deltalake = type(
             "FakeDeltaLake",
             (),
             {
-                "write_deltalake": staticmethod(
-                    lambda target, table, **kwargs: write_calls.append((target, table, kwargs))
-                ),
+                "write_deltalake": staticmethod(_fake_write_deltalake),
                 "DeltaTable": FakeDeltaTable,
             },
         )
@@ -891,13 +901,20 @@ class TestDeltaInitialization:
             def create(**kwargs):
                 raise TypeError("old version")
 
+        # Same explicit `engine` param shape as the primary fake above —
+        # otherwise `_safe_write_deltalake` strips `engine` from kwargs
+        # before this mock sees it and the engine assertion at line ~920
+        # would KeyError.
+        def _fake_fallback_write_deltalake(target, table, *, engine=None, **kwargs):
+            if engine is not None:
+                kwargs["engine"] = engine
+            write_calls.append((target, table, kwargs))
+
         fake_fallback = type(
             "FakeFallbackDeltaLake",
             (),
             {
-                "write_deltalake": staticmethod(
-                    lambda target, table, **kwargs: write_calls.append((target, table, kwargs))
-                ),
+                "write_deltalake": staticmethod(_fake_fallback_write_deltalake),
                 "DeltaTable": FakeFallbackDeltaTable,
             },
         )

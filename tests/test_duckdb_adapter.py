@@ -191,7 +191,13 @@ def test_duckdb_adapter_links_and_register_df_variants(tmp_path: Path) -> None:
     assert adapter.con.sql("SELECT id FROM pandas_like").fetchone()[0] == 2
 
 
-def test_duckdb_adapter_parquet_directory_link_and_base_path_resolution(tmp_path: Path) -> None:
+def test_duckdb_adapter_parquet_directory_link_and_base_path_resolution(tmp_path: Path, monkeypatch) -> None:
+    # Link paths are STORAGE references — resolved from CWD after the
+    # registry expands {silver_path}/etc placeholders. _base_path is
+    # explicitly NOT consulted for links (it's reserved for contract-local
+    # files like external_logic.path). chdir to tmp_path so the CWD-relative
+    # "links" glob lands where the fixture was written.
+    monkeypatch.chdir(tmp_path)
     link_dir = tmp_path / "links"
     link_dir.mkdir()
     pl.DataFrame({"id": [1], "name": ["alpha"]}).write_parquet(link_dir / "part-0.parquet")
@@ -204,7 +210,7 @@ def test_duckdb_adapter_parquet_directory_link_and_base_path_resolution(tmp_path
         ],
         transformations=[{"sql": "SELECT source.id, dim.name FROM source LEFT JOIN dim ON source.id = dim.id"}],
     )
-    contract._base_path = tmp_path
+    contract._base_path = tmp_path  # set, but engine no longer uses it for links
 
     good, bad = DuckDBAdapter(contract).execute(pl.DataFrame({"id": [1]}))
 
