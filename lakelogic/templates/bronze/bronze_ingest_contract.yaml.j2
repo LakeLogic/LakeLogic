@@ -7,7 +7,6 @@ version: "1.0.0"
 
 info:
   title: "{{ title }}"
-  version: "1.0.0"
   description: "{{ description | default('Raw ingestion contract — Bronze layer') }}"
   target_layer: "bronze"
   domain: "{{ domain }}"
@@ -18,13 +17,14 @@ dataset: "{{ dataset_name }}"
 primary_key: {{ primary_key | tojson }}
 {%- endif %}
 
-# ── Source Configuration ───────────────────────────────────────
-source:
-  type: "{{ source_type | default('csv') }}"
-  path: "{{ source_path | default('') }}"
-
-# ── Server (Ingest Mode) ──────────────────────────────────────
+# ── Server: storage + ingest config ───────────────────────────
+# OSS Server schema expects type (storage backend) + path + format
+# (file format) on the same block. Previously this template split
+# source/server which failed Pydantic validation (server.type required).
 server:
+  type: "{{ source_backend | default('local') }}"
+  format: "{{ source_type | default('csv') }}"
+  path: "{{ source_path | default('') }}"
   mode: ingest
   cast_to_string: true
   schema_policy:

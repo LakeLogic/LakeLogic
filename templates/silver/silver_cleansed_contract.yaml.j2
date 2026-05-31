@@ -7,7 +7,6 @@ version: "1.0.0"
 
 info:
   title: "{{ title }}"
-  version: "1.0.0"
   description: "{{ description | default('Cleansed & typed contract — Silver layer') }}"
   target_layer: "silver"
   domain: "{{ domain }}"
@@ -39,6 +38,9 @@ model:
 {%- if field.pii is defined and field.pii %}
       pii: true
       classification: "{{ field.classification | default('confidential') }}"
+{%- if field.masking %}
+      masking: "{{ field.masking }}"
+{%- endif %}
 {%- endif %}
 {%- if field.description %}
       description: "{{ field.description }}"
@@ -100,7 +102,8 @@ quality:
 transformations:
   - phase: pre
     deduplicate:
-      on: {{ dedup_keys | tojson }}
+      # Quoted: YAML 1.1 parsers read bare `on:` as boolean True.
+      "on": {{ dedup_keys | tojson }}
 {%- if dedup_sort_by %}
       sort_by: {{ dedup_sort_by | tojson }}
       order: "{{ dedup_order | default('desc') }}"
