@@ -555,6 +555,29 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "quantity_available": "pyint(min_value=0, max_value=10000)",
     "quantity_committed": "pyint(min_value=0, max_value=5000)",
     "stock_level": "pyint(min_value=0, max_value=5000)",
+    # ── Measures, durations & ratings (generic numeric name-tokens) ───────
+    # Without these, numeric fields typed as `string` in raw/bronze layers
+    # (e.g. distance_km, duration_minutes, surge_multiplier, *_rating) fall
+    # through to the ID-style fallback ("DIS-7813"), which then fails the
+    # downstream numeric cast in silver and quarantines 100% of rows. Mapping
+    # the common numeric name-tokens to realistic numbers keeps them castable.
+    "rating": "pyfloat(min_value=3.6, max_value=5, right_digits=1)",
+    "distance": "pyfloat(min_value=0.3, max_value=60, right_digits=2)",
+    "distance_km": "pyfloat(min_value=0.3, max_value=60, right_digits=2)",
+    "km": "pyfloat(min_value=0.3, max_value=60, right_digits=2)",
+    "duration": "pyint(min_value=1, max_value=180)",
+    "duration_minutes": "pyint(min_value=1, max_value=180)",
+    "minutes": "pyint(min_value=1, max_value=180)",
+    "multiplier": "pyfloat(min_value=1, max_value=5, right_digits=1)",
+    "surge_multiplier": "pyfloat(min_value=1, max_value=5, right_digits=1)",
+    "speed": "pyfloat(min_value=0, max_value=120, right_digits=1)",
+    "speed_kmh": "pyfloat(min_value=0, max_value=120, right_digits=1)",
+    "kmh": "pyfloat(min_value=0, max_value=120, right_digits=1)",
+    "mph": "pyfloat(min_value=0, max_value=80, right_digits=1)",
+    # Tips are small absolute amounts — an exact hint so they don't inherit the
+    # broad "amount" range (which would make tips rival the fare).
+    "tip": "pyfloat(min_value=0, max_value=12, right_digits=2)",
+    "tip_amount": "pyfloat(min_value=0, max_value=12, right_digits=2)",
     # ── Healthcare ────────────────────────────────────────────────────────
     "nhs_number": "numerify(text='### ### ####')",
     "patient_id": "bothify(text='PAT-######')",
@@ -795,6 +818,13 @@ _DATE_NAME_CONTAINS = (
     "close_date",
 )
 _TIMESTAMP_SUFFIXES = ("_at", "_time", "_timestamp", "_ts", "_datetime", "_dt")
+
+# Exact field names that denote a temporal value but carry no recognizable
+# suffix (a bare `timestamp` column won't match `_timestamp`). Without these
+# they fall through to the ID-style fallback ("TIM-6785") and quarantine on
+# the downstream timestamp cast.
+_DATE_NAME_EXACT_TS = frozenset({"timestamp", "datetime", "event_timestamp"})
+_DATE_NAME_EXACT_DATE = frozenset({"date", "date_of_birth", "dob", "birthdate"})
 
 
 # ── Temporal Triplets Configuration ──────────────────────────────────────────
@@ -6257,9 +6287,13 @@ class DataGenerator:
         # ── Date/timestamp detection by field NAME (highest priority) ──────────
         # Must run BEFORE Faker semantic hints to prevent false matches
         # (e.g. "ship_date" matching the "ip" hint in _SEMANTIC_HINTS).
-        is_timestamp_name = any(name_lower.endswith(s) for s in _TIMESTAMP_SUFFIXES)
-        is_date_name = any(name_lower.endswith(s) for s in _DATE_NAME_SUFFIXES) or any(
-            kw in name_lower for kw in _DATE_NAME_CONTAINS
+        is_timestamp_name = name_lower in _DATE_NAME_EXACT_TS or any(
+            name_lower.endswith(s) for s in _TIMESTAMP_SUFFIXES
+        )
+        is_date_name = (
+            name_lower in _DATE_NAME_EXACT_DATE
+            or any(name_lower.endswith(s) for s in _DATE_NAME_SUFFIXES)
+            or any(kw in name_lower for kw in _DATE_NAME_CONTAINS)
         )
         if is_timestamp_name:
             # ── Window-constrained generation ──────────────────────────
