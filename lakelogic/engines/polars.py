@@ -555,6 +555,35 @@ class PolarsAdapter(EngineAdapter):
                         )
                         .alias(field.name)
                     )
+                elif dtype == pl.Boolean and current_dtype != pl.Boolean:
+                    # Polars refuses a direct String→Boolean cast ("casting from
+                    # Utf8View to Boolean not supported"), which would crash the
+                    # whole contract. Map the common textual truthy/falsy tokens
+                    # explicitly; anything unrecognized becomes null and is
+                    # quarantined as a type mismatch, identical to the numeric path.
+                    _bnorm = (
+                        pl.col(field.name)
+                        .cast(pl.Utf8, strict=False)
+                        .str.strip_chars()
+                        .str.to_lowercase()
+                    )
+                    cast_expr = (
+                        pl.when(_bnorm.is_in(["true", "t", "1", "yes", "y"]))
+                        .then(pl.lit(True))
+                        .when(_bnorm.is_in(["false", "f", "0", "no", "n"]))
+                        .then(pl.lit(False))
+                        .otherwise(pl.lit(None, dtype=pl.Boolean))
+                    )
+                    err_col = f"__type_err_{field.name}"
+                    self._type_err_cols.append(err_col)
+                    msg = f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    exprs.append(
+                        pl.when(pl.col(field.name).is_not_null() & cast_expr.is_null())
+                        .then(pl.lit(msg))
+                        .otherwise(pl.lit(None))
+                        .alias(err_col)
+                    )
+                    exprs.append(cast_expr.alias(field.name))
                 else:
                     cast_expr = pl.col(field.name).cast(dtype, strict=False)
                     err_col = f"__type_err_{field.name}"

@@ -1732,6 +1732,15 @@ class DataProcessor:
                                     lf = pl.scan_ndjson(file_paths[0], **_ndjson_kw)
                                     df = lf.collect()
                             else:  # CSV
+                                # Raw landing CSV is the bronze (raw) layer: read
+                                # every column as a string so malformed values
+                                # (e.g. "n/a" in an otherwise-numeric column) pass
+                                # through intact and are quarantined at the typed
+                                # cast downstream, instead of aborting the whole
+                                # ingest with a Polars parse error. infer_schema_length=0
+                                # makes Polars default all columns to Utf8.
+                                _csv_read_opts = {**_read_opts, "infer_schema_length": 0}
+                                _csv_scan_kw = {**_scan_kw, "infer_schema_length": 0}
                                 if _is_local:
                                     # Eager read — bypasses Polars' internal
                                     # path canonicalisation which breaks on
@@ -1739,18 +1748,7 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
                                             [
-                                                pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file"))
-                                                for p in file_paths
-                                            ],
-                                            how=_concat_how,
-                                        )
-                                    else:
-                                        df = pl.read_csv(file_paths[0])
-                                else:
-                                    if _tag_source:
-                                        df = pl.concat(  # pragma: no cover
-                                            [
-                                                pl.read_csv(p, **_read_opts).with_columns(
+                                                pl.read_csv(p, infer_schema_length=0).with_columns(
                                                     pl.lit(p).alias("_source_file")
                                                 )
                                                 for p in file_paths
@@ -1758,7 +1756,20 @@ class DataProcessor:
                                             how=_concat_how,
                                         )
                                     else:
-                                        lf = pl.scan_csv(file_paths[0], **_scan_kw)
+                                        df = pl.read_csv(file_paths[0], infer_schema_length=0)
+                                else:
+                                    if _tag_source:
+                                        df = pl.concat(  # pragma: no cover
+                                            [
+                                                pl.read_csv(p, **_csv_read_opts).with_columns(
+                                                    pl.lit(p).alias("_source_file")
+                                                )
+                                                for p in file_paths
+                                            ],
+                                            how=_concat_how,
+                                        )
+                                    else:
+                                        lf = pl.scan_csv(file_paths[0], **_csv_scan_kw)
                                         df = lf.collect()
                         else:
                             # Eager fallback — JSON, XML, Excel (no scan_* support)
@@ -1803,7 +1814,8 @@ class DataProcessor:
                                 elif fp.endswith(".json"):
                                     df = _read_json_flat(fp)
                                 else:
-                                    df = pl.read_csv(fp)
+                                    # raw landing CSV → read all-string (see note above)
+                                    df = pl.read_csv(fp, infer_schema_length=0)
                             else:
                                 frames = []
                                 for fp in file_paths:
@@ -1814,7 +1826,7 @@ class DataProcessor:
                                     elif fp.endswith(".json"):
                                         frames.append(_read_json_flat(fp))
                                     else:
-                                        frames.append(pl.read_csv(fp))
+                                        frames.append(pl.read_csv(fp, infer_schema_length=0))
                                 df = pl.concat(frames, how="diagonal_relaxed")  # coerce type conflicts across files
 
                     else:
@@ -2035,12 +2047,12 @@ class DataProcessor:
                                         # that breaks on Windows drive letters.
                                         if not self._is_uri_path(path):
                                             df = pl.concat(
-                                                [pl.read_csv(p) for p in _resolved],
+                                                [pl.read_csv(p, infer_schema_length=0) for p in _resolved],
                                                 how="diagonal_relaxed",
                                             )
                                         else:
                                             lf = pl.concat(
-                                                [pl.scan_csv(p, glob=False) for p in _resolved],
+                                                [pl.scan_csv(p, glob=False, infer_schema_length=0) for p in _resolved],
                                                 how="diagonal_relaxed",
                                             )
                                             df = lf.collect()
@@ -2065,9 +2077,9 @@ class DataProcessor:
                                         df = lf.collect()
                                     else:
                                         if not self._is_uri_path(path):
-                                            df = pl.read_csv(path)
+                                            df = pl.read_csv(path, infer_schema_length=0)
                                         else:
-                                            lf = pl.scan_csv(path, glob=False)
+                                            lf = pl.scan_csv(path, glob=False, infer_schema_length=0)
                                             df = lf.collect()
                                 except Exception as e:
                                     if (
@@ -4721,7 +4733,9 @@ class DataProcessor:
         if path_str.endswith(".parquet"):
             lf = pl.scan_parquet(path_str)
         elif path_str.endswith(".csv"):
-            lf = pl.scan_csv(path_str)
+            # raw landing CSV → all-string read so malformed values quarantine
+            # downstream instead of aborting the scan (see _load_source note).
+            lf = pl.scan_csv(path_str, infer_schema_length=0)
         elif path_str.endswith(".ndjson") or path_str.endswith(".jsonl"):
             lf = pl.scan_ndjson(path_str)
         else:
