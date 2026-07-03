@@ -1738,7 +1738,7 @@ wheels = [
 
 [[package]]
 name = "datacontract-cli"
-version = "0.12.4"
+version = "0.12.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -1760,9 +1760,9 @@ dependencies = [
     { name = "sqlglot" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/26/a0/c5175e73d1e52ea85fe0e12d665fc6ffac5e7258d8caa96c360b0db53c01/datacontract_cli-0.12.4.tar.gz", hash = "sha256:9b77afd39ed5c68a264bdf4e202851fb24a2ef13da35b9be0ebc7b19df34901b", size = 413984, upload-time = "2026-05-21T20:26:22.38Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/3f/20b452334caaa2a115fe3fcf397176040ec47692b16f2bc5744f207446ca/datacontract_cli-0.12.5.tar.gz", hash = "sha256:d4052cb97f0fde513610a3f3e409521f21c568a313c137a2c630a020e217bf56", size = 426678, upload-time = "2026-05-30T11:34:56.576Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/ee/0f6e4eeea7b83257af5c96523b17af07f97b5d4885662ad9e45854e15df5/datacontract_cli-0.12.4-py3-none-any.whl", hash = "sha256:536321fcde612dc92d8924856ad11489f884a73f78a46707114c9e54cfa67aa5", size = 339977, upload-time = "2026-05-21T20:26:20.569Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/24/7db45d483f28beb7c14bad04bc08a0edc1bb50d04d4e27fcc1f8b50bbba1/datacontract_cli-0.12.5-py3-none-any.whl", hash = "sha256:fc6efeead304c358c201a1430c2c4eba4fa7ae75859a193743375daad0411a9a", size = 346596, upload-time = "2026-05-30T11:34:54.869Z" },
 ]
 
 [[package]]
@@ -1952,7 +1952,7 @@ wheels = [
 
 [[package]]
 name = "diff-cover"
-version = "10.2.1"
+version = "10.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chardet" },
@@ -1960,9 +1960,9 @@ dependencies = [
     { name = "pluggy" },
     { name = "pygments" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9b/72/fc43790759f3824801359249611f8785541407541fc756ba6922aa5781ba/diff_cover-10.2.1.tar.gz", hash = "sha256:33bae6a1bdcc8aea2c626bdcff4efb9f4e9cbf00f929060159e7c959306f85bf", size = 102405, upload-time = "2026-05-23T12:55:07.555Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/21/057e816125c162662d2a2cc2ebcd72dd333e78e51678298d07dd3146011a/diff_cover-10.3.0.tar.gz", hash = "sha256:474dbc63e815fbb7567d7b7ca5b104123e96129f25426ebdbc9a1bdbb935b2c6", size = 106546, upload-time = "2026-05-30T14:17:14.32Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/32/88/037da0abb5241fdb22d786307af6a74e3c4cf27f241e461314893071d19e/diff_cover-10.2.1-py3-none-any.whl", hash = "sha256:1f98191f18953091672598c1cb3eb62efc1288d96f8d92f24c898e993bf3aae1", size = 56744, upload-time = "2026-05-23T12:55:05.99Z" },
+    { url = "https://files.pythonhosted.org/packages/83/0a/a96e57a7a3fca419cd5ceff0d13dee2166520fa67103fb82624ad64700fb/diff_cover-10.3.0-py3-none-any.whl", hash = "sha256:2e47d5ab3868d1e92131c11f364f3f4a8583c97123d3bbc6b6cc8ce0a4cc2202", size = 58989, upload-time = "2026-05-30T14:17:12.858Z" },
 ]
 
 [[package]]
@@ -8769,15 +8769,15 @@ wheels = [
 
 [[package]]
 name = "starlette"
-version = "1.2.0"
+version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/bf/616a066c2760f6c2b1ae3437cc28149734d069fbb46511712beae118a68c/starlette-1.2.0.tar.gz", hash = "sha256:3c5a6b23fff42492914e93890bb80cbfea72dbf37de268eec06185d62a4ca553", size = 2668923, upload-time = "2026-05-28T11:42:50.568Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/25/44/ec35f1b6e83094b997da438a02c8c9b0ade2b1e84cfc48bd4656780760a6/starlette-1.2.1.tar.gz", hash = "sha256:9b9b5ebb992e67d6093741e63c2f59e4f6fff986f81163c087867bd7b924b3f6", size = 2701854, upload-time = "2026-05-31T01:07:51.847Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/85/492183764d5d01d4514be3730fdb8e228a80605783099551c51627578b5d/starlette-1.2.0-py3-none-any.whl", hash = "sha256:36e0c76ac59157e75dc4b3bdeafba97fb04eaf1878045f15dbef666a6f092ed7", size = 73213, upload-time = "2026-05-28T11:42:48.801Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/54/196d0c1db10af76baa4f64894448505d60d3cdf70ef92cbb35f46a4e4c71/starlette-1.2.1-py3-none-any.whl", hash = "sha256:4de0082d08c8f6764a85a54cf1120d6939507a19905c7768acad2a9f875d2b89", size = 73350, upload-time = "2026-05-31T01:07:50.09Z" },
 ]
 
 [[package]]
