@@ -1598,7 +1598,17 @@ def write_run_log(
         _raw_dict = getattr(contract, "__dict__", {})
         observatory_cfg = _raw_dict.get("observatory")
 
-    logger.info(f"📡 [1/5] Observatory config resolved: {observatory_cfg is not None}")
+    # Merge in env-var convenience config (${VAR} interpolation + the
+    # LAKELOGIC_CLOUD_API_KEY / _ENDPOINT one-liner path). This runs even when
+    # there is NO YAML observatory block, so a bare env var is enough to connect.
+    from .observatory_spool import resolve_observatory_config
+
+    observatory_cfg = resolve_observatory_config(observatory_cfg)
+
+    logger.info(
+        f"📡 [1/5] Observatory config resolved: enabled={observatory_cfg.get('enabled', False)}, "
+        f"endpoint={bool(observatory_cfg.get('endpoint'))}, key={bool(observatory_cfg.get('api_key'))}"
+    )
 
     if observatory_cfg and isinstance(observatory_cfg, dict) and observatory_cfg.get("enabled"):
         endpoint = observatory_cfg.get("endpoint")
@@ -1649,6 +1659,28 @@ def write_run_log(
                     _raw_failures = report.get("row_rule_failures") or []
                     _quarantined_rows = _raw_failures[:50] if _raw_failures else None
 
+                # Contract version + a schema fingerprint, so the SaaS can correlate
+                # an incident to the contract revision that shipped it (feeds
+                # breaking-change / drift attribution). Fingerprint is best-effort.
+                _contract_version = report.get("contract_version")
+                _contract_fp = None
+                try:
+                    import hashlib as _hashlib
+
+                    _fields = None
+                    _model = getattr(contract, "model", None)
+                    if _model is not None:
+                        _fields = getattr(_model, "fields", None)
+                    if _fields:
+                        _sig = ",".join(
+                            sorted(f"{getattr(fld, 'name', '')}:{getattr(fld, 'type', '')}" for fld in _fields)
+                        )
+                        _contract_fp = _hashlib.sha256(f"{_contract_version or ''}|{_sig}".encode("utf-8")).hexdigest()[
+                            :16
+                        ]
+                except Exception:
+                    _contract_fp = None
+
                 payload = {
                     "contract_name": report.get("contract") or report.get("dataset"),
                     "status": status,
@@ -1672,6 +1704,8 @@ def write_run_log(
                         "pipeline_run_id": report.get("pipeline_run_id"),
                         "run_id": report.get("run_id"),
                         "slo_json": report.get("slo_json"),
+                        "contract_version": _contract_version,
+                        "contract_fingerprint": _contract_fp,
                     },
                     # Cost observability
                     "estimated_cost": report.get("estimated_cost"),
@@ -1682,14 +1716,38 @@ def write_run_log(
                 logger.info(f"📡 [3/5] Posting to {endpoint} (contract={payload['contract_name']})")
 
                 # Fire and forget (short timeout to prevent blocking the pipeline)
+                from .observatory_spool import flush_spool, spool_payload
+
                 resp = _requests.post(endpoint, json=payload, headers=headers, timeout=3.0)
                 logger.info(f"📡 [4/5] Response: HTTP {resp.status_code}")
                 if resp.status_code < 300:
                     logger.info(f"📡 [5/5] ✅ Ingested: {resp.text[:200]}")
+                    # SaaS just confirmed reachable — opportunistically drain any
+                    # run logs buffered during a previous outage (bounded + time-
+                    # budgeted, so a backlog can't stall the pipeline).
+                    flush_spool(observatory_cfg, endpoint, headers)
+                elif resp.status_code in (408, 429) or resp.status_code >= 500:
+                    # Transient / server-side failure — buffer for retry on a
+                    # later run instead of dropping (quarantine sample stripped).
+                    spool_payload(observatory_cfg, payload)
+                    logger.warning(
+                        f"📡 [5/5] ⏳ Observatory {resp.status_code}; buffered run log for retry: {resp.text[:300]}"
+                    )
                 else:
-                    logger.warning(f"📡 [5/5] ❌ Observatory returned {resp.status_code}: {resp.text[:500]}")
+                    # 4xx (bad payload / auth) — retrying won't help; drop.
+                    logger.warning(
+                        f"📡 [5/5] ❌ Observatory returned {resp.status_code} (not retried): {resp.text[:500]}"
+                    )
             except Exception as exc:
-                logger.warning(f"📡 [ERR] Failed to push telemetry to observatory {endpoint}: {exc}")
+                # Network error / timeout — buffer for retry (metadata only) so a
+                # transient outage doesn't silently lose this run's telemetry.
+                try:
+                    from .observatory_spool import spool_payload as _spool_payload
+
+                    _spool_payload(observatory_cfg, payload)
+                except Exception:
+                    pass
+                logger.warning(f"📡 [ERR] Push failed ({exc}); buffered run log for retry")
         else:
             logger.info(
                 f"📡 [SKIP] Push skipped: endpoint={bool(endpoint)}, "

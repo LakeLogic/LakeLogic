@@ -1,15 +1,19 @@
 site_name: LakeLogic
-site_description: Trust Your Data. Scale Your Logic. SQL-first quality gates from Polars to petabytes.
+site_description: Define data trust once. Enforce it everywhere. Open-source, Git-native data contracts — schema, quality, PII, lineage and SLOs as code, validated at runtime and in CI across Polars, DuckDB, and Spark.
 site_url: https://LakeLogic.github.io/LakeLogic/
 site_author: LakeLogic Team
 repo_name: lakelogic/LakeLogic
 repo_url: https://github.com/lakelogic/LakeLogic
 edit_uri: edit/main/docs/
 copyright: >
-  Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · 
-  Open Source by <a href="https://github.com/LakeLogic" target="_blank">LakeLogic Team</a>
+  Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> ·
+  Open core — Apache 2.0 · <a href="https://github.com/lakelogic/LakeLogic" target="_blank">GitHub</a>
 
 use_directory_urls: false
+
+# Serve docs on a dedicated port so `mkdocs serve` never collides with the
+# FastAPI SaaS API (which uses :8000). Open http://127.0.0.1:8010/LakeLogic/
+dev_addr: 127.0.0.1:8010
 
 theme:
   name: material

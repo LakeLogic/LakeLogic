@@ -33,6 +33,36 @@ class PolarsAdapter(EngineAdapter):
 
         return ctx
 
+    @staticmethod
+    def _numeric_compared_cols(row_rules, schema) -> set:
+        """
+        Return the Utf8 columns that a row rule compares against a numeric literal
+        (e.g. ``age >= 30`` or ``30 < age``).
+
+        The loader reads every column as Utf8 (``infer_schema_length=0``), so a
+        numeric comparison on a column without a declared numeric type hits Polars'
+        strict ``cannot compare string with numeric type`` error. Such columns are
+        coerced to Float64 *for rule evaluation only*, so the comparison works while
+        the emitted good/bad frames keep their original (string) dtypes.
+        """
+        import re as _re
+
+        utf8_cols = [name for name, dtype in schema.items() if dtype == pl.Utf8]
+        if not utf8_cols:
+            return set()
+
+        ops = r"(?:<=|>=|<>|!=|<|>|=)"
+        found: set = set()
+        for rule in row_rules:
+            sql = getattr(rule, "sql", "") or ""
+            for col in utf8_cols:
+                cb = _re.escape(col)
+                # `col <op> number`  OR  `number <op> col`
+                pattern = rf"\b{cb}\b\s*{ops}\s*-?\d|-?\d[\d._]*\s*{ops}\s*\b{cb}\b"
+                if _re.search(pattern, sql, _re.IGNORECASE):
+                    found.add(col)
+        return found
+
     def _register_links(self, ctx: pl.SQLContext) -> None:
         """
         Register linked reference datasets into a SQLContext.
@@ -555,6 +585,30 @@ class PolarsAdapter(EngineAdapter):
                         )
                         .alias(field.name)
                     )
+                elif dtype == pl.Boolean and current_dtype != pl.Boolean:
+                    # Polars refuses a direct String→Boolean cast ("casting from
+                    # Utf8View to Boolean not supported"), which would crash the
+                    # whole contract. Map the common textual truthy/falsy tokens
+                    # explicitly; anything unrecognized becomes null and is
+                    # quarantined as a type mismatch, identical to the numeric path.
+                    _bnorm = pl.col(field.name).cast(pl.Utf8, strict=False).str.strip_chars().str.to_lowercase()
+                    cast_expr = (
+                        pl.when(_bnorm.is_in(["true", "t", "1", "yes", "y"]))
+                        .then(pl.lit(True))
+                        .when(_bnorm.is_in(["false", "f", "0", "no", "n"]))
+                        .then(pl.lit(False))
+                        .otherwise(pl.lit(None, dtype=pl.Boolean))
+                    )
+                    err_col = f"__type_err_{field.name}"
+                    self._type_err_cols.append(err_col)
+                    msg = f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    exprs.append(
+                        pl.when(pl.col(field.name).is_not_null() & cast_expr.is_null())
+                        .then(pl.lit(msg))
+                        .otherwise(pl.lit(None))
+                        .alias(err_col)
+                    )
+                    exprs.append(cast_expr.alias(field.name))
                 else:
                     cast_expr = pl.col(field.name).cast(dtype, strict=False)
                     err_col = f"__type_err_{field.name}"
@@ -700,9 +754,29 @@ class PolarsAdapter(EngineAdapter):
             for i, rule in enumerate(row_rules):
                 rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as _rule_{i}")
 
-            # Run all rules in one pass
-            eval_sql = f"SELECT *, {', '.join(rule_exprs)} FROM {self.contract.dataset or 'source'}"
-            lf_eval = ctx.execute(eval_sql)
+            dataset_name = self.contract.dataset or "source"
+
+            # Coerce string columns that a rule compares to a numeric literal to
+            # Float64 for rule evaluation only (see _numeric_compared_cols). Keeps
+            # numeric comparisons working under strict Polars while the emitted
+            # good/bad frames retain their original dtypes.
+            try:
+                _schema = lf.collect_schema()
+            except Exception:
+                _schema = lf.schema
+            coerce_cols = self._numeric_compared_cols(row_rules, _schema)
+
+            if coerce_cols:
+                lf_rules_src = lf.with_columns([pl.col(c).cast(pl.Float64, strict=False) for c in coerce_cols])
+                rules_ctx = self._get_context(lf_rules_src)
+                eval_sql = f"SELECT {', '.join(rule_exprs)} FROM {dataset_name}"
+                # Masks computed on the coerced frame, concatenated back onto the
+                # original (unchanged) columns — row order is preserved by both.
+                lf_eval = pl.concat([lf, rules_ctx.execute(eval_sql)], how="horizontal")
+            else:
+                # Run all rules in one pass
+                eval_sql = f"SELECT *, {', '.join(rule_exprs)} FROM {dataset_name}"
+                lf_eval = ctx.execute(eval_sql)
             self._add_trace(
                 "Row Rules Evaluation",
                 input_rows=post_output_count,

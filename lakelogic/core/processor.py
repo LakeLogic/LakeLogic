@@ -145,6 +145,11 @@ class DataProcessor:
         self.engine_name = (engine or self._discover_engine()).lower()
         self.stage = stage
         self.contract = self._load_contract(contract)
+        # Pre-flight: catch contracts that would silently materialize the WRONG
+        # output (keyless merge, tiebreaker-less dedup, SCD2 with no tracked
+        # columns) before we run. Non-breaking — logs by default; raises only
+        # under LAKELOGIC_STRICT_PREFLIGHT. Same validator as `lakelogic validate`.
+        self._run_preflight(contract)
         # Support trace=True or trace="enabled"
         self.trace_enabled = trace is True or str(trace).lower() == "enabled"
         self.adapter = self._get_adapter()
@@ -310,6 +315,40 @@ class DataProcessor:
             return DuckDBAdapter(self.contract)
         else:
             raise ValueError(f"Unsupported engine: {self.engine_name}")
+
+    def _run_preflight(self, contract_input: Union[str, Path, dict, DataContract]) -> None:
+        """Pre-flight materialization validation (see lakelogic.core.preflight).
+
+        Best-effort + non-breaking: logs any materialization blockers, and raises
+        ``PreflightError`` only when ``LAKELOGIC_STRICT_PREFLIGHT`` is set, so
+        existing pipelines are unaffected until a team opts into fail-fast.
+        """
+        try:
+            from lakelogic.core.preflight import preflight_check, PreflightError
+            from loguru import logger as _logger
+        except Exception:
+            return
+
+        name = None
+        try:
+            _info = getattr(self.contract, "info", None)
+            name = getattr(_info, "table_name", None) if _info else None
+        except Exception:
+            pass
+        name = name or "contract"
+
+        try:
+            findings = preflight_check(contract_input, name)
+        except Exception:
+            return  # pre-flight must never break the processor
+
+        if not findings:
+            return
+        for f in findings:
+            _logger.warning(f"PRE-FLIGHT {f.check_id} [{name}]: {f.message}")
+        strict = os.environ.get("LAKELOGIC_STRICT_PREFLIGHT", "").strip().lower() in ("1", "true", "yes")
+        if strict:
+            raise PreflightError(name, findings)
 
     def _load_contract(self, contract: Union[str, Path, dict, DataContract]) -> DataContract:
         """
@@ -1732,6 +1771,15 @@ class DataProcessor:
                                     lf = pl.scan_ndjson(file_paths[0], **_ndjson_kw)
                                     df = lf.collect()
                             else:  # CSV
+                                # Raw landing CSV is the bronze (raw) layer: read
+                                # every column as a string so malformed values
+                                # (e.g. "n/a" in an otherwise-numeric column) pass
+                                # through intact and are quarantined at the typed
+                                # cast downstream, instead of aborting the whole
+                                # ingest with a Polars parse error. infer_schema_length=0
+                                # makes Polars default all columns to Utf8.
+                                _csv_read_opts = {**_read_opts, "infer_schema_length": 0}
+                                _csv_scan_kw = {**_scan_kw, "infer_schema_length": 0}
                                 if _is_local:
                                     # Eager read — bypasses Polars' internal
                                     # path canonicalisation which breaks on
@@ -1739,18 +1787,7 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
                                             [
-                                                pl.read_csv(p).with_columns(pl.lit(p).alias("_source_file"))
-                                                for p in file_paths
-                                            ],
-                                            how=_concat_how,
-                                        )
-                                    else:
-                                        df = pl.read_csv(file_paths[0])
-                                else:
-                                    if _tag_source:
-                                        df = pl.concat(  # pragma: no cover
-                                            [
-                                                pl.read_csv(p, **_read_opts).with_columns(
+                                                pl.read_csv(p, infer_schema_length=0).with_columns(
                                                     pl.lit(p).alias("_source_file")
                                                 )
                                                 for p in file_paths
@@ -1758,7 +1795,20 @@ class DataProcessor:
                                             how=_concat_how,
                                         )
                                     else:
-                                        lf = pl.scan_csv(file_paths[0], **_scan_kw)
+                                        df = pl.read_csv(file_paths[0], infer_schema_length=0)
+                                else:
+                                    if _tag_source:
+                                        df = pl.concat(  # pragma: no cover
+                                            [
+                                                pl.read_csv(p, **_csv_read_opts).with_columns(
+                                                    pl.lit(p).alias("_source_file")
+                                                )
+                                                for p in file_paths
+                                            ],
+                                            how=_concat_how,
+                                        )
+                                    else:
+                                        lf = pl.scan_csv(file_paths[0], **_csv_scan_kw)
                                         df = lf.collect()
                         else:
                             # Eager fallback — JSON, XML, Excel (no scan_* support)
@@ -1803,7 +1853,8 @@ class DataProcessor:
                                 elif fp.endswith(".json"):
                                     df = _read_json_flat(fp)
                                 else:
-                                    df = pl.read_csv(fp)
+                                    # raw landing CSV → read all-string (see note above)
+                                    df = pl.read_csv(fp, infer_schema_length=0)
                             else:
                                 frames = []
                                 for fp in file_paths:
@@ -1814,7 +1865,7 @@ class DataProcessor:
                                     elif fp.endswith(".json"):
                                         frames.append(_read_json_flat(fp))
                                     else:
-                                        frames.append(pl.read_csv(fp))
+                                        frames.append(pl.read_csv(fp, infer_schema_length=0))
                                 df = pl.concat(frames, how="diagonal_relaxed")  # coerce type conflicts across files
 
                     else:
@@ -2035,12 +2086,12 @@ class DataProcessor:
                                         # that breaks on Windows drive letters.
                                         if not self._is_uri_path(path):
                                             df = pl.concat(
-                                                [pl.read_csv(p) for p in _resolved],
+                                                [pl.read_csv(p, infer_schema_length=0) for p in _resolved],
                                                 how="diagonal_relaxed",
                                             )
                                         else:
                                             lf = pl.concat(
-                                                [pl.scan_csv(p, glob=False) for p in _resolved],
+                                                [pl.scan_csv(p, glob=False, infer_schema_length=0) for p in _resolved],
                                                 how="diagonal_relaxed",
                                             )
                                             df = lf.collect()
@@ -2065,9 +2116,9 @@ class DataProcessor:
                                         df = lf.collect()
                                     else:
                                         if not self._is_uri_path(path):
-                                            df = pl.read_csv(path)
+                                            df = pl.read_csv(path, infer_schema_length=0)
                                         else:
-                                            lf = pl.scan_csv(path, glob=False)
+                                            lf = pl.scan_csv(path, glob=False, infer_schema_length=0)
                                             df = lf.collect()
                                 except Exception as e:
                                     if (
@@ -2131,7 +2182,11 @@ class DataProcessor:
                             elif path.endswith((".xlsx", ".xls")):
                                 df = pl.read_excel(path)
                             else:
-                                df = pl.read_csv(path)
+                                # Raw landing CSV → all Utf8 (infer_schema_length=0),
+                                # consistent with the primary CSV path above: malformed
+                                # values pass through and are quarantined at the typed
+                                # cast downstream instead of aborting the read.
+                                df = pl.read_csv(path, infer_schema_length=0)
 
             elif self.engine_name == "spark":  # pragma: no cover
                 from pyspark.sql import SparkSession
@@ -4721,7 +4776,9 @@ class DataProcessor:
         if path_str.endswith(".parquet"):
             lf = pl.scan_parquet(path_str)
         elif path_str.endswith(".csv"):
-            lf = pl.scan_csv(path_str)
+            # raw landing CSV → all-string read so malformed values quarantine
+            # downstream instead of aborting the scan (see _load_source note).
+            lf = pl.scan_csv(path_str, infer_schema_length=0)
         elif path_str.endswith(".ndjson") or path_str.endswith(".jsonl"):
             lf = pl.scan_ndjson(path_str)
         else:

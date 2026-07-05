@@ -13,6 +13,10 @@ templates:
       and produce a denormalized fact table.
     processor_template: gold_fact_processor.py.j2
     contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
     use_when:
       - "join"
       - "fact"
@@ -35,6 +39,10 @@ templates:
       and produce a summary/analytics-ready table.
     processor_template: gold_aggregate_processor.py.j2
     contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
     use_when:
       - "aggregate"
       - "sum"
@@ -62,6 +70,10 @@ templates:
       (Type 1 overwrite or Type 2 history tracking).
     processor_template: gold_dim_processor.py.j2
     contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
     use_when:
       - "dimension"
       - "dim"
@@ -89,6 +101,10 @@ templates:
       preserving historical data in untouched partitions.
     processor_template: gold_fact_processor.py.j2
     contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
     use_when:
       - "merge"
       - "upsert"

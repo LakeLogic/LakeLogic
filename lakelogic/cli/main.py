@@ -24,6 +24,8 @@ import json
 from lakelogic.core.processor import DataProcessor
 from lakelogic.cli.review import review_command
 from lakelogic.cli.review_reply import review_reply_command
+from lakelogic.cli.lint import lint_command
+from lakelogic.cli.observatory_cmd import observatory_app
 
 app = typer.Typer(
     name="lakelogic",
@@ -41,6 +43,8 @@ app = typer.Typer(
 
 app.command(name="review", rich_help_panel="Code Quality")(review_command)
 app.command(name="review-reply", rich_help_panel="Code Quality")(review_reply_command)
+app.command(name="lint", rich_help_panel="Governance")(lint_command)
+app.add_typer(observatory_app, name="observatory", rich_help_panel="Observatory")
 
 
 @app.command(rich_help_panel="Contract Execution")
@@ -281,6 +285,12 @@ def validate(
         "--strict",
         help="Fail on warnings (not just errors).",
     ),
+    preflight: bool = typer.Option(
+        False,
+        "--preflight",
+        help="Also run pre-flight materialization checks — catch contracts that would silently "
+        "produce WRONG output (keyless merge, dedup with no tiebreaker, SCD2 with no tracked columns).",
+    ),
 ):
     """
     Validate a data contract for correctness and enforceable gates.
@@ -316,6 +326,31 @@ def validate(
         if not contract_data:
             typer.secho("❌ Contract file is empty.", fg=typer.colors.RED)
             raise typer.Exit(1)
+
+        # Pre-flight materialization validation (opt-in). Dict-based, so it runs
+        # even for contracts that need runtime context to fully parse — the same
+        # validator the pipeline runs before materializing.
+        if preflight:
+            from lakelogic.core.contract_lint import load_context
+            from lakelogic.core.preflight import preflight_check
+
+            pf = preflight_check(contract_data, contract.stem, load_context(contract))
+            if pf:
+                typer.echo(
+                    typer.style(
+                        "❌ Pre-flight materialization blockers (would silently produce WRONG output):",
+                        fg=typer.colors.RED,
+                        bold=True,
+                    )
+                )
+                for finding in pf:
+                    typer.echo(
+                        typer.style(f"   ✖ {finding.check_id}", fg=typer.colors.RED, bold=True) + f"  {finding.message}"
+                    )
+                    if finding.suggestion:
+                        typer.echo(typer.style(f"      → {finding.suggestion}", dim=True))
+                raise typer.Exit(1)
+            typer.secho("✓ Pre-flight: contract can materialize correctly.", fg=typer.colors.GREEN)
 
         # Parse into DataContract
         try:
