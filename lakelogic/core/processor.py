@@ -1633,8 +1633,10 @@ class DataProcessor:
         # "schema as contract" place) and leave extraction.output_schema empty, the
         # spark path previously skipped the mirror → pdfplumber returned empty rows
         # for every field → 100% silent quarantine.
-        if _early_ext_cfg and _early_ext_prov in {"pdfplumber", "easyocr"} and not getattr(
-            _early_ext_cfg, "output_schema", None
+        if (
+            _early_ext_cfg
+            and _early_ext_prov in {"pdfplumber", "easyocr"}
+            and not getattr(_early_ext_cfg, "output_schema", None)
         ):
             _early_model = getattr(self.contract, "model", None)
             _early_model_fields = getattr(_early_model, "fields", None) if _early_model else None
@@ -1646,9 +1648,7 @@ class DataProcessor:
                         f"model.fields so provider '{_early_ext_prov}' applies the extraction hints."
                     )
                 except Exception as _early_mirror_exc:  # pragma: no cover - defensive
-                    logger.warning(
-                        f"Could not mirror model.fields into extraction.output_schema: {_early_mirror_exc}"
-                    )
+                    logger.warning(f"Could not mirror model.fields into extraction.output_schema: {_early_mirror_exc}")
         _is_non_tabular = _early_fmt in {"pdf", "image", "pptx", "docx", "html"} or _early_ext_prov in {
             "pdfplumber",
             "easyocr",
