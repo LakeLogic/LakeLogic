@@ -377,6 +377,57 @@ Pipeline run completes
 
 > **Design principle:** Cost estimation is fail-safe. If the provider crashes, the pipeline continues normally with `cost_confidence = "none"`. Cost tracking never blocks data delivery.
 
+### Configuration
+
+Enable the push by adding an `observatory` block at the registry (or contract) level:
+
+```yaml
+observatory:
+  enabled: true
+  endpoint: https://api.lakelogic.io/api/v1/operations/run-logs/ingest
+  api_key: llc_sk_...          # org-scoped key with the operations:ingest scope
+  emit_on: [success, partial, failed]   # which run statuses to send
+  environments: [production]            # optional allow-list (empty = all)
+  layers: [silver, gold]                # optional allow-list (empty = all)
+  include_quarantine_sample: false      # send up to 50 failing rows (off by default)
+
+  # Offline durability — buffer failed pushes and replay them later.
+  spool:
+    enabled: true               # default true when observatory is enabled
+    dir: ~/.lakelogic/observatory_spool
+    max_files: 500              # ring-buffer cap (oldest dropped beyond this)
+    ttl_days: 7                # discard buffered logs older than this
+    batch: 20                  # max logs replayed inline per run
+    max_seconds: 5.0           # wall-clock budget for an inline replay
+```
+
+Only **run-level metadata** leaves your environment (contract, status, row counts, quality score, SLOs, cost). Raw data stays in your lakehouse. The optional quarantine sample is capped at 50 rows and is **off by default**.
+
+### Telemetry resilience (offline spool & retry)
+
+The push is fire-and-forget so it never blocks or breaks a pipeline. To avoid *silently dropping* telemetry during a transient SaaS outage, a failed push is **buffered to a local spool** and replayed automatically on a later run once the endpoint is reachable again:
+
+- **Buffered:** network errors, timeouts, and `5xx`/`429`/`408` responses.
+- **Dropped (not retried):** other `4xx` (bad payload / auth) — retrying can't help.
+- **Privacy:** the quarantine row sample is **stripped before anything is written to disk** — only run metadata is spooled.
+- **Bounded & safe:** the spool is capped by `max_files` (ring buffer) and `ttl_days`; replay is time-boxed (`max_seconds`) and stops on the first still-failing attempt, so a backlog can never stall a pipeline.
+- **Idempotent:** the SaaS ingest endpoint deduplicates on `run_id`, so replays never create duplicates.
+
+> On ephemeral/serverless filesystems (e.g. Azure Functions), point `spool.dir` at persistent storage so buffered logs survive container restarts. Local runs and Databricks job clusters work out of the box.
+
+Drain the spool manually (e.g. after a long outage) without waiting for the next pipeline run:
+
+```bash
+# Reads endpoint / api_key / spool settings from the registry YAML
+lakelogic observatory flush --registry path/to/_system.yaml
+
+# Or pass them explicitly
+lakelogic observatory flush \
+  --endpoint https://api.lakelogic.io/api/v1/operations/run-logs/ingest \
+  --api-key  llc_sk_... \
+  --spool-dir ~/.lakelogic/observatory_spool
+```
+
 ---
 
 ## 8. GDPR Right-to-Erasure
