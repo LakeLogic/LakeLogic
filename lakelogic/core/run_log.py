@@ -1602,6 +1602,7 @@ def write_run_log(
     # LAKELOGIC_CLOUD_API_KEY / _ENDPOINT one-liner path). This runs even when
     # there is NO YAML observatory block, so a bare env var is enough to connect.
     from .observatory_spool import resolve_observatory_config
+
     observatory_cfg = resolve_observatory_config(observatory_cfg)
 
     logger.info(
@@ -1672,14 +1673,11 @@ def write_run_log(
                         _fields = getattr(_model, "fields", None)
                     if _fields:
                         _sig = ",".join(
-                            sorted(
-                                f"{getattr(fld, 'name', '')}:{getattr(fld, 'type', '')}"
-                                for fld in _fields
-                            )
+                            sorted(f"{getattr(fld, 'name', '')}:{getattr(fld, 'type', '')}" for fld in _fields)
                         )
-                        _contract_fp = _hashlib.sha256(
-                            f"{_contract_version or ''}|{_sig}".encode("utf-8")
-                        ).hexdigest()[:16]
+                        _contract_fp = _hashlib.sha256(f"{_contract_version or ''}|{_sig}".encode("utf-8")).hexdigest()[
+                            :16
+                        ]
                 except Exception:
                     _contract_fp = None
 
@@ -1745,6 +1743,7 @@ def write_run_log(
                 # transient outage doesn't silently lose this run's telemetry.
                 try:
                     from .observatory_spool import spool_payload as _spool_payload
+
                     _spool_payload(observatory_cfg, payload)
                 except Exception:
                     pass

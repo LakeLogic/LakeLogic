@@ -4,6 +4,7 @@ Covers: quarantine sample is never persisted, failed pushes are buffered,
 replay deletes on success / drops 4xx / stops on 5xx & network error, and the
 ring-buffer + TTL caps hold.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,6 +25,7 @@ class _Resp:
 
 class _FakeRequests:
     """Configurable fake for requests.post — a status sequence or an exception."""
+
     def __init__(self, statuses=None, raise_exc=False):
         self.statuses = list(statuses or [])
         self.raise_exc = raise_exc
@@ -169,8 +171,16 @@ def test_cli_flush_drains_spool(tmp_path, monkeypatch):
 
     result = CliRunner().invoke(
         app,
-        ["observatory", "flush", "--endpoint", "https://saas/ingest",
-         "--api-key", "llc_sk_x", "--spool-dir", str(tmp_path)],
+        [
+            "observatory",
+            "flush",
+            "--endpoint",
+            "https://saas/ingest",
+            "--api-key",
+            "llc_sk_x",
+            "--spool-dir",
+            str(tmp_path),
+        ],
     )
     assert result.exit_code == 0
     assert "Replayed 2" in result.stdout
@@ -231,8 +241,7 @@ def test_resolve_yaml_key_takes_precedence_over_env(monkeypatch):
 def test_resolve_env_interpolation(monkeypatch):
     _clear_cloud_env(monkeypatch)
     monkeypatch.setenv("MY_SECRET", "llc_sk_interp")
-    cfg = sp.resolve_observatory_config({"enabled": True, "endpoint": "https://y/ingest",
-                                         "api_key": "${MY_SECRET}"})
+    cfg = sp.resolve_observatory_config({"enabled": True, "endpoint": "https://y/ingest", "api_key": "${MY_SECRET}"})
     assert cfg["api_key"] == "llc_sk_interp"
 
 
@@ -252,6 +261,7 @@ def test_resolve_nothing_configured_is_disabled(monkeypatch):
 def test_cli_status_reports_connected(monkeypatch, tmp_path):
     from typer.testing import CliRunner
     from lakelogic.cli.main import app
+
     _clear_cloud_env(monkeypatch)
     monkeypatch.setenv("LAKELOGIC_CLOUD_API_KEY", "llc_sk_status123456")
     result = CliRunner().invoke(app, ["observatory", "status", "--spool-dir", str(tmp_path)])
@@ -264,6 +274,7 @@ def test_cli_status_reports_connected(monkeypatch, tmp_path):
 def test_cli_status_reports_not_connected(monkeypatch, tmp_path):
     from typer.testing import CliRunner
     from lakelogic.cli.main import app
+
     _clear_cloud_env(monkeypatch)
     result = CliRunner().invoke(app, ["observatory", "status", "--spool-dir", str(tmp_path)])
     assert result.exit_code == 0

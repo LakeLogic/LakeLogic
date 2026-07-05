@@ -17,6 +17,7 @@ runtime-resolved ``DataContract`` (which needs registry/run-log context an autho
 contract in a PR won't have). At runtime the pipeline already holds the raw dict
 (``contract_dict``); pass that.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,9 +26,9 @@ from typing import Any, Dict, List, Optional, Union
 from lakelogic.core.contract_lint import (
     ContractFinding,
     GovernanceContext,
-    check_pk_missing_for_mutation,   # PK-002
-    check_dedup_no_timestamp,        # KEY-001
-    check_scd2_no_track_columns,     # SCD-001
+    check_dedup_no_timestamp,  # KEY-001
+    check_pk_missing_for_mutation,  # PK-002
+    check_scd2_no_track_columns,  # SCD-001
 )
 
 # The materialization-correctness checks. Violating any of these means the
@@ -46,9 +47,7 @@ class PreflightError(RuntimeError):
         self.contract = contract
         self.findings = findings
         detail = "\n".join(f"  ✖ {f.check_id}: {f.message}" for f in findings)
-        super().__init__(
-            f"Contract '{contract}' cannot materialize correctly (pre-flight):\n{detail}"
-        )
+        super().__init__(f"Contract '{contract}' cannot materialize correctly (pre-flight):\n{detail}")
 
 
 def _as_raw(contract: Union[Dict[str, Any], str, Path, Any]) -> Dict[str, Any]:
@@ -57,6 +56,7 @@ def _as_raw(contract: Union[Dict[str, Any], str, Path, Any]) -> Dict[str, Any]:
         return contract
     if isinstance(contract, (str, Path)):
         import yaml
+
         d = yaml.safe_load(Path(contract).read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     # DataContract (or similar) — best-effort; prefer passing the raw dict at runtime.

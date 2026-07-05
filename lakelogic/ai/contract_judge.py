@@ -13,6 +13,7 @@ missing. It reuses the deterministic backbone's :class:`ContractFinding`.
   runs; an LLM/network error also returns ``[]`` (never crashes the lint);
 - the LLM call is injectable (``caller=``) so it's fully testable without a key.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,8 +25,7 @@ from pydantic import BaseModel
 from lakelogic.core.contract_lint import ContractFinding, GovernanceContext, _layer
 
 # Fields we surface to the model — enough for judgment, nothing sensitive.
-_FIELD_KEYS = ("name", "type", "description", "pii", "masking", "rules",
-               "accepted_values", "min", "max")
+_FIELD_KEYS = ("name", "type", "description", "pii", "masking", "rules", "accepted_values", "min", "max")
 
 
 class _LLMFinding(BaseModel):
@@ -60,8 +60,7 @@ Severity is 'info' or 'warning' ONLY (never higher). Be conservative — no find
 better than a false one. Return an empty list if nothing is clearly wrong."""
 
 
-def _build_user_prompt(raw: Dict[str, Any], name: str,
-                       ctx: Optional[GovernanceContext]) -> str:
+def _build_user_prompt(raw: Dict[str, Any], name: str, ctx: Optional[GovernanceContext]) -> str:
     fields = [
         {k: f.get(k) for k in _FIELD_KEYS if f.get(k) is not None}
         for f in ((raw.get("model") or {}).get("fields") or [])
@@ -75,8 +74,9 @@ def _build_user_prompt(raw: Dict[str, Any], name: str,
         "quality": raw.get("quality"),
         "transformations": raw.get("transformations"),
     }
-    return ("Review this contract for semantic governance gaps and return findings.\n\n"
-            + json.dumps(payload, default=str, indent=2))
+    return "Review this contract for semantic governance gaps and return findings.\n\n" + json.dumps(
+        payload, default=str, indent=2
+    )
 
 
 def _default_caller(cfg, prompt: str) -> List[Dict[str, Any]]:
@@ -133,6 +133,7 @@ def judge_contract(
         cfg = config
         if cfg is None:
             from lakelogic.ai.review_config import load_config
+
             cfg = load_config()
         if not getattr(cfg, "api_key_present", False) or getattr(cfg, "provider", "none") == "none":
             return []  # graceful: no key → skip LLM, rules lint still runs
@@ -148,7 +149,7 @@ def judge_contract(
         return []
 
     out: List[ContractFinding] = []
-    for d in (raw_findings or []):
+    for d in raw_findings or []:
         if isinstance(d, BaseModel):
             d = d.model_dump()
         if not isinstance(d, dict):

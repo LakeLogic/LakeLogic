@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.34.0] — 2026-07-05
+
+### Added
+
+- Add observatory spool for telemetry pushes with bounded retry
+
+### Fixed
+
+- **generator,engine**: Robust ingest of string-typed numeric/temporal/boolean columns
+## [1.33.0] — 2026-05-30
+
+### Documentation
+
+- Update index.md to enhance clarity and detail of data contract framework
 ## [1.32.0] — 2026-05-21
 
 ### Added
@@ -478,6 +492,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.34.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.34.0
+[1.33.0]: https://github.com/lakelogic/LakeLogic/compare/v1.32.0...v1.33.0
 [1.32.0]: https://github.com/lakelogic/LakeLogic/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/lakelogic/LakeLogic/compare/v1.30.0...v1.31.0
 [1.30.0]: https://github.com/lakelogic/LakeLogic/compare/v1.29.0...v1.30.0

@@ -168,6 +168,36 @@ class TestRunSource:
         assert len(good) == 1  # Alice (30)
         assert len(bad) == 1  # Bob (25)
 
+    def test_quality_rule_numeric_on_string_preserves_dtype(self, csv_source):
+        """A numeric rule on an undeclared (string) column works under strict Polars,
+        and the emitted frame keeps the original string dtype (coercion is eval-only)."""
+        contract = {
+            "version": "1.0.0",
+            "dataset": "people",
+            "source": {"type": "landing", "path": str(csv_source)},
+            "quality": {"row_rules": [{"name": "adult", "sql": "age >= 30"}]},
+        }
+        good, bad = DataProcessor(engine="polars", contract=contract).run_source()
+        assert len(good) == 1 and len(bad) == 1
+        # age was loaded as a string and must remain a string in the output
+        assert good["age"].dtype == pl.String
+        assert good["age"][0] == "30"
+
+    def test_quality_rule_leaves_uncompared_numeric_looking_column(self, tmp_path):
+        """A numeric-looking string column that no rule compares numerically keeps its
+        exact string value (e.g. leading zeros) — coercion is scoped to compared cols."""
+        csv_file = tmp_path / "zips.csv"
+        csv_file.write_text("zip,age\n007,30\n012,25\n")
+        contract = {
+            "version": "1.0.0",
+            "dataset": "people",
+            "source": {"type": "landing", "path": str(csv_file)},
+            "quality": {"row_rules": [{"name": "adult", "sql": "age >= 30"}]},
+        }
+        good, _ = DataProcessor(engine="polars", contract=contract).run_source()
+        assert good["zip"].dtype == pl.String
+        assert good["zip"][0] == "007"  # leading zero preserved, not coerced to 7.0
+
     def test_run_source_no_path_raises(self):
         contract = {"version": "1.0.0", "dataset": "people"}
         proc = DataProcessor(engine="polars", contract=contract)

@@ -1,4 +1,5 @@
 """Tests for the deterministic contract governance lint (lakelogic.core.contract_lint)."""
+
 from lakelogic.core.contract_lint import (
     review_contract,
     review_contract_dict,
@@ -78,9 +79,12 @@ def test_missing_delete_strategy():  # DEL-001
 def test_no_quality_rules():  # QLT-001 — Silver only (enforcement layer)
     assert "QLT-001" in _ids(_silver(quality={}))
     # Gold derives from already-validated Silver → row-rules NOT expected there.
-    gold = {"info": {"target_layer": "gold"}, "primary_key": ["id"],
-            "materialization": {"strategy": "scd2", "scd2": {"track_columns": ["x"]}},
-            "model": {"fields": [{"name": "id", "type": "string"}]}}
+    gold = {
+        "info": {"target_layer": "gold"},
+        "primary_key": ["id"],
+        "materialization": {"strategy": "scd2", "scd2": {"track_columns": ["x"]}},
+        "model": {"fields": [{"name": "id", "type": "string"}]},
+    }
     assert "QLT-001" not in _ids(gold)
 
 
@@ -92,16 +96,16 @@ def test_scd2_without_track_columns():  # SCD-001
 
 
 def test_unpartitioned_landing():  # SRC-001 — Bronze only
-    raw = {"info": {"target_layer": "bronze"}, "source": {"type": "landing"},
-           "model": {"fields": []}}
+    raw = {"info": {"target_layer": "bronze"}, "source": {"type": "landing"}, "model": {"fields": []}}
     assert "SRC-001" in _ids(raw)
-    ok = {"info": {"target_layer": "bronze"},
-          "source": {"type": "landing", "partition": {"format": "y_%Y"}},
-          "model": {"fields": []}}
+    ok = {
+        "info": {"target_layer": "bronze"},
+        "source": {"type": "landing", "partition": {"format": "y_%Y"}},
+        "model": {"fields": []},
+    }
     assert "SRC-001" not in _ids(ok)
     # A non-bronze contract with a landing source is not a SRC-001 concern.
-    gold_landing = {"info": {"target_layer": "gold"}, "source": {"type": "landing"},
-                    "model": {"fields": []}}
+    gold_landing = {"info": {"target_layer": "gold"}, "source": {"type": "landing"}, "model": {"fields": []}}
     assert "SRC-001" not in _ids(gold_landing)
 
 
@@ -113,14 +117,17 @@ def test_no_volume_freshness_slo():  # VOL-001
 
 def test_bronze_landing_not_flagged_for_entity_checks():
     # Bronze landing shouldn't get silver/gold-only entity findings (DEL/QLT/VOL).
-    raw = {"info": {"target_layer": "bronze"},
-           "source": {"type": "landing", "partition": {"format": "y_%Y"}},
-           "model": {"fields": [{"name": "id", "type": "string"}]}}
+    raw = {
+        "info": {"target_layer": "bronze"},
+        "source": {"type": "landing", "partition": {"format": "y_%Y"}},
+        "model": {"fields": [{"name": "id", "type": "string"}]},
+    }
     ids = _ids(raw)
     assert {"DEL-001", "QLT-001", "VOL-001"}.isdisjoint(ids)
 
 
 # ── Domain-aware behaviour (contract > system > domain) ─────────────────────
+
 
 def _sev(raw, cid, ctx=None):
     hits = [f for f in review_contract_dict(raw, "t", ctx) if f.check_id == cid]
@@ -177,6 +184,7 @@ def test_load_context_walks_up_the_tree(tmp_path):
 
 # ── CI: annotations, file path, gate ────────────────────────────────────────
 
+
 def test_file_path_populated_on_findings(tmp_path):
     c = tmp_path / "silver_x.yaml"
     c.write_text(
@@ -192,10 +200,18 @@ def test_render_github_annotations():
     rep = ContractReviewReport(
         contracts_scanned=1,
         findings=[
-            ContractFinding(contract="c", check_id="PII-002", severity="critical", category="pii",
-                            message="m1", field="email", file="a/b.yaml"),
-            ContractFinding(contract="c", check_id="VOL-001", severity="info", category="rel",
-                            message="m2", file="a/b.yaml"),
+            ContractFinding(
+                contract="c",
+                check_id="PII-002",
+                severity="critical",
+                category="pii",
+                message="m1",
+                field="email",
+                file="a/b.yaml",
+            ),
+            ContractFinding(
+                contract="c", check_id="VOL-001", severity="info", category="rel", message="m2", file="a/b.yaml"
+            ),
         ],
         summary={"critical": 1, "warning": 0, "info": 1},
     )
@@ -208,13 +224,19 @@ def test_render_github_annotations():
 def test_gate_ignores_llm_findings():
     rep = ContractReviewReport(
         contracts_scanned=1,
-        findings=[ContractFinding(contract="c", check_id="SEM-001", severity="critical",
-                                  category="semantic", message="m", source="llm")],
+        findings=[
+            ContractFinding(
+                contract="c", check_id="SEM-001", severity="critical", category="semantic", message="m", source="llm"
+            )
+        ],
         summary={},
     )
     assert gate_severity(rep) is None  # an LLM critical must NOT gate CI
-    rep.findings.append(ContractFinding(contract="c", check_id="PK-002", severity="warning",
-                                        category="keys", message="m", source="rules"))
+    rep.findings.append(
+        ContractFinding(
+            contract="c", check_id="PK-002", severity="warning", category="keys", message="m", source="rules"
+        )
+    )
     assert gate_severity(rep) == "warning"  # ...but a rules finding does
 
 
