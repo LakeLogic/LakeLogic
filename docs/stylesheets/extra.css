@@ -1,19 +1,21 @@
 /* ========================================
-   LakeLogic Documentation — Snowflake-Inspired Dark Theme
+   LakeLogic Documentation — LakeLogic Brand Theme (Lake Aqua cyan)
    ======================================== */
 
 /* ---------------------------------------------------------------------------
-   1. Custom colour tokens (Snowflake navy palette)
+   1. Custom colour tokens (neutral near-black + Lake Aqua brand cyan)
    --------------------------------------------------------------------------- */
 :root {
-  --ll-navy-900: #0B1929;
-  --ll-navy-800: #0F2137;
-  --ll-navy-700: #132D4A;
-  --ll-navy-600: #1A3A5C;
-  --ll-navy-500: #1E4976;
-  --ll-blue-500: #29B5E8;   /* Snowflake signature cyan */
-  --ll-blue-400: #49C5F0;
-  --ll-blue-300: #7DD8F6;
+  /* Neutral near-black dark scale (de-navied to match the brand; keeps GitHub-dark
+     legibility for code + syntax highlighting). Var names retained for stability. */
+  --ll-navy-900: #0d1117;   /* canvas / page background */
+  --ll-navy-800: #161b22;   /* surface / code background */
+  --ll-navy-700: #21262d;
+  --ll-navy-600: #2d333b;
+  --ll-navy-500: #373e47;
+  --ll-blue-500: #06b6d4;   /* Lake Aqua — LakeLogic brand cyan */
+  --ll-blue-400: #22d3ee;
+  --ll-blue-300: #67e8f9;
   --ll-green:    #4CAF50;
   --ll-red:      #EF5350;
   --ll-border:   rgba(255, 255, 255, 0.08);
@@ -33,11 +35,11 @@
   --md-typeset-a-color:         var(--ll-blue-400);
 }
 
-/* Light mode keeps a clean white with the same accent */
+/* Light mode keeps a clean white with the same brand cyan accent */
 [data-md-color-scheme="default"] {
-  --md-primary-fg-color:  #0F2137;
-  --md-accent-fg-color:   #1976D2;
-  --md-typeset-a-color:   #1976D2;
+  --md-primary-fg-color:  #0891b2;   /* Lake Aqua — brand cyan (600) */
+  --md-accent-fg-color:   #0891b2;
+  --md-typeset-a-color:   #0e7490;
 }
 
 /* ---------------------------------------------------------------------------
@@ -139,14 +141,14 @@
 }
 
 .md-nav__link:hover {
-  background: rgba(41, 181, 232, 0.08);
+  background: rgba(6, 182, 212, 0.08);
   transform: translateX(2px);
 }
 
 .md-nav__link--active {
   font-weight: 600;
   color: var(--ll-blue-400) !important;
-  background: rgba(41, 181, 232, 0.1);
+  background: rgba(6, 182, 212, 0.1);
   border-left: 3px solid var(--ll-blue-500);
   padding-left: calc(0.8rem - 3px);
 }
@@ -212,12 +214,12 @@
 }
 
 .highlight:hover {
-  box-shadow: 0 4px 12px rgba(41, 181, 232, 0.08);
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.08);
 }
 
 /* Inline code */
 .md-typeset code {
-  background-color: rgba(41, 181, 232, 0.1);
+  background-color: rgba(6, 182, 212, 0.1);
   padding: 0.15em 0.4em;
   border-radius: 3px;
   font-size: 0.85em;
@@ -225,8 +227,8 @@
 }
 
 [data-md-color-scheme="default"] .md-typeset code {
-  color: #1565C0;
-  background-color: rgba(21, 101, 192, 0.08);
+  color: #0e7490;
+  background-color: rgba(8, 145, 178, 0.08);
 }
 
 .md-typeset pre code {
@@ -246,12 +248,12 @@
 .md-button--primary {
   background: var(--ll-blue-500);
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(41, 181, 232, 0.25);
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.25);
 }
 
 .md-button--primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(41, 181, 232, 0.35);
+  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.35);
   background: var(--ll-blue-400);
 }
 
@@ -262,7 +264,7 @@
 }
 
 .md-button:not(.md-button--primary):hover {
-  background: rgba(41, 181, 232, 0.1);
+  background: rgba(6, 182, 212, 0.1);
 }
 
 /* ---------------------------------------------------------------------------
@@ -290,7 +292,7 @@
 }
 
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) tr:hover {
-  background: rgba(41, 181, 232, 0.04);
+  background: rgba(6, 182, 212, 0.04);
 }
 
 /* ---------------------------------------------------------------------------
@@ -301,7 +303,7 @@
 }
 
 .md-search__input:focus {
-  box-shadow: 0 0 0 3px rgba(41, 181, 232, 0.2);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.2);
 }
 
 [data-md-color-scheme="slate"] .md-search__form {
@@ -320,8 +322,8 @@
 
 .md-typeset .grid.cards > ul > li:hover {
   transform: translateY(-3px);
-  box-shadow: 0 8px 20px rgba(41, 181, 232, 0.1);
-  border-color: rgba(41, 181, 232, 0.3);
+  box-shadow: 0 8px 20px rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.3);
 }
 
 [data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li {
@@ -504,7 +506,7 @@
 }
 
 [data-md-color-scheme="default"] .hero-section {
-  background: linear-gradient(135deg, rgba(15, 33, 55, 0.04), rgba(41, 181, 232, 0.06));
+  background: linear-gradient(135deg, rgba(15, 33, 55, 0.04), rgba(6, 182, 212, 0.06));
 }
 
 .hero-content {

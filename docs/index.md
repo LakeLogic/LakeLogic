@@ -1,28 +1,27 @@
 ---
-title: LakeLogic Data Contract Framework
-description: Open-source data contracts for reliable data pipelines. Define schema, data quality rules, lineage, SLOs, PII handling, and materialization once, then enforce them across Spark, Polars, DuckDB, Delta Lake, and Iceberg.
+title: LakeLogic — Open-Source Data Contracts
+description: Define data trust once. Enforce it everywhere. Open-source, Git-native data contracts — define schema, quality, PII, lineage and SLOs once in YAML, validated at runtime and in CI across Polars, DuckDB, and Spark.
 hide:
   - navigation
 ---
 <div class="hero-section" markdown>
 
 <div class="hero-content" markdown>
-# LakeLogic Data Contracts. <span style="color: var(--md-accent-fg-color);">Reliable Pipelines.</span>
+# Define data trust once. <span style="color: var(--md-accent-fg-color);">Enforce it everywhere.</span>
 
 <p class="hero-subtitle" style="font-size: 1.3rem; font-weight: 500;">
-Open-source data contract framework for reliable data pipelines.<br>
-Validate at runtime. Block bad merges in CI/CD. Ship trusted data faster.
+Bad data breaks dashboards and decisions — usually too late.<br>
+LakeLogic is the open-source framework for <strong>Git-native data contracts</strong>: validate at runtime, block bad merges in CI — before bad data ships.
 </p>
 
 <p class="hero-keyword-anchor" style="font-size: 0.95rem; opacity: 0.8; line-height: 1.5;" markdown="1">
-Define schema, data quality rules, lineage, SLOs, PII handling, and materialization once in YAML.<br><br>
-Write once. Run on [Spark](https://spark.apache.org/){: target="_blank" }, [Polars](https://pola.rs/){: target="_blank" }, or [DuckDB](https://duckdb.org/){: target="_blank" }.<br>
-<strong style="color: var(--md-accent-fg-color); font-size: 1.05rem;">Data contracts as code for Delta Lake, Iceberg, and modern lakehouse pipelines.</strong>
+Define schema, data quality rules, lineage, SLOs, PII handling, and materialization once in YAML — then run the same contract on [Polars](https://pola.rs/){: target="_blank" }, [DuckDB](https://duckdb.org/){: target="_blank" }, or [Spark](https://spark.apache.org/){: target="_blank" }.<br><br>
+<strong style="color: var(--md-accent-fg-color); font-size: 1.05rem;">Git-native · in your repo &nbsp;·&nbsp; Zero-egress · runs in your lakehouse &nbsp;·&nbsp; Open core · Apache 2.0</strong>
 </p>
 
 <div class="hero-cta" markdown>
 [ :simple-googlecolab: Run 5-Minute Quickstart in Google Colab ](https://colab.research.google.com/github/lakelogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb){: target="_blank" .md-button .md-button--primary .md-button--lg }
-[ :simple-github: View on GitHub ](https://github.com/lakelogic/LakeLogic){: .md-button .md-button--secondary }
+[ :simple-github: Start on GitHub ](https://github.com/lakelogic/LakeLogic){: .md-button .md-button--secondary }
 </div>
 </div>
 

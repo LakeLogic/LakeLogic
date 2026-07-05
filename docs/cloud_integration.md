@@ -5,6 +5,26 @@ LakeLogic can send run metadata to LakeLogic Cloud for centralized observability
 
 ---
 
+## Open core: OSS vs LakeLogic Cloud
+
+LakeLogic is **open core** (Apache 2.0). The framework — everything needed to define, run, and enforce contracts — is free and open source. LakeLogic Cloud adds an optional hosted layer on top and changes nothing about how the OSS runs.
+
+| Capability | OSS (`lakelogic`, Apache 2.0) | LakeLogic Cloud |
+|---|:---:|:---:|
+| Data contracts — schema, quality, PII, lineage, SLOs | ✅ | ✅ |
+| Runtime validation + quarantine | ✅ | ✅ |
+| CI/CD contract gates | ✅ | ✅ |
+| Engines — Polars · DuckDB · Spark | ✅ | ✅ |
+| Delta Lake / Iceberg materialization | ✅ | ✅ |
+| Run-log observatory | Local logs | Hosted, cross-pipeline |
+| Live trust score per data product | — | ✅ |
+| Zeus — agentic incident diagnosis & remediation | — | ✅ |
+| Contract Studio — visual governance across domains | — | ✅ |
+
+The OSS runs fully standalone. Cloud is additive and receives run **metadata only** (the fields below) — your data never leaves your environment.
+
+---
+
 ## Overview
 
 Every `DataProcessor.run_source()` call produces a run report. With cloud reporting enabled, this report is POSTed to a remote API — the same data that's written to local run logs.
