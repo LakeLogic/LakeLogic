@@ -229,7 +229,8 @@ def check_pk_missing_for_mutation(raw, name, ctx):  # PK-002
                 "PK-002",
                 "critical",
                 "keys",
-                f"strategy '{_strategy(raw)}'/dedup needs a key but none is declared — merge/upsert/dedup are non-deterministic without one.",
+                f"strategy '{_strategy(raw)}'/dedup needs a key but none is declared — "
+                "merge/upsert/dedup are non-deterministic without one.",
                 suggestion="Add `primary_key: [<id>]` (or `key_columns` on the dedup).",
             )
         ]
@@ -309,8 +310,10 @@ def check_no_delete_strategy(raw, name, ctx):  # DEL-001
                 "DEL-001",
                 sev,
                 "deletes",
-                f"current-state entity with a key but no delete strategy — hard deletes at source go undetected (stale rows persist).{extra}",
-                suggestion="Declare `soft_deletes: {enabled: true}` + CDC, or `deletion: {strategy: snapshot_reconcile, ...}`.",
+                f"current-state entity with a key but no delete strategy — hard deletes "
+                f"at source go undetected (stale rows persist).{extra}",
+                suggestion="Declare `soft_deletes: {enabled: true}` + CDC, or "
+                "`deletion: {strategy: snapshot_reconcile, ...}`.",
             )
         ]
     return []
@@ -326,7 +329,8 @@ def check_no_quality(raw, name, ctx):  # QLT-001 — Silver only (the enforcemen
                 "QLT-001",
                 "warning",
                 "quality",
-                "silver table has no quality rules — Silver is the enforcement layer; with no rules nothing is validated and quarantine can never fire.",
+                "silver table has no quality rules — Silver is the enforcement layer; "
+                "with no rules nothing is validated and quarantine can never fire.",
                 suggestion="Add `quality.row_rules` / `dataset_rules` (or field-level `rules`).",
             )
         ]
@@ -385,7 +389,8 @@ def check_no_volume_freshness_slo(raw, name, ctx):  # VOL-001
             "VOL-001",
             "info",
             "reliability",
-            f"{layer} table has no freshness or volume SLO (contract or domain) — blind to stalled feeds / missing data.",
+            f"{layer} table has no freshness or volume SLO (contract or domain) — "
+            "blind to stalled feeds / missing data.",
             suggestion="Add contract `service_levels.freshness`/`row_count`, or an `slo.*` block at the domain.",
         )
     ]
