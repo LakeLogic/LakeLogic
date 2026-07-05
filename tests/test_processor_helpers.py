@@ -827,7 +827,10 @@ def test_processor_run_source_polars_reads_multiple_csvs_and_applies_targeted_re
     assert result == "run-result"
     assert captured["source_path"] == str(tmp_path / "landing")
     assert captured["reset_trace"] is False
-    assert captured["df"]["customer_id"].to_list() == [2, 3]
+    # infer_schema_length=0 loads raw landing CSV as strings (bronze/raw layer);
+    # typed casts happen downstream against the contract. The reprocess filter
+    # matches on the string form of the requested values.
+    assert captured["df"]["customer_id"].to_list() == ["2", "3"]
     assert set(captured["df"]["_source_file"].to_list()) == {str(first), str(second)}
 
 
@@ -1075,9 +1078,15 @@ def test_processor_run_source_polars_ndjson_json_and_multi_file_eager_fallback(m
     ]
     processor._is_uri_path = lambda path: False
 
-    monkeypatch.setattr(pl, "read_xml", lambda path: pl.DataFrame({"id": [1], "source": ["xml"]}), raising=False)
-    monkeypatch.setattr(pl, "read_excel", lambda path: pl.DataFrame({"id": [2], "source": ["xlsx"]}), raising=False)
-    monkeypatch.setattr(pl, "read_csv", lambda path: pl.DataFrame({"id": [4], "source": ["csv"]}), raising=False)
+    monkeypatch.setattr(
+        pl, "read_xml", lambda path, **kwargs: pl.DataFrame({"id": [1], "source": ["xml"]}), raising=False
+    )
+    monkeypatch.setattr(
+        pl, "read_excel", lambda path, **kwargs: pl.DataFrame({"id": [2], "source": ["xlsx"]}), raising=False
+    )
+    monkeypatch.setattr(
+        pl, "read_csv", lambda path, **kwargs: pl.DataFrame({"id": [4], "source": ["csv"]}), raising=False
+    )
 
     multi = processor.run_source()
     assert sorted(multi["id"].to_list()) == [1, 2, 3, 4]
@@ -1678,7 +1687,7 @@ def test_processor_run_source_incremental_empty_and_not_found_paths(monkeypatch,
     monkeypatch.setattr(
         pl,
         "read_csv",
-        lambda path: (_ for _ in ()).throw(FileNotFoundError("not found")),
+        lambda path, **kwargs: (_ for _ in ()).throw(FileNotFoundError("not found")),
     )
     result = processor.run_source()
     assert isinstance(result, proc_mod.ValidationResult)

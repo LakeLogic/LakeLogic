@@ -4,13 +4,13 @@ Currently exposes ``flush``: replay run logs that were buffered locally while th
 SaaS ingest endpoint was unreachable (see ``core/observatory_spool.py``). Useful
 after an outage to drain the backlog without waiting for the next pipeline run.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import typer
-from loguru import logger
 
 observatory_app = typer.Typer(
     name="observatory",
@@ -36,9 +36,7 @@ def _resolve_cfg(
             if isinstance(obs, dict):
                 cfg = dict(obs)
         except Exception as exc:
-            raise typer.BadParameter(
-                f"Could not read observatory config from registry '{registry}': {exc}"
-            )
+            raise typer.BadParameter(f"Could not read observatory config from registry '{registry}': {exc}")
     if endpoint:
         cfg["endpoint"] = endpoint
     if api_key:
@@ -63,15 +61,15 @@ def _mask(secret: str) -> str:
 @observatory_app.command("status")
 def status(
     registry: Optional[Path] = typer.Option(
-        None, "--registry", "-r",
+        None,
+        "--registry",
+        "-r",
         help="Registry YAML to read observatory settings from (optional; env vars alone work).",
     ),
     endpoint: Optional[str] = typer.Option(None, "--endpoint", help="Override the ingest endpoint URL."),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="Override the API key."),
     spool_dir: Optional[Path] = typer.Option(None, "--spool-dir", help="Override the local spool directory."),
-    check: bool = typer.Option(
-        False, "--check", help="Also probe the endpoint host for reachability (no data sent)."
-    ),
+    check: bool = typer.Option(False, "--check", help="Also probe the endpoint host for reachability (no data sent)."),
 ) -> None:
     """Report whether this runtime is connected to the Observatory — the
     'is my pipe connected?' one-liner. Shows the resolved endpoint, whether an
@@ -92,7 +90,7 @@ def status(
     typer.echo(f"  enabled   : {cfg.get('enabled', bool(key))}")
 
     d = sp._dir(cfg)
-    buffered = len(list(d.glob('*.json'))) if d.exists() else 0
+    buffered = len(list(d.glob("*.json"))) if d.exists() else 0
     typer.echo(f"  spool     : {buffered} buffered run log(s) at {d}")
 
     if not connected:
@@ -103,8 +101,9 @@ def status(
 
     if check and endpoint_url:
         try:
-            import requests as _rq
             from urllib.parse import urlsplit
+
+            import requests as _rq
 
             base = urlsplit(endpoint_url)
             host = f"{base.scheme}://{base.netloc}"
@@ -120,18 +119,14 @@ def status(
 @observatory_app.command("flush")
 def flush(
     registry: Optional[Path] = typer.Option(
-        None, "--registry", "-r",
+        None,
+        "--registry",
+        "-r",
         help="Registry YAML to read observatory endpoint/api_key/spool settings from.",
     ),
-    endpoint: Optional[str] = typer.Option(
-        None, "--endpoint", help="Override the ingest endpoint URL."
-    ),
-    api_key: Optional[str] = typer.Option(
-        None, "--api-key", help="Override the API key (sent as X-API-Key)."
-    ),
-    spool_dir: Optional[Path] = typer.Option(
-        None, "--spool-dir", help="Override the local spool directory."
-    ),
+    endpoint: Optional[str] = typer.Option(None, "--endpoint", help="Override the ingest endpoint URL."),
+    api_key: Optional[str] = typer.Option(None, "--api-key", help="Override the API key (sent as X-API-Key)."),
+    spool_dir: Optional[Path] = typer.Option(None, "--spool-dir", help="Override the local spool directory."),
 ) -> None:
     """Replay locally-buffered run logs to the Observatory ingest endpoint.
 
@@ -145,8 +140,7 @@ def flush(
     endpoint_url = cfg.get("endpoint")
     if not endpoint_url:
         raise typer.BadParameter(
-            "No endpoint. Pass --endpoint, or --registry pointing at a YAML with "
-            "observatory.endpoint set."
+            "No endpoint. Pass --endpoint, or --registry pointing at a YAML with observatory.endpoint set."
         )
 
     headers = {"Content-Type": "application/json"}
@@ -172,6 +166,5 @@ def flush(
     typer.echo(f"Replayed {total} buffered run log(s); {remaining} still buffered.")
     if remaining:
         typer.echo(
-            "Some logs remain buffered — the endpoint may still be unreachable. "
-            "Re-run this command once it's back."
+            "Some logs remain buffered — the endpoint may still be unreachable. Re-run this command once it's back."
         )

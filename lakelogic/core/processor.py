@@ -2182,7 +2182,11 @@ class DataProcessor:
                             elif path.endswith((".xlsx", ".xls")):
                                 df = pl.read_excel(path)
                             else:
-                                df = pl.read_csv(path)
+                                # Raw landing CSV → all Utf8 (infer_schema_length=0),
+                                # consistent with the primary CSV path above: malformed
+                                # values pass through and are quarantined at the typed
+                                # cast downstream instead of aborting the read.
+                                df = pl.read_csv(path, infer_schema_length=0)
 
             elif self.engine_name == "spark":  # pragma: no cover
                 from pyspark.sql import SparkSession

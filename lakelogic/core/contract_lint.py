@@ -15,6 +15,7 @@ here is structural and reproducible, so it can gate. LLM *judgment* checks live 
 the AI layer and are advisory only. Findings align with
 ``ai.code_reviewer.ReviewFinding`` severities (critical | warning | info).
 """
+
 from __future__ import annotations
 
 import re
@@ -39,9 +40,9 @@ class ContractFinding(BaseModel):
     message: str
     field: Optional[str] = None
     suggestion: Optional[str] = None
-    source: str = "rules"          # rules | llm
-    file: Optional[str] = None     # source file path (set by review_contract; used for annotations)
-    line: Optional[int] = None     # 1-based line of the offending element (best-effort; None → whole file)
+    source: str = "rules"  # rules | llm
+    file: Optional[str] = None  # source file path (set by review_contract; used for annotations)
+    line: Optional[int] = None  # 1-based line of the offending element (best-effort; None → whole file)
 
 
 class ContractReviewReport(BaseModel):
@@ -72,13 +73,13 @@ _KEYED_STRATEGIES = {"merge", "scd2", "upsert"}
 
 # ── Accessors over the raw authored dict ────────────────────────────────────
 
+
 def _d(x: Any) -> Dict[str, Any]:
     return x if isinstance(x, dict) else {}
 
 
 def _layer(raw: Dict[str, Any]) -> str:
-    return (raw.get("tier") or raw.get("layer")
-            or _d(raw.get("info")).get("target_layer") or "").lower()
+    return (raw.get("tier") or raw.get("layer") or _d(raw.get("info")).get("target_layer") or "").lower()
 
 
 def _fields(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -92,7 +93,7 @@ def _strategy(raw: Dict[str, Any]) -> str:
 
 def _dedup(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Return the dedup transform's inner config dict, if any."""
-    for t in (raw.get("transformations") or []):
+    for t in raw.get("transformations") or []:
         if not isinstance(t, dict):
             continue
         for k, v in t.items():
@@ -136,6 +137,7 @@ def _service_levels(raw: Dict[str, Any]) -> Dict[str, Any]:
 # When a requirement is satisfied at domain/system level, the check does NOT flag
 # it as missing; when the domain declares a POLICY (GDPR, erasure), the check
 # escalates severity.
+
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(base or {})
@@ -207,29 +209,46 @@ def load_context(contract_path: str | Path, *, max_up: int = 8) -> Optional[Gove
 
 # ── Checks ──────────────────────────────────────────────────────────────────
 
+
 def _c(contract, cid, sev, cat, msg, *, field=None, suggestion=None):
-    return ContractFinding(contract=contract, check_id=cid, severity=sev, category=cat,
-                           message=msg, field=field, suggestion=suggestion)
+    return ContractFinding(
+        contract=contract, check_id=cid, severity=sev, category=cat, message=msg, field=field, suggestion=suggestion
+    )
 
 
 # Every check takes (raw, name, ctx). ctx is the resolved domain/system policy
 # (or None in standalone mode). Checks consult it for inheritance + severity.
 
+
 def check_pk_missing_for_mutation(raw, name, ctx):  # PK-002
     dedup = _dedup(raw)
     if (_strategy(raw) in _KEYED_STRATEGIES or dedup is not None) and not _has_key(raw, dedup):
-        return [_c(name, "PK-002", "critical", "keys",
-                   f"strategy '{_strategy(raw)}'/dedup needs a key but none is declared — merge/upsert/dedup are non-deterministic without one.",
-                   suggestion="Add `primary_key: [<id>]` (or `key_columns` on the dedup).")]
+        return [
+            _c(
+                name,
+                "PK-002",
+                "critical",
+                "keys",
+                f"strategy '{_strategy(raw)}'/dedup needs a key but none is declared — merge/upsert/dedup are non-deterministic without one.",
+                suggestion="Add `primary_key: [<id>]` (or `key_columns` on the dedup).",
+            )
+        ]
     return []
 
 
 def check_dedup_no_timestamp(raw, name, ctx):  # KEY-001
     dedup = _dedup(raw)
     if dedup is not None and not dedup.get("timestamp_column"):
-        return [_c(name, "KEY-001", "warning", "keys",
-                   "deduplicate has no timestamp_column — 'which row wins' is non-deterministic.",
-                   suggestion="Add `timestamp_column: <updated_at>` to the dedup transform.")]
+        return [
+            _c(
+                name,
+                "KEY-001",
+                "warning",
+                "keys",
+                "deduplicate has no timestamp_column — 'which row wins' is non-deterministic.",
+                suggestion="Add `timestamp_column: <updated_at>` to the dedup transform.",
+            )
+        ]
     return []
 
 
@@ -238,9 +257,17 @@ def check_untagged_pii(raw, name, ctx):  # PII-001
     for f in _fields(raw):
         fname = f.get("name") or ""
         if _PII_RE.search(fname) and not f.get("pii") and not f.get("phi"):
-            out.append(_c(name, "PII-001", "warning", "pii",
-                          f"field '{fname}' looks like PII but isn't tagged `pii: true`.",
-                          field=fname, suggestion=f"Tag `pii: true` + a `masking:` strategy on '{fname}', or confirm it's not PII."))
+            out.append(
+                _c(
+                    name,
+                    "PII-001",
+                    "warning",
+                    "pii",
+                    f"field '{fname}' looks like PII but isn't tagged `pii: true`.",
+                    field=fname,
+                    suggestion=f"Tag `pii: true` + a `masking:` strategy on '{fname}', or confirm it's not PII.",
+                )
+            )
     return out
 
 
@@ -252,22 +279,40 @@ def check_pii_no_masking(raw, name, ctx):  # PII-002
         if f.get("pii") and not f.get("masking") and not f.get("security_groups"):
             fname = f.get("name")
             extra = " (domain compliance mandates PII masking)" if sev == "critical" else ""
-            out.append(_c(name, "PII-002", sev, "pii",
-                          f"PII field '{fname}' has no masking strategy — it will surface unmasked.{extra}",
-                          field=fname, suggestion="Add `masking: hash|redact|partial|nullify` (or map security_groups)."))
+            out.append(
+                _c(
+                    name,
+                    "PII-002",
+                    sev,
+                    "pii",
+                    f"PII field '{fname}' has no masking strategy — it will surface unmasked.{extra}",
+                    field=fname,
+                    suggestion="Add `masking: hash|redact|partial|nullify` (or map security_groups).",
+                )
+            )
     return out
 
 
 def check_no_delete_strategy(raw, name, ctx):  # DEL-001
     dedup = _dedup(raw)
-    is_entity = (_layer(raw) in _ENTITY_LAYERS and _has_key(raw, dedup)
-                 and (_strategy(raw) in _KEYED_STRATEGIES or dedup is not None))
+    is_entity = (
+        _layer(raw) in _ENTITY_LAYERS
+        and _has_key(raw, dedup)
+        and (_strategy(raw) in _KEYED_STRATEGIES or dedup is not None)
+    )
     if is_entity and not _has_delete_strategy(raw):
         sev = "critical" if (ctx and ctx.erasure_required) else "warning"
         extra = " (domain declares an erasure policy — entities must support deletion)" if sev == "critical" else ""
-        return [_c(name, "DEL-001", sev, "deletes",
-                   f"current-state entity with a key but no delete strategy — hard deletes at source go undetected (stale rows persist).{extra}",
-                   suggestion="Declare `soft_deletes: {enabled: true}` + CDC, or `deletion: {strategy: snapshot_reconcile, ...}`.")]
+        return [
+            _c(
+                name,
+                "DEL-001",
+                sev,
+                "deletes",
+                f"current-state entity with a key but no delete strategy — hard deletes at source go undetected (stale rows persist).{extra}",
+                suggestion="Declare `soft_deletes: {enabled: true}` + CDC, or `deletion: {strategy: snapshot_reconcile, ...}`.",
+            )
+        ]
     return []
 
 
@@ -275,9 +320,16 @@ def check_no_quality(raw, name, ctx):  # QLT-001 — Silver only (the enforcemen
     # Silver is where raw data is validated against rules. Gold is derived from
     # already-validated Silver, so row-level quality rules are NOT expected there.
     if _layer(raw) == "silver" and not _has_any_quality(raw):
-        return [_c(name, "QLT-001", "warning", "quality",
-                   "silver table has no quality rules — Silver is the enforcement layer; with no rules nothing is validated and quarantine can never fire.",
-                   suggestion="Add `quality.row_rules` / `dataset_rules` (or field-level `rules`).")]
+        return [
+            _c(
+                name,
+                "QLT-001",
+                "warning",
+                "quality",
+                "silver table has no quality rules — Silver is the enforcement layer; with no rules nothing is validated and quarantine can never fire.",
+                suggestion="Add `quality.row_rules` / `dataset_rules` (or field-level `rules`).",
+            )
+        ]
     return []
 
 
@@ -285,10 +337,17 @@ def check_scd2_no_track_columns(raw, name, ctx):  # SCD-001
     if _strategy(raw) == "scd2":
         scd2 = _d(_d(raw.get("materialization")).get("scd2"))
         if not scd2.get("track_columns"):
-            return [_c(name, "SCD-001", "critical", "materialization",
-                       "SCD2 with no track_columns — the engine cuts a NEW version on every load (version churn), "
-                       "instead of only when a tracked attribute changes; the dimension's history becomes meaningless.",
-                       suggestion="List the attributes under `materialization.scd2.track_columns`.")]
+            return [
+                _c(
+                    name,
+                    "SCD-001",
+                    "critical",
+                    "materialization",
+                    "SCD2 with no track_columns — the engine cuts a NEW version on every load (version churn), "
+                    "instead of only when a tracked attribute changes; the dimension's history becomes meaningless.",
+                    suggestion="List the attributes under `materialization.scd2.track_columns`.",
+                )
+            ]
     return []
 
 
@@ -298,9 +357,16 @@ def check_unpartitioned_landing(raw, name, ctx):  # SRC-001 — Bronze only (lan
         return []
     s = _d(raw.get("source"))
     if (s.get("type") or "").lower() == "landing" and not s.get("partition"):
-        return [_c(name, "SRC-001", "warning", "source",
-                   "bronze landing source is unpartitioned — every load rescans the whole zone (no incremental pruning).",
-                   suggestion="Add `source.partition.format` (e.g. y_%Y/m_%m/d_%d/h_%H).")]
+        return [
+            _c(
+                name,
+                "SRC-001",
+                "warning",
+                "source",
+                "bronze landing source is unpartitioned — every load rescans the whole zone (no incremental pruning).",
+                suggestion="Add `source.partition.format` (e.g. y_%Y/m_%m/d_%d/h_%H).",
+            )
+        ]
     return []
 
 
@@ -310,12 +376,19 @@ def check_no_volume_freshness_slo(raw, name, ctx):  # VOL-001
         return []
     sl = _service_levels(raw)
     if sl.get("freshness") or sl.get("row_count"):
-        return []                          # contract declares it → supersedes
+        return []  # contract declares it → supersedes
     if ctx and ctx.provides_slo(layer):
-        return []                          # inherited from the domain/system
-    return [_c(name, "VOL-001", "info", "reliability",
-               f"{layer} table has no freshness or volume SLO (contract or domain) — blind to stalled feeds / missing data.",
-               suggestion="Add contract `service_levels.freshness`/`row_count`, or an `slo.*` block at the domain.")]
+        return []  # inherited from the domain/system
+    return [
+        _c(
+            name,
+            "VOL-001",
+            "info",
+            "reliability",
+            f"{layer} table has no freshness or volume SLO (contract or domain) — blind to stalled feeds / missing data.",
+            suggestion="Add contract `service_levels.freshness`/`row_count`, or an `slo.*` block at the domain.",
+        )
+    ]
 
 
 _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[ContractFinding]]] = [
@@ -333,8 +406,10 @@ _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[
 
 # ── Public API ──────────────────────────────────────────────────────────────
 
-def review_contract_dict(raw: Dict[str, Any], name: str,
-                         ctx: Optional[GovernanceContext] = None) -> List[ContractFinding]:
+
+def review_contract_dict(
+    raw: Dict[str, Any], name: str, ctx: Optional[GovernanceContext] = None
+) -> List[ContractFinding]:
     """Run every check against a parsed contract dict + optional resolved domain
     policy. This is also the *critic-mode* entry point (pass a proposed diff's dict)."""
     findings: List[ContractFinding] = []
@@ -346,8 +421,7 @@ def review_contract_dict(raw: Dict[str, Any], name: str,
     return findings
 
 
-def review_contract(path: str | Path,
-                    ctx: Optional[GovernanceContext] = None) -> List[ContractFinding]:
+def review_contract(path: str | Path, ctx: Optional[GovernanceContext] = None) -> List[ContractFinding]:
     """Lint one contract file. Resolves its domain/system policy automatically
     (walks up to `_domain.yaml`/`_system.yaml`) unless a ``ctx`` is supplied."""
     path = Path(path)

@@ -1,5 +1,6 @@
 """Tests for pre-flight materialization validation (lakelogic.core.preflight)
 and its non-breaking hook in DataProcessor."""
+
 import pytest
 
 from lakelogic.core.preflight import preflight_check, assert_preflight, PreflightError
@@ -49,6 +50,7 @@ def test_preflight_ignores_non_materialization_gaps():
 
 def test_preflight_accepts_a_path(tmp_path):
     import yaml
+
     p = tmp_path / "silver_x.yaml"
     p.write_text(yaml.safe_dump(BAD_MERGE), encoding="utf-8")
     assert "PK-002" in {f.check_id for f in preflight_check(p, "silver_x")}
@@ -63,6 +65,7 @@ def test_assert_preflight_raises_on_blocker():
 # ── The non-breaking DataProcessor hook ─────────────────────────────────────
 # `_run_preflight` only uses self.contract for the display name, so we can drive
 # it on a lightweight stub without constructing a full processor/adapter.
+
 
 class _Stub:
     contract = None

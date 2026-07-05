@@ -4,6 +4,7 @@ Reviews contracts for governance gaps (PII tagging/masking, keys, delete
 strategy, quality rules, SCD2 config, source layout, freshness/volume SLOs).
 Rules-based and reproducible — safe to run in CI on every contract PR.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,25 +17,34 @@ def lint_command(
     paths: List[Path] = typer.Argument(..., help="Contract file(s) or directory to lint."),
     fmt: str = typer.Option("text", "--format", "-f", help="Output format: text | json | github."),
     fail_on: str = typer.Option(
-        "none", "--fail-on",
+        "none",
+        "--fail-on",
         help="Exit non-zero if any RULES finding is at least this severity: none | info | warning | critical. "
-             "(LLM/judgment findings are advisory and never gate.)",
+        "(LLM/judgment findings are advisory and never gate.)",
     ),
     llm: bool = typer.Option(
-        False, "--llm",
+        False,
+        "--llm",
         help="Also run the LLM judgment layer (advisory). Requires an API key; a no-op without one.",
     ),
 ):
     """Review data contracts for governance gaps."""
     import yaml
+
     from lakelogic.core.contract_lint import (
-        review_paths, render_github, gate_severity, iter_contract_files, load_context, SEVERITY_RANK,
+        SEVERITY_RANK,
+        gate_severity,
+        iter_contract_files,
+        load_context,
+        render_github,
+        review_paths,
     )
 
     report = review_paths(paths)
 
     if llm:
         from lakelogic.ai.contract_judge import judge_contract
+
         for f in iter_contract_files(paths):
             try:
                 raw = yaml.safe_load(f.read_text(encoding="utf-8"))
@@ -87,8 +97,10 @@ def _render_text(report, rank) -> None:
                 typer.echo(typer.style(f"      → {f.suggestion}", dim=True))
 
     s = report.summary
-    typer.echo(typer.style(
-        f"\n{report.contracts_scanned} contract(s) · "
-        f"{s.get('critical', 0)} critical · {s.get('warning', 0)} warning · {s.get('info', 0)} info",
-        bold=True,
-    ))
+    typer.echo(
+        typer.style(
+            f"\n{report.contracts_scanned} contract(s) · "
+            f"{s.get('critical', 0)} critical · {s.get('warning', 0)} warning · {s.get('info', 0)} info",
+            bold=True,
+        )
+    )

@@ -36,6 +36,7 @@ Config (under the contract/registry ``observatory.spool`` block, all optional)::
         batch: 20               # max files replayed per run
         max_seconds: 5.0        # wall-clock budget for a flush
 """
+
 from __future__ import annotations
 
 import json

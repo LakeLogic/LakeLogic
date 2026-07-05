@@ -289,7 +289,7 @@ def validate(
         False,
         "--preflight",
         help="Also run pre-flight materialization checks — catch contracts that would silently "
-             "produce WRONG output (keyless merge, dedup with no tiebreaker, SCD2 with no tracked columns).",
+        "produce WRONG output (keyless merge, dedup with no tiebreaker, SCD2 with no tracked columns).",
     ),
 ):
     """
@@ -336,12 +336,17 @@ def validate(
 
             pf = preflight_check(contract_data, contract.stem, load_context(contract))
             if pf:
-                typer.echo(typer.style(
-                    "❌ Pre-flight materialization blockers (would silently produce WRONG output):",
-                    fg=typer.colors.RED, bold=True))
+                typer.echo(
+                    typer.style(
+                        "❌ Pre-flight materialization blockers (would silently produce WRONG output):",
+                        fg=typer.colors.RED,
+                        bold=True,
+                    )
+                )
                 for finding in pf:
-                    typer.echo(typer.style(f"   ✖ {finding.check_id}", fg=typer.colors.RED, bold=True)
-                               + f"  {finding.message}")
+                    typer.echo(
+                        typer.style(f"   ✖ {finding.check_id}", fg=typer.colors.RED, bold=True) + f"  {finding.message}"
+                    )
                     if finding.suggestion:
                         typer.echo(typer.style(f"      → {finding.suggestion}", dim=True))
                 raise typer.Exit(1)
