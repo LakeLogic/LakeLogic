@@ -93,6 +93,27 @@ class PipelineRunSummary:
             "results": self.results,
         }
 
+    def has_failures(self) -> bool:
+        """True if any contract in this run failed."""
+        return any(r.get("status") == "failed" for r in self.results)
+
+    def failure_details(self) -> str:
+        """One line per failed contract with its error message — meant to be put
+        INTO a raised exception. Databricks (and most job runners) don't return
+        notebook stdout, so a generic 'a contract failed' leaves operators blind;
+        this makes the actual per-contract error travel with the exception."""
+        fails = [r for r in self.results if r.get("status") == "failed"]
+        if not fails:
+            return ""
+        parts = []
+        for r in fails:
+            name = r.get("contract") or r.get("table_name") or "?"
+            layer = r.get("layer") or "?"
+            err = str(r.get("error") or "no error captured").strip().splitlines()
+            first = err[0][:300] if err else "no error captured"
+            parts.append(f"{name} [{layer}]: {first}")
+        return f"{len(fails)} contract(s) failed — " + " | ".join(parts)
+
     def __str__(self) -> str:
         lines = []
         lines.append("=" * 80)

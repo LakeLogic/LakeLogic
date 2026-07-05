@@ -1626,6 +1626,29 @@ class DataProcessor:
         ).lower()
         _early_ext_cfg = getattr(self.contract, "extraction", None)
         _early_ext_prov = str(getattr(_early_ext_cfg, "provider", "") or "").lower()
+        # Mirror model.fields → extraction.output_schema HERE (before the engine
+        # branch below), so file extractors see the per-field extraction hints on
+        # EVERY read path — polars, duckdb, AND spark/UC. When authors put
+        # extraction_task / extraction_examples on model.fields (the natural
+        # "schema as contract" place) and leave extraction.output_schema empty, the
+        # spark path previously skipped the mirror → pdfplumber returned empty rows
+        # for every field → 100% silent quarantine.
+        if _early_ext_cfg and _early_ext_prov in {"pdfplumber", "easyocr"} and not getattr(
+            _early_ext_cfg, "output_schema", None
+        ):
+            _early_model = getattr(self.contract, "model", None)
+            _early_model_fields = getattr(_early_model, "fields", None) if _early_model else None
+            if _early_model_fields:
+                try:
+                    _early_ext_cfg.output_schema = list(_early_model_fields)
+                    logger.info(
+                        f"extraction.output_schema empty — mirrored {len(_early_model_fields)} "
+                        f"model.fields so provider '{_early_ext_prov}' applies the extraction hints."
+                    )
+                except Exception as _early_mirror_exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        f"Could not mirror model.fields into extraction.output_schema: {_early_mirror_exc}"
+                    )
         _is_non_tabular = _early_fmt in {"pdf", "image", "pptx", "docx", "html"} or _early_ext_prov in {
             "pdfplumber",
             "easyocr",
