@@ -145,6 +145,11 @@ class DataProcessor:
         self.engine_name = (engine or self._discover_engine()).lower()
         self.stage = stage
         self.contract = self._load_contract(contract)
+        # Pre-flight: catch contracts that would silently materialize the WRONG
+        # output (keyless merge, tiebreaker-less dedup, SCD2 with no tracked
+        # columns) before we run. Non-breaking — logs by default; raises only
+        # under LAKELOGIC_STRICT_PREFLIGHT. Same validator as `lakelogic validate`.
+        self._run_preflight(contract)
         # Support trace=True or trace="enabled"
         self.trace_enabled = trace is True or str(trace).lower() == "enabled"
         self.adapter = self._get_adapter()
@@ -310,6 +315,40 @@ class DataProcessor:
             return DuckDBAdapter(self.contract)
         else:
             raise ValueError(f"Unsupported engine: {self.engine_name}")
+
+    def _run_preflight(self, contract_input: Union[str, Path, dict, DataContract]) -> None:
+        """Pre-flight materialization validation (see lakelogic.core.preflight).
+
+        Best-effort + non-breaking: logs any materialization blockers, and raises
+        ``PreflightError`` only when ``LAKELOGIC_STRICT_PREFLIGHT`` is set, so
+        existing pipelines are unaffected until a team opts into fail-fast.
+        """
+        try:
+            from lakelogic.core.preflight import preflight_check, PreflightError
+            from loguru import logger as _logger
+        except Exception:
+            return
+
+        name = None
+        try:
+            _info = getattr(self.contract, "info", None)
+            name = getattr(_info, "table_name", None) if _info else None
+        except Exception:
+            pass
+        name = name or "contract"
+
+        try:
+            findings = preflight_check(contract_input, name)
+        except Exception:
+            return  # pre-flight must never break the processor
+
+        if not findings:
+            return
+        for f in findings:
+            _logger.warning(f"PRE-FLIGHT {f.check_id} [{name}]: {f.message}")
+        strict = os.environ.get("LAKELOGIC_STRICT_PREFLIGHT", "").strip().lower() in ("1", "true", "yes")
+        if strict:
+            raise PreflightError(name, findings)
 
     def _load_contract(self, contract: Union[str, Path, dict, DataContract]) -> DataContract:
         """
