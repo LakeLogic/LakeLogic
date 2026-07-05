@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.36.0] — 2026-07-05
+
+### Added
+
+- Enhance error handling in PipelineRunSummary with failure detection and detailed reporting
 ## [1.35.0] — 2026-07-05
 
 ### Added
@@ -497,6 +502,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.36.0]: https://github.com/lakelogic/LakeLogic/compare/v1.35.0...v1.36.0
 [1.35.0]: https://github.com/lakelogic/LakeLogic/compare/v1.34.0...v1.35.0
 [1.34.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.34.0
 [1.33.0]: https://github.com/lakelogic/LakeLogic/compare/v1.32.0...v1.33.0

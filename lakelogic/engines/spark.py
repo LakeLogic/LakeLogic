@@ -865,19 +865,32 @@ class SparkAdapter(EngineAdapter):
 
         df = df.select(*select_exprs)
 
-        # ── Detect post-phase SQL transforms that reshape columns ────────────
-        # When a contract has a post-phase SQL transform (e.g. gold aggregation
-        # with GROUP BY), the model fields describe the *output* of the SQL, not
-        # the source.  Strict missing/unknown enforcement at this stage would
-        # produce false positives because the source columns haven't been
-        # transformed yet (post-transforms run AFTER schema enforcement).
+        # ── Detect downstream reshaping so we don't false-positive here ──────
+        # When a contract's model describes the OUTPUT of a later step (a post-
+        # phase transform, or a materialization strategy that injects columns),
+        # the model fields are legitimately absent from the raw source at THIS
+        # stage (post-transforms + materialization run AFTER schema enforcement).
+        # Enforcing missing/unknown here would quarantine every row. Covers:
+        #   • post-phase transforms: sql, rollup, pivot, unpivot, derive
+        #   • SCD2 materialization (injects surrogate key / effective_from-to /
+        #     is_current / version columns after this stage)
         _has_post_sql = False
         if self.contract.transformations:
             for _t in self.contract.transformations:
                 _phase = (getattr(_t, "phase", None) or "post").lower()
-                if _phase == "post" and getattr(_t, "sql", None):
+                if _phase == "post" and (
+                    getattr(_t, "sql", None)
+                    or getattr(_t, "rollup", None)
+                    or getattr(_t, "pivot", None)
+                    or getattr(_t, "unpivot", None)
+                    or getattr(_t, "derive", None)
+                ):
                     _has_post_sql = True
                     break
+        if not _has_post_sql:
+            _mat = getattr(self.contract, "materialization", None)
+            if str(getattr(_mat, "strategy", "") or "").lower() == "scd2":
+                _has_post_sql = True
 
         schema_errors = []
         if evolution == "strict" and missing and not _has_post_sql:

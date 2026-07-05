@@ -2337,6 +2337,20 @@ def _spark_scd2_dataframe(  # pragma: no cover
             else:
                 incoming_df = incoming_df.withColumn(sk_column, F.substring(F.sha2(pk_concat, 256), 1, 16))
 
+        # Stamp version + change-reason here too, so the initial-load schema is
+        # IDENTICAL to the merge path's (below). Otherwise a re-run overwrites the
+        # table with a differently-shaped frame and fails with DELTA_METADATA_MISMATCH
+        # under UC Table ACLs (auto schema migration disallowed).
+        _init_version_col = scd2_cfg.get("version_column", "_version")
+        if _init_version_col:
+            from pyspark.sql.window import Window as _InitWindow
+
+            _init_w = _InitWindow.partitionBy(*primary_key).orderBy(F.col(effective_from).asc())
+            incoming_df = incoming_df.withColumn(_init_version_col, F.row_number().over(_init_w).cast("long"))
+        _init_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
+        if _init_reason_col:
+            incoming_df = incoming_df.withColumn(_init_reason_col, F.lit("initial").cast("string"))
+
         # No existing data, just write incoming
         writer = incoming_df.write.format(output_format)
         if is_table:
@@ -2534,7 +2548,11 @@ def _spark_scd2_dataframe(  # pragma: no cover
         from pyspark.sql.window import Window
 
         w = Window.partitionBy(*primary_key).orderBy(effective_from)
-        result = result.withColumn(version_column, F.row_number().over(w))
+        # Cast to long: the initial-load path writes this column at the model's
+        # declared type, and every integer model type maps to bigint. row_number()
+        # is INT, so without this cast a re-run (merge path) collides with the
+        # existing bigint column → DELTA_FAILED_TO_MERGE_FIELDS / METADATA_MISMATCH.
+        result = result.withColumn(version_column, F.row_number().over(w).cast("long"))
 
     # ── Unknown member injection (Spark) ─────────────────────────
     unknown_cfg = scd2_cfg.get("unknown_member") or {}
