@@ -47,6 +47,21 @@ def test_pipeline_run_summary_append_replace_and_render():
     assert "silver_customers" in rendered
     assert "Error: boom" in rendered
 
+    # has_failures() / failure_details() surface the real per-contract error so
+    # callers can put it on a raised exception (job runners drop notebook stdout).
+    assert summary.has_failures() is True
+    details = summary.failure_details()
+    assert "1 contract(s) failed" in details
+    assert "orders [bronze]" in details
+    assert "boom" in details
+
+
+def test_pipeline_run_summary_no_failures_details_empty():
+    summary = runner.PipelineRunSummary("run-2", "dev", dry_run=False)
+    summary.append("orders", "bronze", "success", rows=10, table_name="bronze_orders")
+    assert summary.has_failures() is False
+    assert summary.failure_details() == ""
+
 
 def test_runner_mode_and_catalog_reference_detection():
     registry = types.SimpleNamespace(
