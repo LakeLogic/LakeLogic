@@ -2430,6 +2430,14 @@ def _spark_scd2_dataframe(  # pragma: no cover
     unchanged = existing_df.join(incoming_keys, on=primary_key, how="left_anti")
     already_closed = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(~F.col(current_flag))
 
+    # Existing CURRENT rows whose key IS in incoming but is NOT being closed
+    # (tracked columns unchanged) — retain them as-is. `unchanged` above only
+    # covers keys ABSENT from incoming; without this, a re-run with unchanged data
+    # drops every still-current row and the dimension collapses to just the
+    # unknown-member row.
+    _closing_keys = records_to_close.select(*primary_key).distinct()
+    retained_current = candidates.join(_closing_keys, on=primary_key, how="left_anti")
+
     # Stamp effective_to on records being closed
     incoming_effective = incoming_df.select(*primary_key, F.col(effective_from).alias("_new_effective_from")).distinct()
 
@@ -2503,6 +2511,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
         unchanged = unchanged.withColumn(change_reason_col, F.lit(None).cast("string"))
         already_closed = already_closed.withColumn(change_reason_col, F.lit(None).cast("string"))
         closed_records = closed_records.withColumn(change_reason_col, F.lit(None).cast("string"))
+        retained_current = retained_current.withColumn(change_reason_col, F.lit(None).cast("string"))
 
     # Align all columns
     all_columns = list(existing_df.columns)
@@ -2519,10 +2528,14 @@ def _spark_scd2_dataframe(  # pragma: no cover
     unchanged = align_columns(unchanged, all_columns)
     already_closed = align_columns(already_closed, all_columns)
     closed_records = align_columns(closed_records, all_columns)
+    retained_current = align_columns(retained_current, all_columns)
     incoming_df = align_columns(incoming_df, all_columns)
 
-    # Union all: unchanged + already closed + newly closed + incoming
-    result = unchanged.union(already_closed).union(closed_records).union(incoming_df)
+    # Union all: unchanged (key not in incoming) + still-current (key in incoming,
+    # unchanged) + already closed + newly closed + incoming (changed/new versions)
+    result = (
+        unchanged.union(retained_current).union(already_closed).union(closed_records).union(incoming_df)
+    )
 
     # ── Surrogate key injection (Spark) ─────────────────────────
     sk_column = scd2_cfg.get("surrogate_key", "_sk")
