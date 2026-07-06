@@ -1112,6 +1112,9 @@ def test_spark_save_as_table_and_apply_metadata(monkeypatch):
     monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
 
     class FakeWriter:
+        def option(self, key, value):  # DV-disable option; transparent for this test
+            return self
+
         def mode(self, mode):
             saved.append(("mode", mode))
             return self
@@ -1186,6 +1189,9 @@ def test_inject_unknown_member_spark_and_table_paths(monkeypatch):
     class FakeUnknownWriter:
         def format(self, fmt):
             save_calls.append(("format", fmt))
+            return self
+
+        def option(self, key, value):  # DV-disable option; transparent for this test
             return self
 
         def mode(self, mode):
