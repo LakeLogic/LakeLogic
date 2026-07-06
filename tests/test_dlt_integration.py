@@ -19,6 +19,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Stable reference to the real module so monkeypatching is robust to other
+# tests that stub sys.modules['lakelogic'] (string-path setattr would break).
+import lakelogic.adapters.dlt_adapter as _dlt_mod
+
 from lakelogic.core.models import (
     DltEndpointConfig,
     DltSourceConfig,
@@ -335,7 +339,7 @@ class TestDltAdapter:
             )
         )
         monkeypatch.setattr(
-            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module
+            _dlt_mod.importlib, "import_module", lambda name, package=None: fake_module
         )
 
         pipeline = types.SimpleNamespace(state={}, run=lambda *args, **kwargs: None)
@@ -362,7 +366,7 @@ class TestDltAdapter:
         setattr(fake_module, "decorated", decorated_source)
         adapter.cfg = DltSourceConfig(source="missing_source")
         monkeypatch.setattr(
-            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module
+            _dlt_mod.importlib, "import_module", lambda name, package=None: fake_module
         )
         assert adapter._run_verified_source({}) == {"tmp_dir": tmp_path, "pipeline": pipeline}
 
@@ -373,7 +377,7 @@ class TestDltAdapter:
         adapter = DltAdapter(src, "test")
         monkeypatch.setitem(sys.modules, "dlt", types.ModuleType("dlt"))
         monkeypatch.setattr(
-            "lakelogic.adapters.dlt_adapter.importlib.import_module",
+            _dlt_mod.importlib, "import_module",
             lambda name, package=None: (_ for _ in ()).throw(ModuleNotFoundError("missing")),
         )
         with pytest.raises(ImportError):
@@ -382,7 +386,7 @@ class TestDltAdapter:
         fake_module = types.ModuleType("stripe")
         fake_module.other = object()
         monkeypatch.setattr(
-            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: fake_module
+            _dlt_mod.importlib, "import_module", lambda name, package=None: fake_module
         )
         with pytest.raises(ValueError, match="Could not find a source function"):
             adapter._run_verified_source({})
@@ -395,11 +399,11 @@ class TestDltAdapter:
         monkeypatch.setattr(adapter, "_get_tmp_dir", lambda: tmp_path)
         monkeypatch.setattr(adapter, "_collect_parquet_files", lambda tmp_dir, pipeline_obj: {})
         warnings = []
-        monkeypatch.setattr("lakelogic.adapters.dlt_adapter.logger.warning", warnings.append)
+        monkeypatch.setattr(_dlt_mod.logger, "warning", warnings.append)
         ok_module = types.ModuleType("stripe")
         ok_module.stripe = lambda **credentials: types.SimpleNamespace()
         monkeypatch.setattr(
-            "lakelogic.adapters.dlt_adapter.importlib.import_module", lambda name, package=None: ok_module
+            _dlt_mod.importlib, "import_module", lambda name, package=None: ok_module
         )
         adapter._run_verified_source({}, previous_state="not-json")
         assert any("Failed to restore dlt state" in message for message in warnings)
@@ -495,8 +499,8 @@ class TestDltAdapter:
         monkeypatch.setitem(sys.modules, "pyarrow.parquet", fake_parquet_module)
         info_messages = []
         warning_messages = []
-        monkeypatch.setattr("lakelogic.adapters.dlt_adapter.logger.info", info_messages.append)
-        monkeypatch.setattr("lakelogic.adapters.dlt_adapter.logger.warning", warning_messages.append)
+        monkeypatch.setattr(_dlt_mod.logger, "info", info_messages.append)
+        monkeypatch.setattr(_dlt_mod.logger, "warning", warning_messages.append)
         parquet_dir = tmp_path / "parquet"
         parquet_dir.mkdir(exist_ok=True)
         (parquet_dir / "a.parquet").write_text("x", encoding="utf-8")

@@ -495,7 +495,9 @@ def test_polars_helper_post_transformations_cover_sql_lookup_join_and_date_range
 
 def test_polars_helper_post_transformations_date_range_and_derive_failure_paths(monkeypatch):
     warnings_seen = []
-    monkeypatch.setattr("warnings.warn", lambda message, stacklevel=2: warnings_seen.append(str(message)))
+    # Match the real warnings.warn signature (message, category, stacklevel, source, ...)
+    # so library-internal deprecation warnings don't blow up with an unexpected kwarg.
+    monkeypatch.setattr("warnings.warn", lambda message, *args, **kwargs: warnings_seen.append(str(message)))
 
     class BrokenContext:
         def register(self, name, frame):
