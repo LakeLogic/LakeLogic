@@ -243,8 +243,15 @@ def _spark_save_as_table(  # pragma: no cover
             except Exception as e:
                 logger.debug(f"Schema creation skipped: {e}")
 
-        # Write data directly to the external storage path
-        writer.mode(mode).save(resolved_loc)
+        # Write data directly to the external storage path.
+        # Disable deletion vectors at WRITE time so the Delta protocol never
+        # advertises the `deletionVectors` reader feature — which blocks
+        # delta-rs (Polars/DuckDB) with "reader features: {'deletionVectors'}
+        # not yet supported". A writer-level option is honoured on serverless,
+        # where the session-default conf
+        # (spark.databricks.delta.properties.defaults.enableDeletionVectors) is
+        # silently ignored.
+        writer.option("delta.enableDeletionVectors", "false").mode(mode).save(resolved_loc)
 
         # Register (or confirm) the table in UC pointing to that location
         try:
@@ -252,7 +259,8 @@ def _spark_save_as_table(  # pragma: no cover
         except Exception as e:
             logger.debug(f"Table registration skipped (may already exist): {e}")
     else:
-        writer.mode(mode).saveAsTable(table_name)
+        # Same DV-disable for managed-table writes (see external branch above).
+        writer.option("delta.enableDeletionVectors", "false").mode(mode).saveAsTable(table_name)
 
 
 def _spark_apply_table_metadata(spark, table_name: str, contract) -> None:  # pragma: no cover
