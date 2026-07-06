@@ -2533,9 +2533,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
 
     # Union all: unchanged (key not in incoming) + still-current (key in incoming,
     # unchanged) + already closed + newly closed + incoming (changed/new versions)
-    result = (
-        unchanged.union(retained_current).union(already_closed).union(closed_records).union(incoming_df)
-    )
+    result = unchanged.union(retained_current).union(already_closed).union(closed_records).union(incoming_df)
 
     # ── Surrogate key injection (Spark) ─────────────────────────
     sk_column = scd2_cfg.get("surrogate_key", "_sk")
