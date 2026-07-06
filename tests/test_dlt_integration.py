@@ -338,9 +338,7 @@ class TestDltAdapter:
                 with_resources=lambda resource: ("resource", resource, credentials)
             )
         )
-        monkeypatch.setattr(
-            _dlt_mod.importlib, "import_module", lambda name, package=None: fake_module
-        )
+        monkeypatch.setattr(_dlt_mod.importlib, "import_module", lambda name, package=None: fake_module)
 
         pipeline = types.SimpleNamespace(state={}, run=lambda *args, **kwargs: None)
         fake_dlt = types.ModuleType("dlt")
@@ -365,9 +363,7 @@ class TestDltAdapter:
         setattr(fake_module, "other", lambda: None)
         setattr(fake_module, "decorated", decorated_source)
         adapter.cfg = DltSourceConfig(source="missing_source")
-        monkeypatch.setattr(
-            _dlt_mod.importlib, "import_module", lambda name, package=None: fake_module
-        )
+        monkeypatch.setattr(_dlt_mod.importlib, "import_module", lambda name, package=None: fake_module)
         assert adapter._run_verified_source({}) == {"tmp_dir": tmp_path, "pipeline": pipeline}
 
     def test_run_verified_source_import_and_state_restore_failures(self, monkeypatch, tmp_path):
@@ -377,7 +373,8 @@ class TestDltAdapter:
         adapter = DltAdapter(src, "test")
         monkeypatch.setitem(sys.modules, "dlt", types.ModuleType("dlt"))
         monkeypatch.setattr(
-            _dlt_mod.importlib, "import_module",
+            _dlt_mod.importlib,
+            "import_module",
             lambda name, package=None: (_ for _ in ()).throw(ModuleNotFoundError("missing")),
         )
         with pytest.raises(ImportError):
@@ -385,9 +382,7 @@ class TestDltAdapter:
 
         fake_module = types.ModuleType("stripe")
         fake_module.other = object()
-        monkeypatch.setattr(
-            _dlt_mod.importlib, "import_module", lambda name, package=None: fake_module
-        )
+        monkeypatch.setattr(_dlt_mod.importlib, "import_module", lambda name, package=None: fake_module)
         with pytest.raises(ValueError, match="Could not find a source function"):
             adapter._run_verified_source({})
 
@@ -402,9 +397,7 @@ class TestDltAdapter:
         monkeypatch.setattr(_dlt_mod.logger, "warning", warnings.append)
         ok_module = types.ModuleType("stripe")
         ok_module.stripe = lambda **credentials: types.SimpleNamespace()
-        monkeypatch.setattr(
-            _dlt_mod.importlib, "import_module", lambda name, package=None: ok_module
-        )
+        monkeypatch.setattr(_dlt_mod.importlib, "import_module", lambda name, package=None: ok_module)
         adapter._run_verified_source({}, previous_state="not-json")
         assert any("Failed to restore dlt state" in message for message in warnings)
 

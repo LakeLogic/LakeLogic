@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.38.1] — 2026-07-06
+
+### Fixed
+
+- Update monkeypatch for dlt_adapter and warnings to match expected signatures
 ## [1.38.0] — 2026-07-06
 
 ### Added
@@ -513,6 +518,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.38.1]: https://github.com/lakelogic/LakeLogic/compare/v1.38.0...v1.38.1
 [1.38.0]: https://github.com/lakelogic/LakeLogic/compare/v1.37.0...v1.38.0
 [1.37.0]: https://github.com/lakelogic/LakeLogic/compare/v1.36.0...v1.37.0
 [1.36.0]: https://github.com/lakelogic/LakeLogic/compare/v1.35.0...v1.36.0
