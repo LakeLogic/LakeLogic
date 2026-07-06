@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.37.0] — 2026-07-06
+
+### Added
+
+- Enhance _spark_scd2_dataframe to retain current rows with unchanged keys during processing
 ## [1.36.0] — 2026-07-05
 
 ### Added
@@ -502,6 +507,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.37.0]: https://github.com/lakelogic/LakeLogic/compare/v1.36.0...v1.37.0
 [1.36.0]: https://github.com/lakelogic/LakeLogic/compare/v1.35.0...v1.36.0
 [1.35.0]: https://github.com/lakelogic/LakeLogic/compare/v1.34.0...v1.35.0
 [1.34.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.34.0
