@@ -56,7 +56,7 @@ dependencies = [
     "duckdb>=0.9.0",
     "typer>=0.9.0",
     "deltalake>=0.15.0",
-    "pyarrow>=14.0.0",
+    "pyarrow>=23.0.1",
 ]
 
 [project.optional-dependencies]
@@ -68,7 +68,7 @@ cli = [
 engines = [
     "polars>=0.20.0",
     "duckdb>=0.9.0",
-    "pyarrow>=14.0.0",
+    "pyarrow>=23.0.1",
     "deltalake>=0.15.0",
     "sqlglot>=20.0.0",
     "lxml>=4.9.0",
@@ -102,7 +102,7 @@ delta = [
     "google-cloud-storage>=2.10.0",  # GCP GCS access
 ]
 polars = ["polars>=0.20.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
-duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=14.0.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
+duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
 spark = ["pyspark>=3.3.0"]
 # Database CDC connectors
 databases = [
@@ -128,7 +128,7 @@ integrations = [
 ]
 api = ["requests>=2.31.0"]
 # dlt — declarative API ingestion driven by Data Contracts
-dlt = ["dlt[parquet]>=1.0", "pyarrow>=14.0.0"]
+dlt = ["dlt[parquet]>=1.0", "pyarrow>=23.0.1"]
 sftp = ["paramiko>=4.0.1"]
 azure_messaging = ["azure-servicebus>=7.11.0", "azure-eventgrid>=4.17.0", "azure-identity>=1.15.0"]
 aws_messaging = ["boto3>=1.28.0"]
@@ -136,13 +136,15 @@ gcp_messaging = ["google-cloud-pubsub>=2.18.0"]
 # Streaming processing
 streaming = [
     "bytewax>=0.19.0",  # Real-time stream processing (Rust-based)
-    "pathway>=0.15.0; python_version >= '3.10' and python_version < '3.14'",   # Real-time SQL transformations
+    # NOTE: `pathway` removed — it hard-pins pyarrow<19.0.0, which conflicts with
+    # the security-required pyarrow>=23.0.1 (GHSA-rgxp-2hwp-jwgg). The optional
+    # pathway framework in streaming_processor.py still imports lazily if a user
+    # installs pathway themselves.
     "kafka-python>=2.0.2",  # Apache Kafka
     "sseclient-py>=1.8.0",  # Server-Sent Events (Wikimedia, etc.)
     "websocket-client>=1.6.0",  # WebSocket (Coinbase, Binance, etc.)
 ]
 bytewax = ["bytewax>=0.19.0"]
-pathway = ["pathway>=0.15.0; python_version >= '3.10' and python_version < '3.14'"]
 kafka = ["kafka-python>=2.0.2"]
 sse = ["sseclient-py>=1.8.0"]
 websocket = ["websocket-client>=1.6.0"]
@@ -178,7 +180,7 @@ all = [
     "typer>=0.9.0",
     "polars>=0.20.0",
     "duckdb>=0.9.0",
-    "pyarrow>=14.0.0",
+    "pyarrow>=23.0.1",
     "deltalake>=0.15.0",
     "sqlglot>=20.0.0",
     "lxml>=4.9.0",
