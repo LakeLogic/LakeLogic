@@ -1,74 +1,124 @@
-site_name: LakeGuard
-site_description: Consistent Data Contracts across Polars, Pandas, DuckDB, and Spark.
-site_url: https://LineageLogic.github.io/LakeGuard
+site_name: LakeLogic
+site_description: Define data trust once. Enforce it everywhere. Open-source, Git-native data contracts — schema, quality, PII, lineage and SLOs as code, validated at runtime and in CI across Polars, DuckDB, and Spark.
+site_url: https://LakeLogic.github.io/LakeLogic/
+site_author: LakeLogic Team
+repo_name: lakelogic/LakeLogic
+repo_url: https://github.com/lakelogic/LakeLogic
+edit_uri: edit/main/docs/
+copyright: >
+  Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> ·
+  Open core — Apache 2.0 · <a href="https://github.com/lakelogic/LakeLogic" target="_blank">GitHub</a>
+
+use_directory_urls: false
+
+# Serve docs on a dedicated port so `mkdocs serve` never collides with the
+# FastAPI SaaS API (which uses :8000). Open http://127.0.0.1:8010/LakeLogic/
+dev_addr: 127.0.0.1:8010
 
 theme:
   name: material
+  custom_dir: docs/overrides
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: "Inter"
+    code: "JetBrains Mono"
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: indigo
+    # Dark mode (Default)
+    - scheme: slate
+      primary: custom
+      accent: light blue
       toggle:
         icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: indigo
-      accent: indigo
+        name: Switch to light mode
+        
+    # Light mode (Optional Toggle)
+    - scheme: default
+      primary: custom
+      accent: light blue
       toggle:
         icon: material/brightness-4
-        name: Switch to light mode
+        name: Switch to dark mode
   features:
-    - navigation.tabs
-    - navigation.sections
-    - content.code.copy
-    - content.code.annotate
+    - navigation.instant        # Instant loading (SPA-like)
+    - navigation.tracking       # URL updates with scroll
+    - navigation.tabs           # Top-level tabs
+    - navigation.top            # Back to top button
+    - navigation.footer         # Previous/next links
+    - navigation.indexes        # Allow index pages for sections
+    - navigation.sections       # Collapsible sidebar sections
+    - navigation.expand         # Expand all sections by default
+    - toc.follow                # TOC follows scroll
+    - search.suggest            # Search suggestions
+    - search.highlight          # Highlight search terms
+    - content.code.copy         # Copy button on code blocks
+    - content.code.annotate     # Code annotations
+    - content.tabs.link         # Linked content tabs
 
 nav:
   - Home: index.md
   - Getting Started:
       - Installation: installation.md
-      - Quickstart: quickstart.md
-  - Tutorials:
-      - Basic Validation: tutorials/basic_validation.md
-      - Medallion Architecture: tutorials/medallion_architecture.md
-      - Notifications & Secrets: tutorials/notifications_secrets.md
-  - Patterns:
-      - Overview: playbooks.md
-      - Bronze Quality Gate: patterns/bronze_quality_gate.md
-      - Dedup & Survivorship: patterns/dedup_survivorship.md
-      - SCD2 Dimension: patterns/scd2_dimension.md
-      - Late Arriving Reprocess: patterns/late_arriving_reprocess.md
-      - External Python Logic: patterns/external_python_logic.md
   - Concepts:
+      - Architecture Overview: architecture_diagram.md
       - How it Works: concepts.md
+      - Open Data Contract Standard (ODCS): odcs.md
       - Contract Organization: organization.md
       - Ingestion & Cloud: ingestion.md
+      - Real-Time Streaming: streaming.md
+      - Unstructured Data (LLM Extraction): llm_extraction.md
       - Reprocessing & Partitioning: reprocessing.md
+      - Pipeline Resilience: resilience.md
       - Pipelines & Parallelism: pipelines.md
-  - Production:
-      - Deployment Patterns: deployment_patterns.md
-      - Job Templates: job_templates.md
-      - Insurance ELT Example: examples/insurance_elt.md
+  - Examples:
+      - Overview: examples.md
+
+  - Deployment: deployment_patterns.md
   - Observability:
-      - Overview: observability.md
-      - Lineage & Reconciliation: reconciliation.md
+      - Monitoring & Lineage: observability.md
       - Notifications & Alerting: notifications.md
+  - Compliance & Governance:
+      - Overview: contracts/compliance.md
+      - Service Level Objectives: contracts/slo.md
+  - Contracts:
+      - Overview: contracts/index.md
+      - Domain Config (_domain.yaml): contracts/domain_config.md
+      - System Config (_system.yaml): contracts/system_config.md
+      - Data Product Contracts:
+          - Contract Anatomy: contracts/data_product_contracts/index.md
+          - Ingestion: contracts/data_product_contracts/ingestion.md
+          - Watermark Strategies: contracts/data_product_contracts/watermark_strategies.md
+          - Transformations: contracts/data_product_contracts/transformations.md
+          - Quality Rules: contracts/data_product_contracts/quality.md
+          - Materialization: contracts/data_product_contracts/materialization.md
+          - Dimensional Modeling: contracts/data_product_contracts/dimensional_modeling.md
+      - Schema & Model: contracts/schema_model.md
+      - Schema Validation API: contracts/schema_api.md
+      - Versioning: contracts/versioning.md
   - Reference:
+      - Complete Contract Template: contract_template.md
+      - Return Values: return_values.md
+      - Automatic Credentials: automatic_credentials.md
+      - Catalog Table Names: catalog_table_names.md
+      - Delta Lake (Spark-Free): delta_lake_support.md
       - CLI: cli.md
       - Driver: driver.md
       - Bootstrap: bootstrap.md
       - API: api.md
       - Capability Matrix: capabilities.md
-      - Warehouse Adapters: warehouse_adapters.md
+      - Public Streaming Sources: streaming_sources.md
+      - Logging Configuration: logging_configuration.md
+      - Validation Result: validation_result.md
       - Release & Maintenance: maintenance.md
-  - Why LakeGuard?: comparison.md
+  - Why LakeLogic?: comparison.md
 
 plugins:
   - search
   - mkdocs-jupyter:
       include_source: true
+
+not_in_nav: |
+  _backups/**
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -80,6 +130,30 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - admonition
   - attr_list
   - md_in_html
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/theme-switcher.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/lakelogic/LakeLogic
+      name: LakeLogic on GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/lakelogic/
+      name: LakeLogic on PyPI
+    - icon: fontawesome/solid/globe
+      link: https://lakelogic.org
+      name: LakeLogic.org Website
+  generator: false

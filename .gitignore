@@ -105,13 +105,13 @@ celerybeat.pid
 # Environments
 .env
 .venv
-.venv_lakeguard/
+.venv_lakelogic/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
-env_lakeguard/
+env_lakelogic/
 
 # Spyder project settings
 .spyderproject
@@ -167,18 +167,39 @@ $RECYCLE.BIN/
 
 # LakeGuard specific
 # Output directories from examples
+examples/_archive/
 examples/**/data/bronze/
 examples/**/data/silver/
 examples/**/data/gold/
 examples/**/data/quarantine/
 examples/**/data/output/
+examples/**/output/
+examples/03_advanced_workflows/**/data/*.parquet
+examples/03_advanced_workflows/**/data/**/*.parquet
 examples/**/data/landing/*.parquet
 examples/**/data/landing/*.delta
 examples/**/data/landing/*.db
 
+# Notebook-generated files in colab examples
+examples/colab/*.yaml
+examples/colab/*.yml
+examples/colab/*.csv
+examples/colab/*.duckdb
+examples/colab/*.db
+examples/colab/*.json
+examples/colab/*.ndjson
+examples/colab/*.log
+examples/colab/catalog/
+examples/colab/lakehouse/
+examples/colab/landing/
+examples/colab/*_demo/
+examples/colab/*_wip/
+examples/colab/dlt_pipelines/
+
+
 # LakeGuard state files
-_lakeguard_state/
-.lakeguard/
+_lakelogic_state/
+.lakelogic/
 *.state.json
 run_logs/
 
@@ -245,7 +266,6 @@ site/
 
 # Temporary test files
 check_contract.py
-test_*.py
 
 # Secret files (just in case)
 secrets.yaml
@@ -284,3 +304,37 @@ __pycache__/
 
 # uv cache (if local)
 .uv/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+*.tfvars
+*.tfvars.json
+!dev.tfvars
+!test.tfvars
+!prod.tfvars
+**/secrets*.tfvars
+**/*.auto.tfvars
+
+
+.product_vision/
+.markdownlint.json
+
+# Reference/example files
+_ref/
+
+.databricks
+.venv_ci
+.venv_docker
+.databricks
+
+.databricks
+
+databricks.yml
+
+.agent/
+.claude/
+playwright-mcp/
+.playwright-mcp/

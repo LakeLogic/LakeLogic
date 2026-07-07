@@ -1,0 +1,21 @@
+version: 1.0.0
+info:
+  title: "Gold \u2014 Gold Google Ads Acquisition Roi"
+  table_name: '{gold_layer}_google_ads_acquisition_roi'
+  description: Aggregated Gold KPIs.
+  target_layer: gold
+  domain: marketing
+  system: google_ads
+model:
+  fields:
+  - name: kpi_date
+    type: date
+  - name: metric_name
+    type: string
+  - name: metric_value
+    type: float
+source:
+  type: sql
+  query: "\n                SELECT \n                    CURRENT_DATE() as kpi_date,\n\
+    \                    'dummy_metric' as metric_name,\n                    100.0\
+    \ as metric_value\n            "

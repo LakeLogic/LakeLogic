@@ -1,0 +1,141 @@
+{# ── {{ system | title }} ({{ domain | title }}) System Registry ── #}
+# ── {{ domain | title }} / {{ system | title }} System Registry ──────────────
+domain: {{ domain }}
+system: {{ system }}
+
+metadata:
+  run_log_table: "{log_path}"
+  run_log_backend: "delta"
+
+quarantine:
+  enabled: true
+  fail_on_quarantine: false
+  include_error_reason: true
+  target: "{quarantine_path}"
+  format: "delta"
+  mode: "append"
+
+storage:
+  # ── Table Resolution ──────────────────────────────────────────────────────
+  domain_catalog: "`{catalog}`.{domain}"
+  external_location_root: "{data_root}"
+
+  # ── Operational Paths (UC mode — Databricks Volumes) ──────────────────────
+  contract_root: "/Workspace/Shared/data_platform/domains/{domain}/{system}"
+  landing_root: "/Volumes/{catalog}/nondelta/landing_{domain}/{system}"
+  log_root: "/Volumes/{catalog}/nondelta/_logs"
+
+  # ── Storage Paths (direct mode — cloud/local) ────────────────────────────
+  landing_path: "{storage_root}/_data/landing_{domain}/{system}"
+  contract_path: "{storage_root}/_contracts/{domain}/{system}"
+  bronze_path: "{data_root}/{bronze_layer}"
+  silver_path: "{data_root}/{silver_layer}"
+  gold_path: "{data_root}/{gold_layer}"
+  log_path: "{data_root}/_logs"
+  quarantine_path: "{data_root}/_quarantine"
+
+# ── External Sources (for lineage visualization) ────────────────────────────
+external_sources: []
+#  - name: "Example API"
+#    type: api                    # api | file | database | stream
+#    source_domain: "Internal"
+#    catalog_path: "example_api"
+#    consumed_by:
+#      - "entity_name"
+
+# ── Contract Registry ───────────────────────────────────────────────────────
+contracts:
+{% for contract in contracts %}
+  # ── {{ contract.layer | title }} Layer ───
+  - layer: {{ contract.layer }}
+    entity: {{ contract.entity }}
+    path: "contracts/{{ contract.layer }}/{{ contract.layer }}_{{ system }}_{{ contract.entity }}_v1.0.yaml"
+    enabled: {{ contract.enabled | default(true) | lower }}
+{% if contract.depends_on is defined %}
+    depends_on: {{ contract.depends_on }}
+{% endif %}
+{% endfor %}
+
+# ── Lineage (inherited by all contracts) ────────────────────────────────────
+lineage:
+  enabled: true
+  source_column_name: "_lakelogic_source"
+  timestamp_column_name: "_lakelogic_processed_at"
+  run_id_column_name: "_lakelogic_run_id"
+  contract_name_column_name: "_lakelogic_contract_name"
+  capture_domain: false
+  capture_system: false
+
+# ── Materialization (per-layer defaults, contracts override) ────────────────
+materialization:
+  bronze:
+    strategy: append
+    format: delta
+  silver:
+    strategy: merge
+    format: delta
+    merge_dedup_guard: true
+  gold:
+    strategy: merge
+    format: delta
+
+# ── Server Defaults (per-layer, contracts override) ─────────────────────────
+server:
+  bronze:
+    cast_to_string: true
+    schema_policy:
+      evolution: append
+      unknown_fields: allow
+  silver:
+    schema_policy:
+      evolution: strict
+      unknown_fields: quarantine
+  gold:
+    schema_policy:
+      evolution: strict
+      unknown_fields: quarantine
+
+# ── Cost Observability ──────────────────────────────────────────────────────
+cost:
+  provider: "manual"
+  attribution: "duration_proportional"
+  currency: "{{ currency | default('GBP') }}"
+  rates:
+    dbu_per_hour: 0.22
+    storage_per_gb_month: 0.023
+  cluster:
+    min_nodes: 2
+    max_nodes: 8
+    scaling_assumption: "avg"
+
+notifications_enabled: false
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ENVIRONMENTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+x-azure-storage: &azure_storage
+  storage_root: "abfss://nondelta@{storage_account}.dfs.core.windows.net"
+  data_root: "abfss://{domain}@{storage_account}.dfs.core.windows.net"
+
+environments:
+  dev:
+    catalog: "{{ catalog_prefix | default('lakelogic') }}-dev-001"
+    storage_account: "sa{{ storage_prefix | default('lakelogic') }}devadls001"
+    <<: *azure_storage
+  staging:
+    catalog: "{{ catalog_prefix | default('lakelogic') }}-staging-001"
+    storage_account: "sa{{ storage_prefix | default('lakelogic') }}stagingadls001"
+    <<: *azure_storage
+  prod:
+    catalog: "{{ catalog_prefix | default('lakelogic') }}-prod-001"
+    storage_account: "sa{{ storage_prefix | default('lakelogic') }}prodadls001"
+    <<: *azure_storage
+  local:
+    catalog: "local"
+    storage_root: "./lakehouse"
+    data_root: "./lakehouse/{domain}"
+  colab:
+    catalog: "colab"
+    storage_root: "/content/lake"
+    data_root: "/content/lake/{domain}"

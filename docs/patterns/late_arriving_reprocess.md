@@ -82,7 +82,7 @@ materialization:
 ```bash
 cd examples/03_patterns/late_arriving_reprocess
 python -c "
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 proc = DataProcessor(contract='contract.yaml')
 
 # Run 1: Load initial events

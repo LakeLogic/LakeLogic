@@ -1,93 +1,72 @@
-# LakeGuard Examples
+# LakeLogic Examples
 
-Learn LakeGuard through hands-on examples, organized by skill level.
+Hands-on examples organized by learning stage. Each example is a self-contained notebook that runs locally, on Colab, or on Databricks with a single setup cell.
 
----
+## Structure
 
-## Learning Path
-
-### Level 1: First Contract (5 minutes)
-Start here. Run your first data quality check.
-
-```
-01_getting_started/basic_validation/
-```
-
-### Level 2: Core Concepts (30 minutes)
-Understand the medallion architecture and reference data.
-
-```
-02_tutorials/
-├── medallion_architecture/   # Bronze → Silver pipeline
-└── reference_joins/          # Link tables and enrichment
-```
-
-### Level 3: Real Patterns (pick what you need)
-Common data engineering recipes.
-
-```
-03_patterns/
-├── bronze_quality_gate/      # Quality checks at ingestion
-├── dedup_survivorship/       # Handle duplicate records
-├── scd2_dimension/           # Slowly changing dimensions
-├── late_arriving_reprocess/  # Safe partition backfill
-└── external_python_logic/    # Custom Python/notebook hooks
-```
-
-### Level 4: Production Ready
-Alerts, secrets, and complete examples.
-
-```
-04_features/
-└── notifications_and_secrets/   # Slack, Teams, email alerts
-
-05_production/
-├── contract_template/           # Full production-grade template
-└── insurance_elt/               # Complete multi-entity example
-```
-
-### Level 5: Integrate with Your Stack
-Connect LakeGuard to your orchestrator.
-
-```
-06_integrations/
-└── job_templates/               # Airflow, Dagster, Prefect, etc.
-```
-
----
+| Folder | What It Covers |
+|---|---|
+| `01_quickstart/` | Your first pipeline in 5 minutes |
+| `02_core_patterns/` | Essential modeling patterns for any lakehouse |
+| `03_compliance_governance/` | HIPAA & GDPR policy enforcement, PII masking |
+| `04_lakehouse_data_platform/` | Full Data Mesh pipeline — domain ownership, config-driven medallion, engine portability |
+| `_archive/` | Untested examples — available once validated |
 
 ## Quick Start
 
 ```bash
-# 1. Install LakeGuard
-pip install lakeguard
+# 1. Install LakeLogic
+pip install lakelogic
 
 # 2. Run your first example
-cd examples/01_getting_started/basic_validation
-lakeguard run --contract contract.yaml --source data/sample_customers.csv
-
-# 3. Explore the output
-# Good records pass, bad records go to quarantine with error reasons
+cd examples/01_quickstart
+jupyter notebook 01_hello_world.ipynb
 ```
 
----
+## Available Examples
 
-## Example Structure
+### 01_quickstart
+| Notebook | What You'll Learn |
+|---|---|
+| `01_hello_world.ipynb` | Ingest a remote CSV, apply quality rules, inspect good/bad rows |
+| `02_database_governance.ipynb` | Extract from SQLite, validate against a contract, quarantine bad records |
+| `03_dbt_pii_quality.ipynb` | Convert a dbt schema to a LakeLogic contract with PII detection |
 
-Each example contains:
+### 02_core_patterns
+| Folder | What You'll Learn |
+|---|---|
+| `bronze_quality_gate/` | Stop bad data at ingestion — schema enforcement + row rules |
+| `dedup_survivorship/` | Deduplicate records and elect a survivor using configurable rules |
+| `medallion_architecture/` | Full Bronze → Silver → Gold pipeline in one contract chain |
+| `reference_joins/` | Enrich records by joining a reference table inside the contract |
+| `scd2_dimension/` | Preserve full history with versioned rows (Slowly Changing Dimension Type 2) |
+| `soft_delete/` | Flag CDC deletes instead of removing rows — GDPR & audit friendly |
+
+### 03_compliance_governance
+| Folder | What You'll Learn |
+|---|---|
+| `hipaa_gdpr_pii_masking/` | HIPAA & GDPR Policy Packs, automated PII masking, audit-ready quarantine |
+
+### 04_lakehouse_data_platform
+| Notebook | What You'll Learn |
+|---|---|
+| `data_mesh_ecommerce.ipynb` | Full Data Mesh pipeline with domain-centric contracts, config-driven medallion layers, PII masking, quarantine, cross-product JOINs, SCD2 dimensions, and engine portability (DuckDB → Polars → Spark) |
+
+## Example Layout
+
+Most examples follow this structure:
 
 ```
 example_name/
 ├── README.md          # What this example teaches
 ├── contract.yaml      # The data contract
 ├── data/              # Sample input data
-└── run.py             # (optional) Python script to run
+└── playbook.ipynb     # Interactive notebook — runs locally or on Colab
 ```
 
----
+## Where to Go Next
 
-## Need Help?
-
-- [Documentation](https://LineageLogic.github.io/LakeGuard)
-- [GitHub Issues](https://github.com/LineageLogic/LakeGuard/issues)
-- [GitHub Discussions](https://github.com/LineageLogic/LakeGuard/discussions)
+1. **New to LakeLogic?** Start with `01_quickstart/01_hello_world.ipynb`
+2. **Building a lakehouse?** Work through `02_core_patterns/` — bronze gate → dedup → SCD2 → soft delete
+3. **Regulated industry?** Go straight to `03_compliance_governance/hipaa_gdpr_pii_masking/`
+4. **Data Mesh at scale?** Run `04_lakehouse_data_platform/data_mesh_ecommerce.ipynb` — domain ownership, engine portability, config-driven governance

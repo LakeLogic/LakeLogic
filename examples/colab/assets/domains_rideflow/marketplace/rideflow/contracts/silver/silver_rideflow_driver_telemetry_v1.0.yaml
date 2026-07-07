@@ -1,0 +1,50 @@
+version: 1.0.0
+info:
+  title: "Silver \u2014 Rideflow Driver Telemetry"
+  table_name: '{silver_layer}_rideflow_driver_telemetry'
+  description: Cleaned, typed, and deduplicated data.
+  target_layer: silver
+  domain: marketplace
+  system: rideflow
+
+primary_key: [telemetry_id]
+
+model:
+  fields:
+  - name: telemetry_id
+    type: string
+    required: true
+  - name: driver_id
+    type: string
+    required: true
+  - name: gps_lat
+    type: string
+  - name: gps_lng
+    type: string
+  - name: speed_kmh
+    type: float
+  - name: heading
+    type: string
+  - name: accuracy_meters
+    type: string
+  - name: trip_id
+    type: string
+  - name: status
+    type: string
+  - name: city_code
+    type: string
+  - name: timestamp
+    type: timestamp
+quality:
+  row_rules: []
+  dataset_rules:
+  - unique: telemetry_id
+transformations:
+- deduplicate:
+    by:
+    - telemetry_id
+source:
+  type: delta
+  path: '{bronze_path}/{bronze_layer}_{system}_driver_telemetry'
+  load_mode: incremental
+  watermark_strategy: pipeline_log

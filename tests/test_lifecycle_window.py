@@ -1,7 +1,7 @@
 from typing import Any, Tuple
 
-from lakeguard.core.models import DataContract, Quality, RowRuleLifecycleWindow
-from lakeguard.engines.base import EngineAdapter
+from lakelogic.core.models import DataContract, Quality, RowRuleLifecycleWindow
+from lakelogic.engines.base import EngineAdapter
 
 
 class DummyAdapter(EngineAdapter):

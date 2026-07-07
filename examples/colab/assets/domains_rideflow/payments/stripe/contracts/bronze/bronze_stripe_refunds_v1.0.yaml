@@ -1,0 +1,55 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — Stripe Refunds"
+  table_name: "{bronze_layer}_{system}_refunds"
+  description: >
+    Raw refund events from Stripe. One row per refund issued to a rider.
+  target_layer: bronze
+  domain: payments
+  system: stripe
+
+model:
+  fields:
+    - name: refund_id
+      type: string
+      required: true
+      description: "Stripe refund ID"
+    - name: charge_id
+      type: string
+      required: true
+      description: "FK to parent charge"
+    - name: rider_id
+      type: string
+      description: "FK to marketplace rider"
+    - name: amount
+      type: string
+      description: "Refund amount in minor units"
+    - name: currency
+      type: string
+      description: "ISO 4217 currency code"
+    - name: status
+      type: string
+      description: "Refund status (succeeded, pending, failed)"
+    - name: reason
+      type: string
+      description: "Refund reason code"
+    - name: refund_reason
+      type: string
+      pii: true
+      description: "Free-text refund reason (may contain PII)"
+    - name: created_at
+      type: string
+      description: "Refund creation timestamp"
+
+source:
+  type: landing
+  path: "{landing_root}/refunds"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d"

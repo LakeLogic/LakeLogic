@@ -16,7 +16,7 @@
 
   <rect class="bg" x="0" y="0" width="1200" height="700" />
 
-  <text class="title" x="40" y="40">LakeGuard Observability Dashboard (Wireframe)</text>
+  <text class="title" x="40" y="40">LakeLogic Observability Dashboard (Wireframe)</text>
   <text class="muted" x="40" y="62">KPI summary, quality trends, and top issues in one view</text>
 
   <!-- KPI Cards -->

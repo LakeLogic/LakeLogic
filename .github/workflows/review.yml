@@ -1,0 +1,62 @@
+name: LakeLogic Review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # for SARIF upload
+  pull-requests: write     # for inline review comments + summary
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # required for --diff against origin/main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache LakeLogic review results
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/lakelogic/review
+          key: lakelogic-review-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            lakelogic-review-
+
+      - name: Install
+        run: pip install -e .[review,ai]
+
+      # 1. SARIF run — gates the build via exit code
+      - name: Run review (SARIF, gating)
+        run: |
+          lakelogic review \
+            --diff origin/${{ github.base_ref }} \
+            --format sarif \
+            -o review.sarif \
+            --fail-on critical
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: review.sarif
+
+      # 2. PR review run — posts inline comments + updating summary (CodeRabbit-style)
+      - name: Post inline review + summary comment
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          lakelogic review \
+            --diff origin/${{ github.base_ref }} \
+            --format github_pr \
+            --fail-on never
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,61 @@
+version: 1.0.0
+info:
+  title: "Silver — Checkr Driver Licences Validated"
+  table_name: "{silver_layer}_{system}_driver_licences"
+  description: "Validated and securely masked driver licence information."
+  target_layer: silver
+  domain: operations
+  system: checkr
+
+dataset: "driver_licences"
+
+source:
+  type: table
+  format: delta
+  path: "{storage_root}/{domain}/{bronze_layer}_{system}_driver_licences"
+
+model:
+  fields:
+    - name: full_name
+      type: string
+      required: true
+      pii: true
+      masking: redact
+      
+    - name: licence_number
+      type: string
+      required: true
+      pii: true
+      masking: hash
+      
+    - name: date_of_birth
+      type: string
+      pii: true
+      masking: hash
+      
+    - name: expiry_date
+      type: date
+      
+    - name: vehicle_classes
+      type: string
+
+quality:
+  dataset_rules:
+    - unique: licence_number
+
+transformations:
+  - drop:
+      columns: 
+        - file_path
+        - _lakelogic_llm_cost_usd
+        - _lakelogic_llm_latency_ms
+        - _lakelogic_llm_model
+        - _lakelogic_llm_provider
+        - _lakelogic_created_at
+        - _lakelogic_created_by
+  - deduplicate:
+      by:
+        - licence_number
+
+lineage:
+  enabled: true

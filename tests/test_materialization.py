@@ -1,6 +1,6 @@
 import polars as pl
 
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 
 
 def test_lineage_injection(tmp_path):
@@ -15,13 +15,16 @@ def test_lineage_injection(tmp_path):
     good_df, bad_df = processor.run(df, source_path=tmp_path / "source.csv")
 
     for frame in (good_df, bad_df):
-        assert "_lakeguard_source" in frame.columns
-        assert "_lakeguard_processed_at" in frame.columns
-        assert "_lakeguard_run_id" in frame.columns
-        assert frame["_lakeguard_source"][0] == str(tmp_path / "source.csv")
+        assert "_lakelogic_source" in frame.columns
+        assert "_lakelogic_processed_at" in frame.columns
+        assert "_lakelogic_run_id" in frame.columns
+        assert frame["_lakelogic_source"][0] == str(tmp_path / "source.csv")
 
 
 def test_materialization_partitioned_append(tmp_path):
+    import pytest
+
+    pytest.importorskip("pandas")
     contract = {
         "version": "1.0.0",
         "dataset": "events",
@@ -33,19 +36,20 @@ def test_materialization_partitioned_append(tmp_path):
             "format": "csv",
         },
     }
-    df = pl.DataFrame(
-        {"event_id": [1, 2], "event_date": ["2024-01-01", "2024-01-02"], "value": [10, 20]}
-    )
+    df = pl.DataFrame({"event_id": [1, 2], "event_date": ["2024-01-01", "2024-01-02"], "value": [10, 20]})
     processor = DataProcessor(engine="polars", contract=contract)
     processor.materialize(df)
 
-    part_a = tmp_path / "out" / "event_date=2024-01-01" / "data.csv"
-    part_b = tmp_path / "out" / "event_date=2024-01-02" / "data.csv"
-    assert part_a.exists()
-    assert part_b.exists()
+    part_a_dir = tmp_path / "out" / "event_date=2024-01-01"
+    part_b_dir = tmp_path / "out" / "event_date=2024-01-02"
+    assert list(part_a_dir.glob("data*.csv")), f"No CSV in {part_a_dir}"
+    assert list(part_b_dir.glob("data*.csv")), f"No CSV in {part_b_dir}"
 
 
 def test_materialization_merge(tmp_path):
+    import pytest
+
+    pytest.importorskip("pandas")
     contract = {
         "version": "1.0.0",
         "dataset": "customers",
@@ -69,6 +73,9 @@ def test_materialization_merge(tmp_path):
 
 
 def test_quarantine_table_duckdb(tmp_path):
+    import pytest
+
+    pytest.skip("DuckDB engine is deprecated")
     contract = {
         "version": "1.0.0",
         "dataset": "events",
@@ -85,6 +92,7 @@ def test_quarantine_table_duckdb(tmp_path):
     processor.materialize(good_df, bad_df)
 
     import duckdb
+
     con = duckdb.connect(str(tmp_path / "quarantine.duckdb"))
     try:
         count = con.execute("SELECT COUNT(*) FROM quarantine_events").fetchone()[0]

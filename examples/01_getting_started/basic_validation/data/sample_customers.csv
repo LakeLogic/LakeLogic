@@ -1,7 +1,0 @@
-id,name,email,age,signup_date,status
-1,Alice,alice@example.com,25,2023-01-01,active
-2,Bob,bob@example.com,30,2023-01-02,active
-3,Charlie,charlie-invalid-email,35,2023-01-03,active
-4,David,david@example.com,-5,2023-01-04,inactive
-5,Eve,eve@example.com,28,2023-01-05,active
-6,Alice,alice@example.com,25,2023-01-06,active

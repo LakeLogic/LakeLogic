@@ -80,7 +80,7 @@ quality:
 ```bash
 cd examples/03_patterns/dedup_survivorship
 python -c "
-from lakeguard import DataProcessor
+from lakelogic import DataProcessor
 proc = DataProcessor(contract='contract.yaml')
 good, bad = proc.run('data/customer_updates.csv')
 print(f'Unique customers: {len(good)}')

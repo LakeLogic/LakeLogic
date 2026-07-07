@@ -1,0 +1,73 @@
+version: 1.0.0
+
+info:
+  title: "Gold — Daily Rider Metrics"
+  table_name: "{gold_layer}_rideflow_rider_daily_metrics"
+  description: "Daily aggregated rider metrics. Can be safely reprocessed and summed over time to calculate Lifetime Value."
+  target_layer: gold
+  domain: marketplace
+  system: rideflow
+
+source:
+  type: delta
+  path: "{silver_path}/silver_rideflow_trips"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+
+primary_key: [rider_id, activity_date]
+
+links:
+  - name: silver_trips_full
+    path: "{silver_path}/silver_rideflow_trips"
+    type: delta
+
+model:
+  fields:
+    - name: rider_id
+      type: string
+      required: true
+    - name: activity_date
+      type: date
+      required: true
+    - name: daily_trips
+      type: integer
+    - name: daily_spend
+      type: float
+    - name: daily_tips
+      type: float
+    - name: avg_daily_rating
+      type: float
+
+transformations:
+  - sql: |
+      SELECT
+          rider_id,
+          DATE(requested_at)         AS activity_date,
+          COUNT(*)                   AS daily_trips,
+          SUM(fare_amount)           AS daily_spend,
+          SUM(tip_amount)            AS daily_tips,
+          AVG(rider_rating)          AS avg_daily_rating
+      -- Read the FULL Silver table (via link) so aggregates
+      -- (COUNT, SUM, AVG) include ALL rows for each date —
+      -- not just the incremental slice.  The Jinja guard below
+      -- limits WHICH dates are recomputed, then merge upserts
+      -- the corrected totals into Gold.
+      FROM silver_trips_full
+      WHERE rider_id IS NOT NULL
+      -- Only re-aggregate dates that received new trips.
+      -- On a full load, `source` contains everything, so this safely selects all dates.
+      AND DATE(requested_at) IN (SELECT DISTINCT DATE(requested_at) FROM source)
+      GROUP BY rider_id, DATE(requested_at)
+
+
+downstream:
+  - type: table
+    name: "gold_marketing_funnel"
+    platform: databricks
+    owner: "analytics-team"
+    managed: false                  
+    
+  - type: api
+    name: "Rider Daily Metrics API"
+    platform: internal
+    owner: "backend-team"

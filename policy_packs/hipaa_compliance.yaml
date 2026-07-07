@@ -1,0 +1,41 @@
+name: hipaa_pii_compliance
+description: "Industry template for HIPAA and PII compliance validation."
+
+defaults:
+  schema_policy:
+    evolution: strict
+    unknown_fields: quarantine
+
+  quality:
+    enforce_required: true
+    row_rules:
+      # Common PII fields that must be validated or at least exist
+      - name: email_format_check
+        category: validity
+        sql: "email REGEXP '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'"
+        description: "Emails must follow standard format."
+
+      - name: ssn_format_check
+        category: validity
+        sql: "ssn REGEXP '^\\d{3}-\\d{2}-\\d{4}$'"
+        description: "SSN must follow XXX-XX-XXXX format."
+        severity: error
+
+  metadata:
+    compliance_framework: "HIPAA"
+    data_sensitivity: "PII"
+    pii_policy: "mask_on_export"
+
+lineage:
+  enabled: true
+  capture_domain: true
+  capture_system: true
+
+quarantine:
+  enabled: true
+  notifications:
+    - type: slack
+      target: "env:COMPLIANCE_ALERTS_WEBHOOK"
+      on_events: ["failure"]
+
+# This template can be imported into standard contracts

@@ -1,0 +1,50 @@
+# ============================================================
+# LAKELOGIC — BRONZE PIPELINE TEMPLATE MANIFEST
+# ============================================================
+# Registry of Bronze ingestion templates for contract generation.
+
+templates:
+  - id: bronze_ingest
+    name: "Raw Ingestion (Cast-to-String)"
+    description: >
+      Ingest raw source data with minimal transformation.
+      All columns cast to string for schema-safe landing.
+      Allows schema drift with append evolution.
+    contract_template: bronze_ingest_contract.yaml.j2
+    processor_template: bronze_ingest_processor.py.j2
+    use_when:
+      - "ingest"
+      - "raw"
+      - "bronze"
+      - "landing"
+      - "import"
+      - "csv"
+      - "source"
+    example_prompts:
+      - "Ingest raw customer CSV into Bronze layer"
+      - "Land raw orders data from upstream API"
+      - "Import product catalog into Bronze storage"
+
+  - id: bronze_unstructured
+    name: "Unstructured Parsing (LLM Extraction)"
+    description: >
+      Extract structured data from raw unstructured files
+      (PDFs, images, raw text) using LLM extraction.
+      Validates output against a strict schema mapping.
+    contract_template: bronze_unstructured_contract.yaml.j2
+    processor_template: bronze_unstructured_processor.py.j2
+    use_when:
+      - "unstructured"
+      - "extract"
+      - "pdf"
+      - "parse"
+      - "llm"
+      - "document"
+      - "image"
+      - "invoice"
+      - "receipt"
+      - "text"
+    example_prompts:
+      - "Extract invoice details (date, total amount, vendor name) from PDF files."
+      - "Parse customer feedback emails and extract sentiment, topic, and urgency."
+      - "Extract structured product spec attributes from raw textual descriptions."

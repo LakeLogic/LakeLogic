@@ -1,9 +1,0 @@
-customer_id,name,email,signup_date,plan_type,total_spend,is_active
-101,Alice Smith,alice.smith@example.com,2024-01-15,premium,1250.50,true
-102,Bob Jones,bob.jones_invalid_email,2024-01-16,basic,45.00,true
-103,Charlie Brown,,2024-01-17,free,0,true
-104,Duplicate User,dup@example.com,2024-01-15,free,10.00,true
-104,Duplicate User,dup@example.com,2024-01-18,free,25.00,true
-105,Eve Adams,eve@example.com,2024-02-01,premium,-500,false
-106,Frank White,frank@example.com,not-a-date,basic,100,true
-107,Grace Lee,grace@example.com,2024-02-10,gold,high,true

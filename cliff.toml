@@ -1,0 +1,98 @@
+# git-cliff configuration for LakeLogic
+# Docs: https://git-cliff.org/docs/configuration
+#
+# Usage:
+#   git cliff                          # full changelog
+#   git cliff --latest                 # only the latest release
+#   git cliff --unreleased             # only unreleased changes
+#   git cliff -o CHANGELOG.md          # write to file
+#   git cliff --tag v0.13.0            # preview next release
+#
+# Workflow with commitizen:
+#   1. cz bump                         # bumps version + creates git tag
+#   2. git cliff -o CHANGELOG.md       # regenerates full changelog
+#   3. git add CHANGELOG.md && git commit --amend --no-edit
+
+[changelog]
+header = """# Changelog
+
+All notable changes to **LakeLogic** are documented here.
+
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+"""
+body = """
+{%- macro remote_url() -%}
+  https://github.com/lakelogic/LakeLogic
+{%- endmacro -%}
+
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif %}
+{%- for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits
+| filter(attribute="scope")
+| sort(attribute="scope") %}
+- **{{ commit.scope }}**: {{ commit.message | upper_first }}
+{%- if commit.breaking %} (**BREAKING**){% endif %}
+{%- endfor %}
+{%- for commit in commits %}
+{%- if not commit.scope %}
+- {{ commit.message | upper_first }}
+{%- if commit.breaking %} (**BREAKING**){% endif %}
+{%- endif %}
+{%- endfor %}
+{% endfor %}
+"""
+footer = """
+---
+
+<!-- Link definitions -->
+{% for release in releases -%}
+{% if release.version -%}
+{% if release.previous.version -%}
+[{{ release.version | trim_start_matches(pat="v") }}]: https://github.com/lakelogic/LakeLogic/compare/{{ release.previous.version }}...{{ release.version }}
+{% else -%}
+[{{ release.version | trim_start_matches(pat="v") }}]: https://github.com/lakelogic/LakeLogic/releases/tag/{{ release.version }}
+{% endif -%}
+{% else -%}
+{% if release.previous.version -%}
+[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/{{ release.previous.version }}...HEAD
+{% endif -%}
+{% endif -%}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+
+commit_parsers = [
+    # Skip noise
+    { message = "^bump", skip = true },
+    { message = "^chore", skip = true },
+    { message = "^Merge", skip = true },
+    # Conventional commit types → changelog groups
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^style", group = "Styling" },
+    { message = "^test", group = "Testing" },
+    { message = "^build", group = "Build" },
+    { message = "^ci", group = "CI/CD" },
+    { body = ".*security", group = "Security" },
+]
+
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = "v[0-9].*"
+sort_commits = "newest"

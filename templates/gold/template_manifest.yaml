@@ -1,0 +1,128 @@
+# ============================================================
+# LAKELOGIC — GOLD PIPELINE TEMPLATE MANIFEST
+# ============================================================
+# Registry of available templates for Zeus AI code generation.
+# Zeus picks the right template based on user intent keywords.
+
+templates:
+  - id: gold_fact
+    name: "Fact Table (Joins + KPIs)"
+    description: >
+      Join multiple Silver tables with dimension lookups,
+      derive KPIs (delivery days, late flags, scores),
+      and produce a denormalized fact table.
+    processor_template: gold_fact_processor.py.j2
+    contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
+    use_when:
+      - "join"
+      - "fact"
+      - "merge"
+      - "enrich"
+      - "combine"
+      - "lookup"
+      - "denormalize"
+      - "left join"
+    example_prompts:
+      - "Join customers and orders, calculate LTV by segment"
+      - "Merge product catalog with inventory, flag stockouts"
+      - "Enrich transactions with customer demographics and reviews"
+
+  - id: gold_aggregate
+    name: "Aggregation (GROUP BY + Metrics)"
+    description: >
+      Roll up Silver data by dimensions using GROUP BY,
+      compute aggregate metrics (SUM, AVG, COUNT, MAX),
+      and produce a summary/analytics-ready table.
+    processor_template: gold_aggregate_processor.py.j2
+    contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
+    use_when:
+      - "aggregate"
+      - "sum"
+      - "count"
+      - "average"
+      - "group by"
+      - "rollup"
+      - "pivot"
+      - "metrics"
+      - "summary"
+      - "kpi"
+      - "revenue by"
+      - "per segment"
+      - "per region"
+    example_prompts:
+      - "Aggregate daily sessions by channel, compute conversion rate"
+      - "Pivot monthly revenue by region, compute YoY growth"
+      - "Calculate customer LTV by segment with churn risk"
+
+  - id: gold_dim
+    name: "Dimension Table (SCD1 / SCD2)"
+    description: >
+      Build a dimension table from Silver data with deduplication,
+      attribute derivation, and Slowly Changing Dimension support
+      (Type 1 overwrite or Type 2 history tracking).
+    processor_template: gold_dim_processor.py.j2
+    contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
+    use_when:
+      - "dimension"
+      - "dim"
+      - "scd"
+      - "scd2"
+      - "scd type 2"
+      - "slowly changing"
+      - "history"
+      - "current flag"
+      - "valid_from"
+      - "customer dimension"
+      - "product dimension"
+      - "lookup"
+    example_prompts:
+      - "Build customer dimension with SCD2 history tracking"
+      - "Create product dimension from raw catalog, deduplicate on product_id"
+      - "Build store dimension with SCD1, derive region from postcode"
+
+  - id: gold_merge
+    name: "Partition-Aware Merge (UPSERT)"
+    description: >
+      Merge incoming data into a Gold Delta table using a partition-aware
+      MERGE INTO (upsert) pattern. Useful for incremental loads where
+      new/changed rows replace existing rows scoped to specific partitions,
+      preserving historical data in untouched partitions.
+    processor_template: gold_fact_processor.py.j2
+    contract_template: gold_contract.yaml.j2
+    # Inline variant: transformations are embedded as SQL in the contract
+    # instead of a separate Python processor. Backend picks this when the
+    # caller sends logic_shape='inline'.
+    contract_template_inline: gold_contract_inline.yaml.j2
+    use_when:
+      - "merge"
+      - "upsert"
+      - "insert or update"
+      - "incremental"
+      - "partition merge"
+      - "delta merge"
+      - "merge into"
+      - "replace partition"
+      - "overwrite partition"
+    example_prompts:
+      - "Merge daily orders into Gold fact, partition by order_date"
+      - "Upsert customer records by customer_id, partition by region"
+      - "Incremental merge of transactions, replace only changed partitions"
+
+# Reference docs injected into Zeus prompt context
+context_files:
+  - path: "docs/contract_template.md"
+    purpose: "Complete contract YAML reference — Zeus uses this as the rule book for valid YAML options"
+  - path: "policy_packs/baseline_gold.yaml"
+    purpose: "Default quality rules and lineage settings for Gold layer"

@@ -4,35 +4,59 @@ This matrix summarizes what each engine supports in the OSS runtime. When a feat
 
 ## Engine Support
 
-| Engine | File Sources | Table Sources | File Outputs | Table Outputs | Quarantine Table Targets | Notes |
+| Engine | File Sources | Table Sources | File Outputs | Table Outputs | Quarantine Targets | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Polars | CSV, Parquet | No | CSV, Parquet | No | Yes (DuckDB/SQLite backend) | Fast local engine. For managed lakehouse tables (Unity Catalog/Fabric), use Spark. |
-| Pandas | CSV, Parquet | No | CSV, Parquet | No | Yes (DuckDB/SQLite backend) | Uses DuckDB for SQL execution. |
-| DuckDB | CSV, Parquet | No | CSV, Parquet | DuckDB tables | Yes (DuckDB/SQLite backend) | Table outputs are DuckDB database tables. |
-| Spark | CSV, Parquet, Delta, Iceberg, JSON | Spark tables | CSV, Parquet, Delta, Iceberg, JSON | Spark tables | Yes (Spark tables) | Recommended for lakehouse catalogs (Unity Catalog/Fabric). |
-| Snowflake | Table-only | Table-only | Table writes (Snowflake) | Snowflake tables | Yes (Snowflake tables) | Requires connector and credentials. |
-| BigQuery | Table-only | Table-only | Table writes (BigQuery) | BigQuery tables | Yes (BigQuery tables) | Requires client and credentials. |
+| Polars | CSV, Parquet, Delta¹ | Delta tables¹ | CSV, Parquet, Delta¹, Iceberg² | Delta tables¹ | Delta¹ file | Delta-RS provides Spark-free lakehouse table support. |
+| Spark | CSV, Parquet, Delta, Iceberg, JSON | Spark tables | CSV, Parquet, Delta, Iceberg, JSON | Spark tables | Spark tables (Delta/Iceberg) | Recommended for lakehouse catalogs (Unity Catalog/Fabric). |
+| Snowflake | Table-only | Table-only | Table writes (Snowflake) | Snowflake tables | Snowflake tables | Requires `snowflake-connector-python` and credentials. |
+| BigQuery | Table-only | Table-only | Table writes (BigQuery) | BigQuery tables | BigQuery tables | Requires `google-cloud-bigquery` and credentials. |
+| LLM | Text, PDF, Image, Audio, Video | N/A | Structured rows | N/A | Via parent engine | Unstructured → structured extraction via LLM providers. |
+
+¹ Delta support via [delta-rs](https://delta-io.github.io/delta-rs/) (`pip install deltalake`). Includes read, write, atomic MERGE, vacuum, optimize, and time travel — no Spark/JVM required. Cloud storage auto-credentials via `DeltaAdapter`.
+² Iceberg file output uses DuckDB's iceberg extension (`COPY ... FORMAT ICEBERG`).
 
 ## Materialization Strategies
 
-| Strategy | Polars | Pandas | DuckDB | Spark |
-| --- | --- | --- | --- | --- |
-| `overwrite` | Native | Native | Native | Native |
-| `append` | Native | Native | Native | Native |
-| `merge` | Requires pandas | Native | Requires pandas | Native (distributed) |
-| `scd2` | Requires pandas | Native | Requires pandas | Native (distributed) |
+| Strategy | Polars | Spark |
+| --- | --- | --- |
+| `overwrite` | Native | Native |
+| `append` | Native | Native |
+| `merge` | Native (Delta via delta-rs) | Native (distributed) |
+| `scd2` | Native | Native (distributed) |
 
-**Spark advantage:** Merge and SCD2 operations run natively using distributed DataFrame operations, avoiding driver memory bottlenecks. For Delta Lake tables, LakeGuard uses `MERGE INTO` when available.
+**Spark advantage:** Merge and SCD2 operations run natively using distributed DataFrame operations, avoiding driver memory bottlenecks. For Delta Lake tables, LakeLogic uses `MERGE INTO` when available.
+
+**Delta merge via delta-rs:** When the output format is Delta, Polars uses `DeltaTable.merge()` from delta-rs for atomic merge operations. This uses the same MERGE INTO semantics as Spark Delta but runs without a JVM.
+
+**Non-Delta merge/SCD2:** For CSV/Parquet targets, Polars utilizes native DataFrame operations without driver memory bottlenecks — however, use Spark or Delta format for exceptionally large datasets.
 
 ## Format Defaults
 
-- Quarantine **file** targets default to **Parquet** (override with file suffix or `metadata.quarantine_format`).
-- Quarantine **table** targets on Spark default to **Iceberg** (override with `metadata.quarantine_table_format`).
-- Non-Spark engines support **CSV/Parquet** for file targets.
+- Quarantine **file** targets default to **Parquet** (override with `quarantine.format`, or `metadata.quarantine_format`, or file suffix).
+- Quarantine **table** targets on Spark default to **Delta** (override with `metadata.quarantine_table_format`).
+- Non-Spark engines support **CSV, Parquet, and Delta** for quarantine file targets.
 
 If you need an unsupported combination, use Spark or route through an external staging step.
 
+## LLM Extraction Engine
+
+The LLM engine (`engines/llm.py`) extracts structured data from unstructured inputs:
+
+| Provider | API Key Env Var | Notes |
+| --- | --- | --- |
+| `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-4o-mini |
+| `azure_openai` | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` | Azure-hosted OpenAI |
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude 3.5 Sonnet, Haiku |
+| `google` | `GOOGLE_API_KEY` | Gemini 2.0 Flash |
+| `bedrock` | AWS credentials (boto3) | Claude, Llama, Titan via AWS |
+| `ollama` | None (local) | Any Ollama model, default `http://localhost:11434` |
+| `local` | None (local) | HuggingFace Transformers (Phi-3-mini default) |
+
+Preprocessing supports PDF (OCR), image, audio (Whisper), and video inputs.
+
 ## Lakehouse Catalog Notes (Unity Catalog / Fabric)
 
-- **Managed tables require Spark.** Polars/Pandas can write files, but cannot register or manage tables in a catalog.
+- **Unity Catalog external tables work with Polars.** LakeLogic resolves 3-part table names (`catalog.schema.table`) to storage paths via the Databricks API, then reads/writes via delta-rs. No Spark needed.
+- **UC managed tables require Spark.** Managed tables don't expose a direct storage path — if resolution returns no `storage_location`, Spark is required.
 - **Iceberg tables in a catalog require Spark.** File-based Iceberg output is not the same as a catalog-managed table.
+- **Delta via delta-rs** is used automatically by LakeLogic for read, write, merge, vacuum, and time travel on any Delta table accessible via path. A standalone `DeltaAdapter` class is also available for ad-hoc use outside the pipeline.

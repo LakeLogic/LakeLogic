@@ -1,0 +1,58 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — RideFlow Trip Cancellations"
+  table_name: "{bronze_layer}_{system}_trip_cancellations"
+  description: >
+    Raw trip cancellation events from the RideFlow platform.
+    Each row represents a cancelled ride or delivery.
+  target_layer: bronze
+  domain: marketplace
+  system: rideflow
+
+model:
+  fields:
+    - name: cancellation_id
+      type: string
+      required: true
+      description: "Unique cancellation identifier"
+    - name: trip_id
+      type: string
+      description: "FK to trip (may be null for pre-match cancellations)"
+    - name: rider_id
+      type: string
+      required: true
+      description: "FK to rider_profiles"
+    - name: driver_id
+      type: string
+      description: "FK to driver_profiles (null if cancelled before match)"
+    - name: cancelled_by
+      type: string
+      description: "rider or driver"
+    - name: cancel_reason_code
+      type: string
+      description: "Cancellation reason code"
+    - name: city_code
+      type: string
+      description: "City code"
+    - name: requested_at
+      type: string
+      description: "Original request timestamp"
+    - name: cancelled_at
+      type: string
+      description: "Cancellation timestamp"
+    - name: cancellation_fee
+      type: string
+      description: "Fee charged (if applicable)"
+
+source:
+  type: landing
+  path: "{landing_root}/trip_cancellations"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

@@ -1,98 +1,127 @@
-# Installation Guide
+# Installation
 
-LakeGuard is designed to be lightweight. Install only what you need and scale up anytime.
+LakeLogic is designed to be lightweight — install only what you need and scale up anytime.
 
-## 1. Using [uv](https://github.com/astral-sh/uv) (Recommended)
+> **Analogy:** Think of LakeLogic like a Swiss Army knife. The base package gives you the blade (Polars engine). Extras snap on tools — Spark for big data, DuckDB for analytics, notifications for alerting, and database connectors for CDC.
 
-`uv` is the fastest way to install and manage LakeGuard.
+---
 
-```bash
-# Install everything (recommended for testing)
-uv pip install "lakeguard[all]"
-
-# Or install only what you need
-uv pip install "lakeguard[polars]"
-uv pip install "lakeguard[spark]"
-```
-
-## 2. Using pip
-
-If you prefer standard `pip`:
+## Quick Install
 
 ```bash
-pip install "lakeguard[all]"
+# Recommended — fast, conflict-free
+uv pip install "lakelogic[polars]"
+
+# Or with pip
+pip install "lakelogic[polars]"
 ```
 
-## Installation Options (Extras)
+That's it. You're ready to run your first contract.
 
-| Extra | What it includes | Use case |
+---
+
+## Choose Your Extras
+
+### Engines — How You Process Data
+
+Pick the engine that matches your workload:
+
+| Extra | What You Get | Best For |
 | :--- | :--- | :--- |
-| `[polars]` | Polars engine | High-speed local processing. |
-| `[pandas]` | Pandas + DuckDB | For data science teams. |
-| `[spark]` | PySpark | Large-scale Lakehouse jobs. |
-| `[duckdb]` | DuckDB native | Fast analytical SQL in-memory. |
-| `[snowflake]` | Snowflake connector | Run contracts directly in Snowflake (table-only). |
-| `[bigquery]` | BigQuery client | Run contracts directly in BigQuery (table-only). |
-| `[notebook]` | nbclient + nbformat | Run external notebook logic hooks. |
-| `[profiling]` | DataProfiler + Presidio | Schema profiling + PII detection (bootstrap). |
-| `[notifications]` | Secret manager clients (Azure/AWS/GCP/Vault) + cryptography | Enable optional notification secret providers. |
-| `[all]` | **Every engine** | When you want total flexibility. |
+| `[polars]` | Polars + Delta Lake + Excel/XML readers | **Start here** — fast local processing, notebooks, CI/CD |
+| `[spark]` | PySpark | Petabyte-scale Lakehouse jobs on Databricks |
+| `[duckdb]` | DuckDB + Pandas + PyArrow + Delta | Analytical SQL workloads, fast local queries |
+| `[engines]` | All of the above | Want everything — switch engines freely |
 
-**Materialization notes:**
+### Data Sources — Where You Read From
 
-- **Spark engine**: Supports `append`, `overwrite`, `merge`, and `scd2` strategies natively. Uses distributed DataFrame operations for merge/SCD2, avoiding driver memory bottlenecks at scale. Delta Lake `MERGE INTO` is used when available.
-- **DuckDB engine**: Full support for local and cloud data lakes. Supports `iceberg` and `delta` formats natively.
-- **Polars engine**: Supports `delta` format natively via `deltalake`.
-- **Pandas engine**: Full materialization support.
+| Extra | What You Get | Best For |
+| :--- | :--- | :--- |
+| `[databases]` | SQL Server, PostgreSQL, MySQL, MongoDB | CDC ingestion from operational databases |
+| `[azuresql]` | SQL Server + Azure AD auth | Azure SQL Database / Managed Instance |
+| `[postgresql]` | PostgreSQL + Azure AD auth | PostgreSQL CDC |
+| `[mysql]` | MySQL connector | MySQL CDC · 🔜 *connector wrapper coming soon* |
+| `[mongodb]` | MongoDB connector | Document store ingestion · 🔜 *connector wrapper coming soon* |
+| `[api]` | REST API client | Pulling data from HTTP APIs |
+| `[sftp]` | SFTP/SSH client | File-based ingestion from remote servers |
+| `[dlt]` | dlt + PyArrow | Declarative API ingestion · 🔜 *contract integration coming soon* |
 
-Install `[duckdb]` or `[polars]` for high-performance OSS processing. After installing, it is recommended to "warm" your environment for modern formats:
+### Streaming — Real-Time Processing
+
+| Extra | What You Get | Best For |
+| :--- | :--- | :--- |
+| `[streaming]` | Bytewax + Pathway + Kafka + SSE + WebSocket | Full real-time stack |
+| `[bytewax]` | Bytewax (Rust-based stream processor) | High-performance streaming |
+| `[pathway]` | Pathway (real-time SQL transforms) | SQL-first streaming |
+| `[kafka]` | Apache Kafka client | Kafka-based event pipelines |
+| `[sse]` | Server-Sent Events client | Wikimedia, live feeds |
+| `[websocket]` | WebSocket client | Coinbase, Binance, live APIs |
+
+### Cloud & Warehouses — Where You Deploy
+
+| Extra | What You Get | Best For |
+| :--- | :--- | :--- |
+| `[delta]` | Delta Lake + Azure + AWS + GCP storage | Spark-free Delta table reads/writes |
+| `[azure]` | Azure AD + Key Vault + Blob Storage + Databricks SDK | Azure-native deployments |
+| `[snowflake]` | Snowflake connector | Run contracts directly in Snowflake |
+| `[bigquery]` | BigQuery client | Run contracts directly in BigQuery |
+| `[cloud]` | All cloud providers + messaging + warehouses | Multi-cloud deployments |
+
+### Notifications & Secrets — Who Gets Alerted
+
+| Extra | What You Get | Best For |
+| :--- | :--- | :--- |
+| `[notifications]` | Apprise + Jinja2 + Key Vault + Secrets Manager + HVAC | Slack, Teams, Email, PagerDuty alerts |
+| `[notify]` | Apprise + HashiCorp Vault | Lightweight notification setup |
+| `[azure_messaging]` | Azure Service Bus + Event Grid | Azure-native event routing |
+| `[aws_messaging]` | AWS SQS/SNS via Boto3 | AWS-native event routing |
+| `[gcp_messaging]` | Google Cloud Pub/Sub | GCP-native event routing |
+
+### AI & Profiling — Smart Contract Generation
+
+| Extra | What You Get | Best For |
+| :--- | :--- | :--- |
+| `[ai]` | OpenAI + Anthropic + Google GenAI | AI-powered contract bootstrap (`lakelogic bootstrap --ai`) |
+| `[pii]` | DataProfiler + Presidio | Automatic PII detection, profiling, and anonymization |
+
+### Bundles — Pre-Packaged Combinations
+
+| Extra | What You Get | Best For |
+| :--- | :--- | :--- |
+| `[all]` | Base install (backwards compat) | Minimal footprint |
+| `[enterprise]` | Spark + PII + Bytewax + notebooks | Full-stack enterprise deployment |
+| `[cli]` | Typer CLI framework | `lakelogic` command-line tool |
+
+---
+
+## Engine Selection Tips
+
+> **Rule of thumb:** Start with `[polars]`. If you hit scale limits, switch to `[spark]`. If you want SQL-native analytics, try `[duckdb]`. Your contracts work on all three — zero code changes.
+
+| Scenario | Recommended Engine |
+| :--- | :--- |
+| Local development, notebooks, CI/CD | **Polars** — fastest startup, smallest footprint |
+| Databricks, Unity Catalog, petabyte-scale | **Spark** — distributed, Delta-native |
+| Analytical queries, fast local SQL | **DuckDB** — SQL-first, great for ad-hoc work |
+| Don't know yet | **Polars** — you can always switch later |
+
+After installing, warm your environment for Delta Lake support:
 
 ```bash
-
-lakeguard setup-oss
-
+lakelogic setup-oss
 ```
-This command pre-installs the necessary DuckDB extensions (Iceberg, Delta, Cloud Drivers) so they are available offline and during runtime.
 
 ---
 
 ## Developer Installation
 
-If you want to contribute to LakeGuard:
-
-1. **Clone the repo**:
-   ```bash
-
-   git clone https://github.com/LineageLogic/LakeGuard.git
-   cd lakeguard
-
-   ```
-
-2. **Sync with uv**:
-   ```bash
-
-   uv sync
-
-   ```
-
-3. **Run tests**:
-   ```bash
-
-   uv run pytest
-
-   ```
-
-### Clean Developer Install (Recommended for Windows/Jupyter)
-
-To install in editable mode while suppressing warnings about script paths and avoiding dependency conflicts (e.g., NumPy version mismatches with `pandas-ta`):
+If you want to contribute to LakeLogic:
 
 ```bash
-
-pip install -e . --no-warn-script-location --no-deps
-
+git clone https://github.com/lakelogic/LakeLogic.git
+cd lakelogic
+uv sync
+uv run pytest
 ```
 
-## Requirements
-
-- **Python**: 3.9 or higher.
-- **OS**: Windows, macOS, or Linux.
+**Requirements:** Python 3.9+ · Windows, macOS, or Linux

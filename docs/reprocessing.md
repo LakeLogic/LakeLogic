@@ -1,14 +1,15 @@
 # Reprocessing & Partitioning
 
-> Note: The OSS release supports local materialization, Spark table writes, and table-only warehouse adapters. File staging into warehouses is not included.
+> **Think of partitioning like organizing a filing cabinet by month.**
+> When you need to fix January's data, you pull out the January folder and replace it — you don't dump the entire cabinet and start over.
 
-In a professional Data Lakehouse, you don't just "upload" data. You need a way to handle **Late Arriving Data** and **Reprocessing** without creating a mess.
+In a professional data platform, you need to handle late-arriving data and reprocessing without creating duplicates or corrupting your tables. LakeLogic makes your pipelines **idempotent** — run them twice, get the same result.
 
-LakeGuard makes your pipelines **Idempotent** (meaning you can run them multiple times safely).
+---
 
-## 1. Partitioning
+## Partitioning
 
-Partitioning is like putting your data into folders by date. This makes it much faster to read and easier to manage.
+Partitioning splits your data into logical folders (typically by date), making reads faster and rewrites surgical:
 
 ```yaml
 materialization:
@@ -16,101 +17,159 @@ materialization:
   partition_by: ["event_date"]
   reprocess_policy: overwrite_partition
   target_path: output/silver_pos_sales_events
-  format: csv  # use delta/iceberg with Spark
+  format: parquet
 ```
 
-When LakeGuard runs with this config, it ensures data is written to the correct "folder" (`event_date=2024-01-01`).
+**Why this matters:** When you query "show me last week's sales," the engine only reads 7 partition folders instead of scanning the entire table. At scale, this is the difference between a 2-second query and a 20-minute one.
 
-## 2. Handling Late Arriving Data
+### Graceful Partition Pruning (Centralized Partitioning)
 
-What if a sale from **yesterday** arrives **today**?
+In a professional data mesh, you typically centralize your partitioning strategy in `_system.yaml` so you don't have to repeat it across every contract:
 
-If you use `strategy: merge`, LakeGuard doesn't care when the data arrives. It will:
-1. Look for the `primary_key` (e.g., `order_id`).
-2. If it exists: Update the old record.
-3. If it's new: Insert the new record.
+```yaml
+# _system.yaml
+materialization:
+  bronze:
+    strategy: append
+    partition_by: ["tenant_id", "event_date"]
+```
 
-This ensures your reports are always accurate, even if the internet was slow yesterday.
+However, not all tables have a `tenant_id`. LakeLogic handles this via **Graceful Partition Pruning**.
+If a table only has `event_date`, LakeLogic will log a warning and automatically prune the missing `tenant_id` from the strategy:
 
-## 3. Reprocessing (The "Delete & Re-run" Pattern)
+```log
+WARNING | Partition columns not present in data (pruned): tenant_id. This is expected when _system.yaml defines a superset of partition columns shared across multiple contracts.
+```
 
-Sometimes you find a bug in your logic and need to fix data from the last 30 days.
+The table will successfully write, partitioned solely by `event_date`. This allows you to define a "superset" partitioning strategy at the system level and let individual contracts naturally downgrade to what their data model supports.
+
+---
+
+## Handling Late-Arriving Data
+
+> **Think of this like a late flight landing.**
+> The airport doesn't rebuild the entire arrivals board — it just updates the one row that changed.
+
+What if yesterday's sale arrives today? With `strategy: merge`, LakeLogic handles it automatically:
+
+1. Look for the `primary_key` (e.g., `order_id`)
+2. If it exists → update the old record
+3. If it's new → insert it
+
+```yaml
+materialization:
+  strategy: merge
+  primary_key: [order_id]
+  target_path: output/silver_orders
+  format: parquet
+```
+
+**Why this matters:** Your reports stay accurate regardless of when data arrives. No duplicates, no missed records.
+
+---
+
+## Reprocessing (The "Fix and Replay" Pattern)
+
+Sometimes you find a bug in your logic and need to fix the last 30 days of data:
 
 ```mermaid
 sequenceDiagram
     participant D as Developer
-    participant L as LakeGuard
+    participant L as LakeLogic
     participant S as Silver Layer
     
-    D->>L: Update Logic (Add new column)
+    D->>L: Fix transformation logic
     D->>L: Run for last 30 days
-    L->>S: overwrite_partition (Clear old data)
-    L->>S: Insert Fixed Data
+    L->>S: overwrite_partition (clear old data)
+    L->>S: Insert corrected data
 ```
 
-By using `reprocess_policy: overwrite_partition`, LakeGuard handles the "Clean up" step for you. It deletes the data for the specific day you are running and replaces it with the new, fixed data.
+With `reprocess_policy: overwrite_partition`, LakeLogic deletes only the affected partitions and replaces them with corrected data.
 
-If you want an extra safety guard, use `reprocess_policy: overwrite_partition_safe`. This writes the new partition to a temporary folder first and only swaps it into place after the write succeeds.
+For extra safety, use `overwrite_partition_safe` — this writes to a temp folder first and swaps in only after success.
 
-### Key Benefits:
-- **No Duplicates**: Running the same job twice won't double your sales numbers.
-- **Safety**: LakeGuard won't "Overwrite" your whole table by accident; it only touches the partitions it needs.
-- **Speed**: By using `partition_by`, the engine only reads the data it needs to work on.
+| Guarantee | How it helps |
+| :--- | :--- |
+| **No duplicates** | Running the same job twice won't double your sales numbers |
+| **Surgical precision** | Only the affected partitions are touched |
+| **Safe rollback** | `_safe` variant writes to temp first, swaps atomically |
 
-## 4. Quarantine Reprocessing Strategy
+---
 
-Quarantine is best treated as an **audit trail**. When corrected data arrives, re-run the contract against the corrected batch and write the fixed records into the target table using a safe reprocessing policy.
+## Date-Range Reprocessing (Backfills)
 
-### Recommended Patterns
+Need to reprocess a specific window? Tell LakeLogic the date range:
 
-**A) Partition overwrite (batch corrections)**
+```yaml
+materialization:
+  strategy: append
+  partition_by: ["event_date"]
+  reprocess_policy: overwrite_partition
+  target_path: output/silver_pos_sales_events
+  format: parquet
+```
+
+```python
+from lakelogic import DataProcessor
+
+processor = DataProcessor(
+    contract="contracts/silver_pos_sales_events.yaml",
+    engine="polars",
+)
+
+# Reprocess just these 2 weeks
+result = processor.run_source(
+    reprocess_from="2026-01-15",
+    reprocess_to="2026-02-01",
+)
+```
+
+**What happens under the hood:**
+
+1. Loads source data (bypasses incremental watermark)
+2. Filters to rows within the date range
+3. Validates against the contract
+4. Overwrites only the affected partitions
+
+| Scenario | Behaviour |
+| :--- | :--- |
+| `reprocess_from` only | Filters rows >= that date |
+| `reprocess_to` only | Filters rows ≤ that date |
+| Both set | Closed date range |
+| Neither set | Normal incremental run |
+
+---
+
+## Quarantine Reprocessing
+
+Quarantine is best treated as an **audit trail**. When corrected data arrives, re-run the contract against the corrected batch:
+
+**Partition overwrite (batch corrections):**
 
 ```yaml
 materialization:
   strategy: append
   partition_by: ["event_date"]
   reprocess_policy: overwrite_partition_safe
-  target_path: s3://lake/silver/pos_sales_events
+  target_path: output/silver_pos_sales_events
   format: parquet
 ```
 
-Re-running the corrected batch will replace only the affected partition.
-
-**B) Merge by primary key (dimension corrections)**
+**Merge by primary key (dimension corrections):**
 
 ```yaml
-primary_key: ["customer_id"]
 materialization:
   strategy: merge
-  target_path: s3://lake/silver/crm_customers
+  primary_key: [customer_id]
+  target_path: output/silver_crm_customers
   format: parquet
 ```
 
-This updates existing rows and inserts new ones without duplicating data.
+**Why this matters:** Corrected data flows through the same quality gate as new data — no backdoors, no shortcuts around your rules.
 
-### Quarantine as a Table (Lakehouse)
+---
 
-You can store quarantine rows in a table and keep it as an immutable audit log.
+## What's Next?
 
-```yaml
-quarantine:
-  target: "table:main.silver.quarantine_pos_sales_events"
-metadata:
-  quarantine_table_backend: spark
-  quarantine_table_format: iceberg
-```
-
-If you want to track which rows were reprocessed, enable lineage and update your quarantine table using the run id.
-
-```yaml
-lineage:
-  enabled: true
-```
-
-Then mark the rows in a follow-up SQL step (example for Spark):
-
-```sql
-UPDATE main.silver.quarantine_pos_sales_events
-SET quarantine_reprocessed = true
-WHERE _lakeguard_run_id = '<run_id_from_reprocess>';
-```
+- **[Pipelines & Parallelism](pipelines.md)** — Orchestrating multi-table workflows
+- **[How it Works](concepts.md)** — Deep dive into transformations and validation

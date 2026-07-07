@@ -1,31 +1,160 @@
 [project]
-name = "lakeguard"
-version = "0.1.0"
-description = "A Python-based data contract runtime for consistent quality across engines."
+name = "lakelogic"
+version = "1.38.2"
+description = "A declarative, contract-driven medallion pipeline engine for data mesh architectures. Write once. Run on Spark, Polars, or DuckDB."
 readme = "README.md"
-requires-python = ">=3.9"
-authors = [{ name = "LakeGuard Team", email = "hello@lakeguard.io" }]
+requires-python = ">=3.10"
+authors = [{ name = "LakeLogic Team", email = "lakelogic@gmail.com" }]
 license = { text = "Apache-2.0" }
+keywords = [
+    "data-contracts",
+    "data-quality",
+    "schema-validation",
+    "data-engineering",
+    "medallion-architecture",
+    "lakehouse",
+    "delta-lake",
+    "polars",
+    "spark",
+    "duckdb",
+    "etl",
+    "data-pipeline",
+    "data-governance",
+    "quarantine",
+    "lineage",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
 dependencies = [
-    "httpx>=0.27.0",
-    "pydantic>=2.0.0",
+    # Core — minimal footprint to avoid Databricks/Spark runtime conflicts
+    # IMPORTANT: Do NOT add packages here that Databricks Runtime already ships.
+    # Transitive deps (anyio, rich, pygments, markdown-it-py) are handled by
+    # their parent packages. Adding them here forces pip to resolve versions,
+    # which often triggers "core Python package version changed" warnings on DBR.
+    "pydantic>=2.0.0,<3",
     "pyyaml>=6.0",
-    "typer>=0.9.0",
+    "loguru>=0.7.0",
+    "httpx>=0.27.0,<1",
+    "Jinja2>=3.1.0",
     "sqlglot>=20.0.0",
     "polars>=0.20.0",
-    "loguru>=0.7.0",
+    "duckdb>=0.9.0",
+    "typer>=0.9.0",
+    "deltalake>=0.15.0",
+    "pyarrow>=23.0.1",
 ]
 
 [project.optional-dependencies]
-polars = ["polars>=0.20.0", "deltalake>=0.15.0"]
-pandas = ["pandas>=2.0.0", "duckdb>=0.9.0", "deltalake>=0.15.0"]
-duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=14.0.0", "deltalake>=0.15.0"]
+# CLI — only needed for `lakelogic` command, not notebooks
+cli = [
+    "typer>=0.9.0",
+]
+# Engine extras — install what you need: pip install lakelogic[engines]
+engines = [
+    "polars>=0.20.0",
+    "duckdb>=0.9.0",
+    "pyarrow>=23.0.1",
+    "deltalake>=0.15.0",
+    "sqlglot>=20.0.0",
+    "lxml>=4.9.0",
+    "openpyxl>=3.1.0",
+]
+# Azure — for Azure Functions, Key Vault, Blob Storage
+azure = [
+    "azure-identity>=1.15.0",
+    "azure-keyvault-secrets>=4.7.0",
+    "azure-storage-blob>=12.19.0",
+    "databricks-sdk>=0.18.0",
+    "cryptography>=41.0.0",
+    "fsspec>=2023.10.0",
+    "adlfs>=2023.10.0",
+]
+# Notifications — apprise + secrets backends
+notify = [
+    "apprise>=1.7.0",
+    "hvac>=2.0.0",
+]
+delta = [
+    "deltalake>=0.15.0",  # Delta Lake support without Spark
+    # Azure (Fabric LakeDB, Synapse Analytics, Unity Catalog on Azure)
+    "azure-identity>=1.15.0",  # Azure AD authentication
+    "azure-storage-blob>=12.19.0",  # Azure Blob Storage
+    # Databricks (Unity Catalog)
+    "databricks-sdk>=0.18.0",  # Unity Catalog metadata access
+    # AWS (Unity Catalog on AWS, S3)
+    "boto3>=1.28.0",  # AWS S3 access
+    # GCP (Unity Catalog on GCP, GCS)
+    "google-cloud-storage>=2.10.0",  # GCP GCS access
+]
+polars = ["polars>=0.20.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
+duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
 spark = ["pyspark>=3.3.0"]
+# Database CDC connectors
+databases = [
+    "pyodbc>=5.0.0",  # Azure SQL, SQL Server
+    "psycopg2-binary>=2.9.0",  # PostgreSQL
+    "pymysql>=1.1.0",  # MySQL
+    "pymongo>=4.6.0",  # MongoDB
+    "azure-identity>=1.15.0",  # Azure AD for Azure SQL/PostgreSQL
+]
+azuresql = ["pyodbc>=5.0.0", "azure-identity>=1.15.0"]
+postgresql = ["psycopg2-binary>=2.9.0", "azure-identity>=1.15.0"]
+mysql = ["pymysql>=1.1.0"]
+mongodb = ["pymongo>=4.6.0"]
+# Integration connectors (APIs, SFTP, Messaging)
+integrations = [
+    "requests>=2.31.0",  # REST APIs
+    "paramiko>=4.0.1",  # SFTP/SSH
+    "azure-servicebus>=7.11.0",  # Azure Service Bus
+    "azure-eventgrid>=4.17.0",  # Azure Event Grid
+    "azure-identity>=1.15.0",  # Azure AD for messaging
+    "boto3>=1.28.0",  # AWS SQS/SNS
+    "google-cloud-pubsub>=2.18.0",  # GCP Pub/Sub
+]
+api = ["requests>=2.31.0"]
+# dlt — declarative API ingestion driven by Data Contracts
+dlt = ["dlt[parquet]>=1.0", "pyarrow>=23.0.1"]
+sftp = ["paramiko>=4.0.1"]
+azure_messaging = ["azure-servicebus>=7.11.0", "azure-eventgrid>=4.17.0", "azure-identity>=1.15.0"]
+aws_messaging = ["boto3>=1.28.0"]
+gcp_messaging = ["google-cloud-pubsub>=2.18.0"]
+# Streaming processing
+streaming = [
+    "bytewax>=0.19.0",  # Real-time stream processing (Rust-based)
+    # NOTE: `pathway` removed — it hard-pins pyarrow<19.0.0, which conflicts with
+    # the security-required pyarrow>=23.0.1 (GHSA-rgxp-2hwp-jwgg). The optional
+    # pathway framework in streaming_processor.py still imports lazily if a user
+    # installs pathway themselves.
+    "kafka-python>=2.0.2",  # Apache Kafka
+    "sseclient-py>=1.8.0",  # Server-Sent Events (Wikimedia, etc.)
+    "websocket-client>=1.6.0",  # WebSocket (Coinbase, Binance, etc.)
+]
+bytewax = ["bytewax>=0.19.0"]
+kafka = ["kafka-python>=2.0.2"]
+sse = ["sseclient-py>=1.8.0"]
+websocket = ["websocket-client>=1.6.0"]
 snowflake = ["snowflake-connector-python>=3.5.0"]
 bigquery = ["google-cloud-bigquery>=3.11.0"]
 notebook = ["nbclient>=0.9.0", "nbformat>=5.9.0"]
-profiling = ["dataprofiler>=0.9.0", "presidio-analyzer>=2.2.0"]
+profiling = ["dataprofiler>=0.9.0", "presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0"]
 notifications = [
+    "apprise>=1.7.0",
+    "Jinja2>=3.1.0",
     "azure-identity>=1.15.0",
     "azure-keyvault-secrets>=4.7.0",
     "boto3>=1.28.0",
@@ -41,48 +170,224 @@ docs = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "hypothesis>=6.100.0",
     "ruff>=0.1.0",
     "black>=23.0.0",
+    "commitizen>=3.0.0",
+    "git-cliff>=2.0.0",
 ]
 all = [
+    "typer>=0.9.0",
     "polars>=0.20.0",
-    "pandas>=2.0.0",
     "duckdb>=0.9.0",
-    "pyarrow>=14.0.0",
+    "pyarrow>=23.0.1",
     "deltalake>=0.15.0",
-    "pyspark>=3.3.0",
+    "sqlglot>=20.0.0",
+    "lxml>=4.9.0",
+    "openpyxl>=3.1.0",
+]
+# Heavy extras — opt-in only (may have numpy/platform conflicts)
+cloud = [
     "snowflake-connector-python>=3.5.0",
     "google-cloud-bigquery>=3.11.0",
-    "nbclient>=0.9.0",
-    "nbformat>=5.9.0",
+    "google-cloud-storage>=2.10.0",
+    "google-cloud-secret-manager>=2.16.0",
+    "google-cloud-pubsub>=2.18.0",
+    "google-genai>=0.5.0",
+    "azure-servicebus>=7.11.0",
+    "azure-eventgrid>=4.17.0",
+]
+pii = [
     "dataprofiler>=0.9.0",
     "presidio-analyzer>=2.2.0",
-    "azure-identity>=1.15.0",
-    "azure-keyvault-secrets>=4.7.0",
-    "boto3>=1.28.0",
-    "google-cloud-secret-manager>=2.16.0",
-    "hvac>=2.0.0",
-    "cryptography>=41.0.0",
+    "presidio-anonymizer>=2.2.0",
+]
+ai = [
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+    "google-genai>=0.5.0",
+    "typing-extensions>=4.12.0",  # PEP 728 TypedDict support for google-genai on Python <3.12
+    "instructor>=1.5.0",  # typed LLM output + auto-retry for `lakelogic review` Tier 2
+]
+# Tiered code reviewer (`lakelogic review`).
+# Tier 1 = deterministic (ruff + sqlfluff + PII regex), no API key required.
+# Tier 2 = LLM (lands in P2; install lakelogic[ai] alongside for the SDKs).
+review = [
+    "ruff>=0.6,<0.14",
+    "sqlfluff>=4.2.1,<5",
+    "datacontract-cli>=0.10",  # P4: schema breaking-change detection
+]
+enterprise = [
+    "pyspark>=3.3.0",
+    "lakelogic[pii]",
+    "bytewax>=0.19.0",
+    "nbclient>=0.9.0",
+    "nbformat>=5.9.0",
+]
+# NLP — local text extraction (no API keys, no system deps needed)
+nlp = [
+    "spacy>=3.7.0",
+    "textblob>=0.18.0",
+]
+# Extraction — full unstructured document processing
+# For images/PDFs, also install system deps: tesseract-ocr, poppler-utils
+# For MS Office docs: libreoffice
+# See: https://docs.unstructured.io/open-source/installation/full-installation
+extraction = [
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.12.0",
+    "pypandoc-binary>=1.13",
+    "spacy>=3.7.0",
+    "textblob>=0.18.0",
+]
+# Extraction + image/PDF OCR — pure Python, no system deps, no torch
+# rapidocr-onnxruntime handles images via ONNX Runtime; pdfplumber handles PDFs
+extraction-ocr = [
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.12.0",
+    "rapidocr-onnxruntime>=1.4.0",
+    "pdfplumber>=0.10.0",
+    "pypandoc-binary>=1.13",
+    "spacy>=3.7.0",
+    "textblob>=0.18.0",
+]
+# Synthetic test-data generators — used by the test_data_driver notebooks
+# to produce file-based source fixtures (PDFs, images, richer CSVs) that
+# bronze contracts can ingest. Kept separate from runtime extras because
+# nothing in lakelogic itself writes PDFs — only the demo / test orchestrators do.
+synthetic = [
+    "reportlab>=4.0.0",   # synthetic PDF generation (driver licences, invoices, etc.)
+    "faker>=24.0.0",      # realistic names / addresses / IDs for richer fixtures
+]
+# Demo meta-extra — one-shot install for the test_data_driver notebooks +
+# the LakehousePipeline runtime they orchestrate. Use when cloning the
+# repo for the first time or onboarding a new partner — gets everything
+# needed to run the end-to-end orchestrator + extract PDFs the pipeline ingests.
+# Composition is intentional: engines for compute, extraction-ocr for the
+# unstructured-source side, synthetic for the generators that feed them.
+demo = [
+    "lakelogic[engines]",
+    "lakelogic[extraction-ocr]",
+    "lakelogic[synthetic]",
 ]
 
 [project.scripts]
-lakeguard = "lakeguard.cli.main:app"
-lakeguard-driver = "lakeguard.cli.driver:main"
+lakelogic = "lakelogic.cli.main:app"
+lakelogic-driver = "lakelogic.cli.driver:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["lakeguard"]
+packages = ["lakelogic"]
+artifacts = [
+    "lakelogic/notifications/templates/*.j2",
+    "lakelogic/templates/bronze/*.j2",
+    "lakelogic/templates/silver/*.j2",
+    "lakelogic/templates/system/*.j2",
+    "lakelogic/templates/domain/*.j2",
+]
 
 [tool.uv]
 managed = true
-dev-dependencies = [
+
+# Security: force minimum versions for transitive deps to close Dependabot alerts
+constraint-dependencies = [
+    "nltk>=3.9.4; python_version >= '3.10'",    # CVE-2025-14009 Zip Slip, Path Traversal AFO, remote shutdown, XSS, unbounded recursion
+    "pillow>=12.1.1; python_version >= '3.10'",  # CVE-2026-25990 PSD out-of-bounds write, FITS GZIP decompression bomb
+    "orjson>=3.11.6; python_version >= '3.10'",  # CVE-2025-67221 recursion DoS on deeply nested JSON
+    "pytest>=9.0.3; python_version >= '3.10'",  # CVE-2025-71176 predictable tmpdir symlink attack
+    "unstructured>=0.18.18; python_version >= '3.10'",  # CVE-2025-64712 MSG attachment path traversal
+    "paramiko>=4.0.1",  # Fix SHA-1 vulnerability in rsakey.py
+]
+
+[dependency-groups]
+dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "hypothesis>=6.100.0",
     "ruff>=0.1.0",
     "black>=23.0.0",
     "mkdocs-material>=9.0.0",
     "mkdocstrings[python]>=0.20.0",
+    "commitizen>=3.0.0",
+    "git-cliff>=2.0.0",
 ]
+
+# ---------------------------------------------------------------------------
+# commitizen — version bumping + git tags only
+# Changelog is generated by git-cliff (see cliff.toml)
+#
+# Daily workflow:
+#   cz commit                  guided conventional commit prompt
+#   cz bump                    bump version + git tag (no changelog)
+#   git cliff -o CHANGELOG.md  regenerate changelog from git tags
+# ---------------------------------------------------------------------------
+[tool.commitizen]
+name            = "cz_conventional_commits"
+version         = "1.38.2"
+version_scheme  = "pep440"
+tag_format      = "v$version"
+update_changelog_on_bump = false
+changelog_file  = "CHANGELOG.md"
+changelog_incremental = false
+
+# Files where `cz bump` will rewrite the version string
+version_files = [
+    "pyproject.toml:version",
+    "lakelogic/__init__.py:__version__",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+exclude = [
+    "_ref",
+    ".venv",
+    ".venv_lakelogic",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"**/*.ipynb" = ["F403", "F405", "W291", "W293", "F401"]
+"tests/_smoke_*.py" = ["E402", "E501", "F401", "I001"]
+"tests/test_*.py" = ["E402", "E501", "E702", "E712", "F401", "F811", "F841", "I001"]
+"scripts/*.py" = ["E722", "E501", "I001"]
+"lakelogic/engines/bigquery.py" = ["I001"]
+"lakelogic/engines/database_connectors.py" = ["I001"]
+"lakelogic/engines/duckdb.py" = ["I001"]
+"lakelogic/engines/integration_connectors.py" = ["I001"]
+"lakelogic/engines/polars.py" = ["I001"]
+"lakelogic/engines/snowflake.py" = ["I001"]
+"lakelogic/engines/streaming_connectors.py" = ["I001"]
+"lakelogic/notifications/base.py" = ["I001"]
+"lakelogic/tools/template_apply.py" = ["I001"]
+"lakelogic/core/slo.py" = ["I001"]
+"lakelogic/core/quarantine.py" = ["I001"]
+"lakelogic/core/run_log.py" = ["I001"]
+"lakelogic/cli/observability.py" = ["I001"]
+"lakelogic/core/bootstrap.py" = ["I001"]
+"lakelogic/core/ddl.py" = ["I001"]
+"lakelogic/core/dim_date.py" = ["I001"]
+"lakelogic/core/generator.py" = ["I001", "E402"]
+"lakelogic/core/incremental.py" = ["I001"]
+"lakelogic/core/materialization.py" = ["I001"]
+"lakelogic/core/models.py" = ["I001"]
+"lakelogic/core/observer.py" = ["I001"]
+"lakelogic/core/processor.py" = ["I001"]
+"lakelogic/__init__.py" = ["I001"]
+"lakelogic/adapters/dbt.py" = ["I001"]
+"lakelogic/ai/contract_enricher.py" = ["I001"]
+"lakelogic/ai/edge_case_generator.py" = ["I001"]
+"lakelogic/ai/provider.py" = ["I001"]
+"lakelogic/cli/__init__.py" = ["I001"]
+"lakelogic/cli/driver.py" = ["I001", "E402"]
+"lakelogic/cli/main.py" = ["I001"]
+"examples/**/*.ipynb" = ["I001", "E402", "E712", "E501"]
+"docs/examples/**/*.ipynb" = ["I001", "E402", "E712", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lakelogic"]

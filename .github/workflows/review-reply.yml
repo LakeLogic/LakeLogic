@@ -1,0 +1,59 @@
+name: LakeLogic Review Reply
+
+# Triggers when anyone comments on a PR. The job filters down to comments
+# that mention @lakelogic; everything else short-circuits in seconds.
+#
+# This is the "webhook receiver" without a hosted service — GitHub Actions
+# itself listens for the event and runs lakelogic review-reply, which parses
+# the command (explain / ignore) and posts a response on the PR.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write          # write needed for the ignore command (commits ignore file)
+  pull-requests: write
+  issues: write
+
+jobs:
+  reply:
+    # Only run on PR comments mentioning @lakelogic — keeps cost near zero.
+    if: |
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '@lakelogic')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: pip install -e .[review,ai]
+
+      - name: Handle @lakelogic mention
+        run: |
+          lakelogic review-reply \
+            --comment-id ${{ github.event.comment.id }} \
+            --pr ${{ github.event.issue.number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # If the ignore command modified the ignore file, push it on a branch
+      - name: Commit ignore-file changes (if any)
+        if: success()
+        run: |
+          if [ -n "$(git status --porcelain .lakelogic-review-ignore 2>/dev/null)" ]; then
+            git config user.name "lakelogic-bot"
+            git config user.email "lakelogic-bot@users.noreply.github.com"
+            git checkout -b lakelogic-ignore-${{ github.event.comment.id }}
+            git add .lakelogic-review-ignore
+            git commit -m "chore: ignore rule (via @lakelogic ignore on PR #${{ github.event.issue.number }})"
+            git push origin HEAD
+          fi

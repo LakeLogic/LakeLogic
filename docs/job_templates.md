@@ -1,6 +1,6 @@
 # Job Templates
 
-These templates show how to call `lakeguard-driver` in major orchestrators.
+These templates show how to call `lakelogic-driver` in major orchestrators.
 Update paths, credentials, and schedules to match your environment.
 
 ## State & Scheduling Notes

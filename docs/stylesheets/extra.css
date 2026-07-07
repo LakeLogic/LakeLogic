@@ -1,0 +1,609 @@
+/* ========================================
+   LakeLogic Documentation — LakeLogic Brand Theme (Lake Aqua cyan)
+   ======================================== */
+
+/* ---------------------------------------------------------------------------
+   1. Custom colour tokens (neutral near-black + Lake Aqua brand cyan)
+   --------------------------------------------------------------------------- */
+:root {
+  /* Neutral near-black dark scale (de-navied to match the brand; keeps GitHub-dark
+     legibility for code + syntax highlighting). Var names retained for stability. */
+  --ll-navy-900: #0d1117;   /* canvas / page background */
+  --ll-navy-800: #161b22;   /* surface / code background */
+  --ll-navy-700: #21262d;
+  --ll-navy-600: #2d333b;
+  --ll-navy-500: #373e47;
+  --ll-blue-500: #06b6d4;   /* Lake Aqua — LakeLogic brand cyan */
+  --ll-blue-400: #22d3ee;
+  --ll-blue-300: #67e8f9;
+  --ll-green:    #4CAF50;
+  --ll-red:      #EF5350;
+  --ll-border:   rgba(255, 255, 255, 0.08);
+  --ll-text:     #C9D1D9;
+  --ll-text-dim: #8B949E;
+}
+
+/* Override Material slate scheme colours */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color:        var(--ll-navy-900);
+  --md-default-bg-color--light: var(--ll-navy-800);
+  --md-default-fg-color:        var(--ll-text);
+  --md-default-fg-color--light: var(--ll-text-dim);
+  --md-code-bg-color:           var(--ll-navy-800);
+  --md-primary-fg-color:        var(--ll-blue-500);
+  --md-accent-fg-color:         var(--ll-blue-400);
+  --md-typeset-a-color:         var(--ll-blue-400);
+}
+
+/* Light mode keeps a clean white with the same brand cyan accent */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color:  #0891b2;   /* Lake Aqua — brand cyan (600) */
+  --md-accent-fg-color:   #0891b2;
+  --md-typeset-a-color:   #0e7490;
+}
+
+/* ---------------------------------------------------------------------------
+   2. Header
+   --------------------------------------------------------------------------- */
+.md-header {
+  background: var(--ll-navy-900);
+  border-bottom: 1px solid var(--ll-border);
+  box-shadow: none;
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  width: 36px !important;
+  height: 36px !important;
+}
+
+.md-header__title {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Tabs bar */
+.md-tabs {
+  background: var(--ll-navy-900);
+  border-bottom: 1px solid var(--ll-border);
+}
+
+.md-tabs__link {
+  font-size: 0.8rem;
+  font-weight: 500;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.md-tabs__link:hover,
+.md-tabs__link--active {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   3. Typography
+   --------------------------------------------------------------------------- */
+.md-typeset {
+  font-size: 0.8rem;
+  line-height: 1.7;
+  font-weight: 400;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  font-size: 1.9rem;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+  margin-top: 1.8rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--ll-border);
+}
+
+.md-typeset h3 { font-weight: 600; font-size: 1.1rem; }
+.md-typeset h4 { font-weight: 600; font-size: 0.9rem; }
+
+/* ---------------------------------------------------------------------------
+   4. Left sidebar navigation (Snowflake style)
+   --------------------------------------------------------------------------- */
+.md-sidebar--primary {
+  border-right: 1px solid var(--ll-border);
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--primary {
+  background: var(--ll-navy-900);
+}
+
+.md-nav__title {
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-nav__item {
+  font-weight: 400;
+}
+
+.md-nav__link {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  border-left: 3px solid transparent;
+}
+
+.md-nav__link:hover {
+  background: rgba(6, 182, 212, 0.08);
+  transform: translateX(2px);
+}
+
+.md-nav__link--active {
+  font-weight: 600;
+  color: var(--ll-blue-400) !important;
+  background: rgba(6, 182, 212, 0.1);
+  border-left: 3px solid var(--ll-blue-500);
+  padding-left: calc(0.8rem - 3px);
+}
+
+/* Section headings in nav — collapsible chevrons */
+.md-nav__item--section > .md-nav__link {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--md-default-fg-color);
+  text-transform: none;
+}
+
+/* Chevron indicators for collapsible sections */
+.md-nav__item--nested > .md-nav__link::after {
+  transition: transform 0.2s ease;
+}
+
+/* Hide emoji icons in sidebar nav — keep it clean like Snowflake */
+.md-nav .twemoji,
+.md-nav .emojione,
+.md-nav svg:not([xmlns]) {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   5. Right sidebar — "On this page" TOC
+   --------------------------------------------------------------------------- */
+.md-sidebar--secondary {
+  border-left: 1px solid var(--ll-border);
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--secondary {
+  background: var(--ll-navy-900);
+}
+
+.md-sidebar--secondary .md-nav__title {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ll-text-dim);
+}
+
+.md-sidebar--secondary .md-nav__link {
+  font-size: 0.7rem;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  padding-left: 0.8rem;
+}
+
+.md-sidebar--secondary .md-nav__link--active {
+  border-left: 2px solid var(--ll-blue-500);
+  color: var(--ll-blue-400) !important;
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   6. Code blocks
+   --------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] .highlight {
+  border-left: 3px solid var(--ll-blue-500);
+  border-radius: 6px;
+  background: var(--ll-navy-800);
+}
+
+.highlight:hover {
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.08);
+}
+
+/* Inline code */
+.md-typeset code {
+  background-color: rgba(6, 182, 212, 0.1);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-size: 0.85em;
+  color: var(--ll-blue-300);
+}
+
+[data-md-color-scheme="default"] .md-typeset code {
+  color: #0e7490;
+  background-color: rgba(8, 145, 178, 0.08);
+}
+
+.md-typeset pre code {
+  background-color: transparent;
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------------------
+   7. Buttons
+   --------------------------------------------------------------------------- */
+.md-button {
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.md-button--primary {
+  background: var(--ll-blue-500);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.25);
+}
+
+.md-button--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.35);
+  background: var(--ll-blue-400);
+}
+
+.md-button:not(.md-button--primary) {
+  border: 2px solid var(--ll-blue-500);
+  background: transparent;
+  color: var(--ll-blue-400);
+}
+
+.md-button:not(.md-button--primary):hover {
+  background: rgba(6, 182, 212, 0.1);
+}
+
+/* ---------------------------------------------------------------------------
+   8. Admonitions
+   --------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] .md-typeset .admonition,
+[data-md-color-scheme="slate"] .md-typeset details {
+  background: var(--ll-navy-800);
+  border-left: 4px solid var(--ll-blue-500);
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+   9. Tables
+   --------------------------------------------------------------------------- */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--ll-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background: var(--ll-navy-700);
+  font-weight: 600;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) tr:hover {
+  background: rgba(6, 182, 212, 0.04);
+}
+
+/* ---------------------------------------------------------------------------
+   10. Search
+   --------------------------------------------------------------------------- */
+.md-search__input {
+  border-radius: 8px;
+}
+
+.md-search__input:focus {
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.2);
+}
+
+[data-md-color-scheme="slate"] .md-search__form {
+  background: var(--ll-navy-700);
+}
+
+/* ---------------------------------------------------------------------------
+   11. Cards
+   --------------------------------------------------------------------------- */
+.md-typeset .grid.cards > ul > li {
+  border-radius: 12px;
+  border: 1px solid var(--ll-border);
+  transition: all 0.2s ease;
+  background-color: var(--md-default-bg-color);
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(6, 182, 212, 0.1);
+  border-color: rgba(6, 182, 212, 0.3);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li {
+  background-color: var(--ll-navy-800);
+  border-color: var(--ll-border);
+}
+
+.md-typeset .grid.cards > ul > li > hr {
+  margin: 0.8em 0;
+  border-bottom: 1px solid var(--ll-border);
+}
+
+/* ---------------------------------------------------------------------------
+   12. Feedback section (Snowflake "Was this page helpful?")
+   --------------------------------------------------------------------------- */
+.ll-feedback {
+  border-top: 1px solid var(--ll-border);
+  padding: 1.5rem 0;
+  text-align: center;
+}
+
+[data-md-color-scheme="slate"] .ll-feedback {
+  background: var(--ll-navy-900);
+}
+
+.ll-feedback__inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.ll-feedback__label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--md-default-fg-color);
+}
+
+.ll-feedback__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 1rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: #fff;
+}
+
+.ll-feedback__btn--yes {
+  background: #2563EB;
+}
+
+.ll-feedback__btn--yes:hover {
+  background: #1D4ED8;
+  transform: translateY(-1px);
+}
+
+.ll-feedback__btn--no {
+  background: #2563EB;
+}
+
+.ll-feedback__btn--no:hover {
+  background: #1D4ED8;
+  transform: translateY(-1px);
+}
+
+.ll-feedback__thanks {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ll-green);
+}
+
+/* ---------------------------------------------------------------------------
+   13. Footer (Snowflake links grid + bottom bar)
+   --------------------------------------------------------------------------- */
+.ll-footer {
+  border-top: 1px solid var(--ll-border);
+  padding: 0;
+}
+
+[data-md-color-scheme="slate"] .ll-footer {
+  background: var(--ll-navy-900);
+}
+
+[data-md-color-scheme="default"] .ll-footer {
+  background: #f8f9fa;
+}
+
+.ll-footer__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem 2rem;
+  padding: 2.5rem 1rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+@media screen and (max-width: 600px) {
+  .ll-footer__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.ll-footer__link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--md-default-fg-color) !important;
+  text-decoration: none !important;
+  padding: 0.4rem 0;
+  transition: color 0.15s;
+}
+
+.ll-footer__link:hover {
+  color: var(--ll-blue-400) !important;
+}
+
+.ll-footer__link svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.ll-footer__link:hover svg {
+  opacity: 1;
+}
+
+/* Bottom copyright bar */
+.ll-footer__bottom {
+  border-top: 1px solid var(--ll-border);
+  padding: 1rem;
+  text-align: center;
+}
+
+.ll-footer__meta {
+  font-size: 0.72rem;
+  color: var(--ll-text-dim);
+}
+
+.ll-footer__meta a {
+  color: var(--ll-text-dim) !important;
+  text-decoration: none !important;
+  transition: color 0.15s;
+}
+
+.ll-footer__meta a:hover {
+  color: var(--ll-blue-400) !important;
+}
+
+.ll-footer__sep {
+  margin: 0 0.5rem;
+  opacity: 0.4;
+}
+
+/* Hide MkDocs Material default footer — we use our custom one */
+.md-footer {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   14. Hero section (landing page)
+   --------------------------------------------------------------------------- */
+.hero-section {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 3rem;
+  padding: 2.5rem 2rem 4rem 2rem;
+  border-radius: 12px;
+  margin: 0 0 2rem 0;
+}
+
+[data-md-color-scheme="slate"] .hero-section {
+  background: linear-gradient(135deg, var(--ll-navy-800), var(--ll-navy-700));
+}
+
+[data-md-color-scheme="default"] .hero-section {
+  background: linear-gradient(135deg, rgba(15, 33, 55, 0.04), rgba(6, 182, 212, 0.06));
+}
+
+.hero-content {
+  flex: 1;
+  text-align: left;
+}
+
+.hero-visual {
+  flex: 1;
+  max-width: 500px;
+  filter: drop-shadow(0 15px 25px rgba(0, 0, 0, 0.25));
+}
+
+@media screen and (max-width: 76.1875em) {
+  .hero-section {
+    flex-direction: column;
+    padding: 3rem 1.5rem;
+    gap: 2rem;
+  }
+  .hero-visual {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+.hero-title {
+  font-size: 2.9rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 1rem;
+}
+
+.hero-subtitle {
+  font-size: 1.15rem;
+  color: var(--md-default-fg-color--light);
+  margin-bottom: 2rem;
+  max-width: 700px;
+}
+
+.hero-cta {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 2rem;
+}
+
+@media screen and (max-width: 76.1875em) {
+  .hero-title { font-size: 2rem; }
+  .hero-subtitle { font-size: 1rem; }
+}
+
+/* ---------------------------------------------------------------------------
+   15. Mermaid diagrams
+   --------------------------------------------------------------------------- */
+.md-typeset .mermaid {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.md-typeset .mermaid svg {
+  min-width: 800px;
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   16. Notebook / output styling
+   --------------------------------------------------------------------------- */
+.jp-OutputArea-output {
+  background: var(--md-code-bg-color);
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+/* ---------------------------------------------------------------------------
+   17. Utility classes
+   --------------------------------------------------------------------------- */
+.quality-gate-good { color: var(--ll-green); font-weight: 600; }
+.quality-gate-bad  { color: var(--ll-red);   font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   18. Page load animation
+   --------------------------------------------------------------------------- */
+.md-content {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------------------------------------------------------------------------
+   19. Smooth scrolling
+   --------------------------------------------------------------------------- */
+html {
+  scroll-behavior: smooth;
+}

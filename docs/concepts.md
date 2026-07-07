@@ -1,70 +1,38 @@
-# The Medallion Architecture
+# How It Works
 
-LakeGuard is the **quality gate** between the layers of your Data Lakehouse.
+> **Think of LakeLogic as a spell-checker for your data.**
+> You define the rules once (the contract), and LakeLogic applies them automatically every time data flows through your pipeline — flagging problems without losing a single row.
 
-```mermaid
-graph LR
-    subgraph "Landing"
-        A[Raw Sources]
-    end
+LakeLogic processes data in three clear phases: **Clean → Validate → Enrich**. This page explains each phase and when to use which approach.
 
-    subgraph "Bronze Layer"
-        B[Raw Data]
-    end
+---
 
-    subgraph "Silver Layer"
-        C[Filtered, Cleaned, Transformed, Enriched]
-    end
+## Phase 1: Clean (Pre-Processing)
 
-    subgraph "Gold Layer"
-        D[Business Ready]
-    end
+Before checking rules, LakeLogic removes the noise. These steps run **first**, so your quality rules don't waste time on junk data.
 
-    B -->|🛡️ Quality Gate| C
-    C -->|🛡️ Materialize| D
-    
-    B -.->|Fail| Q[Quarantine 🛑]
-    Q -.->|Correction| B
-    
-    style B fill:#cd7f32,color:#fff
-    style C fill:#c0c0c0,color:#333
-    style D fill:#ffd700,color:#333
-    style Q fill:#ef4444,color:#fff
+| Step | What it does | Real-world example |
+|:---|:---|:---|
+| `rename` | Align column names | `cust_id` → `customer_id` |
+| `filter` | Drop irrelevant rows | `WHERE status != 'deleted'` |
+| `deduplicate` | Keep the latest version | Last record per `customer_id` by `updated_at` |
+| `trim` / `lower` / `upper` | Standardize text | `"  New York "` → `"new york"` |
+| `cast` | Fix data types | `"42"` → `42` |
+
+### Two Ways to Write Transformations
+
+**Structured (business-friendly)** — readable, intent-first. Best for common patterns:
+
+```yaml
+transformations:
+  - deduplicate:
+      on: ["customer_id"]
+      sort_by: ["updated_at"]
+      order: desc
+    phase: pre
 ```
 
-## Cleansing Transformations (Bronze → Silver)
-
-In the Bronze layer, data is often "dirty." Before you apply strict quality rules or perform heavy calculations, you need to clean the noise.
-
-LakeGuard processes transformations in a specific order to ensure maximum performance and safety:
-
-### 1. Pre-Processing (Cleanse)
-These run **first**, before schema enforcement and quality rules.
--   **`rename`**: Align column names (e.g., `cust_id` to `customer_id`).
--   **`filter`**: Drop invalid rows immediately (e.g., `WHERE status = 'active'`).
--   **`deduplicate`**: Keep the latest version of a record based on a timestamp.
-
-Structured transformations are convenience wrappers for engine-agnostic contracts; SQL steps are preferred for advanced logic.
-Common helpers include:
-- **`select`**, **`drop`**, **`cast`**
-- **`trim`**, **`lower`**, **`upper`**
-- **`coalesce`**, **`split`**, **`explode`**
-- **`map_values`**
-- **`join`** (post-processing)
-- **`derive`**, **`lookup`** (post-processing)
-
-### Two Transformation Flavors
-You can express transformations in two ways:
-- **Structured (business-friendly)**: `rename`, `filter`, `deduplicate`, `select`, `drop`, `cast`, `trim`, `lower`, `upper`, `coalesce`, `split`, `explode`, `map_values`, `join`, `lookup`, `derive`.
-- **SQL (power-user)**: full SQL with `phase: pre|post`.
-
-Both flavors can be mixed, but the SQL style is more expressive.
-
-### When to Use Which
-- **Structured**: You want readable, intent-first contracts for common patterns.
-- **SQL**: You need window functions, complex joins, multi-step logic, or vendor-specific SQL.
-
-You can also provide SQL transformations directly:
+**SQL (power-user)** — full expressiveness. Best for complex logic:
 
 ```yaml
 transformations:
@@ -72,29 +40,21 @@ transformations:
       SELECT * FROM (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) AS rn
         FROM source
-      ) AS t
-      WHERE rn = 1
+      ) WHERE rn = 1
     phase: pre
 ```
 
-And here is the same idea using structured steps:
+Both flavors can be mixed in the same contract. The structured style generates engine-optimized SQL behind the scenes.
 
-```yaml
-transformations:
-  - deduplicate:
-      on: ["id"]
-      sort_by: ["updated_at"]
-      order: desc
-```
+---
 
-### 2. Validation Gate
-LakeGuard then enforces your **Schema** and runs your **Quality Rules**. Because you've already filtered and deduplicated, this stage is faster and produces fewer "false alerts."
+## Phase 2: Validate (The Quality Gate)
 
-Common quality helpers:
-- Row-level: `not_null`, `accepted_values`, `regex_match`, `range`, `referential_integrity`
-- Dataset-level: `unique`, `null_ratio`, `row_count_between`
+This is where LakeLogic earns its keep. Every row is checked against your **schema** and **quality rules**. Rows that fail are quarantined with clear error reasons — nothing is silently dropped.
 
-Example:
+### Row-Level Rules
+
+Applied to every individual row:
 
 ```yaml
 quality:
@@ -110,6 +70,13 @@ quality:
         field: age
         min: 18
         max: 120
+```
+
+### Dataset-Level Rules
+
+Applied to the whole table after row validation:
+
+```yaml
   dataset_rules:
     - unique: customer_id
     - null_ratio:
@@ -120,10 +87,13 @@ quality:
         max: 1000000
 ```
 
-### 3. Post-Processing (Enrich)
-These run **last**, only on the "Good" data.
--   **`derive`**: Calculate new fields using SQL (e.g., `price * quantity`).
--   **`lookup`**: Join with dimension tables to add names or categories.
+**Why this matters:** Dataset rules catch systemic issues — like a source suddenly sending zero rows or an unusual spike in nulls — that individual row checks would miss.
+
+---
+
+## Phase 3: Enrich (Post-Processing)
+
+Only **good** rows reach this phase. Here you derive new fields and join with reference data:
 
 ```yaml
 transformations:
@@ -133,91 +103,86 @@ transformations:
     phase: post
 ```
 
+Or use structured lookups:
+
+```yaml
+transformations:
+  - lookup:
+      field: country_name
+      reference: dim_countries
+      on: country_code
+      key: code
+      value: name
+      default_value: "Unknown"
+```
+
+**Why this matters:** Enrichment only runs on validated data, so your Gold tables never contain invalid combinations.
+
 ---
 
-## Handling Complex Patterns (Gold)
+## Materialization: Where the Data Lands
 
-When moving from **Silver to Gold**, LakeGuard doesn't just check rules; it uses a **Strategy** to build your tables.
+After processing, LakeLogic writes results to your target format. Choose the right strategy for your use case:
 
-### 1. The "Orphaned Key" Problem
-Sometimes a transaction (Fact) arrives before its customer info (Dimension). This is a **Late Arriving Dimension**.
-
-**The LakeGuard Solution**:
-Instead of losing the transaction, we use the `default_value` feature.
--   If `customer_id` is found: Use it.
--   If `customer_id` is missing: Map it to `-1` (Unknown).
--   This ensures **100% data financial integrity**.
-
-### 2. The Correction Loop
-If data fails a rule in **Bronze**, it goes to **Quarantine**. 
-1.  **Fix**: The data owner fixes the raw source or provides a correction file.
-2.  **Reprocess**: LakeGuard picks up the correction and flows it through to **Silver** and **Gold**.
-
-## Materialization Strategies
-
-LakeGuard can materialize validated data to local CSV/Parquet targets or Delta/Iceberg when running on Spark. Use `processor.materialize(...)` or `lakeguard run --materialize`.
+| Strategy | Best for | Analogy |
+|:---|:---|:---|
+| **`append`** | Transaction tables that keep growing | Adding pages to a journal |
+| **`merge`** | Updating existing records (SCD Type 1) | Editing a contact in your phone |
+| **`scd2`** | Keeping full history of changes | A filing cabinet with every version |
+| **`overwrite`** | Daily snapshots or small summaries | Replacing yesterday's newspaper |
 
 ```yaml
 materialization:
   strategy: merge
-  target_path: output/customers
-  format: csv
+  primary_key: [customer_id]
+  target_path: output/silver_customers
+  format: parquet
 ```
-
-| Strategy | When to use it |
-| :--- | :--- |
-| **`append`** | For giant transaction tables where you just keep adding rows. |
-| **`merge`** | For "SCD Type 1" (Updating existing records). |
-| **`scd2`** | For "History Tracking" (Keeping old and new versions). |
-| **`overwrite`** | For small summary tables or daily snapshots. |
-
-**Spark advantage:** Merge and SCD2 strategies run natively using distributed DataFrame operations (or Delta Lake `MERGE INTO` when available), avoiding driver memory bottlenecks at scale.
 
 ---
 
-## External Logic Hooks (Gold Patterns)
+## External Logic (Gold Patterns)
 
-For Gold processing, some teams prefer dedicated Python scripts or notebooks.
-You can reference them directly in the contract:
+For advanced Gold layer processing, some teams prefer dedicated Python scripts or notebooks. You can reference them directly in the contract:
 
 ```yaml
 external_logic:
   type: python
   path: ./gold/build_sales_gold.py
   entrypoint: build_gold
-  args:
-    target_table: gold_fact_sales
 ```
 
-Notebook example:
-
-```yaml
-external_logic:
-  type: notebook
-  path: ./gold/sales_gold.ipynb
-  output_path: output/gold_fact_sales.parquet
-  output_format: parquet
-```
-
-If `output_path` is provided, LakeGuard will read it back in for materialization.
-Otherwise, set `handles_output: true` if the external logic writes the final table itself.
+LakeLogic will call your function, then optionally validate and materialize the output. This keeps complex business logic in code while still enforcing your quality contract.
 
 ---
 
-## Intelligent Engine Selection (Portable Logic)
+## Putting It All Together
 
-LakeGuard is designed to be **write-once, run-anywhere**. It intelligently discovers the most efficient engine for your current environment so you don't have to manage engine-specific imports or libraries.
+```text
+  Raw Data
+     │
+     ▼
+  ┌──────────────────────────────────────┐
+  │  CONTRACT (YAML)                     │
+  │                                      │
+  │  1. Clean    → rename, dedup, trim   │
+  │  2. Validate → schema + rules        │
+  │  3. Enrich   → derive, join          │
+  │  4. Write    → append/merge/scd2     │
+  └──────────────┬───────────────────────┘
+                 │
+         ┌───────┴───────┐
+         ▼               ▼
+   Good Data        Quarantine
+   (next layer)     (with reasons)
+```
 
-### Auto-Discovery Priority
-When you initialize a `DataProcessor` without an explicit engine, LakeGuard follows this priority:
+**The key insight:** All of this is defined in YAML. No Python validation code to maintain, no scattered business rules, no "it works on my machine" surprises.
 
-1.  **LAKEGUARD_ENGINE Environment Variable**: Uses your global preference (ideal for CI/CD).
-2.  **Spark (pyspark)**: Automatically used if running inside **Databricks**, **Synapse**, or a Spark cluster.
-3.  **Polars**: Used if installed (the preferred high-performance engine for local/single-node).
-4.  **DuckDB**: Used as a fast alternative if Polars is missing.
-5.  **Pandas**: The universal fallback engine.
+---
 
-Snowflake and BigQuery adapters are available but are not auto-discovered; select them explicitly via `engine="snowflake"` or `engine="bigquery"` (table-only).
+## What's Next?
 
-### Why this matters?
-This allows you to develop logic on your laptop using **Polars**, commit it to Git, and have that same contract run on a **Spark** cluster in Databricks without changing a single line of code. 🛡️🚀
+- **[Architecture Overview](architecture_diagram.md)** — Visual guide to Bronze → Silver → Gold
+- **[Contract Organization](organization.md)** — Structuring contracts for enterprise scale
+- **[Tutorials & Examples](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb)** — Get hands-on in 5 minutes

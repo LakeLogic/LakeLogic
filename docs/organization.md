@@ -1,117 +1,176 @@
-# Contract Organization & Governance 🏗️
+# Contract Organization
 
-> Note: These are **recommended patterns**. Automatic registry resolution and contract discovery are planned but not yet built into the OSS runtime.
+> **Think of contracts like franchise manuals.**
+> Every McDonald's operates differently (different staff, different suppliers), but they all follow the same playbook for food safety. Data contracts work the same way — each domain runs independently but follows shared quality standards.
 
-As your Data Lakehouse grows from 10 to 1,000 tables, how you organize your contracts determines whether your team succeeds or drowns in "Contract YAML Hell."
+As your data estate grows from 10 to 1,000+ tables, how you organize contracts determines whether your team stays agile or drowns in "Contract Sprawl."
 
-## 1. Directory Hierarchy: The Domain-First Pattern
+---
 
-We recommend organizing your repository by **Business Domain** rather than by Technical Layer. This aligns with **Data Mesh** principles and ensures clear ownership.
+## 1. Domain-First Ownership
 
-### Recommended Structure
+> [!NOTE]
+> These are **recommended patterns** for enterprise-grade data estates. Automatic registry resolution and contract discovery are planned features.
+
+Organize your repository by **business domain**, not by technical layer. This aligns with Data Mesh principles — the teams who know the data best own the contracts.
 
 ```text
 contracts/
-├── finance/                    <-- Domain (Ownership Boundary)
-│   ├── _registry.yaml           <-- Master Registry for the domain
-│   ├── sap_erp/                 <-- Source System
-│   │   ├── bronze/              <-- Technical Layer
-│   │   │   ├── bronze_erp_customers_v1.yml
-│   │   │   └── bronze_erp_customers_v2.yml
+├── finance/                    ← Domain (ownership boundary)
+│   ├── _domain.yaml            ← Domain ownership and routing
+│   ├── sap_erp/                ← Source system
+│   │   ├── _system.yaml        ← System-level registry (materialization default, configs)
+│   │   ├── bronze/
+│   │   │   └── bronze_erp_customers.yml
 │   │   └── silver/
-│   │       └── silver_erp_customers_active.yml
+│   │       └── silver_erp_customers.yml
 │   └── payment_gateway/
 ├── marketing/
-└── warehouse/                   <-- Shared/Gold Layer
-    └── gold_sales_summary_v1.yml
+└── shared/                     ← Global entities (dates, countries)
 ```
 
----
+**Why this matters:**
 
-## 2. Naming Conventions
+| Benefit | Without domains | With domains |
+| :--- | :--- | :--- |
+| **Incident routing** | "Whose data is this?" → 30 min to find the owner | Auto-routed to the domain team |
+| **Change isolation** | Marketing update breaks Finance pipeline | Decoupled — each domain deploys independently |
+| **Shared standards** | Country codes defined 12 different ways | `shared/` provides one source of truth |
 
-Consistency in naming allows your **ETL Driver** to find contracts automatically without hardcoding paths.
+### Data Mesh & Unity Catalog Topology
 
-### Contract Filenames
-We recommend matching the contract filename to the **Target Table Name**, including a version suffix.
+When deployed on Databricks, LakeLogic acts as the federated governance and orchestration layer while Unity Catalog serves as the physical technical boundary. Each Data Domain securely publishes, reads, and curates its own Data Products.
 
-*   **Pattern (Bronze/Silver)**: `[layer]_[system]_[entity]_v[version].yml`
-*   **Example**: `bronze_erp_customers_v1.yml` (validates table `bronze_erp_customers`)
-*   **Example**: `silver_erp_orders_v2.yml` (validates table `silver_erp_orders`)
-*   **Pattern (Gold, shared)**: `[layer]_[domain]_[entity]_v[version].yml`
-*   **Example**: `gold_dim_customers_v1.yml` (validates table `gold_dim_customers`)
+```mermaid
+flowchart TD
+    %% Unity Catalog Core
+    UC[("fa:fa-shield Unity Catalog (Central Governance)")]
 
-### Why match table names?
-1.  **Traceability**: When a dbt test or Spark job fails on `silver_erp_orders`, you immediately know to look for `silver_erp_orders_v[X].yml`.
-2.  **Automation**: Your runner script can assume that `lakeguard run --table silver_erp_orders` maps to the contract in that domain folder.
+    %% Domain 1: Finance
+    subgraph D1 [Finance Domain (Producer)]
+        direction TB
+        F_In[(Source Systems)] --> L1[LakeLogic Pipeline]
+        L1 --> F_B[(Bronze)]
+        L1 --> F_S[(Silver)]
+        L1 --> F_DP[("fa:fa-table Gold Data Product (finance.sales_metrics)")]
+    end
 
----
+    %% Domain 2: Marketing
+    subgraph D2 [Marketing Domain (Consumer)]
+        direction TB
+        M_DP[("fa:fa-table Gold Data Product (marketing.campaign_roi)")]
+        L2[LakeLogic Pipeline] --> M_DP
+    end
 
-## 3. The "Registry" Pattern
-
-Instead of pointing your production jobs to a specific file like `customers_v12_final_v2.yml`, use a **Registry file**.
-
-**File: `finance/_registry.yaml`**
-```yaml
-entries:
-  - entity: customers
-    layer: bronze
-    active_version: v2
-    contract_path: sap_erp/bronze/bronze_erp_customers_v2.yml
+    %% Relationships
+    F_DP -. "Publish/Register" .-> UC
+    M_DP -. "Publish/Register" .-> UC
     
-  - entity: customers
-    layer: silver
-    active_version: v1
-    contract_path: sap_erp/silver/silver_erp_customers_v1.yml
+    UC -. "Read Access Granted" .-> L2
+    F_DP -. "Cross-Domain Read" .-> L2
+
+    classDef domain fill:#f0f8ff,stroke:#005A9C,stroke-width:2px,color:#333
+    classDef product fill:#e6f3ff,stroke:#007BFF,stroke-width:1px,color:#333
+    classDef pipeline fill:#f9f9f9,stroke:#666,stroke-width:1px,stroke-dasharray: 3 3
+    classDef uc fill:#fff3cd,stroke:#ffc107,stroke-width:2px,color:#333
+
+    class D1,D2 domain
+    class F_DP,M_DP product
+    class L1,L2 pipeline
+    class UC uc
 ```
 
-### Benefits of the Registry:
--   **Safe Promotion**: To upgrade to `v3`, you test the new YAML in a dev branch and then simply update the `active_version` in the registry.
--   **Multi-Version Support**: You can run `v1` and `v2` in parallel during a migration by having both entries in the registry.
+This alignment means `contracts/finance/` in LakeLogic directly dictates the governance for the `finance` catalog in Unity Catalog.
+
+```mermaid
+sequenceDiagram
+    participant D as Finance Team (LakeLogic)
+    participant L as LakeLogic Pipeline
+    participant U as Unity Catalog
+    participant C as Marketing Team (Consumer)
+
+    %% Publishing Flow
+    D->>L: Deploy _system.yaml & Contracts
+    L->>L: Ingest & Clean Data (Bronze -> Silver)
+    L->>U: Publish finance.sales_metrics (Gold)
+    L->>U: Apply Object Tags (PII, PII_TYPE)
+    L->>U: Lineage Registered
+
+    %% Consumption Flow
+    C->>U: Request Read Access
+    U-->>C: Grant Access (Federated Governance)
+    C->>L: Join finance.sales_metrics in Marketing Pipeline
+```
 
 ---
 
-## 4. Metadata Standard
+## 2. System Definition (`_system.yaml`) as a Control Plane
 
-Every contract in the LakeGuard ecosystem should include standard metadata. This allows tools to "Capture" and "Browse" your contracts easily.
-
-| Field | Description |
-| :--- | :--- |
-| **`title`** | Human-readable name (e.g., "Customer Master Data"). |
-| **`owner`** | The Slack channel or Team ID responsible for this data. |
-| **`status`** | `draft`, `active`, `deprecated`, or `emergency`. |
-| **`classification`** | `PII`, `Financial`, or `Public`. |
-
-## 5. Reference Data & Cross-Domain Lookups
-
-Reference data (ISO country codes, currency lists, product categories) is often used across **multiple** domains. To avoid duplicating contracts, we recommend a dedicated `shared/` or `reference/` domain.
-
-### Shared Hierarchy
-```text
-contracts/
-├── shared/                     <-- Global Reference Data
-│   ├── geo/
-│   │   └── silver_reference_countries_v1.yml    <-- Used by Finance, Marketing, and Logisitics
-│   └── currency/
-│       └── rates_v1.yml
-```
-
-### The "Lookup" Lifecycle
-When a **Finance** contract needs to perform a `lookup` against **Shared** reference data, it should reference the "Silver" (cleaned) version of that reference table.
-
-1.  **Shared Owner**: Validates and publishes `silver_reference_countries` using the `silver_reference_countries_v1.yml` contract.
-2.  **Finance Owner**: Points their `lookup` rule to `silver_reference_countries`.
-3.  **Safety**: Because `silver_reference_countries` has its own contract, the Finance team is guaranteed that the lookup data is valid and schema-compliant.
-
-By centralizing reference data contracts, you ensure that "United States" is represented as `US` (or `USA`) consistently across your entire company. 🛡️🌍
-
-### Table-Based Links (Lakehouse)
-If your reference data already lives in a Lakehouse table, you can point `links` directly at a table name (Spark only in OSS).
+Instead of repeating materialization logic, defaults, and cross-references in every single contract, use the `_system.yaml` control plane:
 
 ```yaml
-links:
-  - name: dim_geography
-    type: table
-    table: main.reference.dim_geography
-    broadcast: true  # Spark-only hint for small lookup tables
+# finance/sap_erp/_system.yaml
+system: sap_erp
+
+materialization:
+  bronze:
+    strategy: append
+    partition_by: ["ingestion_date"]
+    format: delta
+  silver:
+    strategy: merge
+    format: delta
+
+quality:
+  fail_pipeline_on_dataset_error: true
+  fail_pipeline_on_row_error: false
 ```
+
+**Why this matters:**
+
+- **Zero-downtime upgrades** — change storage locations or partition strategies at the system level and all underlying tables inherit it instantly.
+- **Auditability** — the system config is a single ledger for how an entire source system behaves.
+- **DRY Contracts** — engineers only define the columns and rules that are unique to the table.
+
+---
+
+## 3. Governance Metadata
+
+Every contract should include governance-rich metadata that transforms your YAML files into a **searchable data catalog**:
+
+| Field | Business value |
+| :--- | :--- |
+| `owner` | Routing for data quality alerts and incident response |
+| `status` | Lifecycle management (`draft` → `active` → `deprecated`) |
+| `classification` | Automated tagging for GDPR, HIPAA, and CCPA compliance |
+| `sla_tier` | Prioritizes engineering response during outages |
+
+---
+
+## 4. Shared Templates
+
+> **Think of templates like a corporate style guide.**
+> Instead of every team reinventing timestamp formats and PII masking rules, you define them once and inherit everywhere.
+
+**Why this matters:**
+
+- **One update, company-wide impact** — change a global Silver template, and every domain picks it up
+- **Guaranteed consistency** — "United States" is always `US`, everywhere
+- **Fast onboarding** — new teams bootstrap production-ready contracts in minutes
+
+---
+
+## 5. Cross-Domain Integrity
+
+Reference data (ISO country codes, currency lists) should live in a `shared/` domain with its own quality contracts:
+
+1. **Shared team** publishes `silver_reference_countries` with its own validation
+2. **Finance / Marketing** use `lookup` rules that point to the shared table
+3. **Safety guarantee** — because the shared table has its own contract, downstream teams know the lookup data is always valid and schema-compliant
+
+---
+
+## What's Next?
+
+- **[Complete Contract Template](contract_template.md)** — Full reference of all contract fields
+- **[Architecture Overview](architecture_diagram.md)** — How contracts fit into the medallion layers

@@ -1,0 +1,21 @@
+version: 1.0.0
+info:
+  title: "Gold \u2014 Revenue Daily"
+  table_name: '{gold_layer}__shared_revenue_daily'
+  description: Aggregated Gold KPIs.
+  target_layer: gold
+  domain: _shared
+  system: _shared
+model:
+  fields:
+  - name: kpi_date
+    type: date
+  - name: metric_name
+    type: string
+  - name: metric_value
+    type: float
+source:
+  type: sql
+  query: "\n                SELECT \n                    CURRENT_DATE() as kpi_date,\n\
+    \                    'dummy_metric' as metric_name,\n                    100.0\
+    \ as metric_value\n            "

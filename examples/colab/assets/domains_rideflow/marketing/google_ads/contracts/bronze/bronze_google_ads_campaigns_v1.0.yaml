@@ -1,0 +1,60 @@
+version: 1.0.0
+
+info:
+  title: "Bronze — Google Ads Campaigns"
+  table_name: "{bronze_layer}_{system}_campaigns"
+  description: >
+    Raw Google Ads campaign performance metrics. Aggregate data — no PII.
+  target_layer: bronze
+  domain: marketing
+  system: google_ads
+
+model:
+  fields:
+    - name: campaign_id
+      type: string
+      required: true
+      description: "Google Ads campaign ID"
+    - name: campaign_name
+      type: string
+      required: true
+      description: "Campaign name"
+    - name: ad_group_id
+      type: string
+      description: "Ad group ID"
+    - name: ad_group_name
+      type: string
+      description: "Ad group name"
+    - name: date
+      type: string
+      description: "Reporting date"
+    - name: impressions
+      type: string
+      description: "Number of impressions"
+    - name: clicks
+      type: string
+      description: "Number of clicks"
+    - name: cost
+      type: string
+      description: "Total spend in minor units"
+    - name: conversions
+      type: string
+      description: "Number of conversions"
+    - name: conversion_value
+      type: string
+      description: "Total conversion value"
+    - name: currency
+      type: string
+      description: "ISO 4217 currency code"
+
+source:
+  type: landing
+  path: "{landing_root}/campaigns"
+  format: csv
+  options:
+    header: "true"
+    recursiveFileLookup: "true"
+  load_mode: incremental
+  watermark_strategy: pipeline_log
+  partition:
+    format: "y_%Y/m_%m/d_%d/h_%H"

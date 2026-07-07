@@ -1,0 +1,36 @@
+name: fsi_audit_ready
+description: "Financial Services Industry template for audit-ready data reconciliation."
+
+defaults:
+  schema_policy:
+    evolution: strict
+    unknown_fields: quarantine
+
+  quality:
+    row_rules:
+      - name: monetary_precision
+        category: accuracy
+        sql: "transaction_amount IS NOT NULL AND transaction_amount = ROUND(transaction_amount, 2)"
+        description: "Transaction amounts must 2-decimal precision."
+      
+      - name: valid_currency_code
+        category: consistency
+        sql: "currency_code IN ('USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD')"
+        description: "Currency must be one of the major global codes."
+
+    dataset_rules:
+      - name: batch_balance_reconciliation
+        sql: "SUM(transaction_amount) - SUM(expected_amount) = 0"
+        description: "The batch must balance perfectly before proceeding to Gold."
+
+lineage:
+  enabled: true
+  preserve_upstream: ["_upstream_lakelogic_run_id"]
+  
+materialization:
+  strategy: merge
+  reprocess_policy: overwrite_partition
+
+quarantine:
+  enabled: true
+  strict_notifications: true

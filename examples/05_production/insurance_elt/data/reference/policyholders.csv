@@ -1,4 +1,0 @@
-customer_id,first_name,last_name,email,phone,date_of_birth,state_code
-1001,Alice,Nguyen,alice.nguyen@example.com,555-0101,1984-03-02,CA
-1002,Bob,Allen,bob.allen@example.com,555-0102,1972-07-19,TX
-1003,Cara,Diaz,cara.diaz@example.com,555-0103,1995-11-09,NY

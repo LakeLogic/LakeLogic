@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from lakeguard.cli import driver
+from lakelogic.cli import driver
 
 
 def test_driver_metrics_path(tmp_path: Path) -> None:
@@ -60,7 +60,7 @@ def test_prometheus_formatting(tmp_path: Path) -> None:
     drv = driver.PipelineDriver(
         "polars",
         max_workers=1,
-        metrics_prefix="lakeguard",
+        metrics_prefix="lakelogic",
         metrics_tags={"env": "test"},
     )
     drv.metrics_snapshot = {
@@ -69,5 +69,5 @@ def test_prometheus_formatting(tmp_path: Path) -> None:
         "metrics": {"successful": 3, "failed": 1},
     }
     payload = drv._format_prometheus()
-    assert "lakeguard_successful" in payload
+    assert "lakelogic_successful" in payload
     assert 'env="test"' in payload

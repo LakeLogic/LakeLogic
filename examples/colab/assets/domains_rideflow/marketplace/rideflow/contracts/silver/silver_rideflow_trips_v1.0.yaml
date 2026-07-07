@@ -1,0 +1,77 @@
+version: 1.0.0
+info:
+  title: "Silver \u2014 Rideflow Trips"
+  table_name: '{silver_layer}_rideflow_trips'
+  description: Cleaned, typed, and deduplicated data
+  target_layer: silver
+  domain: marketplace
+  system: rideflow
+
+primary_key: [trip_id]
+
+model:
+  fields:
+  - name: trip_id
+    type: string
+    required: true
+  - name: rider_id
+    type: string
+    required: true
+  - name: driver_id
+    type: string
+    required: true
+  - name: trip_type
+    type: string
+  - name: pickup_lat
+    type: string
+  - name: pickup_lng
+    type: string
+  - name: dropoff_lat
+    type: string
+  - name: dropoff_lng
+    type: string
+  - name: city_code
+    type: string
+  - name: requested_at
+    type: timestamp
+  - name: pickup_at
+    type: timestamp
+  - name: dropoff_at
+    type: timestamp
+  - name: distance_km
+    type: float
+  - name: duration_minutes
+    type: integer
+  - name: fare_amount
+    type: float
+  - name: surge_multiplier
+    type: float
+  - name: tip_amount
+    type: float
+  - name: payment_method
+    type: string
+  - name: rider_rating
+    type: float
+  - name: driver_rating
+    type: float
+  - name: notes
+    type: string
+
+
+quality:
+  row_rules:
+    - name: positive_spend
+      sql: "fare_amount >= 0"
+    - name: valid_rating
+      sql: "rider_rating IS NULL OR (rider_rating >= 1.0 AND rider_rating <= 5.0)"
+
+transformations:
+- deduplicate:
+    by:
+    - trip_id
+
+source:
+  type: delta
+  path: '{bronze_path}/{bronze_layer}_{system}_trip_completed'
+  load_mode: incremental
+  watermark_strategy: pipeline_log

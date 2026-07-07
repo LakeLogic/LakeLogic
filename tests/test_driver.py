@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from lakeguard.cli import driver
+from lakelogic.cli import driver
 
 
 def test_parse_layers_strict_valid():
@@ -13,9 +13,9 @@ def test_parse_layers_strict_valid():
     assert driver.parse_layers("bronze,silver", strict=True) == ["bronze", "silver"]
     assert driver.parse_layers("silver,gold", strict=True) == ["silver", "gold"]
     assert driver.parse_layers("gold", strict=True) == ["gold"]
-    assert driver.parse_layers("reference,bronze", strict=True) == ["reference", "bronze"]
-    assert driver.parse_layers("reference,bronze,silver,gold", strict=True) == ["reference", "bronze", "silver", "gold"]
-    assert driver.parse_layers("ref,bronze", strict=True) == ["reference", "bronze"]
+    assert driver.parse_layers("bronze,silver,gold,reference", strict=True) == ["bronze", "silver", "gold", "reference"]
+    assert driver.parse_layers("bronze,reference", strict=True) == ["bronze", "reference"]
+    assert driver.parse_layers("ref,bronze", strict=False) == ["reference", "bronze"]
 
 
 def test_parse_layers_strict_invalid():

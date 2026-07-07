@@ -1,0 +1,17 @@
+{% extends "_base.md.j2" %}
+{% block content %}
+*🟡 Schema Drift Detected*
+
+{{ message }}
+
+• *Run ID:* `{{ run_id }}`
+• *Engine:* {{ engine }}
+• *Source:* `{{ masked_source_path or source_path or 'N/A' }}`
+• *Time (UTC):* {{ timestamp_utc }}
+• *Table:* `{{ contract.dataset or 'N/A' }}`
+{% if contract.domain %}• *Domain:* {{ contract.domain }}
+{% endif %}{% if contract.system %}• *System:* {{ contract.system }}
+{% endif %}
+
+> Review the contract schema and update field definitions if the drift is intentional.
+{% endblock %}

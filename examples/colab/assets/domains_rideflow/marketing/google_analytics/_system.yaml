@@ -1,0 +1,127 @@
+# ── Google Analytics 4 System Registry ────────────────────────────────────────
+domain: marketing
+system: google_analytics
+
+metadata:
+  run_log_table: "{log_path}"
+  run_log_backend: "delta"
+
+quarantine:
+  enabled: true
+  fail_on_quarantine: false
+  include_error_reason: true
+  target: "{quarantine_path}"
+  format: "delta"
+  mode: "append"
+
+storage:
+  domain_catalog: "`{catalog}`.{domain}"
+  external_location_root: "{data_root}"
+  contract_root: "/Workspace/Shared/data_platform/domains/{domain}/{system}"
+  landing_root: "/Volumes/{catalog}/nondelta/landing_{domain}/{system}"
+  log_root: "/Volumes/{catalog}/nondelta/_logs"
+  landing_path: "{storage_root}/_data/{domain}/{system}"
+  contract_path: "{storage_root}/_contracts/{domain}/{system}"
+  log_path: "{storage_root}/_logs/{domain}"
+  quarantine_path: "{quarantine_root}/{domain}/{system}"
+
+external_sources:
+  - name: "Google Analytics 4"
+    source_domain: "Google LLC"
+    catalog_path: "google_analytics_api"
+    consumed_by:
+      - "app_events"
+      - "sessions"
+
+contracts:
+  - layer: bronze
+    entity: app_events
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_app_events_v1.0.yaml"
+    enabled: true
+  - layer: bronze
+    entity: sessions
+    path: "contracts/{bronze_layer}/{bronze_layer}_{system}_sessions_v1.0.yaml"
+    enabled: true
+
+  - layer: silver
+    entity: silver_google_analytics_sessions
+    path: "contracts/{silver_layer}/silver_google_analytics_sessions_v1.0.yaml"
+    enabled: true
+lineage:
+  enabled: true
+  source_column_name: "_lakelogic_source"
+  timestamp_column_name: "_lakelogic_processed_at"
+  run_id_column_name: "_lakelogic_run_id"
+  contract_name_column_name: "_lakelogic_contract_name"
+  capture_domain: false
+  capture_system: false
+
+materialization:
+  bronze:
+    strategy: append
+    format: delta
+  silver:
+    strategy: merge
+    format: delta
+    merge_dedup_guard: true
+  gold:
+    strategy: merge
+    format: delta
+
+server:
+  bronze:
+    cast_to_string: true
+    schema_policy:
+      evolution: append
+      unknown_fields: allow
+  silver:
+    schema_policy:
+      evolution: strict
+      unknown_fields: quarantine
+  gold:
+    schema_policy:
+      evolution: strict
+      unknown_fields: quarantine
+
+cost:
+  provider: "manual"
+  attribution: "duration_proportional"
+  currency: "GBP"
+  rates:
+    dbu_per_hour: 0.22
+    storage_per_gb_month: 0.023
+  cluster:
+    min_nodes: 1
+    max_nodes: 4
+    scaling_assumption: "avg"
+
+notifications_enabled: false
+
+x-azure-storage: &azure_storage
+  storage_root: "abfss://nondelta@{storage_account}.dfs.core.windows.net"
+  data_root: "abfss://{domain}@{storage_account}.dfs.core.windows.net"
+  quarantine_root: "abfss://quarantine@{storage_account}.dfs.core.windows.net"
+
+environments:
+  dev:
+    catalog: "rideflow-lakehouse-dev-001"
+    storage_account: "sarideflowdevadls001"
+    <<: *azure_storage
+  staging:
+    catalog: "rideflow-lakehouse-staging-001"
+    storage_account: "sarideflowstgadls001"
+    <<: *azure_storage
+  prod:
+    catalog: "rideflow-lakehouse-prod-001"
+    storage_account: "sarideflowprodadls001"
+    <<: *azure_storage
+  local:
+    catalog: "local"
+    storage_root: "./lakehouse"
+    data_root: "./lakehouse/{domain}"
+    quarantine_root: "./lakehouse/_quarantine"
+  colab:
+    catalog: "colab"
+    storage_root: "/content/lake"
+    data_root: "/content/lake/{domain}"
+    quarantine_root: "/content/lake/_quarantine"
