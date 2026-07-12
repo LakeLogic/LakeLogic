@@ -114,9 +114,7 @@ def test_duckdb_adapter_deduplicate_removes_duplicate_keys() -> None:
         model={"fields": [{"name": "id", "type": "int"}, {"name": "name", "type": "string"}]},
         transformations=[{"deduplicate": {"by": ["id"]}}],
     )
-    good, bad = DuckDBAdapter(contract).execute(
-        pl.DataFrame({"id": [1, 1, 1, 2], "name": ["a", "a", "a", "b"]})
-    )
+    good, bad = DuckDBAdapter(contract).execute(pl.DataFrame({"id": [1, 1, 1, 2], "name": ["a", "a", "a", "b"]}))
     assert len(bad) == 0
     assert sorted(good["id"].to_list()) == [1, 2]  # three id=1 rows collapse to one
 

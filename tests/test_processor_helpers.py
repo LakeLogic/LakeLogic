@@ -801,11 +801,16 @@ def test_processor_run_source_cloud_bare_dir_is_glob_expanded(monkeypatch):
     processor._active_trace_steps = []
     processor.contract = types.SimpleNamespace(
         source=types.SimpleNamespace(
-            type="landing", path=cloud_dir, load_mode="full", format="csv",
-            partition=None, flatten_nested=False,
+            type="landing",
+            path=cloud_dir,
+            load_mode="full",
+            format="csv",
+            partition=None,
+            flatten_nested=False,
         ),
         materialization=types.SimpleNamespace(reprocess_column=None, partition_by=[]),
-        server=None, lineage=None,
+        server=None,
+        lineage=None,
     )
     processor._resolve_source_path = lambda value: cloud_dir
     processor._is_uri_path = lambda path: str(path).startswith("abfss://")

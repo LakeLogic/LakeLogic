@@ -6,46 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
-## [1.38.2] — 2026-07-07
-
-### Fixed
-
-- Resolve pyarrow CVE GHSA-rgxp-2hwp-jwgg (IPC pre-buffering use-after-free)
-## [1.38.1] — 2026-07-06
-
-### Fixed
-
-- Update monkeypatch for dlt_adapter and warnings to match expected signatures
-## [1.38.0] — 2026-07-06
+## [1.39.0] — 2026-07-12
 
 ### Added
 
+- **sensitive**: Introduce handling for confidential non-personal fields
 - Add option method to FakeWriter for test transparency in spark_save_as_table
 - Disable deletion vectors in _spark_save_as_table to support delta-rs compatibility
-## [1.37.0] — 2026-07-06
-
-### Added
-
 - Enhance _spark_scd2_dataframe to retain current rows with unchanged keys during processing
-## [1.36.0] — 2026-07-05
-
-### Added
-
 - Enhance error handling in PipelineRunSummary with failure detection and detailed reporting
-## [1.35.0] — 2026-07-05
-
-### Added
-
 - Update logo colors and enhance documentation clarity with open core details
-## [1.34.0] — 2026-07-05
-
-### Added
-
 - Add observatory spool for telemetry pushes with bounded retry
 
 ### Fixed
 
+- **duckdb**: Apply deduplicate transform in duckdb engine
 - **generator,engine**: Robust ingest of string-typed numeric/temporal/boolean columns
+- **processor**: Glob-expand non-partitioned cloud landing directories
+- **registry**: Preserve 'on' join key when loading contract YAML
+- Resolve pyarrow CVE GHSA-rgxp-2hwp-jwgg (IPC pre-buffering use-after-free)
+- Update monkeypatch for dlt_adapter and warnings to match expected signatures
 ## [1.33.0] — 2026-05-30
 
 ### Documentation
@@ -523,13 +503,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
-[1.38.2]: https://github.com/lakelogic/LakeLogic/compare/v1.38.1...v1.38.2
-[1.38.1]: https://github.com/lakelogic/LakeLogic/compare/v1.38.0...v1.38.1
-[1.38.0]: https://github.com/lakelogic/LakeLogic/compare/v1.37.0...v1.38.0
-[1.37.0]: https://github.com/lakelogic/LakeLogic/compare/v1.36.0...v1.37.0
-[1.36.0]: https://github.com/lakelogic/LakeLogic/compare/v1.35.0...v1.36.0
-[1.35.0]: https://github.com/lakelogic/LakeLogic/compare/v1.34.0...v1.35.0
-[1.34.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.34.0
+[1.39.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.39.0
 [1.33.0]: https://github.com/lakelogic/LakeLogic/compare/v1.32.0...v1.33.0
 [1.32.0]: https://github.com/lakelogic/LakeLogic/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/lakelogic/LakeLogic/compare/v1.30.0...v1.31.0

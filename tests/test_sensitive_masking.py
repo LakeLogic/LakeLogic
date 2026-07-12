@@ -36,9 +36,7 @@ def test_sensitive_field_is_selected_for_masking():
 
 def test_sensitive_value_is_masked_in_dataframe():
     eng = MaskingEngine(_contract(), hash_salt="s")
-    df = pl.DataFrame(
-        {"id": [1], "email": ["a@b.com"], "bank_account": ["GB29NWBK60161331926819"]}
-    )
+    df = pl.DataFrame({"id": [1], "email": ["a@b.com"], "bank_account": ["GB29NWBK60161331926819"]})
     out = eng.apply(df, user_groups=[])
     assert out["bank_account"][0] != "GB29NWBK60161331926819"  # hashed away
     assert out["email"][0] != "a@b.com"
