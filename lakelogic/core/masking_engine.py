@@ -284,10 +284,14 @@ class MaskingEngine:
         self._pii_fields = self._extract_pii_fields()
 
     def _extract_pii_fields(self) -> List[FieldDefinition]:
-        """Get all PII-flagged fields from the contract."""
+        """Get all fields that require masking — those flagged ``pii: true`` OR
+        ``sensitive: true``. Both are masked through the same ``security_groups`` +
+        ``masking`` mechanism; they differ only in classification (personal data
+        vs confidential business data) and in erasure handling (``sensitive`` is
+        NOT pulled into GDPR/HIPAA erasure)."""
         if not self.contract.model or not self.contract.model.fields:
             return []
-        return [f for f in self.contract.model.fields if f.pii]
+        return [f for f in self.contract.model.fields if f.pii or f.sensitive]
 
     def get_fields_to_mask(self, user_groups: Optional[List[str]] = None) -> List[FieldDefinition]:
         """

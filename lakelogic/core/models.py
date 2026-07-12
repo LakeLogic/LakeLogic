@@ -1105,6 +1105,11 @@ class FieldDefinition(BaseModel):
     required: bool = False
     pii: bool = False
     phi: bool = False
+    # Confidential-but-not-personal data (bank account, salary, API key, secret).
+    # Masked exactly like `pii` (via `security_groups` + `masking:`), but NOT pulled
+    # into GDPR/HIPAA erasure — sensitive business data isn't "right to be forgotten"
+    # and often carries retention obligations.
+    sensitive: bool = False
     classification: Optional[str] = None
     description: Optional[str] = None
     rules: List[QualityRule] = Field(default_factory=list)
@@ -1558,6 +1563,8 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
                 field["required"] = col["required"]
             if "pii" in col:
                 field["pii"] = col["pii"]
+            if "sensitive" in col:
+                field["sensitive"] = col["sensitive"]
             fields.append(field)
         lakelogic_data["model"] = {"fields": fields}
 
