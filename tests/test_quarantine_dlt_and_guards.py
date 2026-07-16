@@ -250,8 +250,9 @@ class TestMaterializeQuarantineGuards:
         monkeypatch.setattr(
             q,
             "_write_quarantine_table",
-            lambda df, contract, table_name, engine_name=None: calls.append(table_name)
-            or {"target": "table", "rows_written": 1},
+            lambda df, contract, table_name, engine_name=None: (
+                calls.append(table_name) or {"target": "table", "rows_written": 1}
+            ),
         )
         df = pl.DataFrame({"id": [1]})
         result = q.materialize_quarantine(df, contract, quarantine_mode="table", engine_name="polars")
@@ -264,8 +265,9 @@ class TestMaterializeQuarantineGuards:
         monkeypatch.setattr(
             q,
             "_write_quarantine_table",
-            lambda df, contract, table_name, engine_name=None: calls.append(table_name)
-            or {"target": f"table:{table_name}", "rows_written": 1},
+            lambda df, contract, table_name, engine_name=None: (
+                calls.append(table_name) or {"target": f"table:{table_name}", "rows_written": 1}
+            ),
         )
         df = pl.DataFrame({"id": [1]})
         result = q.materialize_quarantine(df, contract, engine_name="polars")
