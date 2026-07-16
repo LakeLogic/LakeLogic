@@ -1582,8 +1582,9 @@ class DataProcessor:
                 # For landing sources with a bare directory path (no glob),
                 # auto-append /* so the file scanner discovers contents.
                 _src_type = getattr(self.contract.source, "type", None) if self.contract.source else None
+                _no_glob = not any(ch in str(path) for ch in ["*", "?", "["])
                 _is_bare_dir = (
-                    not any(ch in str(path) for ch in ["*", "?", "["])
+                    _no_glob
                     and not _is_table
                     and _src_type not in ("delta", "iceberg")
                     and not self._is_uri_path(str(path))
@@ -1591,7 +1592,23 @@ class DataProcessor:
                     and not (Path(path) / "_delta_log").exists()
                     and not ((Path(path) / "metadata").exists() and (Path(path) / "data").exists())
                 )
-                if _is_bare_dir:
+                # Cloud landing dirs (abfss/s3/gs) can't be probed with local
+                # Path().is_dir(), so _is_bare_dir excludes URIs. Without a parallel
+                # branch a wildcard-free cloud directory never gets glob-expanded —
+                # the reader then hits a literal `<dir>/**/*.csv` object key and
+                # 404s (only date-partitioned landing, which routes through
+                # _expand_partitioned_paths, avoided this). Treat a wildcard-free
+                # cloud path whose final segment has no file extension as a
+                # directory and expand it via fsspec, which lists cloud storage fine.
+                _last_seg = str(path).rstrip("/").rsplit("/", 1)[-1]
+                _is_cloud_bare_dir = (
+                    _no_glob
+                    and not _is_table
+                    and _src_type not in ("delta", "iceberg")
+                    and self._is_uri_path(str(path))
+                    and "." not in _last_seg
+                )
+                if _is_bare_dir or _is_cloud_bare_dir:
                     source_files = self._expand_source_files(str(path).rstrip("/") + "/**/*")
                     if not source_files:
                         source_files = self._expand_source_files(str(path).rstrip("/") + "/*")

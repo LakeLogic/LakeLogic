@@ -484,6 +484,32 @@ class DuckDBAdapter(EngineAdapter):
                     current = view_name
                 continue
 
+            # Deduplicate is applied regardless of `phase` to mirror the Polars
+            # engine (whose filter/deduplicate branch is not phase-gated). Without
+            # this, the duckdb engine silently skipped `deduplicate`, letting
+            # duplicate keys through where Polars/Spark removed them.
+            dedupe_cfg = getattr(trans, "deduplicate", None)
+            if dedupe_cfg and dedupe_cfg.on:
+                logger.debug(f"Pre-Transform [Deduplicate]: {dedupe_cfg.on}")
+                on_cols = ", ".join(f'"{c}"' for c in dedupe_cfg.on)
+                if dedupe_cfg.sort_by:
+                    direction = "DESC" if (dedupe_cfg.order or "desc").lower() == "desc" else "ASC"
+                    order_by = ", ".join(f'"{c}" {direction}' for c in dedupe_cfg.sort_by)
+                else:
+                    # No sort key: keep an arbitrary single row per group, matching
+                    # Polars' unique(subset=..., maintain_order=True).
+                    order_by = "(SELECT 1)"
+                view_name = f"_pre_dedup_{id(dedupe_cfg) & 0xFFFFFF:06x}"
+                try:
+                    self.con.sql(
+                        f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current} "
+                        f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {on_cols} ORDER BY {order_by}) = 1"
+                    )
+                    current = view_name
+                except Exception as e:
+                    logger.warning(f"Pre-Transform [Deduplicate] failed: {e}")
+                continue
+
         return current
 
     def _apply_post_transformations(self, table_name: str) -> str:

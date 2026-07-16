@@ -624,6 +624,19 @@ model:
           category: "correctness"
           description: "Valid email format"
     
+    - name: "bank_account"
+      type: "string"
+      sensitive: true
+      # Confidential but NOT personal data. Masked exactly like `pii`
+      # (security_groups + masking) but never pulled into GDPR/HIPAA erasure —
+      # sensitive business data isn't "right to be forgotten" and often has
+      # retention obligations. Tagged COMMENT 'SENSITIVE' in generated DDL.
+      classification: "restricted"
+      description: "Customer bank account number"
+      security_groups: ["finance-admins"]   # optional — omit to always mask
+      masking: "hash"
+      # A sensitive field with no masking + no security_groups → SENS-001 lint warning.
+
     - name: "age"
       type: "int"
       required: false

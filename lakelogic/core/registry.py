@@ -14,9 +14,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from lakelogic.core.yaml_utils import load_yaml
 
 
 class SLOFreshnessConfig(BaseModel):
@@ -464,7 +465,7 @@ class DomainRegistry(BaseModel):
             raise FileNotFoundError(f"Registry not found: {yaml_path}")
 
         with open(yaml_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
+            raw = load_yaml(f)
 
         # ── Domain-level inheritance ──────────────────────────────────────
         # Walk up from the _system.yaml directory to discover a sibling
@@ -501,7 +502,7 @@ class DomainRegistry(BaseModel):
         domain_yaml_path = yaml_path.parent.parent / "_domain.yaml"
         if domain_yaml_path.exists():
             with open(domain_yaml_path, "r", encoding="utf-8") as df:
-                domain_raw = yaml.safe_load(df) or {}
+                domain_raw = load_yaml(df) or {}
             logger.info(f"Domain config inherited from {domain_yaml_path}")
             for key in _DOMAIN_INHERITABLE_KEYS:
                 if key not in domain_raw:
@@ -662,7 +663,7 @@ class DomainRegistry(BaseModel):
 
             # Load the actual contract content
             with open(c_path, "r", encoding="utf-8") as rf:
-                c_dict = yaml.safe_load(rf)
+                c_dict = load_yaml(rf)
                 c_dict["__file__"] = str(c_path)  # Inject original path
 
                 # Resolve storage placeholders ({landing_root}, {bronze_root}, etc.)

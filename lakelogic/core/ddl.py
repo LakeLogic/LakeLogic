@@ -514,14 +514,16 @@ def generate_ddl(
 
         col_def = f"  {field.name} {sql_type}{nullable}{comment}"
 
-        # PII marker as comment for documentation
-        if field.pii and include_comments:
+        # Classification marker as comment for documentation (PII takes precedence
+        # over SENSITIVE when a field is somehow flagged as both).
+        _marker = "PII" if field.pii else ("SENSITIVE" if field.sensitive else None)
+        if _marker and include_comments:
             if backend in ("spark", "databricks") and not comment:
-                col_def += " COMMENT 'PII'"
+                col_def += f" COMMENT '{_marker}'"
             elif backend in ("spark", "databricks"):
                 pass  # Already has a comment
             else:
-                col_def += " /* PII */"
+                col_def += f" /* {_marker} */"
 
         col_defs.append(col_def)
 

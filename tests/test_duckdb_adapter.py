@@ -103,6 +103,33 @@ def test_duckdb_adapter_pre_and_post_transformations_cover_sql_derive_filter_ren
     assert good["customer"].to_list() == ["b"]
     assert good["total_amount"].to_list() == [40.0]
 
+
+def test_duckdb_adapter_deduplicate_removes_duplicate_keys() -> None:
+    # Regression: the duckdb engine previously had no `deduplicate` branch in its
+    # pre-transform pass, so duplicate keys survived where Polars/Spark removed
+    # them. `deduplicate` is applied regardless of `phase` (parity with Polars).
+    contract = DataContract(
+        version="1.0.0",
+        dataset="source",
+        model={"fields": [{"name": "id", "type": "int"}, {"name": "name", "type": "string"}]},
+        transformations=[{"deduplicate": {"by": ["id"]}}],
+    )
+    good, bad = DuckDBAdapter(contract).execute(pl.DataFrame({"id": [1, 1, 1, 2], "name": ["a", "a", "a", "b"]}))
+    assert len(bad) == 0
+    assert sorted(good["id"].to_list()) == [1, 2]  # three id=1 rows collapse to one
+
+
+def test_duckdb_adapter_deduplicate_sort_by_keeps_ordered_survivor() -> None:
+    contract = DataContract(
+        version="1.0.0",
+        dataset="source",
+        model={"fields": [{"name": "id", "type": "int"}, {"name": "v", "type": "int"}]},
+        transformations=[{"deduplicate": {"by": ["id"], "sort_by": ["v"], "order": "desc"}}],
+    )
+    good, _ = DuckDBAdapter(contract).execute(pl.DataFrame({"id": [1, 1, 1], "v": [10, 30, 20]}))
+    assert good["id"].to_list() == [1]
+    assert good["v"].to_list() == [30]  # order=desc keeps the highest v
+
     pivot_contract = DataContract(
         version="1.0.0",
         transformations=[

@@ -789,6 +789,60 @@ def test_processor_run_source_partitioned_initial_load_without_files_returns_emp
     assert writes == ["no_new_data"]
 
 
+def test_processor_run_source_cloud_bare_dir_is_glob_expanded(monkeypatch):
+    # Regression: a wildcard-free cloud (abfss) landing DIRECTORY must be
+    # glob-expanded via fsspec (`<dir>/**/*`). Previously `_is_bare_dir` excluded
+    # URI paths, so the reader received a literal `<dir>/**/*.csv` object key and
+    # 404'd. Only date-partitioned cloud landing (routed through
+    # `_expand_partitioned_paths`) escaped the bug.
+    cloud_dir = "abfss://nondelta@acct.dfs.core.windows.net/_data/landing/city_master"
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor._active_trace_steps = []
+    processor.contract = types.SimpleNamespace(
+        source=types.SimpleNamespace(
+            type="landing",
+            path=cloud_dir,
+            load_mode="full",
+            format="csv",
+            partition=None,
+            flatten_nested=False,
+        ),
+        materialization=types.SimpleNamespace(reprocess_column=None, partition_by=[]),
+        server=None,
+        lineage=None,
+    )
+    processor._resolve_source_path = lambda value: cloud_dir
+    processor._is_uri_path = lambda path: str(path).startswith("abfss://")
+    processor._get_cloud_storage_options = lambda path: {}
+
+    expanded = []
+
+    def fake_expand(path):
+        expanded.append(path)
+        # fsspec finds the seed only via the recursive glob (the fix path).
+        if path.endswith("/**/*"):
+            return [{"path": cloud_dir + "/seed/city_master_seed.csv", "mtime": 5}]
+        return None
+
+    processor._expand_source_files = fake_expand
+    # Avoid real cloud IO — stub the lazy CSV reader on the polars module
+    # (run_source does a local `import polars as pl`, so patch the module itself).
+    monkeypatch.setattr(
+        pl, "scan_csv", lambda *a, **k: types.SimpleNamespace(collect=lambda: pl.DataFrame({"city_code": ["A"]}))
+    )
+
+    captured = {}
+    processor.run = lambda df, source_path=None, reset_trace=False: (
+        captured.update({"source_path": source_path}) or "run-result"
+    )
+
+    result = processor.run_source()
+    assert result == "run-result"
+    # The cloud bare dir must have been expanded with the recursive glob first.
+    assert expanded[0] == cloud_dir + "/**/*"
+
+
 def test_processor_run_source_polars_reads_multiple_csvs_and_applies_targeted_reprocess(tmp_path):
     first = tmp_path / "orders_1.csv"
     second = tmp_path / "orders_2.csv"

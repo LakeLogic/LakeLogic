@@ -291,6 +291,19 @@ def check_pii_no_masking(raw, name, ctx):  # PII-002
                     suggestion="Add `masking: hash|redact|partial|nullify` (or map security_groups).",
                 )
             )
+        if f.get("sensitive") and not f.get("masking") and not f.get("security_groups"):
+            fname = f.get("name")
+            out.append(
+                _c(
+                    name,
+                    "SENS-001",
+                    "warning",
+                    "sensitive",
+                    f"Sensitive field '{fname}' has no masking strategy — confidential data will surface unmasked.",
+                    field=fname,
+                    suggestion="Add `masking: hash|redact|partial|nullify` (or map security_groups).",
+                )
+            )
     return out
 
 

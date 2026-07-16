@@ -1,6 +1,6 @@
 # Schema & Model
 
-The `model:` block defines the expected schema — field names, types, constraints, PII classification, and masking strategies.
+The `model:` block defines the expected schema — field names, types, constraints, PII/sensitive classification, and masking strategies.
 
 ---
 
@@ -62,6 +62,27 @@ LakeLogic provides native, declarative PII masking. By tagging a field with `pii
 | `redact` | `***REDACTED***` | No | No | ✓ |
 | `partial` | `j***@company.com` | No | No | ✗ |
 | `encrypt` | `enc:gAAAAABh...` (AES-256) | Yes | Yes | ✓ |
+
+### Sensitive (Non-Personal) Fields
+
+Not every confidential value is *personal* data. A bank account number, salary, internal API key, or negotiated price is **sensitive** — it must be hidden from unauthorized readers — but it is **not** subject to GDPR/HIPAA erasure (the "right to be forgotten"), and records like these often carry retention obligations that make erasure incorrect.
+
+Tag these with `sensitive: true`. They mask through the **exact same** mechanism as `pii` — `security_groups` + a `masking:` strategy — and are tagged `COMMENT 'SENSITIVE'` in generated DDL, but they are **never** pulled into the GDPR/HIPAA erasure selectors.
+
+```yaml
+    - name: "bank_account"
+      type: "string"
+      sensitive: true
+      masking: "hash"
+      security_groups: ["finance-admins"]   # optional — omit to always mask
+```
+
+| Flag | Masked | Erased (right-to-be-forgotten) | DDL tag |
+|---|---|---|---|
+| `pii: true` | ✓ | ✓ | `PII` |
+| `sensitive: true` | ✓ | ✗ | `SENSITIVE` |
+
+A `sensitive` field with no `masking:` strategy **and** no `security_groups` raises the **`SENS-001`** lint warning — the sensitive-data counterpart of `PII-002`. If a field is somehow flagged both `pii` and `sensitive`, PII wins (it's the stronger classification).
 
 ### Custom Partial Masking Format
 

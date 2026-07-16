@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from lakelogic.core.contract_lint import ContractFinding, GovernanceContext, _layer
 
 # Fields we surface to the model — enough for judgment, nothing sensitive.
-_FIELD_KEYS = ("name", "type", "description", "pii", "masking", "rules", "accepted_values", "min", "max")
+_FIELD_KEYS = ("name", "type", "description", "pii", "sensitive", "masking", "rules", "accepted_values", "min", "max")
 
 
 class _LLMFinding(BaseModel):
