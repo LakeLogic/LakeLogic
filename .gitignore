@@ -189,6 +189,9 @@ examples/colab/*.db
 examples/colab/*.json
 examples/colab/*.ndjson
 examples/colab/*.log
+examples/colab/*.parquet
+examples/colab/*_demo/
+examples/colab/07_dlt_prefect_pipeline/
 examples/colab/catalog/
 examples/colab/lakehouse/
 examples/colab/landing/
