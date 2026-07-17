@@ -112,6 +112,85 @@ class ValidationResult:
         return f"ValidationResult(good={self.good_count}, bad={self.bad_count})"
 
 
+def _sqlalchemy_uri_to_jdbc(uri: str) -> dict:
+    """Translate a SQLAlchemy connection URI into Spark JDBC parameters.
+
+    LakeLogic contracts declare database sources with SQLAlchemy-style URIs
+    (``postgresql://user:pass@host:5432/db``, ``mysql+pymysql://...``). Spark's
+    JDBC reader needs a different URL shape (``jdbc:postgresql://host:5432/db``)
+    plus a driver class, so this maps between them. Parsed with stdlib only — no
+    SQLAlchemy dependency required.
+
+    Returns a dict with ``url``, ``driver``, ``jar_hint`` and — when present in the
+    URI — ``user`` / ``password``. Raises :class:`ValueError` for dialects with no
+    known JDBC mapping (use the polars or duckdb engine for those instead).
+    """
+    from urllib.parse import unquote, urlparse
+
+    try:
+        parsed = urlparse(uri)
+    except Exception as e:  # pragma: no cover - defensive parse guard
+        raise ValueError(f"Could not parse database URI for Spark JDBC: {e}") from e
+
+    # SQLAlchemy schemes may carry a driver suffix (mysql+pymysql) — the JDBC
+    # dialect is the part before the '+'.
+    backend = (parsed.scheme or "").split("+")[0].lower()
+    host = parsed.hostname or ""
+    port = parsed.port
+    db = (parsed.path or "").lstrip("/")
+
+    creds: dict = {}
+    if parsed.username:
+        creds["user"] = unquote(parsed.username)
+    if parsed.password:
+        creds["password"] = unquote(parsed.password)
+
+    if backend == "sqlite":
+        # For SQLite the "database" component is the file path. SQLAlchemy uses
+        # sqlite:///relative and sqlite:////absolute — everything after the first
+        # three slashes is the path (so absolute paths keep their leading slash).
+        sqlite_path = uri.split(":///", 1)[1] if ":///" in uri else db
+        return {
+            "url": f"jdbc:sqlite:{sqlite_path}",
+            "driver": "org.sqlite.JDBC",
+            "jar_hint": "org.xerial:sqlite-jdbc",
+            **creds,
+        }
+    if backend == "postgresql":
+        return {
+            "url": f"jdbc:postgresql://{host}:{port or 5432}/{db}",
+            "driver": "org.postgresql.Driver",
+            "jar_hint": "org.postgresql:postgresql",
+            **creds,
+        }
+    if backend == "mysql":
+        return {
+            "url": f"jdbc:mysql://{host}:{port or 3306}/{db}",
+            "driver": "com.mysql.cj.jdbc.Driver",
+            "jar_hint": "com.mysql:mysql-connector-j",
+            **creds,
+        }
+    if backend in ("mssql", "sqlserver"):
+        return {
+            "url": f"jdbc:sqlserver://{host}:{port or 1433};databaseName={db}",
+            "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+            "jar_hint": "com.microsoft.sqlserver:mssql-jdbc",
+            **creds,
+        }
+    if backend == "oracle":
+        return {
+            "url": f"jdbc:oracle:thin:@{host}:{port or 1521}/{db}",
+            "driver": "oracle.jdbc.OracleDriver",
+            "jar_hint": "com.oracle.database.jdbc:ojdbc11",
+            **creds,
+        }
+    raise ValueError(
+        f"No Spark JDBC mapping for dialect '{backend}'. Supported: postgresql, mysql, mssql, "
+        "oracle, sqlite. Use the polars or duckdb engine for this source, or extend "
+        "_sqlalchemy_uri_to_jdbc()."
+    )
+
+
 class DataProcessor:
     """
     The main entry point for running LakeLogic contracts.
@@ -4595,15 +4674,24 @@ class DataProcessor:
     # ── database source integration ────────────────────────────────────────────
 
     def _run_database_source(self) -> "ValidationResult":
-        """Extract data natively via Polars or DuckDB, run validation.
+        """Extract data natively via Polars, DuckDB, or Spark, then run validation.
 
         Called by :meth:`run_source` when ``source.type == "database"``.
 
         Supports:
           - PostgreSQL, MySQL, SQL Server, Oracle, SQLite via URI auto-detection.
           - Incremental CDC via ``load_mode: incremental`` + ``watermark_field``.
-          - Batch chunking via ``options.fetch_size`` (SQLAlchemy iterator).
+          - Memory-bounded ingestion of large tables:
+              * polars: driver-side chunk loop via ``options.fetch_size`` (SQLAlchemy iterator).
+              * spark:  ``options.fetch_size`` -> JDBC ``fetchsize``; Spark streams partitions
+                across executors, and ``options.partition_column`` + ``partition_num``
+                (+ ``partition_lower_bound`` / ``partition_upper_bound``) enable a parallel read.
+              * duckdb: the native scanner streams the scan, so ``fetch_size`` is a no-op.
           - Parallel partitioned reads via ``options.partition_column`` + ``partition_num``.
+
+        Note: engine reach differs by connector (polars=ConnectorX/ADBC, duckdb=scan
+        extensions, spark=JDBC driver jar), so a given dialect may require different
+        drivers on different engines.
         """
         import polars as pl
 
@@ -4762,8 +4850,67 @@ class DataProcessor:
             except Exception as e:
                 raise RuntimeError(f"DuckDB {extension} DB extraction failed. Error: {e}")
 
+        elif self.engine_name == "spark":
+            # Spark reads via JDBC. Unlike the polars driver-side chunk loop, Spark
+            # streams partitions across executors, so memory stays bounded natively;
+            # `fetch_size` maps to the JDBC `fetchsize` (rows per round-trip), and
+            # true parallelism comes from a partitioned read when bounds are given.
+            from pyspark.sql import SparkSession
+
+            spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+            jdbc = _sqlalchemy_uri_to_jdbc(uri)
+
+            reader = (
+                spark.read.format("jdbc")
+                .option("url", jdbc["url"])
+                .option("driver", jdbc["driver"])
+                .option("dbtable", f"({query}) AS lakelogic_src")
+                .option("fetchsize", int(fetch_size) if fetch_size else 10000)
+            )
+            if jdbc.get("user"):
+                reader = reader.option("user", jdbc["user"])
+            if jdbc.get("password"):
+                reader = reader.option("password", jdbc["password"])
+
+            # Optional parallel partitioned read (the real Spark scaling lever).
+            # Requires the column plus both bounds; otherwise Spark uses 1 partition.
+            p_lower = options.get("partition_lower_bound")
+            p_upper = options.get("partition_upper_bound")
+            if partition_column and partition_num and p_lower is not None and p_upper is not None:
+                reader = (
+                    reader.option("partitionColumn", partition_column)
+                    .option("numPartitions", int(partition_num))
+                    .option("lowerBound", str(p_lower))
+                    .option("upperBound", str(p_upper))
+                )
+                logger.info(
+                    f"Spark JDBC parallel read: partitionColumn={partition_column}, "
+                    f"numPartitions={partition_num} (bounds {p_lower}..{p_upper})."
+                )
+            else:
+                logger.info(
+                    f"Spark JDBC read via {jdbc['driver']} "
+                    f"(fetchsize={int(fetch_size) if fetch_size else 10000}). Spark streams "
+                    "partitions across executors — memory stays bounded with no driver-side loop."
+                )
+
+            try:
+                df = reader.load()
+            except Exception as e:
+                msg = str(e)
+                if any(k in msg for k in ("ClassNotFoundException", "No suitable driver", "Could not load")):
+                    raise RuntimeError(
+                        f"Spark could not find the JDBC driver '{jdbc['driver']}'. Add the driver jar "
+                        f"to your Spark session, e.g. spark.jars.packages='{jdbc['jar_hint']}' "
+                        "(or --packages / spark.jars). Original error: " + msg
+                    ) from e
+                raise RuntimeError(f"Spark JDBC extraction failed. Error: {msg}") from e
+
+            logger.info(f"database (spark jdbc): loaded columns {df.columns}")
+            return self.run(df, source_path=f"database://{dataset}")
+
         else:
-            raise ValueError("Database source natively supports engines 'polars' and 'duckdb'.")
+            raise ValueError("Database source natively supports engines 'polars', 'duckdb', and 'spark'.")
 
         logger.info(f"database: loaded {df.height} rows, {df.width} columns")
 

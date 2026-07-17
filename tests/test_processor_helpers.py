@@ -1837,8 +1837,9 @@ def test_processor_database_source_error_fetch_and_duckdb_paths(monkeypatch):
     assert duck_result.good["id"].to_list() == [1]
     assert any("sqlite_scan" in query for query in queries)
 
+    # An engine with no database-source branch (polars/duckdb/spark are supported).
     bad_engine = object.__new__(proc_mod.DataProcessor)
-    bad_engine.engine_name = "spark"
+    bad_engine.engine_name = "trino"
     bad_engine._resolved_data_layer = "bronze"
     bad_engine.contract = duck.contract
     bad_engine._get_last_source_watermark = lambda: None

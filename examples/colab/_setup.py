@@ -160,6 +160,7 @@ def to_polars(df):
 # without importing polars / pandas / spark directly, so the demo code reads as
 # "LakeLogic on ENGINE", never "LakeLogic wrapping polars".
 
+
 def to_frame(records, engine: str = "duckdb"):
     """Build an engine-native dataframe from a list of dicts for the given ENGINE.
 
@@ -209,8 +210,9 @@ def read_table(path):
     frame you can pass to ``preview`` / ``to_records``. (Uses Polars internally as
     the reader; that's an implementation detail, not something the demo asserts.)
     """
-    import polars as _pl
     from pathlib import Path as _P
+
+    import polars as _pl
 
     try:
         return _pl.read_delta(str(path))
