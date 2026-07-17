@@ -132,7 +132,11 @@ def assert_reconciliation(source_df, good_df, bad_df):
 # 7. Helper: Convert engine dataframes to Polars for unified notebook analysis
 # ---------------------------------------------------------------------------
 def to_polars(df):
-    """Convert Spark, Pandas, or DuckDB DataFrames into Polars for Colab analysis."""
+    """Convert Spark, Pandas, or DuckDB DataFrames into Polars for Colab analysis.
+
+    Retained for backward compatibility; prefer the engine-neutral ``preview`` /
+    ``row_count`` helpers below so notebook bodies stay engine-agnostic.
+    """
     if df is None:
         return None
     import polars as pl
@@ -146,6 +150,156 @@ def to_polars(df):
     if type(df).__name__ == "DataFrame" and "pandas" in str(type(df)):
         return pl.DataFrame(df)
     return df
+
+
+# ---------------------------------------------------------------------------
+# 7b. Engine-neutral helpers — keep notebook bodies free of any single engine
+# ---------------------------------------------------------------------------
+# LakeLogic's whole premise is that the contract is decoupled from the compute
+# engine. These helpers let the notebooks build inputs and display results
+# without importing polars / pandas / spark directly, so the demo code reads as
+# "LakeLogic on ENGINE", never "LakeLogic wrapping polars".
+
+
+def to_frame(records, engine: str = "duckdb"):
+    """Build an engine-native dataframe from a list of dicts for the given ENGINE.
+
+    Used to buffer streaming events (or any in-memory records) into a frame that
+    ``DataProcessor.run()`` accepts, without hardcoding a single engine in the
+    notebook body.
+    """
+    eng = (engine or "duckdb").lower()
+    if eng == "spark":
+        try:
+            from pyspark.sql import SparkSession
+
+            spark = SparkSession.builder.getOrCreate()
+            return spark.createDataFrame(records)
+        except Exception:
+            pass  # fall through to a local frame if Spark isn't available
+    # Polars and DuckDB adapters both accept a Polars frame natively
+    # (DuckDB registers it via Arrow), so one path serves both.
+    import polars as pl
+
+    return pl.DataFrame(records)
+
+
+def row_count(df) -> int:
+    """Engine-agnostic row count for Polars / Pandas / DuckDB / Spark frames."""
+    if df is None:
+        return 0
+    if hasattr(df, "height"):  # polars
+        return int(df.height)
+    if hasattr(df, "shape") and not callable(getattr(df, "shape")):  # pandas
+        return int(df.shape[0])
+    if hasattr(df, "count") and callable(df.count):  # spark / duckdb relation
+        try:
+            return int(df.count())
+        except Exception:
+            pass
+    try:
+        return len(df)
+    except Exception:
+        return 0
+
+
+def read_table(path):
+    """Read a materialized Delta table (or parquet dir/file) for inspection.
+
+    Engine-neutral from the notebook's point of view — it just hands you back a
+    frame you can pass to ``preview`` / ``to_records``. (Uses Polars internally as
+    the reader; that's an implementation detail, not something the demo asserts.)
+    """
+    from pathlib import Path as _P
+
+    import polars as _pl
+
+    try:
+        return _pl.read_delta(str(path))
+    except Exception:
+        pass
+    p = _P(path)
+    files = [str(x) for x in p.rglob("*.parquet")] if p.is_dir() else [str(p)]
+    if files:
+        return _pl.read_parquet(files)
+    raise FileNotFoundError(f"No Delta or parquet data found at {path}")
+
+
+def to_records(df, n=None):
+    """Return rows as a list of plain dicts — the universal, engine-free shape.
+
+    Handy when a demo needs to pick a value, filter, or list column names without
+    reaching for a specific dataframe API. Pass ``n`` to cap the rows returned.
+    """
+    if df is None:
+        return []
+    d = df
+    if n is not None:
+        if hasattr(d, "limit"):  # spark / duckdb relation
+            try:
+                d = d.limit(n)
+            except Exception:
+                pass
+        elif hasattr(d, "head"):  # polars / pandas
+            try:
+                d = d.head(n)
+            except Exception:
+                pass
+    if hasattr(d, "to_dicts"):  # polars
+        recs = d.to_dicts()
+    elif hasattr(d, "toPandas"):  # spark
+        recs = d.toPandas().to_dict("records")
+    elif hasattr(d, "to_dict") and not hasattr(d, "to_dicts"):  # pandas
+        try:
+            recs = d.to_dict("records")
+        except Exception:
+            recs = list(d)
+    elif hasattr(d, "to_pandas"):  # duckdb relation / arrow
+        recs = d.to_pandas().to_dict("records")
+    else:
+        recs = list(d)
+    return recs[:n] if n is not None else recs
+
+
+def preview(df, n: int = 5, columns=None):
+    """Return a display-friendly view of any engine frame.
+
+    Renders cleanly in Colab/Jupyter regardless of which engine produced ``df``,
+    without the notebook body ever importing a dataframe library. Pandas gives the
+    nicest table if it's available; otherwise the native (Polars/DuckDB/Spark)
+    frame is returned — notebooks render those too.
+    """
+    if df is None:
+        return None
+
+    # 1. Optional column projection + row limit, expressed engine-neutrally.
+    sliced = df
+    if columns is not None and hasattr(sliced, "select"):
+        try:
+            sliced = sliced.select(columns)
+        except Exception:
+            sliced = df
+    if hasattr(sliced, "limit"):  # spark / duckdb relation
+        try:
+            sliced = sliced.limit(n)
+        except Exception:
+            pass
+    elif hasattr(sliced, "head"):  # polars / pandas
+        try:
+            sliced = sliced.head(n)
+        except Exception:
+            pass
+
+    # 2. Prefer pandas for display, but fall back to the native frame if pandas
+    #    (or the arrow->pandas bridge) isn't installed.
+    try:
+        if hasattr(sliced, "toPandas"):  # spark
+            return sliced.toPandas()
+        if hasattr(sliced, "to_pandas"):  # polars / duckdb relation / arrow
+            return sliced.to_pandas()
+    except Exception:
+        pass
+    return sliced
 
 
 # ---------------------------------------------------------------------------
