@@ -14,6 +14,7 @@ Three ways to bring data into your lakehouse:
 source:
   type: "landing"     # File-based (local, S3, ADLS, GCS)
   # type: "table"     # Catalog table (Unity Catalog, Hive)
+  # type: "database"  # Operational DB via JDBC/SQL (Postgres, MySQL, SQL Server, Oracle, SQLite)
   # type: "stream"    # Kafka / streaming
 ```
 
@@ -85,6 +86,44 @@ For reading from an existing catalog table (e.g., a Bronze table feeding Silver)
       load_mode: "incremental"
       watermark_strategy: "pipeline_log"
     ```
+
+---
+
+## Database Ingestion (JDBC / native SQL)
+
+Read directly from an operational database (PostgreSQL, MySQL, SQL Server, Oracle, SQLite) with `type: "database"` and a SQLAlchemy-style connection URI. LakeLogic pushes the contract's `model.fields` down as a `SELECT` (column projection), applies any incremental `WHERE`, then validates every row through your contract.
+
+!!! example "Example: Extract from Postgres with projection + memory-bounded batching"
+
+    ```yaml
+    source:
+      type: "database"
+      path: "postgresql://user:pass@host:5432/analytics"   # SQLAlchemy URI
+      load_mode: "incremental"           # optional CDC watermarking
+      watermark_field: "updated_at"
+      options:
+        fetch_size: 100000               # memory-bounded ingestion of large tables
+        # Parallel partitioned read (Spark only):
+        # partition_column: "id"
+        # partition_num: 8
+        # partition_lower_bound: 1
+        # partition_upper_bound: 10000000
+    ```
+
+### Engine support
+
+The contract is identical across engines, but each reaches the database through a different connector — so **driver requirements and `fetch_size` semantics differ**:
+
+| Engine | Connector | Driver needed | `fetch_size` | Large-table strategy |
+| --- | --- | --- | --- | --- |
+| **polars** | ConnectorX / ADBC (`pl.read_database`) | `pip install connectorx` | rows per chunk | driver-side chunk loop (SQLAlchemy iterator) |
+| **duckdb** | native `postgres_scan` / `mysql_scan` / `sqlite_scan` | bundled extension | no-op | native vectorised streaming scan |
+| **spark** | JDBC (`spark.read.format("jdbc")`) | **dialect driver jar** on the classpath | → JDBC `fetchsize` | partitions streamed across executors; `partition_column` + bounds → parallel read |
+
+!!! warning "Spark needs a JDBC driver jar"
+    Spark reads via JDBC, so the dialect's driver must be on the classpath — e.g. `spark.jars.packages="org.postgresql:postgresql"` (Postgres), `com.mysql:mysql-connector-j` (MySQL), `com.microsoft.sqlserver:mssql-jdbc` (SQL Server), `org.xerial:sqlite-jdbc` (SQLite). If it is missing, LakeLogic raises an actionable error naming the exact package to add.
+
+> **Portability note:** schema, quality rules, transforms, lineage and quarantine run identically on any engine. Only the *connector layer* for databases is engine-specific — file / landing / cloud sources are fully uniform.
 
 ---
 
