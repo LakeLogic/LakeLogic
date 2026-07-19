@@ -256,7 +256,17 @@ class LakehousePipeline:
                     "Disabled DeletionVectors by default in Spark session for OSS compatibility."
                 )  # pragma: no cover
             except Exception as e:
-                logger.debug(f"Could not disable DeletionVectors on Spark session: {e}")
+                # Serverless / Spark Connect forbids setting session-level Delta
+                # defaults (CONFIG_NOT_AVAILABLE). That's expected and harmless —
+                # DeletionVectors are disabled per-table at write time in
+                # materialization.py. Log only the concise first line; a Spark
+                # Connect exception's str() otherwise carries the full JVM
+                # stacktrace, which floods the output for a non-issue.
+                reason = next((ln for ln in str(e).splitlines() if ln.strip()), e.__class__.__name__)
+                logger.debug(
+                    f"Session-level DeletionVectors default not settable "
+                    f"(serverless/Spark Connect); enforced per-table instead: {reason}"
+                )
 
     # ── Run log mode auto-detection ────────────────────────────────────────────
 

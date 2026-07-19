@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.40.1] — 2026-07-19
+
+### Fixed
+
+- Improve logging for DeletionVectors configuration in Spark session
+## [1.40.0] — 2026-07-17
+
+### Added
+
+- **database**: Add Spark JDBC ingestion with fetchsize batching and partitioned reads
+
+### Changed
+
+- **examples**: Make Colab notebooks engine-neutral and fix demo correctness
+
+### Styling
+
+- **tests**: Wrap multi-line lambda definitions to satisfy ruff
 ## [1.39.0] — 2026-07-12
 
 ### Added
@@ -503,6 +521,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.40.1]: https://github.com/lakelogic/LakeLogic/compare/v1.40.0...v1.40.1
+[1.40.0]: https://github.com/lakelogic/LakeLogic/compare/v1.39.0...v1.40.0
 [1.39.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.39.0
 [1.33.0]: https://github.com/lakelogic/LakeLogic/compare/v1.32.0...v1.33.0
 [1.32.0]: https://github.com/lakelogic/LakeLogic/compare/v1.31.0...v1.32.0
