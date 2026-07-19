@@ -44,8 +44,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Upload SARIF to GitHub Code Scanning
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        # Only upload when the review actually produced a SARIF file. An empty
+        # diff (or a skipped AI run when ANTHROPIC_API_KEY is unset) leaves no
+        # review.sarif, and an unconditional upload then fails the whole run.
+        if: always() && hashFiles('review.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: review.sarif
 
