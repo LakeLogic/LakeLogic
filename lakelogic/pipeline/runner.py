@@ -264,9 +264,8 @@ class LakehousePipeline:
                 # stacktrace, which floods the output for a non-issue.
                 reason = next((ln for ln in str(e).splitlines() if ln.strip()), e.__class__.__name__)
                 logger.debug(
-                    "Session-level DeletionVectors default not settable "
-                    "(serverless/Spark Connect); enforced per-table instead: %s",
-                    reason,
+                    f"Session-level DeletionVectors default not settable "
+                    f"(serverless/Spark Connect); enforced per-table instead: {reason}"
                 )
 
     # ── Run log mode auto-detection ────────────────────────────────────────────
