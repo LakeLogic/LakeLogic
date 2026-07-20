@@ -2341,9 +2341,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
         # (Previously the Spark path left effective_from = the change/timestamp
         # column here, ignoring start_date_default — an engine inconsistency.)
         if effective_from_default is not None:
-            incoming_df = incoming_df.withColumn(
-                effective_from, F.to_timestamp(F.lit(effective_from_default))
-            )
+            incoming_df = incoming_df.withColumn(effective_from, F.to_timestamp(F.lit(effective_from_default)))
 
         # Generate surrogate key for initial load
         sk_column = scd2_cfg.get("surrogate_key", "_sk")
