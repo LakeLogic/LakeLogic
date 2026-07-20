@@ -2333,6 +2333,18 @@ def _spark_scd2_dataframe(  # pragma: no cover
         pass
 
     if existing_df is None or existing_df.count() == 0:
+        # Initial load represents pre-existing history: stamp effective_from with
+        # the configured start-of-time sentinel (default 1900-01-01) so the first
+        # version reads as "valid since the beginning", matching the polars/pandas
+        # engine (see _scd2_frames). Done BEFORE the surrogate key so the SK is
+        # derived from the same effective_from value on every engine.
+        # (Previously the Spark path left effective_from = the change/timestamp
+        # column here, ignoring start_date_default — an engine inconsistency.)
+        if effective_from_default is not None:
+            incoming_df = incoming_df.withColumn(
+                effective_from, F.to_timestamp(F.lit(effective_from_default))
+            )
+
         # Generate surrogate key for initial load
         sk_column = scd2_cfg.get("surrogate_key", "_sk")
         sk_strategy = scd2_cfg.get("surrogate_key_strategy", "hash")
@@ -2358,6 +2370,14 @@ def _spark_scd2_dataframe(  # pragma: no cover
         _init_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
         if _init_reason_col:
             incoming_df = incoming_df.withColumn(_init_reason_col, F.lit("initial").cast("string"))
+
+        # Inject the Kimball 'Unknown Member' (-1) on the INITIAL load too. The
+        # merge path below does this, but the initial-load branch returns early —
+        # so without this a freshly built dimension never gets its unknown member,
+        # and facts have nothing to point unmatched keys at.
+        _init_um_cfg = scd2_cfg.get("unknown_member") or {}
+        if _init_um_cfg.get("enabled", True):
+            incoming_df = _inject_unknown_member_spark(incoming_df, primary_key, scd2_cfg, _init_um_cfg)
 
         # No existing data, just write incoming
         writer = incoming_df.write.format(output_format)
