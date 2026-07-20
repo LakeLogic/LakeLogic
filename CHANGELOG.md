@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.40.2] — 2026-07-20
+
+### Fixed
+
+- Ensure effective_from is set correctly for initial loads and inject unknown member
+- Update SARIF upload condition and version in review workflow
 ## [1.40.1] — 2026-07-19
 
 ### Fixed
@@ -521,6 +527,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.40.2]: https://github.com/lakelogic/LakeLogic/compare/v1.40.1...v1.40.2
 [1.40.1]: https://github.com/lakelogic/LakeLogic/compare/v1.40.0...v1.40.1
 [1.40.0]: https://github.com/lakelogic/LakeLogic/compare/v1.39.0...v1.40.0
 [1.39.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.39.0
