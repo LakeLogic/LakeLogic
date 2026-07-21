@@ -1931,3 +1931,26 @@ def test_processor_run_source_table_backend_dispatch_and_load_failure(monkeypatc
     streamer.contract = types.SimpleNamespace(source=None)
     with pytest.raises(ValueError, match="No source path provided"):
         streamer.run_source_streaming()
+
+
+def test_spark_schema_for_extracted_rows_handles_all_null_columns():
+    # Regression: pdfplumber/easyocr extraction emits an all-null column
+    # (file_path, or an unmatched metadata field). spark.createDataFrame(rows)
+    # then raised [CANNOT_DETERMINE_TYPE] on Spark Connect, 0-rowing the contract.
+    # The explicit schema must default all-null columns to StringType and keep
+    # real types for populated columns.
+    pytest.importorskip("pyspark")
+    from pyspark.sql.types import BooleanType, DoubleType, LongType, StringType
+
+    rows = [
+        {"licence_number": "CHK-1", "file_path": None, "latency_ms": 12, "cost": 0.0, "ok": True},
+        {"licence_number": "CHK-2", "file_path": None, "latency_ms": 9, "cost": 0.0, "ok": False},
+    ]
+    schema, keys = proc_mod.DataProcessor._spark_schema_for_extracted_rows(rows)
+    assert keys == ["licence_number", "file_path", "latency_ms", "cost", "ok"]
+    t = {f.name: type(f.dataType) for f in schema.fields}
+    assert t["file_path"] is StringType        # all-null -> string, NOT NullType
+    assert t["licence_number"] is StringType
+    assert t["latency_ms"] is LongType
+    assert t["cost"] is DoubleType
+    assert t["ok"] is BooleanType
