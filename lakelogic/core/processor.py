@@ -2587,7 +2587,17 @@ class DataProcessor:
                                     except Exception as _fe:
                                         logger.warning(f"extract_file failed for {_fp}: {_fe}")
                                 if _all_rows:
-                                    df = spark.createDataFrame(_all_rows)
+                                    # Build an EXPLICIT schema. Bare
+                                    # spark.createDataFrame(rows) infers types from
+                                    # the data, which fails with CANNOT_DETERMINE_TYPE
+                                    # on Spark Connect / serverless when any column is
+                                    # all-null — e.g. `file_path` (populated later) or
+                                    # an optional metadata field whose regex matched no
+                                    # PDF. That silently 0-rows the whole contract.
+                                    # All-null columns default to StringType.
+                                    _schema, _keys = self._spark_schema_for_extracted_rows(_all_rows)
+                                    _tuples = [tuple(r.get(k) for k in _keys) for r in _all_rows]
+                                    df = spark.createDataFrame(_tuples, _schema)
                                 else:
                                     df = spark.createDataFrame([], schema="value string").limit(0)
                             # Skip the regular tabular reader path below
@@ -3203,6 +3213,51 @@ class DataProcessor:
 
         # Case 3: no preserve_upstream mapping — same column on both sides
         return wm_field, wm_field
+
+    @staticmethod
+    def _spark_schema_for_extracted_rows(rows: List[Dict[str, Any]]):
+        """
+        Build an explicit Spark ``StructType`` for a list of extracted row dicts.
+
+        Column type is taken from the first non-null value seen for that key;
+        columns that are null in every row default to ``StringType`` (rather than
+        an un-inferrable NullType). Returns ``(StructType, ordered_keys)`` so the
+        caller can project each row into a tuple in the same order.
+
+        Prevents ``spark.createDataFrame(rows)`` from raising
+        ``[CANNOT_DETERMINE_TYPE]`` on Spark Connect when a file extractor emits an
+        all-null column (e.g. ``file_path`` or an unmatched metadata field).
+        """
+        from pyspark.sql.types import (
+            BooleanType,
+            DoubleType,
+            LongType,
+            StringType,
+            StructField,
+            StructType,
+        )
+
+        keys: List[str] = []
+        for r in rows:
+            for k in r.keys():
+                if k not in keys:
+                    keys.append(k)
+
+        def _type_for(key: str):
+            for r in rows:
+                v = r.get(key)
+                if v is not None:
+                    if isinstance(v, bool):
+                        return BooleanType()
+                    if isinstance(v, int):
+                        return LongType()
+                    if isinstance(v, float):
+                        return DoubleType()
+                    return StringType()
+            return StringType()  # all-null → string, never NullType
+
+        schema = StructType([StructField(k, _type_for(k), True) for k in keys])
+        return schema, keys
 
     def _expand_source_files(self, path: str) -> Optional[List[Dict[str, Any]]]:
         """

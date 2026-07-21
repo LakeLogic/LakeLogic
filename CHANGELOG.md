@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.40.3] — 2026-07-21
+
+### Fixed
+
+- **extraction**: Build an explicit Spark schema for file-extraction (pdfplumber/easyocr) output rows. A bare `spark.createDataFrame(rows)` inferred types from the data and failed with `[CANNOT_DETERMINE_TYPE]` on Spark Connect / serverless whenever a column was all-null (e.g. `file_path`, or an optional metadata field whose regex matched no document), silently producing 0 rows for the whole contract. All-null columns now default to `StringType`. Polars/DuckDB engines were unaffected.
 ## [1.40.2] — 2026-07-20
 
 ### Fixed
