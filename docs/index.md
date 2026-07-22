@@ -113,8 +113,6 @@ pip install lakelogic
 
 Then open the [five-minute Colab quickstart](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb). It creates sample data, runs a contract, and shows accepted and quarantined records without requiring Spark or cloud credentials.
 
-> **Project status:** LakeLogic is beta software. Test contracts, engine behaviour, and connected infrastructure with representative data before production adoption.
-
 ## Choose an Execution Engine
 
 The contract model is shared across engines, but their storage and catalog capabilities are not identical.
