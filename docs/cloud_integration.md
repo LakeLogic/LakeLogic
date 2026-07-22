@@ -1,265 +1,262 @@
-# Cloud Run Log Integration
+# Connect LakeLogic OSS to LakeLogic Cloud
 <!-- markdownlint-disable MD013 -->
 
-LakeLogic can send run metadata to LakeLogic Cloud for centralized observability, trend detection, and ops intelligence. **No raw data leaves your environment — only quality metrics.**
+LakeLogic OSS can send operational run metadata to LakeLogic Cloud for cross-pipeline observability, trust monitoring, and incident analysis.
+
+The integration does not upload source datasets or accepted records. It can send contract and pipeline identifiers, source paths, counts, quality scores, rule-failure summaries, SLO context, timings, error messages, and cost estimates. Review this payload against your organisation's security policy before enabling it.
 
 ---
 
-## Open core: OSS vs LakeLogic Cloud
+## OSS and LakeLogic Cloud
 
-LakeLogic is **open core** (Apache 2.0). The framework — everything needed to define, run, and enforce contracts — is free and open source. LakeLogic Cloud adds an optional hosted layer on top and changes nothing about how the OSS runs.
+The Apache 2.0 framework runs independently. LakeLogic Cloud is an optional hosted control plane built on top of the OSS run evidence.
 
-| Capability | OSS (`lakelogic`, Apache 2.0) | LakeLogic Cloud |
+| Capability | LakeLogic OSS | LakeLogic Cloud |
 |---|:---:|:---:|
-| Data contracts — schema, quality, PII, lineage, SLOs | ✅ | ✅ |
-| Runtime validation + quarantine | ✅ | ✅ |
-| CI/CD contract gates | ✅ | ✅ |
-| Engines — Polars · DuckDB · Spark | ✅ | ✅ |
-| Delta Lake / Iceberg materialization | ✅ | ✅ |
-| Run-log observatory | Local logs | Hosted, cross-pipeline |
-| Live trust score per data product | — | ✅ |
-| Zeus — agentic incident diagnosis & remediation | — | ✅ |
-| Contract Studio — visual governance across domains | — | ✅ |
+| Contracts, runtime validation, and quarantine | Yes | Uses OSS evidence |
+| CI/CD contract gates | Yes | Uses OSS evidence |
+| Polars, DuckDB, and Spark execution | Yes | Not an execution engine |
+| Local and customer-managed run logs | Yes | Optional hosted ingestion |
+| Cross-pipeline operations view | Local implementation required | Yes |
+| Trust history and trend monitoring | Local implementation required | Yes |
+| Zeus-assisted incident diagnosis and remediation proposals | No | Yes |
+| Visual contract governance across domains | No | Yes |
 
-The OSS runs fully standalone. Cloud is additive and receives run **metadata only** (the fields below) — your data never leaves your environment.
+Cloud is additive: disabling telemetry does not disable contract execution.
 
----
+## What Is Reported
 
-## Overview
+The current `observatory:` integration maps a run report into this hosted payload:
 
-Every `DataProcessor.run_source()` call produces a run report. With cloud reporting enabled, this report is POSTed to a remote API — the same data that's written to local run logs.
+| Category | Examples |
+|---|---|
+| **Contract** | Contract name, version, schema fingerprint, domain, system, environment, and layer |
+| **Execution** | Status, engine, start and finish times, duration, run ID, and pipeline run ID |
+| **Counts** | Input, accepted, quarantined, and output row counts |
+| **Quality** | Quality score and optional rule-failure summaries |
+| **Context** | Source path, SLO JSON, and an error message when present |
+| **Cost** | Estimated cost, currency, and confidence when available |
 
-### What Gets Reported (Metadata Only)
+`include_quarantine_sample` controls whether rule-failure detail is included. In the current OSS implementation, this is built from aggregated failure descriptors such as rule name, expression, category, message, and count—not complete failed source rows.
 
-| Category | Fields |
-|----------|--------|
-| **Identity** | `run_id`, `pipeline_run_id`, `contract`, `dataset`, `stage`, `engine`, `timestamp` |
-| **Row Counts** | `source`, `total`, `good`, `quarantined`, `pre_transform_dropped`, `quarantine_ratio` |
-| **Quality** | Per-rule failure breakdown (which rules fired, how many rows), dataset rule results |
-| **Schema** | Schema drift events — what changed and when |
-| **SLOs** | Freshness/availability scores with pass/fail |
-| **Performance** | `duration_ms`, engine type |
-| **Context** | `domain`, `system`, `data_layer`, `source_path` |
+For the smallest metadata surface, set:
 
----
+```yaml
+include_quarantine_sample: false
+```
 
 ## Configuration
 
-### Registry-Level (Recommended)
+### Fastest Hosted Connection
 
-Set the `cloud:` block in your `_registry.yaml` so all contracts in the domain inherit it:
+Set the API key issued by LakeLogic Cloud:
+
+```bash
+export LAKELOGIC_CLOUD_API_KEY="llc_sk_your_key"
+```
+
+This enables the current observatory integration and uses the hosted endpoint:
+
+```text
+https://api.lakelogic.io/api/v1/operations/run-logs/ingest
+```
+
+Override the endpoint only when using an approved alternative deployment:
+
+```bash
+export LAKELOGIC_CLOUD_ENDPOINT="https://your-endpoint.example/api/v1/operations/run-logs/ingest"
+```
+
+The environment-only connection enables rule-failure details by default. Use an explicit YAML block with `include_quarantine_sample: false` when you require the smaller payload.
+
+### Domain-Level Configuration
+
+Domain configuration is recommended when telemetry settings should be explicit, reviewed, and inherited by every contract in a domain.
+
+The RideFlow Marketplace domain currently uses:
 
 ```yaml
-# _registry.yaml
-domain: sales
-system: olist
+# domains_rideflow/marketplace/_domain.yaml
+observatory:
+  enabled: false
+  environments: [dev, prod, staging, local, local_polars]
+  endpoint: "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
+  api_key: "${LAKELOGIC_API_KEY}"
+  emit_on: [success, partial, failed]
+```
 
-storage:
-  landing_root: "/Volumes/{catalog}/.../olist"
-  bronze_root: "`{catalog}`.sales_olist_bronze"
-  # ...
+This is disabled deliberately in the reference repository. To connect it:
 
-contracts:
-  - layer: bronze
-    entity: orders
-    path: "contracts/bronze/orders.yaml"
+1. Set `enabled: true`.
+2. Provide the two referenced secrets in the execution environment.
+3. Restrict `environments`, `layers`, and `emit_on` if required.
+
+```bash
+export LAKELOGIC_OBSERVATORY_ENDPOINT="https://api.lakelogic.io/api/v1/operations/run-logs/ingest"
+export LAKELOGIC_API_KEY="llc_sk_your_key"
+```
+
+The names inside `${...}` are ordinary environment references. A domain may use its existing secret names. The environment-only convenience connection specifically uses `LAKELOGIC_CLOUD_API_KEY` and `LAKELOGIC_CLOUD_ENDPOINT`.
+
+### Explicit Configuration with Retry Spooling
+
+```yaml
+observatory:
+  enabled: true
+  endpoint: "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
+  api_key: "${LAKELOGIC_API_KEY}"
+  environments: [prod]
+  layers: [silver, gold]
+  emit_on: [partial, failed]
+  include_quarantine_sample: false
+
+  spool:
     enabled: true
-
-cloud:
-  enabled: true
-  report_url: "${LakeLogic_REPORT_URL}"
-  api_key: "${LAKELOGIC_API_KEY}"
-
-environments:
-  dev:
-    catalog: "my-dev-catalog"
-  prod:
-    catalog: "my-prod-catalog"
+    dir: ~/.lakelogic/observatory_spool
+    max_files: 500
+    ttl_days: 7
+    batch: 20
+    max_seconds: 5.0
 ```
 
-```bash
-# Set these in your environment or CI secrets
-export LakeLogic_REPORT_URL="https://api.LakeLogic.com/v1/runs"
-export LAKELOGIC_API_KEY="llk_your_api_key_here"
-```
+Configuration precedence is:
 
-### Environment Variables Only
+1. Explicit YAML values
+2. Environment-variable convenience values
+3. The hosted default endpoint when an environment API key is present
 
-If you're not using a registry:
+An explicit `enabled: false` is always honoured.
 
-```bash
-export LAKELOGIC_REMOTE_OBSERVER=true
-export LakeLogic_REPORT_URL="https://api.LakeLogic.com/v1/runs"
-export LakeLogic_API_KEY="llk_your_api_key_here"
-```
+### Contract-Level Override
 
-No code changes needed — `RemoteObserver` reads these automatically.
-
-### Contract-Level
-
-Add `cloud:` directly in a contract YAML (overrides registry):
+A contract can override inherited observatory settings:
 
 ```yaml
-cloud:
+observatory:
   enabled: true
-  report_url: "${LakeLogic_REPORT_URL}"
-  api_key: "${LAKELOGIC_API_KEY}"
+  environments: [prod]
+  layers: [gold]
+  emit_on: [failed]
+  include_quarantine_sample: false
 ```
 
----
+Use domain-level defaults for consistency and contract-level settings only for genuine exceptions.
 
-## Architecture
+## Delivery Behaviour
 
-```
-┌──────────────┐     run_source()     ┌───────────────┐
-│  Your Data   │ ──────────────────→  │ DataProcessor  │
-│  (stays      │                      │                │
-│   local)     │                      │  validate      │
-│              │                      │  materialize   │
-└──────────────┘                      │  write run log │
-                                      └───────┬───────┘
-                                              │
-                                     metadata only (POST)
-                                              │
-                                              ▼
-                                      ┌───────────────┐
-                                      │ RemoteObserver │
-                                      │                │
-                                      │ 2s timeout     │
-                                      │ silent fail    │
-                                      │ Bearer auth    │
-                                      └───────┬───────┘
-                                              │
-                                              ▼
-                                      ┌───────────────┐
-                                      │  LakeLogic    │
-                                      │  Cloud API    │
-                                      └───────────────┘
-```
+The current observatory path:
 
-Design guarantees:
-- **2-second timeout** — never delays your ETL pipeline
-- **Silent failure** — if the API is unreachable, the pipeline continues
-- **Bearer auth** — API key sent as `Authorization: Bearer <key>`
-- **No raw data** — only aggregate metrics and metadata
+- sends the API key through the `X-API-Key` header;
+- uses a three-second request timeout;
+- does not raise telemetry failures into the data pipeline;
+- buffers network errors, timeouts, HTTP 408/429 responses, and server errors;
+- retries a bounded batch after a later successful connection;
+- removes rule-failure detail before writing a failed payload to the local spool.
 
----
+The spool is bounded by age, file count, batch size, and a wall-clock replay budget. Put `spool.dir` on persistent storage when running on ephemeral compute.
 
-## Integration Points
-
-### OSS CLI Driver (`lakelogic-driver`)
-
-The `PipelineDriver` reads `cloud:` from the first registry and calls `_apply_cloud_config()`:
-
-```bash
-lakelogic-driver \
-  --registry contracts/_registry.yaml \
-  --layers bronze,silver,gold
-# → Cloud config applied from registry before any contracts run
+```text
+DataProcessor
+    |
+    | writes run evidence
+    v
+Local/customer-managed run log
+    |
+    | selected operational metadata over HTTPS
+    v
+LakeLogic Cloud ingest
+    |
+    +--> success: store hosted run evidence and replay a bounded spool batch
+    |
+    +--> retryable failure: remove failure details and buffer metadata locally
 ```
 
-## Run Log Storage (Local and Cloud)
+## Local and Customer-Managed Run Logs
 
-Run logs are written via contract `metadata`. Both local paths and cloud storage URIs are supported.
+Cloud telemetry is separate from the normal run-log destination. Local and customer-managed storage remains available whether or not LakeLogic Cloud is enabled.
 
-### Local Storage
+### Local JSON or Table Storage
 
 ```yaml
 metadata:
-  # Unique JSON file per run (recommended)
+  # Unique JSON file per run
   run_log_dir: "logs/"
-  # → writes logs/run_<run_id>.json per run
 
-  # Or: Single JSON file (overwritten each run)
+  # Or a single JSON file, overwritten on each run
   run_log_path: "logs/last_run.json"
 
-  # Or: Database table
+  # Or a database table
   run_log_table: "lakelogic.run_logs"
-  run_log_backend: "duckdb"  # or sqlite, spark
+  run_log_backend: "duckdb"  # duckdb, sqlite, or spark
   run_log_database: "logs/lakelogic_run_logs.duckdb"
 ```
 
-### Cloud Storage (ADLS, S3, GCS)
+### ADLS, S3, and GCS
 
-Cloud paths are auto-detected and written via `fsspec`. Install the relevant driver:
+JSON run-log paths support cloud URIs through `fsspec`. Install the filesystem driver you need:
 
 ```bash
-pip install fsspec adlfs    # Azure ADLS
-pip install fsspec s3fs     # AWS S3
-pip install fsspec gcsfs    # Google Cloud Storage
+pip install fsspec adlfs   # Azure ADLS
+pip install fsspec s3fs    # AWS S3
+pip install fsspec gcsfs   # Google Cloud Storage
 ```
 
-**Azure ADLS:**
-
 ```yaml
+# Azure ADLS
 metadata:
-  # Unique file per run
   run_log_dir: "abfss://logs@mystorageaccount.dfs.core.windows.net/lakelogic/runs/"
-  # → abfss://.../runs/run_<run_id>.json
-
-  # Or: single file
-  run_log_path: "abfss://logs@mystorageaccount.dfs.core.windows.net/lakelogic/latest.json"
 ```
 
-**AWS S3:**
-
 ```yaml
+# AWS S3
 metadata:
   run_log_dir: "s3://my-bucket/lakelogic/run-logs/"
 ```
 
-**Google Cloud Storage:**
-
 ```yaml
+# Google Cloud Storage
 metadata:
   run_log_dir: "gs://my-bucket/lakelogic/run-logs/"
 ```
 
-Authentication uses the standard credential chain for each provider:
-- **ADLS:** `AZURE_STORAGE_ACCOUNT_KEY`, `AZURE_STORAGE_SAS_TOKEN`, or Azure AD (DefaultAzureCredential)
-- **S3:** `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, or IAM role
-- **GCS:** `GOOGLE_APPLICATION_CREDENTIALS`, or GCE metadata
+The run-log helper explicitly maps these credential variables when present:
 
----
+- **Azure:** `AZURE_STORAGE_ACCOUNT_NAME` or `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_ACCOUNT_KEY`, or `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET`
+- **AWS:** `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+- **GCS:** credential discovery is delegated to `gcsfs`
 
-## Intelligence Layer
+Provider filesystem drivers may also support their own default credential discovery. Validate the chosen method in the target runtime.
 
-With run logs accumulating over time, the Cloud intelligence layer can:
+## Disable Cloud Telemetry
 
-| Capability | Example |
-|-----------|---------|
-| **Pattern detection** | A rule fails every Monday morning → upstream batch issue |
-| **Trend alerts** | Quarantine rates trending up for 3 weeks on a contract |
-| **Threshold recommendations** | Suggest tightening a null check based on historical patterns |
-| **Cross-contract correlation** | Shared `pipeline_run_id` links Bronze → Silver → Gold |
-| **SLO monitoring** | Freshness breaches tracked over rolling 30-day window |
-
----
-
-## Disabling Cloud Reporting
+For explicit YAML configuration:
 
 ```yaml
-# In _registry.yaml
-cloud:
+observatory:
   enabled: false
 ```
 
-Or via environment:
+For an environment-only connection, unset the API key:
 
 ```bash
-unset LAKELOGIC_REMOTE_OBSERVER
-# or
-export LAKELOGIC_OFFLINE=true
+unset LAKELOGIC_CLOUD_API_KEY
 ```
 
----
+An explicit `enabled: false` takes precedence over environment convenience settings.
+
+## Legacy `cloud:` Integration
+
+Older deployments may still use the `cloud:` block and `RemoteObserver`. That compatibility path uses `LAKELOGIC_REMOTE_OBSERVER`, `LINEAGELOGIC_REPORT_URL`, `LINEAGELOGIC_API_KEY`, Bearer authentication, and a two-second timeout.
+
+New documentation and deployments should use `observatory:`. Do not combine both integrations unless duplicate delivery has been considered and tested.
 
 ## Related Documentation
 
-- [Contract Template — Section 20: Cloud Reporting](contract_template.md)
-- [Observability](observability.md)
-- [Tutorial: Cloud Run Log Integration](observability.md)
+- [Observability and run evidence](observability.md)
+- [Run-log return values](return_values.md)
+- [Cloud integration](cloud_integration.md)
+- [Automatic cloud credentials](automatic_credentials.md)
 
 ---
 
-*Last Updated: March 2026*
+*Last updated: July 2026*

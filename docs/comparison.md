@@ -2,7 +2,7 @@
 
 Choosing the right tool for your data platform depends on your specific needs. LakeLogic is designed to work alongside or as a complement to industry standards like **dbt** and **Great Expectations**.
 
-LakeLogic is **open core** (Apache 2.0): the framework compared on this page is free and open source. For exactly what's in the OSS versus the optional LakeLogic Cloud layer, see [Open core: OSS vs Cloud](cloud_integration.md#open-core-oss-vs-lakelogic-cloud).
+The LakeLogic framework compared on this page is available under Apache 2.0. For the boundary between the OSS framework and the optional hosted control plane, see [LakeLogic OSS and LakeLogic Cloud](cloud_integration.md#oss-and-lakelogic-cloud).
 
 ## Comparison Table
 
