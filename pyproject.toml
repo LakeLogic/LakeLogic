@@ -229,6 +229,12 @@ nlp = [
     "spacy>=3.7.0",
     "textblob>=0.18.0",
 ]
+# PDF only — lightweight text/table extraction from PDFs via pdfplumber.
+# Use this instead of `extraction`/`extraction-ocr` when you only parse PDFs and
+# do NOT need `unstructured` (Office docs) or `rapidocr-onnxruntime` (image OCR).
+pdf = [
+    "pdfplumber>=0.10.0",
+]
 # Extraction — full unstructured document processing
 # For images/PDFs, also install system deps: tesseract-ocr, poppler-utils
 # For MS Office docs: libreoffice

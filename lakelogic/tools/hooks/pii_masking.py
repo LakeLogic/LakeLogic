@@ -126,7 +126,7 @@ def _nlp_replace(
         )
         return df
 
-    try:
+    def _build_analyzer() -> "AnalyzerEngine":
         from presidio_analyzer.nlp_engine import NlpEngineProvider
 
         nlp_config = {
@@ -134,14 +134,32 @@ def _nlp_replace(
             "models": [{"lang_code": "en", "model_name": spacy_model}],
         }
         nlp_engine = NlpEngineProvider(nlp_configuration=nlp_config).create_engine()
-        analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+        return AnalyzerEngine(nlp_engine=nlp_engine)
+
+    try:
+        analyzer = _build_analyzer()
         logger.info(f"PII masking (NLP): using spaCy '{spacy_model}', entities={entities}")
     except Exception as exc:
-        logger.error(
-            f"PII masking (NLP): failed to load spaCy model '{spacy_model}' — {exc}\n"
-            f"Run: python -m spacy download {spacy_model}"
+        # spaCy language models ship separately from the `spacy` package, so the
+        # engine build fails with OSError [E050] the first time a model is used.
+        # Fetch it once, then retry — lazy, first-use-only, so nothing downloads
+        # unless NLP masking actually runs.
+        logger.info(
+            f"PII masking (NLP): spaCy model '{spacy_model}' not available "
+            f"({exc}) — downloading it once (first use only)…"
         )
-        return df
+        try:
+            from spacy.cli import download as _spacy_download
+
+            _spacy_download(spacy_model)
+            analyzer = _build_analyzer()
+            logger.info(f"PII masking (NLP): using spaCy '{spacy_model}', entities={entities}")
+        except Exception as exc2:
+            logger.error(
+                f"PII masking (NLP): failed to load spaCy model '{spacy_model}' — {exc2}\n"
+                f"Run: python -m spacy download {spacy_model}"
+            )
+            return df
 
     anonymizer = AnonymizerEngine()
     operators = {e: OperatorConfig("replace", {"new_value": mask_with}) for e in entities}
