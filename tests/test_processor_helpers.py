@@ -1949,7 +1949,7 @@ def test_spark_schema_for_extracted_rows_handles_all_null_columns():
     schema, keys = proc_mod.DataProcessor._spark_schema_for_extracted_rows(rows)
     assert keys == ["licence_number", "file_path", "latency_ms", "cost", "ok"]
     t = {f.name: type(f.dataType) for f in schema.fields}
-    assert t["file_path"] is StringType        # all-null -> string, NOT NullType
+    assert t["file_path"] is StringType  # all-null -> string, NOT NullType
     assert t["licence_number"] is StringType
     assert t["latency_ms"] is LongType
     assert t["cost"] is DoubleType

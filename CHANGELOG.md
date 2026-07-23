@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.40.4] — 2026-07-23
+
+### Added
+
+- **packaging**: New lean `pdf` extra (`pip install lakelogic[pdf]`) that installs only `pdfplumber` for PDF text/table extraction — use it instead of `extraction-ocr` when you don't need `unstructured` (Office docs) or `rapidocr-onnxruntime` (image OCR).
+
+### Changed
+
+- **extraction (spaCy)**: `provider: spacy` now downloads its language model (e.g. `en_core_web_sm`) automatically on first use if it isn't already installed, then retries — so NER/classification works out of the box in Colab/CI without a manual `python -m spacy download` step. The download is lazy (only when a spaCy extraction actually runs) and applies to both `engines/llm.py` and the PII-masking hook. A clear, actionable error is raised only if the download itself fails.
+- **examples**: Trimmed the `05_data_generation_ai` notebook install from `[polars,extraction-ocr,nlp]` to `[polars,nlp,pdf]` — the notebook only uses pdfplumber + spaCy, so this drops the heavy `unstructured`/`rapidocr-onnxruntime`/pandoc downloads (and the spurious `requests` version conflict on Colab).
+
 ## [1.40.3] — 2026-07-21
 
 ### Fixed

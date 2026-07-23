@@ -571,10 +571,7 @@ def _extract_spacy(
         # [E050] the first time a model is used. Fetch it once, then retry — this
         # makes `provider: spacy` work out of the box in Colab/CI without a manual
         # `python -m spacy download` step.
-        logger.info(
-            f"spaCy model '{model_name}' not found — downloading it once "
-            f"(this happens only on first use)…"
-        )
+        logger.info(f"spaCy model '{model_name}' not found — downloading it once (this happens only on first use)…")
         try:
             from spacy.cli import download as _spacy_download
 
