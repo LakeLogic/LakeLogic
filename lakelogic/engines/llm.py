@@ -563,7 +563,26 @@ def _extract_spacy(
     start = time.perf_counter()
 
     model_name = config.model if config.model != "auto" else "en_core_web_sm"
-    nlp = spacy.load(model_name)
+    try:
+        nlp = spacy.load(model_name)
+    except OSError:
+        # spaCy language models ship separately from the `spacy` package (they are
+        # not pip dependencies of lakelogic[nlp]), so `spacy.load` raises OSError
+        # [E050] the first time a model is used. Fetch it once, then retry — this
+        # makes `provider: spacy` work out of the box in Colab/CI without a manual
+        # `python -m spacy download` step.
+        logger.info(f"spaCy model '{model_name}' not found — downloading it once (this happens only on first use)…")
+        try:
+            from spacy.cli import download as _spacy_download
+
+            _spacy_download(model_name)
+            nlp = spacy.load(model_name)
+        except Exception as exc:  # pragma: no cover - network/model-name failures
+            raise OSError(
+                f"spaCy model '{model_name}' is not installed and could not be "
+                f"downloaded automatically ({exc}). Install it manually with: "
+                f"python -m spacy download {model_name}"
+            ) from exc
     doc = nlp(prompt)
 
     # Map field names to spaCy entity labels
