@@ -133,8 +133,17 @@ def _service_levels(raw: Dict[str, Any]) -> Dict[str, Any]:
 # Streaming transports whose ``.stream()`` is consumed resumably (StreamSink /
 # Spark Structured Streaming). A load from one of these replays on restart.
 _STREAMING_SOURCE_TYPES = {
-    "kafka", "sse", "server_sent_events", "websocket", "ws",
-    "eventhub", "event_hubs", "eventhubs", "kinesis", "pubsub", "pub_sub",
+    "kafka",
+    "sse",
+    "server_sent_events",
+    "websocket",
+    "ws",
+    "eventhub",
+    "event_hubs",
+    "eventhubs",
+    "kinesis",
+    "pubsub",
+    "pub_sub",
 }
 _RESUMABLE_TRIGGERS = {"available_now", "availablenow", "micro_batch", "microbatch", "continuous"}
 

@@ -21,6 +21,7 @@ replays idempotent with the contract's ``materialization.strategy: merge`` +
 The checkpoint **externalizes state** (cursor lives in the store, not process
 memory), which is exactly what makes ephemeral / serverless compute safe.
 """
+
 from __future__ import annotations
 
 import abc
@@ -305,10 +306,7 @@ class StreamSink:
             # Default (count) cursor → resume by skipping already-processed records.
             skip = prior.cursor
             running_count = prior.cursor
-            logger.info(
-                f"[StreamSink {self.checkpoint_key}] resuming — skipping {skip} "
-                f"already-committed record(s)."
-            )
+            logger.info(f"[StreamSink {self.checkpoint_key}] resuming — skipping {skip} already-committed record(s).")
         else:
             logger.info(f"[StreamSink {self.checkpoint_key}] starting from the beginning.")
 
@@ -333,9 +331,7 @@ class StreamSink:
             frame = self._build_frame(buf)
             result = self.processor.run(frame)
             # Durable write FIRST …
-            self.processor.materialize(
-                result.good, result.bad, target_path=self.target_path
-            )
+            self.processor.materialize(result.good, result.bad, target_path=self.target_path)
             # … THEN advance the cursor (at-least-once boundary).
             running_count += len(buf)
             if offset_aware:
@@ -388,10 +384,7 @@ class StreamSink:
                 break
 
             buf.append(event)
-            window_elapsed = (
-                self.window_seconds is not None
-                and (time.monotonic() - window_open) >= self.window_seconds
-            )
+            window_elapsed = self.window_seconds is not None and (time.monotonic() - window_open) >= self.window_seconds
             if len(buf) >= self.batch_size or window_elapsed:
                 _flush()
                 window_open = time.monotonic()
@@ -471,8 +464,7 @@ class KafkaOffsetSource:
                 from kafka import KafkaConsumer, TopicPartition
             except ImportError as exc:
                 raise ImportError(
-                    "KafkaOffsetSource needs kafka-python. Install with "
-                    "`pip install 'lakelogic[kafka]'`."
+                    "KafkaOffsetSource needs kafka-python. Install with `pip install 'lakelogic[kafka]'`."
                 ) from exc
             self.consumer = KafkaConsumer(
                 bootstrap_servers=brokers,
@@ -509,9 +501,7 @@ class KafkaOffsetSource:
         if not self._assigned:
             self.seek(None)  # direct use (no StreamSink resume): assign from start
         while True:
-            batch = self.consumer.poll(
-                timeout_ms=self.poll_timeout_ms, max_records=self.max_poll_records
-            )
+            batch = self.consumer.poll(timeout_ms=self.poll_timeout_ms, max_records=self.max_poll_records)
             if not batch:
                 if self.drain:
                     return  # caught up → AvailableNow stop
@@ -597,12 +587,11 @@ class SSEOffsetSource:
             return self._connect(self._last_id)
         # Live feed: sseclient replays from Last-Event-ID on our behalf.
         try:  # pragma: no cover - requires sseclient + a live feed
-            import sseclient  # type: ignore
             import requests  # type: ignore
+            import sseclient  # type: ignore
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
-                "SSEOffsetSource needs sseclient-py + requests. Install with "
-                "`pip install 'lakelogic[sse]'`."
+                "SSEOffsetSource needs sseclient-py + requests. Install with `pip install 'lakelogic[sse]'`."
             ) from exc
         headers = dict(self.headers)  # pragma: no cover
         headers.setdefault("Accept", "text/event-stream")
@@ -720,8 +709,7 @@ class SparkStreamSink:
     ):
         if not checkpoint_location:
             raise ValueError(
-                "checkpoint_location is required — it is Spark's resumability source "
-                "of truth for this stream."
+                "checkpoint_location is required — it is Spark's resumability source of truth for this stream."
             )
         if trigger not in ("available_now", "processing_time"):
             raise ValueError("trigger must be 'available_now' or 'processing_time'")
@@ -756,9 +744,7 @@ class SparkStreamSink:
         if hasattr(self.processor, "last_run_id"):
             self.processor.last_run_id = None
         result = self.processor.run(batch_df)
-        self.processor.materialize(
-            result.good, result.bad, target_path=self.target_path
-        )
+        self.processor.materialize(result.good, result.bad, target_path=self.target_path)
         summary = SparkBatchResult(
             batch_id=batch_id,
             source_count=result.source_count,
@@ -792,11 +778,7 @@ class SparkStreamSink:
         )
         writer = self._apply_trigger(writer)
         query = writer.start()
-        should_wait = (
-            await_termination
-            if await_termination is not None
-            else self.trigger == "available_now"
-        )
+        should_wait = await_termination if await_termination is not None else self.trigger == "available_now"
         if should_wait:
             query.awaitTermination()
         return query
@@ -875,11 +857,7 @@ class _SimpleTP:
         self.partition = partition
 
     def __eq__(self, other: Any) -> bool:
-        return (
-            isinstance(other, _SimpleTP)
-            and self.topic == other.topic
-            and self.partition == other.partition
-        )
+        return isinstance(other, _SimpleTP) and self.topic == other.topic and self.partition == other.partition
 
     def __hash__(self) -> int:
         return hash((self.topic, self.partition))

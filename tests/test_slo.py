@@ -1060,17 +1060,13 @@ class TestQualityGate:
 
     @staticmethod
     def _quality(min_good=0.9, max_quar=0.1):
-        return SimpleNamespace(
-            min_good_ratio=min_good, max_quarantine_ratio=max_quar, by_severity=None
-        )
+        return SimpleNamespace(min_good_ratio=min_good, max_quarantine_ratio=max_quar, by_severity=None)
 
     def test_all_quarantined_warns_without_quality_config(self):
         # good=0, total>0 and NO quality SLO configured → non-blocking WARN.
         # Total data loss stays visible, but a domain that never opted into
         # quality gating is not failed.
-        res = SLOValidator._evaluate_quality_counts(
-            "dim_rider", {"total": 100, "good": 0, "quarantined": 100}, None
-        )
+        res = SLOValidator._evaluate_quality_counts("dim_rider", {"total": 100, "good": 0, "quarantined": 100}, None)
         assert len(res) == 1
         r = res[0]
         assert r.passed is True  # non-blocking
@@ -1120,7 +1116,5 @@ class TestQualityGate:
         # good>0 and no quality SLO configured → gate is silent (only good==0 is
         # unconditional). Avoids false positives on runs that never opted into a
         # quality threshold.
-        res = SLOValidator._evaluate_quality_counts(
-            "dim_rider", {"total": 100, "good": 50, "quarantined": 50}, None
-        )
+        res = SLOValidator._evaluate_quality_counts("dim_rider", {"total": 100, "good": 50, "quarantined": 50}, None)
         assert res == []

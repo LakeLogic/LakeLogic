@@ -8,20 +8,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 ## [1.40.4] — 2026-07-23
 
-### Added
+### Documentation
 
-- **packaging**: New lean `pdf` extra (`pip install lakelogic[pdf]`) that installs only `pdfplumber` for PDF text/table extraction — use it instead of `extraction-ocr` when you don't need `unstructured` (Office docs) or `rapidocr-onnxruntime` (image OCR).
-
-### Changed
-
-- **extraction (spaCy)**: `provider: spacy` now downloads its language model (e.g. `en_core_web_sm`) automatically on first use if it isn't already installed, then retries — so NER/classification works out of the box in Colab/CI without a manual `python -m spacy download` step. The download is lazy (only when a spaCy extraction actually runs) and applies to both `engines/llm.py` and the PII-masking hook. A clear, actionable error is raised only if the download itself fails.
-- **examples**: Trimmed the `05_data_generation_ai` notebook install from `[polars,extraction-ocr,nlp]` to `[polars,nlp,pdf]` — the notebook only uses pdfplumber + spaCy, so this drops the heavy `unstructured`/`rapidocr-onnxruntime`/pandoc downloads (and the spurious `requests` version conflict on Colab).
-
+- Update cloud integration and comparison documentation for clarity
+- Update cloud integration and comparison documentation for clarity
 ## [1.40.3] — 2026-07-21
+
+### Documentation
+
+- Add 1.40.3 changelog entry for all-null extraction column fix
 
 ### Fixed
 
-- **extraction**: Build an explicit Spark schema for file-extraction (pdfplumber/easyocr) output rows. A bare `spark.createDataFrame(rows)` inferred types from the data and failed with `[CANNOT_DETERMINE_TYPE]` on Spark Connect / serverless whenever a column was all-null (e.g. `file_path`, or an optional metadata field whose regex matched no document), silently producing 0 rows for the whole contract. All-null columns now default to `StringType`. Polars/DuckDB engines were unaffected.
+- Handle all-null columns in Spark DataFrame creation and add regression test
 ## [1.40.2] — 2026-07-20
 
 ### Fixed
@@ -38,18 +37,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **database**: Add Spark JDBC ingestion with fetchsize batching and partitioned reads
-
-### Changed
-
-- **examples**: Make Colab notebooks engine-neutral and fix demo correctness
-
-### Styling
-
-- **tests**: Wrap multi-line lambda definitions to satisfy ruff
-## [1.39.0] — 2026-07-12
-
-### Added
-
 - **sensitive**: Introduce handling for confidential non-personal fields
 - Add option method to FakeWriter for test transparency in spark_save_as_table
 - Disable deletion vectors in _spark_save_as_table to support delta-rs compatibility
@@ -57,6 +44,14 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Enhance error handling in PipelineRunSummary with failure detection and detailed reporting
 - Update logo colors and enhance documentation clarity with open core details
 - Add observatory spool for telemetry pushes with bounded retry
+
+### Changed
+
+- **examples**: Make Colab notebooks engine-neutral and fix demo correctness
+
+### Documentation
+
+- Update index.md to enhance clarity and detail of data contract framework
 
 ### Fixed
 
@@ -66,11 +61,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **registry**: Preserve 'on' join key when loading contract YAML
 - Resolve pyarrow CVE GHSA-rgxp-2hwp-jwgg (IPC pre-buffering use-after-free)
 - Update monkeypatch for dlt_adapter and warnings to match expected signatures
-## [1.33.0] — 2026-05-30
 
-### Documentation
+### Styling
 
-- Update index.md to enhance clarity and detail of data contract framework
+- **tests**: Wrap multi-line lambda definitions to satisfy ruff
 ## [1.32.0] — 2026-05-21
 
 ### Added
@@ -543,11 +537,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.40.4]: https://github.com/lakelogic/LakeLogic/compare/v1.40.3...v1.40.4
+[1.40.3]: https://github.com/lakelogic/LakeLogic/compare/v1.40.2...v1.40.3
 [1.40.2]: https://github.com/lakelogic/LakeLogic/compare/v1.40.1...v1.40.2
-[1.40.1]: https://github.com/lakelogic/LakeLogic/compare/v1.40.0...v1.40.1
-[1.40.0]: https://github.com/lakelogic/LakeLogic/compare/v1.39.0...v1.40.0
-[1.39.0]: https://github.com/lakelogic/LakeLogic/compare/v1.33.0...v1.39.0
-[1.33.0]: https://github.com/lakelogic/LakeLogic/compare/v1.32.0...v1.33.0
+[1.40.1]: https://github.com/lakelogic/LakeLogic/compare/v1.39.0...v1.40.1
+[1.40.0]: https://github.com/lakelogic/LakeLogic/compare/v1.32.0...v1.40.0
 [1.32.0]: https://github.com/lakelogic/LakeLogic/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/lakelogic/LakeLogic/compare/v1.30.0...v1.31.0
 [1.30.0]: https://github.com/lakelogic/LakeLogic/compare/v1.29.0...v1.30.0
