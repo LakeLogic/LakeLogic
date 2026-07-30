@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.40.6] — 2026-07-30
+
+### Fixed
+
+- Export streaming API via __all__ (resolves F401 on package init)
 ## [1.40.4] — 2026-07-23
 
 ### Documentation
@@ -537,6 +542,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.40.6]: https://github.com/lakelogic/LakeLogic/compare/v1.40.5...v1.40.6
 [1.40.4]: https://github.com/lakelogic/LakeLogic/compare/v1.40.3...v1.40.4
 [1.40.3]: https://github.com/lakelogic/LakeLogic/compare/v1.40.2...v1.40.3
 [1.40.2]: https://github.com/lakelogic/LakeLogic/compare/v1.40.1...v1.40.2
