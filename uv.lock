@@ -3199,7 +3199,7 @@ wheels = [
 
 [[package]]
 name = "lakelogic"
-version = "1.40.4"
+version = "1.40.5"
 source = { editable = "." }
 dependencies = [
     { name = "deltalake" },

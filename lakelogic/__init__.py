@@ -234,6 +234,17 @@ __all__ = [
     # Generic SQL adapter
     "GenericSQLAdapter",
     "ENGINE_DIALECT_MAP",
+    # Streaming (resumable micro-batch sink + checkpoint + offset-aware sources)
+    "StreamSink",
+    "StreamRunSummary",
+    "Checkpoint",
+    "CheckpointStore",
+    "SQLiteCheckpointStore",
+    "KafkaOffsetSource",
+    "SSEOffsetSource",
+    "WatermarkChunkSource",
+    "SparkStreamSink",
+    "SparkBatchResult",
     # Help
     "help",
     "driver",
