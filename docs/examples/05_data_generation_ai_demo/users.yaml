@@ -1,0 +1,29 @@
+version: 1.0.0
+dataset: test_users
+model:
+  fields:
+    - name: user_id
+      type: integer
+      required: true
+    - name: email
+      type: string
+      required: true
+      pii: true
+    - name: age
+      type: integer
+      min: 18
+      max: 120
+    - name: country
+      type: string
+      accepted_values: [US, GB, DE, FR, JP]
+    - name: status
+      type: string
+      accepted_values: [active, inactive, suspended]
+quality:
+  row_rules:
+    - name: valid_email
+      sql: "email LIKE '%@%.%'"
+    - name: valid_age
+      sql: "age BETWEEN 18 AND 120"
+    - name: valid_country
+      sql: "country IN ('US','GB','DE','FR','JP')"

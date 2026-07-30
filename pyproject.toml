@@ -135,16 +135,14 @@ aws_messaging = ["boto3>=1.28.0"]
 gcp_messaging = ["google-cloud-pubsub>=2.18.0"]
 # Streaming processing
 streaming = [
-    "bytewax>=0.19.0",  # Real-time stream processing (Rust-based)
-    # NOTE: `pathway` removed — it hard-pins pyarrow<19.0.0, which conflicts with
-    # the security-required pyarrow>=23.0.1 (GHSA-rgxp-2hwp-jwgg). The optional
-    # pathway framework in streaming_processor.py still imports lazily if a user
-    # installs pathway themselves.
+    # Streaming ingestion transports consumed by the engine-agnostic StreamSink.
+    # The Bytewax/Pathway stream-processing frameworks were removed — streaming is
+    # the batch contract engine run per micro-batch over these connectors, not a
+    # separate stream engine. See docs/specs/streaming-contracts.md.
     "kafka-python>=2.0.2",  # Apache Kafka
     "sseclient-py>=1.8.0",  # Server-Sent Events (Wikimedia, etc.)
     "websocket-client>=1.6.0",  # WebSocket (Coinbase, Binance, etc.)
 ]
-bytewax = ["bytewax>=0.19.0"]
 kafka = ["kafka-python>=2.0.2"]
 sse = ["sseclient-py>=1.8.0"]
 websocket = ["websocket-client>=1.6.0"]
@@ -220,7 +218,6 @@ review = [
 enterprise = [
     "pyspark>=3.3.0",
     "lakelogic[pii]",
-    "bytewax>=0.19.0",
     "nbclient>=0.9.0",
     "nbformat>=5.9.0",
 ]

@@ -50,9 +50,7 @@ Pick the engine that matches your workload:
 
 | Extra | What You Get | Best For |
 | :--- | :--- | :--- |
-| `[streaming]` | Bytewax + Pathway + Kafka + SSE + WebSocket | Full real-time stack |
-| `[bytewax]` | Bytewax (Rust-based stream processor) | High-performance streaming |
-| `[pathway]` | Pathway (real-time SQL transforms) | SQL-first streaming |
+| `[streaming]` | Kafka + SSE + WebSocket connectors | Streaming ingestion transports |
 | `[kafka]` | Apache Kafka client | Kafka-based event pipelines |
 | `[sse]` | Server-Sent Events client | Wikimedia, live feeds |
 | `[websocket]` | WebSocket client | Coinbase, Binance, live APIs |
@@ -89,7 +87,7 @@ Pick the engine that matches your workload:
 | Extra | What You Get | Best For |
 | :--- | :--- | :--- |
 | `[all]` | Base install (backwards compat) | Minimal footprint |
-| `[enterprise]` | Spark + PII + Bytewax + notebooks | Full-stack enterprise deployment |
+| `[enterprise]` | Spark + PII + notebooks | Full-stack enterprise deployment |
 | `[cli]` | Typer CLI framework | `lakelogic` command-line tool |
 
 ---

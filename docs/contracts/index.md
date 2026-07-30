@@ -54,6 +54,7 @@ This means you **write less YAML** and **get consistent governance** across hund
 | **Platform Engineer** | Configure storage & cloud environments | [System Config](system_config.md) |
 | **Data Engineer** | Create my first data contract | [Data Product Contracts](data_product_contracts/index.md) |
 | **Data Engineer** | Ingest files or tables | [Ingestion](data_product_contracts/ingestion.md) |
+| **Data Engineer** | Ingest a real-time stream safely (crash-safe, no duplicates) | [Real-Time Streaming](../streaming.md#resumable-crash-safe-ingestion) |
 | **Data Engineer** | Choose how to track "what's new" | [Watermark Strategies](data_product_contracts/watermark_strategies.md) |
 | **Data Engineer** | Link datasets for cross-table joins | [Multi-Dataset Joins & Links](data_product_contracts/index.md#multi-dataset-joins-links) |
 | **Data Engineer** | Add transforms (rename, join, SQL) | [Transformations](data_product_contracts/transformations.md) |

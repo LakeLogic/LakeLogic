@@ -1572,7 +1572,7 @@ def doctor():
     # ── Streaming ───────────────────────────────────────────
     streaming_pkgs = [
         ("kafka-python", "kafka"),
-        ("bytewax", "bytewax"),
+        ("sseclient-py", "sseclient"),
         ("websocket", "websocket"),
     ]
 

@@ -30,11 +30,8 @@ _PACKAGE_EXTRAS: dict[str, tuple[str, str]] = {
     "pyspark": ("pyspark", "enterprise"),
     "dataprofiler": ("dataprofiler", "enterprise"),
     "presidio_analyzer": ("presidio-analyzer", "enterprise"),
-    "bytewax": ("bytewax", "enterprise"),
     "nbclient": ("nbclient", "enterprise"),
     "nbformat": ("nbformat", "enterprise"),
-    # individual extras (for users who want precise installs)
-    "pathway": ("pathway", "pathway"),
 }
 
 

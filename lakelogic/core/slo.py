@@ -651,13 +651,69 @@ class SLOValidator:
     def check_quality(self, report: Optional[Dict[str, Any]] = None) -> List[SLOCheckResult]:
         """
         Evaluate quality SLOs using quarantine ratios and severity-weighted thresholds.
+
+        Two evaluation paths share the same gate (:meth:`_evaluate_quality_counts`):
+
+        * **Post-pipeline** — when a live ``report`` is supplied, counts come from
+          that run (and severity-weighted checks are available).
+        * **Out-of-band** — scheduled/independent runs (``report is None``) read the
+          latest run-log counts per active contract, so a materialization that
+          quarantined every row is still caught instead of silently showing green.
         """
-        results = []
         quality = self.registry.slo.quality
-        if not quality or not report:
+
+        if report:
+            counts = report.get("counts", {}) or {}
+            results = self._evaluate_quality_counts("pipeline", counts, quality)
+
+            # Severity-weighted checks (only available with a live report).
+            total = counts.get("total") or counts.get("source") or 0
+            if quality and quality.by_severity and total > 0 and report.get("rule_failures_by_severity"):
+                failures_by_severity = report["rule_failures_by_severity"]
+                for sev in ["critical", "high", "medium", "low"]:
+                    threshold = quality.by_severity.get(sev)
+                    if not threshold:
+                        continue
+                    sev_failures = failures_by_severity.get(sev, 0)
+                    sev_good_ratio = (total - sev_failures) / total if total > 0 else 1.0
+                    if sev_good_ratio < threshold.min_good_ratio:
+                        results.append(
+                            SLOCheckResult(
+                                layer="quality",
+                                entity=f"severity_{sev}",
+                                check_type="quality",
+                                status=(
+                                    f"❌ {sev.upper()} quality breach "
+                                    f"({sev_good_ratio:.1%} < {threshold.min_good_ratio:.1%})"
+                                ),
+                                passed=False,
+                                severity="fail" if sev in ("critical", "high") else "warn",
+                                quality_ratio=round(sev_good_ratio, 4),
+                                quality_severity=sev,
+                            )
+                        )
             return results
 
-        counts = report.get("counts", {}) or {}
+        # Out-of-band scan: no live report — read the latest run-log counts so
+        # scheduled SLO evaluations still gate on quarantine.
+        return self._check_quality_from_run_log(quality)
+
+    @staticmethod
+    def _evaluate_quality_counts(entity: str, counts: Dict[str, Any], quality: Any) -> List[SLOCheckResult]:
+        """Gate a single run's counts against the quality SLO.
+
+        Shared by the post-pipeline and out-of-band paths so both behave
+        identically. Rules:
+
+        * ``total == 0`` → no result (benign ``no_new_data`` tick; prolonged
+          absence is the freshness SLO's job, not the quality gate).
+        * ``good == 0`` while ``total > 0`` → total data loss. **Fails** when a
+          quality SLO is configured (the domain opted into gating); otherwise a
+          non-blocking **warn** so the loss is still visible without failing a
+          domain that deliberately left ``slo.quality`` unset.
+        * otherwise → threshold gate, but only when a quality SLO is configured.
+        """
+        results: List[SLOCheckResult] = []
         total = counts.get("total") or counts.get("source") or 0
         good = counts.get("good") or 0
         quarantined = counts.get("quarantined") or 0
@@ -666,54 +722,147 @@ class SLOValidator:
             return results
 
         good_ratio = good / total
-        quarantine_ratio = quarantined / total if total > 0 else 0.0
+        quarantine_ratio = quarantined / total
 
-        # Top-level quality check
-        passed = good_ratio >= quality.min_good_ratio and quarantine_ratio <= quality.max_quarantine_ratio
-        status = (
-            f"✅ OK (good={good_ratio:.1%})"
-            if passed
-            else f"❌ QUALITY ({good_ratio:.1%} good, {quarantine_ratio:.1%} quarantined)"
-        )
-
-        results.append(
-            SLOCheckResult(
-                layer="quality",
-                entity="pipeline",
-                check_type="quality",
-                status=status,
-                passed=passed,
-                severity="pass" if passed else "fail",
-                quality_ratio=round(good_ratio, 4),
-            )
-        )
-
-        # Severity-weighted checks
-        if quality.by_severity and report.get("rule_failures_by_severity"):
-            failures_by_severity = report["rule_failures_by_severity"]
-            for sev in ["critical", "high", "medium", "low"]:
-                threshold = quality.by_severity.get(sev)
-                if not threshold:
-                    continue
-                sev_failures = failures_by_severity.get(sev, 0)
-                sev_total = total
-                sev_good_ratio = (sev_total - sev_failures) / sev_total if sev_total > 0 else 1.0
-                if sev_good_ratio < threshold.min_good_ratio:
-                    results.append(
-                        SLOCheckResult(
-                            layer="quality",
-                            entity=f"severity_{sev}",
-                            check_type="quality",
-                            status=(
-                                f"❌ {sev.upper()} quality breach "
-                                f"({sev_good_ratio:.1%} < {threshold.min_good_ratio:.1%})"
-                            ),
-                            passed=False,
-                            severity="fail" if sev in ("critical", "high") else "warn",
-                            quality_ratio=round(sev_good_ratio, 4),
-                            quality_severity=sev,
-                        )
+        if good == 0:
+            # Total data loss. Respect the domain's opt-in: hard-fail only when a
+            # quality SLO is configured; otherwise surface a non-blocking warning
+            # (passed=True, severity="warn") so it's visible but doesn't fail a
+            # domain that never opted into quality gating.
+            if quality:
+                results.append(
+                    SLOCheckResult(
+                        layer="quality",
+                        entity=entity,
+                        check_type="quality",
+                        status=f"❌ ALL ROWS QUARANTINED ({quarantined} of {total} blocked, 0 materialized)",
+                        passed=False,
+                        severity="fail",
+                        quality_ratio=0.0,
                     )
+                )
+            else:
+                results.append(
+                    SLOCheckResult(
+                        layer="quality",
+                        entity=entity,
+                        check_type="quality",
+                        status=(
+                            f"⚠️ ALL ROWS QUARANTINED ({quarantined} of {total} blocked, "
+                            f"0 materialized) — no quality SLO set"
+                        ),
+                        passed=True,
+                        severity="warn",
+                        quality_ratio=0.0,
+                    )
+                )
+            return results
+
+        if quality:
+            passed = good_ratio >= quality.min_good_ratio and quarantine_ratio <= quality.max_quarantine_ratio
+            status = (
+                f"✅ OK (good={good_ratio:.1%})"
+                if passed
+                else f"❌ QUALITY ({good_ratio:.1%} good, {quarantine_ratio:.1%} quarantined)"
+            )
+            results.append(
+                SLOCheckResult(
+                    layer="quality",
+                    entity=entity,
+                    check_type="quality",
+                    status=status,
+                    passed=passed,
+                    severity="pass" if passed else "fail",
+                    quality_ratio=round(good_ratio, 4),
+                )
+            )
+        return results
+
+    def _check_quality_from_run_log(self, quality: Any) -> List[SLOCheckResult]:
+        """Evaluate quality for scheduled/out-of-band runs from the run log.
+
+        Reads the latest non-``no_new_data`` run-log row per active contract and
+        feeds its counts through :meth:`_evaluate_quality_counts`. Requires an
+        engine and a configured ``run_log_table``; returns ``[]`` otherwise.
+        """
+        results: List[SLOCheckResult] = []
+        if not self.spark and not self.polars and not self.duckdb_con:
+            return results
+
+        storage = self.registry.storage
+        run_log_table = storage.run_log_table
+        if not run_log_table:
+            return results
+
+        run_log_table.replace("`", "")
+        spark_ref = resolve_run_log_ref(run_log_table, "spark")
+        duckdb_ref = resolve_run_log_ref(run_log_table, "duckdb")
+
+        for contract in self.registry.get_active_contracts():
+            layer = contract.layer
+            entity = contract.entity
+            counts: Optional[Dict[str, Any]] = None
+            try:
+                if self.spark:
+                    row = self.spark.sql(f"""
+                        SELECT counts_source, counts_total, counts_good, counts_quarantined
+                        FROM {spark_ref}
+                        WHERE data_layer = '{layer}'
+                          AND dataset = '{entity}'
+                          AND stage NOT IN ('no_new_data', 'reprocess')
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """).first()
+                    if row:
+                        counts = {
+                            "source": row["counts_source"],
+                            "total": row["counts_total"],
+                            "good": row["counts_good"],
+                            "quarantined": row["counts_quarantined"],
+                        }
+                elif self.duckdb_con:
+                    res = self.duckdb_con.execute(f"""
+                        SELECT counts_source, counts_total, counts_good, counts_quarantined
+                        FROM {duckdb_ref}
+                        WHERE data_layer = '{layer}'
+                          AND dataset = '{entity}'
+                          AND stage NOT IN ('no_new_data', 'reprocess')
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """).fetchone()
+                    if res:
+                        counts = {"source": res[0], "total": res[1], "good": res[2], "quarantined": res[3]}
+                else:
+                    import polars as pl
+
+                    storage_opts = self._resolve_storage_opts(run_log_table)
+                    try:
+                        df = _read_delta_local(run_log_table, storage_options=storage_opts)
+                    except Exception:
+                        df = pl.read_parquet(run_log_table, storage_options=storage_opts)
+                    filtered = (
+                        df.filter(
+                            (pl.col("data_layer") == layer)
+                            & (pl.col("dataset") == entity)
+                            & (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
+                        )
+                        .sort("timestamp", descending=True)
+                        .head(1)
+                    )
+                    if not filtered.is_empty():
+                        d = filtered.to_dicts()[0]
+                        counts = {
+                            "source": d.get("counts_source"),
+                            "total": d.get("counts_total"),
+                            "good": d.get("counts_good"),
+                            "quarantined": d.get("counts_quarantined"),
+                        }
+            except Exception as e:
+                logger.debug(f"Quality run-log read failed for {entity}: {e}")
+                continue
+
+            if counts is not None:
+                results.extend(self._evaluate_quality_counts(entity, counts, quality))
 
         return results
 

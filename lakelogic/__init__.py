@@ -14,6 +14,18 @@ from lakelogic.core.models import (
     Transformation,
 )
 from lakelogic.core.processor import DataProcessor
+from lakelogic.core.stream_sink import (
+    Checkpoint,
+    CheckpointStore,
+    KafkaOffsetSource,
+    SSEOffsetSource,
+    SparkBatchResult,
+    SparkStreamSink,
+    SQLiteCheckpointStore,
+    StreamSink,
+    StreamRunSummary,
+    WatermarkChunkSource,
+)
 from lakelogic.core.schema_api import (
     ValidationError,
     ValidationResult,

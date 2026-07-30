@@ -4815,7 +4815,32 @@ class DataProcessor:
         # ── Execute via chosen engine ────────────────────────
         if self.engine_name == "polars":
             if fetch_size:
-                logger.info(f"Batch execution active. Fetching data in {fetch_size} row chunks via SQLAlchemy yield.")
+                # SEMANTICS (important): fetch_size bounds the DB round-trip and
+                # the per-chunk validation working set — NOT the final write.
+                # Each chunk is validated independently in memory, then ALL
+                # chunks are concatenated and materialized ONCE at the end of the
+                # run (accumulate-then-write, see Runner._run_contract_stage).
+                # Consequences an operator must know:
+                #   * All-or-nothing: a failure in any chunk aborts the whole run
+                #     BEFORE materialize() runs — the target is left untouched (no
+                #     partial rows, no rollback needed) but every chunk's in-memory
+                #     progress is discarded.
+                #   * Not resumable: there is no per-chunk checkpoint; a re-run
+                #     restarts from the last committed incremental watermark (or
+                #     row 0 on a full load), never mid-fetch.
+                #   * The WRITE is not memory-bounded: pl.concat below buffers the
+                #     entire good/bad result, so a genuinely huge load can still
+                #     OOM at the concat/write even though each chunk was small.
+                # For large or failure-prone loads, prefer the checkpointed
+                # micro-batch path (commit-per-chunk, resumable, memory-bounded
+                # writes) — see docs/specs/streaming-contracts.md,
+                # "Failure & Resumability".
+                logger.info(
+                    f"Batch execution active: fetching in {fetch_size}-row chunks "
+                    f"(SQLAlchemy yield_per). Chunks are validated independently, then "
+                    f"combined and written ONCE at end — all-or-nothing, not resumable "
+                    f"mid-run (a failure in any chunk discards the whole run)."
+                )
                 try:
                     import sqlalchemy
 

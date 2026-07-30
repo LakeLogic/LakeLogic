@@ -130,6 +130,40 @@ def _service_levels(raw: Dict[str, Any]) -> Dict[str, Any]:
     return _d(raw.get("service_levels") or raw.get("service_level") or raw.get("slo"))
 
 
+# Streaming transports whose ``.stream()`` is consumed resumably (StreamSink /
+# Spark Structured Streaming). A load from one of these replays on restart.
+_STREAMING_SOURCE_TYPES = {
+    "kafka", "sse", "server_sent_events", "websocket", "ws",
+    "eventhub", "event_hubs", "eventhubs", "kinesis", "pubsub", "pub_sub",
+}
+_RESUMABLE_TRIGGERS = {"available_now", "availablenow", "micro_batch", "microbatch", "continuous"}
+
+
+def _trigger(raw: Dict[str, Any]) -> str:
+    """The runtime trigger, wherever it's authored (top-level, source, or
+    materialization ``streaming`` block)."""
+    for holder in (raw, _d(raw.get("source")), _d(raw.get("materialization"))):
+        t = holder.get("trigger")
+        if isinstance(t, dict):
+            t = t.get("mode") or t.get("type")
+        if t:
+            return str(t).lower()
+    return ""
+
+
+def _is_resumable_stream(raw: Dict[str, Any]) -> bool:
+    """True when this contract loads from a streaming transport OR declares a
+    resumable trigger — i.e. replays on restart are expected."""
+    s = _d(raw.get("source"))
+    if (s.get("type") or "").lower() in _STREAMING_SOURCE_TYPES:
+        return True
+    if (s.get("mode") or s.get("load_mode") or "").lower() == "streaming":
+        return True
+    if s.get("streaming") is True or raw.get("streaming") is True:
+        return True
+    return _trigger(raw) in _RESUMABLE_TRIGGERS
+
+
 # ── Domain/system governance context ────────────────────────────────────────
 # Requirements can be declared at the domain (`_domain.yaml`) or system
 # (`_system.yaml`) level and inherited by contracts. Precedence:
@@ -409,6 +443,44 @@ def check_no_volume_freshness_slo(raw, name, ctx):  # VOL-001
     ]
 
 
+def check_append_on_resumable_stream(raw, name, ctx):  # STREAM-001
+    # At-least-once delivery replays the in-flight batch on restart; bare `append`
+    # duplicates those rows. Resumable/streaming loads MUST use merge/overwrite.
+    if _is_resumable_stream(raw) and _strategy(raw) == "append":
+        return [
+            _c(
+                name,
+                "STREAM-001",
+                "warning",
+                "materialization",
+                "resumable/streaming source materialized with bare `append` — delivery is "
+                "at-least-once, so a replayed batch on restart duplicates rows.",
+                suggestion="Use `materialization.strategy: merge` (+ `primary_key`) or `overwrite`, "
+                "not `append`, on a resumable source.",
+            )
+        ]
+    return []
+
+
+def check_continuous_trigger(raw, name, ctx):  # STREAM-002
+    # A continuous trigger implies an always-on cluster (cost); most freshness SLOs
+    # are met by available_now on scheduled/serverless compute.
+    if _trigger(raw) == "continuous":
+        return [
+            _c(
+                name,
+                "STREAM-002",
+                "info",
+                "reliability",
+                "`trigger: continuous` implies an always-on cluster — confirm the freshness "
+                "SLO genuinely needs sub-minute latency; otherwise `available_now` on "
+                "scheduled/serverless compute is cheaper.",
+                suggestion="Prefer `trigger: available_now` unless the freshness SLO is sub-minute.",
+            )
+        ]
+    return []
+
+
 _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[ContractFinding]]] = [
     check_pk_missing_for_mutation,
     check_dedup_no_timestamp,
@@ -419,6 +491,8 @@ _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[
     check_scd2_no_track_columns,
     check_unpartitioned_landing,
     check_no_volume_freshness_slo,
+    check_append_on_resumable_stream,
+    check_continuous_trigger,
 ]
 
 

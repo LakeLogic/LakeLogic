@@ -1046,3 +1046,81 @@ def test_standalone_slo_helpers_duckdb_and_merge_paths():
     assert slo.compute_slos(SimpleNamespace(service_levels=None), rel, {}, "duckdb") == {}
 
     con.close()
+
+
+# ── Quality gate: all-quarantined leak (SLOValidator._evaluate_quality_counts) ──
+#
+# Regression for the "everything blocked but SLO shows green" gap. The shared gate
+# is used by BOTH the post-pipeline (report) and out-of-band (run-log) paths, so
+# testing it directly covers both.
+
+
+class TestQualityGate:
+    """SLOValidator._evaluate_quality_counts — the shared quality gate."""
+
+    @staticmethod
+    def _quality(min_good=0.9, max_quar=0.1):
+        return SimpleNamespace(
+            min_good_ratio=min_good, max_quarantine_ratio=max_quar, by_severity=None
+        )
+
+    def test_all_quarantined_warns_without_quality_config(self):
+        # good=0, total>0 and NO quality SLO configured → non-blocking WARN.
+        # Total data loss stays visible, but a domain that never opted into
+        # quality gating is not failed.
+        res = SLOValidator._evaluate_quality_counts(
+            "dim_rider", {"total": 100, "good": 0, "quarantined": 100}, None
+        )
+        assert len(res) == 1
+        r = res[0]
+        assert r.passed is True  # non-blocking
+        assert r.severity == "warn"
+        assert r.quality_ratio == 0.0
+        assert "ALL ROWS QUARANTINED" in r.status
+
+    def test_all_quarantined_fails_with_quality_config(self):
+        # With a quality SLO configured (opted in) → hard FAIL.
+        res = SLOValidator._evaluate_quality_counts(
+            "dim_rider", {"total": 100, "good": 0, "quarantined": 100}, self._quality()
+        )
+        assert len(res) == 1
+        assert res[0].passed is False and res[0].severity == "fail"
+
+    def test_all_quarantined_uses_source_when_total_missing(self):
+        # Run log may carry counts_source but a null counts_total. With a quality
+        # SLO configured, this is a hard fail.
+        res = SLOValidator._evaluate_quality_counts(
+            "dim_rider", {"total": None, "source": 50, "good": 0, "quarantined": 50}, self._quality()
+        )
+        assert len(res) == 1 and res[0].passed is False
+
+    def test_empty_run_is_benign_no_result(self):
+        # total==0 (no_new_data / empty tick) → no quality result at all.
+        # Prolonged absence is the freshness SLO's responsibility, not this gate.
+        res = SLOValidator._evaluate_quality_counts(
+            "dim_rider", {"total": 0, "good": 0, "quarantined": 0}, self._quality()
+        )
+        assert res == []
+
+    def test_healthy_run_passes(self):
+        res = SLOValidator._evaluate_quality_counts(
+            "dim_rider", {"total": 100, "good": 98, "quarantined": 2}, self._quality()
+        )
+        assert len(res) == 1 and res[0].passed is True
+
+    def test_partial_quarantine_breach_fails_with_config(self):
+        # good_ratio 0.5 < 0.9 → threshold breach fails (but not the unconditional path).
+        res = SLOValidator._evaluate_quality_counts(
+            "dim_rider", {"total": 100, "good": 50, "quarantined": 50}, self._quality()
+        )
+        assert len(res) == 1 and res[0].passed is False
+        assert "ALL ROWS QUARANTINED" not in res[0].status
+
+    def test_partial_quarantine_without_config_is_not_flagged(self):
+        # good>0 and no quality SLO configured → gate is silent (only good==0 is
+        # unconditional). Avoids false positives on runs that never opted into a
+        # quality threshold.
+        res = SLOValidator._evaluate_quality_counts(
+            "dim_rider", {"total": 100, "good": 50, "quarantined": 50}, None
+        )
+        assert res == []

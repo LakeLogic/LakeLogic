@@ -115,6 +115,51 @@ def test_no_volume_freshness_slo():  # VOL-001
     assert "VOL-001" not in _ids(_silver())  # has freshness
 
 
+def test_append_on_streaming_source():  # STREAM-001
+    # A Kafka source materialized with bare `append` → at-least-once replays dup.
+    raw = {
+        "info": {"target_layer": "bronze"},
+        "source": {"type": "kafka"},
+        "materialization": {"strategy": "append"},
+        "model": {"fields": [{"name": "id", "type": "string"}]},
+    }
+    assert "STREAM-001" in _ids(raw)
+    # merge clears it …
+    merged = dict(raw, materialization={"strategy": "merge"}, primary_key=["id"])
+    assert "STREAM-001" not in _ids(merged)
+    # … and a plain (non-streaming) batch append is fine.
+    batch = dict(raw, source={"type": "landing"})
+    assert "STREAM-001" not in _ids(batch)
+
+
+def test_append_on_resumable_trigger():  # STREAM-001 via trigger
+    raw = {
+        "info": {"target_layer": "bronze"},
+        "source": {"type": "delta"},
+        "trigger": "available_now",
+        "materialization": {"strategy": "append"},
+        "model": {"fields": [{"name": "id", "type": "string"}]},
+    }
+    assert "STREAM-001" in _ids(raw)
+
+
+def test_continuous_trigger_advisory():  # STREAM-002
+    raw = {
+        "info": {"target_layer": "bronze"},
+        "source": {"type": "kafka"},
+        "trigger": "continuous",
+        "materialization": {"strategy": "merge"},
+        "primary_key": ["id"],
+        "model": {"fields": [{"name": "id", "type": "string"}]},
+    }
+    ids = _ids(raw)
+    assert "STREAM-002" in ids
+    assert "STREAM-001" not in ids  # merge, so no dup warning
+    # available_now doesn't trip the always-on advisory.
+    an = dict(raw, trigger="available_now")
+    assert "STREAM-002" not in _ids(an)
+
+
 def test_bronze_landing_not_flagged_for_entity_checks():
     # Bronze landing shouldn't get silver/gold-only entity findings (DEL/QLT/VOL).
     raw = {
