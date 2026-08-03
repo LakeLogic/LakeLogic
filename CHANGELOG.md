@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.41.0] — 2026-08-03
+
+### Added
+
+- Add Streaming API documentation and navigation entry
+
+### Fixed
+
+- **snowflake**: TRY_CAST via TO_VARCHAR + shared-connection for Notebook use
 ## [1.40.6] — 2026-07-30
 
 ### Fixed
@@ -542,6 +551,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.41.0]: https://github.com/lakelogic/LakeLogic/compare/v1.40.6...v1.41.0
 [1.40.6]: https://github.com/lakelogic/LakeLogic/compare/v1.40.5...v1.40.6
 [1.40.4]: https://github.com/lakelogic/LakeLogic/compare/v1.40.3...v1.40.4
 [1.40.3]: https://github.com/lakelogic/LakeLogic/compare/v1.40.2...v1.40.3
