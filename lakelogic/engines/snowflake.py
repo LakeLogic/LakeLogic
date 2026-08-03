@@ -39,6 +39,20 @@ class SnowflakeAdapter(EngineAdapter):
     This adapter executes contracts directly in Snowflake using SQL.
     """
 
+    # Optional connection shared by the caller (e.g. a Snowflake Notebook's active
+    # Snowpark session) so the engine runs on an existing session instead of opening a
+    # new password-authenticated connection. When set, execute() does NOT close it.
+    _shared_connection: Any = None
+
+    @classmethod
+    def set_shared_connection(cls, conn: Any) -> None:
+        """Reuse an existing snowflake.connector connection for all runs (Notebook use).
+
+        In a Snowflake Notebook: ``SnowflakeAdapter.set_shared_connection(
+        get_active_session().connection)``. Pass ``None`` to clear.
+        """
+        cls._shared_connection = conn
+
     def execute(self, df: Any) -> Tuple[Any, Any]:
         """
         Execute the contract using Snowflake SQL.
@@ -57,6 +71,7 @@ class SnowflakeAdapter(EngineAdapter):
             raise ValueError("Snowflake adapter requires a source table name.")
 
         conn = self._connect()
+        owns_conn = SnowflakeAdapter._shared_connection is None
         try:
             self._register_links(conn)
 
@@ -81,10 +96,11 @@ class SnowflakeAdapter(EngineAdapter):
 
             return good_df, bad_df
         finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            if owns_conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _connect(self):
         """
@@ -93,6 +109,9 @@ class SnowflakeAdapter(EngineAdapter):
         Returns:
             Snowflake connection.
         """
+        if SnowflakeAdapter._shared_connection is not None:
+            return SnowflakeAdapter._shared_connection
+
         from lakelogic.core.deps import require
 
         require("snowflake.connector", extra="cloud")
@@ -336,7 +355,8 @@ class SnowflakeAdapter(EngineAdapter):
             replacements: Dict[str, str] = {}
             for col, dtype in trans.cast.columns.items():
                 target_type = self._to_snowflake_type(dtype)
-                replacements[col] = f"TRY_CAST({self._quote_ident(col)} AS {target_type})"
+                # Route through TO_VARCHAR — Snowflake TRY_CAST rejects non-string sources.
+                replacements[col] = f"TRY_CAST(TO_VARCHAR({self._quote_ident(col)}) AS {target_type})"
             return select_with_replacements(replacements)
 
         if trans.trim:
@@ -575,7 +595,11 @@ class SnowflakeAdapter(EngineAdapter):
             target_type = "VARCHAR" if cast_to_string else self._to_snowflake_type(field.type)
             if field.name in existing_cols:
                 qfield = self._quote_ident(field.name)
-                select_exprs.append(f"TRY_CAST({qfield} AS {target_type}) AS {qfield}")
+                # Snowflake's TRY_CAST only accepts VARCHAR/VARIANT sources — a numeric
+                # or datetime source (e.g. an aggregated Gold column) raises "TRY_CAST
+                # cannot be used with arguments of types ...". Route through TO_VARCHAR so
+                # any source type is valid; null-on-failure (quarantine) semantics are kept.
+                select_exprs.append(f"TRY_CAST(TO_VARCHAR({qfield}) AS {target_type}) AS {qfield}")
             else:
                 qfield = self._quote_ident(field.name)
                 select_exprs.append(f"CAST(NULL AS {target_type}) AS {qfield}")
