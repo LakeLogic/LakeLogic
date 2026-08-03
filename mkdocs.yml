@@ -107,6 +107,7 @@ nav:
       - API: api.md
       - Capability Matrix: capabilities.md
       - Public Streaming Sources: streaming_sources.md
+      - Streaming API (StreamSink): streaming_api.md
       - Logging Configuration: logging_configuration.md
       - Validation Result: validation_result.md
       - Release & Maintenance: maintenance.md
