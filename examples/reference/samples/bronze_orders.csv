@@ -1,0 +1,6 @@
+order_id,event_id,customer_email,amount,currency,status,created_at,attributes
+1,E1001,alice@acme.com,120.50,USD,pending,2026-01-05T10:00:00Z,"{""channel"":""web"",""promo"":true}"
+1,E1002,alice@acme.com,120.50,USD,pending,2026-01-05T09:00:00Z,"{""channel"":""web""}"
+2,E1003,bob@globex.com,89.99,EUR,shipped,2026-01-05T11:30:00Z,"{""channel"":""ios""}"
+3,E1004,carol@initech.com,-5.00,GBP,delivered,2026-01-05T12:00:00Z,"{""channel"":""web""}"
+4,E1005,dave@umbrella.com,45.00,USD,returned,2026-01-06T08:15:00Z,"{""channel"":""android""}"

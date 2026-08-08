@@ -1,0 +1,6 @@
+order_ref,customer_email,customer_id,amount,currency,status,created_at
+1001, alice@acme.com ,10,120.50,USD,PENDING,2026-01-05T10:00:00Z
+1002, bob@globex.com ,11,89.99,EUR,Shipped,2026-01-05T11:30:00Z
+1003, carol@initech.com ,12,-5.00,GBP,delivered,2026-01-05T12:00:00Z
+1004, dave@umbrella.com ,13,45.00,USD,RETURNED,2026-01-06T08:15:00Z
+1005, erin@stark.com ,14,210.00,EUR,shipped,2026-01-06T09:45:00Z

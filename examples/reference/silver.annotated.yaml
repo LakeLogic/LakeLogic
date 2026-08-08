@@ -1,0 +1,298 @@
+# =============================================================================
+# LakeLogic - SILVER reference contract  (annotated "kitchen sink")
+# -----------------------------------------------------------------------------
+# Silver = clean + conform + enrich the Bronze table into a trustworthy,
+# query-ready table. This file shows EVERY Silver option in one place.
+# Copy it, then DELETE the blocks you don't need.
+#
+# Lean OLC vocabulary (model / fields / type / row_rules) - NOT verbose ODCS.
+#
+# Runs clean with:
+#   python -m lakelogic run \
+#     --contract examples/reference/silver.annotated.yaml \
+#     --source   examples/reference/samples/silver_orders.csv
+# =============================================================================
+
+version: 1.0.0
+dataset: orders
+
+info:
+  title: silver_orders
+  table_name: silver_orders
+  description: Cleaned, typed, deduplicated and currency-normalised orders.
+  owner: data-platform@company.com
+  target_layer: silver
+  domain: marketplace          # data-mesh domain
+  system: storefront           # data-mesh source system
+
+# - SOURCE: Silver reads the Bronze TABLE it refines (delta/table/iceberg). -
+# For this standalone demo we point at a CSV via --source; in production a
+# Silver contract reads Bronze:
+#   source:
+#     type: delta
+#     path: "{bronze_path}/bronze_orders"
+#     load_mode: incremental
+#     watermark_strategy: pipeline_log
+source:
+  # Production Silver uses `type: delta` (or table/iceberg) to read the Bronze
+  # TABLE - see the commented block above. This demo uses `type: landing` so the
+  # --source CSV is read directly by the file reader.
+  type: landing
+  path: "{bronze_path}/bronze_orders"     # overridden by --source for the demo run
+  format: csv
+  load_mode: full              # full | incremental | cdc
+  # flatten_nested: [attributes]          # expand Bronze JSON-string columns into parent_child columns
+
+# - PRIMARY / NATURAL KEY -
+primary_key: [order_id]        # logical key of the Silver table
+natural_key: [order_id]        # business key used by SCD2 (stable across versions)
+
+# -----------------------------------------------------------------------------
+# LINKS - reference/lookup datasets made available to transformations & joins.
+# Registered as SQL tables by `name`; join/lookup `reference:` points at them.
+# -----------------------------------------------------------------------------
+links:
+  - name: currency_rates
+    path: examples/reference/samples/currency_rates.csv
+    type: csv                  # csv | parquet | table
+    broadcast: true            # broadcast-join hint for small reference tables
+    columns: [currency, rate_to_gbp]   # column projection - load only what you need
+
+# -----------------------------------------------------------------------------
+# MODEL - the conformed Silver schema. Silver TYPES and REQUIRES properly.
+# -----------------------------------------------------------------------------
+model:
+  grain: "one row per order"
+  fields:
+    - name: order_id
+      type: integer
+      required: true
+    - name: customer_email
+      type: string
+      required: true
+      pii: true                # PII masking-as-execution: masked when a masking gate/policy runs.
+      masking: partial         # nullify | hash | redact | partial | encrypt
+      masking_format: "{first1}***@{domain}"
+      security_groups: [pii_readers]
+    - name: customer_id
+      type: integer
+      required: true
+    - name: amount
+      type: float
+      required: true
+    - name: currency
+      type: string
+    - name: status
+      type: string
+    - name: created_at
+      type: string
+    # NOTE on derived/enriched columns (amount_gbp, rate_to_gbp below): a column
+    # produced by a `post`-phase transform must NOT be declared here - declared
+    # fields are type-validated in the `pre` phase, before the column exists.
+    # Declare a derived column here ONLY if you derive it in `phase: pre`.
+
+# -----------------------------------------------------------------------------
+# TRANSFORMATIONS - run in listed order, grouped by phase.
+#   phase: pre   -> BEFORE quality rules (clean/reshape so rules see tidy data)
+#   phase: post  -> AFTER quality rules (enrich validated rows)
+# Every structured transform LakeLogic supports is shown here.
+# -----------------------------------------------------------------------------
+transformations:
+  # -- rename: source column order_ref -> canonical order_id (pre) --
+  - phase: pre
+    rename:
+      from: order_ref
+      to: order_id
+  # -- trim whitespace off string fields (pre) --
+  - phase: pre
+    trim:
+      fields: [customer_email, status]
+      side: both               # both | left | right
+  # -- lower-case a field to normalise it (pre) --
+  - phase: pre
+    lower:
+      fields: [status]
+  # -- cast raw strings to real types before validation (pre) --
+  - phase: pre
+    cast:
+      columns:
+        amount: double
+        customer_id: integer
+  # -- deduplicate keep-latest (pre) --
+  - phase: pre
+    deduplicate:
+      by: [order_id]           # alias: on
+      sort_by: [created_at]
+      order: desc              # keep newest
+  # -- filter out rows we never want (pre) --
+  - phase: pre
+    filter:
+      sql: "amount > 0"        # shorthand `filter: "amount > 0"` also works
+  # -- join a reference table by link name to enrich multiple fields (post) --
+  - phase: post
+    join:
+      reference: currency_rates   # a link name from `links:` above
+      on: currency               # column on THIS dataset
+      key: currency              # matching column on the reference
+      fields: [rate_to_gbp]      # columns to pull in
+      type: left                 # left | inner | right | full
+      defaults:
+        rate_to_gbp: 1.0         # value when no match (orphan keys)
+  # -- derive a new column from SQL, AFTER the join (post) --
+  - phase: post
+    derive:
+      field: amount_gbp
+      sql: "CAST(amount * rate_to_gbp AS DOUBLE)"
+      # sql_duckdb: "..."       # optional engine-specific override (Polars/DuckDB)
+      # sql_spark:  "..."       # optional Spark override
+  # -- Other supported transforms (uncomment as needed; all real keys) --
+  # - phase: post
+  #   lookup: { field: region, reference: city_dim, on: city_code, key: code, value: region, default_value: Unknown }
+  # - phase: post
+  #   coalesce: { output: contact, sources: [customer_email, customer_id], default: "n/a" }
+  # - phase: post
+  #   map_values: { field: status, mapping: {returned: refunded}, default: unknown, output: status_norm }
+  # - phase: post
+  #   bucket: { field: amount_band, source: amount_gbp, bins: [ {lt: 50, label: small}, {lt: 200, label: mid} ], default: large }
+  # - phase: post
+  #   json_extract: { field: channel, source: attributes, path: "$.channel", cast: string }
+  # - phase: post
+  #   date_diff: { field: age_days, from_col: created_at, to_col: current_date, unit: days }
+  # - phase: post
+  #   split:   { field: tags, delimiter: ",", output: tag_list }
+  # - phase: post
+  #   explode: { field: tag_list, output: tag }
+  # - phase: post
+  #   upper:   { fields: [currency] }
+  # - phase: post
+  #   drop:    { columns: [scratch_col] }
+  # - phase: post
+  #   select:  { columns: [order_id, amount_gbp] }   # keep only these
+  # - sql: "SELECT * FROM source WHERE status <> 'cancelled'"   # raw-SQL escape hatch
+
+# -----------------------------------------------------------------------------
+# QUALITY - full row + dataset checks. Failing rows are quarantined.
+# -----------------------------------------------------------------------------
+quality:
+  enforce_required: true
+  fail_pipeline_on_dataset_error: false   # true = a dataset-rule breach fails the whole run
+  row_rules:
+    # Raw-SQL rule with severity + category + phase:
+    - name: positive_amount
+      sql: "amount > 0"
+      severity: error          # error | warning | info
+      category: validity
+      phase: post              # pre (default) | post - post rules run after transforms
+    - name: gbp_computed
+      sql: "amount_gbp IS NOT NULL"
+      severity: warning
+      phase: post
+    # Business-friendly shorthands:
+    - not_null: customer_email
+    - accepted_values:
+        status: [pending, shipped, delivered, returned, cancelled]
+    - name: email_shape
+      sql: "customer_email LIKE '%@%.%'"
+    # regex_match compiles to a regex SQL function (regexp_matches / RLIKE) that
+    # the default Polars SQL engine does not implement - use it on the DuckDB or
+    # Spark engine, or use a LIKE rule (above) for portability:
+    # - regex_match:
+    #     column: customer_email
+    #     pattern: "^[^@]+@[^@]+\\.[^@]+$"
+    - range:
+        column: amount
+        min: 0
+        max: 100000
+    # Referential integrity - checks a FK against ANOTHER contract's PK pool.
+    # Requires the referenced contract's data to be available at runtime, so it
+    # is left commented for this standalone demo (uncomment inside a mesh run):
+    # - referential_integrity:
+    #     field: customer_id
+    #     contract: silver_customers
+    #     column: customer_id
+    #     severity: critical
+  dataset_rules:
+    - unique: order_id
+    - null_ratio:
+        column: customer_email
+        max: 0.0               # fail if ANY null
+    - row_count_between:
+        min: 1
+        max: 1000000
+
+# -----------------------------------------------------------------------------
+# QUARANTINE
+# -----------------------------------------------------------------------------
+quarantine:
+  enabled: true
+  target: examples/reference/_out/silver_quarantine
+  format: parquet
+  include_error_reason: true
+  fail_on_quarantine: false
+
+# -----------------------------------------------------------------------------
+# SERVICE LEVELS (SLA/SLO) - freshness, availability, row-count bounds.
+# -----------------------------------------------------------------------------
+service_levels:
+  freshness:
+    threshold: "60m"           # e.g. 60m, 4h, 1d
+    field: created_at          # column whose max age is measured
+  availability: 99.9           # field-completeness percentage target
+  row_count:
+    min_rows: 1
+    max_rows: 1000000
+    check_field: counts_good   # counts_good | counts_source | counts_total
+
+# -----------------------------------------------------------------------------
+# MATERIALIZATION - Silver upserts by key. strategy: merge shown active;
+# a full SCD2 (slowly-changing dimension) block is shown commented BELOW it.
+# -----------------------------------------------------------------------------
+materialization:
+  strategy: merge              # append | merge | overwrite | scd2
+  format: delta                # delta | iceberg | parquet
+  target_path: "{silver_path}/silver_orders"
+  partition_by: [currency]
+  # cluster_by: [order_id]
+  reprocess_policy: overwrite_partition    # how re-runs replace existing data
+  reprocess_date_column: created_at        # date column for date-range reprocessing
+  table_properties:
+    delta.autoOptimize.optimizeWrite: "true"
+  merge_dedup_guard: true      # guard against duplicate merge-key rows in a single batch
+
+  # -- SCD2 alternative (mutually exclusive with strategy: merge) --------------
+  # To use, set `strategy: scd2` above and uncomment this block:
+  # scd2:
+  #   track_columns: [customer_email, status]   # changes to these open a new version
+  #   timestamp_field: created_at
+  #   surrogate_key: _sk
+  #   effective_from_field: effective_from
+  #   effective_to_field: effective_to
+  #   current_flag_field: is_current
+  #   end_date_default: "9999-12-31"
+  #   version_column: _version
+  #   change_reason_column: _change_reason
+  #   unknown_member:                # Kimball late-arriving fallback row
+  #     enabled: true
+  #     surrogate_key_value: "-1"
+
+  # -- Soft deletes (mark, don't physically delete) ----------------------------
+  # soft_delete_column: _lakelogic_is_deleted
+  # soft_delete_time_column: _lakelogic_deleted_at
+  # soft_delete_reason_column: _lakelogic_delete_reason
+
+# -----------------------------------------------------------------------------
+# LINEAGE - provenance columns + upstream preservation.
+# -----------------------------------------------------------------------------
+lineage:
+  enabled: true
+  capture_source_path: true
+  capture_timestamp: true
+  capture_run_id: true
+  capture_contract_name: true
+  capture_domain: true
+  capture_system: true
+  preserve_upstream: [_lakelogic_run_id]   # keep these upstream columns (re-prefixed with _upstream)
+  upstream_prefix: _upstream
+
+metadata:
+  refined_from: bronze_orders
