@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.41.1] — 2026-08-08
+
+### Fixed
+
+- **bigquery**: Make the BigQuery engine run live (7 dialect/runtime fixes)
 ## [1.41.0] — 2026-08-03
 
 ### Added
@@ -551,6 +556,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.41.1]: https://github.com/lakelogic/LakeLogic/compare/v1.41.0...v1.41.1
 [1.41.0]: https://github.com/lakelogic/LakeLogic/compare/v1.40.6...v1.41.0
 [1.40.6]: https://github.com/lakelogic/LakeLogic/compare/v1.40.5...v1.40.6
 [1.40.4]: https://github.com/lakelogic/LakeLogic/compare/v1.40.3...v1.40.4

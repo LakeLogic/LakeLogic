@@ -1736,7 +1736,9 @@ def _odcs_process_quality_list(
                 if _odcs_apply_operator(rule, op, val):
                     dataset_rules.append(rule)
                 else:
-                    logger.warning("ODCS quality operator '%s' is not representable; skipping rule '%s'.", op, base_name)
+                    logger.warning(
+                        "ODCS quality operator '%s' is not representable; skipping rule '%s'.", op, base_name
+                    )
             else:
                 row_rules.append({"name": base_name, "sql": query, "description": desc, "severity": severity})
             continue
@@ -1782,10 +1784,14 @@ def _odcs_process_quality_list(
                     if _odcs_apply_operator(rule, op, val):
                         dataset_rules.append(rule)
                         continue
-                logger.warning("ODCS library rule '%s' with operator '%s' could not be mapped; skipping.", rule_name, op)
+                logger.warning(
+                    "ODCS library rule '%s' with operator '%s' could not be mapped; skipping.", rule_name, op
+                )
                 continue
             # Rule with neither recognised name nor operator — nothing executable.
-            logger.warning("ODCS library quality rule '%s' has no mappable operator/values; documented only.", rule_name)
+            logger.warning(
+                "ODCS library quality rule '%s' has no mappable operator/values; documented only.", rule_name
+            )
 
 
 def _odcs_select_schema_table(schema: List[Any], data: Dict[str, Any]):
@@ -1945,9 +1951,7 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
             elif selected and selected.get("name"):
                 table_ref = str(selected["name"])
             # schema-level quality applies to the dataset
-            _odcs_process_quality_list(
-                (selected or {}).get("quality"), None, table_ref, row_rules, dataset_rules
-            )
+            _odcs_process_quality_list((selected or {}).get("quality"), None, table_ref, row_rules, dataset_rules)
         else:
             # Legacy simplified form: the schema list *is* the column list.
             props = schema
@@ -1957,9 +1961,7 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             fname = col["name"]
             field: Dict[str, Any] = {"name": fname}
-            field["type"] = _odcs_map_logical_type(
-                col.get("logicalType") or col.get("physicalType") or col.get("type")
-            )
+            field["type"] = _odcs_map_logical_type(col.get("logicalType") or col.get("physicalType") or col.get("type"))
             if col.get("required"):
                 field["required"] = True
             if col.get("description"):

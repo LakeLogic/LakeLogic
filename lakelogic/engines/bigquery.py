@@ -146,7 +146,9 @@ class BigQueryAdapter(EngineAdapter):
                 continue
 
             col_clause = ", ".join(link.columns) if link.columns else "*"
-            sql = f"CREATE OR REPLACE TEMP TABLE {link.name} AS SELECT {col_clause} FROM {self._quote_table(table_name)}"
+            sql = (
+                f"CREATE OR REPLACE TEMP TABLE {link.name} AS SELECT {col_clause} FROM {self._quote_table(table_name)}"
+            )
             self._execute(client, sql)
 
     def _temp_name(self, label: str) -> str:
@@ -184,9 +186,7 @@ class BigQueryAdapter(EngineAdapter):
             return None
         from google.cloud import bigquery
 
-        return bigquery.QueryJobConfig(
-            connection_properties=[bigquery.ConnectionProperty("session_id", session_id)]
-        )
+        return bigquery.QueryJobConfig(connection_properties=[bigquery.ConnectionProperty("session_id", session_id)])
 
     def _execute(self, client, sql: str) -> None:
         """
@@ -232,10 +232,21 @@ class BigQueryAdapter(EngineAdapter):
     # BigQuery only knows FLOAT64/INT64/NUMERIC/STRING/BOOL. Normalising the CAST
     # target keeps the contract identical across all platforms.
     _SQL_TYPE_MAP = {
-        "DOUBLE PRECISION": "FLOAT64", "DOUBLE": "FLOAT64", "FLOAT": "FLOAT64", "REAL": "FLOAT64",
-        "BIGINT": "INT64", "INTEGER": "INT64", "INT": "INT64", "SMALLINT": "INT64", "TINYINT": "INT64",
-        "NUMBER": "NUMERIC", "DECIMAL": "NUMERIC",
-        "VARCHAR": "STRING", "NVARCHAR": "STRING", "CHAR": "STRING", "TEXT": "STRING",
+        "DOUBLE PRECISION": "FLOAT64",
+        "DOUBLE": "FLOAT64",
+        "FLOAT": "FLOAT64",
+        "REAL": "FLOAT64",
+        "BIGINT": "INT64",
+        "INTEGER": "INT64",
+        "INT": "INT64",
+        "SMALLINT": "INT64",
+        "TINYINT": "INT64",
+        "NUMBER": "NUMERIC",
+        "DECIMAL": "NUMERIC",
+        "VARCHAR": "STRING",
+        "NVARCHAR": "STRING",
+        "CHAR": "STRING",
+        "TEXT": "STRING",
         "BOOLEAN": "BOOL",
     }
 
@@ -250,8 +261,7 @@ class BigQueryAdapter(EngineAdapter):
             return sql
         import re
 
-        alternation = "|".join(sorted((k.replace(" ", r"\s+") for k in self._SQL_TYPE_MAP),
-                                       key=len, reverse=True))
+        alternation = "|".join(sorted((k.replace(" ", r"\s+") for k in self._SQL_TYPE_MAP), key=len, reverse=True))
 
         def _repl(m):
             key = re.sub(r"\s+", " ", m.group(1).upper())
@@ -315,12 +325,12 @@ class BigQueryAdapter(EngineAdapter):
                     if depth == 0:
                         break
                 i += 1
-            args = [a.strip() for a in self._split_top_level(out[open_paren + 1:i])]
+            args = [a.strip() for a in self._split_top_level(out[open_paren + 1 : i])]
             rep = builder(args)
             if rep is None:
                 pos = i + 1
                 continue
-            out = out[:start] + rep + out[i + 1:]
+            out = out[:start] + rep + out[i + 1 :]
             pos = start + len(rep)
         return out
 
@@ -338,11 +348,13 @@ class BigQueryAdapter(EngineAdapter):
         import re
 
         out = self._rewrite_call(
-            sql, "CONCAT_WS",
+            sql,
+            "CONCAT_WS",
             lambda a: f"ARRAY_TO_STRING([{', '.join(a[1:])}], {a[0]})" if len(a) >= 2 else None,
         )
         out = self._rewrite_call(
-            out, "TO_DATE",
+            out,
+            "TO_DATE",
             lambda a: f"DATE(CAST({a[0]} AS TIMESTAMP))" if len(a) == 1 else None,
         )
         out = re.sub(r"\bUNION\b(?!\s+(?:ALL|DISTINCT)\b)", "UNION DISTINCT", out, flags=re.IGNORECASE)
@@ -401,7 +413,10 @@ class BigQueryAdapter(EngineAdapter):
             if trans.sql:
                 self._create_source_alias(client, current)
                 step = self._temp_name(f"{phase}_sql_{idx}")
-                self._execute(client, f"CREATE OR REPLACE TEMP TABLE {step} AS {self._rewrite_functions(self._normalize_sql_types(trans.sql))}")
+                self._execute(
+                    client,
+                    f"CREATE OR REPLACE TEMP TABLE {step} AS {self._rewrite_functions(self._normalize_sql_types(trans.sql))}",
+                )
                 current = step
                 idx += 1
                 continue
