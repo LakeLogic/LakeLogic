@@ -1,0 +1,184 @@
+# =============================================================================
+# LakeLogic - GOLD reference contract  (annotated "kitchen sink")
+# -----------------------------------------------------------------------------
+# Gold = business-ready marts: aggregates, KPIs and metrics that dashboards,
+# APIs and ML models consume. This file shows EVERY Gold option in one place.
+# Copy it, then DELETE the blocks you don't need.
+#
+# Lean OLC vocabulary (model / fields / type / row_rules) - NOT verbose ODCS.
+#
+# Runs clean with:
+#   python -m lakelogic run \
+#     --contract examples/reference/gold.annotated.yaml \
+#     --source   examples/reference/samples/gold_trips.csv
+# =============================================================================
+
+version: 1.0.0
+dataset: trip_kpis
+
+info:
+  title: gold_trip_kpis
+  table_name: gold_trip_kpis
+  description: Daily revenue, volume and distance KPIs aggregated from trips.
+  owner: analytics@company.com
+  target_layer: gold
+  domain: marketplace          # data-mesh domain
+  system: rideflow             # data-mesh source system
+
+# - SOURCE: Gold reads the conformed Silver table(s) it aggregates. -
+# Production form (reads a Silver Delta table):
+#   source:
+#     type: delta
+#     path: "{silver_path}/silver_trips"
+#     load_mode: incremental
+#     watermark_strategy: pipeline_log
+# This demo uses `type: landing` so the --source CSV is read directly.
+source:
+  type: landing
+  path: "{silver_path}/silver_trips"      # overridden by --source for the demo run
+  format: csv
+  load_mode: full
+
+# - PRIMARY KEY of the mart (the grain of one aggregated row) -
+primary_key: [kpi_date, city_code]
+
+# -----------------------------------------------------------------------------
+# CROSS-DOMAIN DEPENDENCIES
+#   upstream   - tables this mart is built from (drives the lineage/mesh graph).
+#                Cross-domain refs use dotted domain.table names.
+#   links      - full tables registered for the aggregate SQL to read from.
+# -----------------------------------------------------------------------------
+upstream:
+  - marketplace.silver_trips
+  - payments.silver_charges     # a dependency from ANOTHER domain (cross-domain)
+
+# links:
+#   - name: silver_trips_full
+#     path: "{silver_path}/silver_trips"
+#     type: delta
+
+# -----------------------------------------------------------------------------
+# MODEL - the mart's OUTPUT schema (the columns the aggregate SQL produces).
+# Because the aggregate runs in `phase: pre`, these declared columns exist by
+# the time schema validation runs.
+# -----------------------------------------------------------------------------
+model:
+  grain: "one row per city per day"
+  fields:
+    - name: kpi_date
+      type: date
+      required: true
+    - name: city_code
+      type: string
+      required: true
+    - name: total_trips
+      type: integer
+    - name: total_revenue
+      type: float
+    - name: total_distance_km
+      type: float
+    - name: avg_fare
+      type: float
+    - name: avg_surge
+      type: float
+
+# -----------------------------------------------------------------------------
+# TRANSFORMATIONS - a single aggregate. `source` is the incoming (Silver) rows.
+# phase: pre so the aggregated columns exist before schema validation.
+# -----------------------------------------------------------------------------
+transformations:
+  - phase: pre
+    sql: |
+      SELECT
+          CAST(requested_at AS DATE)          AS kpi_date,
+          city_code,
+          COUNT(*)                            AS total_trips,
+          SUM(CAST(fare_amount AS DOUBLE))    AS total_revenue,
+          SUM(CAST(distance_km AS DOUBLE))    AS total_distance_km,
+          AVG(CAST(fare_amount AS DOUBLE))    AS avg_fare,
+          AVG(CAST(surge_multiplier AS DOUBLE)) AS avg_surge
+      FROM source
+      WHERE requested_at IS NOT NULL
+      GROUP BY CAST(requested_at AS DATE), city_code
+  # You can also express an aggregate structurally with `rollup:` -
+  # - phase: pre
+  #   rollup:
+  #     group_by: [city_code]
+  #     aggregations:
+  #       total_trips: "COUNT(*)"
+  #       total_revenue: "SUM(fare_amount)"
+
+# -----------------------------------------------------------------------------
+# QUALITY - business assertions on the aggregated metrics.
+# -----------------------------------------------------------------------------
+quality:
+  row_rules:
+    - name: revenue_non_negative
+      sql: "total_revenue >= 0"
+      category: validity
+    - name: trips_counted
+      sql: "total_trips > 0"
+  dataset_rules:
+    - unique:
+        field: kpi_date        # uniqueness on the grain
+    - row_count_between:
+        min: 1
+        max: 100000
+
+# -----------------------------------------------------------------------------
+# MATERIALIZATION - Gold marts typically MERGE (idempotent daily upsert).
+# -----------------------------------------------------------------------------
+materialization:
+  strategy: merge              # append | merge | overwrite | scd2
+  format: delta                # delta | iceberg | parquet
+  target_path: "{gold_path}/gold_trip_kpis"
+  partition_by: [kpi_date]
+  cluster_by: [city_code]
+  reprocess_policy: overwrite_partition
+  reprocess_date_column: kpi_date
+  table_properties:
+    delta.autoOptimize.optimizeWrite: "true"
+  # Kimball fact-table governance (optional):
+  fact:
+    type: aggregate            # transaction | periodic_snapshot | accumulating_snapshot | factless | aggregate
+
+# -----------------------------------------------------------------------------
+# SERVICE LEVELS - freshness/availability the mart promises its consumers.
+# -----------------------------------------------------------------------------
+service_levels:
+  freshness:
+    threshold: "24h"
+    field: kpi_date
+  availability: 99.5
+
+# -----------------------------------------------------------------------------
+# DOWNSTREAM CONSUMERS - who uses this mart (completes end-to-end lineage).
+# type: dashboard | report | api | ml_model | application | notebook | export
+# -----------------------------------------------------------------------------
+downstream:
+  - type: dashboard
+    name: Daily Revenue Dashboard
+    platform: power_bi         # power_bi | tableau | looker | databricks_sql | metabase | grafana | custom
+    url: https://app.powerbi.com/groups/xxx/dashboards/yyy
+    owner: analytics-team
+    refresh: "daily 06:00 UTC"
+    columns_used: [kpi_date, city_code, total_revenue]
+    sla: "< 4 hours"
+  - type: api
+    name: City KPIs API
+    platform: internal
+    owner: backend-team
+  - type: ml_model
+    name: Surge Forecast
+    platform: mlflow
+    owner: data-science
+
+# - LINEAGE -
+lineage:
+  enabled: true
+  capture_run_id: true
+  capture_domain: true
+  capture_system: true
+
+metadata:
+  refined_from: silver_trips

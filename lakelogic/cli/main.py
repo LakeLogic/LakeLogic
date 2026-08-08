@@ -1454,6 +1454,58 @@ def _write_or_print_contract(
         typer.echo(typer.style(f"  ✔  Written: {dest}", fg=typer.colors.CYAN))
 
 
+@app.command("export-odcs", rich_help_panel="Data Tooling")
+def export_odcs(
+    contract: Path = typer.Option(..., "--contract", "-c", help="Path to the LakeLogic contract YAML file."),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output path for the ODCS document (.yaml or .json). Prints to stdout if omitted.",
+    ),
+):
+    """
+    Export a LakeLogic contract to an Open Data Contract Standard (ODCS v3.x) document.
+
+    The emitted ODCS document round-trips: the LakeLogic execution context
+    (source, materialization, tier, target_layer) is carried in
+    ``customProperties.lakelogic`` so it can be re-imported and executed.
+
+    Examples
+    --------
+    # Print ODCS YAML to stdout
+    lakelogic export-odcs --contract contracts/customers.yaml
+
+    # Write an ODCS JSON file
+    lakelogic export-odcs --contract contracts/customers.yaml --output out/customers.odcs.json
+    """
+    from lakelogic.core.models import DataContract
+
+    try:
+        dc = DataContract.from_yaml(contract)
+    except FileNotFoundError as exc:
+        typer.echo(typer.style(f"✗  {exc}", fg=typer.colors.RED), err=True)
+        raise typer.Exit(code=1)
+
+    odcs_dict = dc.to_odcs()
+
+    if output and str(output).lower().endswith(".json"):
+        import json as _json
+
+        text = _json.dumps(odcs_dict, indent=2, default=str)
+    else:
+        import yaml as _yaml
+
+        text = _yaml.safe_dump(odcs_dict, sort_keys=False, default_flow_style=False)
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+        typer.echo(typer.style(f"✔  ODCS document written: {output}", fg=typer.colors.CYAN))
+    else:
+        typer.echo(text)
+
+
 @app.command(rich_help_panel="Environment Setup")
 def doctor():
     """

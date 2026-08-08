@@ -58,6 +58,8 @@ class BigQueryAdapter(EngineAdapter):
             raise ValueError("BigQuery adapter requires a source table name.")
 
         client = self._get_client()
+        self._session_id = None
+        self._start_session(client)
         self._register_links(client)
 
         current = table_name
@@ -100,7 +102,12 @@ class BigQueryAdapter(EngineAdapter):
         project = _resolve_env_value(
             metadata.get("bigquery_project") or os.getenv("BIGQUERY_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
         )
-        return bigquery.Client(project=project)
+        # Job location must match the datasets' location (e.g. EU) — else BigQuery runs
+        # the query in the default US region and cannot find EU tables.
+        location = _resolve_env_value(
+            metadata.get("bigquery_location") or os.getenv("BIGQUERY_LOCATION") or os.getenv("BQ_LOCATION")
+        )
+        return bigquery.Client(project=project, location=location or None)
 
     def _resolve_source_table(self, df: Any) -> Optional[str]:
         """
@@ -139,7 +146,9 @@ class BigQueryAdapter(EngineAdapter):
                 continue
 
             col_clause = ", ".join(link.columns) if link.columns else "*"
-            sql = f"CREATE OR REPLACE TEMP TABLE {link.name} AS SELECT {col_clause} FROM {table_name}"
+            sql = (
+                f"CREATE OR REPLACE TEMP TABLE {link.name} AS SELECT {col_clause} FROM {self._quote_table(table_name)}"
+            )
             self._execute(client, sql)
 
     def _temp_name(self, label: str) -> str:
@@ -155,6 +164,30 @@ class BigQueryAdapter(EngineAdapter):
         token = uuid.uuid4().hex[:8]
         return f"lg_{label}_{token}"
 
+    def _start_session(self, client) -> None:
+        """Open a BigQuery session so CREATE TEMP TABLE is legal and shared.
+
+        A standalone query job cannot use CREATE TEMPORARY TABLE — BigQuery
+        requires a script or session. Each contract statement runs as its own
+        query job, so we open one session per contract run and bind every
+        statement to it (see ``_job_config``) so temp tables created by earlier
+        statements are visible to later ones.
+        """
+        from google.cloud import bigquery
+
+        job = client.query("SELECT 1", job_config=bigquery.QueryJobConfig(create_session=True))
+        job.result()
+        self._session_id = job.session_info.session_id if job.session_info else None
+
+    def _job_config(self):
+        """Return a QueryJobConfig bound to the active session (or None)."""
+        session_id = getattr(self, "_session_id", None)
+        if not session_id:
+            return None
+        from google.cloud import bigquery
+
+        return bigquery.QueryJobConfig(connection_properties=[bigquery.ConnectionProperty("session_id", session_id)])
+
     def _execute(self, client, sql: str) -> None:
         """
         Execute a SQL statement in BigQuery.
@@ -163,7 +196,7 @@ class BigQueryAdapter(EngineAdapter):
             client: BigQuery client.
             sql: SQL statement.
         """
-        job = client.query(sql)
+        job = client.query(sql, job_config=self._job_config())
         job.result()
 
     def _quote_ident(self, name: str) -> str:
@@ -182,6 +215,161 @@ class BigQueryAdapter(EngineAdapter):
         escaped = text.replace("`", "\\`")
         return f"`{escaped}`"
 
+    def _quote_table(self, name: str) -> str:
+        """Backtick-quote a (possibly project-qualified) table reference.
+
+        BigQuery requires backticks around identifiers containing '-', which includes the
+        vast majority of project ids (e.g. `my-project-123.dataset.table`). Wrapping the
+        whole `project.dataset.table` path in a single backtick pair is valid BigQuery.
+        """
+        text = str(name).strip()
+        if text.startswith("`") and text.endswith("`"):
+            return text
+        return f"`{text}`"
+
+    # Warehouse/ANSI type keywords → BigQuery types. Contracts share one raw SQL
+    # transformation across engines; Snowflake/Spark accept DOUBLE/FLOAT/BIGINT, but
+    # BigQuery only knows FLOAT64/INT64/NUMERIC/STRING/BOOL. Normalising the CAST
+    # target keeps the contract identical across all platforms.
+    _SQL_TYPE_MAP = {
+        "DOUBLE PRECISION": "FLOAT64",
+        "DOUBLE": "FLOAT64",
+        "FLOAT": "FLOAT64",
+        "REAL": "FLOAT64",
+        "BIGINT": "INT64",
+        "INTEGER": "INT64",
+        "INT": "INT64",
+        "SMALLINT": "INT64",
+        "TINYINT": "INT64",
+        "NUMBER": "NUMERIC",
+        "DECIMAL": "NUMERIC",
+        "VARCHAR": "STRING",
+        "NVARCHAR": "STRING",
+        "CHAR": "STRING",
+        "TEXT": "STRING",
+        "BOOLEAN": "BOOL",
+    }
+
+    def _normalize_sql_types(self, sql: str) -> str:
+        """Rewrite CAST target types in raw transformation SQL to BigQuery types.
+
+        Scoped to the CAST-close position ``AS <type>)`` (optionally with whitespace)
+        so it never rewrites a column alias like ``SUM(x) AS total`` — an alias is not
+        immediately followed by a closing paren.
+        """
+        if not sql:
+            return sql
+        import re
+
+        alternation = "|".join(sorted((k.replace(" ", r"\s+") for k in self._SQL_TYPE_MAP), key=len, reverse=True))
+
+        def _repl(m):
+            key = re.sub(r"\s+", " ", m.group(1).upper())
+            return f"AS {self._SQL_TYPE_MAP.get(key, m.group(1))})"
+
+        return re.sub(rf"\bAS\s+({alternation})\s*\)", _repl, sql, flags=re.IGNORECASE)
+
+    @staticmethod
+    def _split_top_level(s: str) -> List[str]:
+        """Split a function argument list on top-level commas (respecting nested
+        parens and string literals)."""
+        args: List[str] = []
+        depth = 0
+        in_str = None
+        buf: List[str] = []
+        for ch in s:
+            if in_str:
+                buf.append(ch)
+                if ch == in_str:
+                    in_str = None
+                continue
+            if ch in ("'", '"'):
+                in_str = ch
+                buf.append(ch)
+            elif ch == "(":
+                depth += 1
+                buf.append(ch)
+            elif ch == ")":
+                depth -= 1
+                buf.append(ch)
+            elif ch == "," and depth == 0:
+                args.append("".join(buf))
+                buf = []
+            else:
+                buf.append(ch)
+        if buf:
+            args.append("".join(buf))
+        return args
+
+    def _rewrite_call(self, sql: str, fname: str, builder) -> str:
+        """Rewrite every ``fname(...)`` call via ``builder(args)`` (balanced-paren,
+        nesting-aware). ``builder`` returns the replacement string, or None to leave
+        the call untouched."""
+        import re
+
+        out = sql
+        pos = 0
+        while True:
+            m = re.search(rf"\b{fname}\s*\(", out[pos:], flags=re.IGNORECASE)
+            if not m:
+                break
+            start = pos + m.start()
+            open_paren = pos + m.end() - 1
+            depth = 0
+            i = open_paren
+            while i < len(out):
+                if out[i] == "(":
+                    depth += 1
+                elif out[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            args = [a.strip() for a in self._split_top_level(out[open_paren + 1 : i])]
+            rep = builder(args)
+            if rep is None:
+                pos = i + 1
+                continue
+            out = out[:start] + rep + out[i + 1 :]
+            pos = start + len(rep)
+        return out
+
+    def _rewrite_functions(self, sql: str) -> str:
+        """Translate warehouse/Spark SQL that BigQuery lacks. Contracts share one raw
+        SQL string across engines, so the translation lives here, not in the contract.
+
+        - ``CONCAT_WS(sep, a, …)`` → ``ARRAY_TO_STRING([a, …], sep)`` (both skip NULLs).
+        - ``TO_DATE(x)`` → ``DATE(CAST(x AS TIMESTAMP))`` (BigQuery has no TO_DATE;
+          robust for string dates/datetimes, timestamps and dates alike).
+        - bare ``UNION`` → ``UNION DISTINCT`` (BigQuery requires an explicit quantifier).
+        """
+        if not sql:
+            return sql
+        import re
+
+        out = self._rewrite_call(
+            sql,
+            "CONCAT_WS",
+            lambda a: f"ARRAY_TO_STRING([{', '.join(a[1:])}], {a[0]})" if len(a) >= 2 else None,
+        )
+        out = self._rewrite_call(
+            out,
+            "TO_DATE",
+            lambda a: f"DATE(CAST({a[0]} AS TIMESTAMP))" if len(a) == 1 else None,
+        )
+        out = re.sub(r"\bUNION\b(?!\s+(?:ALL|DISTINCT)\b)", "UNION DISTINCT", out, flags=re.IGNORECASE)
+        return out
+
+    @staticmethod
+    def _escape_str(text: str) -> str:
+        """Escape a Python string for a single-quoted BigQuery string literal.
+
+        BigQuery uses backslash escaping; ANSI quote-doubling ('') is parsed as two
+        adjacent (concatenated) string literals — a syntax error — so a rule message
+        like ``valid_email (EMAIL LIKE '%@%')`` must escape the quotes as ``\\'``.
+        """
+        return str(text).replace("\\", "\\\\").replace("'", "\\'")
+
     def _qualify(self, alias: str, name: str) -> str:
         """Build a qualified identifier (alias + column)."""
         return f"{alias}.{self._quote_ident(name)}"
@@ -194,11 +382,11 @@ class BigQueryAdapter(EngineAdapter):
             client: BigQuery client.
             table_name: Table to expose as `source`.
         """
-        self._execute(client, f"CREATE OR REPLACE TEMP TABLE source AS SELECT * FROM {table_name}")
+        self._execute(client, f"CREATE OR REPLACE TEMP TABLE source AS SELECT * FROM {self._quote_table(table_name)}")
         if self.contract.dataset:
             self._execute(
                 client,
-                f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset} AS SELECT * FROM {table_name}",
+                f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset} AS SELECT * FROM {self._quote_table(table_name)}",
             )
 
     def _apply_transformations(self, client, table_name: str, phase: str) -> str:
@@ -225,7 +413,10 @@ class BigQueryAdapter(EngineAdapter):
             if trans.sql:
                 self._create_source_alias(client, current)
                 step = self._temp_name(f"{phase}_sql_{idx}")
-                self._execute(client, f"CREATE OR REPLACE TEMP TABLE {step} AS {trans.sql}")
+                self._execute(
+                    client,
+                    f"CREATE OR REPLACE TEMP TABLE {step} AS {self._rewrite_functions(self._normalize_sql_types(trans.sql))}",
+                )
                 current = step
                 idx += 1
                 continue
@@ -470,7 +661,7 @@ class BigQueryAdapter(EngineAdapter):
         Returns:
             List of column names.
         """
-        job = client.query(f"SELECT * FROM {table_name} LIMIT 0")
+        job = client.query(f"SELECT * FROM {self._quote_table(table_name)} LIMIT 0", job_config=self._job_config())
         result = job.result()
         return [field.name for field in result.schema]
 
@@ -518,12 +709,19 @@ class BigQueryAdapter(EngineAdapter):
         if not self.contract.model or not self.contract.model.fields:
             return table_name, []
 
-        existing_cols = set(self._get_columns(client, table_name))
+        existing_cols = self._get_columns(client, table_name)
+        # BigQuery preserves the source's column case (e.g. lowercase CSV headers),
+        # while contracts declare fields in the platform-neutral canonical case
+        # (often UPPERCASE, matching Snowflake). Match case-insensitively so a
+        # `cancel_reason_code` source column resolves to a `CANCEL_REASON_CODE`
+        # field instead of being treated as both missing AND unknown (which also
+        # collides — BigQuery column names are case-insensitive).
+        existing_by_lower = {c.lower(): c for c in existing_cols}
         expected_fields = [f.name for f in self.contract.model.fields]
-        expected = set(expected_fields)
+        expected_lower = {name.lower() for name in expected_fields}
 
-        missing = expected - existing_cols
-        unknown = existing_cols - expected
+        missing = {f for f in expected_fields if f.lower() not in existing_by_lower}
+        unknown = {c for c in existing_cols if c.lower() not in expected_lower}
         system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
         unknown = unknown - system_cols - self._lineage_columns()
 
@@ -544,11 +742,13 @@ class BigQueryAdapter(EngineAdapter):
         select_exprs = []
         for field in self.contract.model.fields:
             target_type = "STRING" if cast_to_string else self._to_bigquery_type(field.type)
-            if field.name in existing_cols:
-                qfield = self._quote_ident(field.name)
-                select_exprs.append(f"SAFE_CAST({qfield} AS {target_type}) AS {qfield}")
+            qfield = self._quote_ident(field.name)
+            src = existing_by_lower.get(field.name.lower())
+            if src is not None:
+                # cast the real source column, alias it to the canonical field name
+                qsrc = self._quote_ident(src)
+                select_exprs.append(f"SAFE_CAST({qsrc} AS {target_type}) AS {qfield}")
             else:
-                qfield = self._quote_ident(field.name)
                 select_exprs.append(f"CAST(NULL AS {target_type}) AS {qfield}")
 
         if policy in ["allow", "quarantine"] and unknown:
@@ -565,7 +765,7 @@ class BigQueryAdapter(EngineAdapter):
         schema_table = self._temp_name("schema")
         self._execute(
             client,
-            f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {table_name}",
+            f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {self._quote_table(table_name)}",
         )
 
         # ── Detect post-phase SQL transforms that reshape columns ────────────
@@ -609,15 +809,15 @@ class BigQueryAdapter(EngineAdapter):
         category_exprs = []
 
         for err in schema_errors:
-            safe = err.replace("'", "''")
+            safe = self._escape_str(err)
             error_exprs.append(f"IF(TRUE, '{safe}', NULL)")
             category_exprs.append("IF(TRUE, 'schema', NULL)")
 
         for rule in row_rules:
-            err = f"Rule failed: {rule.name} ({rule.sql})".replace("'", "''")
+            err = self._escape_str(f"Rule failed: {rule.name} ({rule.sql})")
             cond = f"NOT COALESCE(({rule.sql}), FALSE)"
             error_exprs.append(f"IF({cond}, '{err}', NULL)")
-            cat = (rule.category or "rule").replace("'", "''")
+            cat = self._escape_str(rule.category or "rule")
             category_exprs.append(f"IF({cond}, '{cat}', NULL)")
 
         error_array = (
@@ -637,7 +837,7 @@ class BigQueryAdapter(EngineAdapter):
             f"""
             CREATE OR REPLACE TEMP TABLE {eval_table} AS
             SELECT *, {error_array} AS {self.ERROR_COLUMN}, {category_array} AS {self.CATEGORY_COLUMN}
-            FROM {table_name}
+            FROM {self._quote_table(table_name)}
             """,
         )
         return eval_table
@@ -694,7 +894,7 @@ class BigQueryAdapter(EngineAdapter):
         )
 
         for rule in rules:
-            job = client.query(rule.sql)
+            job = client.query(rule.sql, job_config=self._job_config())
             result = job.result()
             val = list(result)[0][0] if result.total_rows else None
 
@@ -732,5 +932,5 @@ class BigQueryAdapter(EngineAdapter):
         Returns:
             pandas.DataFrame
         """
-        job = client.query(f"SELECT * FROM {table_name}")
+        job = client.query(f"SELECT * FROM {table_name}", job_config=self._job_config())
         return job.result().to_dataframe()

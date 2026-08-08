@@ -1,0 +1,6 @@
+trip_id,city_code,fare_amount,distance_km,surge_multiplier,requested_at
+T1,LON,18.50,6.2,1.0,2026-01-05T10:00:00Z
+T2,LON,24.00,9.1,1.3,2026-01-05T18:30:00Z
+T3,MAN,12.75,3.4,1.0,2026-01-05T11:15:00Z
+T4,MAN,31.20,12.8,1.5,2026-01-06T08:05:00Z
+T5,LON,9.90,2.1,1.0,2026-01-06T09:45:00Z

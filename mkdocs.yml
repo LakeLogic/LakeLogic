@@ -24,25 +24,24 @@ theme:
     text: "Inter"
     code: "JetBrains Mono"
   palette:
-    # Dark mode (Default)
-    - scheme: slate
-      primary: custom
-      accent: light blue
-      toggle:
-        icon: material/brightness-7
-        name: Switch to light mode
-        
-    # Light mode (Optional Toggle)
+    # Light mode (Default)
     - scheme: default
       primary: custom
       accent: light blue
       toggle:
         icon: material/brightness-4
         name: Switch to dark mode
+
+    # Dark mode (Optional Toggle)
+    - scheme: slate
+      primary: custom
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
   features:
     - navigation.instant        # Instant loading (SPA-like)
     - navigation.tracking       # URL updates with scroll
-    - navigation.tabs           # Top-level tabs
     - navigation.top            # Back to top button
     - navigation.footer         # Previous/next links
     - navigation.indexes        # Allow index pages for sections
@@ -56,7 +55,7 @@ theme:
     - content.tabs.link         # Linked content tabs
 
 nav:
-  - Home: index.md
+  - Overview: index.md
   - Getting Started:
       - Installation: installation.md
   - Concepts:

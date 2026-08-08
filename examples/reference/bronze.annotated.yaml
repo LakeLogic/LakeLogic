@@ -1,0 +1,229 @@
+# =============================================================================
+# LakeLogic - BRONZE reference contract  (annotated "kitchen sink")
+# -----------------------------------------------------------------------------
+# Bronze = raw landing -> typed, deduplicated, quarantined Bronze table.
+# This file shows EVERY Bronze option in one place. Copy it, then DELETE the
+# blocks you don't need - a real Bronze contract is usually 20-40 lines.
+#
+# Vocabulary is the lean Open Lakehouse Contract (OLC) form:
+#   model / fields / type / row_rules  -  NOT the verbose ODCS names.
+#
+# Runs clean with:
+#   python -m lakelogic run \
+#     --contract examples/reference/bronze.annotated.yaml \
+#     --source   examples/reference/samples/bronze_orders.csv
+# =============================================================================
+
+version: 1.0.0                 # Contract semantic version (yours, not the spec's). Bump on schema changes.
+dataset: orders                # Logical dataset name. Optional label; handy for logs/registry.
+
+info:
+  title: bronze_orders         # Human/table title. Used for run-log slug, watermark file, quarantine naming.
+  table_name: bronze_orders    # Canonical output table name (Unity Catalog / warehouse). Optional.
+  description: Raw e-commerce orders landed from the storefront event stream.
+  owner: data-platform@company.com   # Contact/owner. Free text or email.
+  target_layer: bronze         # bronze | silver | gold | reference. Aliases accepted: raw, landing, staging, curated...
+  status: active               # Free-text lifecycle tag (draft | active | deprecated). Optional.
+  classification: internal     # Free-text data classification. Optional.
+  # -- Data-mesh coordinates (optional; power the mesh graph & catalog tree) --
+  domain: marketplace          # Business domain, e.g. marketplace, finance, logistics.
+  system: storefront           # Source system, e.g. zoopla, salesforce, sap, storefront.
+
+# -----------------------------------------------------------------------------
+# SOURCE - where the raw data is acquired from.
+# type: landing | stream | table | delta | iceberg | database | dlt
+#   landing  - files in a landing dir (csv/json/ndjson/parquet)   <- most common Bronze
+#   table / delta / iceberg - read an existing table (Bronze reading a raw table)
+#   database - JDBC/SQL pull (needs a sqlite:/// or driver URL in path)
+#   dlt      - REST API / verified source via dlt (see github_issues.yaml)
+# -----------------------------------------------------------------------------
+source:
+  type: landing
+  # CLOUD path example - swap gs:// or abfss:// for the SAME contract, only the
+  # scheme changes (s3:// AWS | gs:// GCP | abfss:// Azure ADLS | local path in dev):
+  path: s3://acme-lake/landing/storefront/orders/    # swap gs:// or abfss:// - same contract
+  format: csv                  # csv | json | ndjson | parquet | delta. Inferred from extension if omitted.
+  load_mode: full              # full | incremental | cdc.
+                               #   full        - reprocess everything each run (default, one-shot loads)
+                               #   incremental - only new rows since last watermark (needs metadata.run_log_* below)
+                               #   cdc         - apply insert/update/delete ops (needs cdc_op_field / cdc_timestamp_field)
+
+  # -- Incremental options (only used when load_mode: incremental) ------------
+  # watermark_field: created_at          # Column that advances each run (timestamp/date/id).
+  # watermark_strategy: pipeline_log     # max_target | pipeline_log | manifest | lookback | date_range | delta_version
+  # lookback: "7 days"                   # strategy: lookback - sliding window back from now ("3 hours", "1 month"...)
+  # target_path: s3://acme-lake/bronze/orders/   # strategy: max_target - MAX(watermark) read from this Delta table
+
+  # -- Date-partitioned landing (limit globbing to recent partitions) ---------
+  # partition:
+  #   format: "y_%Y/m_%m/d_%d"           # strftime tokens matching the landing folder layout
+  #   lookback_days: 3                   # only scan the last N date partitions
+  #   file_pattern: "*.csv"              # glob; auto-derived from source.format if omitted
+
+  # -- Empty-source behaviour -------------------------------------------------
+  empty_behavior: skip         # skip (log no_new_data, return empty - good for scheduled incrementals) | fail
+
+  # -- Landing-zone lifecycle: what to do with source files AFTER a good commit -
+  # post_ingestion:
+  #   action: archive          # delete | archive | retain (default retain)
+  #   archive_path: s3://acme-lake/archive/storefront/orders/   # required when action: archive
+  #   cleanup_is_blocking: false   # false = cleanup failure never fails the run
+
+# -----------------------------------------------------------------------------
+# SERVER - storage + ingestion settings, incl. the SCHEMA-EVOLUTION policy.
+# (Separate from `source`: `source` says where to READ, `server` says how to
+#  STORE/ingest. Both may be present. For a validate-only run `server` is inert.)
+# -----------------------------------------------------------------------------
+server:
+  type: s3                     # s3 | gcs | adls | azure | local | glue
+  path: s3://acme-lake/bronze/orders/
+  format: delta                # parquet | delta | iceberg | csv | json
+  mode: validate               # validate (Quality-Gate only) | ingest (raw->Bronze movement)
+
+  # -- SCHEMA EVOLUTION - the headline Bronze control --------------------------
+  cast_to_string: false        # true = coerce EVERY incoming column to string (bulletproof landing; type later in Silver)
+  schema_policy:
+    evolution: append          # strict | append | merge | overwrite | compatible | allow
+                               #   strict  - reject any schema change
+                               #   append  - allow NEW columns, forbid drops/type changes
+                               #   allow   - accept anything (loosest)
+    unknown_fields: quarantine # allow | drop | quarantine - what to do with columns NOT in `model.fields`
+                               #   allow      - keep unexpected columns
+                               #   drop       - silently discard them
+                               #   quarantine - route rows with unexpected columns to the quarantine store
+  # Legacy aliases still accepted and auto-migrated into schema_policy above:
+  #   server.schema_evolution: strict        -> schema_policy.evolution
+  #   server.allow_schema_drift: false       -> schema_policy.unknown_fields: quarantine
+
+# -----------------------------------------------------------------------------
+# MODEL - the declared schema. Bronze keeps it permissive (few `required`).
+# type: string | integer | bigint | float | double | decimal | boolean |
+#       date | timestamp   (SQL-native names pass through to the engine)
+# -----------------------------------------------------------------------------
+model:
+  grain: "one row per order event"   # Human-readable grain description. Optional, documentation only.
+  fields:
+    - name: order_id
+      type: integer
+      required: true           # required -> auto-generates an IS NOT NULL rule; nulls get quarantined.
+    - name: event_id
+      type: string
+      required: true
+    - name: customer_email
+      type: string
+      pii: true                # Personal data -> pulled into GDPR/HIPAA erasure + masked when a masking gate runs.
+      masking: partial         # nullify | hash | redact | partial | encrypt (per-field default strategy)
+      masking_format: "{first1}***@{domain}"   # template for `partial` (tokens: {first1}-{first9},{last1}-{last9},{domain})
+      security_groups: [pii_readers]           # groups allowed to see UNMASKED values; everyone else sees masked.
+    - name: amount
+      type: float
+    - name: currency
+      type: string
+    - name: status
+      type: string
+    - name: created_at
+      type: string             # Bronze often keeps timestamps as raw strings; cast/clean in Silver.
+    - name: attributes
+      type: string             # Semi-structured raw JSON kept as a string blob in Bronze (flatten in Silver).
+    # -- Nested / dotted-path field (semi-structured) ---------------------------
+    # Declare a field INSIDE a JSON object with a dotted path. Only enforced when
+    # the column actually exists post-flatten - so keep it `required: false` in
+    # Bronze where the blob is still a raw string. Uncomment once `attributes`
+    # is flattened (source.flatten_nested / a Silver json_extract) to a real column:
+    # - name: attributes.channel
+    #   type: string
+    #   required: false
+
+# -----------------------------------------------------------------------------
+# TRANSFORMATIONS - Bronze usually only DEDUPLICATES (typing/cleaning is Silver).
+# phase: pre (before quality) | post (after quality). deduplicate defaults pre.
+# -----------------------------------------------------------------------------
+transformations:
+  - deduplicate:
+      by: [order_id]           # dedup keys (alias: `on`). Keep one row per key.
+      sort_by: [created_at]    # tiebreaker column(s) deciding WHICH row survives.
+      order: desc              # desc = keep newest, asc = keep oldest.
+
+# -----------------------------------------------------------------------------
+# PRIMARY KEY - logical key of the Bronze table (also a merge/dedup anchor).
+# -----------------------------------------------------------------------------
+primary_key: [order_id]
+
+# -----------------------------------------------------------------------------
+# QUALITY - row-level predicates. Failing rows are QUARANTINED (not dropped).
+# Each rule: name + sql (DuckDB/Spark dialect, auto-transpiled). severity/category optional.
+# Business-friendly shorthands (not_null, accepted_values, range, regex_match) also allowed.
+# -----------------------------------------------------------------------------
+quality:
+  enforce_required: true       # true = auto IS NOT NULL rule for every `required` field (default true).
+  row_rules:
+    - name: positive_amount
+      sql: "amount > 0"
+      severity: error          # error | warning | info
+      category: validity       # correctness | completeness | consistency | validity | accuracy | timeliness | uniqueness | integrity
+    - name: known_status
+      sql: "status IN ('pending','shipped','delivered','returned','cancelled')"
+    # Business-friendly shorthand equivalents (pick either style):
+    - not_null: event_id
+    - accepted_values:
+        currency: [GBP, USD, EUR]
+  dataset_rules:
+    - unique: order_id         # whole-dataset uniqueness (checked AFTER dedup).
+
+# -----------------------------------------------------------------------------
+# QUARANTINE - where bad rows go, and how they're annotated.
+# -----------------------------------------------------------------------------
+quarantine:
+  enabled: true
+  target: examples/reference/_out/bronze_quarantine   # file path OR "table:catalog.schema._quarantine"
+  format: parquet              # parquet (default) | csv | delta | json
+  write_mode: append           # append (default) | overwrite
+  include_error_reason: true   # add a column explaining WHICH rule each row failed (highly recommended).
+  fail_on_quarantine: false    # true = fail the whole run if ANY row is quarantined (strict gate).
+  # NOTE on quality gating thresholds: a "min good ratio" / "fail below X%" policy
+  # is NOT a per-contract field - it lives at the DOMAIN/registry SLO level
+  # (registry slo.quality.min_good_ratio / max_quarantine_ratio). The per-contract
+  # equivalents are `fail_on_quarantine` (above) and quality.fail_pipeline_on_dataset_error.
+
+# -----------------------------------------------------------------------------
+# MATERIALIZATION - how the GOOD rows are written. (Inert on a validate-only run.)
+# strategy: append | merge | overwrite | scd2
+# -----------------------------------------------------------------------------
+materialization:
+  strategy: append             # Bronze is typically append-only (immutable raw history).
+  format: delta                # delta | iceberg | parquet
+  target_path: s3://acme-lake/bronze/orders/
+  partition_by: [currency]     # physical partition columns.
+  # cluster_by: [order_id]     # Z-order / cluster columns (Delta/Iceberg).
+  table_properties:            # engine table properties passed through on write.
+    delta.autoOptimize.optimizeWrite: "true"
+  # -- Soft-delete columns (mark deleted instead of physically removing) -------
+  # Friendly shorthand (top-level) - expands into the soft_delete_* fields below:
+  # soft_deletes:
+  #   enabled: true
+  #   flag_field: _lakelogic_is_deleted
+  #   timestamp_field: _lakelogic_deleted_at
+  #   reason_field: _lakelogic_delete_reason
+
+# -----------------------------------------------------------------------------
+# METADATA - free-form tags + REQUIRED run-log backend when load_mode: incremental.
+# (Uncomment ONE run_log_* key if you switch source.load_mode to incremental/cdc,
+#  otherwise the watermark is never persisted and every run re-reads everything.)
+# -----------------------------------------------------------------------------
+metadata:
+  source_of_record: storefront-kafka
+  # run_log_dir: examples/reference/_out/run_logs      # lightweight - one JSON file per run
+  # run_log_path: examples/reference/_out/run_log.json # single overwritten JSON file
+  # run_log_table: bronze.run_logs                     # queryable DuckDB/Spark/SQLite table
+
+# -----------------------------------------------------------------------------
+# LINEAGE - stamp provenance columns onto every output row. Off by default.
+# -----------------------------------------------------------------------------
+lineage:
+  enabled: true
+  capture_source_path: true    # add _lakelogic_source (the file/table each row came from)
+  capture_timestamp: true      # add _lakelogic_processed_at
+  capture_run_id: true         # add _lakelogic_run_id
+  capture_contract_name: true  # add _lakelogic_contract_name
+  capture_domain: true         # add _lakelogic_domain
+  capture_system: true         # add _lakelogic_system

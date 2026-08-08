@@ -1,32 +1,30 @@
 ---
 title: LakeLogic — Open-Source Data Contracts
 description: Define schemas, quality rules, PII handling, lineage, and materialization in YAML, then execute the contract with Polars, DuckDB, or Spark.
-hide:
-  - navigation
 ---
 
-<div class="hero-section" markdown>
+<div class="ll-eyebrow"><span class="ll-eyebrow__pip"></span> v1.0 · Apache 2.0</div>
 
-<div class="hero-content" markdown>
-# Define data trust once. <span style="color: var(--md-accent-fg-color);">Use it from development to production.</span>
+<div class="hero-section"><div class="hero-content"><h1 class="hero-title">Define data trust once.<br><span style="color:var(--md-accent-fg-color)">Use it everywhere.</span></h1><p class="hero-subtitle">LakeLogic turns version-controlled YAML contracts into executable checks — schema, quality, PII, lineage, and SLAs enforced from your laptop to your CI pipeline to production.</p><div class="hero-cta"><a class="md-button md-button--primary" href="installation.html">Get started →</a> <a class="md-button md-button--secondary" href="examples.html">Browse examples</a> <a class="md-button" href="https://github.com/lakelogic/LakeLogic" target="_blank">★ Star on GitHub</a></div></div><div class="hero-visual"><div class="ll-win ll-win--yaml"><div class="ll-win__head"><span class="ll-win__dots"><i></i><i></i><i></i></span><span class="ll-win__name">contracts/orders.yaml</span></div><pre class="ll-code"><span class="k">version</span>: <span class="n">1.0.0</span>
+<span class="k">dataset</span>: orders
 
-<p class="hero-subtitle" style="font-size: 1.3rem; font-weight: 500;">
-Bad data usually appears after it has reached a dashboard or decision.<br>
-LakeLogic turns version-controlled YAML contracts into executable checks for your data pipelines.
-</p>
+<span class="k">model</span>:
+  <span class="k">fields</span>:
+    - <span class="k">name</span>: order_id
+      <span class="k">type</span>: <span class="s">integer</span>
+      <span class="k">required</span>: <span class="b">true</span>
+<span class="hl">    - <span class="k">name</span>: customer_email
+      <span class="k">type</span>: <span class="s">string</span>
+      <span class="k">pii</span>: <span class="b">true</span>
+      <span class="k">masking</span>: <span class="s">partial</span></span>
+    - <span class="k">name</span>: amount
+      <span class="k">type</span>: <span class="s">float</span></pre></div><div class="ll-pr"><div class="ll-pr__head"><span class="ll-pr__num">pull request #243</span><span class="ll-pr__count">2 of 3 passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--ok">✓</span><span class="ll-pr__name">ci / <b>build</b></span><span class="ll-res ll-res--ok">Passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--ok">✓</span><span class="ll-pr__name">ci / <b>unit-tests</b></span><span class="ll-res ll-res--ok">Passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--no">✕</span><span class="ll-pr__name">lakelogic / <b>data-contract</b></span><span class="ll-res ll-res--no">Breaking</span></div></div></div></div>
 
-<p class="hero-keyword-anchor" style="font-size: 0.95rem; opacity: 0.8; line-height: 1.5;" markdown="1">
-Define schema, quality rules, PII handling, lineage, service levels, and materialization once. Run the contract with [Polars](https://pola.rs/){: target="_blank" }, [DuckDB](https://duckdb.org/){: target="_blank" }, or [Spark](https://spark.apache.org/){: target="_blank" }.<br><br>
-<strong style="color: var(--md-accent-fg-color); font-size: 1.05rem;">Git-native &nbsp;·&nbsp; Runs in your environment &nbsp;·&nbsp; Apache 2.0</strong>
-</p>
+## How it works
 
-<div class="hero-cta" markdown>
-[ :simple-googlecolab: Run the 5-Minute Quickstart ](https://colab.research.google.com/github/lakelogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb){: target="_blank" .md-button .md-button--primary .md-button--lg }
-[ :simple-github: View on GitHub ](https://github.com/lakelogic/LakeLogic){: target="_blank" .md-button .md-button--secondary }
-</div>
-</div>
+Four steps, one contract file — from a YAML definition to an enforced check in CI.
 
-<div class="hero-visual" markdown>
+<div class="ll-howitworks" markdown>
 === "1. Define"
 
     ```yaml title="orders_contract.yaml"
@@ -96,8 +94,6 @@ Define schema, quality rules, PII handling, lineage, service levels, and materia
     ```
 
     Add the command to your pull-request workflow to reject changes when a configured gate fails. Some gates require comparison or lineage context from your repository.
-
-</div>
 
 </div>
 

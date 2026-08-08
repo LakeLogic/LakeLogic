@@ -1,0 +1,5 @@
+kpi_date,city_code,total_trips,total_revenue,total_distance_km,avg_fare,avg_surge,_lakelogic_source,_lakelogic_processed_at,_lakelogic_run_id,_lakelogic_contract_name,_lakelogic_created_at,_lakelogic_created_by
+2026-01-06,MAN,1,31.2,12.8,31.2,1.5,C:\_Personal\_SaaS\lakelogic\examples\reference\samples\gold_trips.csv,2026-08-07T23:46:20+00:00,efc40439-e654-40ab-936c-a69cb25bd2fc,gold.annotated.yaml (v1.0.0),2026-08-07T23:46:20+00:00,colli
+2026-01-06,LON,1,9.9,2.1,9.9,1.0,C:\_Personal\_SaaS\lakelogic\examples\reference\samples\gold_trips.csv,2026-08-07T23:46:20+00:00,efc40439-e654-40ab-936c-a69cb25bd2fc,gold.annotated.yaml (v1.0.0),2026-08-07T23:46:20+00:00,colli
+2026-01-05,LON,2,42.5,15.3,21.25,1.15,C:\_Personal\_SaaS\lakelogic\examples\reference\samples\gold_trips.csv,2026-08-07T23:46:20+00:00,efc40439-e654-40ab-936c-a69cb25bd2fc,gold.annotated.yaml (v1.0.0),2026-08-07T23:46:20+00:00,colli
+2026-01-05,MAN,1,12.75,3.4,12.75,1.0,C:\_Personal\_SaaS\lakelogic\examples\reference\samples\gold_trips.csv,2026-08-07T23:46:20+00:00,efc40439-e654-40ab-936c-a69cb25bd2fc,gold.annotated.yaml (v1.0.0),2026-08-07T23:46:20+00:00,colli
