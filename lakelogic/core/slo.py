@@ -47,6 +47,25 @@ def _read_delta_local(path: str, storage_options: Optional[dict] = None):
     return pl.read_delta(path, storage_options=storage_options)
 
 
+def _coerce_utc(ts: Any) -> datetime.datetime:
+    """Coerce a timestamp-like value to a tz-aware **UTC** ``datetime``.
+
+    Accepts a ``datetime``/pandas·polars ``Timestamp`` (tz-aware or naive) or an ISO-8601
+    string. A **naive** value is assumed to already be UTC and is stamped as such — it is
+    *never* localized to the host timezone. This is the load-bearing fix: the previous
+    ``datetime.fromtimestamp(ts.timestamp(), tz=utc)`` path applied the machine's local
+    offset to naive timestamps (polars strips tz on ``cast(pl.Datetime)``), so freshness /
+    retention ages were wrong by the host's UTC offset on any non-UTC operator — green on
+    UTC CI, silently off elsewhere.
+    """
+    if isinstance(ts, str):
+        parsed = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.timezone.utc)
+    if getattr(ts, "tzinfo", None) is not None:
+        return ts.astimezone(datetime.timezone.utc)
+    return ts.replace(tzinfo=datetime.timezone.utc)
+
+
 class SLOCheckResult(BaseModel):
     layer: str
     entity: str
@@ -260,14 +279,8 @@ class SLOValidator:
 
             try:
                 # Calculate pipeline delay
-                if hasattr(latest_ts, "timestamp"):
-                    latest_utc = datetime.datetime.fromtimestamp(latest_ts.timestamp(), tz=datetime.timezone.utc)
-                elif isinstance(latest_ts, str):
-                    # ISO string from Delta/polars string columns — parse then add UTC if naive
-                    _parsed = datetime.datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
-                    latest_utc = _parsed if _parsed.tzinfo else _parsed.replace(tzinfo=datetime.timezone.utc)
-                else:
-                    latest_utc = latest_ts.replace(tzinfo=datetime.timezone.utc)
+                # Naive timestamps are assumed UTC (never host-localized); see _coerce_utc.
+                latest_utc = _coerce_utc(latest_ts)
 
                 delay = (now - latest_utc).total_seconds() / 60
                 passed = delay <= max_delay
@@ -320,15 +333,7 @@ class SLOValidator:
                                     src_ts = None
 
                             if src_ts is not None:
-                                if hasattr(src_ts, "timestamp"):
-                                    src_utc = datetime.datetime.fromtimestamp(
-                                        src_ts.timestamp(), tz=datetime.timezone.utc
-                                    )
-                                elif isinstance(src_ts, str):
-                                    _p = datetime.datetime.fromisoformat(src_ts.replace("Z", "+00:00"))
-                                    src_utc = _p if _p.tzinfo else _p.replace(tzinfo=datetime.timezone.utc)
-                                else:
-                                    src_utc = src_ts.replace(tzinfo=datetime.timezone.utc)
+                                src_utc = _coerce_utc(src_ts)
                                 source_delay_min = round((now - src_utc).total_seconds() / 60, 1)
                                 source_col_used = src_col
                                 source_passed = source_delay_min <= source_slo_max
@@ -1095,10 +1100,8 @@ class SLOValidator:
                 logger.debug(f"  ⏭ Retention [{layer}] {entity}: no valid timestamp found in {source_cols} — skipped")
                 continue
 
-            if hasattr(min_ts, "timestamp"):
-                min_utc = datetime.datetime.fromtimestamp(min_ts.timestamp(), tz=datetime.timezone.utc)
-            else:
-                min_utc = min_ts.replace(tzinfo=datetime.timezone.utc)
+            # Naive timestamps are assumed UTC (never host-localized); see _coerce_utc.
+            min_utc = _coerce_utc(min_ts)
 
             age_minutes = round((now - min_utc).total_seconds() / 60, 1)
             passed = age_minutes <= retention_minutes

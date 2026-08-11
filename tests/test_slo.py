@@ -868,6 +868,49 @@ def test_check_retention_duckdb_and_polars_paths(monkeypatch):
     assert all(r.passed for r in polars_results)
 
 
+def test_coerce_utc_treats_naive_timestamps_as_utc_not_host_local():
+    """Regression guard for the tz bug that was green on UTC CI but wrong everywhere else.
+
+    ``polars`` strips the timezone when it casts a column to ``pl.Datetime``, so the
+    freshness/retention paths receive a *naive* datetime holding the UTC wall-clock. The old
+    code ran it through ``datetime.fromtimestamp(ts.timestamp(), tz=utc)``, which interprets a
+    naive value in the **host** timezone — silently shifting the record by the machine's UTC
+    offset (retention breaches miscomputed on any non-UTC operator; green only on UTC CI).
+    This test forces a non-UTC local zone so a reintroduction is caught even on UTC CI.
+    """
+    import datetime as dt
+    import os
+    import time
+
+    naive = dt.datetime(2026, 3, 26, 11, 15, 0)  # a UTC wall-clock, tz stripped by polars
+    expected = naive.replace(tzinfo=dt.timezone.utc)
+
+    # A naive value is stamped UTC, never localized.
+    assert slo._coerce_utc(naive) == expected
+    # An aware value in another zone is converted to the same instant in UTC.
+    aware = dt.datetime(2026, 3, 26, 14, 15, 0, tzinfo=dt.timezone(dt.timedelta(hours=3)))
+    assert slo._coerce_utc(aware) == expected
+    # ISO strings keep working (naive → UTC, aware → converted).
+    assert slo._coerce_utc("2026-03-26T11:15:00") == expected
+    assert slo._coerce_utc("2026-03-26T11:15:00Z") == expected
+
+    # Under a forced non-UTC host zone the naive value must STILL be treated as UTC — the
+    # assertion the original bug failed (only) off UTC. Skipped where tzset is absent (Windows).
+    if not hasattr(time, "tzset"):
+        return
+    prior = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = "America/New_York"  # UTC-4/-5, definitively not UTC
+        time.tzset()
+        assert slo._coerce_utc(naive) == expected
+    finally:
+        if prior is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = prior
+        time.tzset()
+
+
 def test_run_checks_includes_retention_and_tolerates_write_failure(monkeypatch):
     registry = SimpleNamespace(
         domain="marketing",
