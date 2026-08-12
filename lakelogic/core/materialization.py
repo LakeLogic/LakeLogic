@@ -3491,6 +3491,91 @@ def write_to_secondary_targets(
     return results
 
 
+def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
+    """Create/update a **catalog-registered** Iceberg table via pyiceberg.
+
+    Lets non-Spark engines (polars/duckdb) write the SAME catalog-registered
+    Iceberg tables Spark uses — the open, multi-engine promise of Iceberg — rather
+    than falling back to a path-based (Hadoop-catalog) table that no catalog
+    (e.g. AWS Glue / Athena) can see.
+
+    ``table_identifier`` is the target with the ``table:`` prefix stripped, e.g.
+    ``glue.reference.dim_country`` — the first segment is the catalog name and the
+    remainder is ``namespace.table``. Catalog connection props resolve from contract
+    metadata (``iceberg_catalog_type|region|uri|warehouse``) then env
+    (``ICEBERG_CATALOG_*`` / ``AWS_REGION`` / ``ICEBERG_WAREHOUSE``), defaulting to
+    Glue. Write op follows the materialization ``strategy``: overwrite → overwrite,
+    merge/scd2 → upsert on the primary key (pyiceberg), else append.
+    """
+    try:
+        from pyiceberg.catalog import load_catalog
+    except ImportError:
+        raise ValueError("Catalog-registered Iceberg writes require pyiceberg: pip install pyiceberg")
+    import pyarrow as pa
+
+    metadata = getattr(contract, "metadata", None) or {}
+    parts = [p for p in str(table_identifier).split(".") if p]
+    if len(parts) < 2:
+        raise ValueError(f"Iceberg catalog target must be 'catalog.namespace.table', got '{table_identifier}'")
+    catalog_name = parts[0]
+    identifier = ".".join(parts[1:])           # namespace.table (pyiceberg identifier)
+    namespace = ".".join(parts[1:-1]) or "default"
+
+    props: Dict[str, Any] = {"type": (metadata.get("iceberg_catalog_type") or os.getenv("ICEBERG_CATALOG_TYPE") or "glue").lower()}
+    region = metadata.get("iceberg_catalog_region") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+    if region:
+        props["glue.region"] = region
+        props["s3.region"] = region
+    uri = (metadata.get("iceberg_catalog_uri") or os.getenv("ICEBERG_CATALOG_URI")
+           or os.getenv("PYICEBERG_CATALOG__DEFAULT__URI"))
+    if uri:
+        props["uri"] = uri
+    warehouse = (metadata.get("iceberg_catalog_warehouse") or os.getenv("ICEBERG_CATALOG_WAREHOUSE")
+                 or os.getenv("ICEBERG_WAREHOUSE"))
+    if warehouse:
+        props["warehouse"] = warehouse
+
+    catalog = load_catalog(catalog_name, **props)
+
+    if hasattr(df, "to_arrow"):            # polars
+        arrow = df.to_arrow()
+    elif hasattr(df, "to_arrow_table"):    # duckdb relation
+        arrow = df.to_arrow_table()
+    else:
+        arrow = pa.Table.from_pandas(df, preserve_index=False)
+    arrow = _sanitize_arrow_nulls(arrow)
+
+    try:
+        catalog.create_namespace_if_not_exists(namespace)
+    except AttributeError:  # older pyiceberg
+        try:
+            catalog.create_namespace(namespace)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    try:
+        tbl = catalog.load_table(identifier)
+        exists = True
+    except Exception:
+        tbl = catalog.create_table(identifier, schema=arrow.schema)
+        exists = False
+
+    primary_key = list(getattr(contract, "primary_key", None) or [])
+    if not exists:
+        tbl.append(arrow); op = "create+append"
+    elif strategy == "overwrite":
+        tbl.overwrite(arrow); op = "overwrite"
+    elif strategy in ("merge", "scd2", "upsert") and primary_key and hasattr(tbl, "upsert"):
+        tbl.upsert(arrow, join_cols=primary_key); op = "upsert"
+    else:
+        tbl.append(arrow); op = "append"
+
+    logger.info(f"Materialized {arrow.num_rows} rows to Iceberg catalog table {catalog_name}.{identifier} (op={op})")
+    return {"target": f"{catalog_name}.{identifier}", "rows_written": arrow.num_rows, "format": "iceberg", "op": op}
+
+
 def materialize_dataframe(
     df: Any,
     contract,
@@ -3553,6 +3638,14 @@ def materialize_dataframe(
     # accessible.  Fall back to the materialization 'location' field which
     # contains the actual storage path (e.g. abfss://...).
     resolved_str = str(resolved_target)
+    # Non-Spark + Iceberg + a catalog-qualified ('table:') target → write through
+    # pyiceberg to the configured catalog (e.g. AWS Glue), so polars/duckdb create
+    # and update the SAME catalog-registered Iceberg tables Spark uses, instead of
+    # falling back to a path-based (Hadoop-catalog) table no catalog can see.
+    if engine_name != "spark" and resolved_format == "iceberg" and resolved_str.startswith("table:"):
+        return _write_iceberg_via_catalog(
+            df, resolved_str[6:], contract, mat, strategy=(mat.strategy or "append").lower()
+        )
     if resolved_str.startswith("table:") and engine_name != "spark":
         location = getattr(mat, "location", None)
         if location:
