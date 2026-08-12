@@ -4053,27 +4053,17 @@ class DataProcessor:
                 bad_count = None
                 source_count = None
 
-                # Use a union with a marker column to count source/good/bad in one action
-                marked_frames = []
-                if source_df is not None:
-                    marked_frames.append(source_df.select(F.lit("source").alias("_count_marker")))
-                if good_df is not None:
-                    marked_frames.append(good_df.select(F.lit("good").alias("_count_marker")))
-                if bad_df is not None:
-                    marked_frames.append(bad_df.select(F.lit("bad").alias("_count_marker")))
-
-                if marked_frames:
-                    combined = marked_frames[0]
-                    for frame in marked_frames[1:]:
-                        combined = combined.union(frame)
-                    counts_result = combined.groupBy("_count_marker").count().collect()
-                    counts_map = {row["_count_marker"]: row["count"] for row in counts_result}
-                    source_count = counts_map.get("source")
-                    good_count = counts_map.get("good", 0)
-                    bad_count = counts_map.get("bad", 0)
-                else:
-                    good_count = 0
-                    bad_count = 0
+                # Count source/good/bad separately. A previous optimisation
+                # unioned all three frames into ONE query (single action) to count
+                # them together — but for contracts with several transformations
+                # that concatenates the shared, complex lineage three times into a
+                # single plan, which can make Catalyst's plan grow super-linearly
+                # and OOM the driver at plan time. Separate counts keep each plan
+                # single-lineage; the row volumes here are always small.
+                source_count = source_df.count() if source_df is not None else None
+                good_count = good_df.count() if good_df is not None else 0
+                bad_count = bad_df.count() if bad_df is not None else 0
+                logger.debug(f"counts: source={source_count} good={good_count} bad={bad_count}")
 
                 total = (good_count or 0) + (bad_count or 0)
                 ratio = bad_count / total if total > 0 else None

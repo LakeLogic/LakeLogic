@@ -326,6 +326,15 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
     if not backend:
         backend = "spark" if engine_name == "spark" else "delta"
 
+    # When running on Spark, write an Iceberg run-log table THROUGH Spark's own
+    # Iceberg support (the SparkSession's already-configured catalog) rather than
+    # pyiceberg — which needs a separately-provided catalog URI
+    # (PYICEBERG_CATALOG__DEFAULT__URI) and otherwise fails. This mirrors the
+    # medallion and quarantine writers so all three land in the same catalog.
+    if backend == "iceberg" and engine_name == "spark":
+        metadata = {**metadata, "run_log_table_format": metadata.get("run_log_table_format") or "iceberg"}
+        backend = "spark"
+
     record = _flatten_report(report)
 
     if backend == "spark":

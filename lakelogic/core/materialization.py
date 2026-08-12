@@ -2718,6 +2718,27 @@ def _materialize_spark_dataframe(  # pragma: no cover
         soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
         soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
 
+        # ── Truncate a long transform lineage before the merge ───────────────
+        # The DataFrame merge references `df` in BOTH the anti-join and the union,
+        # duplicating its lineage within a single query plan. For contracts with
+        # several transformations that makes Catalyst's plan grow super-linearly
+        # and OOM the driver at plan-compile time. Materialising `df` once here
+        # collapses it to a cache scan, so each reference downstream is trivial.
+        # GATE: only when the contract has transformations — trivial pass-through
+        # contracts have a short lineage that never explodes and shouldn't pay for
+        # an extra materialisation pass.
+        _merge_ckpt = None
+        if getattr(contract, "transformations", None):
+            try:
+                df = df.localCheckpoint(eager=True)
+                _merge_ckpt = df
+                logger.debug("incoming_df checkpointed before merge (lineage truncated)")
+            except Exception as _ck_err:  # pragma: no cover - no local checkpoint dirs
+                logger.debug(f"localCheckpoint unavailable; using persist()+count(): {_ck_err}")
+                df = df.persist()
+                df.count()
+                _merge_ckpt = df
+
         result = _spark_merge_dataframe(
             spark,
             df,
@@ -2735,6 +2756,15 @@ def _materialize_spark_dataframe(  # pragma: no cover
             soft_delete_reason_col=soft_delete_reason_col,
             merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
         )
+
+        # UNPERSIST: release the checkpoint's cached blocks now the merge has
+        # committed, so they don't accumulate across contracts in a long
+        # multi-contract SparkSession.
+        if _merge_ckpt is not None:
+            try:
+                _merge_ckpt.unpersist()
+            except Exception:  # pragma: no cover
+                pass
 
         if target_str.startswith("table:"):
             table_name = target_str[6:]
