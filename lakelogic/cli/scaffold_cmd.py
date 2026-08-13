@@ -24,8 +24,20 @@ def scaffold_command(
     system: Optional[str] = typer.Option(
         None, help="Registry system (default: first contract's info.system)."
     ),
-    engine: str = typer.Option(
-        "duckdb", help="Engine for the generated entrypoint (duckdb | polars | spark)."
+    target: str = typer.Option(
+        "python",
+        help=(
+            "Platform flavor: python (run_pipeline.py entrypoint) | fabric (per-layer "
+            ".ipynb notebooks over OneLake) | databricks (source-format notebooks + "
+            "asset bundle). Contracts and registry are identical across targets."
+        ),
+    ),
+    engine: Optional[str] = typer.Option(
+        None,
+        help=(
+            "Engine for the generated entrypoint (duckdb | polars | spark). "
+            "Default: duckdb for --target python; the notebook targets run on Spark."
+        ),
     ),
     environment: str = typer.Option("dev", help="Environment the entrypoint resolves."),
     generator: Optional[str] = typer.Option(
@@ -56,6 +68,7 @@ def scaffold_command(
             out,
             domain=domain,
             system=system,
+            target=target,
             engine=engine,
             environment=environment,
             provenance=provenance if provenance.lines() else None,
@@ -64,4 +77,9 @@ def scaffold_command(
         logger.error("scaffold failed: {}", exc)
         raise typer.Exit(code=1)
     typer.echo(f"Scaffolded {len(result.files)} file(s) into {result.out_dir}")
-    typer.echo(f"Run it: cd {result.out_dir} && python run_pipeline.py")
+    if target == "fabric":
+        typer.echo("Run it: upload to your lakehouse Files/ and import notebooks/ (see README.md)")
+    elif target == "databricks":
+        typer.echo(f"Run it: cd {result.out_dir} && databricks bundle deploy && databricks bundle run medallion_run")
+    else:
+        typer.echo(f"Run it: cd {result.out_dir} && python run_pipeline.py")
