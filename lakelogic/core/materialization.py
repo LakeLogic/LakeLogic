@@ -3576,6 +3576,64 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
     return {"target": f"{catalog_name}.{identifier}", "rows_written": arrow.num_rows, "format": "iceberg", "op": op}
 
 
+def _configure_ducklake_cloud(con, *paths) -> None:
+    """Authenticate DuckDB's cloud-storage extensions for any cloud DuckLake path.
+
+    If a DuckLake ``DATA_PATH`` (or metadata path) points at object storage —
+    ``s3://`` (AWS), ``gs://`` (GCS), or ``az://`` / ``abfss://`` (Azure ADLS) — the
+    Parquet files live there, so DuckDB needs the matching extension + credentials
+    before the ``ATTACH``. Credentials come from each provider's **default chain** or
+    standard env vars, never hard-coded:
+
+      * S3  — AWS default chain (env / shared profile / SSO / IAM role); ``AWS_REGION``.
+      * GCS — HMAC key from ``GCS_KEY_ID`` / ``GCS_SECRET``.
+      * Azure — ``AZURE_STORAGE_CONNECTION_STRING``, else the Azure credential chain
+        with ``AZURE_STORAGE_ACCOUNT``.
+
+    A no-op for purely local (``./lakehouse``) or MotherDuck (``md:``) paths, so the
+    zero-config local experience is untouched.
+    """
+    schemes = set()
+    for p in paths:
+        low = str(p or "").lower()
+        if low.startswith("s3://"):
+            schemes.add("s3")
+        elif low.startswith(("gs://", "gcs://")):
+            schemes.add("gcs")
+        elif low.startswith(("az://", "abfss://", "abfs://", "azure://")):
+            schemes.add("azure")
+    if not schemes:
+        return
+    if schemes & {"s3", "gcs"}:
+        con.execute("INSTALL httpfs; LOAD httpfs;")
+    if "azure" in schemes:
+        con.execute("INSTALL azure; LOAD azure;")
+    try:
+        if "s3" in schemes:
+            region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or ""
+            reg = f", REGION '{region}'" if region else ""
+            con.execute(f"CREATE OR REPLACE SECRET _ll_s3 (TYPE S3, PROVIDER credential_chain{reg})")
+        if "gcs" in schemes:
+            key = os.getenv("GCS_KEY_ID") or os.getenv("GOOGLE_HMAC_KEY_ID")
+            secret = os.getenv("GCS_SECRET") or os.getenv("GOOGLE_HMAC_SECRET")
+            if key and secret:
+                con.execute(f"CREATE OR REPLACE SECRET _ll_gcs (TYPE GCS, KEY_ID '{key}', SECRET '{secret}')")
+            else:
+                logger.warning("DuckLake GCS path but no GCS_KEY_ID/GCS_SECRET set — relying on ambient credentials.")
+        if "azure" in schemes:
+            conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+            account = os.getenv("AZURE_STORAGE_ACCOUNT") or os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
+            if conn_str:
+                con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, CONNECTION_STRING '{conn_str}')")
+            elif account:
+                con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, ACCOUNT_NAME '{account}')")
+            else:
+                logger.warning("DuckLake Azure path but no AZURE_STORAGE_* set — relying on ambient credentials.")
+    except Exception as e:
+        logger.warning(f"DuckLake cloud credential setup incomplete ({sorted(schemes)}): {e}. "
+                       f"Falling back to any ambient DuckDB credentials.")
+
+
 def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
     """Create/update a table in a **DuckLake** catalog (DuckDB's ``ducklake`` extension).
 
@@ -3640,6 +3698,7 @@ def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strate
         if _motherduck:
             con.execute(f'CREATE DATABASE IF NOT EXISTS "{catalog}" (TYPE DUCKLAKE)')
         else:
+            _configure_ducklake_cloud(con, data_path, meta_path)  # s3:// / gs:// / abfss:// data paths
             con.execute(f"ATTACH 'ducklake:{meta_path}' AS \"{catalog}\" (DATA_PATH '{data_path}')")
         con.execute(f'CREATE SCHEMA IF NOT EXISTS "{catalog}"."{schema}"')
         con.register("_ll_incoming", arrow)
