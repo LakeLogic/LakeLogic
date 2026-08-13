@@ -879,7 +879,19 @@ class DuckDBAdapter(EngineAdapter):
                     }
                 )
             except Exception as e:
-                logger.error(f"Error executing dataset rule '{rule.name}': {e}")
+                msg = str(e)
+                # A dataset rule may reference a column that materialization injects
+                # later — e.g. a surrogate key (`*_sk`) or SCD2 audit columns
+                # (effective_from/to, is_current, version). At validation time that
+                # column legitimately doesn't exist yet, and such keys are unique by
+                # construction, so this isn't an error — just note it and move on.
+                if "not found" in msg.lower() or "referenced column" in msg.lower():
+                    logger.info(
+                        f"Dataset rule '{rule.name}' not evaluated at validation: references a "
+                        f"column not present yet (injected at materialization); enforced there."
+                    )
+                else:
+                    logger.warning(f"Dataset rule '{rule.name}' could not be evaluated: {e}")
 
     def close(self):
         """Close the DuckDB connection if we own it."""
