@@ -10,6 +10,7 @@ makes it a standalone engine suitable for lightweight pipelines, Colab
 demos, and SQL-heavy contracts.
 """
 
+import os
 import time
 from pathlib import Path
 from typing import Any, List, Tuple
@@ -17,6 +18,37 @@ from typing import Any, List, Tuple
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter
+
+
+def _read_ducklake_table_arrow(fq_table: str, columns=None):
+    """Read a DuckLake table ('catalog.schema.table') into a PyArrow table.
+
+    DuckLake IS DuckDB, so a `table:` link on the duckdb engine can be satisfied by
+    reading it straight from the attached DuckLake catalog — local (file-backed) or
+    MotherDuck ('md:'). Catalog metadata/data paths come from the env the DuckLake
+    materializer also uses (DUCKLAKE_METADATA / DUCKLAKE_DATA_PATH); MotherDuck needs
+    the motherduck_token env.
+    """
+    import duckdb
+
+    meta = os.environ.get("DUCKLAKE_METADATA", "")
+    catalog = fq_table.split(".")[0]
+    if str(meta).startswith("md:"):
+        con = duckdb.connect("md:")
+        con.execute("INSTALL ducklake; LOAD ducklake;")
+        con.execute(f'CREATE DATABASE IF NOT EXISTS "{catalog}" (TYPE DUCKLAKE)')
+    else:
+        data = os.environ.get("DUCKLAKE_DATA_PATH", "")
+        con = duckdb.connect()
+        con.execute("INSTALL ducklake; LOAD ducklake;")
+        con.execute(f"ATTACH 'ducklake:{meta}' AS \"{catalog}\" (DATA_PATH '{data}')")
+    try:
+        cols = "*"
+        if columns:
+            cols = ", ".join(f'"{c}"' for c in columns)
+        return con.execute(f"SELECT {cols} FROM {fq_table}").arrow()
+    finally:
+        con.close()
 
 
 class DuckDBAdapter(EngineAdapter):
@@ -94,8 +126,25 @@ class DuckDBAdapter(EngineAdapter):
         """Register linked reference datasets as DuckDB views for JOINs."""
         for link in self.contract.links:
             try:
-                # Skip table-type links (Spark-only)
                 table_path = link.path[6:] if link.path and link.path.startswith("table:") else None
+                _table_ref = link.table or table_path
+                # DuckLake table link — read it from the attached DuckLake catalog
+                # (DuckLake is DuckDB) instead of the Spark-only skip below.
+                if _table_ref and os.environ.get("DUCKLAKE_METADATA"):
+                    try:
+                        _pa = _read_ducklake_table_arrow(_table_ref, getattr(link, "columns", None))
+                        # Materialise into a real table (not a registered arrow view): a
+                        # registered arrow scan is single-use, but a fact may reference the
+                        # link twice in one query (a join AND an IN-subquery), which would
+                        # otherwise read 0 rows the second time.
+                        self.con.register("_ll_link_src", _pa)
+                        self.con.execute(f'CREATE OR REPLACE TABLE "{link.name}" AS SELECT * FROM _ll_link_src')
+                        self.con.unregister("_ll_link_src")
+                        logger.info(f"Registered DuckLake link '{link.name}' from {_table_ref}")
+                        continue
+                    except Exception as e:
+                        logger.warning(f"DuckLake link '{link.name}' ({_table_ref}) failed: {e}")
+                # Skip table-type links (Spark-only)
                 if link.table or (link.type and link.type.lower() == "table") or table_path:
                     table_name = link.table or table_path or link.path
                     logger.warning(
