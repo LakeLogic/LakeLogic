@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 from loguru import logger
 
+from lakelogic.scaffold.dbt_project import scaffold_dbt_project
 from lakelogic.scaffold.project import Provenance, ScaffoldError, scaffold_project
 
 
@@ -29,7 +30,8 @@ def scaffold_command(
         help=(
             "Platform flavor: python (run_pipeline.py entrypoint) | fabric (per-layer "
             ".ipynb notebooks over OneLake) | databricks (source-format notebooks + "
-            "asset bundle). Contracts and registry are identical across targets."
+            "asset bundle) | dbt (Snowflake-first dbt project compiled from the "
+            "contracts). Contracts stay canonical across all targets."
         ),
     ),
     engine: Optional[str] = typer.Option(
@@ -63,16 +65,28 @@ def scaffold_command(
         generator=generator, revision_hash=revision_hash, seal_hash=seal_hash, source=source
     )
     try:
-        result = scaffold_project(
-            contracts,
-            out,
-            domain=domain,
-            system=system,
-            target=target,
-            engine=engine,
-            environment=environment,
-            provenance=provenance if provenance.lines() else None,
-        )
+        if target == "dbt":
+            if engine is not None:
+                logger.error("scaffold failed: --engine does not apply to --target dbt")
+                raise typer.Exit(code=1)
+            result = scaffold_dbt_project(
+                contracts,
+                out,
+                domain=domain,
+                system=system,
+                provenance=provenance if provenance.lines() else None,
+            )
+        else:
+            result = scaffold_project(
+                contracts,
+                out,
+                domain=domain,
+                system=system,
+                target=target,
+                engine=engine,
+                environment=environment,
+                provenance=provenance if provenance.lines() else None,
+            )
     except ScaffoldError as exc:
         logger.error("scaffold failed: {}", exc)
         raise typer.Exit(code=1)
@@ -81,5 +95,7 @@ def scaffold_command(
         typer.echo("Run it: upload to your lakehouse Files/ and import notebooks/ (see README.md)")
     elif target == "databricks":
         typer.echo(f"Run it: cd {result.out_dir} && databricks bundle deploy && databricks bundle run medallion_run")
+    elif target == "dbt":
+        typer.echo(f"Run it: cd {result.out_dir} && dbt run && dbt test (see README.md)")
     else:
         typer.echo(f"Run it: cd {result.out_dir} && python run_pipeline.py")
