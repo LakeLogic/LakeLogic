@@ -3576,6 +3576,101 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
     return {"target": f"{catalog_name}.{identifier}", "rows_written": arrow.num_rows, "format": "iceberg", "op": op}
 
 
+def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
+    """Create/update a table in a **DuckLake** catalog (DuckDB's ``ducklake`` extension).
+
+    DuckLake is DuckDB's open lakehouse format — a SQL-database catalog (SQLite/DuckDB/
+    Postgres) plus Parquet data, with snapshots/time-travel. This materialises a batch
+    into a DuckLake table so contracts land in DuckLake the same way they do in
+    Delta/Iceberg — pure local DuckDB, no cloud or JVM.
+
+    ``table_identifier`` is the target with the ``table:`` prefix stripped, e.g.
+    ``rideflow_lake.marketplace.bronze_trips`` — first segment is the attached catalog
+    name, then ``schema.table``. Catalog metadata + data paths resolve from contract
+    metadata (``ducklake_metadata`` / ``ducklake_data_path``) then env
+    (``DUCKLAKE_METADATA`` / ``DUCKLAKE_DATA_PATH``). Write op follows ``strategy``:
+    overwrite → CREATE OR REPLACE, merge/scd2 → delete-by-PK + insert, else append.
+    """
+    import duckdb
+    import pyarrow as pa
+
+    metadata = getattr(contract, "metadata", None) or {}
+    parts = [p for p in str(table_identifier).split(".") if p]
+    if len(parts) < 2:
+        raise ValueError(f"DuckLake target must be 'catalog.[schema.]table', got '{table_identifier}'")
+    catalog = parts[0]
+    schema = parts[1] if len(parts) >= 3 else "main"
+    table = parts[-1]
+    fq = f'"{catalog}"."{schema}"."{table}"'
+
+    meta_path = (metadata.get("ducklake_metadata") or os.getenv("DUCKLAKE_METADATA")
+                 or "./lakehouse/ducklake_catalog.ducklake")
+    data_path = (metadata.get("ducklake_data_path") or os.getenv("DUCKLAKE_DATA_PATH")
+                 or "./lakehouse/ducklake_data/")
+    # Local catalog/data → ensure dirs exist. Remote targets (MotherDuck 'md:',
+    # cloud object storage 's3://'/'gs://'/'abfss://') are managed server-side.
+    def _is_remote(p: str) -> bool:
+        p = str(p)
+        return "://" in p or p.startswith("md:")
+
+    if not _is_remote(data_path):
+        os.makedirs(data_path, exist_ok=True)
+    if not _is_remote(meta_path):
+        _meta_dir = os.path.dirname(meta_path)
+        if _meta_dir:
+            os.makedirs(_meta_dir, exist_ok=True)
+
+    if hasattr(df, "to_arrow"):
+        arrow = df.to_arrow()
+    elif hasattr(df, "to_arrow_table"):
+        arrow = df.to_arrow_table()
+    else:
+        arrow = pa.Table.from_pandas(df, preserve_index=False)
+    arrow = _sanitize_arrow_nulls(arrow)
+
+    # Two DuckLake backends, shared write logic below:
+    #  * MotherDuck — metadata 'md:...' (or ducklake_backend=motherduck): create a
+    #    NATIVE DuckLake database. ('ATTACH ducklake:md:' is rejected in MotherDuck
+    #    "workspace mode".) Requires the motherduck_token env var.
+    #  * Local — attach a file-backed DuckLake catalog + local/S3 data path.
+    _motherduck = str(meta_path).startswith("md:") or (metadata.get("ducklake_backend") or "").lower() == "motherduck"
+    con = duckdb.connect("md:") if _motherduck else duckdb.connect()
+    try:
+        con.execute("INSTALL ducklake; LOAD ducklake;")
+        if _motherduck:
+            con.execute(f'CREATE DATABASE IF NOT EXISTS "{catalog}" (TYPE DUCKLAKE)')
+        else:
+            con.execute(f"ATTACH 'ducklake:{meta_path}' AS \"{catalog}\" (DATA_PATH '{data_path}')")
+        con.execute(f'CREATE SCHEMA IF NOT EXISTS "{catalog}"."{schema}"')
+        con.register("_ll_incoming", arrow)
+
+        exists = con.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE database_name = ? AND schema_name = ? AND table_name = ?",
+            [catalog, schema, table],
+        ).fetchone()[0] > 0
+        primary_key = list(getattr(contract, "primary_key", None) or [])
+
+        if not exists:
+            con.execute(f"CREATE TABLE {fq} AS SELECT * FROM _ll_incoming")
+            op = "create"
+        elif strategy == "overwrite":
+            con.execute(f"CREATE OR REPLACE TABLE {fq} AS SELECT * FROM _ll_incoming")
+            op = "overwrite"
+        elif strategy in ("merge", "scd2", "upsert") and primary_key:
+            _on = " AND ".join([f'{fq}."{k}" = i."{k}"' for k in primary_key])
+            con.execute(f"DELETE FROM {fq} WHERE EXISTS (SELECT 1 FROM _ll_incoming i WHERE {_on})")
+            con.execute(f"INSERT INTO {fq} SELECT * FROM _ll_incoming")
+            op = "upsert"
+        else:
+            con.execute(f"INSERT INTO {fq} SELECT * FROM _ll_incoming")
+            op = "append"
+    finally:
+        con.close()
+
+    logger.info(f"Materialized {arrow.num_rows} rows to DuckLake table {catalog}.{schema}.{table} (op={op})")
+    return {"target": f"{catalog}.{schema}.{table}", "rows_written": arrow.num_rows, "format": "ducklake", "op": op}
+
+
 def materialize_dataframe(
     df: Any,
     contract,
@@ -3644,6 +3739,11 @@ def materialize_dataframe(
     # falling back to a path-based (Hadoop-catalog) table no catalog can see.
     if engine_name != "spark" and resolved_format == "iceberg" and resolved_str.startswith("table:"):
         return _write_iceberg_via_catalog(
+            df, resolved_str[6:], contract, mat, strategy=(mat.strategy or "append").lower()
+        )
+    # DuckLake (DuckDB's SQL-catalog lakehouse) — a catalog write, not a file path.
+    if resolved_format == "ducklake" and resolved_str.startswith("table:"):
+        return _write_ducklake_via_catalog(
             df, resolved_str[6:], contract, mat, strategy=(mat.strategy or "append").lower()
         )
     if resolved_str.startswith("table:") and engine_name != "spark":
