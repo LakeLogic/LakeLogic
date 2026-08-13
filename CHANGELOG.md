@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.43.0] — 2026-08-13
+
+### Added
+
+- **scaffold**: Dbt target — Snowflake-first dbt project compiled from contracts
+- **scaffold**: Platform target flavors — fabric/databricks notebooks + asset bundle
+- **scaffold**: Lakelogic scaffold — contracts in, a runnable medallion project out
 ## [1.42.0] — 2026-08-11
 
 ### Added
@@ -474,6 +481,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.43.0]: https://github.com/lakelogic/LakeLogic/compare/v1.42.0...v1.43.0
 [1.42.0]: https://github.com/lakelogic/LakeLogic/compare/v1.41.0...v1.42.0
 [1.41.0]: https://github.com/lakelogic/LakeLogic/compare/v1.40.6...v1.41.0
 [1.40.6]: https://github.com/lakelogic/LakeLogic/compare/v1.40.4...v1.40.6
