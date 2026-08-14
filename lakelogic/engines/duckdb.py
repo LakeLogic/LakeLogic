@@ -466,6 +466,21 @@ class DuckDBAdapter(EngineAdapter):
             flags=re.IGNORECASE,
         )
 
+        # to_date(x, 'yyyy-MM-dd') -> strptime(x, '%Y-%m-%d')::DATE  (Spark 2-arg form)
+        sql = re.sub(
+            r"\bto_date\s*\(\s*(.*?)\s*,\s*'(.*?)'\s*\)",
+            _date_repl,
+            sql,
+            flags=re.IGNORECASE,
+        )
+        # to_date(x) -> CAST(x AS DATE)  (Spark 1-arg form; DuckDB has no to_date)
+        sql = re.sub(
+            r"\bto_date\s*\(\s*([^(),]+?)\s*\)",
+            r"CAST(\1 AS DATE)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
         return sql
 
     # ── Pre/Post transformations ──────────────────────────────────────────
