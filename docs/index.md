@@ -20,6 +20,8 @@ description: Define schemas, quality rules, PII handling, lineage, and materiali
     - <span class="k">name</span>: amount
       <span class="k">type</span>: <span class="s">float</span></pre></div><div class="ll-pr"><div class="ll-pr__head"><span class="ll-pr__num">pull request #243</span><span class="ll-pr__count">2 of 3 passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--ok">✓</span><span class="ll-pr__name">ci / <b>build</b></span><span class="ll-res ll-res--ok">Passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--ok">✓</span><span class="ll-pr__name">ci / <b>unit-tests</b></span><span class="ll-res ll-res--ok">Passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--no">✕</span><span class="ll-pr__name">lakelogic / <b>data-contract</b></span><span class="ll-res ll-res--no">Breaking</span></div></div></div></div>
 
+*LakeLogic — the open-source reference framework for the Open Lakehouse Contract.*
+
 !!! abstract "Built on the Open Lakehouse Contract"
     LakeLogic is the reference framework for the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)** — the open, engine-neutral standard for lakehouse data contracts. Your `.yaml` contracts are portable OLC documents; LakeLogic executes them identically across Polars, DuckDB, and Spark. See the [OLC reference](https://lakelogic.github.io/open-lakehouse-contract/reference/anatomy/) for the full spec.
 
@@ -161,6 +163,25 @@ LakeLogic parses contract declarations, executes supported validation and transf
 LakeLogic does not create domain ownership, cloud permissions, alert-delivery infrastructure, retention jobs, or regulatory compliance by itself. Those responsibilities remain with your platform and organisation. The contract provides a versioned control surface that can participate in them.
 
 For catalog-specific behaviour, see [capabilities](capabilities.md), [cloud integration](cloud_integration.md), and [automatic credentials](automatic_credentials.md).
+
+## LakeLogic vs. LakeLogic Platform
+
+**LakeLogic (open source)** is the reference framework — it runs your OLC contracts anywhere. **LakeLogic Platform** is the commercial layer built on top of it: it consumes the telemetry the open-source framework emits and turns it into org-wide observability, governance, and AI-assisted incident resolution.
+
+| | LakeLogic (open source) | LakeLogic Platform |
+| --- | --- | --- |
+| License | Apache 2.0 · free | Commercial |
+| Run contracts — schema, quality, PII, lineage, SLOs — across Polars / DuckDB / Spark | ✓ | ✓ |
+| Local development + CI validation gates | ✓ `lakelogic validate` | ✓ |
+| Materialization (Delta / Iceberg / warehouse) | ✓ | ✓ |
+| Quarantine, reconciliation, run evidence | ✓ | ✓ |
+| Hosting | Self-hosted / your infrastructure | Fully managed |
+| Cross-pipeline observability | Emits telemetry | Consumes it |
+| Zeus — agentic AI incident diagnosis & resolution (MTTR) | — | ✓ |
+| Contract Studio — visual authoring & review | — | ✓ |
+| Lineage Explorer + governance / compliance dashboards | — | ✓ |
+
+The contract is the same portable OLC document in both — start on open source, and nothing you write is locked in.
 
 ## Continue Learning
 
