@@ -250,6 +250,36 @@ def _extract_anthropic(
     return extracted
 
 
+def _extract_regex(
+    config: ExtractionConfig,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic, offline extraction via regex — no LLM, no network.
+
+    ``config.patterns`` maps each output field to a regex with one capture group,
+    applied to the ``text_column`` value (``prompt``). A field whose pattern does
+    not match yields ``None``. Because it is fully deterministic and engine-neutral,
+    this provider makes the extraction path testable and conformance-checkable, and
+    is a genuinely useful option for semi-structured text where an LLM is overkill.
+    """
+    import re as _re
+
+    patterns = getattr(config, "patterns", None) or {}
+    text = prompt or ""
+    extracted: Dict[str, Any] = {}
+    for field, pattern in patterns.items():
+        try:
+            m = _re.search(pattern, text)
+        except _re.error as exc:  # bad pattern → surface, don't silently drop
+            raise ValueError(f"extraction.patterns['{field}'] is not a valid regex: {exc}") from exc
+        extracted[field] = (m.group(1) if m.groups() else m.group(0)) if m else None
+    extracted["_lakelogic_llm_provider"] = "regex"
+    extracted["_lakelogic_llm_cost_usd"] = 0.0
+    return extracted
+
+
 def _extract_local(
     config: ExtractionConfig,
     prompt: str,
@@ -952,15 +982,17 @@ def extract_row(
 
     # Step 2: Render prompt (local providers may not have a template)
     provider = config.provider
-    if config.prompt_template and provider not in ("unstructured", "spacy"):
+    if config.prompt_template and provider not in ("unstructured", "spacy", "regex"):
         prompt = _render_prompt(config.prompt_template, row)
     else:
-        # For unstructured/spacy: pass the text column value directly
+        # For unstructured/spacy/regex: pass the text column value directly
         text_col = config.text_column or "text"
         prompt = str(row.get(text_col, ""))
 
     # Step 3: Call provider
-    if provider == "unstructured":
+    if provider == "regex":
+        extracted = _extract_regex(config, prompt, config.system_prompt)
+    elif provider == "unstructured":
         extracted = _extract_unstructured(config, prompt, config.system_prompt)
     elif provider == "spacy":
         extracted = _extract_spacy(config, prompt, config.system_prompt)
@@ -982,7 +1014,7 @@ def extract_row(
         raise ValueError(
             f"Unknown extraction provider: {provider!r}. "
             f"Supported: openai, anthropic, azure_openai, google, local, "
-            f"unstructured, spacy, pdfplumber, easyocr"
+            f"regex, unstructured, spacy, pdfplumber, easyocr"
         )
 
     # Step 4: Score confidence

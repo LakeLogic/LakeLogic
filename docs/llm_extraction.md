@@ -40,6 +40,7 @@ good, bad = proc.run(files_df)   # contract.extraction.preprocessing.file_column
 
 | Provider | Install | Input | Cost |
 | -------- | ------- | ----- | ---- |
+| `regex` | built-in | Semi-structured text | $0, offline, **deterministic** |
 | `local` (pdfplumber) | `lakelogic[extraction-ocr]` | PDF, DOCX | $0, offline |
 | `rapidocr` | `lakelogic[extraction-ocr]` | Scanned images | $0, ONNX, no torch |
 | `spacy` | `lakelogic[nlp]` | Free text | $0, local NER |
@@ -49,6 +50,33 @@ good, bad = proc.run(files_df)   # contract.extraction.preprocessing.file_column
 | `ollama` | `lakelogic[ai]` | Any | $0, local LLM |
 | `azure_openai` | `lakelogic[ai]` | Any | Per token |
 | `bedrock` | `lakelogic[ai]` | Any | Per token |
+
+The `extraction:` block is run by the pipeline itself — extracted fields are then
+validated, quality-checked, and materialized by the contract like any other column.
+
+### `regex` — deterministic offline extraction
+
+For semi-structured text where an LLM is overkill, `provider: regex` maps each output
+field to a regex (one capture group) applied to `text_column`. Fully deterministic and
+offline — the same output on every engine (Polars, DuckDB, Spark), no API key, no cost.
+
+```yaml
+model:
+  fields:
+    - { name: note, type: string }
+    - { name: temperature, type: integer }   # extracted, then cast + validated
+    - { name: status, type: string }
+extraction:
+  provider: regex
+  text_column: note
+  patterns:
+    temperature: 'temperature=(\d+)'
+    status: 'status=(\w+)'
+```
+
+A field whose pattern does not match yields `null`. Because it is deterministic, `regex`
+is the provider used to conformance-test the extraction path across engines; LLM providers
+ride the same wiring but are non-deterministic and therefore out of conformance scope.
 
 ---
 

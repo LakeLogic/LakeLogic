@@ -23,6 +23,11 @@ class SparkAdapter(EngineAdapter):
             return text
         return f"`{text.replace('`', '``')}`"
 
+    def _regex_sql(self, field: str, pattern: str) -> str:
+        """Spark SQL regex predicate — Spark has no ``REGEXP_MATCHES``; use RLIKE."""
+        esc = str(pattern).replace("'", "''")
+        return f"{self._quote_ident(field)} RLIKE '{esc}'"
+
     def execute(self, df: Any) -> Tuple[Any, Any]:
         """
         Executes the contract using PySpark.
@@ -403,7 +408,11 @@ class SparkAdapter(EngineAdapter):
                 output = trans.split.output or trans.split.field
                 if trans.split.field in current_df.columns:
                     logger.debug(f"Pre-Transform [Split]: {trans.split.field} -> {output}")
-                    current_df = current_df.withColumn(output, F.split(F.col(trans.split.field), trans.split.delimiter))
+                    # to_json gives a compact JSON array string, matching the DuckDB
+                    # (to_json) and Polars (compact json.dumps) engines.
+                    current_df = current_df.withColumn(
+                        output, F.to_json(F.split(F.col(trans.split.field), trans.split.delimiter))
+                    )
                     existing = set(current_df.columns)
             elif trans.explode:
                 output = trans.explode.output or trans.explode.field
@@ -429,19 +438,21 @@ class SparkAdapter(EngineAdapter):
             elif trans.filter:
                 logger.debug(f"Pre-Transform [Filter]: {trans.filter.sql}")
                 current_df = current_df.filter(trans.filter.sql)
-            elif trans.deduplicate:
-                logger.debug(f"Pre-Transform [Deduplicate]: {trans.deduplicate.on}")
-                if trans.deduplicate.sort_by:
-                    w = Window.partitionBy(*trans.deduplicate.on)
-                    order_cols = []
-                    for col in trans.deduplicate.sort_by:
-                        order_cols.append(F.col(col).desc() if trans.deduplicate.order == "desc" else F.col(col).asc())
-                    w = w.orderBy(*order_cols)
-                    current_df = (
-                        current_df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
-                    )
-                else:
-                    current_df = current_df.dropDuplicates(trans.deduplicate.on)
+            elif trans.deduplicate or getattr(trans, "deduplicate_by_latest", None):
+                dd = self._resolve_deduplicate(trans)  # handles `deduplicate` + `deduplicate_by_latest`
+                if dd:
+                    logger.debug(f"Pre-Transform [Deduplicate]: {dd.on}")
+                    if dd.sort_by:
+                        w = Window.partitionBy(*dd.on)
+                        order_cols = [
+                            F.col(col).desc() if dd.order == "desc" else F.col(col).asc() for col in dd.sort_by
+                        ]
+                        w = w.orderBy(*order_cols)
+                        current_df = (
+                            current_df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
+                        )
+                    else:
+                        current_df = current_df.dropDuplicates(dd.on)
 
             # ── Post-Step Sync ──────────────────────────────────────────────
             # Re-register the updated DataFrame as 'source' so that the NEXT
@@ -655,6 +666,45 @@ class SparkAdapter(EngineAdapter):
                     select_exprs.append(col_expr.alias(alias))
 
                 current_df = joined.select(*select_exprs)
+            elif getattr(trans, "json_extract", None):
+                cfg = trans.json_extract
+                logger.debug(f"Post-Transform [JsonExtract]: {cfg.source} -> {cfg.field}")
+                from pyspark.sql import functions as F
+
+                extracted = F.get_json_object(F.col(cfg.source), cfg.path)
+                if cfg.cast:
+                    spark_type = {
+                        "float": "double", "double": "double", "int": "int", "integer": "int",
+                        "long": "bigint", "bool": "boolean", "boolean": "boolean", "string": "string",
+                    }.get(str(cfg.cast).lower(), "string")
+                    extracted = extracted.cast(spark_type)
+                current_df = current_df.withColumn(cfg.field, extracted)
+            elif getattr(trans, "date_range_explode", None):
+                cfg = trans.date_range_explode
+                logger.debug(f"Post-Transform [DateRangeExplode]: {cfg.start_col}..{cfg.end_col} => {cfg.output}")
+                import re as _re
+
+                from pyspark.sql import functions as F
+
+                def _dp(c):  # tolerant of ISO + compact YYYYMMDD
+                    iso = F.concat_ws(
+                        "-", F.substring(F.col(c), 1, 4), F.substring(F.col(c), 5, 2), F.substring(F.col(c), 7, 2)
+                    )
+                    return F.to_date(F.when(F.col(c).rlike(r"^[0-9]{8}$"), iso).otherwise(F.col(c)))
+
+                start_e = _dp(cfg.start_col)
+                end_e = (
+                    F.least(F.coalesce(_dp(cfg.end_col), F.current_date()), F.current_date())
+                    if getattr(cfg, "end_col", None)
+                    else F.current_date()
+                )
+                _intv = str(getattr(cfg, "interval", None) or "1d").strip().lower()
+                _m = _re.match(r"(\d+)\s*([a-z]+)", _intv)
+                _num = _m.group(1) if _m else "1"
+                _unit = {"d": "day", "day": "day", "days": "day", "w": "week", "week": "week",
+                         "mo": "month", "month": "month"}.get(_m.group(2) if _m else "d", "day")
+                seq = F.sequence(start_e, end_e, F.expr(f"interval {_num} {_unit}"))
+                current_df = current_df.withColumn(cfg.output, F.explode(seq))
             elif trans.filter and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Filter]: {trans.filter.sql}")
                 current_df = current_df.filter(trans.filter.sql)
@@ -692,7 +742,7 @@ class SparkAdapter(EngineAdapter):
                         logger.warning(f"Link '{link.name}' missing table name.")
                         continue
                     ref_df = spark.table(table_name)
-                    if link.columns:
+                    if link.columns and not (getattr(link, "filter", None) or getattr(link, "query", None)):
                         available = set(ref_df.columns)
                         select_cols = [c for c in link.columns if c in available]
                         if select_cols:
@@ -738,8 +788,10 @@ class SparkAdapter(EngineAdapter):
                     logger.warning(f"Unsupported or unknown link format for {link.name}: {link_type}")
                     continue
 
-                # Column projection — only keep specified columns
-                if link.columns:
+                # Column projection — only keep specified columns. Deferred to the
+                # post-pass when filter/query is present (predicate may reference
+                # not-yet-projected columns).
+                if link.columns and not (getattr(link, "filter", None) or getattr(link, "query", None)):
                     available = set(ref_df.columns)
                     select_cols = [c for c in link.columns if c in available]
                     if select_cols:
@@ -750,6 +802,33 @@ class SparkAdapter(EngineAdapter):
                 ref_df.createOrReplaceTempView(safe_link_name)
             except Exception as e:
                 logger.warning(f"Could not register link {link.name}: {e}")
+
+        # Post-pass: load-time row subsetting for links declaring a portable
+        # `filter` (WHERE) or an engine-specific `query` escape hatch. Applies
+        # after every registration branch. ``{link}`` in a query refers to the
+        # just-registered dataset.
+        for link in self.contract.links:
+            _flt = getattr(link, "filter", None)
+            _qry = getattr(link, "query", None)
+            if not (_flt or _qry):
+                continue
+            safe_link_name = f"{link.name}_{id(self)}"
+            try:
+                _sql = (
+                    _qry.replace("{link}", safe_link_name)
+                    if _qry
+                    else f"SELECT * FROM {safe_link_name} WHERE {_flt}"
+                )
+                _sub = spark.sql(_sql)
+                # Apply the deferred column projection now (after the predicate).
+                if link.columns:
+                    _keep = [c for c in link.columns if c in set(_sub.columns)]
+                    if _keep:
+                        _sub = _sub.select(*_keep)
+                _sub.createOrReplaceTempView(safe_link_name)
+                logger.debug(f"Link '{link.name}' subset via {'query' if _qry else 'filter'}")
+            except Exception as e:
+                logger.warning(f"Could not apply link subset for '{link.name}': {e}")
 
     def _to_spark_type(self, type_name: str) -> str:
         """

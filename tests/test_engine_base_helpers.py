@@ -119,7 +119,7 @@ def test_base_sql_helper_generation_and_lineage_columns():
 
     date_diff = types.SimpleNamespace(field="days_open", from_col="opened_at", to_col="closed_at", unit="days")
     date_diff_sql = adapter._build_date_diff_sql(date_diff)
-    assert 'DATEDIFF(\'day\', "opened_at", "closed_at")' in date_diff_sql
+    assert 'DATEDIFF(\'day\', CAST("opened_at" AS DATE), CAST("closed_at" AS DATE))' in date_diff_sql
 
 
 def test_base_date_diff_and_transform_validation_paths():
@@ -134,7 +134,10 @@ def test_base_date_diff_and_transform_validation_paths():
     spark_sql = spark_adapter._build_date_diff_sql(
         types.SimpleNamespace(field="days_open", from_col="opened_at", to_col="closed_at", unit="days")
     )
-    assert 'DATEDIFF("closed_at", "opened_at")' in spark_sql
+    # Columns are wrapped in a tolerant to_date (handles ISO + compact YYYYMMDD).
+    assert "DATEDIFF(to_date(" in spark_sql
+    assert '"closed_at"' in spark_sql and '"opened_at"' in spark_sql
+    assert "RLIKE" in spark_sql  # the YYYYMMDD normalisation branch
 
     assert (
         polars_adapter._build_pivot_sql(

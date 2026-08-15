@@ -1,5 +1,13 @@
 # Quality Rules
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **quality rules** is the OLC reference: **[quality rules reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/quality/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 Quality rules are your data's **safety net** — and they're **SQL-powered**. Every rule, from simple null checks to complex business logic, is expressed as SQL under the hood. The YAML shorthand (`not_null:`, `range:`, `accepted_values:`) compiles to SQL, and you can always write custom SQL rules directly.
 
 > **Bottom line:** If you can write a SQL `WHERE` clause, you can write a quality rule. No Python, no custom code — just SQL.

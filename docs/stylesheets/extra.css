@@ -862,8 +862,8 @@
 .ll-footer__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1rem 2rem;
-  padding: 2.5rem 1rem;
+  gap: 0.25rem 2rem;
+  padding: 1.35rem 1rem;
   max-width: 960px;
   margin: 0 auto;
 }
@@ -882,7 +882,7 @@
   font-weight: 500;
   color: var(--ll-text-secondary) !important;
   text-decoration: none !important;
-  padding: 0.4rem 0;
+  padding: 0.2rem 0;
   transition: color 0.15s;
 }
 
@@ -901,7 +901,7 @@
 
 .ll-footer__bottom {
   border-top: 1px solid var(--ll-border);
-  padding: 1rem;
+  padding: 0.7rem 1rem;
   text-align: center;
   background: var(--ll-bg);
 }

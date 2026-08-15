@@ -57,6 +57,12 @@ dependencies = [
     "typer>=0.9.0",
     "deltalake>=0.15.0",
     "pyarrow>=23.0.1",
+    # Canonical Open Lakehouse Contract spec — provides `olc.models` (OLCContractV1,
+    # the strict standard). LakeLogic CONSUMES this as the single source of truth for
+    # the contract spec rather than defining its own. Lightweight (pydantic-only).
+    # Until published to PyPI it is installed from the OLC repo (editable in dev,
+    # a pinned git ref in CI/prod).
+    "open-lakehouse-contract[models]>=0.1.0",
 ]
 
 [project.optional-dependencies]

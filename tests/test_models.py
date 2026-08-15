@@ -125,6 +125,7 @@ def test_external_logic_parsing():
         "external_logic": {
             "type": "python",
             "path": "gold/build_sales.py",
+            "engine": "polars",
             "entrypoint": "build_sales",
             "args": {"target_table": "fact_sales"},
             "output_path": "output/fact_sales.parquet",
@@ -135,8 +136,22 @@ def test_external_logic_parsing():
     contract = DataContract(**data)
     logic = contract.external_logic
     assert logic.type == "python"
+    assert logic.engine == "polars"
     assert logic.entrypoint == "build_sales"
     assert logic.output_format == "parquet"
+
+
+def test_external_logic_requires_engine():
+    """`engine` is mandatory whenever external_logic is used — external logic runs
+    against an engine-specific DataFrame, so it must be declared explicitly."""
+    import pytest
+
+    data = {
+        "version": "1.0.0",
+        "external_logic": {"type": "python", "path": "gold/build.py"},
+    }
+    with pytest.raises(Exception):
+        DataContract(**data)
 
 
 def test_transformation_rename_mappings():

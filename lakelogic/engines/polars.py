@@ -160,8 +160,10 @@ class PolarsAdapter(EngineAdapter):
                     logger.warning(f"Unsupported link format for {link.name}: {path}")
                     continue
 
-                # Column projection — only keep specified columns
-                if link.columns:
+                # Column projection — only keep specified columns. Skipped here
+                # when filter/query is present so the predicate can reference
+                # not-yet-projected columns; the post-pass projects afterwards.
+                if link.columns and not (getattr(link, "filter", None) or getattr(link, "query", None)):
                     available = set(link_lf.collect_schema().names())
                     select_cols = [c for c in link.columns if c in available]
                     if select_cols:
@@ -173,6 +175,29 @@ class PolarsAdapter(EngineAdapter):
                 ctx.register(link.name, link_lf)
             except Exception as e:
                 logger.warning(f"Could not register link {link.name}: {e}")
+
+        # Post-pass: load-time row subsetting for links that declare a portable
+        # `filter` (WHERE) or an engine-specific `query` escape hatch. Runs after
+        # every registration branch (local + remote) so it applies uniformly.
+        # ``{link}`` in a query refers to the just-registered dataset.
+        for link in self.contract.links:
+            _flt = getattr(link, "filter", None)
+            _qry = getattr(link, "query", None)
+            if not (_flt or _qry):
+                continue
+            try:
+                _sql = _qry.replace("{link}", link.name) if _qry else f"SELECT * FROM {link.name} WHERE {_flt}"
+                _sub = ctx.execute(_sql, eager=False)
+                # Apply the deferred column projection now (after the predicate).
+                if link.columns:
+                    _avail = set(_sub.collect_schema().names())
+                    _keep = [c for c in link.columns if c in _avail]
+                    if _keep:
+                        _sub = _sub.select(_keep)
+                ctx.register(link.name, _sub)
+                logger.debug(f"Link '{link.name}' subset via {'query' if _qry else 'filter'}")
+            except Exception as e:
+                logger.warning(f"Could not apply link subset for '{link.name}': {e}")
 
     def _apply_sql_transformation(self, lf: pl.LazyFrame, sql: str) -> pl.LazyFrame:
         """
@@ -333,6 +358,17 @@ class PolarsAdapter(EngineAdapter):
             out = rel.pl().lazy()
             con.close()
             return out
+
+    def _regex_sql(self, field: str, pattern: str) -> str:
+        """Polars SQL regex predicate.
+
+        The base emitter uses DuckDB's ``REGEXP_MATCHES``, which the Polars SQL
+        engine does not implement (``unsupported function 'regexp_matches'``).
+        Polars supports ``regexp_like(col, pattern)`` — emit that directly.
+        """
+        qfield = self._quote_ident(field)
+        esc = str(pattern).replace("'", "''")
+        return f"regexp_like({qfield}, '{esc}')"
 
     @staticmethod
     def _normalize_sql(sql: str) -> str:
@@ -577,6 +613,7 @@ class PolarsAdapter(EngineAdapter):
                                 _json.dumps(
                                     v.to_list() if hasattr(v, "to_list") else v,
                                     ensure_ascii=False,
+                                    separators=(",", ":"),  # compact — match DuckDB to_json
                                 )
                                 if v is not None
                                 else None
@@ -1162,7 +1199,7 @@ class PolarsAdapter(EngineAdapter):
                         existing = set(current_lf.collect_schema().names())
             else:
                 filter_cfg = getattr(trans, "filter", None)
-                dedupe_cfg = getattr(trans, "deduplicate", None)
+                dedupe_cfg = self._resolve_deduplicate(trans)
                 if filter_cfg:
                     logger.debug(f"Pre-Transform [Filter]: {filter_cfg.sql}")
                     try:
@@ -1250,7 +1287,7 @@ class PolarsAdapter(EngineAdapter):
                 current_lf = self._apply_sql_transformation(current_lf, unpivot_sql)
                 continue
 
-            if trans.derive:
+            if trans.derive and trans_phase != "pre":
                 logger.debug(f"Post-Transform [Derive]: {trans.derive.field}")
                 field_name = trans.derive.field
                 _pre_derive_lf = current_lf
@@ -1372,21 +1409,45 @@ class PolarsAdapter(EngineAdapter):
                 field_name = trans.bucket.field
                 sql = self._build_bucket_sql(trans.bucket, source_table=tbl_name)
                 if sql:
-                    # _build_bucket_sql returns "SELECT *, (CASE...) AS field FROM source"
-                    # We need to inject EXCLUDE if the field exists
+                    # _build_bucket_sql returns "SELECT *, (CASE...) AS field FROM source".
+                    # If the field already exists (schema pre-added it as a declared model
+                    # field), drop it and re-register — polars SQL '* EXCLUDE (f), (..) AS f'
+                    # silently drops f, so the plain 'SELECT *, (..) AS f' must re-add it.
                     if field_name in existing_cols:
-                        sql = sql.replace("SELECT *,", f"SELECT * EXCLUDE ({field_name}),")
+                        current_lf = current_lf.drop(field_name)
+                        ctx.register(tbl_name, current_lf)
                     current_lf = ctx.execute(sql)
                     existing_cols = set(current_lf.collect_schema().names())
-            elif trans.date_diff:
-                logger.debug(f"Post-Transform [DateDiff]: {trans.date_diff.field}")
-                field_name = trans.date_diff.field
-                sql = self._build_date_diff_sql(trans.date_diff, source_table=tbl_name)
-                if sql:
-                    if field_name in existing_cols:
-                        sql = sql.replace("SELECT *,", f"SELECT * EXCLUDE ({field_name}),")
-                    current_lf = ctx.execute(sql)
-                    existing_cols = set(current_lf.collect_schema().names())
+            elif trans.date_diff and getattr(trans.date_diff, "from_col", None) and getattr(
+                trans.date_diff, "to_col", None
+            ):
+                dd = trans.date_diff
+                logger.debug(f"Post-Transform [DateDiff]: {dd.field}")
+                # Native Polars expression (date granularity, matching the DuckDB
+                # DATE cast). `with_columns` cleanly overwrites a schema-pre-added
+                # null when the output is a declared model field — the SQL
+                # `* EXCLUDE (...)` path silently dropped it.
+                unit = (getattr(dd, "unit", None) or "days").lower().rstrip("s")
+
+                def _dparse(col: str):
+                    c = pl.col(col).cast(pl.Utf8).str.slice(0, 10)
+                    # Tolerant of ISO (YYYY-MM-DD) and compact (YYYYMMDD, e.g. GA4).
+                    return pl.coalesce(
+                        c.str.strptime(pl.Date, "%Y-%m-%d", strict=False),
+                        c.str.strptime(pl.Date, "%Y%m%d", strict=False),
+                    )
+
+                fp = _dparse(dd.from_col)
+                tp = _dparse(dd.to_col)
+                delta = tp - fp
+                unit_expr = {
+                    "day": delta.dt.total_days(),
+                    "hour": delta.dt.total_hours(),
+                    "minute": delta.dt.total_minutes(),
+                    "second": delta.dt.total_seconds(),
+                }.get(unit, delta.dt.total_days())
+                current_lf = current_lf.with_columns(unit_expr.cast(pl.Int64).alias(dd.field))
+                existing_cols = set(current_lf.collect_schema().names())
             elif trans.json_extract:
                 cfg = trans.json_extract
                 logger.debug(f"Post-Transform [JsonExtract]: {cfg.source} -> {cfg.field} via {cfg.path}")
@@ -1439,6 +1500,12 @@ class PolarsAdapter(EngineAdapter):
                 ctx.register(tbl_name, current_lf)
             elif trans.lookup:
                 logger.debug(f"Post-Transform [Lookup]: {trans.lookup.field} from {trans.lookup.reference}")
+                # If the output field is a declared model column, schema enforcement
+                # pre-added it as null; drop it so `src.*` doesn't collide with the
+                # joined `ref.<value> AS <field>` (polars errors on a duplicated column).
+                if trans.lookup.field in existing_cols:
+                    current_lf = current_lf.drop(trans.lookup.field)
+                    ctx.register(tbl_name, current_lf)
                 query = f"""
                 SELECT
                     src.*,
@@ -1447,10 +1514,21 @@ class PolarsAdapter(EngineAdapter):
                 LEFT JOIN {trans.lookup.reference} ref ON src.{trans.lookup.on} = ref.{trans.lookup.key}
                 """
                 current_lf = ctx.execute(query)
+                existing_cols = set(current_lf.collect_schema().names())
             elif trans.join:
                 logger.debug(f"Post-Transform [Join]: {trans.join.reference}")
-                join_sql = self._build_join_sql(trans.join, tbl_name=tbl_name)
+                # Drop any joined-in columns that already exist (schema pre-added
+                # declared model fields as null) so `src.*` doesn't collide with them.
+                jn = trans.join
+                _prefix = getattr(jn, "prefix", None)
+                aliases = [(f"{_prefix}{f}" if _prefix else f) for f in (getattr(jn, "fields", None) or [])]
+                collide = [a for a in aliases if a in existing_cols]
+                if collide:
+                    current_lf = current_lf.drop(collide)
+                    ctx.register(tbl_name, current_lf)
+                join_sql = self._build_join_sql(jn, tbl_name=tbl_name)
                 current_lf = ctx.execute(join_sql)
+                existing_cols = set(current_lf.collect_schema().names())
             else:
                 filter_cfg = getattr(trans, "filter", None)
                 if filter_cfg and trans_phase != "pre":

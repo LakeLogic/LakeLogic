@@ -101,6 +101,10 @@ class FakeFunctions:
         return FakeExpr(("split", value.value, delimiter))
 
     @staticmethod
+    def to_json(value):
+        return FakeExpr(("to_json", getattr(value, "value", value)))
+
+    @staticmethod
     def explode(value):
         return FakeExpr(("explode", value.value))
 

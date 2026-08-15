@@ -140,7 +140,10 @@ markdown_extensions:
   - md_in_html
 
 extra_css:
-  - stylesheets/extra.css
+  # Bump ?v= on every extra.css change to bust the browser/Pages cache
+  # (GitHub Pages serves the file unhashed, so returning visitors would
+  # otherwise keep the stale stylesheet — see docs deploy notes).
+  - stylesheets/extra.css?v=2
 
 extra_javascript:
   - javascripts/theme-switcher.js

@@ -1,5 +1,13 @@
 # Dimensional Modeling (Kimball Patterns)
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **dimensional modeling & SCD** is the OLC reference: **[dimensional modeling & SCD reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/materialization/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 LakeLogic natively supports Kimball dimensional modeling patterns — SCD Type 1 & 2 dimensions, and all five fact table types — via declarative YAML config.
 
 > **Think of it like a hotel guest register.** SCD1 is like a register that only keeps the guest's current address — if they move, you overwrite it. SCD2 is like a register that keeps *every* address the guest has ever had, with dates showing when each was valid. Fact tables are the records of what actually happened — check-ins, room charges, complaints — tied back to who the guest was *at that point in time*.

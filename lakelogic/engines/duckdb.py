@@ -186,7 +186,10 @@ class DuckDBAdapter(EngineAdapter):
                     logger.warning(f"Link file/directory not found: {path}")
                     continue
 
-                col_clause = ", ".join(f'"{c}"' for c in link.columns) if link.columns else "*"
+                # Defer projection to the post-pass when filter/query is present,
+                # so the predicate may reference not-yet-projected columns.
+                _defer_proj = bool(getattr(link, "filter", None) or getattr(link, "query", None))
+                col_clause = ", ".join(f'"{c}"' for c in link.columns) if (link.columns and not _defer_proj) else "*"
                 link_type = (link.type or "parquet").lower()
 
                 if link_type == "delta":
@@ -237,6 +240,33 @@ class DuckDBAdapter(EngineAdapter):
                 logger.info(f"Registered link '{link.name}' from {path} (type={link_type})")
             except Exception as e:
                 logger.warning(f"Could not register link '{link.name}': {e}")
+
+        # Post-pass: load-time row subsetting for links declaring a portable
+        # `filter` (WHERE) or an engine-specific `query` escape hatch. The inner
+        # SELECT is materialized to a TEMP table first (eager), which breaks the
+        # view self-reference so the final view can be replaced in place. Runs
+        # after all registration branches so it applies uniformly. ``{link}``
+        # refers to the just-registered dataset.
+        for link in self.contract.links:
+            _flt = getattr(link, "filter", None)
+            _qry = getattr(link, "query", None)
+            if not (_flt or _qry):
+                continue
+            try:
+                inner = _qry.replace("{link}", link.name) if _qry else f"SELECT * FROM {link.name} WHERE {_flt}"
+                tmp = f"_{link.name}__olc_sub"
+                self.con.execute(f'CREATE OR REPLACE TEMP TABLE "{tmp}" AS {inner}')
+                # Apply the deferred projection now (after the predicate).
+                proj = "*"
+                if link.columns:
+                    avail = {r[0] for r in self.con.execute(f'DESCRIBE "{tmp}"').fetchall()}
+                    keep = [c for c in link.columns if c in avail]
+                    if keep:
+                        proj = ", ".join(f'"{c}"' for c in keep)
+                self.con.execute(f'CREATE OR REPLACE VIEW {link.name} AS SELECT {proj} FROM "{tmp}"')
+                logger.debug(f"Link '{link.name}' subset via {'query' if _qry else 'filter'}")
+            except Exception as e:
+                logger.warning(f"Could not apply link subset for '{link.name}': {e}")
 
     # ── Schema enforcement ────────────────────────────────────────────────
 
@@ -491,6 +521,102 @@ class DuckDBAdapter(EngineAdapter):
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
 
+            # Column-level shorthands (lower / upper / trim / cast) run BEFORE schema
+            # enforcement — matching the Polars engine — so a `cast` that conflicts
+            # with the declared model type is reconciled by schema enforcement the same
+            # way on both engines. Applied regardless of phase (value rewrites).
+            replace_expr = self._build_column_replace_sql(trans)
+            if replace_expr:
+                view_name = f"_pre_colshorthand_{id(replace_expr) & 0xFFFFFF:06x}"
+                self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * REPLACE ({replace_expr}) FROM {current}")
+                current = view_name
+                continue
+
+            # Coalesce: add (or overwrite) one column from the first non-null source.
+            if trans.coalesce:
+                sources = trans.coalesce.sources or [trans.coalesce.field]
+                args = [f'"{c}"' for c in sources]
+                if trans.coalesce.default is not None:
+                    default = trans.coalesce.default
+                    args.append(f"'{default}'" if isinstance(default, str) else str(default))
+                output = trans.coalesce.output or trans.coalesce.field
+                cols = self._get_current_columns(current)
+                exclude = f' EXCLUDE ("{output}")' if output in cols else ""
+                view_name = f"_pre_coalesce_{id(trans.coalesce) & 0xFFFFFF:06x}"
+                self.con.sql(
+                    f"CREATE OR REPLACE VIEW {view_name} AS "
+                    f'SELECT *{exclude}, COALESCE({", ".join(args)}) AS "{output}" FROM {current}'
+                )
+                current = view_name
+                continue
+
+            # Select / drop — structural column projection (phase-agnostic).
+            if getattr(trans, "select", None) and trans.select.columns:
+                keep = ", ".join(f'"{c}"' for c in trans.select.columns)
+                view_name = f"_pre_select_{id(trans.select) & 0xFFFFFF:06x}"
+                self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT {keep} FROM {current}")
+                current = view_name
+                continue
+            if getattr(trans, "drop", None) and trans.drop.columns:
+                dropped = ", ".join(f'"{c}"' for c in trans.drop.columns)
+                view_name = f"_pre_drop_{id(trans.drop) & 0xFFFFFF:06x}"
+                self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * EXCLUDE ({dropped}) FROM {current}")
+                current = view_name
+                continue
+
+            # Split a string column into a LIST (string_split), matching Polars str.split.
+            if getattr(trans, "split", None):
+                output = trans.split.output or trans.split.field
+                cols = self._get_current_columns(current)
+                exclude = f' EXCLUDE ("{output}")' if output in cols else ""
+                delim = str(trans.split.delimiter).replace("'", "''")
+                view_name = f"_pre_split_{id(trans.split) & 0xFFFFFF:06x}"
+                # to_json gives a compact JSON array string that matches the Polars
+                # engine's list->string serialisation (both "[\"a\",\"b\"]").
+                self.con.sql(
+                    f"CREATE OR REPLACE VIEW {view_name} AS "
+                    f'SELECT *{exclude}, to_json(string_split("{trans.split.field}", \'{delim}\')) AS "{output}" FROM {current}'
+                )
+                current = view_name
+                continue
+
+            # Explode a list column into one row per element (UNNEST).
+            if getattr(trans, "explode", None):
+                ex = trans.explode
+                output = ex.output or ex.field
+                cols = self._get_current_columns(current)
+                if output == ex.field and ex.field in cols:
+                    sql = f'SELECT * EXCLUDE ("{ex.field}"), UNNEST("{ex.field}") AS "{output}" FROM {current}'
+                else:
+                    sql = f'SELECT *, UNNEST("{ex.field}") AS "{output}" FROM {current}'
+                view_name = f"_pre_explode_{id(ex) & 0xFFFFFF:06x}"
+                self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS {sql}")
+                current = view_name
+                continue
+
+            # Map a column's values via a lookup, else default (or the original value).
+            if getattr(trans, "map_values", None):
+                mv = trans.map_values
+                output = mv.output or mv.field
+                whens = []
+                for k, v in mv.mapping.items():
+                    kq = str(k).replace("'", "''")
+                    vq = f"'{str(v)}'" if isinstance(v, str) else str(v)
+                    whens.append(f"WHEN \"{mv.field}\" = '{kq}' THEN {vq}")
+                if mv.default is not None:
+                    els = f"'{mv.default}'" if isinstance(mv.default, str) else str(mv.default)
+                else:
+                    els = f'"{mv.field}"'
+                case_sql = f"CASE {' '.join(whens)} ELSE {els} END"
+                cols = self._get_current_columns(current)
+                exclude = f' EXCLUDE ("{output}")' if output in cols else ""
+                view_name = f"_pre_mapvalues_{id(mv) & 0xFFFFFF:06x}"
+                self.con.sql(
+                    f'CREATE OR REPLACE VIEW {view_name} AS SELECT *{exclude}, {case_sql} AS "{output}" FROM {current}'
+                )
+                current = view_name
+                continue
+
             if trans.sql and trans_phase == "pre":
                 logger.debug(f"Pre-Transform [SQL]: {trans.sql}")
                 try:
@@ -552,7 +678,7 @@ class DuckDBAdapter(EngineAdapter):
             # engine (whose filter/deduplicate branch is not phase-gated). Without
             # this, the duckdb engine silently skipped `deduplicate`, letting
             # duplicate keys through where Polars/Spark removed them.
-            dedupe_cfg = getattr(trans, "deduplicate", None)
+            dedupe_cfg = self._resolve_deduplicate(trans)
             if dedupe_cfg and dedupe_cfg.on:
                 logger.debug(f"Pre-Transform [Deduplicate]: {dedupe_cfg.on}")
                 on_cols = ", ".join(f'"{c}"' for c in dedupe_cfg.on)
@@ -613,7 +739,8 @@ class DuckDBAdapter(EngineAdapter):
                 continue
 
             if trans.filter:
-                filter_sql = self._normalize_spark_sql(trans.filter)
+                raw_filter = trans.filter.sql if hasattr(trans.filter, "sql") else str(trans.filter)
+                filter_sql = self._normalize_spark_sql(raw_filter)
                 view_name = f"_post_filter_{id(filter_sql) & 0xFFFFFF:06x}"
                 try:
                     self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current} WHERE {filter_sql}")
@@ -658,9 +785,197 @@ class DuckDBAdapter(EngineAdapter):
                         logger.warning(f"Post-Transform [Unpivot] failed: {e}")
                 continue
 
+            # Date diff — tolerant of ISO (YYYY-MM-DD) and compact (YYYYMMDD, e.g. GA4)
+            # date strings; date granularity to match the Polars engine.
+            if trans.date_diff and getattr(trans.date_diff, "from_col", None) and getattr(
+                trans.date_diff, "to_col", None
+            ):
+                dd = trans.date_diff
+                unit = (getattr(dd, "unit", None) or "days").lower().rstrip("s")
+                unit = unit if unit in {"day", "week", "month", "year", "hour", "minute", "second"} else "day"
+
+                def _dparse(col: str) -> str:
+                    return f"COALESCE(TRY_CAST(\"{col}\" AS DATE), TRY_STRPTIME(\"{col}\", '%Y%m%d')::DATE)"
+
+                expr = f"DATEDIFF('{unit}', {_dparse(dd.from_col)}, {_dparse(dd.to_col)})"
+                field = dd.field
+                cols = self._get_current_columns(current)
+                exclude = f' EXCLUDE ("{field}")' if field in cols else ""
+                view_name = f"_post_datediff_{id(dd) & 0xFFFFFF:06x}"
+                self.con.sql(
+                    f"CREATE OR REPLACE VIEW {view_name} AS "
+                    f'SELECT *{exclude}, ({expr}) AS "{field}" FROM {current}'
+                )
+                current = view_name
+                continue
+
+            # Lookup — enrich with a single column from a registered reference link.
+            if trans.lookup:
+                lu = trans.lookup
+                cols = self._get_current_columns(current)
+                # Exclude a pre-existing (schema-added) output column so it doesn't
+                # collide with the joined value.
+                src_star = f'src.* EXCLUDE ("{lu.field}")' if lu.field in cols else "src.*"
+                view_name = f"_post_lookup_{id(lu) & 0xFFFFFF:06x}"
+                self.con.sql(
+                    f"CREATE OR REPLACE VIEW {view_name} AS "
+                    f'SELECT {src_star}, ref."{lu.value}" AS "{lu.field}" '
+                    f'FROM {current} src LEFT JOIN "{lu.reference}" ref '
+                    f'ON src."{lu.on}" = ref."{lu.key}"'
+                )
+                current = view_name
+                continue
+
+            # Join — enrich with multiple columns from a registered reference link.
+            if trans.join:
+                jn = trans.join
+                join_type = (jn.type or "left").upper()
+                if join_type == "FULL":
+                    join_type = "FULL OUTER"
+                cols = self._get_current_columns(current)
+                defaults = getattr(jn, "defaults", None) or {}
+                aliases = [(f"{jn.prefix}{f}" if jn.prefix else f) for f in jn.fields]
+                exclude = [a for a in aliases if a in cols]
+                src_star = (
+                    'src.* EXCLUDE (' + ", ".join(f'"{c}"' for c in exclude) + ")" if exclude else "src.*"
+                )
+                parts = [src_star]
+                for f in jn.fields:
+                    alias = f"{jn.prefix}{f}" if jn.prefix else f
+                    if f in defaults and defaults[f] is not None:
+                        parts.append(f'COALESCE(ref."{f}", {self._format_literal(defaults[f])}) AS "{alias}"')
+                    else:
+                        parts.append(f'ref."{f}" AS "{alias}"')
+                view_name = f"_post_join_{id(jn) & 0xFFFFFF:06x}"
+                self.con.sql(
+                    f"CREATE OR REPLACE VIEW {view_name} AS SELECT {', '.join(parts)} "
+                    f'FROM {current} src {join_type} JOIN "{jn.reference}" ref '
+                    f'ON src."{jn.on}" = ref."{jn.key}"'
+                )
+                current = view_name
+                continue
+
+            # Bucket — CASE-based binning via the shared cross-engine builder.
+            if trans.bucket:
+                bsql = self._build_bucket_sql(trans.bucket, source_table=current)
+                if bsql:
+                    field = trans.bucket.field
+                    cols = self._get_current_columns(current)
+                    if field in cols:
+                        bsql = bsql.replace("SELECT *,", f'SELECT * EXCLUDE ("{field}"),')
+                    view_name = f"_post_bucket_{id(trans.bucket) & 0xFFFFFF:06x}"
+                    self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS {bsql}")
+                    current = view_name
+                continue
+
+            # Date-range explode — one row per date in [start, end] (clamped to today,
+            # null end -> today), matching the Polars engine.
+            if trans.date_range_explode:
+                cfg = trans.date_range_explode
+                cols = self._get_current_columns(current)
+                start_e = f'CAST("{cfg.start_col}" AS DATE)'
+                if getattr(cfg, "end_col", None):
+                    end_e = f'LEAST(COALESCE(CAST("{cfg.end_col}" AS DATE), current_date), current_date)'
+                else:
+                    end_e = "current_date"
+                import re as _re
+
+                _intv = str(getattr(cfg, "interval", None) or "1d").strip().lower()
+                _m = _re.match(r"(\d+)\s*([a-z]+)", _intv)
+                _num = _m.group(1) if _m else "1"
+                _unit = {"d": "DAY", "day": "DAY", "days": "DAY", "w": "WEEK", "week": "WEEK",
+                         "weeks": "WEEK", "mo": "MONTH", "month": "MONTH", "months": "MONTH"}.get(
+                    _m.group(2) if _m else "d", "DAY"
+                )
+                interval = f"INTERVAL {_num} {_unit}"
+                exclude = f' EXCLUDE ("{cfg.output}")' if cfg.output in cols else ""
+                view_name = f"_post_daterange_{id(cfg) & 0xFFFFFF:06x}"
+                self.con.sql(
+                    f"CREATE OR REPLACE VIEW {view_name} AS "
+                    f'SELECT *{exclude}, CAST(UNNEST(generate_series({start_e}, {end_e}, {interval})) AS DATE) '
+                    f'AS "{cfg.output}" FROM {current}'
+                )
+                current = view_name
+                continue
+
+            # JSON extract — pull a JSON path into a (optionally cast) column.
+            if trans.json_extract:
+                cfg = trans.json_extract
+                path = str(cfg.path).replace("'", "''")
+                expr = f"json_extract_string(\"{cfg.source}\", '{path}')"
+                if cfg.cast:
+                    expr = f"CAST({expr} AS {self._DUCKDB_CAST_TYPES.get(str(cfg.cast).lower(), 'VARCHAR')})"
+                cols = self._get_current_columns(current)
+                exclude = f' EXCLUDE ("{cfg.field}")' if cfg.field in cols else ""
+                view_name = f"_post_jsonextract_{id(cfg) & 0xFFFFFF:06x}"
+                self.con.sql(
+                    f'CREATE OR REPLACE VIEW {view_name} AS SELECT *{exclude}, {expr} AS "{cfg.field}" FROM {current}'
+                )
+                current = view_name
+                continue
+
         return current
 
+    # OLC scalar type name → DuckDB CAST type.
+    _DUCKDB_CAST_TYPES = {
+        "string": "VARCHAR", "str": "VARCHAR", "text": "VARCHAR",
+        "int": "INTEGER", "integer": "INTEGER", "long": "BIGINT", "bigint": "BIGINT",
+        "float": "FLOAT", "double": "DOUBLE", "decimal": "DOUBLE",
+        "bool": "BOOLEAN", "boolean": "BOOLEAN",
+        "date": "DATE", "timestamp": "TIMESTAMP", "datetime": "TIMESTAMP",
+    }
+
+    def _build_column_replace_sql(self, trans: Any) -> str:
+        """Build the REPLACE(...) body for lower/upper/trim/cast; '' if none apply."""
+        parts = []
+        if getattr(trans, "lower", None):
+            parts += [f'LOWER("{c}") AS "{c}"' for c in trans.lower.fields]
+        if getattr(trans, "upper", None):
+            parts += [f'UPPER("{c}") AS "{c}"' for c in trans.upper.fields]
+        if getattr(trans, "trim", None):
+            side = (getattr(trans.trim, "side", None) or "both").lower()
+            fn = {"left": "LTRIM", "right": "RTRIM"}.get(side, "TRIM")
+            parts += [f'{fn}("{c}") AS "{c}"' for c in trans.trim.fields]
+        if getattr(trans, "cast", None):
+            for col, dtype in trans.cast.columns.items():
+                sql_type = self._DUCKDB_CAST_TYPES.get(str(dtype).lower(), "VARCHAR")
+                parts.append(f'CAST("{col}" AS {sql_type}) AS "{col}"')
+        return ", ".join(parts)
+
     # ── Main execution ────────────────────────────────────────────────────
+
+    # Transform ops the DuckDB engine actually implements (pre + post passes).
+    # `deduplicate_by_latest` is handled via `_resolve_deduplicate`.
+    _DUCKDB_SUPPORTED_TRANSFORMS = frozenset(
+        {"sql", "derive", "filter", "rename", "rollup", "pivot", "unpivot",
+         "deduplicate", "deduplicate_by_latest",
+         "lower", "upper", "trim", "cast", "coalesce",
+         "select", "drop", "map_values", "json_extract", "date_diff", "split",
+         "bucket", "lookup", "join", "explode", "date_range_explode"}
+    )
+
+    def _assert_supported_transforms(self) -> None:
+        """Raise on any transform op this engine would silently no-op.
+
+        The DuckDB engine implements a subset of the transform vocabulary. An
+        unimplemented op (e.g. ``lower``, ``coalesce``, ``date_diff``,
+        ``json_extract``) used to be skipped silently — producing wrong output
+        with no error. Fail loud instead so the gap is impossible to miss.
+        """
+        from lakelogic.core.models import Transformation
+
+        op_fields = [f for f in Transformation.model_fields if f != "phase"]
+        for trans in (self.contract.transformations or []):
+            for op in op_fields:
+                if getattr(trans, op, None) and op not in self._DUCKDB_SUPPORTED_TRANSFORMS:
+                    title = getattr(self.contract.info, "title", None) if self.contract.info else None
+                    raise ValueError(
+                        f"The DuckDB engine does not implement the '{op}' transformation "
+                        f"and would silently skip it. Use the Polars/Spark engine, or express "
+                        f"it as a `sql` / `derive` transform instead"
+                        + (f" (contract: {title})" if title else "")
+                        + "."
+                    )
 
     def execute(self, df: Any) -> Tuple[Any, Any]:
         """
@@ -676,6 +991,10 @@ class DuckDBAdapter(EngineAdapter):
         self.dataset_rule_results = []
         self.schema_drift = {}
         self.trace = []
+
+        # Fail loud rather than silently no-op on transforms this engine does not
+        # implement (see _assert_supported_transforms).
+        self._assert_supported_transforms()
 
         # 0. Register input data
         self._register_df("source", df)
@@ -834,11 +1153,18 @@ class DuckDBAdapter(EngineAdapter):
             f"WHERE len({self.ERROR_COLUMN}) > 0"
         )
 
-        # 6. Dataset rules on good data
+        # 6. Dataset rules on good data — evaluate the POST-transform good snapshot.
+        # The input was registered as a relation under "source"/dataset_name, which
+        # shadows a CREATE VIEW of the same name; unregister it first so the redirect
+        # to _good actually takes effect (otherwise rules evaluate the PRE-transform
+        # input, disagreeing with the other engines when a transform changes the key).
         dataset_name = self.contract.dataset or "source"
-        self.con.sql(f"CREATE OR REPLACE VIEW {dataset_name} AS SELECT * FROM _good")
-        if dataset_name != "source":
-            self.con.sql("CREATE OR REPLACE VIEW source AS SELECT * FROM _good")
+        for _nm in {dataset_name, "source"}:
+            try:
+                self.con.unregister(_nm)
+            except Exception:  # pragma: no cover - not a registered relation
+                pass
+            self.con.sql(f"CREATE OR REPLACE VIEW {_nm} AS SELECT * FROM _good")
 
         self._run_dataset_rules(dataset_name)
 

@@ -157,6 +157,9 @@ class SnowflakeAdapter(EngineAdapter):
         Args:
             conn: Snowflake connection.
         """
+        from lakelogic.engines.base import assert_link_subset_supported
+
+        assert_link_subset_supported(self.contract.links, "snowflake")
         cursor = conn.cursor()
         try:
             for link in self.contract.links:

@@ -10,6 +10,14 @@ import shutil
 
 from loguru import logger
 
+# Canonical SCD2 "beginning-of-time" sentinel: a record's FIRST version opens here
+# unless the contract overrides ``effective_from_default``. Date-only (no time) so it
+# is represented identically on every engine — Spark stores SCD2 dates as timestamps
+# and a pre-1970 sub-day value loses its time under LMT/timezone conversion, whereas a
+# plain date round-trips cleanly. A new record's first version starts at this default,
+# NOT at its own event timestamp.
+SCD2_DEFAULT_EFFECTIVE_FROM = "1900-01-01"
+
 
 def _is_remote_path(path) -> bool:
     """Return True if the path is a cloud storage URI (ADLS, S3, GCS).
@@ -1350,7 +1358,7 @@ def _inject_unknown_member_pandas(
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
@@ -1457,7 +1465,7 @@ def _inject_unknown_member_spark(  # pragma: no cover
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
@@ -1682,7 +1690,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
@@ -2277,7 +2285,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
 
     now_value = scd2_cfg.get("default_effective_from")
@@ -2373,8 +2381,10 @@ def _spark_scd2_dataframe(  # pragma: no cover
         # merge path below does this, but the initial-load branch returns early —
         # so without this a freshly built dimension never gets its unknown member,
         # and facts have nothing to point unmatched keys at.
-        _init_um_cfg = scd2_cfg.get("unknown_member") or {}
-        if _init_um_cfg.get("enabled", True):
+        # Only inject when `unknown_member` is explicitly configured — matches the
+        # pandas (DuckDB/Polars) path, which requires the block to be present.
+        _init_um_cfg = scd2_cfg.get("unknown_member")
+        if _init_um_cfg is not None and _init_um_cfg.get("enabled", True):
             incoming_df = _inject_unknown_member_spark(incoming_df, primary_key, scd2_cfg, _init_um_cfg)
 
         # No existing data, just write incoming
@@ -2539,6 +2549,25 @@ def _spark_scd2_dataframe(  # pragma: no cover
         closed_records = closed_records.withColumn(change_reason_col, F.lit(None).cast("string"))
         retained_current = retained_current.withColumn(change_reason_col, F.lit(None).cast("string"))
 
+    # New PKs (first-ever version) begin at the beginning-of-time default, matching
+    # the pandas/polars engines; UPDATED PKs keep their change_date as the open date.
+    # Prior-version closing above already used the change_date, so this only re-stamps
+    # brand-new keys — otherwise Spark opened a new record at its own event timestamp
+    # (an engine inconsistency the SCD2 conformance case now guards against).
+    if effective_from_default is not None:
+        _existed_keys = existing_df.select(*primary_key).distinct().withColumn("__olc_existed", F.lit(True))
+        incoming_df = (
+            incoming_df.join(_existed_keys, on=primary_key, how="left")
+            .withColumn(
+                effective_from,
+                F.when(
+                    F.col("__olc_existed").isNull(),
+                    F.to_timestamp(F.lit(effective_from_default)),
+                ).otherwise(F.col(effective_from)),
+            )
+            .drop("__olc_existed")
+        )
+
     # Align all columns
     all_columns = list(existing_df.columns)
     for col in incoming_df.columns:
@@ -2592,8 +2621,9 @@ def _spark_scd2_dataframe(  # pragma: no cover
         result = result.withColumn(version_column, F.row_number().over(w).cast("long"))
 
     # ── Unknown member injection (Spark) ─────────────────────────
-    unknown_cfg = scd2_cfg.get("unknown_member") or {}
-    if unknown_cfg.get("enabled", True):
+    # Only when explicitly configured — matches the pandas (DuckDB/Polars) path.
+    unknown_cfg = scd2_cfg.get("unknown_member")
+    if unknown_cfg is not None and unknown_cfg.get("enabled", True):
         result = _inject_unknown_member_spark(result, primary_key, scd2_cfg, unknown_cfg)
 
     # ── Enforce SCD2 Column Ordering (Spark / Kimball convention) ──

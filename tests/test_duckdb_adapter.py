@@ -34,7 +34,10 @@ def test_duckdb_adapter_execute_splits_good_bad_rows_and_runs_dataset_rules() ->
     assert "_lakelogic_errors" in bad.columns
     assert "schema" in bad.filter(pl.col("id").is_null())["_lakelogic_categories"][0].to_list()
     assert adapter.dataset_rule_results == [
-        {"name": "row_count", "value": "3 (expected 1.0 to 10.0)", "passed": True, "description": None}
+        # Dataset rules now evaluate the POST-split good data (1 row; 2 were
+        # quarantined), matching the Polars engine — previously it wrongly counted
+        # the original 3 input rows.
+        {"name": "row_count", "value": "1 (expected 1.0 to 10.0)", "passed": True, "description": None}
     ]
     assert [step.step for step in adapter.trace] == [
         "Load Source",

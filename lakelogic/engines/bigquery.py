@@ -131,6 +131,9 @@ class BigQueryAdapter(EngineAdapter):
         Args:
             client: BigQuery client.
         """
+        from lakelogic.engines.base import assert_link_subset_supported
+
+        assert_link_subset_supported(self.contract.links, "bigquery")
         for link in self.contract.links:
             table_name = None
             if link.table:

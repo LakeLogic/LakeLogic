@@ -1,5 +1,13 @@
 # Watermark Strategies
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **incremental / watermark strategies** is the OLC reference: **[incremental / watermark strategies reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/ingestion/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 Watermark strategies control **how LakeLogic tracks incremental progress** — which data has already been processed and what's new since the last run.
 
 > **Think of it like a bookmark.** Each time you read a book, you place a bookmark where you stopped. Next time, you start from the bookmark — not from page one. Watermarks work the same way for your data: they remember the "last page you read" so you only process new data.
