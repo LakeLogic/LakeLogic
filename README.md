@@ -1,3 +1,5 @@
+![LakeLogic — executable data contracts: define data trust once, enforced from your laptop to production](docs/assets/lakelogic_banner.png)
+
 # LakeLogic
 
 **Define data trust once. Enforce it from development to production.**
@@ -9,7 +11,7 @@
 [![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
-LakeLogic is an open-source framework for executable data contracts. Describe a data product's schema, quality rules, PII handling, lineage, and materialization in YAML, then run that contract with Polars, DuckDB, or Spark.
+LakeLogic is the open-source reference framework for the [**Open Lakehouse Contract (OLC)**](https://lakelogic.github.io/open-lakehouse-contract/) — the open, engine-neutral standard for executable data contracts. Describe a data product's schema, quality rules, PII handling, lineage, and materialization in a portable OLC `.yaml` document, then run that contract identically with Polars, DuckDB, or Spark.
 
 Use the same contract to get fast feedback locally, check changes in CI/CD, and govern pipeline execution in your lakehouse. Records that fail row-level rules can be retained with their failure reasons instead of being silently discarded.
 

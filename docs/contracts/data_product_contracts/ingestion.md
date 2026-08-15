@@ -1,5 +1,13 @@
 # Ingestion (Source Configuration)
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **ingestion & sources** is the OLC reference: **[ingestion & sources reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/ingestion/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 The `source:` block defines **what to read, from where, and how**.
 
 > **Think of it like a mail room.** You tell LakeLogic which mailbox to open (file path or table), what kind of mail to expect (CSV, Parquet, JSON), and how often to check for new deliveries (full refresh vs incremental).

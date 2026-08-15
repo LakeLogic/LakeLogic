@@ -1,5 +1,13 @@
 # Data Product Contracts
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **contract anatomy** is the OLC reference: **[contract anatomy reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/anatomy/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 A data product contract is a single YAML file that fully describes one table/entity in your lakehouse. The contract IS the pipeline — no imperative code required.
 
 ---

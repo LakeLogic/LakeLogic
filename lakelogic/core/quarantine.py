@@ -136,9 +136,19 @@ def _write_quarantine_table_spark(df: Any, contract, table_name: str, metadata: 
     if not hasattr(df, "write"):
         raise ValueError("Spark quarantine table requires a Spark DataFrame.")
 
-    # Default to 'delta' on Spark if not specified (more robust for Databricks/Unity Catalog).
-    table_format = (metadata.get("quarantine_table_format") or "delta").lower()
-    mode = (metadata.get("quarantine_table_mode") or "append").lower()
+    # Format precedence: explicit metadata override → the contract's declared
+    # `quarantine.format` → 'delta' default. Previously the contract's format was
+    # ignored and this always defaulted to Delta, which fails on Iceberg-only
+    # engines (e.g. Glue/EMR) with "Unsupported format in USING: delta" and
+    # silently drops the quarantined rows.
+    _q_cfg = getattr(contract, "quarantine", None)
+    _contract_q_format = (getattr(_q_cfg, "format", None) or "").lower() if _q_cfg is not None else ""
+    table_format = (metadata.get("quarantine_table_format") or _contract_q_format or "delta").lower()
+    mode = (
+        metadata.get("quarantine_table_mode")
+        or (getattr(_q_cfg, "write_mode", None) if _q_cfg is not None else None)
+        or "append"
+    ).lower()
 
     spark = df.sparkSession
     parts = table_name.split(".")

@@ -10,6 +10,14 @@ import shutil
 
 from loguru import logger
 
+# Canonical SCD2 "beginning-of-time" sentinel: a record's FIRST version opens here
+# unless the contract overrides ``effective_from_default``. Date-only (no time) so it
+# is represented identically on every engine — Spark stores SCD2 dates as timestamps
+# and a pre-1970 sub-day value loses its time under LMT/timezone conversion, whereas a
+# plain date round-trips cleanly. A new record's first version starts at this default,
+# NOT at its own event timestamp.
+SCD2_DEFAULT_EFFECTIVE_FROM = "1900-01-01"
+
 
 def _is_remote_path(path) -> bool:
     """Return True if the path is a cloud storage URI (ADLS, S3, GCS).
@@ -1350,7 +1358,7 @@ def _inject_unknown_member_pandas(
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
@@ -1457,7 +1465,7 @@ def _inject_unknown_member_spark(  # pragma: no cover
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
     version_column = scd2_cfg.get("version_column", "_version")
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
@@ -1682,7 +1690,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
     change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
 
@@ -2277,7 +2285,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
     effective_from_default = (
         scd2_cfg.get("start_date_default")
         if "start_date_default" in scd2_cfg
-        else scd2_cfg.get("effective_from_default", "1900-01-01")
+        else scd2_cfg.get("effective_from_default", SCD2_DEFAULT_EFFECTIVE_FROM)
     )
 
     now_value = scd2_cfg.get("default_effective_from")
@@ -2373,8 +2381,10 @@ def _spark_scd2_dataframe(  # pragma: no cover
         # merge path below does this, but the initial-load branch returns early —
         # so without this a freshly built dimension never gets its unknown member,
         # and facts have nothing to point unmatched keys at.
-        _init_um_cfg = scd2_cfg.get("unknown_member") or {}
-        if _init_um_cfg.get("enabled", True):
+        # Only inject when `unknown_member` is explicitly configured — matches the
+        # pandas (DuckDB/Polars) path, which requires the block to be present.
+        _init_um_cfg = scd2_cfg.get("unknown_member")
+        if _init_um_cfg is not None and _init_um_cfg.get("enabled", True):
             incoming_df = _inject_unknown_member_spark(incoming_df, primary_key, scd2_cfg, _init_um_cfg)
 
         # No existing data, just write incoming
@@ -2539,6 +2549,25 @@ def _spark_scd2_dataframe(  # pragma: no cover
         closed_records = closed_records.withColumn(change_reason_col, F.lit(None).cast("string"))
         retained_current = retained_current.withColumn(change_reason_col, F.lit(None).cast("string"))
 
+    # New PKs (first-ever version) begin at the beginning-of-time default, matching
+    # the pandas/polars engines; UPDATED PKs keep their change_date as the open date.
+    # Prior-version closing above already used the change_date, so this only re-stamps
+    # brand-new keys — otherwise Spark opened a new record at its own event timestamp
+    # (an engine inconsistency the SCD2 conformance case now guards against).
+    if effective_from_default is not None:
+        _existed_keys = existing_df.select(*primary_key).distinct().withColumn("__olc_existed", F.lit(True))
+        incoming_df = (
+            incoming_df.join(_existed_keys, on=primary_key, how="left")
+            .withColumn(
+                effective_from,
+                F.when(
+                    F.col("__olc_existed").isNull(),
+                    F.to_timestamp(F.lit(effective_from_default)),
+                ).otherwise(F.col(effective_from)),
+            )
+            .drop("__olc_existed")
+        )
+
     # Align all columns
     all_columns = list(existing_df.columns)
     for col in incoming_df.columns:
@@ -2592,8 +2621,9 @@ def _spark_scd2_dataframe(  # pragma: no cover
         result = result.withColumn(version_column, F.row_number().over(w).cast("long"))
 
     # ── Unknown member injection (Spark) ─────────────────────────
-    unknown_cfg = scd2_cfg.get("unknown_member") or {}
-    if unknown_cfg.get("enabled", True):
+    # Only when explicitly configured — matches the pandas (DuckDB/Polars) path.
+    unknown_cfg = scd2_cfg.get("unknown_member")
+    if unknown_cfg is not None and unknown_cfg.get("enabled", True):
         result = _inject_unknown_member_spark(result, primary_key, scd2_cfg, unknown_cfg)
 
     # ── Enforce SCD2 Column Ordering (Spark / Kimball convention) ──
@@ -2718,6 +2748,27 @@ def _materialize_spark_dataframe(  # pragma: no cover
         soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
         soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
 
+        # ── Truncate a long transform lineage before the merge ───────────────
+        # The DataFrame merge references `df` in BOTH the anti-join and the union,
+        # duplicating its lineage within a single query plan. For contracts with
+        # several transformations that makes Catalyst's plan grow super-linearly
+        # and OOM the driver at plan-compile time. Materialising `df` once here
+        # collapses it to a cache scan, so each reference downstream is trivial.
+        # GATE: only when the contract has transformations — trivial pass-through
+        # contracts have a short lineage that never explodes and shouldn't pay for
+        # an extra materialisation pass.
+        _merge_ckpt = None
+        if getattr(contract, "transformations", None):
+            try:
+                df = df.localCheckpoint(eager=True)
+                _merge_ckpt = df
+                logger.debug("incoming_df checkpointed before merge (lineage truncated)")
+            except Exception as _ck_err:  # pragma: no cover - no local checkpoint dirs
+                logger.debug(f"localCheckpoint unavailable; using persist()+count(): {_ck_err}")
+                df = df.persist()
+                df.count()
+                _merge_ckpt = df
+
         result = _spark_merge_dataframe(
             spark,
             df,
@@ -2735,6 +2786,15 @@ def _materialize_spark_dataframe(  # pragma: no cover
             soft_delete_reason_col=soft_delete_reason_col,
             merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
         )
+
+        # UNPERSIST: release the checkpoint's cached blocks now the merge has
+        # committed, so they don't accumulate across contracts in a long
+        # multi-contract SparkSession.
+        if _merge_ckpt is not None:
+            try:
+                _merge_ckpt.unpersist()
+            except Exception:  # pragma: no cover
+                pass
 
         if target_str.startswith("table:"):
             table_name = target_str[6:]
@@ -3461,6 +3521,245 @@ def write_to_secondary_targets(
     return results
 
 
+def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
+    """Create/update a **catalog-registered** Iceberg table via pyiceberg.
+
+    Lets non-Spark engines (polars/duckdb) write the SAME catalog-registered
+    Iceberg tables Spark uses — the open, multi-engine promise of Iceberg — rather
+    than falling back to a path-based (Hadoop-catalog) table that no catalog
+    (e.g. AWS Glue / Athena) can see.
+
+    ``table_identifier`` is the target with the ``table:`` prefix stripped, e.g.
+    ``glue.reference.dim_country`` — the first segment is the catalog name and the
+    remainder is ``namespace.table``. Catalog connection props resolve from contract
+    metadata (``iceberg_catalog_type|region|uri|warehouse``) then env
+    (``ICEBERG_CATALOG_*`` / ``AWS_REGION`` / ``ICEBERG_WAREHOUSE``), defaulting to
+    Glue. Write op follows the materialization ``strategy``: overwrite → overwrite,
+    merge/scd2 → upsert on the primary key (pyiceberg), else append.
+    """
+    try:
+        from pyiceberg.catalog import load_catalog
+    except ImportError:
+        raise ValueError("Catalog-registered Iceberg writes require pyiceberg: pip install pyiceberg")
+    import pyarrow as pa
+
+    metadata = getattr(contract, "metadata", None) or {}
+    parts = [p for p in str(table_identifier).split(".") if p]
+    if len(parts) < 2:
+        raise ValueError(f"Iceberg catalog target must be 'catalog.namespace.table', got '{table_identifier}'")
+    catalog_name = parts[0]
+    identifier = ".".join(parts[1:])           # namespace.table (pyiceberg identifier)
+    namespace = ".".join(parts[1:-1]) or "default"
+
+    props: Dict[str, Any] = {"type": (metadata.get("iceberg_catalog_type") or os.getenv("ICEBERG_CATALOG_TYPE") or "glue").lower()}
+    region = metadata.get("iceberg_catalog_region") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+    if region:
+        props["glue.region"] = region
+        props["s3.region"] = region
+    uri = (metadata.get("iceberg_catalog_uri") or os.getenv("ICEBERG_CATALOG_URI")
+           or os.getenv("PYICEBERG_CATALOG__DEFAULT__URI"))
+    if uri:
+        props["uri"] = uri
+    warehouse = (metadata.get("iceberg_catalog_warehouse") or os.getenv("ICEBERG_CATALOG_WAREHOUSE")
+                 or os.getenv("ICEBERG_WAREHOUSE"))
+    if warehouse:
+        props["warehouse"] = warehouse
+
+    catalog = load_catalog(catalog_name, **props)
+
+    if hasattr(df, "to_arrow"):            # polars
+        arrow = df.to_arrow()
+    elif hasattr(df, "to_arrow_table"):    # duckdb relation
+        arrow = df.to_arrow_table()
+    else:
+        arrow = pa.Table.from_pandas(df, preserve_index=False)
+    arrow = _sanitize_arrow_nulls(arrow)
+
+    try:
+        catalog.create_namespace_if_not_exists(namespace)
+    except AttributeError:  # older pyiceberg
+        try:
+            catalog.create_namespace(namespace)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    try:
+        tbl = catalog.load_table(identifier)
+        exists = True
+    except Exception:
+        tbl = catalog.create_table(identifier, schema=arrow.schema)
+        exists = False
+
+    primary_key = list(getattr(contract, "primary_key", None) or [])
+    if not exists:
+        tbl.append(arrow); op = "create+append"
+    elif strategy == "overwrite":
+        tbl.overwrite(arrow); op = "overwrite"
+    elif strategy in ("merge", "scd2", "upsert") and primary_key and hasattr(tbl, "upsert"):
+        tbl.upsert(arrow, join_cols=primary_key); op = "upsert"
+    else:
+        tbl.append(arrow); op = "append"
+
+    logger.info(f"Materialized {arrow.num_rows} rows to Iceberg catalog table {catalog_name}.{identifier} (op={op})")
+    return {"target": f"{catalog_name}.{identifier}", "rows_written": arrow.num_rows, "format": "iceberg", "op": op}
+
+
+def _configure_ducklake_cloud(con, *paths) -> None:
+    """Authenticate DuckDB's cloud-storage extensions for any cloud DuckLake path.
+
+    If a DuckLake ``DATA_PATH`` (or metadata path) points at object storage —
+    ``s3://`` (AWS), ``gs://`` (GCS), or ``az://`` / ``abfss://`` (Azure ADLS) — the
+    Parquet files live there, so DuckDB needs the matching extension + credentials
+    before the ``ATTACH``. Credentials come from each provider's **default chain** or
+    standard env vars, never hard-coded:
+
+      * S3  — AWS default chain (env / shared profile / SSO / IAM role); ``AWS_REGION``.
+      * GCS — HMAC key from ``GCS_KEY_ID`` / ``GCS_SECRET``.
+      * Azure — ``AZURE_STORAGE_CONNECTION_STRING``, else the Azure credential chain
+        with ``AZURE_STORAGE_ACCOUNT``.
+
+    A no-op for purely local (``./lakehouse``) or MotherDuck (``md:``) paths, so the
+    zero-config local experience is untouched.
+    """
+    schemes = set()
+    for p in paths:
+        low = str(p or "").lower()
+        if low.startswith("s3://"):
+            schemes.add("s3")
+        elif low.startswith(("gs://", "gcs://")):
+            schemes.add("gcs")
+        elif low.startswith(("az://", "abfss://", "abfs://", "azure://")):
+            schemes.add("azure")
+    if not schemes:
+        return
+    if schemes & {"s3", "gcs"}:
+        con.execute("INSTALL httpfs; LOAD httpfs;")
+    if "azure" in schemes:
+        con.execute("INSTALL azure; LOAD azure;")
+    try:
+        if "s3" in schemes:
+            region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or ""
+            reg = f", REGION '{region}'" if region else ""
+            con.execute(f"CREATE OR REPLACE SECRET _ll_s3 (TYPE S3, PROVIDER credential_chain{reg})")
+        if "gcs" in schemes:
+            key = os.getenv("GCS_KEY_ID") or os.getenv("GOOGLE_HMAC_KEY_ID")
+            secret = os.getenv("GCS_SECRET") or os.getenv("GOOGLE_HMAC_SECRET")
+            if key and secret:
+                con.execute(f"CREATE OR REPLACE SECRET _ll_gcs (TYPE GCS, KEY_ID '{key}', SECRET '{secret}')")
+            else:
+                logger.warning("DuckLake GCS path but no GCS_KEY_ID/GCS_SECRET set — relying on ambient credentials.")
+        if "azure" in schemes:
+            conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+            account = os.getenv("AZURE_STORAGE_ACCOUNT") or os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
+            if conn_str:
+                con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, CONNECTION_STRING '{conn_str}')")
+            elif account:
+                con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, ACCOUNT_NAME '{account}')")
+            else:
+                logger.warning("DuckLake Azure path but no AZURE_STORAGE_* set — relying on ambient credentials.")
+    except Exception as e:
+        logger.warning(f"DuckLake cloud credential setup incomplete ({sorted(schemes)}): {e}. "
+                       f"Falling back to any ambient DuckDB credentials.")
+
+
+def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
+    """Create/update a table in a **DuckLake** catalog (DuckDB's ``ducklake`` extension).
+
+    DuckLake is DuckDB's open lakehouse format — a SQL-database catalog (SQLite/DuckDB/
+    Postgres) plus Parquet data, with snapshots/time-travel. This materialises a batch
+    into a DuckLake table so contracts land in DuckLake the same way they do in
+    Delta/Iceberg — pure local DuckDB, no cloud or JVM.
+
+    ``table_identifier`` is the target with the ``table:`` prefix stripped, e.g.
+    ``rideflow_lake.marketplace.bronze_trips`` — first segment is the attached catalog
+    name, then ``schema.table``. Catalog metadata + data paths resolve from contract
+    metadata (``ducklake_metadata`` / ``ducklake_data_path``) then env
+    (``DUCKLAKE_METADATA`` / ``DUCKLAKE_DATA_PATH``). Write op follows ``strategy``:
+    overwrite → CREATE OR REPLACE, merge/scd2 → delete-by-PK + insert, else append.
+    """
+    import duckdb
+    import pyarrow as pa
+
+    metadata = getattr(contract, "metadata", None) or {}
+    parts = [p for p in str(table_identifier).split(".") if p]
+    if len(parts) < 2:
+        raise ValueError(f"DuckLake target must be 'catalog.[schema.]table', got '{table_identifier}'")
+    catalog = parts[0]
+    schema = parts[1] if len(parts) >= 3 else "main"
+    table = parts[-1]
+    fq = f'"{catalog}"."{schema}"."{table}"'
+
+    meta_path = (metadata.get("ducklake_metadata") or os.getenv("DUCKLAKE_METADATA")
+                 or "./lakehouse/ducklake_catalog.ducklake")
+    data_path = (metadata.get("ducklake_data_path") or os.getenv("DUCKLAKE_DATA_PATH")
+                 or "./lakehouse/ducklake_data/")
+    # Local catalog/data → ensure dirs exist. Remote targets (MotherDuck 'md:',
+    # cloud object storage 's3://'/'gs://'/'abfss://') are managed server-side.
+    def _is_remote(p: str) -> bool:
+        p = str(p)
+        return "://" in p or p.startswith("md:")
+
+    if not _is_remote(data_path):
+        os.makedirs(data_path, exist_ok=True)
+    if not _is_remote(meta_path):
+        _meta_dir = os.path.dirname(meta_path)
+        if _meta_dir:
+            os.makedirs(_meta_dir, exist_ok=True)
+
+    if hasattr(df, "to_arrow"):
+        arrow = df.to_arrow()
+    elif hasattr(df, "to_arrow_table"):
+        arrow = df.to_arrow_table()
+    else:
+        arrow = pa.Table.from_pandas(df, preserve_index=False)
+    arrow = _sanitize_arrow_nulls(arrow)
+
+    # Two DuckLake backends, shared write logic below:
+    #  * MotherDuck — metadata 'md:...' (or ducklake_backend=motherduck): create a
+    #    NATIVE DuckLake database. ('ATTACH ducklake:md:' is rejected in MotherDuck
+    #    "workspace mode".) Requires the motherduck_token env var.
+    #  * Local — attach a file-backed DuckLake catalog + local/S3 data path.
+    _motherduck = str(meta_path).startswith("md:") or (metadata.get("ducklake_backend") or "").lower() == "motherduck"
+    con = duckdb.connect("md:") if _motherduck else duckdb.connect()
+    try:
+        con.execute("INSTALL ducklake; LOAD ducklake;")
+        if _motherduck:
+            con.execute(f'CREATE DATABASE IF NOT EXISTS "{catalog}" (TYPE DUCKLAKE)')
+        else:
+            _configure_ducklake_cloud(con, data_path, meta_path)  # s3:// / gs:// / abfss:// data paths
+            con.execute(f"ATTACH 'ducklake:{meta_path}' AS \"{catalog}\" (DATA_PATH '{data_path}')")
+        con.execute(f'CREATE SCHEMA IF NOT EXISTS "{catalog}"."{schema}"')
+        con.register("_ll_incoming", arrow)
+
+        exists = con.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE database_name = ? AND schema_name = ? AND table_name = ?",
+            [catalog, schema, table],
+        ).fetchone()[0] > 0
+        primary_key = list(getattr(contract, "primary_key", None) or [])
+
+        if not exists:
+            con.execute(f"CREATE TABLE {fq} AS SELECT * FROM _ll_incoming")
+            op = "create"
+        elif strategy == "overwrite":
+            con.execute(f"CREATE OR REPLACE TABLE {fq} AS SELECT * FROM _ll_incoming")
+            op = "overwrite"
+        elif strategy in ("merge", "scd2", "upsert") and primary_key:
+            _on = " AND ".join([f'{fq}."{k}" = i."{k}"' for k in primary_key])
+            con.execute(f"DELETE FROM {fq} WHERE EXISTS (SELECT 1 FROM _ll_incoming i WHERE {_on})")
+            con.execute(f"INSERT INTO {fq} SELECT * FROM _ll_incoming")
+            op = "upsert"
+        else:
+            con.execute(f"INSERT INTO {fq} SELECT * FROM _ll_incoming")
+            op = "append"
+    finally:
+        con.close()
+
+    logger.info(f"Materialized {arrow.num_rows} rows to DuckLake table {catalog}.{schema}.{table} (op={op})")
+    return {"target": f"{catalog}.{schema}.{table}", "rows_written": arrow.num_rows, "format": "ducklake", "op": op}
+
+
 def materialize_dataframe(
     df: Any,
     contract,
@@ -3523,6 +3822,19 @@ def materialize_dataframe(
     # accessible.  Fall back to the materialization 'location' field which
     # contains the actual storage path (e.g. abfss://...).
     resolved_str = str(resolved_target)
+    # Non-Spark + Iceberg + a catalog-qualified ('table:') target → write through
+    # pyiceberg to the configured catalog (e.g. AWS Glue), so polars/duckdb create
+    # and update the SAME catalog-registered Iceberg tables Spark uses, instead of
+    # falling back to a path-based (Hadoop-catalog) table no catalog can see.
+    if engine_name != "spark" and resolved_format == "iceberg" and resolved_str.startswith("table:"):
+        return _write_iceberg_via_catalog(
+            df, resolved_str[6:], contract, mat, strategy=(mat.strategy or "append").lower()
+        )
+    # DuckLake (DuckDB's SQL-catalog lakehouse) — a catalog write, not a file path.
+    if resolved_format == "ducklake" and resolved_str.startswith("table:"):
+        return _write_ducklake_via_catalog(
+            df, resolved_str[6:], contract, mat, strategy=(mat.strategy or "append").lower()
+        )
     if resolved_str.startswith("table:") and engine_name != "spark":
         location = getattr(mat, "location", None)
         if location:

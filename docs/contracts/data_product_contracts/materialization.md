@@ -1,5 +1,13 @@
 # Materialization
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **materialization** is the OLC reference: **[materialization reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/materialization/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 Materialization controls **how validated data is written** to the target Delta table.
 
 > **Think of it like choosing a filing strategy.** You can append new pages to the end of a folder (append), update existing pages in-place (merge), keep every version of every page with dates (SCD2), or throw everything out and start fresh each day (overwrite).

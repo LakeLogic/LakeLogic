@@ -62,7 +62,7 @@ def test_polars_helper_dtype_schema_and_join_sql():
     casted = casted_lf.collect()
     assert casted.schema["id"] == pl.Int64
     assert casted.schema["tags"] == pl.Utf8
-    assert casted["tags"].to_list() == ['["a", "b"]']
+    assert casted["tags"].to_list() == ['["a","b"]']
     assert "extra" not in casted.columns
     assert "missing_col" in casted.columns
     assert any("Missing fields" in error for error in schema_errors)
@@ -416,7 +416,11 @@ def test_polars_helper_post_transformations_cover_sql_lookup_join_and_date_range
             _transformation(pivot=types.SimpleNamespace(name="pivot")),
             _transformation(unpivot=types.SimpleNamespace(name="unpivot")),
             _transformation(bucket=types.SimpleNamespace(field="bucketed")),
-            _transformation(date_diff=types.SimpleNamespace(field="days_open")),
+            _transformation(
+                date_diff=types.SimpleNamespace(
+                    field="days_open", from_col="start_date", to_col="end_date", unit="days"
+                )
+            ),
             _transformation(
                 json_extract=types.SimpleNamespace(source="payload", path="$.city", field="city", cast=None)
             ),

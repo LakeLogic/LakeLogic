@@ -1,5 +1,13 @@
 # Transformations
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **transformations** is the OLC reference: **[transformations reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/transformation/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 LakeLogic is **SQL-first**. If you know SQL, you already know how to transform data in LakeLogic. Every transformation — from simple renames to complex multi-table joins — can be expressed as a SQL statement. The YAML shorthand transforms (rename, filter, cast, etc.) are convenience wrappers that compile down to SQL internally.
 
 > **Bottom line:** Write SQL in your contract, LakeLogic runs it. No Python, no Spark code, no notebooks — just SQL in YAML.

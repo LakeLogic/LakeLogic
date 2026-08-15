@@ -208,6 +208,7 @@ class DataProcessor:
         pipeline_run_id: Optional[str] = None,
         trace: bool = False,
         run_log_mode: Optional[str] = None,
+        strict: bool = False,
     ):
         """
         Initialize the DataProcessor.
@@ -219,8 +220,13 @@ class DataProcessor:
             pipeline_run_id: Optional pipeline-level run id for correlation across contracts.
             trace: Enable detailed execution tracing and row debugging.
             run_log_mode: Which run log backends to use: "dir", "table", or "all" (default).
+            strict: Opt-in — gate the contract on the public OLC standard
+                (``OLCContractV1``) before running. Off by default so the lenient
+                runtime path is unchanged; the default flips to strict once the
+                fleet is validated (Phase 6 of the alignment refactor).
         """
         self._configure_logging()
+        self._strict = strict
         self.engine_name = (engine or self._discover_engine()).lower()
         self.stage = stage
         self.contract = self._load_contract(contract)
@@ -429,6 +435,20 @@ class DataProcessor:
         if strict:
             raise PreflightError(name, findings)
 
+    def _enforce_strict(self, data: dict) -> None:
+        """Opt-in gate: validate the raw contract against the public OLC standard.
+
+        No-op unless ``strict=True`` was passed to the constructor. Raises
+        ``pydantic.ValidationError`` / ``ValueError`` for non-canonical contracts.
+        The lenient ``DataContract`` is still what the runtime uses; this only
+        adds an up-front conformance check on the strict path.
+        """
+        if not getattr(self, "_strict", False):
+            return
+        from lakelogic.core.contracts import load_strict
+
+        load_strict(data)
+
     def _load_contract(self, contract: Union[str, Path, dict, DataContract]) -> DataContract:
         """
         Loads the contract from various formats.
@@ -440,10 +460,12 @@ class DataProcessor:
             Loaded DataContract.
         """
         if isinstance(contract, DataContract):
+            self._enforce_strict(contract.model_dump(exclude_none=True))
             loaded = self._apply_stage_overrides(contract)
             loaded = self._apply_fact_governance(loaded)
             return self._apply_cdc_defaults(loaded)
         if isinstance(contract, dict):
+            self._enforce_strict(contract)
             loaded = DataContract(**contract)
             # Anchor _base_path to the contract YAML's directory so packaging
             # artefacts referenced by relative path (external_logic.path,
@@ -492,6 +514,7 @@ class DataProcessor:
         # Handle inline YAML strings
         if isinstance(contract, str) and ("\n" in contract or "version:" in contract):
             data = _load_yaml_no_on_bool(contract)
+            self._enforce_strict(data)
             contract_obj = DataContract(**data)
             loaded = self._apply_stage_overrides(contract_obj)
             loaded = self._apply_fact_governance(loaded)
@@ -503,6 +526,7 @@ class DataProcessor:
 
         with open(path, "r") as f:
             data = _load_yaml_no_on_bool(f)
+            self._enforce_strict(data)
             contract_obj = DataContract(**data)
             try:
                 contract_obj._base_path = path.parent
@@ -706,6 +730,26 @@ class DataProcessor:
         # Capture source_path for run report
         if source_path and not self.last_source_path:
             self.last_source_path = str(source_path)
+
+        # ── EXTRACTION HOOK ──
+        # If the contract declares an `extraction:` block, turn a free-text column
+        # into structured fields (LLM / local model / file reader / deterministic
+        # regex) BEFORE schema + quality enforcement, so the extracted output is
+        # governed by the contract like any other column.
+        if getattr(self.contract, "extraction", None) is not None:
+            from lakelogic.core.extraction import apply_extraction
+
+            _pre_ex = time.perf_counter()
+            df = apply_extraction(self.contract, df, self.engine_name)
+            self._active_trace_steps.append(
+                TraceStep(
+                    step=f"Extraction ({self.contract.extraction.provider})",
+                    timestamp=time.time(),
+                    duration_ms=(time.perf_counter() - _pre_ex) * 1000,
+                    details={"provider": self.contract.extraction.provider},
+                    status="ok",
+                )
+            )
 
         # ── EXTERNAL LOGIC HOOK ──
         # We run this BEFORE adapter.execute() so that the framework's strict schema
@@ -4053,27 +4097,17 @@ class DataProcessor:
                 bad_count = None
                 source_count = None
 
-                # Use a union with a marker column to count source/good/bad in one action
-                marked_frames = []
-                if source_df is not None:
-                    marked_frames.append(source_df.select(F.lit("source").alias("_count_marker")))
-                if good_df is not None:
-                    marked_frames.append(good_df.select(F.lit("good").alias("_count_marker")))
-                if bad_df is not None:
-                    marked_frames.append(bad_df.select(F.lit("bad").alias("_count_marker")))
-
-                if marked_frames:
-                    combined = marked_frames[0]
-                    for frame in marked_frames[1:]:
-                        combined = combined.union(frame)
-                    counts_result = combined.groupBy("_count_marker").count().collect()
-                    counts_map = {row["_count_marker"]: row["count"] for row in counts_result}
-                    source_count = counts_map.get("source")
-                    good_count = counts_map.get("good", 0)
-                    bad_count = counts_map.get("bad", 0)
-                else:
-                    good_count = 0
-                    bad_count = 0
+                # Count source/good/bad separately. A previous optimisation
+                # unioned all three frames into ONE query (single action) to count
+                # them together — but for contracts with several transformations
+                # that concatenates the shared, complex lineage three times into a
+                # single plan, which can make Catalyst's plan grow super-linearly
+                # and OOM the driver at plan time. Separate counts keep each plan
+                # single-lineage; the row volumes here are always small.
+                source_count = source_df.count() if source_df is not None else None
+                good_count = good_df.count() if good_df is not None else 0
+                bad_count = bad_df.count() if bad_df is not None else 0
+                logger.debug(f"counts: source={source_count} good={good_count} bad={bad_count}")
 
                 total = (good_count or 0) + (bad_count or 0)
                 ratio = bad_count / total if total > 0 else None

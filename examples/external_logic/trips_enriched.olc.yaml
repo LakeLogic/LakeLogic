@@ -1,0 +1,57 @@
+# Multi-frame external logic: SOURCE (trips) + a LINK (drivers) → enriched output.
+#
+# LakeLogic loads the `drivers` link and hands it to the external step alongside
+# the validated source frame. The step returns the joined frame; the contract
+# governs it (schema, quality, materialization).
+#
+# ENGINE: set external_logic.engine to the engine the step runs against. To run
+# the whole pipeline on another engine, pick it at runtime (see run_demo.py) and
+# set engine here to match. The SAME enrich_trips.py runs on all three.
+#
+# LINK SUBSETTING: `links[].filter` loads only a PORTION of the reference table at
+# load time (portable SQL WHERE). Here we link only ACTIVE drivers. Swap to
+# `query:` for a full engine-specific SELECT (see the commented alternative).
+version: 1.0.0
+
+info:
+  title: Trips Enriched
+  table_name: trips_enriched
+  target_layer: silver
+  description: Trips left-joined to active-driver reference data via external logic.
+  owner: marketplace-team@example.com
+
+model:
+  fields:
+    - { name: trip_id, type: string, required: true }
+    - { name: driver_id, type: string, required: true }
+    - { name: fare, type: double }
+    - { name: driver_name, type: string, description: Injected from the drivers link. }
+    - { name: driver_city, type: string, description: Injected from the drivers link. }
+
+primary_key: [trip_id]
+
+# Reference data handed to the external step. `filter` links only a portion.
+links:
+  - name: drivers
+    path: drivers.parquet
+    type: parquet
+    columns: [driver_id, driver_name, driver_city]   # projection
+    filter: "status = 'active'"                       # portable row subset
+    # query: "SELECT driver_id, driver_name, driver_city FROM {link} WHERE status='active'"  # escape hatch
+
+quality:
+  row_rules:
+    - { name: fare_non_negative, sql: "fare >= 0" }
+  dataset_rules:
+    - unique: trip_id
+
+external_logic:
+  type: python
+  engine: polars          # required — engine the step runs against
+  path: enrich_trips.py
+  entrypoint: run
+  handles_output: false   # return the frame; LakeLogic materializes + governs it
+
+materialization:
+  strategy: overwrite
+  format: delta

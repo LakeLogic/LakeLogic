@@ -1,5 +1,13 @@
 # Schema & Model
 
+!!! abstract "Open Lakehouse Contract - the standard"
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    standard for lakehouse data contracts. The authoritative field-level spec for
+    **schema & model** is the OLC reference: **[schema & model reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/schema/)**.
+    This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
+    examples, and runtime-specific notes).
+
+
 The `model:` block defines the expected schema — field names, types, constraints, PII/sensitive classification, and masking strategies.
 
 ---

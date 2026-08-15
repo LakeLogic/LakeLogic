@@ -39,6 +39,27 @@ ENGINE_DIALECT_MAP: Dict[str, str] = {
     "databricks": "databricks",
 }
 
+# Engines whose link loader honours Link.filter / Link.query (load-time row
+# subsetting). Engines NOT listed here must call ``assert_link_subset_supported``
+# so a `filter:`/`query:` never SILENTLY loads the full linked table.
+_LINK_SUBSET_ENGINES = frozenset({"polars", "pandas", "duckdb", "spark"})
+
+
+def assert_link_subset_supported(links: Any, engine_name: str) -> None:
+    """Fail loudly if any link declares ``filter``/``query`` on an engine whose
+    loader does not yet apply load-time subsetting — silently loading the full
+    table would violate the contract's stated intent."""
+    if engine_name in _LINK_SUBSET_ENGINES:
+        return
+    for link in links or []:
+        if getattr(link, "filter", None) or getattr(link, "query", None):
+            raise NotImplementedError(
+                f"Link '{getattr(link, 'name', '?')}' declares filter/query, but the "
+                f"'{engine_name}' engine does not yet apply load-time link subsetting. "
+                "Use an engine that supports it (polars, duckdb, spark) or remove "
+                "filter/query from the link."
+            )
+
 
 class EngineAdapter(ABC):
     """
@@ -689,7 +710,14 @@ class EngineAdapter(ABC):
         qto = self._quote_ident(to_col)
         engine = self._normalize_engine()
         if engine == "spark":
-            diff_expr = f"DATEDIFF({qto}, {qfrom})"
+            # Tolerant of ISO (YYYY-MM-DD) and compact (YYYYMMDD, e.g. GA4): normalise
+            # a compact date to ISO first, then to_date (Spark ANSI to_date throws on
+            # a bare YYYYMMDD string).
+            def _sp_date(c: str) -> str:
+                iso = f"CONCAT_WS('-', SUBSTR({c},1,4), SUBSTR({c},5,2), SUBSTR({c},7,2))"
+                return f"to_date(CASE WHEN {c} RLIKE '^[0-9]{{8}}$' THEN {iso} ELSE {c} END)"
+
+            diff_expr = f"DATEDIFF({_sp_date(qto)}, {_sp_date(qfrom)})"
         elif engine == "polars":
             # Polars SQL: subtracting two STRPTIME values yields duration[μs]
             # but neither DATE_PART nor EXTRACT(EPOCH FROM ...) work on
@@ -710,7 +738,9 @@ class EngineAdapter(ABC):
             else:
                 diff_expr = f"CAST({seconds_expr} / 86400 AS INTEGER)"
         else:
-            diff_expr = f"DATEDIFF('{unit}', {qfrom}, {qto})"
+            # DATEDIFF needs DATE/TIMESTAMP, not the raw string columns; cast so it
+            # works on string dates and matches the Polars branch's date granularity.
+            diff_expr = f"DATEDIFF('{unit}', CAST({qfrom} AS DATE), CAST({qto} AS DATE))"
         return f"SELECT *, ({diff_expr}) AS {self._quote_ident(field)} FROM {source_table}"
 
     def _expand_row_rule(self, spec: Any) -> Optional[Any]:
@@ -889,6 +919,28 @@ class EngineAdapter(ABC):
 
         return None
 
+    def _resolve_deduplicate(self, trans: Any) -> Any:
+        """Return the effective deduplicate config for a transformation.
+
+        Accepts either the ``deduplicate`` op or the ``deduplicate_by_latest``
+        shorthand ({key_columns, timestamp_column} = keep the latest row per key)
+        and returns a ``TransformationDeduplicate`` both engines already know how
+        to apply. Returns ``None`` when neither is configured.
+        """
+        dd = getattr(trans, "deduplicate", None)
+        if dd and getattr(dd, "on", None):
+            return dd
+        dbl = getattr(trans, "deduplicate_by_latest", None)
+        if dbl and getattr(dbl, "key_columns", None) and getattr(dbl, "timestamp_column", None):
+            from lakelogic.core.models import TransformationDeduplicate
+
+            return TransformationDeduplicate(
+                on=list(dbl.key_columns),
+                sort_by=[dbl.timestamp_column],
+                order="desc",
+            )
+        return None
+
     def _expand_dataset_rule(self, spec: Any) -> Optional[QualityRule]:
         """
         Expand structured dataset rule specs into QualityRule objects.
@@ -906,15 +958,37 @@ class EngineAdapter(ABC):
 
         if isinstance(spec, DatasetRuleUnique):
             payload = spec.unique
-            field = payload if isinstance(payload, str) else payload.get("field")
             cfg = payload if isinstance(payload, dict) else {}
-            if not field:
+            # `unique` may be a single column (str), a COMPOSITE key (list of str),
+            # or a verbose dict ({field: …} or {columns: [...]}).
+            if isinstance(payload, str):
+                columns = [payload]
+            elif isinstance(payload, list):
+                columns = [c for c in payload if isinstance(c, str)]
+            else:
+                cols = cfg.get("columns") or cfg.get("fields")
+                if isinstance(cols, list):
+                    columns = [c for c in cols if isinstance(c, str)]
+                elif cfg.get("field"):
+                    columns = [cfg["field"]]
+                else:
+                    columns = []
+            if not columns:
                 return None
-            name = cfg.get("name") or f"{field}_unique"
-            qfield = self._quote_ident(field)
+            name = cfg.get("name") or ("_".join(columns) + "_unique")
+            if len(columns) == 1:
+                distinct_expr = self._quote_ident(columns[0])
+            else:
+                # Composite key: distinct over the concatenated tuple. CONCAT_WS with a
+                # literal separator works on both DuckDB and Polars SQL (tuple-distinct
+                # and chr() do not).
+                # CAST AS STRING (not VARCHAR) — works on DuckDB, Polars AND Spark
+                # (Spark rejects a bare VARCHAR).
+                parts = ", ".join(f"CAST({self._quote_ident(c)} AS STRING)" for c in columns)
+                distinct_expr = f"CONCAT_WS('|#|', {parts})"
             return QualityRule(
                 name=name,
-                sql=f"SELECT COUNT(*) - COUNT(DISTINCT {qfield}) FROM {dataset}",
+                sql=f"SELECT COUNT(*) - COUNT(DISTINCT {distinct_expr}) FROM {dataset}",
                 category=cfg.get("category", "consistency"),
                 description=cfg.get("description"),
                 severity=cfg.get("severity", "error"),

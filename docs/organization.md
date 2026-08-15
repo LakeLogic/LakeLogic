@@ -47,7 +47,7 @@ flowchart TD
     UC[("fa:fa-shield Unity Catalog (Central Governance)")]
 
     %% Domain 1: Finance
-    subgraph D1 [Finance Domain (Producer)]
+    subgraph D1 ["Finance Domain (Producer)"]
         direction TB
         F_In[(Source Systems)] --> L1[LakeLogic Pipeline]
         L1 --> F_B[(Bronze)]
@@ -56,7 +56,7 @@ flowchart TD
     end
 
     %% Domain 2: Marketing
-    subgraph D2 [Marketing Domain (Consumer)]
+    subgraph D2 ["Marketing Domain (Consumer)"]
         direction TB
         M_DP[("fa:fa-table Gold Data Product (marketing.campaign_roi)")]
         L2[LakeLogic Pipeline] --> M_DP
