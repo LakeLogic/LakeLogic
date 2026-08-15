@@ -205,6 +205,27 @@ def _fabric_notebook(
     def _cell_source(lines: List[str]) -> List[str]:
         return [line + "\n" for line in lines[:-1]] + [lines[-1]]
 
+    # Job-safe install: `%pip` magic CANCELS the Spark session in Fabric JOB runs
+    # (non-interactive, pipeline-triggered), so a `%pip install` cell works when run
+    # by hand but kills scheduled runs. Install to a --target dir, prepend it to
+    # sys.path, and purge stale already-imported copies instead. Keep this cell as-is
+    # rather than "simplifying" it back to `%pip` — that reintroduces the job-run bug.
+    # (The base Fabric runtime ships an older typing_extensions than lakelogic needs.)
+    install_lines = [
+        "# Install lakelogic for a Fabric JOB run WITHOUT `%pip` — `%pip` magic cancels",
+        "# the Spark session in non-interactive (pipeline-triggered) job runs. Install to",
+        "# a --target dir, put it on sys.path, and drop stale already-imported copies.",
+        "import subprocess, sys",
+        '_TARGET = "/tmp/lakelogic_libs"',
+        'subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--target", _TARGET,',
+        '                       "lakelogic", "typing_extensions"])',
+        "if _TARGET not in sys.path:",
+        "    sys.path.insert(0, _TARGET)",
+        "for _m in list(sys.modules):",
+        '    if _m.split(".")[0] in ("lakelogic", "pydantic", "pydantic_core", "typing_extensions"):',
+        "        del sys.modules[_m]",
+    ]
+
     notebook = {
         "cells": [
             {
@@ -221,7 +242,7 @@ def _fabric_notebook(
                 "metadata": {},
                 "execution_count": None,
                 "outputs": [],
-                "source": ["%pip install lakelogic"],
+                "source": _cell_source(install_lines),
             },
             {
                 "cell_type": "code",

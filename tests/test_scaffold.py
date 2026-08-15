@@ -201,7 +201,18 @@ def test_fabric_target_emits_per_layer_notebooks(contract_dir, tmp_path):
         nb = json.loads((out / "notebooks" / f"{name}.ipynb").read_text(encoding="utf-8"))
         assert nb["nbformat"] == 4
         code_cells = [c for c in nb["cells"] if c["cell_type"] == "code"]
-        assert any("%pip install lakelogic" in "".join(c["source"]) for c in code_cells)
+        # Install cell must be job-safe: NO `%pip` magic (it cancels the Spark session
+        # in Fabric job runs), instead a subprocess pip --target install put on sys.path
+        # with stale already-imported module copies purged.
+        install_src = "".join(code_cells[0]["source"])
+        # No `%pip` magic *directive* (a line that actually runs the magic); the WHY
+        # comment is allowed to mention it.
+        assert not any(ln.strip().startswith("%pip") for ln in install_src.splitlines())
+        assert '"--target"' in install_src and "/tmp/lakelogic_libs" in install_src
+        assert '"lakelogic", "typing_extensions"' in install_src
+        assert "sys.path.insert(0, _TARGET)" in install_src
+        assert "del sys.modules[_m]" in install_src
+        compile(install_src, f"{name}.ipynb", "exec")  # install cell is valid python
         run_src = "".join(code_cells[-1]["source"])
         assert f"target_layers='{layer}'" in run_src
         assert 'engine="spark", spark=spark' in run_src
