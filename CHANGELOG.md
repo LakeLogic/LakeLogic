@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.44.0] — 2026-08-15
+
+### Added
+
+- **ducklake**: Write Parquet to cloud object storage (S3 / GCS / Azure ADLS)
+- **ducklake**: Read table: links from the DuckLake catalog on the duckdb engine
+- **ducklake**: Materialize contracts to DuckLake (local + MotherDuck)
+- **iceberg**: Non-Spark engines write catalog-registered Iceberg (Glue)
+- Add banner image to README for enhanced visual appeal
+- Implement external logic framework and enrich trips example
+
+### Documentation
+
+- Enhance index.md with LakeLogic vs. LakeLogic Platform comparison
+
+### Fixed
+
+- **duckdb**: Don't ERROR on dataset rules referencing not-yet-injected columns
+- **duckdb-engine**: Rewrite Spark to_date() to DuckDB-native SQL
+- **spark/iceberg**: Stop Catalyst plan explosion on merge; honor Iceberg for quarantine + run-log
 ## [1.43.0] — 2026-08-13
 
 ### Added
@@ -481,6 +501,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.44.0]: https://github.com/lakelogic/LakeLogic/compare/v1.43.0...v1.44.0
 [1.43.0]: https://github.com/lakelogic/LakeLogic/compare/v1.42.0...v1.43.0
 [1.42.0]: https://github.com/lakelogic/LakeLogic/compare/v1.41.0...v1.42.0
 [1.41.0]: https://github.com/lakelogic/LakeLogic/compare/v1.40.6...v1.41.0
