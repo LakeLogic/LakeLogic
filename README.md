@@ -1,3 +1,5 @@
+![LakeLogic — executable data contracts: define data trust once, enforced from your laptop to production](docs/assets/lakelogic_banner.png)
+
 # LakeLogic
 
 **Define data trust once. Enforce it from development to production.**
