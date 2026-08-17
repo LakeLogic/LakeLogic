@@ -3,22 +3,9 @@ title: LakeLogic — Open-Source Data Contracts
 description: Define schemas, quality rules, PII handling, lineage, and materialization in YAML, then execute the contract with Polars, DuckDB, or Spark.
 ---
 
-<div class="ll-eyebrow"><span class="ll-eyebrow__pip"></span> v1.0 · Apache 2.0</div>
+<div class="hero-banner"><img src="assets/lakelogic_banner.png" alt="LakeLogic — executable data contracts: define data trust once, enforced from your laptop to production"></div>
 
-<div class="hero-section"><div class="hero-content"><h1 class="hero-title">Define data trust once.<br><span style="color:var(--md-accent-fg-color)">Use it everywhere.</span></h1><p class="hero-subtitle">LakeLogic turns version-controlled YAML contracts into executable checks — schema, quality, PII, lineage, and SLAs enforced from your laptop to your CI pipeline to production.</p><div class="hero-cta"><a class="md-button md-button--primary" href="https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb" target="_blank">Get started →</a> <a class="md-button md-button--secondary" href="examples.html">Browse examples</a> <a class="md-button" href="installation.html">Install locally</a> <a class="md-button" href="https://github.com/lakelogic/LakeLogic" target="_blank">★ Star on GitHub</a></div></div><div class="hero-visual"><div class="ll-win ll-win--yaml"><div class="ll-win__head"><span class="ll-win__dots"><i></i><i></i><i></i></span><span class="ll-win__name">contracts/orders.yaml</span></div><pre class="ll-code"><span class="k">version</span>: <span class="n">1.0.0</span>
-<span class="k">dataset</span>: orders
-
-<span class="k">model</span>:
-  <span class="k">fields</span>:
-    - <span class="k">name</span>: order_id
-      <span class="k">type</span>: <span class="s">integer</span>
-      <span class="k">required</span>: <span class="b">true</span>
-<span class="hl">    - <span class="k">name</span>: customer_email
-      <span class="k">type</span>: <span class="s">string</span>
-      <span class="k">pii</span>: <span class="b">true</span>
-      <span class="k">masking</span>: <span class="s">partial</span></span>
-    - <span class="k">name</span>: amount
-      <span class="k">type</span>: <span class="s">float</span></pre></div><div class="ll-pr"><div class="ll-pr__head"><span class="ll-pr__num">pull request #243</span><span class="ll-pr__count">2 of 3 passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--ok">✓</span><span class="ll-pr__name">ci / <b>build</b></span><span class="ll-res ll-res--ok">Passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--ok">✓</span><span class="ll-pr__name">ci / <b>unit-tests</b></span><span class="ll-res ll-res--ok">Passed</span></div><div class="ll-pr__check"><span class="ll-ck ll-ck--no">✕</span><span class="ll-pr__name">lakelogic / <b>data-contract</b></span><span class="ll-res ll-res--no">Breaking</span></div></div></div></div>
+<div class="hero-cta"><a class="md-button md-button--primary" href="https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb" target="_blank">Get started →</a> <a class="md-button md-button--secondary" href="examples.html">Browse examples</a> <a class="md-button" href="installation.html">Install locally</a> <a class="md-button" href="https://github.com/lakelogic/LakeLogic" target="_blank">★ Star on GitHub</a></div>
 
 *LakeLogic — the open-source reference framework for the Open Lakehouse Contract.*
 
