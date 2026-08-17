@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.43.1] — 2026-08-17
+
+### Fixed
+
+- **scaffold**: Job-safe pip install in fabric notebooks (%pip cancels Fabric job-run sessions)
 ## [1.43.0] — 2026-08-13
 
 ### Added
@@ -481,6 +486,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.43.1]: https://github.com/lakelogic/LakeLogic/compare/v1.43.0...v1.43.1
 [1.43.0]: https://github.com/lakelogic/LakeLogic/compare/v1.42.0...v1.43.0
 [1.42.0]: https://github.com/lakelogic/LakeLogic/compare/v1.41.0...v1.42.0
 [1.41.0]: https://github.com/lakelogic/LakeLogic/compare/v1.40.6...v1.41.0
