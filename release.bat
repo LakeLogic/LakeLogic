@@ -129,10 +129,13 @@ git add CHANGELOG.md
 git commit --amend --no-edit
 
 REM Step 4: Re-attach the tag to the amended commit
-REM         Without this, the tag points to the old (pre-amend) commit
+REM         Without this, the tag points to the old (pre-amend) commit.
+REM         Use an ANNOTATED tag (-a): `git push --follow-tags` (step 5) only
+REM         pushes annotated tags, so a lightweight `git tag -f` would never reach
+REM         origin and the tag-triggered publish workflow would not fire.
 echo.
 echo [4/6] Re-tagging %NEW_TAG% on amended commit...
-git tag -f %NEW_TAG%
+git tag -f -a %NEW_TAG% -m "release %NEW_TAG%"
 
 REM Step 5: Push
 echo.
