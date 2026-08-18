@@ -1281,6 +1281,14 @@ def test_processor_compute_counts_spark_optimized_and_fallback(monkeypatch):
             self.marker = marker
             self.rows = rows
 
+        # The Spark path now counts each frame separately via `.count()` (the old
+        # union-into-one-query optimisation was removed to avoid Catalyst plan
+        # blow-up / driver OOM on multi-transform lineage — see _compute_counts).
+        # `.count()` is what the current implementation calls; the select/union
+        # fakes below remain only to exercise the no-longer-taken path safely.
+        def count(self):
+            return self.rows
+
         def select(self, expr):
             return FakeMarkedFrame([self.marker] * self.rows)
 

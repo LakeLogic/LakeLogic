@@ -575,7 +575,7 @@ class DuckDBAdapter(EngineAdapter):
                 # engine's list->string serialisation (both "[\"a\",\"b\"]").
                 self.con.sql(
                     f"CREATE OR REPLACE VIEW {view_name} AS "
-                    f'SELECT *{exclude}, to_json(string_split("{trans.split.field}", \'{delim}\')) AS "{output}" FROM {current}'
+                    f'SELECT *{exclude}, to_json(string_split("{trans.split.field}", \'{delim}\')) AS "{output}" FROM {current}'  # noqa: E501
                 )
                 current = view_name
                 continue

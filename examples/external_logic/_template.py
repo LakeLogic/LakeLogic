@@ -117,7 +117,6 @@ def _emit_test_cases(source: Any, out: Any, kind: str, out_dir: str) -> None:
         source.limit(5).toPandas().to_json(Path(out_dir) / "input.sample.jsonl", orient="records", lines=True)
         out.limit(5).toPandas().to_json(Path(out_dir) / "expected.sample.jsonl", orient="records", lines=True)
     else:
-        import polars as pl
 
         s = source.collect() if (kind == "polars" and hasattr(source, "collect")) else source
         o = out.collect() if (kind == "polars" and hasattr(out, "collect")) else out
