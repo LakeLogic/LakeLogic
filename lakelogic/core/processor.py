@@ -4089,7 +4089,6 @@ class DataProcessor:
         # For Spark, optimize by computing counts in a single action where possible
         if self.engine_name == "spark":  # pragma: no cover
             try:
-                from pyspark.sql import functions as F
 
                 # Cache good_df and bad_df if they share lineage to avoid recomputation
                 # Then compute counts together

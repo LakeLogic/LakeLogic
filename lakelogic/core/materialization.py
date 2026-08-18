@@ -3551,7 +3551,7 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
     identifier = ".".join(parts[1:])           # namespace.table (pyiceberg identifier)
     namespace = ".".join(parts[1:-1]) or "default"
 
-    props: Dict[str, Any] = {"type": (metadata.get("iceberg_catalog_type") or os.getenv("ICEBERG_CATALOG_TYPE") or "glue").lower()}
+    props: Dict[str, Any] = {"type": (metadata.get("iceberg_catalog_type") or os.getenv("ICEBERG_CATALOG_TYPE") or "glue").lower()}  # noqa: E501
     region = metadata.get("iceberg_catalog_region") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
     if region:
         props["glue.region"] = region
@@ -3594,13 +3594,17 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
 
     primary_key = list(getattr(contract, "primary_key", None) or [])
     if not exists:
-        tbl.append(arrow); op = "create+append"
+        tbl.append(arrow)
+        op = "create+append"
     elif strategy == "overwrite":
-        tbl.overwrite(arrow); op = "overwrite"
+        tbl.overwrite(arrow)
+        op = "overwrite"
     elif strategy in ("merge", "scd2", "upsert") and primary_key and hasattr(tbl, "upsert"):
-        tbl.upsert(arrow, join_cols=primary_key); op = "upsert"
+        tbl.upsert(arrow, join_cols=primary_key)
+        op = "upsert"
     else:
-        tbl.append(arrow); op = "append"
+        tbl.append(arrow)
+        op = "append"
 
     logger.info(f"Materialized {arrow.num_rows} rows to Iceberg catalog table {catalog_name}.{identifier} (op={op})")
     return {"target": f"{catalog_name}.{identifier}", "rows_written": arrow.num_rows, "format": "iceberg", "op": op}
@@ -3656,7 +3660,7 @@ def _configure_ducklake_cloud(con, *paths) -> None:
             if conn_str:
                 con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, CONNECTION_STRING '{conn_str}')")
             elif account:
-                con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, ACCOUNT_NAME '{account}')")
+                con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, ACCOUNT_NAME '{account}')")  # noqa: E501
             else:
                 logger.warning("DuckLake Azure path but no AZURE_STORAGE_* set — relying on ambient credentials.")
     except Exception as e:

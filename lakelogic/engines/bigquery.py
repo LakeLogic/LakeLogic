@@ -389,7 +389,7 @@ class BigQueryAdapter(EngineAdapter):
         if self.contract.dataset:
             self._execute(
                 client,
-                f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset} AS SELECT * FROM {self._quote_table(table_name)}",
+                f"CREATE OR REPLACE TEMP TABLE {self.contract.dataset} AS SELECT * FROM {self._quote_table(table_name)}",  # noqa: E501
             )
 
     def _apply_transformations(self, client, table_name: str, phase: str) -> str:
@@ -418,7 +418,7 @@ class BigQueryAdapter(EngineAdapter):
                 step = self._temp_name(f"{phase}_sql_{idx}")
                 self._execute(
                     client,
-                    f"CREATE OR REPLACE TEMP TABLE {step} AS {self._rewrite_functions(self._normalize_sql_types(trans.sql))}",
+                    f"CREATE OR REPLACE TEMP TABLE {step} AS {self._rewrite_functions(self._normalize_sql_types(trans.sql))}",  # noqa: E501
                 )
                 current = step
                 idx += 1
@@ -768,7 +768,7 @@ class BigQueryAdapter(EngineAdapter):
         schema_table = self._temp_name("schema")
         self._execute(
             client,
-            f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {self._quote_table(table_name)}",
+            f"CREATE OR REPLACE TEMP TABLE {schema_table} AS SELECT {', '.join(select_exprs)} FROM {self._quote_table(table_name)}",  # noqa: E501
         )
 
         # ── Detect post-phase SQL transforms that reshape columns ────────────
