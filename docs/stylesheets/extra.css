@@ -996,6 +996,18 @@
 }
 
 /* ---- hero two-column layout ---- */
+.hero-banner {
+  margin: 0 0 1.5rem 0;
+}
+
+.hero-banner img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--ll-border);
+}
+
 .hero-section {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
