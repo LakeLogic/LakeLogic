@@ -1072,6 +1072,7 @@
   justify-content: flex-start;
   flex-wrap: wrap;
   margin-top: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 @media screen and (max-width: 76.1875em) {
