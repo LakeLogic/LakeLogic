@@ -96,12 +96,25 @@ if "%1"=="" (
 ) else (
     python -m commitizen bump --increment %1 --yes
 )
-if errorlevel 1 (
+set "BUMP_RC=%ERRORLEVEL%"
+
+REM cz exit code 21 = NoneIncrementExit: commits exist since the last tag but none of
+REM them bump the version (docs/style/refactor/chore/test only). That is NOT a failure --
+REM there is simply nothing to *release*. Exit cleanly so a docs-only batch doesn't look
+REM like a broken build; just push those commits directly.
+if "%BUMP_RC%"=="21" (
     echo.
-    echo ERROR: cz bump failed.
+    echo Nothing to release: no feat/fix commits since the last tag.
+    echo   docs / style / refactor / chore / test commits do not bump the version.
+    echo   Those commits are fine -- just push them:  git push
+    echo.
+    exit /b 0
+)
+if not "%BUMP_RC%"=="0" (
+    echo.
+    echo ERROR: cz bump failed ^(exit %BUMP_RC%^).
     echo.
     echo Common causes:
-    echo   - No new commits since last tag: commit your changes first
     echo   - Commits not in conventional format: use 'cz commit' or 'feat:/fix:' prefixes
     echo   - Tip: run 'git log --oneline' to check your commits
     echo.
