@@ -45,6 +45,11 @@ app = typer.Typer(
 app.command(name="review", rich_help_panel="Code Quality")(review_command)
 app.command(name="review-reply", rich_help_panel="Code Quality")(review_reply_command)
 app.command(name="lint", rich_help_panel="Governance")(lint_command)
+
+# Lazy import keeps CLI start-up lean; the scaffold module pulls in the full contract model.
+from lakelogic.cli.scaffold_cmd import scaffold_command  # noqa: E402
+
+app.command(name="scaffold", rich_help_panel="Data Tooling")(scaffold_command)
 app.add_typer(observatory_app, name="observatory", rich_help_panel="Observatory")
 app.add_typer(registry_app, name="registry", rich_help_panel="Governance")
 

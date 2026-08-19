@@ -1,7 +1,7 @@
 [project]
 name = "lakelogic"
-version = "1.41.1"
-description = "The open-source reference framework for Open Lakehouse Contracts."
+version = "1.44.0"
+description = "A declarative, contract-driven medallion pipeline engine for data mesh architectures. Write once. Run on Spark, Polars, or DuckDB."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "LakeLogic Team", email = "lakelogic@gmail.com" }]
@@ -333,7 +333,7 @@ dev = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "1.41.1"
+version         = "1.44.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = false
