@@ -3,7 +3,7 @@ title: LakeLogic — Open-Source Data Contracts
 description: The open-source reference framework for Open Lakehouse Contracts.
 ---
 
-<div class="hero-banner"><img src="assets/lakelogic_banner.png" alt="LakeLogic Core: execute Open Lakehouse Contracts across Polars, DuckDB and Spark from local development through CI to production"></div>
+<div class="hero-banner"><img src="assets/lakelogic_core_banner.png" alt="LakeLogic Core: execute Open Lakehouse Contracts across Polars, DuckDB and Spark from local development through CI to production"></div>
 
 <div class="hero-cta"><a class="md-button md-button--primary" href="https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb" target="_blank">Get started →</a> <a class="md-button md-button--secondary" href="examples.html">Browse examples</a> <a class="md-button" href="installation.html">Install locally</a> <a class="md-button" href="https://github.com/lakelogic/LakeLogic" target="_blank">★ Star on GitHub</a></div>
 
