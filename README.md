@@ -1,4 +1,4 @@
-![LakeLogic Core: execute Open Lakehouse Contracts across Polars, DuckDB and Spark from local development through CI to production](docs/assets/lakelogic_banner.png)
+![LakeLogic Core: execute Open Lakehouse Contracts across Polars, DuckDB and Spark from local development through CI to production](docs/assets/lakelogic_core_banner.png)
 
 # LakeLogic
 
