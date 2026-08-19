@@ -240,6 +240,12 @@ Therefore, `depends_on` should primarily be reserved for orchestrating dependenc
 
 LakeLogic uses a powerful inheritance model to keep your data contracts clean. It explicitly separates **Global Defaults** from **Local Overrides**:
 
+!!! info "Authoritative spec"
+    The `server` example below illustrates the system→contract layer. For the **complete**
+    resolution model — every inheritable key, per-layer `materialization`/`server` merge,
+    environment substitution, precedence and provenance — see
+    **[Configuration Resolution & Inheritance](inheritance.md)**.
+
 ### 1. `server` in `_system.yaml` (The Global Template)
 
 This block lives in your `_system.yaml` registry. It acts as the blanket rule for the entire system layer. If you define `evolution: strict` here under `bronze:`, you are telling the engine: *"Unless told otherwise, treat every single Bronze contract in this network as strictly locked down."*

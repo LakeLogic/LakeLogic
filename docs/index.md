@@ -1,13 +1,15 @@
 ---
 title: LakeLogic — Open-Source Data Contracts
-description: Define schemas, quality rules, PII handling, lineage, and materialization in YAML, then execute the contract with Polars, DuckDB, or Spark.
+description: The open-source reference framework for Open Lakehouse Contracts.
 ---
 
-<div class="hero-banner"><img src="assets/lakelogic_banner.png" alt="LakeLogic — executable data contracts: define data trust once, enforced from your laptop to production"></div>
+<div class="hero-banner"><img src="assets/lakelogic_banner.png" alt="LakeLogic Core: execute Open Lakehouse Contracts across Polars, DuckDB and Spark from local development through CI to production"></div>
 
 <div class="hero-cta"><a class="md-button md-button--primary" href="https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb" target="_blank">Get started →</a> <a class="md-button md-button--secondary" href="examples.html">Browse examples</a> <a class="md-button" href="installation.html">Install locally</a> <a class="md-button" href="https://github.com/lakelogic/LakeLogic" target="_blank">★ Star on GitHub</a></div>
 
-*LakeLogic — the open-source reference framework for the Open Lakehouse Contract.*
+*The open-source reference framework for Open Lakehouse Contracts.*
+
+Validate and execute OLC contracts across Polars, DuckDB and Spark, from local development through CI and production pipelines.
 
 !!! abstract "Built on the Open Lakehouse Contract"
     LakeLogic is the reference framework for the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)** — the open, engine-neutral standard for lakehouse data contracts. Your `.yaml` contracts are portable OLC documents; LakeLogic executes them identically across Polars, DuckDB, and Spark. See the [OLC reference](https://lakelogic.github.io/open-lakehouse-contract/reference/anatomy/) for the full spec.

@@ -1,0 +1,443 @@
+{
+  "$defs": {
+    "RegistrySLO": {
+      "properties": {
+        "alerting": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SLOAlertingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "freshness": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SLOFreshnessConfig"
+          },
+          "title": "Freshness",
+          "type": "object"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SLOQualityConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "row_count": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SLORowCountConfig"
+          },
+          "title": "Row Count",
+          "type": "object"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SLOScheduleConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "RegistrySLO",
+      "type": "object"
+    },
+    "SLOAlertingConfig": {
+      "description": "SLO alerting \u2014 emits events through the existing notifications system.",
+      "properties": {
+        "emit_events": {
+          "default": true,
+          "title": "Emit Events",
+          "type": "boolean"
+        },
+        "min_severity": {
+          "default": "medium",
+          "title": "Min Severity",
+          "type": "string"
+        },
+        "notify_on_recovery": {
+          "default": true,
+          "title": "Notify On Recovery",
+          "type": "boolean"
+        },
+        "suppress_duplicate_alerts_minutes": {
+          "default": 30,
+          "title": "Suppress Duplicate Alerts Minutes",
+          "type": "integer"
+        }
+      },
+      "title": "SLOAlertingConfig",
+      "type": "object"
+    },
+    "SLOFreshnessConfig": {
+      "properties": {
+        "check_column": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "default": "_lakelogic_loaded_at",
+          "title": "Check Column"
+        },
+        "exclude_tables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Tables",
+          "type": "array"
+        },
+        "max_delay_minutes": {
+          "title": "Max Delay Minutes",
+          "type": "integer"
+        },
+        "max_source_delay_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Source Delay Minutes"
+        },
+        "source_check_columns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Check Columns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "max_delay_minutes"
+      ],
+      "title": "SLOFreshnessConfig",
+      "type": "object"
+    },
+    "SLOQualityConfig": {
+      "properties": {
+        "by_severity": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SLOQualitySeverityThreshold"
+          },
+          "title": "By Severity",
+          "type": "object"
+        },
+        "max_quarantine_ratio": {
+          "default": 0.05,
+          "title": "Max Quarantine Ratio",
+          "type": "number"
+        },
+        "min_good_ratio": {
+          "default": 0.95,
+          "title": "Min Good Ratio",
+          "type": "number"
+        }
+      },
+      "title": "SLOQualityConfig",
+      "type": "object"
+    },
+    "SLOQualitySeverityThreshold": {
+      "properties": {
+        "min_good_ratio": {
+          "default": 0.95,
+          "title": "Min Good Ratio",
+          "type": "number"
+        }
+      },
+      "title": "SLOQualitySeverityThreshold",
+      "type": "object"
+    },
+    "SLORowCountAnomalyConfig": {
+      "description": "Anomaly detection against historical run log baselines.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "lookback_runs": {
+          "default": 14,
+          "title": "Lookback Runs",
+          "type": "integer"
+        },
+        "max_ratio": {
+          "default": 2.0,
+          "title": "Max Ratio",
+          "type": "number"
+        },
+        "method": {
+          "default": "median",
+          "title": "Method",
+          "type": "string"
+        },
+        "min_ratio": {
+          "default": 0.5,
+          "title": "Min Ratio",
+          "type": "number"
+        },
+        "min_runs_before_enforcement": {
+          "default": 5,
+          "title": "Min Runs Before Enforcement",
+          "type": "integer"
+        }
+      },
+      "title": "SLORowCountAnomalyConfig",
+      "type": "object"
+    },
+    "SLORowCountConfig": {
+      "description": "Per-layer row count thresholds checked against run log entries.",
+      "properties": {
+        "anomaly": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SLORowCountAnomalyConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "check_field": {
+          "default": "counts_good",
+          "title": "Check Field",
+          "type": "string"
+        },
+        "exclude_tables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Tables",
+          "type": "array"
+        },
+        "max_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Rows"
+        },
+        "min_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Rows"
+        },
+        "warn_only": {
+          "default": false,
+          "title": "Warn Only",
+          "type": "boolean"
+        }
+      },
+      "title": "SLORowCountConfig",
+      "type": "object"
+    },
+    "SLOScheduleConfig": {
+      "properties": {
+        "environments": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Environments",
+          "type": "array"
+        },
+        "expected_completion_utc": {
+          "default": "06:00",
+          "title": "Expected Completion Utc",
+          "type": "string"
+        },
+        "expected_duration_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Duration Minutes"
+        },
+        "expected_start_utc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Start Utc"
+        },
+        "pipeline_cron": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pipeline Cron"
+        },
+        "timezone": {
+          "default": "UTC",
+          "title": "Timezone",
+          "type": "string"
+        },
+        "warn_if_duration_exceeds_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warn If Duration Exceeds Minutes"
+        }
+      },
+      "title": "SLOScheduleConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "description": "A raw ``_domain.yaml`` \u2014 domain-wide governance defaults inherited by every system\nand contract in the domain. Strict on top-level keys; governance blocks are free-form.",
+  "properties": {
+    "bronze_layer": {
+      "default": "bronze",
+      "title": "Bronze Layer",
+      "type": "string"
+    },
+    "compliance": {
+      "additionalProperties": true,
+      "title": "Compliance",
+      "type": "object"
+    },
+    "cost": {
+      "additionalProperties": true,
+      "title": "Cost",
+      "type": "object"
+    },
+    "domain": {
+      "title": "Domain",
+      "type": "string"
+    },
+    "gold_layer": {
+      "default": "gold",
+      "title": "Gold Layer",
+      "type": "string"
+    },
+    "lineage": {
+      "additionalProperties": true,
+      "title": "Lineage",
+      "type": "object"
+    },
+    "materialization": {
+      "additionalProperties": true,
+      "title": "Materialization",
+      "type": "object"
+    },
+    "notifications": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Notifications",
+      "type": "array"
+    },
+    "notifications_enabled": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notifications Enabled"
+    },
+    "observatory": {
+      "additionalProperties": true,
+      "title": "Observatory",
+      "type": "object"
+    },
+    "ownership": {
+      "additionalProperties": true,
+      "title": "Ownership",
+      "type": "object"
+    },
+    "quarantine": {
+      "additionalProperties": true,
+      "title": "Quarantine",
+      "type": "object"
+    },
+    "retention": {
+      "additionalProperties": true,
+      "title": "Retention",
+      "type": "object"
+    },
+    "server": {
+      "additionalProperties": true,
+      "title": "Server",
+      "type": "object"
+    },
+    "silver_layer": {
+      "default": "silver",
+      "title": "Silver Layer",
+      "type": "string"
+    },
+    "slo": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RegistrySLO"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "domain"
+  ],
+  "title": "DomainManifestV1",
+  "type": "object"
+}

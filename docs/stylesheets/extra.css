@@ -1325,3 +1325,53 @@ html {
   margin-top: 0.55rem;
   padding-top: 0.55rem;
 }
+
+/* ---------------------------------------------------------------------------
+   21. Desktop density
+   Match the useful proportions of an 80% browser zoom at native 100% zoom.
+   Material starts from a large desktop root size; reduce the application shell
+   while holding long-form article copy near 15px for comfortable reading.
+   --------------------------------------------------------------------------- */
+@media screen and (min-width: 76.25em) {
+  html {
+    font-size: 106.25%;
+  }
+
+  .md-grid {
+    max-width: 1400px;
+  }
+
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  .md-content {
+    padding-inline: 0.75rem 1rem;
+  }
+
+  .md-content__inner {
+    margin-inline: 1rem 1.35rem;
+    padding-top: 1rem;
+  }
+
+  .md-typeset {
+    font-size: 0.88rem;
+    line-height: 1.58;
+  }
+
+  .md-typeset h1 {
+    font-size: 1.75rem;
+  }
+
+  .md-typeset h2 {
+    font-size: 1.25rem;
+    margin-top: 2rem;
+  }
+
+  .md-typeset h3 {
+    font-size: 1rem;
+    margin-top: 1.5rem;
+  }
+}
