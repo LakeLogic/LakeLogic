@@ -363,6 +363,12 @@ Override medallion layer names for the entire domain. All contracts use `{bronze
 
 > **Why this matters:** You configure governance **once** at the domain level. Every system and contract underneath automatically inherits those settings — saving you from copying the same SLOs, contacts, and notification channels into every file.
 
+!!! info "Authoritative spec"
+    This table is the domain-level summary. For the **complete** resolution model —
+    domain → system → environment → contract, full precedence (including the two
+    inversions), order, and provenance — see
+    **[Configuration Resolution & Inheritance](inheritance.md)**.
+
 | Key Type | Merge Strategy | Example |
 | --- | --- | --- |
 | **Dict** (slo, ownership, materialization) | Deep merge — domain provides defaults, system overrides specific fields | Domain sets `slo.freshness.bronze.max_delay: 60`, system can override to `30` |

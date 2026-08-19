@@ -10,7 +10,11 @@ As your data estate grows from 10 to 1,000+ tables, how you organize contracts d
 ## 1. Domain-First Ownership
 
 > [!NOTE]
-> These are **recommended patterns** for enterprise-grade data estates. Automatic registry resolution and contract discovery are planned features.
+> These are **recommended patterns** for enterprise-grade data estates. Registry
+> resolution (domain → system → environment → contract) is **implemented** — see
+> [Configuration Resolution & Inheritance](contracts/inheritance.md) for the exact
+> precedence and order. Contracts are declared in each `_system.yaml`'s `contracts:`
+> index (not yet auto-discovered by globbing).
 
 Organize your repository by **business domain**, not by technical layer. This aligns with Data Mesh principles — the teams who know the data best own the contracts.
 

@@ -1,7 +1,7 @@
 [project]
 name = "lakelogic"
 version = "1.41.1"
-description = "A declarative, contract-driven medallion pipeline engine for data mesh architectures. Write once. Run on Spark, Polars, or DuckDB."
+description = "The open-source reference framework for Open Lakehouse Contracts."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "LakeLogic Team", email = "lakelogic@gmail.com" }]

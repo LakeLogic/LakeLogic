@@ -247,21 +247,12 @@ class EnvironmentConfig(BaseModel):
         return resolved
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Recursively merge *override* into *base*.  Override values win on conflicts.
-    Lists are replaced (not concatenated) — the override list takes precedence.
-
-    Used to layer ``_domain.yaml`` defaults underneath ``_system.yaml`` values
-    so that the system always wins while inheriting unset domain-level config.
-    """
-    merged = dict(base)
-    for key, val in override.items():
-        if key in merged and isinstance(merged[key], dict) and isinstance(val, dict):
-            merged[key] = _deep_merge(merged[key], val)
-        else:
-            merged[key] = val
-    return merged
+# The domain → system merge (and ``_deep_merge``) live in the dependency-free
+# ``registry.merge`` module so the runtime here and the standalone provenance resolver share
+# ONE implementation of the inheritance rules. Imported after the sub-models above (which
+# ``registry.models`` re-uses) but before ``DomainRegistry`` — this ordering keeps the
+# import graph acyclic. ``_deep_merge`` is re-exported for in-repo back-compat callers.
+from lakelogic.registry.merge import _deep_merge, merge_domain_system  # noqa: E402,F401
 
 
 def _resolve_placeholders(obj: Any, vars_map: Dict[str, str]) -> Any:
@@ -468,112 +459,51 @@ class DomainRegistry(BaseModel):
             raw = load_yaml(f)
 
         # ── Domain-level inheritance ──────────────────────────────────────
-        # Walk up from the _system.yaml directory to discover a sibling
-        # _domain.yaml in the parent.  Domain-level keys provide defaults;
-        # system-level keys override (child wins).
-        #
-        # Inheritance hierarchy:
-        #   _domain.yaml  (domain defaults)  ← base
-        #   _system.yaml  (system overrides) ← wins on conflict
-        #
-        # Inheritable keys: slo, ownership, notifications, quarantine,
-        #                   lineage, materialization, server
-        _DOMAIN_INHERITABLE_KEYS = [
-            "slo",
-            "ownership",
-            "notifications",
-            "quarantine",
-            "compliance",
-            "lineage",
-            "materialization",
-            "server",
-            "cost",
-            "observatory",
-            "retention",
-        ]
-        # Scalar keys: inherit only if the system doesn't define them
-        _DOMAIN_SCALAR_KEYS = [
-            "domain",
-            "bronze_layer",
-            "silver_layer",
-            "gold_layer",
-            "notifications_enabled",
-        ]
+        # Walk up to a sibling _domain.yaml and fold its defaults under this system.
+        # The merge rules (inheritable deep-merge/concat, identity-scalar domain-lock,
+        # cost.currency authority) live in the shared `registry.merge` module so the
+        # runtime and the standalone provenance resolver can never drift. Trial-validation
+        # against this model is passed through, so an incompatible domain default is
+        # skipped and the system value retained — identical to the previous inline logic.
+        from lakelogic.registry.keys import IDENTITY_SCALARS_ORDER
+
         domain_yaml_path = yaml_path.parent.parent / "_domain.yaml"
         if domain_yaml_path.exists():
             with open(domain_yaml_path, "r", encoding="utf-8") as df:
                 domain_raw = load_yaml(df) or {}
             logger.info(f"Domain config inherited from {domain_yaml_path}")
-            for key in _DOMAIN_INHERITABLE_KEYS:
-                if key not in domain_raw:
-                    continue
-                domain_val = domain_raw[key]
-                system_val = raw.get(key)
-                if system_val is None:
-                    # System didn't define this key — inherit wholesale
-                    merged_val = domain_val
-                elif isinstance(system_val, dict) and isinstance(domain_val, dict):
-                    # Deep merge: domain provides base, system overrides
-                    merged_val = _deep_merge(domain_val, system_val)
-                elif isinstance(system_val, list) and isinstance(domain_val, list):
-                    # Lists: concatenate domain + system (system appends)
-                    merged_val = domain_val + system_val
-                else:
-                    # system value wins outright (scalar override)
-                    continue
 
-                # Validate: trial-parse the merged value through Pydantic
-                # to ensure the domain schema shape is compatible.
-                _trial = dict(raw)
-                _trial[key] = merged_val
+            def _accepts(candidate: Dict[str, Any]) -> bool:
                 try:
-                    cls.model_validate(_trial)
-                    raw[key] = merged_val
-                    logger.trace(f"  Inherited domain key '{key}'")
-                except Exception as exc:
-                    logger.warning(
-                        f"  Skipped domain key '{key}': incompatible schema "
-                        f"({exc.__class__.__name__}). System value retained."
-                    )
+                    cls.model_validate(candidate)
+                    return True
+                except Exception:
+                    return False
 
-            # Scalar keys: inherit if system doesn't define them,
-            # warn on mismatches when both define the same key.
-            for key in _DOMAIN_SCALAR_KEYS:
-                domain_val = domain_raw.get(key)
-                if domain_val is None:
-                    continue
-                system_val = raw.get(key)
-                if system_val is None:
-                    # System didn't define it — inherit from domain
-                    raw[key] = domain_val
-                    logger.trace(f"  Inherited domain scalar '{key}' = {domain_val}")
-                elif system_val != domain_val:
-                    # Both defined but different — flag the mismatch
+            # Preserve the operator-facing mismatch warnings (the resolution behaviour
+            # itself is inside merge_domain_system).
+            for key in IDENTITY_SCALARS_ORDER:
+                dv, sv = domain_raw.get(key), raw.get(key)
+                if dv is not None and sv is not None and dv != sv:
                     logger.warning(
-                        f"  ⚠ Config mismatch: _system.yaml has {key}='{system_val}' "
-                        f"but _domain.yaml has {key}='{domain_val}'. "
-                        f"Domain value takes precedence for consistency."
+                        f"  ⚠ Config mismatch: _system.yaml has {key}='{sv}' "
+                        f"but _domain.yaml has {key}='{dv}'. Domain value takes precedence."
                     )
-                    raw[key] = domain_val
-
-            # ── Cost currency mismatch check ──────────────────────────────
-            # The domain's cost.currency is the authoritative reporting
-            # currency for budget enforcement and Observatory roll-ups.
-            # If the system defines a different currency, warn and enforce
-            # the domain value to prevent mixed-currency aggregations.
-            domain_cost = domain_raw.get("cost") or {}
-            system_cost = raw.get("cost") or {}
-            domain_currency = domain_cost.get("currency")
-            system_currency = system_cost.get("currency")
-            if domain_currency and system_currency and domain_currency != system_currency:
+            d_cur = (domain_raw.get("cost") or {}).get("currency")
+            s_cur = (raw.get("cost") or {}).get("currency")
+            if d_cur and s_cur and d_cur != s_cur:
                 logger.warning(
-                    f"  ⚠ Cost currency mismatch: _system.yaml has cost.currency='{system_currency}' "
-                    f"but _domain.yaml has cost.currency='{domain_currency}'. "
-                    f"Domain currency '{domain_currency}' will be used for roll-ups and budget enforcement. "
-                    f"System rates will still be applied, but reported in {domain_currency}."
+                    f"  ⚠ Cost currency mismatch: system '{s_cur}' vs domain '{d_cur}'. "
+                    f"Domain currency '{d_cur}' used for roll-ups; system rates still apply."
                 )
-                if "cost" in raw and isinstance(raw["cost"], dict):
-                    raw["cost"]["currency"] = domain_currency
+
+            raw, _ = merge_domain_system(
+                raw,
+                domain_raw,
+                system_file=str(yaml_path),
+                domain_file=str(domain_yaml_path),
+                validate=_accepts,
+            )
 
         # ── Validate observatory config early ──────────────────────────
         if raw.get("observatory") and isinstance(raw["observatory"], dict):

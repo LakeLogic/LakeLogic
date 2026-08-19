@@ -26,6 +26,7 @@ from lakelogic.cli.review import review_command
 from lakelogic.cli.review_reply import review_reply_command
 from lakelogic.cli.lint import lint_command
 from lakelogic.cli.observatory_cmd import observatory_app
+from lakelogic.cli.registry_cmd import registry_app
 
 app = typer.Typer(
     name="lakelogic",
@@ -45,6 +46,7 @@ app.command(name="review", rich_help_panel="Code Quality")(review_command)
 app.command(name="review-reply", rich_help_panel="Code Quality")(review_reply_command)
 app.command(name="lint", rich_help_panel="Governance")(lint_command)
 app.add_typer(observatory_app, name="observatory", rich_help_panel="Observatory")
+app.add_typer(registry_app, name="registry", rich_help_panel="Governance")
 
 
 @app.command(rich_help_panel="Contract Execution")

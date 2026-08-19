@@ -1,8 +1,8 @@
-![LakeLogic — executable data contracts: define data trust once, enforced from your laptop to production](docs/assets/lakelogic_banner.png)
+![LakeLogic Core: execute Open Lakehouse Contracts across Polars, DuckDB and Spark from local development through CI to production](docs/assets/lakelogic_banner.png)
 
 # LakeLogic
 
-**Define data trust once. Enforce it from development to production.**
+**The open-source reference framework for Open Lakehouse Contracts.**
 
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LakeLogic.github.io/LakeLogic/)
 [![PyPI](https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white)](https://pypi.org/project/lakelogic/)
@@ -11,15 +11,15 @@
 [![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
-LakeLogic is the open-source reference framework for the [**Open Lakehouse Contract (OLC)**](https://lakelogic.github.io/open-lakehouse-contract/) — the open, engine-neutral standard for executable data contracts. Describe a data product's schema, quality rules, PII handling, lineage, and materialization in a portable OLC `.yaml` document, then run that contract identically with Polars, DuckDB, or Spark.
+Validate and execute OLC contracts across Polars, DuckDB and Spark, from local development through CI and production pipelines.
+
+LakeLogic is the open-source reference framework for the [**Open Lakehouse Contract (OLC)**](https://lakelogic.github.io/open-lakehouse-contract/) — the open, engine-neutral standard for executable data contracts. Describe a data product's sources, schema, ownership, quality rules, PII handling, lineage, service levels (SLAs and SLOs), transformations and materialization in a portable OLC `.yaml` document, then run that contract identically with Polars, DuckDB, or Spark.
 
 Use the same contract to get fast feedback locally, check changes in CI/CD, and govern pipeline execution in your lakehouse. Records that fail row-level rules can be retained with their failure reasons instead of being silently discarded.
 
 [**Run the five-minute Colab quickstart**](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb) · [**Read the documentation**](https://lakelogic.github.io/LakeLogic/) · [**Browse the examples**](https://lakelogic.github.io/LakeLogic/examples.html)
 
 ![LakeLogic Architecture](docs/assets/lakelogic_architecture.png)
-
-> **Project status:** LakeLogic is currently beta software. Test contracts and engine-specific behaviour against representative data before production adoption.
 
 ## The Problem It Solves
 

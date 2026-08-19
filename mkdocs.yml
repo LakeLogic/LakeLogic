@@ -1,5 +1,5 @@
 site_name: LakeLogic
-site_description: Define data trust once. Enforce it everywhere. Open-source, Git-native data contracts — schema, quality, PII, lineage and SLOs as code, validated at runtime and in CI across Polars, DuckDB, and Spark.
+site_description: The open-source reference framework for Open Lakehouse Contracts. Validate and execute OLC contracts across Polars, DuckDB and Spark.
 site_url: https://LakeLogic.github.io/LakeLogic/
 site_author: LakeLogic Team
 repo_name: lakelogic/LakeLogic
@@ -83,6 +83,7 @@ nav:
       - Overview: contracts/index.md
       - Domain Config (_domain.yaml): contracts/domain_config.md
       - System Config (_system.yaml): contracts/system_config.md
+      - Resolution & Inheritance: contracts/inheritance.md
       - Data Product Contracts:
           - Contract Anatomy: contracts/data_product_contracts/index.md
           - Ingestion: contracts/data_product_contracts/ingestion.md

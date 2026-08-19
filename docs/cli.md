@@ -33,6 +33,10 @@ lakelogic
 │ generate   Generate synthetic data from a contract definition.            │
 │ import-dbt Import dbt schema.yml / sources.yml -> LakeLogic contract YAML.│
 └───────────────────────────────────────────────────────────────────────────┘
+┌─ Governance ──────────────────────────────────────────────────────────────┐
+│ registry   Validate & inspect the mesh registry (_domain/_system.yaml).   │
+│ lint       Lint contracts for governance issues.                          │
+└───────────────────────────────────────────────────────────────────────────┘
 ┌─ Environment Setup ───────────────────────────────────────────────────────┐
 │ setup-oss  Pre-install DuckDB extensions & check OSS dependencies.        │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -262,6 +266,86 @@ lakelogic import-dbt \
   --model customers \
   --dry-run
 ```
+
+---
+
+### Governance
+
+Validate and inspect the **mesh registry** — the `_domain.yaml` / `_system.yaml` files
+that sit *above* individual contracts and supply their shared defaults. See
+[Resolution & Inheritance](contracts/inheritance.md) for how those files combine.
+
+**Why it matters**
+
+- **Catch drift before it ships.** A typo (`server_defaults` instead of `server`), a
+  contract path that no longer exists, or a system whose `domain` disagrees with its
+  folder — all become a red line in CI instead of a silent production surprise.
+- **Answer "where did this setting come from?"** `explain` shows, per key, whether a
+  value is declared on the system, inherited from the domain, or locked by the domain —
+  so governance decisions are auditable, not archaeology.
+- **One command in CI** guards an entire estate of hundreds of contracts.
+
+#### `lakelogic registry validate`
+
+Structurally and referentially validate a file or a whole tree. Exit code `0` = clean,
+non-zero = at least one error (or a warning under `--strict`) — drop it straight into CI.
+
+```bash
+# Validate one domain's systems…
+lakelogic registry validate domains_rideflow/marketplace
+
+# …or the entire mesh, failing the build on warnings too
+lakelogic registry validate domains_rideflow --strict
+```
+
+Checks: unknown/misplaced keys, wrong types, missing identity, duplicate contract
+entities, every `contracts:` path resolves to a real file, and domain-identity agreement
+between a `_system.yaml` and its sibling `_domain.yaml`.
+
+#### `lakelogic registry explain`
+
+Show where each governance/identity key on a system comes from — the resolved-origin
+view of the inheritance chain, backed by the real domain → system merge.
+
+```bash
+lakelogic registry explain domains_rideflow/marketplace/rideflow/_system.yaml
+lakelogic registry explain .../rideflow/_system.yaml --deep          # per-leaf origins
+lakelogic registry explain .../rideflow/_system.yaml --key slo.freshness   # trace one path
+lakelogic registry explain .../rideflow/_system.yaml --env dev       # what varies per environment
+```
+
+```
+  marketplace / rideflow
+  KEY                  ORIGIN           WHY
+  ──────────────────────────────────────────────
+  slo                  domain           inherited
+  cost                 system+domain    deep-merged
+  domain               domain           domain-locked
+  materialization      system           declared
+```
+
+With `--deep`, provenance drills into merged blocks — answering "why is
+`slo.freshness.bronze.max_delay_minutes` **30** here?" with `system / overridden` while its
+sibling `check_column` reads `domain / inherited`.
+
+#### `lakelogic registry schema`
+
+Emit the JSON Schema for a manifest — wire it into your editor or a language-agnostic
+CI validator.
+
+```bash
+lakelogic registry schema domain
+lakelogic registry schema system --output schemas/system-manifest.schema.json
+```
+
+The generated schemas are also checked into the repo under
+[`schemas/registry/`](https://github.com/lakelogic/LakeLogic/tree/main/schemas/registry) —
+so non-Python tooling can validate `_domain.yaml` / `_system.yaml` without installing
+LakeLogic.
+
+> Validating an individual **contract** (not the registry)? Use `lakelogic validate
+> --contract path.yaml` for structural + gate checks, or the portable `olc validate` from
+> the [Open Lakehouse Contract CLI](https://lakelogic.github.io/open-lakehouse-contract/reference/cli/).
 
 ---
 
