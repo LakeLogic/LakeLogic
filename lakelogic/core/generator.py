@@ -4655,7 +4655,7 @@ class DataGenerator:
             import zlib
 
             salt = zlib.crc32(entity.encode("utf-8")) & 0xFFFFFFFF
-            return (base * 1_000_003 + salt) % (2 ** 31)
+            return (base * 1_000_003 + salt) % (2**31)
 
         # ── 1. Load all contracts and extract metadata ────────────────────
         generators: Dict[str, "DataGenerator"] = {}

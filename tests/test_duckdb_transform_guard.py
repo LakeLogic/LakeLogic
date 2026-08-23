@@ -6,6 +6,7 @@ guard's block-list is empty in practice. These tests verify the *mechanism* stil
 works — i.e. a future op added to the model but not the engine fails loud — by
 temporarily removing an op from the supported set.
 """
+
 import polars as pl
 import pytest
 

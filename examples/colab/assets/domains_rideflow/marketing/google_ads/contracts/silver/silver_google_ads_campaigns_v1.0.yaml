@@ -40,6 +40,8 @@ transformations:
 - deduplicate:
     by:
     - campaign_id
+    sort_by: [campaign_id, ad_group_id, date]
+    order: desc
 source:
   type: delta
   path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_campaigns'

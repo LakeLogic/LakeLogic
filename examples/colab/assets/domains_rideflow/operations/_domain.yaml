@@ -5,9 +5,9 @@ ownership:
   domain_owner: "Trust & Safety Team"
   team: trust_and_safety
   contacts:
-    - name: Trust & Safety Data Lead
-      role: oncall
-      email: trust-safety-data@rideflow.com
+  - name: Trust & Safety Data Lead
+    role: oncall
+    email: trust-safety-data@rideflow.com
   cost_center: trust_safety
   jira_project: OPSDATA
 
@@ -15,14 +15,11 @@ ownership:
 slo:
   freshness:
     bronze:
-      max_delay_minutes: 60
-      check_column: "_lakelogic_loaded_at"
-      max_source_delay_minutes: 120
+      max_delay_minutes: 120
+      check_columns: ["_lakelogic_processed_at"]
     silver:
-      max_delay_minutes: 240
-      check_column: "_lakelogic_processed_at"
-      max_source_delay_minutes: 360
-
+      max_delay_minutes: 360
+      check_columns: ["_lakelogic_processed_at"]
   row_count:
     bronze:
       min_rows: 1

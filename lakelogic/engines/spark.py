@@ -288,6 +288,7 @@ class SparkAdapter(EngineAdapter):
         """
         from pyspark.sql import Window
         from pyspark.sql import functions as F
+        from pyspark.sql import types as T
 
         current_df = df
         existing = set(current_df.columns)
@@ -442,11 +443,20 @@ class SparkAdapter(EngineAdapter):
                 dd = self._resolve_deduplicate(trans)  # handles `deduplicate` + `deduplicate_by_latest`
                 if dd:
                     logger.debug(f"Pre-Transform [Deduplicate]: {dd.on}")
-                    if dd.sort_by:
-                        w = Window.partitionBy(*dd.on)
-                        order_cols = [
-                            F.col(col).desc() if dd.order == "desc" else F.col(col).asc() for col in dd.sort_by
+                    # Nested/binary columns are not orderable in Spark, so they sit
+                    # out the tie-break; the scalar columns still make it stable.
+                    try:
+                        _sortable = [
+                            f.name
+                            for f in current_df.schema.fields
+                            if not isinstance(f.dataType, (T.ArrayType, T.StructType, T.MapType, T.BinaryType))
                         ]
+                    except AttributeError:
+                        _sortable = list(getattr(current_df, "columns", []) or [])
+                    sort_by, order = self._dedup_order(dd, _sortable)
+                    if sort_by:
+                        w = Window.partitionBy(*dd.on)
+                        order_cols = [F.col(col).desc() if order == "desc" else F.col(col).asc() for col in sort_by]
                         w = w.orderBy(*order_cols)
                         current_df = (
                             current_df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
@@ -674,8 +684,14 @@ class SparkAdapter(EngineAdapter):
                 extracted = F.get_json_object(F.col(cfg.source), cfg.path)
                 if cfg.cast:
                     spark_type = {
-                        "float": "double", "double": "double", "int": "int", "integer": "int",
-                        "long": "bigint", "bool": "boolean", "boolean": "boolean", "string": "string",
+                        "float": "double",
+                        "double": "double",
+                        "int": "int",
+                        "integer": "int",
+                        "long": "bigint",
+                        "bool": "boolean",
+                        "boolean": "boolean",
+                        "string": "string",
                     }.get(str(cfg.cast).lower(), "string")
                     extracted = extracted.cast(spark_type)
                 current_df = current_df.withColumn(cfg.field, extracted)
@@ -701,8 +717,15 @@ class SparkAdapter(EngineAdapter):
                 _intv = str(getattr(cfg, "interval", None) or "1d").strip().lower()
                 _m = _re.match(r"(\d+)\s*([a-z]+)", _intv)
                 _num = _m.group(1) if _m else "1"
-                _unit = {"d": "day", "day": "day", "days": "day", "w": "week", "week": "week",
-                         "mo": "month", "month": "month"}.get(_m.group(2) if _m else "d", "day")
+                _unit = {
+                    "d": "day",
+                    "day": "day",
+                    "days": "day",
+                    "w": "week",
+                    "week": "week",
+                    "mo": "month",
+                    "month": "month",
+                }.get(_m.group(2) if _m else "d", "day")
                 seq = F.sequence(start_e, end_e, F.expr(f"interval {_num} {_unit}"))
                 current_df = current_df.withColumn(cfg.output, F.explode(seq))
             elif trans.filter and trans_phase != "pre":
@@ -815,9 +838,7 @@ class SparkAdapter(EngineAdapter):
             safe_link_name = f"{link.name}_{id(self)}"
             try:
                 _sql = (
-                    _qry.replace("{link}", safe_link_name)
-                    if _qry
-                    else f"SELECT * FROM {safe_link_name} WHERE {_flt}"
+                    _qry.replace("{link}", safe_link_name) if _qry else f"SELECT * FROM {safe_link_name} WHERE {_flt}"
                 )
                 _sub = spark.sql(_sql)
                 # Apply the deferred column projection now (after the predicate).

@@ -4,7 +4,8 @@ The subset of contract checks that are **materialization prerequisites** — wit
 them the engine doesn't error, it silently produces the WRONG output:
 
   * PK-002  a merge / upsert / SCD2 / dedup with no key → non-deterministic writes
-  * KEY-001 a dedup with no timestamp → an arbitrary row wins (random current-state)
+  * KEY-001 a dedup with no timestamp → the deterministic tie-break picks the winner,
+            which is stable across runs but is not necessarily the latest row
   * SCD-001 an SCD2 with no track_columns → a new version every load (history churn)
 
 The same validator runs at **two moments** (one definition, no drift):

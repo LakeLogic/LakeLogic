@@ -356,9 +356,10 @@ def _safe_partition_value(value: Any) -> str:
     if value is None:
         return "null"
     text = str(value)
-    safe = text.replace(os.sep, "_").replace(" ", "_").replace(":", "_")
-    if os.altsep:
-        safe = safe.replace(os.altsep, "_")
+    # Replace BOTH separators explicitly (not os.sep/os.altsep) so partition dir
+    # names are identical and filesystem-safe on every OS — on Linux os.altsep is
+    # None, which would otherwise leave backslashes in the value.
+    safe = text.replace("/", "_").replace("\\", "_").replace(" ", "_").replace(":", "_")
     return safe
 
 
@@ -3548,28 +3549,36 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
     if len(parts) < 2:
         raise ValueError(f"Iceberg catalog target must be 'catalog.namespace.table', got '{table_identifier}'")
     catalog_name = parts[0]
-    identifier = ".".join(parts[1:])           # namespace.table (pyiceberg identifier)
+    identifier = ".".join(parts[1:])  # namespace.table (pyiceberg identifier)
     namespace = ".".join(parts[1:-1]) or "default"
 
-    props: Dict[str, Any] = {"type": (metadata.get("iceberg_catalog_type") or os.getenv("ICEBERG_CATALOG_TYPE") or "glue").lower()}  # noqa: E501
+    props: Dict[str, Any] = {
+        "type": (metadata.get("iceberg_catalog_type") or os.getenv("ICEBERG_CATALOG_TYPE") or "glue").lower()
+    }  # noqa: E501
     region = metadata.get("iceberg_catalog_region") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
     if region:
         props["glue.region"] = region
         props["s3.region"] = region
-    uri = (metadata.get("iceberg_catalog_uri") or os.getenv("ICEBERG_CATALOG_URI")
-           or os.getenv("PYICEBERG_CATALOG__DEFAULT__URI"))
+    uri = (
+        metadata.get("iceberg_catalog_uri")
+        or os.getenv("ICEBERG_CATALOG_URI")
+        or os.getenv("PYICEBERG_CATALOG__DEFAULT__URI")
+    )
     if uri:
         props["uri"] = uri
-    warehouse = (metadata.get("iceberg_catalog_warehouse") or os.getenv("ICEBERG_CATALOG_WAREHOUSE")
-                 or os.getenv("ICEBERG_WAREHOUSE"))
+    warehouse = (
+        metadata.get("iceberg_catalog_warehouse")
+        or os.getenv("ICEBERG_CATALOG_WAREHOUSE")
+        or os.getenv("ICEBERG_WAREHOUSE")
+    )
     if warehouse:
         props["warehouse"] = warehouse
 
     catalog = load_catalog(catalog_name, **props)
 
-    if hasattr(df, "to_arrow"):            # polars
+    if hasattr(df, "to_arrow"):  # polars
         arrow = df.to_arrow()
-    elif hasattr(df, "to_arrow_table"):    # duckdb relation
+    elif hasattr(df, "to_arrow_table"):  # duckdb relation
         arrow = df.to_arrow_table()
     else:
         arrow = pa.Table.from_pandas(df, preserve_index=False)
@@ -3660,12 +3669,17 @@ def _configure_ducklake_cloud(con, *paths) -> None:
             if conn_str:
                 con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, CONNECTION_STRING '{conn_str}')")
             elif account:
-                con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, ACCOUNT_NAME '{account}')")  # noqa: E501
+                con.execute(
+                    f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, "
+                    f"ACCOUNT_NAME '{account}')"
+                )  # noqa: E501
             else:
                 logger.warning("DuckLake Azure path but no AZURE_STORAGE_* set — relying on ambient credentials.")
     except Exception as e:
-        logger.warning(f"DuckLake cloud credential setup incomplete ({sorted(schemes)}): {e}. "
-                       f"Falling back to any ambient DuckDB credentials.")
+        logger.warning(
+            f"DuckLake cloud credential setup incomplete ({sorted(schemes)}): {e}. "
+            f"Falling back to any ambient DuckDB credentials."
+        )
 
 
 def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
@@ -3695,10 +3709,11 @@ def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strate
     table = parts[-1]
     fq = f'"{catalog}"."{schema}"."{table}"'
 
-    meta_path = (metadata.get("ducklake_metadata") or os.getenv("DUCKLAKE_METADATA")
-                 or "./lakehouse/ducklake_catalog.ducklake")
-    data_path = (metadata.get("ducklake_data_path") or os.getenv("DUCKLAKE_DATA_PATH")
-                 or "./lakehouse/ducklake_data/")
+    meta_path = (
+        metadata.get("ducklake_metadata") or os.getenv("DUCKLAKE_METADATA") or "./lakehouse/ducklake_catalog.ducklake"
+    )
+    data_path = metadata.get("ducklake_data_path") or os.getenv("DUCKLAKE_DATA_PATH") or "./lakehouse/ducklake_data/"
+
     # Local catalog/data → ensure dirs exist. Remote targets (MotherDuck 'md:',
     # cloud object storage 's3://'/'gs://'/'abfss://') are managed server-side.
     def _is_remote(p: str) -> bool:
@@ -3737,10 +3752,13 @@ def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strate
         con.execute(f'CREATE SCHEMA IF NOT EXISTS "{catalog}"."{schema}"')
         con.register("_ll_incoming", arrow)
 
-        exists = con.execute(
-            "SELECT count(*) FROM duckdb_tables() WHERE database_name = ? AND schema_name = ? AND table_name = ?",
-            [catalog, schema, table],
-        ).fetchone()[0] > 0
+        exists = (
+            con.execute(
+                "SELECT count(*) FROM duckdb_tables() WHERE database_name = ? AND schema_name = ? AND table_name = ?",
+                [catalog, schema, table],
+            ).fetchone()[0]
+            > 0
+        )
         primary_key = list(getattr(contract, "primary_key", None) or [])
 
         if not exists:

@@ -13,18 +13,10 @@ from lakelogic.scaffold.project import Provenance, ScaffoldError, scaffold_proje
 
 
 def scaffold_command(
-    contracts: Path = typer.Argument(
-        ..., help="A contract YAML, or a directory of contracts (searched recursively)."
-    ),
-    out: Path = typer.Option(
-        Path("./lakehouse_project"), "--out", "-o", help="Output project directory."
-    ),
-    domain: Optional[str] = typer.Option(
-        None, help="Registry domain (default: first contract's info.domain)."
-    ),
-    system: Optional[str] = typer.Option(
-        None, help="Registry system (default: first contract's info.system)."
-    ),
+    contracts: Path = typer.Argument(..., help="A contract YAML, or a directory of contracts (searched recursively)."),
+    out: Path = typer.Option(Path("./lakehouse_project"), "--out", "-o", help="Output project directory."),
+    domain: Optional[str] = typer.Option(None, help="Registry domain (default: first contract's info.domain)."),
+    system: Optional[str] = typer.Option(None, help="Registry system (default: first contract's info.system)."),
     target: str = typer.Option(
         "python",
         help=(
@@ -42,18 +34,10 @@ def scaffold_command(
         ),
     ),
     environment: str = typer.Option("dev", help="Environment the entrypoint resolves."),
-    generator: Optional[str] = typer.Option(
-        None, help="Provenance: what generated this project."
-    ),
-    revision_hash: Optional[str] = typer.Option(
-        None, help="Provenance: the approved design revision hash."
-    ),
-    seal_hash: Optional[str] = typer.Option(
-        None, help="Provenance: the governance review seal hash."
-    ),
-    source: Optional[str] = typer.Option(
-        None, help="Provenance: the estate/snapshot the design came from."
-    ),
+    generator: Optional[str] = typer.Option(None, help="Provenance: what generated this project."),
+    revision_hash: Optional[str] = typer.Option(None, help="Provenance: the approved design revision hash."),
+    seal_hash: Optional[str] = typer.Option(None, help="Provenance: the governance review seal hash."),
+    source: Optional[str] = typer.Option(None, help="Provenance: the estate/snapshot the design came from."),
 ):
     """Scaffold a runnable medallion project (registry + contracts + entrypoint).
 
@@ -61,9 +45,7 @@ def scaffold_command(
     generated ``_registry.yaml``, ``run_pipeline.py``, and README. Deterministic:
     the same contracts always produce the same bytes.
     """
-    provenance = Provenance(
-        generator=generator, revision_hash=revision_hash, seal_hash=seal_hash, source=source
-    )
+    provenance = Provenance(generator=generator, revision_hash=revision_hash, seal_hash=seal_hash, source=source)
     try:
         if target == "dbt":
             if engine is not None:

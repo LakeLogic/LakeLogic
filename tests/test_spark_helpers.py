@@ -734,7 +734,10 @@ def test_spark_helper_pre_transformations_cover_column_operations(monkeypatch):
                 )
             ),
             _transformation(filter=types.SimpleNamespace(sql="mapped IS NOT NULL")),
-            _transformation(deduplicate=types.SimpleNamespace(on=["mapped"], sort_by=None)),
+            _transformation(
+                # sort_by must be declared — an unordered deduplicate is refused.
+                deduplicate=types.SimpleNamespace(on=["mapped"], sort_by=["mapped"], order="desc")
+            ),
         ],
         links=[],
     )
@@ -754,8 +757,12 @@ def test_spark_helper_pre_transformations_cover_column_operations(monkeypatch):
     assert "parts" in transformed.columns
     assert "part" in transformed.columns
     assert "mapped" in transformed.columns
-    assert transformed.drop_duplicates_on == ["mapped"]
-    assert transformed.filters[-1] == "mapped IS NOT NULL"
+    # A dedup with no sort_by now takes the deterministic tie-break (row_number
+    # over the dedup keys + remaining columns) instead of the arbitrary
+    # dropDuplicates, so the same input always keeps the same row.
+    assert transformed.drop_duplicates_on is None
+    assert "_rn" not in transformed.columns
+    assert "mapped IS NOT NULL" in transformed.filters
     assert any("column not found" in message for message in warnings)
 
 

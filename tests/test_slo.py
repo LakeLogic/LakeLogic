@@ -356,9 +356,9 @@ def test_check_freshness_spark_success_stale_and_missing_column(monkeypatch):
     ]
 
     freshness = {
-        "bronze": SimpleNamespace(max_delay_minutes=60, exclude_tables=["skip_me"], check_column=["fresh_col"]),
-        "silver": SimpleNamespace(max_delay_minutes=15, exclude_tables=[], check_column="fresh_col"),
-        "gold": SimpleNamespace(max_delay_minutes=30, exclude_tables=[], check_column=["missing_col"]),
+        "bronze": SimpleNamespace(max_delay_minutes=60, exclude_tables=["skip_me"], check_columns=["fresh_col"]),
+        "silver": SimpleNamespace(max_delay_minutes=15, exclude_tables=[], check_columns=["fresh_col"]),
+        "gold": SimpleNamespace(max_delay_minutes=30, exclude_tables=[], check_columns=["missing_col"]),
     }
     registry = SimpleNamespace(
         domain="commerce",
@@ -421,11 +421,11 @@ def test_check_freshness_source_columns_pass_fail_and_skip(monkeypatch):
 
     freshness = {
         "bronze": SimpleNamespace(
-            max_delay_minutes=60,
             exclude_tables=[],
-            check_column="loaded_at",
-            max_source_delay_minutes=30,  # source must be < 30 min old
-            source_check_columns=["updated_at", "last_modified"],
+            # One list, business timestamps first and the audit column last, and
+            # one threshold — the source/data-staleness limit.
+            max_delay_minutes=30,
+            check_columns=["updated_at", "last_modified", "loaded_at"],
         ),
     }
     registry = SimpleNamespace(
@@ -444,21 +444,21 @@ def test_check_freshness_source_columns_pass_fail_and_skip(monkeypatch):
             return self._row
 
     def fake_sql(query):
-        # Pipeline freshness — all tables are fresh (10 min delay)
-        if "MAX(loaded_at)" in query or "MAX(_lakelogic_loaded_at)" in query:
-            return FakeSparkResult({"latest_ts": now - datetime.timedelta(minutes=10)})
-        # Source freshness via TRY_CAST
-        if "TRY_CAST(updated_at" in query:
+        # ONE check now: iterate check_columns in order, first that yields a
+        # timestamp wins. Business columns first, the audit column last.
+        if "MAX(updated_at)" in query:
             if "fresh_src" in query:
-                return FakeSparkResult({"src_ts": now - datetime.timedelta(minutes=5)})
+                return FakeSparkResult({"latest_ts": now - datetime.timedelta(minutes=5)})
             if "stale_src" in query:
-                return FakeSparkResult({"src_ts": now - datetime.timedelta(minutes=120)})
+                return FakeSparkResult({"latest_ts": now - datetime.timedelta(minutes=120)})
             if "no_src_col" in query:
-                return FakeSparkResult({"src_ts": None})  # column exists but all NULL
-        if "TRY_CAST(last_modified" in query:
+                return FakeSparkResult({"latest_ts": None})  # present but all NULL
+        if "MAX(last_modified)" in query:
             if "no_src_col" in query:
-                raise RuntimeError("column not found")  # doesn't exist either
-            return FakeSparkResult({"src_ts": None})
+                raise RuntimeError("column not found")  # absent entirely
+            return FakeSparkResult({"latest_ts": None})
+        if "MAX(loaded_at)" in query or "MAX(_lakelogic_processed_at)" in query:
+            return FakeSparkResult({"latest_ts": now - datetime.timedelta(minutes=10)})
         return FakeSparkResult({"latest_ts": None})
 
     validator = SLOValidator(registry, spark=SimpleNamespace(sql=fake_sql))
@@ -466,24 +466,23 @@ def test_check_freshness_source_columns_pass_fail_and_skip(monkeypatch):
 
     by_entity = {r.entity: r for r in results}
 
-    # fresh_src: pipeline OK (10 min < 60 min), source OK (5 min < 30 min)
+    # fresh_src: resolves the FIRST candidate (updated_at, 5 min < 30) → OK
     assert by_entity["fresh_src"].passed is True
     assert by_entity["fresh_src"].status == "✅ OK"
-    assert by_entity["fresh_src"].source_passed is True
     assert by_entity["fresh_src"].source_column_used == "updated_at"
     assert by_entity["fresh_src"].source_delay_minutes == 5.0
 
-    # stale_src: pipeline OK (10 min < 60 min), but source STALE (120 min > 30 min)
+    # stale_src: same column, 120 min > 30 → STALE. The business timestamp decides,
+    # which is the point of ordering it ahead of the audit column: `loaded_at` is
+    # 10 min old on every table here and would have masked this.
     assert by_entity["stale_src"].passed is False
-    assert "SOURCE STALE" in by_entity["stale_src"].status
-    assert by_entity["stale_src"].source_passed is False
-    assert by_entity["stale_src"].source_column_used == "updated_at"
+    assert by_entity["stale_src"].status == "❌ STALE"
     assert by_entity["stale_src"].source_delay_minutes == 120.0
 
-    # no_src_col: pipeline OK, source skipped (no valid columns) — overall passes
+    # no_src_col: updated_at all-NULL, last_modified absent → falls back to the
+    # audit column rather than being skipped, so the table is still measured.
     assert by_entity["no_src_col"].passed is True
-    assert by_entity["no_src_col"].source_passed is None
-    assert by_entity["no_src_col"].source_column_used is None
+    assert by_entity["no_src_col"].source_column_used == "loaded_at"
 
 
 def test_check_freshness_duckdb_fallback_and_no_data(monkeypatch):
@@ -503,7 +502,7 @@ def test_check_freshness_duckdb_fallback_and_no_data(monkeypatch):
         domain="commerce",
         system="erp",
         slo=SimpleNamespace(
-            freshness={"bronze": SimpleNamespace(max_delay_minutes=30, exclude_tables=[], check_column="loaded_at")}
+            freshness={"bronze": SimpleNamespace(max_delay_minutes=30, exclude_tables=[], check_columns=["loaded_at"])}
         ),
         storage=SimpleNamespace(bronze_root=None, silver_root=None, gold_root=None),
         get_active_contracts=lambda: [
@@ -563,7 +562,7 @@ def test_check_freshness_polars_uses_delta_then_parquet(monkeypatch):
         slo=SimpleNamespace(
             freshness={
                 "bronze": SimpleNamespace(
-                    max_delay_minutes=20, exclude_tables=[], check_column=["missing", "loaded_at"]
+                    max_delay_minutes=20, exclude_tables=[], check_columns=["missing", "loaded_at"]
                 )
             }
         ),
@@ -816,9 +815,9 @@ def test_check_retention_duckdb_and_polars_paths(monkeypatch):
         SimpleNamespace(layer="gold", entity="bad_period"),
     ]
     freshness = {
-        "bronze": SimpleNamespace(source_check_columns=["event_ts"]),
-        "silver": SimpleNamespace(source_check_columns=[]),
-        "gold": SimpleNamespace(source_check_columns=["event_ts"]),
+        "bronze": SimpleNamespace(check_columns=["event_ts"]),
+        "silver": SimpleNamespace(check_columns=[]),
+        "gold": SimpleNamespace(check_columns=["event_ts"]),
     }
     registry = SimpleNamespace(
         domain="commerce",

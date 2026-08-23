@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "1.44.0"
+version = "1.45.0"
 description = "A declarative, contract-driven medallion pipeline engine for data mesh architectures. Write once. Run on Spark, Polars, or DuckDB."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -175,6 +175,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "hypothesis>=6.100.0",
+    "pandas>=2.0.0",  # required by the extraction file-path tests
     "ruff>=0.1.0",
     "black>=23.0.0",
     "commitizen>=3.0.0",
@@ -333,7 +334,7 @@ dev = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "1.44.0"
+version         = "1.45.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = false

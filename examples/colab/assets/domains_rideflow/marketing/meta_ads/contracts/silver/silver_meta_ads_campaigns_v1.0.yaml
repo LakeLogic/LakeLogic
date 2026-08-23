@@ -1,6 +1,6 @@
 version: 1.0.0
 info:
-  title: "Silver \u2014 Meta Ads Campaigns"
+  title: "Silver — Meta Ads Campaigns"
   table_name: '{silver_layer}_meta_ads_campaigns'
   description: Cleaned, typed, and deduplicated data.
   target_layer: silver
@@ -36,10 +36,9 @@ quality:
   row_rules: []
   dataset_rules:
   - unique: campaign_id
-transformations:
-- deduplicate:
-    by:
+  - unique:
     - campaign_id
+  fail_pipeline_on_dataset_error: true
 source:
   type: delta
   path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_campaigns'

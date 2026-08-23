@@ -67,6 +67,8 @@ transformations:
 - deduplicate:
     by:
     - driver_id
+    sort_by: [updated_at]
+    order: desc
 source:
   type: delta
   path: '{bronze_path}/bronze_rideflow_driver_profiles'

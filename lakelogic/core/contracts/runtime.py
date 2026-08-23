@@ -10,6 +10,7 @@ Phase 4 (opt-in): nothing here is on by default. ``DataProcessor(strict=True)``
 routes through :func:`load_strict` to *gate* on the standard, then builds the
 runtime object as usual. The default (``strict=False``) path is untouched.
 """
+
 from __future__ import annotations
 
 from typing import Any

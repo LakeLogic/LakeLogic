@@ -132,7 +132,7 @@ transformations:
   - phase: post
     join:
       reference: currency_rates   # a link name from `links:` above
-      on: currency               # column on THIS dataset
+      "on": currency               # column on THIS dataset
       key: currency              # matching column on the reference
       fields: [rate_to_gbp]      # columns to pull in
       type: left                 # left | inner | right | full
@@ -147,7 +147,7 @@ transformations:
       # sql_spark:  "..."       # optional Spark override
   # -- Other supported transforms (uncomment as needed; all real keys) --
   # - phase: post
-  #   lookup: { field: region, reference: city_dim, on: city_code, key: code, value: region, default_value: Unknown }
+  #   lookup: { field: region, reference: city_dim, "on": city_code, key: code, value: region, default_value: Unknown }
   # - phase: post
   #   coalesce: { output: contact, sources: [customer_email, customer_id], default: "n/a" }
   # - phase: post

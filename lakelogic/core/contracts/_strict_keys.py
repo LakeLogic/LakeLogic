@@ -3,6 +3,7 @@
 The canonical implementation lives in ``olc.models._strict_keys`` (installed natively).
 Kept as a stable import path; OLC is the source of truth.
 """
+
 from __future__ import annotations
 
 from olc.models._strict_keys import (

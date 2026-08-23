@@ -15,9 +15,12 @@ jobs:
         name: Generate Changelog
         runs-on: ubuntu-latest
         steps:
+            # Check out main's tip (not the tag's detached commit) so the changelog
+            # commit fast-forwards. fetch-depth 0 brings full history + tags for git-cliff.
             - uses: actions/checkout@v4
               with:
-                  fetch-depth: 0 # full history needed for git-cliff
+                  ref: main
+                  fetch-depth: 0
 
             - name: Generate changelog
               uses: orhun/git-cliff-action@v4
@@ -33,5 +36,13 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "github-actions[bot]@users.noreply.github.com"
                   git add CHANGELOG.md
-                  git diff --staged --quiet || git commit -m "docs: update changelog for ${{ github.ref_name }}"
-                  git push origin HEAD:main
+                  git diff --staged --quiet && { echo "no changelog changes"; exit 0; }
+                  git commit -m "docs: update changelog for ${{ github.ref_name }}"
+                  # Rebase-retry so a race with another push to main can't fail the job.
+                  for i in 1 2 3 4 5; do
+                      if git push origin HEAD:main; then exit 0; fi
+                      echo "push rejected, rebasing onto origin/main (attempt $i)…"
+                      git fetch origin main
+                      git rebase origin/main || { git rebase --abort; exit 1; }
+                  done
+                  echo "push failed after 5 attempts"; exit 1

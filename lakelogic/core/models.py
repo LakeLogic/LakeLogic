@@ -125,7 +125,6 @@ TIER_CANONICAL_MAP = {
 TIER_VALID_CANONICAL = {"bronze", "silver", "gold", "reference"}
 
 
-
 # -- OLC-authored spec shapes (single source of truth) --------------------
 # These field-shapes are authored ONCE in the Open Lakehouse Contract
 # (olc.models._nested) and re-exported here, so adding/changing a field
@@ -142,6 +141,7 @@ from olc.models._nested import (  # noqa: E402,F401
     DownstreamConsumer,
     Quarantine,
     UpstreamContractRef,
+    UpstreamSource,
     Notification,
     ConfidenceConfig,
     DatasetRuleNullRatio,
@@ -187,11 +187,6 @@ from olc.models._nested import (  # noqa: E402,F401
 )
 
 
-
-
-
-
-
 class Server(BaseModel):
     """Storage and ingestion settings for a contract."""
 
@@ -206,12 +201,6 @@ class Server(BaseModel):
 
     # Landing zone lifecycle (Bronze layer only)
     post_ingestion: Optional[PostIngestionConfig] = None
-
-
-
-
-
-
 
 
 class DltSourceConfig(_olcn.DltSourceConfig):
@@ -243,7 +232,9 @@ class DltSourceConfig(_olcn.DltSourceConfig):
                 params:
                   limit: 100
     """
+
     model_config = ConfigDict(extra="allow")
+
     @model_validator(mode="after")
     def _validate_mode(self) -> "DltSourceConfig":
         if not self.source and not self.base_url:
@@ -253,6 +244,7 @@ class DltSourceConfig(_olcn.DltSourceConfig):
 
 class SourceConfig(_olcn.SourceConfig):
     """Source acquisition settings for landing/stream/table/dlt inputs."""
+
     model_config = ConfigDict(extra="allow")
     dlt: Optional[DltSourceConfig] = None
     _SOURCE_KNOWN_KEYS: set = {
@@ -282,17 +274,18 @@ class SourceConfig(_olcn.SourceConfig):
         "dlt",
         "post_ingestion",
     }
+
     @model_validator(mode="after")
     def _warn_unknown_keys(self) -> "SourceConfig":
         _warn_unknown_extra_keys(self, self._SOURCE_KNOWN_KEYS, "source")
         return self
 
 
-
-
 class TransformationRename(_olcn.TransformationRename):
     """Rename a column prior to validation."""
+
     model_config = ConfigDict(populate_by_name=True, extra="allow")
+
     def iter_pairs(self) -> List[tuple[str, str]]:
         if self.mappings:
             return [(src, dst) for src, dst in self.mappings.items() if src and dst]
@@ -301,12 +294,9 @@ class TransformationRename(_olcn.TransformationRename):
         return []
 
 
-
-
-
-
 class TransformationFilter(_olcn.TransformationFilter):
     """Row-level filter expressed in SQL."""
+
     @model_validator(mode="before")
     @classmethod
     def _accept_string_shorthand(cls, data: Any) -> Any:
@@ -316,35 +306,11 @@ class TransformationFilter(_olcn.TransformationFilter):
         return data
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class TransformationPivot(_olcn.TransformationPivot):
     """Pivot rows into columns using conditional aggregation."""
+
     model_config = ConfigDict(extra="allow")
+
     @model_validator(mode="after")
     def _normalize(self):
         if not self.pivot_col and self.pivot_cols:
@@ -359,7 +325,9 @@ class TransformationPivot(_olcn.TransformationPivot):
 
 class TransformationUnpivot(_olcn.TransformationUnpivot):
     """Unpivot columns into rows."""
+
     model_config = ConfigDict(extra="allow")
+
     @model_validator(mode="after")
     def _normalize(self):
         if not self.value_vars and self.value_cols:
@@ -367,18 +335,9 @@ class TransformationUnpivot(_olcn.TransformationUnpivot):
         return self
 
 
-
-
-
-
-
-
-
-
-
-
 class Transformation(_olcn.Transformation):
     """Transformation step (SQL or structured)."""
+
     model_config = ConfigDict(extra="allow")
     rename: Optional[TransformationRename] = None
     filter: Optional[TransformationFilter] = None
@@ -386,28 +345,9 @@ class Transformation(_olcn.Transformation):
     unpivot: Optional[TransformationUnpivot] = None
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class QualityRule(_olcn.QualityRule):
     """Row-level or dataset-level quality rule."""
+
     @field_validator("category", mode="before")
     @classmethod
     def _normalize_category(cls, value: Any) -> str:
@@ -426,6 +366,7 @@ class QualityRule(_olcn.QualityRule):
 
 class Quality(_olcn.Quality):
     """Quality rule groups for row and dataset checks."""
+
     row_rules: List[
         Union[
             QualityRule,
@@ -447,30 +388,21 @@ class Quality(_olcn.Quality):
     ] = Field(default_factory=list)
 
 
-
-
-
-
-
-
-
-
-
-
 class FieldDefinition(_olcn.FieldDefinition):
     """Schema field definition."""
+
     rules: List[QualityRule] = Field(default_factory=list)
 
 
 class Model(_olcn.Model):
     """Schema model definition."""
+
     fields: List[FieldDefinition] = Field(default_factory=list)
-
-
 
 
 class Materialization(_olcn.Materialization):
     """Materialization settings for writing outputs."""
+
     model_config = ConfigDict(extra="allow")
     _MAT_KNOWN_KEYS: set = {
         "strategy",
@@ -497,6 +429,7 @@ class Materialization(_olcn.Materialization):
         "dlt_credentials",
         "dlt_dataset_name",
     }
+
     @model_validator(mode="after")
     def _validate_strategy_alignment(self) -> "Materialization":
         """Warn when strategy and sub-config blocks are mismatched."""
@@ -511,12 +444,11 @@ class Materialization(_olcn.Materialization):
                 "The scd2 block will be ignored."
             )
         return self
+
     @model_validator(mode="after")
     def _warn_unknown_keys(self) -> "Materialization":
         _warn_unknown_extra_keys(self, self._MAT_KNOWN_KEYS, "materialization")
         return self
-
-
 
 
 # ── LLM Extraction Models ────────────────────────────────────────────────────
@@ -526,12 +458,6 @@ class Materialization(_olcn.Materialization):
 # output_schema reuses FieldDefinition for consistency with model.fields.
 # Extraction-specific hints (extraction_task, extraction_examples, max_length)
 # are optional fields on FieldDefinition itself.
-
-
-
-
-
-
 
 
 class ExtractionConfig(_olcn.ExtractionConfig):
@@ -558,12 +484,14 @@ class ExtractionConfig(_olcn.ExtractionConfig):
           confidence:
             min_threshold: 0.8
     """
+
     model_config = ConfigDict(extra="allow")
     output_schema: List[FieldDefinition] = Field(default_factory=list)
 
 
 class LineageConfig(_olcn.LineageConfig):
     """Lineage capture settings."""
+
     model_config = ConfigDict(extra="allow")
     _LINEAGE_KNOWN_KEYS: set = {
         "enabled",
@@ -588,12 +516,11 @@ class LineageConfig(_olcn.LineageConfig):
         "upstream_prefix",
         "run_id_source",
     }
+
     @model_validator(mode="after")
     def _warn_unknown_keys(self) -> "LineageConfig":
         _warn_unknown_extra_keys(self, self._LINEAGE_KNOWN_KEYS, "lineage")
         return self
-
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1478,6 +1405,11 @@ class DataContract(BaseModel):
 
     # ORCHESTRATION & DEPENDENCIES
     upstream: List[str] = Field(default_factory=list)
+    # Structured upstream refs to products that HAVE their own contract, and nested
+    # non-contract origins (source system -> landing -> this). Mirrors `downstream`
+    # (whose DownstreamConsumer nests `consumers`); both come from olc.models._nested.
+    upstream_contracts: List[UpstreamContractRef] = Field(default_factory=list)
+    upstream_sources: List[UpstreamSource] = Field(default_factory=list)
     downstream: List[DownstreamConsumer] = Field(default_factory=list)
     schedule: Optional[str] = None
 

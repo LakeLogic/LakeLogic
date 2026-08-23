@@ -47,8 +47,10 @@ def _load_link_frames(contract: Any, good_df: Any, engine_name: str) -> Dict[str
             logger.debug(f"external_logic link '{link.name}' has no path; skipping.")
             continue
         path = Path(path_str)
-        if not path.is_absolute() and base_path and not path_str.startswith(
-            ("s3://", "gs://", "abfss://", "adl://", "https://", "table:")
+        if (
+            not path.is_absolute()
+            and base_path
+            and not path_str.startswith(("s3://", "gs://", "abfss://", "adl://", "https://", "table:"))
         ):
             path = Path(base_path) / path
 
@@ -111,9 +113,7 @@ def _invoke_entrypoint(fn: Callable, good_df: Any, offered: Dict[str, Any], args
     """
     try:
         sig = inspect.signature(fn)
-        accepts_kwargs = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
         params = sig.parameters
     except (TypeError, ValueError):  # builtins / C-callables with no signature
         accepts_kwargs, params = True, {}
@@ -375,8 +375,10 @@ def _run_notebook_logic(
         if not _lp:
             continue
         _p = Path(_lp)
-        if not _p.is_absolute() and base_path and not _lp.startswith(
-            ("s3://", "gs://", "abfss://", "adl://", "https://", "table:")
+        if (
+            not _p.is_absolute()
+            and base_path
+            and not _lp.startswith(("s3://", "gs://", "abfss://", "adl://", "https://", "table:"))
         ):
             _p = Path(base_path) / _p
         link_paths[_link.name] = str(_p)

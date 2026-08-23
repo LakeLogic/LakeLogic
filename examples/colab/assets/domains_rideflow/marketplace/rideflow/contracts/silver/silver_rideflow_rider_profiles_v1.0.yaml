@@ -47,6 +47,8 @@ transformations:
 - deduplicate:
     by:
     - rider_id
+    sort_by: [updated_at]
+    order: desc
 source:
   type: delta
   path: '{bronze_path}/{bronze_layer}_{system}_rider_profiles'

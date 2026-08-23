@@ -105,6 +105,26 @@ def _dedup_keys(raw: dict) -> List[str]:
     return []
 
 
+def _dedup_ordering(raw: dict) -> str:
+    """The ``ORDER BY`` clause deciding which duplicate survives, from the contract.
+
+    The generated SQL must reproduce the contract's ordering. It previously emitted
+    ``order by 1`` — ordering by the first projected column, i.e. an arbitrary
+    survivor chosen by the generator rather than the author. That is the same silent
+    data-loss the contract's required ``sort_by`` exists to prevent, just expressed
+    in dbt instead of the engine, and it would diverge from what LakeLogic itself
+    produces for the same contract.
+    """
+    for xf in raw.get("transformations") or ():
+        if isinstance(xf, dict) and xf.get("deduplicate"):
+            cfg = xf["deduplicate"] or {}
+            cols = [str(c) for c in (cfg.get("sort_by") or [])]
+            if cols:
+                direction = "asc" if str(cfg.get("order", "desc")).lower() == "asc" else "desc"
+                return ", ".join(f"{c} {direction}" for c in cols)
+    return ""
+
+
 def _fields_of(raw: dict) -> List[Dict[str, Any]]:
     model = raw.get("model") or {}
     return [f for f in (model.get("fields") or []) if isinstance(f, dict) and f.get("name")]
@@ -137,6 +157,7 @@ class _ModelPlan:
         self.src_bytes = src_bytes
         self.fields = _fields_of(raw)
         self.dedup_keys = _dedup_keys(raw)
+        self.dedup_ordering = _dedup_ordering(raw)
         self.row_rules = _row_rules_of(raw)
         self.upstream = [str(u) for u in (raw.get("upstream") or [])]
         self.logic = (raw.get("logic") or "").strip() or None
@@ -183,9 +204,7 @@ def _model_sql(
 
     if plan.fields:
         select_cols = ",\n".join(
-            f"        cast({f['name']} as {_sf_type(f.get('type', 'string'))}) "
-            f"as {f['name']}"
-            for f in plan.fields
+            f"        cast({f['name']} as {_sf_type(f.get('type', 'string'))}) as {f['name']}" for f in plan.fields
         )
         body = [
             "with source_data as (",
@@ -205,9 +224,11 @@ def _model_sql(
 
     if plan.dedup_keys:
         partition = ", ".join(plan.dedup_keys)
-        body.append(
-            f"qualify row_number() over (partition by {partition} order by 1) = 1"
-        )
+        # The contract's own ordering, so the dbt model and the LakeLogic engine
+        # keep the SAME row. `sort_by` is required, so this is normally present;
+        # the fallback only covers a contract read through a lenient path.
+        ordering = plan.dedup_ordering or ", ".join(f"{k} asc" for k in plan.dedup_keys)
+        body.append(f"qualify row_number() over (partition by {partition} order by {ordering}) = 1")
         body.append(f"-- deduplicate: one row per ({partition}), per the contract")
 
     return header + "\n\n" + "\n".join(body) + "\n"
@@ -264,11 +285,9 @@ def _schema_entry(plan: _ModelPlan, provenance: Optional[Provenance]) -> Tuple[D
     model_tests: List[Any] = []
     if len(plan.dedup_keys) > 1:
         needs_utils = True
-        model_tests.append({
-            "dbt_utils.unique_combination_of_columns": {
-                "combination_of_columns": list(plan.dedup_keys)
-            }
-        })
+        model_tests.append(
+            {"dbt_utils.unique_combination_of_columns": {"combination_of_columns": list(plan.dedup_keys)}}
+        )
     for rule in rules_by_col.get(None, ()):
         needs_utils = True
         model_tests.append({"dbt_utils.expression_is_true": {"expression": rule["sql"]}})
@@ -278,10 +297,7 @@ def _schema_entry(plan: _ModelPlan, provenance: Optional[Provenance]) -> Tuple[D
 
 
 def _yaml_doc(header: str, doc: Dict[str, Any]) -> str:
-    return "\n".join(
-        [header, yaml.safe_dump(doc, sort_keys=False, default_flow_style=False,
-                                allow_unicode=True)]
-    )
+    return "\n".join([header, yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True)])
 
 
 def scaffold_dbt_project(
@@ -329,23 +345,18 @@ def scaffold_dbt_project(
 
     loaded.sort(key=lambda item: (("bronze", "silver", "gold").index(item[0]), item[1]))
     model_plans = [
-        _ModelPlan(layer, entity, raw, data)
-        for layer, entity, raw, data in loaded
-        if layer in _MODEL_LAYERS
+        _ModelPlan(layer, entity, raw, data) for layer, entity, raw, data in loaded if layer in _MODEL_LAYERS
     ]
     bronze = [(entity, raw) for layer, entity, raw, _data in loaded if layer == "bronze"]
     model_entities = {p.entity for p in model_plans}
     source_entities = {entity for entity, _raw in bronze}
     # Entry-layer models (no upstream) implicitly declare their own landing source.
-    implicit_sources = sorted(
-        p.entity for p in model_plans if not p.upstream and not p.logic
-    )
+    implicit_sources = sorted(p.entity for p in model_plans if not p.upstream and not p.logic)
 
     # Validate every model BEFORE writing anything (all-or-nothing) — _model_sql raises
     # on unresolvable upstream / joins the scaffold refuses to invent.
     rendered_sql = {
-        p.entity: _model_sql(p, model_entities, source_entities | set(implicit_sources),
-                             provenance)
+        p.entity: _model_sql(p, model_entities, source_entities | set(implicit_sources), provenance)
         for p in model_plans
     }
     schema_entries: Dict[str, List[Dict[str, Any]]] = {layer: [] for layer in _MODEL_LAYERS}
@@ -377,104 +388,118 @@ def scaffold_dbt_project(
         "model-paths": ["models"],
         "models": {
             project_name: {
-                layer: {"+schema": layer, "+materialized": "table"}
-                for layer in _MODEL_LAYERS
-                if schema_entries[layer]
+                layer: {"+schema": layer, "+materialized": "table"} for layer in _MODEL_LAYERS if schema_entries[layer]
             }
         },
     }
-    _write(out / "dbt_project.yml",
-           _yaml_doc(_header(f"dbt project — {reg_domain}/{reg_system}", provenance),
-                     project))
+    _write(out / "dbt_project.yml", _yaml_doc(_header(f"dbt project — {reg_domain}/{reg_system}", provenance), project))
 
     # -- packages.yml (only when a generated test needs dbt_utils) ----------
     if needs_dbt_utils:
-        _write(out / "packages.yml", _yaml_doc(
-            _header("dbt packages required by the generated tests", provenance),
-            {"packages": [{"package": "dbt-labs/dbt_utils", "version": [">=1.0.0", "<2.0.0"]}]},
-        ))
+        _write(
+            out / "packages.yml",
+            _yaml_doc(
+                _header("dbt packages required by the generated tests", provenance),
+                {"packages": [{"package": "dbt-labs/dbt_utils", "version": [">=1.0.0", "<2.0.0"]}]},
+            ),
+        )
 
     # -- profiles.yml.example (Snowflake, env-var driven, no secrets) --------
-    _write(out / "profiles.yml.example", _yaml_doc(
-        _header("Copy to ~/.dbt/profiles.yml and fill via environment variables — "
-                "never commit credentials", provenance),
-        {
-            profile_name: {
-                "target": "dev",
-                "outputs": {
-                    "dev": {
-                        "type": "snowflake",
-                        "account": "{{ env_var('SNOWFLAKE_ACCOUNT') }}",
-                        "user": "{{ env_var('SNOWFLAKE_USER') }}",
-                        "password": "{{ env_var('SNOWFLAKE_PASSWORD') }}",
-                        "role": "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}",
-                        "database": "{{ env_var('SNOWFLAKE_DATABASE') }}",
-                        "warehouse": "{{ env_var('SNOWFLAKE_WAREHOUSE') }}",
-                        "schema": "silver",
-                        "threads": 4,
-                    }
-                },
-            }
-        },
-    ))
+    _write(
+        out / "profiles.yml.example",
+        _yaml_doc(
+            _header(
+                "Copy to ~/.dbt/profiles.yml and fill via environment variables — never commit credentials", provenance
+            ),
+            {
+                profile_name: {
+                    "target": "dev",
+                    "outputs": {
+                        "dev": {
+                            "type": "snowflake",
+                            "account": "{{ env_var('SNOWFLAKE_ACCOUNT') }}",
+                            "user": "{{ env_var('SNOWFLAKE_USER') }}",
+                            "password": "{{ env_var('SNOWFLAKE_PASSWORD') }}",
+                            "role": "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}",
+                            "database": "{{ env_var('SNOWFLAKE_DATABASE') }}",
+                            "warehouse": "{{ env_var('SNOWFLAKE_WAREHOUSE') }}",
+                            "schema": "silver",
+                            "threads": 4,
+                        }
+                    },
+                }
+            },
+        ),
+    )
 
     # -- models/sources.yml --------------------------------------------------
     source_tables: List[Dict[str, Any]] = []
     for entity, raw in bronze:
         info = raw.get("info") or {}
-        source_tables.append({
-            "name": entity,
-            "description": str(info.get("description") or info.get("title") or entity),
-        })
-    for entity in implicit_sources:
-        source_tables.append({
-            "name": entity,
-            "description": "Landing table for the entry-layer model of the same name — "
-                           "point this at your landed raw data.",
-        })
-    if source_tables:
-        _write(out / "models" / "sources.yml", _yaml_doc(
-            _header("Raw landing sources (bronze contracts + entry-layer inputs)",
-                    provenance),
+        source_tables.append(
             {
-                "version": 2,
-                "sources": [{
-                    "name": _SOURCE_NAME,
-                    "schema": "{{ env_var('LAKELOGIC_RAW_SCHEMA', 'raw') }}",
-                    "tables": source_tables,
-                }],
-            },
-        ))
+                "name": entity,
+                "description": str(info.get("description") or info.get("title") or entity),
+            }
+        )
+    for entity in implicit_sources:
+        source_tables.append(
+            {
+                "name": entity,
+                "description": "Landing table for the entry-layer model of the same name — "
+                "point this at your landed raw data.",
+            }
+        )
+    if source_tables:
+        _write(
+            out / "models" / "sources.yml",
+            _yaml_doc(
+                _header("Raw landing sources (bronze contracts + entry-layer inputs)", provenance),
+                {
+                    "version": 2,
+                    "sources": [
+                        {
+                            "name": _SOURCE_NAME,
+                            "schema": "{{ env_var('LAKELOGIC_RAW_SCHEMA', 'raw') }}",
+                            "tables": source_tables,
+                        }
+                    ],
+                },
+            ),
+        )
 
     # -- per-layer models + schema.yml ---------------------------------------
     for plan in model_plans:
-        _write(out / "models" / plan.layer / f"{plan.entity}.sql",
-               rendered_sql[plan.entity])
+        _write(out / "models" / plan.layer / f"{plan.entity}.sql", rendered_sql[plan.entity])
     for layer in _MODEL_LAYERS:
         if schema_entries[layer]:
-            _write(out / "models" / layer / "schema.yml", _yaml_doc(
-                _header(f"{layer} models — compiled from the canonical contracts; "
+            _write(
+                out / "models" / layer / "schema.yml",
+                _yaml_doc(
+                    _header(
+                        f"{layer} models — compiled from the canonical contracts; "
                         "the lakelogic dbt adapter reads this back as the drift gate",
-                        provenance),
-                {"version": 2, "models": schema_entries[layer]},
-            ))
+                        provenance,
+                    ),
+                    {"version": 2, "models": schema_entries[layer]},
+                ),
+            )
 
     # -- README.md -----------------------------------------------------------
     prov_block = ""
     if provenance and provenance.lines():
-        prov_block = "\n".join(
-            ["", "## Provenance", ""] + [f"- {line}" for line in provenance.lines()]
-        ) + "\n"
-    counts = {layer: sum(1 for p in model_plans if p.layer == layer)
-              for layer in _MODEL_LAYERS}
+        prov_block = "\n".join(["", "## Provenance", ""] + [f"- {line}" for line in provenance.lines()]) + "\n"
+    counts = {layer: sum(1 for p in model_plans if p.layer == layer) for layer in _MODEL_LAYERS}
     deps_line = "dbt deps\n" if needs_dbt_utils else ""
-    _write(out / "README.md", f"""# {reg_domain}/{reg_system} — dbt project
+    _write(
+        out / "README.md",
+        f"""# {reg_domain}/{reg_system} — dbt project
 
 Generated by `lakelogic scaffold --target dbt`. The **contracts in `contracts/` are the
 canonical design** — the dbt models, tests, and sources are compiled from them; regenerate
 this project rather than hand-editing generated files.
 
-Models: {counts['silver']} silver / {counts['gold']} gold. Bronze contracts and
+Models: {counts["silver"]} silver / {counts["gold"]} gold. Bronze contracts and
 entry-layer inputs are declared as dbt **sources** (`models/sources.yml`) — point the
 `{_SOURCE_NAME}` source (env `LAKELOGIC_RAW_SCHEMA`) at your landed raw data.
 
@@ -500,11 +525,13 @@ lakelogic import-dbt --schema models/silver/schema.yml --output /tmp/readback/
 ```bash
 lakelogic validate contracts/ --recursive
 ```
-{prov_block}""")
+{prov_block}""",
+    )
 
     logger.info(
         "scaffolded dbt project with {} model(s) + {} source(s) into {}",
-        len(model_plans), len(source_tables), out,
+        len(model_plans),
+        len(source_tables),
+        out,
     )
-    return ScaffoldResult(out_dir=out, registry_path=out / "dbt_project.yml",
-                          files=tuple(files))
+    return ScaffoldResult(out_dir=out, registry_path=out / "dbt_project.yml", files=tuple(files))
