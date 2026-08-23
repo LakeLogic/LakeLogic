@@ -356,9 +356,10 @@ def _safe_partition_value(value: Any) -> str:
     if value is None:
         return "null"
     text = str(value)
-    safe = text.replace(os.sep, "_").replace(" ", "_").replace(":", "_")
-    if os.altsep:
-        safe = safe.replace(os.altsep, "_")
+    # Replace BOTH separators explicitly (not os.sep/os.altsep) so partition dir
+    # names are identical and filesystem-safe on every OS — on Linux os.altsep is
+    # None, which would otherwise leave backslashes in the value.
+    safe = text.replace("/", "_").replace("\\", "_").replace(" ", "_").replace(":", "_")
     return safe
 
 
