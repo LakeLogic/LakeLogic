@@ -72,7 +72,8 @@ def _run(engine: str, trips, link_path: Path):
     print(f"\n=== engine: {engine} - enriched trips (source JOIN active-drivers link) ===")
     for r in sorted(rows, key=lambda r: r["trip_id"]):
         print(
-            f"  {r['trip_id']}  {r['driver_id']}  fare={r['fare']:<5}  name={r.get('driver_name')}  city={r.get('driver_city')}"
+            f"  {r['trip_id']}  {r['driver_id']}  fare={r['fare']:<5}  "
+            f"name={r.get('driver_name')}  city={r.get('driver_city')}"
         )  # noqa: E501
 
 

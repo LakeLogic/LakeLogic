@@ -3669,7 +3669,8 @@ def _configure_ducklake_cloud(con, *paths) -> None:
                 con.execute(f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, CONNECTION_STRING '{conn_str}')")
             elif account:
                 con.execute(
-                    f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, ACCOUNT_NAME '{account}')"
+                    f"CREATE OR REPLACE SECRET _ll_azure (TYPE AZURE, PROVIDER credential_chain, "
+                    f"ACCOUNT_NAME '{account}')"
                 )  # noqa: E501
             else:
                 logger.warning("DuckLake Azure path but no AZURE_STORAGE_* set — relying on ambient credentials.")
