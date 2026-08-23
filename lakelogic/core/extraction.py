@@ -67,4 +67,22 @@ def apply_extraction(contract: Any, df: Any, engine_name: str) -> Any:
         f"(text_column='{getattr(config, 'text_column', None)}')."
     )
     enriched = extract_batch(rows, contract)
+
+    # A batch where EVERY row failed used to be N ERROR log lines followed by a
+    # green run over empty columns — the exact shape of the "90 PDFs, 0 fields"
+    # incident. Total failure is a run-level failure, so fail the run with the
+    # count and the first reason rather than materializing empty output.
+    failures = [
+        str(r.get("_lakelogic_errors") or "")
+        for r in enriched
+        if str(r.get("_lakelogic_errors") or "").startswith("Extraction error")
+    ]
+    if failures and len(failures) == len(enriched):
+        raise RuntimeError(
+            f"Extraction failed for all {len(enriched)} row(s) using provider "
+            f"'{config.provider}': {failures[0]}"
+        )
+    if failures:
+        logger.warning(f"Extraction failed for {len(failures)}/{len(enriched)} rows: {failures[0]}")
+
     return _rows_to_frame(enriched, df)

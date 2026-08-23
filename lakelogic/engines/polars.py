@@ -1210,8 +1210,18 @@ class PolarsAdapter(EngineAdapter):
                         logger.warning(f"Pre-Transform [Filter] failed: {e}")
                 elif dedupe_cfg:
                     logger.debug(f"Pre-Transform [Deduplicate]: {dedupe_cfg.on}")
-                    if dedupe_cfg.sort_by:
-                        current_lf = current_lf.sort(dedupe_cfg.sort_by, descending=(dedupe_cfg.order == "desc"))
+                    # Nested dtypes are not orderable in Polars, so they can't take
+                    # part in the tie-break; the scalar columns still make it stable.
+                    _schema = current_lf.collect_schema()
+                    _sortable = [n for n, dt in _schema.items() if not isinstance(dt, (pl.List, pl.Struct, pl.Object))]
+                    _sort_by, _order = self._dedup_order(dedupe_cfg, _sortable)
+                    if _sort_by:
+                        try:
+                            current_lf = current_lf.sort(_sort_by, descending=(_order == "desc"))
+                        except Exception as _sort_err:
+                            # Nested/unorderable columns (list, struct) can't be sorted;
+                            # keep the dedup rather than failing the run.
+                            logger.warning(f"Pre-Transform [Deduplicate] tie-break sort skipped: {_sort_err}")
                     current_lf = current_lf.unique(subset=dedupe_cfg.on, maintain_order=True)
         return current_lf
 

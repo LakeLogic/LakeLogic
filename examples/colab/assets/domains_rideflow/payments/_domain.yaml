@@ -5,9 +5,9 @@ ownership:
   domain_owner: "Finance Engineering"
   team: finance_engineering
   contacts:
-    - name: Finance Data Lead
-      role: oncall
-      email: finance-data@rideflow.com
+  - name: Finance Data Lead
+    role: oncall
+    email: finance-data@rideflow.com
   cost_center: finance_ops
   jira_project: PAYMENTS
 
@@ -15,14 +15,11 @@ ownership:
 slo:
   freshness:
     bronze:
-      max_delay_minutes: 60
-      check_column: "_lakelogic_loaded_at"
-      max_source_delay_minutes: 120
+      max_delay_minutes: 120
+      check_columns: ["_lakelogic_processed_at"]
     silver:
-      max_delay_minutes: 240
-      check_column: "_lakelogic_processed_at"
-      max_source_delay_minutes: 300
-
+      max_delay_minutes: 300
+      check_columns: ["_lakelogic_processed_at"]
   row_count:
     bronze:
       min_rows: 1

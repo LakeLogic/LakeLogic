@@ -5,9 +5,9 @@ ownership:
   domain_owner: "Platform Data Engineering"
   team: data_engineering
   contacts:
-    - name: Platform Data Lead
-      role: oncall
-      email: oncall-data@example.com
+  - name: Platform Data Lead
+    role: oncall
+    email: oncall-data@example.com
   cost_center: platform_engineering
   jira_project: KAN
 
@@ -15,16 +15,11 @@ ownership:
 slo:
   freshness:
     bronze:
-      max_delay_minutes: 30
-      check_column: "_lakelogic_loaded_at"
-      max_source_delay_minutes: 60
-      source_check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at"]
+      max_delay_minutes: 60
+      check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at", "_lakelogic_processed_at"]
     silver:
-      max_delay_minutes: 120
-      check_column: "_lakelogic_processed_at"
-      max_source_delay_minutes: 180
-      source_check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at"]
-
+      max_delay_minutes: 180
+      check_columns: ["updated_at", "last_modified", "event_timestamp", "created_at", "_lakelogic_processed_at"]
   row_count:
     bronze:
       min_rows: 1

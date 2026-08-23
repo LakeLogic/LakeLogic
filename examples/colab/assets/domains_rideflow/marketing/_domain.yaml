@@ -5,9 +5,9 @@ ownership:
   domain_owner: "Growth Team"
   team: growth_analytics
   contacts:
-    - name: Growth Data Lead
-      role: oncall
-      email: growth-data@rideflow.com
+  - name: Growth Data Lead
+    role: oncall
+    email: growth-data@rideflow.com
   cost_center: growth_marketing
   jira_project: GROWTH
 
@@ -15,14 +15,11 @@ ownership:
 slo:
   freshness:
     bronze:
-      max_delay_minutes: 120
-      check_column: "_lakelogic_loaded_at"
-      max_source_delay_minutes: 240
+      max_delay_minutes: 240
+      check_columns: ["_lakelogic_processed_at"]
     silver:
-      max_delay_minutes: 360
-      check_column: "_lakelogic_processed_at"
-      max_source_delay_minutes: 480
-
+      max_delay_minutes: 480
+      check_columns: ["_lakelogic_processed_at"]
   row_count:
     bronze:
       min_rows: 1

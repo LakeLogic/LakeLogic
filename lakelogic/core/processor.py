@@ -435,6 +435,19 @@ class DataProcessor:
         if strict:
             raise PreflightError(name, findings)
 
+    def _raise_if_all_files_failed(self, provider: str, file_paths: list, errors: list) -> None:
+        """Fail the run when a file provider could not read a single matched file.
+
+        Per-file warnings alone produced a green run over an empty frame, which is
+        indistinguishable from "there was no data". If nothing could be read, the
+        run is broken and must say so.
+        """
+        if file_paths and errors and len(errors) == len(file_paths):
+            raise RuntimeError(
+                f"File extraction failed for all {len(file_paths)} file(s) using "
+                f"provider '{provider}': {errors[0]}"
+            )
+
     def _enforce_strict(self, data: dict) -> None:
         """Opt-in gate: validate the raw contract against the public OLC standard.
 
@@ -736,7 +749,13 @@ class DataProcessor:
         # into structured fields (LLM / local model / file reader / deterministic
         # regex) BEFORE schema + quality enforcement, so the extracted output is
         # governed by the contract like any other column.
-        if getattr(self.contract, "extraction", None) is not None:
+        # Skipped when run_source already ran a file provider (pdfplumber/easyocr)
+        # over the matched files: `df` is then the extracted output, and running
+        # extraction again looked for a text/path column that no longer exists —
+        # which is how every row ended up extracting from ''.
+        if getattr(self.contract, "extraction", None) is not None and not getattr(
+            self, "_file_extraction_applied", False
+        ):
             from lakelogic.core.extraction import apply_extraction
 
             _pre_ex = time.perf_counter()
@@ -930,13 +949,43 @@ class DataProcessor:
                         status="ok",
                         details={
                             "fields_masked": len(engine.get_fields_to_mask(user_groups)),
-                            "strategies": {f.name: f.masking or "redact" for f in pii_fields},
+                            # `getattr`, not attribute access: this line only builds an
+                            # observability trace, and it sits INSIDE the masking try-block.
+                            # A field object without `masking` would otherwise raise here —
+                            # after masking already succeeded — and now that masking fails
+                            # closed, a trace-building slip would abort a run whose data was
+                            # correctly masked. Recording the trace must never be able to do
+                            # that.
+                            "strategies": {
+                                f.name: getattr(f, "masking", None) or "redact"
+                                for f in pii_fields
+                            },
                             "user_groups": user_groups,
                         },
                     )
                 )
             except Exception as mask_exc:
-                logger.warning(f"PII masking failed ({mask_exc}), proceeding without masking")
+                # FAIL CLOSED. Masking that fails must never fall through to writing the
+                # rows unmasked: the contract declared those fields sensitive, and a
+                # pipeline that quietly publishes them is worse than one that stops. This
+                # previously warned and continued, which on Databricks serverless meant
+                # every PII field a contract declared was written in the clear.
+                #
+                # `LAKELOGIC_ON_MASKING_FAILURE=warn` restores the old behaviour for an
+                # operator who consciously accepts that risk; the default is to raise.
+                on_failure = os.environ.get("LAKELOGIC_ON_MASKING_FAILURE", "fail").strip().lower()
+                masked_fields = [f.name for f in pii_fields]
+                if on_failure != "warn":
+                    raise RuntimeError(
+                        f"PII masking failed ({mask_exc}) — refusing to write "
+                        f"{len(masked_fields)} declared sensitive field(s) unmasked: "
+                        f"{', '.join(masked_fields)}. Fix the masking failure, or set "
+                        f"LAKELOGIC_ON_MASKING_FAILURE=warn to publish unmasked deliberately."
+                    ) from mask_exc
+                logger.warning(
+                    f"PII masking failed ({mask_exc}); LAKELOGIC_ON_MASKING_FAILURE=warn is "
+                    f"set, so these fields are being written UNMASKED: {', '.join(masked_fields)}"
+                )
                 self._active_trace_steps.append(
                     TraceStep(
                         step="PII Masking",
@@ -1750,6 +1799,10 @@ class DataProcessor:
 
         self._source_files = source_files or []
         self._source_max_mtime = None
+        # Cleared per source load: the file-provider branches below set it so the
+        # EXTRACTION HOOK in run() does not extract a second time from rows that
+        # are already the extracted output.
+        self._file_extraction_applied = False
         if source_files:
             self._source_max_mtime = max(f.get("mtime", 0) for f in source_files)
 
@@ -1879,12 +1932,16 @@ class DataProcessor:
                             else:
                                 logger.info(f"File extraction: provider={_ext_prov}, files={len(file_paths)}")
                                 _all_rows: list[dict] = []
+                                _file_errors: list[str] = []
                                 for _fp in file_paths:
                                     try:
                                         _all_rows.extend(_extract_file(_fp, _ext_cfg))
                                     except Exception as _fe:
                                         logger.warning(f"extract_file failed for {_fp}: {_fe}")
+                                        _file_errors.append(f"{_fp}: {_fe}")
+                                self._raise_if_all_files_failed(_ext_prov, file_paths, _file_errors)
                                 df = pl.DataFrame(_all_rows) if _all_rows else pl.DataFrame()
+                                self._file_extraction_applied = True
                         elif _scannable:
                             # Lazy: scan each file and concat lazily.
                             # Use diagonal_relaxed so type-inference differences
@@ -2625,11 +2682,15 @@ class DataProcessor:
                             else:
                                 logger.info(f"File extraction (Spark): provider={_ext_prov}, files={len(file_paths)}")
                                 _all_rows: list[dict] = []
+                                _file_errors: list[str] = []
                                 for _fp in file_paths:
                                     try:
                                         _all_rows.extend(_extract_file(_fp, _ext_cfg))
                                     except Exception as _fe:
                                         logger.warning(f"extract_file failed for {_fp}: {_fe}")
+                                        _file_errors.append(f"{_fp}: {_fe}")
+                                self._raise_if_all_files_failed(_ext_prov, file_paths, _file_errors)
+                                self._file_extraction_applied = True
                                 if _all_rows:
                                     # Build an EXPLICIT schema. Bare
                                     # spark.createDataFrame(rows) infers types from

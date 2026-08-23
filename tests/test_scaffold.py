@@ -54,6 +54,7 @@ def contract_dir(tmp_path):
                 fare_amount: "float"
           - deduplicate:
               on: ["trip_id"]
+              sort_by: ["trip_id"]
         quality:
           row_rules:
             - name: "trip_id_not_null"

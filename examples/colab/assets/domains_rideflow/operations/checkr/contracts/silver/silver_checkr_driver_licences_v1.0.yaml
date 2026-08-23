@@ -16,46 +16,45 @@ source:
 
 model:
   fields:
-    - name: full_name
-      type: string
-      required: true
-      pii: true
-      masking: redact
-      
-    - name: licence_number
-      type: string
-      required: true
-      pii: true
-      masking: hash
-      
-    - name: date_of_birth
-      type: string
-      pii: true
-      masking: hash
-      
-    - name: expiry_date
-      type: date
-      
-    - name: vehicle_classes
-      type: string
+  - name: full_name
+    type: string
+    required: true
+    pii: true
+    masking: redact
+
+  - name: licence_number
+    type: string
+    required: true
+    pii: true
+    masking: hash
+
+  - name: date_of_birth
+    type: string
+    pii: true
+    masking: hash
+
+  - name: expiry_date
+    type: date
+
+  - name: vehicle_classes
+    type: string
 
 quality:
   dataset_rules:
-    - unique: licence_number
+  - unique: licence_number
 
+  - unique:
+    - licence_number
+  fail_pipeline_on_dataset_error: true
 transformations:
-  - drop:
-      columns: 
-        - file_path
-        - _lakelogic_llm_cost_usd
-        - _lakelogic_llm_latency_ms
-        - _lakelogic_llm_model
-        - _lakelogic_llm_provider
-        - _lakelogic_created_at
-        - _lakelogic_created_by
-  - deduplicate:
-      by:
-        - licence_number
-
+- drop:
+    columns:
+    - file_path
+    - _lakelogic_llm_cost_usd
+    - _lakelogic_llm_latency_ms
+    - _lakelogic_llm_model
+    - _lakelogic_llm_provider
+    - _lakelogic_created_at
+    - _lakelogic_created_by
 lineage:
   enabled: true

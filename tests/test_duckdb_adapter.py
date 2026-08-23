@@ -115,7 +115,11 @@ def test_duckdb_adapter_deduplicate_removes_duplicate_keys() -> None:
         version="1.0.0",
         dataset="source",
         model={"fields": [{"name": "id", "type": "int"}, {"name": "name", "type": "string"}]},
-        transformations=[{"deduplicate": {"by": ["id"]}}],
+        # `sort_by` is required, not decoration: an unordered deduplicate is
+        # rejected outright, because which duplicate survives is the author's
+        # decision to make. Here every id=1 row is identical, so the ordering is
+        # immaterial to the assertion — it just has to be declared.
+        transformations=[{"deduplicate": {"by": ["id"], "sort_by": ["name"]}}],
     )
     good, bad = DuckDBAdapter(contract).execute(pl.DataFrame({"id": [1, 1, 1, 2], "name": ["a", "a", "a", "b"]}))
     assert len(bad) == 0

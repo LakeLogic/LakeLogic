@@ -421,11 +421,27 @@ class MaskingEngine:
         except ImportError:
             pass
 
-        # Spark DataFrame
+        # Spark DataFrame — classic AND Spark Connect.
+        #
+        # `pyspark.sql.connect.dataframe.DataFrame` is a SEPARATE class, not a subclass of
+        # `pyspark.sql.DataFrame`, so an isinstance check against the classic type alone
+        # misses every Connect frame. Connect is what Databricks serverless hands you, so
+        # on serverless masking raised `Unsupported dataframe type` — and the caller's
+        # except-branch then wrote the rows UNMASKED. The column expressions `_apply_spark`
+        # builds are identical on both, so the only thing that ever needed widening is
+        # this test.
         try:
             from pyspark.sql import DataFrame as SparkDataFrame
 
             if isinstance(df, SparkDataFrame):
+                return self._apply_spark(df, field_strategies)
+        except ImportError:
+            pass
+
+        try:
+            from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
+
+            if isinstance(df, ConnectDataFrame):
                 return self._apply_spark(df, field_strategies)
         except ImportError:
             pass

@@ -58,6 +58,7 @@ def contract_dir(tmp_path):
         transformations:
           - deduplicate:
               by: ["trip_id"]
+              sort_by: ["trip_id"]
         quality:
           row_rules:
             - name: "fare_amount_range"
@@ -119,7 +120,15 @@ def test_silver_sql_casts_and_dedups_per_the_contract(contract_dir, tmp_path):
     sql = (out / "models" / "silver" / "silver_trips.sql").read_text(encoding="utf-8")
     assert "cast(trip_id as varchar) as trip_id" in sql
     assert "cast(fare_amount as float) as fare_amount" in sql
-    assert "qualify row_number() over (partition by trip_id order by 1) = 1" in sql
+    # The ORDER BY must come from the contract's `sort_by`, not `order by 1`.
+    # `order by 1` orders by the first projected column, so the generated dbt model
+    # would keep a different row than LakeLogic keeps for the same contract — the
+    # two implementations of one contract silently disagreeing.
+    assert (
+        "qualify row_number() over (partition by trip_id order by trip_id desc) = 1"
+        in sql
+    )
+    assert "order by 1)" not in sql
 
 
 def test_schema_yml_tests_and_contract_enforcement(contract_dir, tmp_path):
@@ -305,6 +314,7 @@ def test_composite_dedup_key_uses_unique_combination(tmp_path):
         transformations:
           - deduplicate:
               by: ["user_id", "event_ts"]
+              sort_by: ["user_id"]
         """)
     out = tmp_path / "out"
     scaffold_dbt_project(src, out)

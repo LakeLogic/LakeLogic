@@ -21,13 +21,134 @@ from lakelogic.core.yaml_utils import load_yaml
 
 
 class SLOFreshnessConfig(BaseModel):
+    """Freshness thresholds and the timestamp columns used to measure them.
+
+    ``check_columns`` is an ORDERED candidate list: the first column present
+    in the table being measured wins, and the same list serves both the table check
+    and the source-delay check. Estates are heterogeneous — one system calls it
+    ``updated_at``, the next ``last_modified`` — so a single column was never
+    enough, which is why a second list field grew alongside the first.
+
+    Order matters and is business-first, because freshness measures how stale the
+    DATA is. A business timestamp answers that; an audit column only records when WE
+    last wrote, which is trivially fresh on every run — as a leading candidate it
+    would make the check unfailable. Audit columns therefore belong last, as the
+    fallback for tables carrying no business timestamp at all.
+    """
+
+    # A typo'd key here used to be accepted and ignored: `sorce_check_columns` left
+    # the check silently on its defaults while looking configured. Freshness config
+    # is small and fully enumerated, so an unknown key is a mistake, not forward
+    # compatibility. This is what makes the deprecated aliases below safe to retire
+    # later — once unknown keys fail, removing an alias fails loudly instead of
+    # silently reverting someone's registry to defaults.
+    model_config = ConfigDict(extra="forbid")
+
     max_delay_minutes: int
-    check_column: Union[str, List[str]] = "_lakelogic_loaded_at"
-    max_source_delay_minutes: Optional[int] = None  # source-time freshness
-    source_check_columns: List[str] = Field(
-        default_factory=list
-    )  # candidate source timestamp columns (first match wins, skip if none found)
+    check_columns: List[str] = Field(
+        default_factory=lambda: ["_lakelogic_processed_at", "_lakelogic_loaded_at"]
+    )
+    # Scope. Both accept exact names or fnmatch patterns (``dim_*``, ``ref_*``), so
+    # a whole family of reference tables is one entry rather than a maintained list.
+    # `include_tables` empty = every table; non-empty = ONLY these. `exclude_tables`
+    # always subtracts, so include+exclude together reads as "these, except those".
+    #
+    # This exists because freshness is meaningless for non-volatile data: a currency
+    # or country reference table is correct precisely because it has not changed, and
+    # checking it manufactures a breach every run until someone mutes the whole layer.
+    include_tables: List[str] = Field(default_factory=list)
     exclude_tables: List[str] = Field(default_factory=list)
+
+    def covers(self, entity: str) -> bool:
+        """Whether this freshness SLO applies to ``entity``."""
+        from fnmatch import fnmatch
+
+        def _hit(pats: List[str]) -> bool:
+            return any(entity == p or fnmatch(entity, p) for p in pats)
+
+        if self.include_tables and not _hit(self.include_tables):
+            return False
+        return not _hit(self.exclude_tables)
+
+    # Deprecated. There is one measurement — the newest timestamp on this table —
+    # so there is one threshold. `max_source_delay_minutes` was the limit for a
+    # second check that resolved a timestamp from a different candidate list on the
+    # SAME table; once the lists merged, the two checks became identical.
+    max_source_delay_minutes: Optional[int] = None
+
+    # ── Deprecated spelling, still accepted ─────────────────────────────────
+    # Both fold into `check_columns`. `check_column` was the single-column form;
+    # `source_check_columns` named the same list after its most common use, but the
+    # columns need not come from the source — the user simply lists the columns to
+    # check, in preference order.
+    check_column: Union[str, List[str], None] = None
+    source_check_columns: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def _merge_legacy_source_delay(self) -> "SLOFreshnessConfig":
+        """Fold the deprecated second threshold into the single one.
+
+        The SOURCE limit wins, not the pipeline one. The surviving measurement is
+        "how stale is the data", which is what `max_source_delay_minutes` bounded;
+        `max_delay_minutes` bounded how long OUR write took. Keeping the pipeline
+        limit would apply a write-latency budget to data age and fire constantly.
+        """
+        if self.max_source_delay_minutes is None:
+            return self
+        if self.max_source_delay_minutes != self.max_delay_minutes:
+            logger.warning(
+                "SLO freshness: `max_source_delay_minutes` is deprecated — there is one "
+                f"measurement, so one threshold. Using `max_delay_minutes: "
+                f"{self.max_source_delay_minutes}` (the source/data-staleness limit, "
+                f"replacing the pipeline limit of {self.max_delay_minutes})."
+            )
+        self.max_delay_minutes = self.max_source_delay_minutes
+        return self
+
+    @model_validator(mode="after")
+    def _merge_legacy_check_column(self) -> "SLOFreshnessConfig":
+        if self.check_column is None:
+            return self
+
+        old = (
+            [self.check_column]
+            if isinstance(self.check_column, str)
+            else list(self.check_column or [])
+        )
+        # Seed ONLY from an explicitly declared list. `source_check_columns` defaults
+        # to the audit columns, so seeding from the field unconditionally would put
+        # an audit column first — and an audit column is written by us on every run,
+        # so it is always fresh and the check could never fail.
+        merged: List[str] = (
+            list(self.check_columns) if "check_columns" in self.model_fields_set else []
+        )
+        for col in old:
+            if col and col not in merged:
+                merged.append(col)
+        if merged:
+            self.check_columns = merged
+            logger.warning(
+                "SLO freshness: `check_column` is deprecated — use "
+                f"`check_columns: {merged}` (one ordered list, first present wins, "
+                "business timestamps before audit columns)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _merge_legacy_source_check_columns(self) -> "SLOFreshnessConfig":
+        if self.source_check_columns is None:
+            return self
+        merged = list(self.source_check_columns)
+        if "check_columns" in self.model_fields_set:
+            for col in self.check_columns:
+                if col not in merged:
+                    merged.append(col)
+        self.check_columns = merged
+        logger.warning(
+            "SLO freshness: `source_check_columns` is deprecated — use "
+            f"`check_columns: {merged}` (the columns need not be source columns)."
+        )
+        return self
 
 
 class SLORowCountAnomalyConfig(BaseModel):

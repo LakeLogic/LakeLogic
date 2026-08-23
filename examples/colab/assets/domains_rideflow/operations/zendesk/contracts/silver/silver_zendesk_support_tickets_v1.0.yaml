@@ -56,6 +56,8 @@ transformations:
 - deduplicate:
     by:
     - ticket_id
+    sort_by: [updated_at]
+    order: desc
 source:
   type: delta
   path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_support_tickets'

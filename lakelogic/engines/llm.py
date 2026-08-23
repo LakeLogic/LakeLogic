@@ -947,6 +947,40 @@ def preprocess_row(
 # ── Main Extraction Pipeline ─────────────────────────────────────────────────
 
 
+# Columns that carry a file path on a binary/file source, most-specific first.
+# Spark's `binaryFile` reader exposes `path`; the polars/duckdb file readers and
+# LakeLogic's own file tagging use `file_path` / `_lakelogic_source_file`.
+_FILE_PATH_COLUMNS = ("path", "file_path", "_lakelogic_source_file", "_lakelogic_source")
+
+
+def _resolve_row_file_path(row: Dict[str, Any], config: ExtractionConfig) -> str:
+    """Return the file path for a row bound for a file provider (pdfplumber/easyocr).
+
+    File providers open a path. Falling back to an empty string when no column
+    matched turned every row into ``open('')`` — 90 identical "No such file or
+    directory: ''" log lines and a green, empty run. Raising instead makes the
+    misconfiguration visible at the first row.
+    """
+    candidates = []
+    prep = getattr(config, "preprocessing", None)
+    if prep is not None and getattr(prep, "file_column", None):
+        candidates.append(prep.file_column)
+    if getattr(config, "text_column", None):
+        candidates.append(config.text_column)
+    candidates.extend(_FILE_PATH_COLUMNS)
+
+    for col in candidates:
+        value = row.get(col)
+        if value:
+            return str(value)
+
+    raise ValueError(
+        f"provider={config.provider!r} needs a file path but none of "
+        f"{candidates!r} is populated on the row (columns: {sorted(row)!r}). "
+        f"Set extraction.text_column to the column holding the path."
+    )
+
+
 def extract_row(
     row: Dict[str, Any],
     config: ExtractionConfig,
@@ -999,9 +1033,11 @@ def extract_row(
     elif provider == "local":
         extracted = _extract_local(config, prompt, config.system_prompt)
     elif provider in ("pdfplumber", "easyocr"):
-        # File-based providers — prompt is typically a file path
-        # For single-row usage, return the first row from extract_file
-        file_rows = extract_file(prompt, config)
+        # File-based providers read a PATH, not free text. Using the rendered
+        # `prompt` here meant a row from a binary-file source (which has no
+        # text column) yielded '' and every file "extracted" nothing while the
+        # run still went green. Resolve the real per-row path instead.
+        file_rows = extract_file(_resolve_row_file_path(row, config), config)
         extracted = file_rows[0] if file_rows else {}
     elif provider in _PROVIDER_EXTRACT:
         if client is None:

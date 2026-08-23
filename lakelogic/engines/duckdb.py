@@ -682,12 +682,11 @@ class DuckDBAdapter(EngineAdapter):
             if dedupe_cfg and dedupe_cfg.on:
                 logger.debug(f"Pre-Transform [Deduplicate]: {dedupe_cfg.on}")
                 on_cols = ", ".join(f'"{c}"' for c in dedupe_cfg.on)
-                if dedupe_cfg.sort_by:
-                    direction = "DESC" if (dedupe_cfg.order or "desc").lower() == "desc" else "ASC"
-                    order_by = ", ".join(f'"{c}" {direction}' for c in dedupe_cfg.sort_by)
+                _sort_by, _order = self._dedup_order(dedupe_cfg, self._get_current_columns(current))
+                if _sort_by:
+                    direction = "DESC" if (_order or "desc").lower() == "desc" else "ASC"
+                    order_by = ", ".join(f'"{c}" {direction}' for c in _sort_by)
                 else:
-                    # No sort key: keep an arbitrary single row per group, matching
-                    # Polars' unique(subset=..., maintain_order=True).
                     order_by = "(SELECT 1)"
                 view_name = f"_pre_dedup_{id(dedupe_cfg) & 0xFFFFFF:06x}"
                 try:

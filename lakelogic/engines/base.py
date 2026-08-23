@@ -922,10 +922,21 @@ class EngineAdapter(ABC):
     def _resolve_deduplicate(self, trans: Any) -> Any:
         """Return the effective deduplicate config for a transformation.
 
-        Accepts either the ``deduplicate`` op or the ``deduplicate_by_latest``
-        shorthand ({key_columns, timestamp_column} = keep the latest row per key)
-        and returns a ``TransformationDeduplicate`` both engines already know how
-        to apply. Returns ``None`` when neither is configured.
+        Accepts either the ``deduplicate`` op or the DEPRECATED
+        ``deduplicate_by_latest`` shorthand, and returns a
+        ``TransformationDeduplicate`` both engines already know how to apply.
+        Returns ``None`` when neither is configured.
+
+        ``deduplicate_by_latest`` is deprecated because it adds no expressiveness:
+        every deduplicate is "partition by keys, order by a column", and the
+        shorthand is just that with ``order`` pinned to ``desc``. What it *did* add
+        was a second spelling of the ordering field — ``timestamp_column`` here vs
+        ``sort_by`` there — which is a genuine hazard now that an unordered dedup is
+        refused: authors reach for the wrong key on the wrong op, and the field is
+        silently dropped at parse time. One op, one spelling.
+
+        Still parsed, and will stay parsed: published contracts use it. It is no
+        longer suggested anywhere, and warns so estates can migrate.
         """
         dd = getattr(trans, "deduplicate", None)
         if dd and getattr(dd, "on", None):
@@ -934,12 +945,49 @@ class EngineAdapter(ABC):
         if dbl and getattr(dbl, "key_columns", None) and getattr(dbl, "timestamp_column", None):
             from lakelogic.core.models import TransformationDeduplicate
 
+            logger.warning(
+                f"`deduplicate_by_latest` is deprecated — replace it with the equivalent "
+                f"`deduplicate: {{on: {list(dbl.key_columns)}, sort_by: [{dbl.timestamp_column}], "
+                f"order: desc}}`. Behaviour is identical; the shorthand is kept only for "
+                f"contracts already in the wild."
+            )
             return TransformationDeduplicate(
                 on=list(dbl.key_columns),
                 sort_by=[dbl.timestamp_column],
                 order="desc",
             )
         return None
+
+    def _dedup_order(self, dedupe_cfg: Any, columns: Any) -> tuple:
+        """Return ``(sort_by, order)`` for a deduplicate, or refuse to run.
+
+        A deduplicate without a declared ``sort_by``/``timestamp_column`` has no
+        answer to the only question that matters: *which* of the duplicate rows
+        survives. Any answer the framework invents on the author's behalf — first
+        row the reader emitted, lexicographically smallest, newest file — is a
+        silent, load-bearing business decision embedded in a contract that never
+        states it. So we refuse: an unordered deduplicate is an incomplete
+        contract, not a contract with a default.
+
+        This is deliberately a hard error and not a warning. Dedup discards rows;
+        a warning would be noticed only after the wrong ones were already gone.
+        """
+        declared = list(getattr(dedupe_cfg, "sort_by", None) or [])
+        if declared:
+            return declared, (getattr(dedupe_cfg, "order", None) or "desc")
+
+        on = list(getattr(dedupe_cfg, "on", None) or [])
+        raise ValueError(
+            f"Deduplicate on {on or '(no keys)'} declares no `timestamp_column`/`sort_by`, "
+            f"so which duplicate row survives is undefined — LakeLogic will not guess, "
+            f"because dedup discards rows and the wrong survivor is silent data loss.\n"
+            f"Declare the winner:\n"
+            f"  transformations:\n"
+            f"    - deduplicate:\n"
+            f"        on: {on or ['<key>']}\n"
+            f"        sort_by: [<updated_at>]\n"
+            f"        order: desc"
+        )
 
     def _expand_dataset_rule(self, spec: Any) -> Optional[QualityRule]:
         """

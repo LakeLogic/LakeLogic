@@ -153,11 +153,11 @@ class TestTransformationDeduplicateAlias:
     """TransformationDeduplicate accepts both 'on' and 'by' keys."""
 
     def test_on_keyword(self):
-        d = TransformationDeduplicate.model_validate({"on": ["id"]})
+        d = TransformationDeduplicate.model_validate({"on": ["id"], "sort_by": ["id"]})
         assert d.on == ["id"]
 
     def test_by_alias(self):
-        d = TransformationDeduplicate.model_validate({"by": ["customer_id"]})
+        d = TransformationDeduplicate.model_validate({"by": ["customer_id"], "sort_by": ["customer_id"]})
         assert d.on == ["customer_id"]
 
     def test_by_with_sort(self):
@@ -170,7 +170,7 @@ class TestTransformationDeduplicateAlias:
         """'by' alias works inside a full contract transformation."""
         contract = DataContract(
             version="1.0.0",
-            transformations=[{"deduplicate": {"by": ["customer_unique_id"]}}],
+            transformations=[{"deduplicate": {"by": ["customer_unique_id"], "sort_by": ["customer_unique_id"]}}],
         )
         assert contract.transformations[0].deduplicate.on == ["customer_unique_id"]
 

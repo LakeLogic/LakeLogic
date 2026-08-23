@@ -142,6 +142,7 @@ from olc.models._nested import (  # noqa: E402,F401
     DownstreamConsumer,
     Quarantine,
     UpstreamContractRef,
+    UpstreamSource,
     Notification,
     ConfidenceConfig,
     DatasetRuleNullRatio,
@@ -1478,6 +1479,11 @@ class DataContract(BaseModel):
 
     # ORCHESTRATION & DEPENDENCIES
     upstream: List[str] = Field(default_factory=list)
+    # Structured upstream refs to products that HAVE their own contract, and nested
+    # non-contract origins (source system -> landing -> this). Mirrors `downstream`
+    # (whose DownstreamConsumer nests `consumers`); both come from olc.models._nested.
+    upstream_contracts: List[UpstreamContractRef] = Field(default_factory=list)
+    upstream_sources: List[UpstreamSource] = Field(default_factory=list)
     downstream: List[DownstreamConsumer] = Field(default_factory=list)
     schedule: Optional[str] = None
 

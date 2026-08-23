@@ -61,3 +61,54 @@ def test_lint_flags_sensitive_field_without_masking():
     raw = {"model": {"fields": [{"name": "bank_account", "type": "string", "sensitive": True}]}}
     findings = check_pii_no_masking(raw, "accounts", None)
     assert "SENS-001" in {f.check_id for f in findings}
+
+
+# ── Fail-closed masking + Spark Connect compatibility ────────────────────────
+# Regression guards for a bug that shipped UNMASKED PII on Databricks serverless:
+# `MaskingEngine.apply` only recognised classic `pyspark.sql.DataFrame`, so Spark
+# Connect frames raised `Unsupported dataframe type` — and the processor's except
+# branch logged a warning and wrote the rows anyway.
+
+def test_masking_engine_accepts_spark_connect_dataframes(monkeypatch):
+    """A Spark Connect frame must take the Spark masking path.
+
+    `pyspark.sql.connect.dataframe.DataFrame` is a SEPARATE class from the classic
+    `pyspark.sql.DataFrame`, so an isinstance check against the classic type alone
+    misses it. Connect is exactly what Databricks serverless hands the engine, so this
+    gap made `apply` raise `Unsupported dataframe type` — and the processor then wrote
+    the declared-sensitive fields UNMASKED."""
+    import sys, types
+
+    class _ConnectDF:
+        """Stands in for a Connect frame so the test needs no Spark install."""
+
+    connect_mod = types.ModuleType("pyspark.sql.connect.dataframe")
+    connect_mod.DataFrame = _ConnectDF
+    monkeypatch.setitem(sys.modules, "pyspark.sql.connect.dataframe", connect_mod)
+
+    eng = MaskingEngine(_contract(), hash_salt="s")
+    seen = {}
+    monkeypatch.setattr(
+        eng, "_apply_spark",
+        lambda df, field_strategies: seen.update(fields=set(field_strategies)) or df,
+    )
+
+    frame = _ConnectDF()
+    assert eng.apply(frame, user_groups=[]) is frame
+    # It reached the Spark path AND carried the contract's sensitive fields with it.
+    assert seen.get("fields") == {"email", "bank_account"}
+
+
+def test_masking_failure_fails_closed_by_default(monkeypatch):
+    """A masking failure must stop the run, never publish the fields unmasked.
+
+    This is the whole point of declaring a field sensitive: a pipeline that quietly
+    writes it in the clear is worse than one that stops."""
+    import os
+    monkeypatch.delenv("LAKELOGIC_ON_MASKING_FAILURE", raising=False)
+    default = os.environ.get("LAKELOGIC_ON_MASKING_FAILURE", "fail").strip().lower()
+    assert default == "fail", "masking must fail closed unless explicitly overridden"
+
+    monkeypatch.setenv("LAKELOGIC_ON_MASKING_FAILURE", "warn")
+    opted_out = os.environ.get("LAKELOGIC_ON_MASKING_FAILURE", "fail").strip().lower()
+    assert opted_out == "warn", "an operator can still opt into publishing unmasked"

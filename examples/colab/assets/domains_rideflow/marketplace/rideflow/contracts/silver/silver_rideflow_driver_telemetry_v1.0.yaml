@@ -43,6 +43,8 @@ transformations:
 - deduplicate:
     by:
     - telemetry_id
+    sort_by: [timestamp]
+    order: desc
 source:
   type: delta
   path: '{bronze_path}/{bronze_layer}_{system}_driver_telemetry'

@@ -93,12 +93,25 @@ def _strategy(raw: Dict[str, Any]) -> str:
 
 def _dedup(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Return the dedup transform's inner config dict, if any."""
+    found = _dedup_op(raw)
+    return None if found is None else found[1]
+
+
+def _dedup_op(raw: Dict[str, Any]) -> Optional[tuple]:
+    """Return ``(op_name, config)`` for the dedup transform, if any.
+
+    The op NAME matters and not just its config: ``timestamp_column`` is a field of
+    the ``deduplicate_by_latest`` shorthand only. On a plain ``deduplicate`` the
+    contract model drops it, so a contract declaring it there would lint clean and
+    then be refused at runtime — lint has to know which form it is looking at to
+    stay honest about that.
+    """
     for t in raw.get("transformations") or []:
         if not isinstance(t, dict):
             continue
         for k, v in t.items():
             if str(k).startswith("deduplicate") or k == "dedup":
-                return _d(v)
+                return str(k), _d(v)
     return None
 
 
@@ -280,20 +293,125 @@ def check_pk_missing_for_mutation(raw, name, ctx):  # PK-002
     return []
 
 
-def check_dedup_no_timestamp(raw, name, ctx):  # KEY-001
-    dedup = _dedup(raw)
-    if dedup is not None and not dedup.get("timestamp_column"):
-        return [
-            _c(
-                name,
-                "KEY-001",
-                "warning",
-                "keys",
-                "deduplicate has no timestamp_column — 'which row wins' is non-deterministic.",
-                suggestion="Add `timestamp_column: <updated_at>` to the dedup transform.",
+def check_unknown_transformation_op(raw, name, ctx):  # TRF-001
+    """Every transformation key must be an operation the runtime implements.
+
+    ``Transformation`` is declared ``extra="allow"`` for forward-compatibility, so
+    an unknown or misspelled op is accepted, stored, and then never executed. The
+    contract reads as though it aggregates; the pipeline runs green; the table is
+    simply missing that step. This was found in three gold marts declaring
+    ``aggregate:`` — an op no engine implements — whose output was therefore
+    un-aggregated while every run reported success.
+
+    Forward-compat is worth keeping, so this lints rather than hard-forbidding: a
+    contract written for a newer runtime still loads, but nobody ships an op that
+    silently does nothing.
+    """
+    from lakelogic.core.models import Transformation
+
+    known = set(Transformation.model_fields)
+    findings = []
+    for i, t in enumerate(raw.get("transformations") or []):
+        if not isinstance(t, dict):
+            continue
+        for key in t:
+            if str(key) in known or str(key).startswith("_"):
+                continue
+            findings.append(
+                _c(
+                    name,
+                    "TRF-001",
+                    "critical",
+                    "transformations",
+                    f"transformations[{i}] declares `{key}`, which no engine implements — "
+                    f"it is accepted, stored and then skipped, so the contract describes a "
+                    f"step that never runs and the pipeline still reports success.",
+                    suggestion=f"Remove `{key}` or express the step with a supported "
+                    f"operation (e.g. `sql:` for aggregation/union). Supported ops: "
+                    f"{', '.join(sorted(known - {'phase'}))}.",
+                )
             )
-        ]
-    return []
+    return findings
+
+
+def check_dedup_sort_by_is_the_key(raw, name, ctx):  # KEY-002
+    """`sort_by` must not be (a subset of) the dedup keys.
+
+    Ordering by the partition column is a no-op: every row inside a dedup group has
+    the same value for it, so the survivor is decided by whatever order the engine
+    happened to produce — the precise non-determinism KEY-001 exists to prevent,
+    now wearing a `sort_by` that satisfies the schema.
+
+    This is a real pattern, not a hypothetical: it appears wherever a `sort_by` was
+    back-filled mechanically from the dedup keys to make contracts validate.
+    """
+    found = _dedup_op(raw)
+    if found is None:
+        return []
+    op, dedup = found
+    if op == "deduplicate_by_latest":
+        return []
+
+    on = [str(c).lower() for c in (dedup.get("on") or dedup.get("by") or [])]
+    sort_by = [str(c).lower() for c in (dedup.get("sort_by") or [])]
+    if not on or not sort_by or not set(sort_by).issubset(set(on)):
+        return []
+
+    return [
+        _c(
+            name,
+            "KEY-002",
+            "critical",
+            "keys",
+            f"deduplicate sorts by {sort_by}, which is inside its own key {on} — every "
+            f"row in a group shares that value, so this orders nothing and the surviving "
+            f"row is still arbitrary.",
+            suggestion="Sort by a column that DIFFERS between duplicates — normally the "
+            "record-version column (`updated_at`, else `created_at`). If no such column "
+            "exists, the duplicates are indistinguishable: drop the deduplicate and "
+            "enforce `unique` on the key instead (with "
+            "`quality.fail_pipeline_on_dataset_error: true`) so they surface.",
+        )
+    ]
+
+
+def check_dedup_no_timestamp(raw, name, ctx):  # KEY-001
+    found = _dedup_op(raw)
+    if found is None:
+        return []
+    op, dedup = found
+
+    # Which key counts as "ordered" depends on the form, and lint must mirror the
+    # engine exactly. `deduplicate_by_latest` orders by `timestamp_column`; the
+    # plain `deduplicate` op orders by `sort_by` and DROPS `timestamp_column` at
+    # parse time. Accepting `timestamp_column` on the plain op would green-light a
+    # contract the engine then refuses — the worst of both, since the author would
+    # have done what lint asked.
+    if op == "deduplicate_by_latest":
+        if dedup.get("timestamp_column"):
+            return []
+        fix = "Add `timestamp_column: <updated_at>` to the deduplicate_by_latest transform."
+    else:
+        if dedup.get("sort_by"):
+            return []
+        fix = (
+            "Add `sort_by: [<updated_at>]` and `order: desc` to the deduplicate transform. "
+            "Note `timestamp_column` is NOT read here — it belongs to the deprecated "
+            "`deduplicate_by_latest` shorthand and is dropped at parse time on this op."
+        )
+
+    return [
+        _c(
+            name,
+            "KEY-001",
+            "critical",
+            "keys",
+            "deduplicate declares no row ordering, so which duplicate row survives is "
+            "undefined. LakeLogic refuses to run this rather than guess, because dedup "
+            "discards rows and the wrong survivor is silent data loss.",
+            suggestion=fix,
+        )
+    ]
 
 
 def check_untagged_pii(raw, name, ctx):  # PII-001
@@ -493,6 +611,8 @@ def check_continuous_trigger(raw, name, ctx):  # STREAM-002
 _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[ContractFinding]]] = [
     check_pk_missing_for_mutation,
     check_dedup_no_timestamp,
+    check_dedup_sort_by_is_the_key,
+    check_unknown_transformation_op,
     check_untagged_pii,
     check_pii_no_masking,
     check_no_delete_strategy,

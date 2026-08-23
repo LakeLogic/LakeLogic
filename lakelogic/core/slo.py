@@ -105,6 +105,24 @@ class SLOReport(BaseModel):
     results: List[SLOCheckResult] = Field(default_factory=list)
 
 
+def _slo_covers(layer_slo, entity: str) -> bool:
+    """Does this per-layer SLO config apply to ``entity``?
+
+    Prefers the config's own ``covers()``; duck-typed doubles that predate it fall
+    back to the exclusion list alone.
+    """
+    covers = getattr(layer_slo, "covers", None)
+    if callable(covers):
+        return covers(entity)
+    from fnmatch import fnmatch
+
+    include = list(getattr(layer_slo, "include_tables", None) or [])
+    exclude = list(getattr(layer_slo, "exclude_tables", None) or [])
+    if include and not any(entity == p or fnmatch(entity, p) for p in include):
+        return False
+    return not any(entity == p or fnmatch(entity, p) for p in exclude)
+
+
 class SLOValidator:
     """
     Validates Data Contracts and Domain Registries against their defined Service Levels (SLOs).
@@ -196,23 +214,30 @@ class SLOValidator:
 
             # Get the SLO rules for this specific layer
             layer_slo = freshness_config.get(layer)
-            if layer_slo and entity in layer_slo.exclude_tables:
+            # `covers` honours include_tables/exclude_tables and matches patterns,
+            # so a reference-data family (`dim_*`) is scoped with one entry. Falls
+            # back to the plain exclusion test for duck-typed configs in tests.
+            if layer_slo and not _slo_covers(layer_slo, entity):
                 continue
 
             max_delay = layer_slo.max_delay_minutes if layer_slo else 999999
 
-            check_col_conf = layer_slo.check_column if layer_slo else "_lakelogic_loaded_at"
-            if isinstance(check_col_conf, str):
-                check_cols = [check_col_conf]
-            else:
-                check_cols = list(check_col_conf)
-
-            # Always fallback to the standard audit column if not explicitly in the list
-            if "_lakelogic_loaded_at" not in check_cols:
-                check_cols.append("_lakelogic_loaded_at")
+            # One ordered candidate list, first present wins. The previous code
+            # appended "_lakelogic_loaded_at" unconditionally as "the standard audit
+            # column" — but that name is only written by systems that configure it;
+            # the framework default is "_lakelogic_processed_at", so the guaranteed
+            # fallback was frequently a column that did not exist.
+            check_cols = list(layer_slo.check_columns) if layer_slo else [
+                "_lakelogic_processed_at",
+                "_lakelogic_loaded_at",
+            ]
+            for audit in ("_lakelogic_processed_at", "_lakelogic_loaded_at"):
+                if audit not in check_cols:
+                    check_cols.append(audit)
 
             latest_ts = None
             found_col = None
+            existing_col = None  # a column that exists but held no timestamp
             last_error = None
 
             for col in check_cols:
@@ -246,11 +271,26 @@ class SLOValidator:
                                     f"read_delta failed: {str(delta_e)[:150]}... | read_parquet fallback failed: {str(parquet_e)[:150]}..."  # noqa: E501
                                 ) from delta_e
 
-                    found_col = col
-                    break
+                    # "First present wins" must mean the first column that yields a
+                    # TIMESTAMP, not merely the first that queries without error. A
+                    # column can exist and be entirely NULL (common on optional
+                    # business timestamps); breaking there abandoned the remaining
+                    # candidates and reported NO DATA on a table the audit column
+                    # could have measured perfectly well.
+                    if latest_ts is not None:
+                        found_col = col
+                        break
+                    if existing_col is None:
+                        existing_col = col  # exists but empty — keep looking
+                    continue
                 except Exception as e:
                     last_error = e
                     continue
+
+            # Every candidate was empty, but at least one existed → NO DATA below,
+            # which is a truthful "table has no timestamps yet" rather than an error.
+            if found_col is None and existing_col is not None:
+                found_col = existing_col
 
             if not found_col:
                 # Table might not exist or none of the columns exist
@@ -285,85 +325,21 @@ class SLOValidator:
                 delay = (now - latest_utc).total_seconds() / 60
                 passed = delay <= max_delay
 
-                # ── Source freshness check (Tier 2) ──────────────────────
-                # Iterate through source_check_columns to find a valid
-                # business timestamp. Uses TRY_CAST-style safe parsing:
-                # if the column doesn't exist or can't be cast to a
-                # timestamp, it returns NULL and we skip gracefully.
-                source_delay_min = None
-                source_slo_max = getattr(layer_slo, "max_source_delay_minutes", None) if layer_slo else None
-                source_col_used = None
-                source_passed = None
-                source_cols = getattr(layer_slo, "source_check_columns", []) if layer_slo else []
+                # ── Source freshness ─────────────────────────────────────
+                # Formerly a second check with its own column list and its own
+                # threshold. Both resolved a timestamp on the SAME table from a
+                # candidate list, so once the two lists merged into
+                # `source_check_columns` this became the identical query with a
+                # different limit — a duplicate full-table MAX() scan per table.
+                # It is now the same measurement, reported under both names so the
+                # result schema is unchanged.
+                source_delay_min = round(delay, 1)
+                source_col_used = found_col
+                source_passed = passed
 
-                if layer_slo and source_slo_max and source_cols:
-                    for src_col in source_cols:
-                        try:
-                            src_ts = None
-                            if self.spark:
-                                # TRY_CAST returns NULL if the column can't be cast
-                                src_row = self.spark.sql(
-                                    f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts FROM {table_name}"
-                                ).first()
-                                src_ts = src_row["src_ts"] if src_row else None
-                            elif self.duckdb_con:
-                                try:
-                                    src_result = self.duckdb_con.execute(
-                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts "
-                                        f"FROM delta_scan('{polars_path}')"
-                                    ).fetchone()
-                                except Exception:
-                                    src_result = self.duckdb_con.execute(
-                                        f"SELECT MAX(TRY_CAST({src_col} AS TIMESTAMP)) as src_ts "
-                                        f"FROM parquet_scan('{polars_path}')"
-                                    ).fetchone()
-                                src_ts = src_result[0] if src_result else None
-                            else:
-                                import polars as pl
+                overall_passed = passed
 
-                                storage_opts = self._resolve_storage_opts(polars_path)
-                                try:
-                                    src_df = _read_delta_local(polars_path, storage_options=storage_opts)
-                                except Exception:
-                                    src_df = pl.read_parquet(polars_path, storage_options=storage_opts)
-                                # Safe cast: str_to_datetime returns null on parse failure
-                                try:
-                                    src_ts = src_df.select(pl.col(src_col).cast(pl.Datetime, strict=False).max()).item()
-                                except Exception:
-                                    src_ts = None
-
-                            if src_ts is not None:
-                                src_utc = _coerce_utc(src_ts)
-                                source_delay_min = round((now - src_utc).total_seconds() / 60, 1)
-                                source_col_used = src_col
-                                source_passed = source_delay_min <= source_slo_max
-                                break  # first valid column wins
-                        except Exception:
-                            continue  # column missing or unparseable — try next
-
-                    if source_col_used:
-                        logger.debug(
-                            f"   🔎 [{layer}] {entity}: source freshness via '{source_col_used}' "
-                            f"(delay: {source_delay_min}min, SLO: {source_slo_max}min) "
-                            f"{'✅' if source_passed else '❌'}"
-                        )
-                    else:
-                        logger.debug(
-                            f"   ⏭️ [{layer}] {entity}: no source timestamp columns found "
-                            f"in {layer_slo.source_check_columns} — source freshness skipped"
-                        )
-
-                # Overall pass: pipeline freshness must pass.
-                # Source freshness is informational if columns are missing,
-                # but fails the check if a source column was found and breaches the SLO.
-                overall_passed = passed and (source_passed is not False)
-
-                if overall_passed:
-                    status = "✅ OK"
-                elif not passed:
-                    status = "❌ STALE"
-                else:
-                    status = f"❌ SOURCE STALE (via {source_col_used})"
+                status = "✅ OK" if overall_passed else "❌ STALE"
 
                 results.append(
                     SLOCheckResult(
@@ -375,7 +351,7 @@ class SLOValidator:
                         delay_minutes=round(delay, 1),
                         slo_max_minutes=max_delay,
                         source_delay_minutes=source_delay_min,
-                        source_slo_max_minutes=source_slo_max,
+                        source_slo_max_minutes=max_delay,
                         source_column_used=source_col_used,
                         source_passed=source_passed,
                     )
@@ -456,7 +432,7 @@ class SLOValidator:
             if not layer_slo:
                 continue
 
-            if entity in layer_slo.exclude_tables:
+            if not _slo_covers(layer_slo, entity):
                 continue
 
             min_rows = layer_slo.min_rows
@@ -991,7 +967,7 @@ class SLOValidator:
         """
         Check that no table contains records older than its layer's retention period.
 
-        Retention is a MIN-timestamp check: queries MIN(source_check_column) and
+        Retention is a MIN-timestamp check: queries MIN(check_columns[first present]) and
         fails if the oldest record exceeds the ISO 8601 retention window defined in
         registry.retention (e.g. bronze: P7D, silver: P90D, gold: P7Y).
 
@@ -1034,9 +1010,9 @@ class SLOValidator:
 
             # Source columns to probe — prefer freshness SLO config, fall back to common names
             layer_slo = freshness_config.get(layer)
-            source_cols = (getattr(layer_slo, "source_check_columns", None) or []) if layer_slo else []
+            source_cols = (list(layer_slo.check_columns) if layer_slo else [])
             if not source_cols:
-                logger.debug(f"  ⏭ Retention [{layer}] {entity}: no source_check_columns configured — skipped")
+                logger.debug(f"  ⏭ Retention [{layer}] {entity}: no check_columns configured — skipped")
                 continue
 
             schema_root = layer_roots.get(layer)

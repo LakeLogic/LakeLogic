@@ -1,6 +1,6 @@
 version: 1.0.0
 info:
-  title: "Silver \u2014 Rideflow Trips"
+  title: "Silver — Rideflow Trips"
   table_name: '{silver_layer}_rideflow_trips'
   description: Cleaned, typed, and deduplicated data
   target_layer: silver
@@ -60,16 +60,15 @@ model:
 
 quality:
   row_rules:
-    - name: positive_spend
-      sql: "fare_amount >= 0"
-    - name: valid_rating
-      sql: "rider_rating IS NULL OR (rider_rating >= 1.0 AND rider_rating <= 5.0)"
+  - name: positive_spend
+    sql: "fare_amount >= 0"
+  - name: valid_rating
+    sql: "rider_rating IS NULL OR (rider_rating >= 1.0 AND rider_rating <= 5.0)"
 
-transformations:
-- deduplicate:
-    by:
+  dataset_rules:
+  - unique:
     - trip_id
-
+  fail_pipeline_on_dataset_error: true
 source:
   type: delta
   path: '{bronze_path}/{bronze_layer}_{system}_trip_completed'

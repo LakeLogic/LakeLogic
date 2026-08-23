@@ -105,6 +105,26 @@ def _dedup_keys(raw: dict) -> List[str]:
     return []
 
 
+def _dedup_ordering(raw: dict) -> str:
+    """The ``ORDER BY`` clause deciding which duplicate survives, from the contract.
+
+    The generated SQL must reproduce the contract's ordering. It previously emitted
+    ``order by 1`` — ordering by the first projected column, i.e. an arbitrary
+    survivor chosen by the generator rather than the author. That is the same silent
+    data-loss the contract's required ``sort_by`` exists to prevent, just expressed
+    in dbt instead of the engine, and it would diverge from what LakeLogic itself
+    produces for the same contract.
+    """
+    for xf in raw.get("transformations") or ():
+        if isinstance(xf, dict) and xf.get("deduplicate"):
+            cfg = xf["deduplicate"] or {}
+            cols = [str(c) for c in (cfg.get("sort_by") or [])]
+            if cols:
+                direction = "asc" if str(cfg.get("order", "desc")).lower() == "asc" else "desc"
+                return ", ".join(f"{c} {direction}" for c in cols)
+    return ""
+
+
 def _fields_of(raw: dict) -> List[Dict[str, Any]]:
     model = raw.get("model") or {}
     return [f for f in (model.get("fields") or []) if isinstance(f, dict) and f.get("name")]
@@ -137,6 +157,7 @@ class _ModelPlan:
         self.src_bytes = src_bytes
         self.fields = _fields_of(raw)
         self.dedup_keys = _dedup_keys(raw)
+        self.dedup_ordering = _dedup_ordering(raw)
         self.row_rules = _row_rules_of(raw)
         self.upstream = [str(u) for u in (raw.get("upstream") or [])]
         self.logic = (raw.get("logic") or "").strip() or None
@@ -205,8 +226,13 @@ def _model_sql(
 
     if plan.dedup_keys:
         partition = ", ".join(plan.dedup_keys)
+        # The contract's own ordering, so the dbt model and the LakeLogic engine
+        # keep the SAME row. `sort_by` is required, so this is normally present;
+        # the fallback only covers a contract read through a lenient path.
+        ordering = plan.dedup_ordering or ", ".join(f"{k} asc" for k in plan.dedup_keys)
         body.append(
-            f"qualify row_number() over (partition by {partition} order by 1) = 1"
+            f"qualify row_number() over (partition by {partition} "
+            f"order by {ordering}) = 1"
         )
         body.append(f"-- deduplicate: one row per ({partition}), per the contract")
 

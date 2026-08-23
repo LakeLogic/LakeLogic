@@ -81,6 +81,8 @@
       "type": "object"
     },
     "SLOFreshnessConfig": {
+      "additionalProperties": false,
+      "description": "Freshness thresholds and the timestamp columns used to measure them.\n\n``check_columns`` is an ORDERED candidate list: the first column present\nin the table being measured wins, and the same list serves both the table check\nand the source-delay check. Estates are heterogeneous \u2014 one system calls it\n``updated_at``, the next ``last_modified`` \u2014 so a single column was never\nenough, which is why a second list field grew alongside the first.\n\nOrder matters and is business-first, because freshness measures how stale the\nDATA is. A business timestamp answers that; an audit column only records when WE\nlast wrote, which is trivially fresh on every run \u2014 as a leading candidate it\nwould make the check unfailable. Audit columns therefore belong last, as the\nfallback for tables carrying no business timestamp at all.",
       "properties": {
         "check_column": {
           "anyOf": [
@@ -92,16 +94,33 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            {
+              "type": "null"
             }
           ],
-          "default": "_lakelogic_loaded_at",
+          "default": null,
           "title": "Check Column"
+        },
+        "check_columns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Check Columns",
+          "type": "array"
         },
         "exclude_tables": {
           "items": {
             "type": "string"
           },
           "title": "Exclude Tables",
+          "type": "array"
+        },
+        "include_tables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Include Tables",
           "type": "array"
         },
         "max_delay_minutes": {
@@ -121,11 +140,19 @@
           "title": "Max Source Delay Minutes"
         },
         "source_check_columns": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Source Check Columns",
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Check Columns"
         }
       },
       "required": [

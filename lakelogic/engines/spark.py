@@ -288,6 +288,7 @@ class SparkAdapter(EngineAdapter):
         """
         from pyspark.sql import Window
         from pyspark.sql import functions as F
+        from pyspark.sql import types as T
 
         current_df = df
         existing = set(current_df.columns)
@@ -442,11 +443,20 @@ class SparkAdapter(EngineAdapter):
                 dd = self._resolve_deduplicate(trans)  # handles `deduplicate` + `deduplicate_by_latest`
                 if dd:
                     logger.debug(f"Pre-Transform [Deduplicate]: {dd.on}")
-                    if dd.sort_by:
-                        w = Window.partitionBy(*dd.on)
-                        order_cols = [
-                            F.col(col).desc() if dd.order == "desc" else F.col(col).asc() for col in dd.sort_by
+                    # Nested/binary columns are not orderable in Spark, so they sit
+                    # out the tie-break; the scalar columns still make it stable.
+                    try:
+                        _sortable = [
+                            f.name
+                            for f in current_df.schema.fields
+                            if not isinstance(f.dataType, (T.ArrayType, T.StructType, T.MapType, T.BinaryType))
                         ]
+                    except AttributeError:
+                        _sortable = list(getattr(current_df, "columns", []) or [])
+                    sort_by, order = self._dedup_order(dd, _sortable)
+                    if sort_by:
+                        w = Window.partitionBy(*dd.on)
+                        order_cols = [F.col(col).desc() if order == "desc" else F.col(col).asc() for col in sort_by]
                         w = w.orderBy(*order_cols)
                         current_df = (
                             current_df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
