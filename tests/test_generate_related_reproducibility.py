@@ -8,6 +8,7 @@ Covers two fixes:
   its name, so two entities with an identical schema no longer generate byte-identical
   rows (which could let a child FK satisfy referential integrity against the wrong parent).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -22,9 +23,7 @@ WINDOW = (datetime(2020, 1, 1), datetime(2021, 1, 1))
 
 
 def _related(contracts, **kw):
-    return gen.DataGenerator.generate_related(
-        contracts, rows=8, seed=7, output_format="pandas", **kw
-    )
+    return gen.DataGenerator.generate_related(contracts, rows=8, seed=7, output_format="pandas", **kw)
 
 
 def test_window_makes_timestamps_reproducible():
@@ -43,8 +42,7 @@ def test_full_related_product_reproducible_with_window():
         "riders": {"rider_id": "string", "name": "string", "updated_at": "timestamp"},
         "trips": {"trip_id": "string", "rider_id": "string", "fare": "float"},
     }
-    rels = [{"child": "trips", "child_column": "rider_id",
-             "parent": "riders", "parent_column": "rider_id"}]
+    rels = [{"child": "trips", "child_column": "rider_id", "parent": "riders", "parent_column": "rider_id"}]
     a = _related(contracts, relationships=rels, window_start=WINDOW[0], window_end=WINDOW[1])
     b = _related(contracts, relationships=rels, window_start=WINDOW[0], window_end=WINDOW[1])
     for name in contracts:
@@ -56,8 +54,7 @@ def test_referential_integrity_holds_with_window():
         "riders": {"rider_id": "string", "name": "string"},
         "trips": {"trip_id": "string", "rider_id": "string", "fare": "float"},
     }
-    rels = [{"child": "trips", "child_column": "rider_id",
-             "parent": "riders", "parent_column": "rider_id"}]
+    rels = [{"child": "trips", "child_column": "rider_id", "parent": "riders", "parent_column": "rider_id"}]
     out = _related(contracts, relationships=rels, window_start=WINDOW[0], window_end=WINDOW[1])
     parents = set(out["riders"]["rider_id"])
     children = set(out["trips"]["rider_id"])

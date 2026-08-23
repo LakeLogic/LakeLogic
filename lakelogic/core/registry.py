@@ -45,9 +45,7 @@ class SLOFreshnessConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_delay_minutes: int
-    check_columns: List[str] = Field(
-        default_factory=lambda: ["_lakelogic_processed_at", "_lakelogic_loaded_at"]
-    )
+    check_columns: List[str] = Field(default_factory=lambda: ["_lakelogic_processed_at", "_lakelogic_loaded_at"])
     # Scope. Both accept exact names or fnmatch patterns (``dim_*``, ``ref_*``), so
     # a whole family of reference tables is one entry rather than a maintained list.
     # `include_tables` empty = every table; non-empty = ONLY these. `exclude_tables`
@@ -110,18 +108,12 @@ class SLOFreshnessConfig(BaseModel):
         if self.check_column is None:
             return self
 
-        old = (
-            [self.check_column]
-            if isinstance(self.check_column, str)
-            else list(self.check_column or [])
-        )
+        old = [self.check_column] if isinstance(self.check_column, str) else list(self.check_column or [])
         # Seed ONLY from an explicitly declared list. `source_check_columns` defaults
         # to the audit columns, so seeding from the field unconditionally would put
         # an audit column first — and an audit column is written by us on every run,
         # so it is always fresh and the check could never fail.
-        merged: List[str] = (
-            list(self.check_columns) if "check_columns" in self.model_fields_set else []
-        )
+        merged: List[str] = list(self.check_columns) if "check_columns" in self.model_fields_set else []
         for col in old:
             if col and col not in merged:
                 merged.append(col)

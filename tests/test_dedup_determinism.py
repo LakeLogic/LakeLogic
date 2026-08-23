@@ -140,11 +140,7 @@ def test_lint_accepts_sort_by_on_the_plain_deduplicate_op():
 
 
 def test_lint_accepts_timestamp_column_on_the_by_latest_shorthand():
-    raw = {
-        "transformations": [
-            {"deduplicate_by_latest": {"key_columns": ["id"], "timestamp_column": "updated_at"}}
-        ]
-    }
+    raw = {"transformations": [{"deduplicate_by_latest": {"key_columns": ["id"], "timestamp_column": "updated_at"}}]}
     assert check_dedup_no_timestamp(raw, "contract.yaml", None) == []
 
 
@@ -179,9 +175,7 @@ def test_lint_and_engine_agree_on_timestamp_column_under_plain_deduplicate():
 def _lint2(dedup):
     from lakelogic.core.contract_lint import check_dedup_sort_by_is_the_key
 
-    return check_dedup_sort_by_is_the_key(
-        {"transformations": [{"deduplicate": dedup}]}, "contract.yaml", None
-    )
+    return check_dedup_sort_by_is_the_key({"transformations": [{"deduplicate": dedup}]}, "contract.yaml", None)
 
 
 def test_sort_by_inside_the_dedup_key_is_rejected():
@@ -219,9 +213,7 @@ def test_a_real_ordering_column_passes():
 def _lint_ops(transformations):
     from lakelogic.core.contract_lint import check_unknown_transformation_op
 
-    return check_unknown_transformation_op(
-        {"transformations": transformations}, "contract.yaml", None
-    )
+    return check_unknown_transformation_op({"transformations": transformations}, "contract.yaml", None)
 
 
 def test_unimplemented_transformation_op_is_rejected():

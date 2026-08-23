@@ -684,8 +684,14 @@ class SparkAdapter(EngineAdapter):
                 extracted = F.get_json_object(F.col(cfg.source), cfg.path)
                 if cfg.cast:
                     spark_type = {
-                        "float": "double", "double": "double", "int": "int", "integer": "int",
-                        "long": "bigint", "bool": "boolean", "boolean": "boolean", "string": "string",
+                        "float": "double",
+                        "double": "double",
+                        "int": "int",
+                        "integer": "int",
+                        "long": "bigint",
+                        "bool": "boolean",
+                        "boolean": "boolean",
+                        "string": "string",
                     }.get(str(cfg.cast).lower(), "string")
                     extracted = extracted.cast(spark_type)
                 current_df = current_df.withColumn(cfg.field, extracted)
@@ -711,8 +717,15 @@ class SparkAdapter(EngineAdapter):
                 _intv = str(getattr(cfg, "interval", None) or "1d").strip().lower()
                 _m = _re.match(r"(\d+)\s*([a-z]+)", _intv)
                 _num = _m.group(1) if _m else "1"
-                _unit = {"d": "day", "day": "day", "days": "day", "w": "week", "week": "week",
-                         "mo": "month", "month": "month"}.get(_m.group(2) if _m else "d", "day")
+                _unit = {
+                    "d": "day",
+                    "day": "day",
+                    "days": "day",
+                    "w": "week",
+                    "week": "week",
+                    "mo": "month",
+                    "month": "month",
+                }.get(_m.group(2) if _m else "d", "day")
                 seq = F.sequence(start_e, end_e, F.expr(f"interval {_num} {_unit}"))
                 current_df = current_df.withColumn(cfg.output, F.explode(seq))
             elif trans.filter and trans_phase != "pre":
@@ -825,9 +838,7 @@ class SparkAdapter(EngineAdapter):
             safe_link_name = f"{link.name}_{id(self)}"
             try:
                 _sql = (
-                    _qry.replace("{link}", safe_link_name)
-                    if _qry
-                    else f"SELECT * FROM {safe_link_name} WHERE {_flt}"
+                    _qry.replace("{link}", safe_link_name) if _qry else f"SELECT * FROM {safe_link_name} WHERE {_flt}"
                 )
                 _sub = spark.sql(_sql)
                 # Apply the deferred column projection now (after the predicate).

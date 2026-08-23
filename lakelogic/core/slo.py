@@ -227,10 +227,14 @@ class SLOValidator:
             # column" — but that name is only written by systems that configure it;
             # the framework default is "_lakelogic_processed_at", so the guaranteed
             # fallback was frequently a column that did not exist.
-            check_cols = list(layer_slo.check_columns) if layer_slo else [
-                "_lakelogic_processed_at",
-                "_lakelogic_loaded_at",
-            ]
+            check_cols = (
+                list(layer_slo.check_columns)
+                if layer_slo
+                else [
+                    "_lakelogic_processed_at",
+                    "_lakelogic_loaded_at",
+                ]
+            )
             for audit in ("_lakelogic_processed_at", "_lakelogic_loaded_at"):
                 if audit not in check_cols:
                     check_cols.append(audit)
@@ -1010,7 +1014,7 @@ class SLOValidator:
 
             # Source columns to probe — prefer freshness SLO config, fall back to common names
             layer_slo = freshness_config.get(layer)
-            source_cols = (list(layer_slo.check_columns) if layer_slo else [])
+            source_cols = list(layer_slo.check_columns) if layer_slo else []
             if not source_cols:
                 logger.debug(f"  ⏭ Retention [{layer}] {entity}: no check_columns configured — skipped")
                 continue

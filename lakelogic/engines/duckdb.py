@@ -786,15 +786,17 @@ class DuckDBAdapter(EngineAdapter):
 
             # Date diff — tolerant of ISO (YYYY-MM-DD) and compact (YYYYMMDD, e.g. GA4)
             # date strings; date granularity to match the Polars engine.
-            if trans.date_diff and getattr(trans.date_diff, "from_col", None) and getattr(
-                trans.date_diff, "to_col", None
+            if (
+                trans.date_diff
+                and getattr(trans.date_diff, "from_col", None)
+                and getattr(trans.date_diff, "to_col", None)
             ):
                 dd = trans.date_diff
                 unit = (getattr(dd, "unit", None) or "days").lower().rstrip("s")
                 unit = unit if unit in {"day", "week", "month", "year", "hour", "minute", "second"} else "day"
 
                 def _dparse(col: str) -> str:
-                    return f"COALESCE(TRY_CAST(\"{col}\" AS DATE), TRY_STRPTIME(\"{col}\", '%Y%m%d')::DATE)"
+                    return f'COALESCE(TRY_CAST("{col}" AS DATE), TRY_STRPTIME("{col}", \'%Y%m%d\')::DATE)'
 
                 expr = f"DATEDIFF('{unit}', {_dparse(dd.from_col)}, {_dparse(dd.to_col)})"
                 field = dd.field
@@ -802,8 +804,7 @@ class DuckDBAdapter(EngineAdapter):
                 exclude = f' EXCLUDE ("{field}")' if field in cols else ""
                 view_name = f"_post_datediff_{id(dd) & 0xFFFFFF:06x}"
                 self.con.sql(
-                    f"CREATE OR REPLACE VIEW {view_name} AS "
-                    f'SELECT *{exclude}, ({expr}) AS "{field}" FROM {current}'
+                    f'CREATE OR REPLACE VIEW {view_name} AS SELECT *{exclude}, ({expr}) AS "{field}" FROM {current}'
                 )
                 current = view_name
                 continue
@@ -835,9 +836,7 @@ class DuckDBAdapter(EngineAdapter):
                 defaults = getattr(jn, "defaults", None) or {}
                 aliases = [(f"{jn.prefix}{f}" if jn.prefix else f) for f in jn.fields]
                 exclude = [a for a in aliases if a in cols]
-                src_star = (
-                    'src.* EXCLUDE (' + ", ".join(f'"{c}"' for c in exclude) + ")" if exclude else "src.*"
-                )
+                src_star = "src.* EXCLUDE (" + ", ".join(f'"{c}"' for c in exclude) + ")" if exclude else "src.*"
                 parts = [src_star]
                 for f in jn.fields:
                     alias = f"{jn.prefix}{f}" if jn.prefix else f
@@ -882,16 +881,23 @@ class DuckDBAdapter(EngineAdapter):
                 _intv = str(getattr(cfg, "interval", None) or "1d").strip().lower()
                 _m = _re.match(r"(\d+)\s*([a-z]+)", _intv)
                 _num = _m.group(1) if _m else "1"
-                _unit = {"d": "DAY", "day": "DAY", "days": "DAY", "w": "WEEK", "week": "WEEK",
-                         "weeks": "WEEK", "mo": "MONTH", "month": "MONTH", "months": "MONTH"}.get(
-                    _m.group(2) if _m else "d", "DAY"
-                )
+                _unit = {
+                    "d": "DAY",
+                    "day": "DAY",
+                    "days": "DAY",
+                    "w": "WEEK",
+                    "week": "WEEK",
+                    "weeks": "WEEK",
+                    "mo": "MONTH",
+                    "month": "MONTH",
+                    "months": "MONTH",
+                }.get(_m.group(2) if _m else "d", "DAY")
                 interval = f"INTERVAL {_num} {_unit}"
                 exclude = f' EXCLUDE ("{cfg.output}")' if cfg.output in cols else ""
                 view_name = f"_post_daterange_{id(cfg) & 0xFFFFFF:06x}"
                 self.con.sql(
                     f"CREATE OR REPLACE VIEW {view_name} AS "
-                    f'SELECT *{exclude}, CAST(UNNEST(generate_series({start_e}, {end_e}, {interval})) AS DATE) '
+                    f"SELECT *{exclude}, CAST(UNNEST(generate_series({start_e}, {end_e}, {interval})) AS DATE) "
                     f'AS "{cfg.output}" FROM {current}'
                 )
                 current = view_name
@@ -917,11 +923,21 @@ class DuckDBAdapter(EngineAdapter):
 
     # OLC scalar type name → DuckDB CAST type.
     _DUCKDB_CAST_TYPES = {
-        "string": "VARCHAR", "str": "VARCHAR", "text": "VARCHAR",
-        "int": "INTEGER", "integer": "INTEGER", "long": "BIGINT", "bigint": "BIGINT",
-        "float": "FLOAT", "double": "DOUBLE", "decimal": "DOUBLE",
-        "bool": "BOOLEAN", "boolean": "BOOLEAN",
-        "date": "DATE", "timestamp": "TIMESTAMP", "datetime": "TIMESTAMP",
+        "string": "VARCHAR",
+        "str": "VARCHAR",
+        "text": "VARCHAR",
+        "int": "INTEGER",
+        "integer": "INTEGER",
+        "long": "BIGINT",
+        "bigint": "BIGINT",
+        "float": "FLOAT",
+        "double": "DOUBLE",
+        "decimal": "DOUBLE",
+        "bool": "BOOLEAN",
+        "boolean": "BOOLEAN",
+        "date": "DATE",
+        "timestamp": "TIMESTAMP",
+        "datetime": "TIMESTAMP",
     }
 
     def _build_column_replace_sql(self, trans: Any) -> str:
@@ -946,11 +962,33 @@ class DuckDBAdapter(EngineAdapter):
     # Transform ops the DuckDB engine actually implements (pre + post passes).
     # `deduplicate_by_latest` is handled via `_resolve_deduplicate`.
     _DUCKDB_SUPPORTED_TRANSFORMS = frozenset(
-        {"sql", "derive", "filter", "rename", "rollup", "pivot", "unpivot",
-         "deduplicate", "deduplicate_by_latest",
-         "lower", "upper", "trim", "cast", "coalesce",
-         "select", "drop", "map_values", "json_extract", "date_diff", "split",
-         "bucket", "lookup", "join", "explode", "date_range_explode"}
+        {
+            "sql",
+            "derive",
+            "filter",
+            "rename",
+            "rollup",
+            "pivot",
+            "unpivot",
+            "deduplicate",
+            "deduplicate_by_latest",
+            "lower",
+            "upper",
+            "trim",
+            "cast",
+            "coalesce",
+            "select",
+            "drop",
+            "map_values",
+            "json_extract",
+            "date_diff",
+            "split",
+            "bucket",
+            "lookup",
+            "join",
+            "explode",
+            "date_range_explode",
+        }
     )
 
     def _assert_supported_transforms(self) -> None:
@@ -964,16 +1002,14 @@ class DuckDBAdapter(EngineAdapter):
         from lakelogic.core.models import Transformation
 
         op_fields = [f for f in Transformation.model_fields if f != "phase"]
-        for trans in (self.contract.transformations or []):
+        for trans in self.contract.transformations or []:
             for op in op_fields:
                 if getattr(trans, op, None) and op not in self._DUCKDB_SUPPORTED_TRANSFORMS:
                     title = getattr(self.contract.info, "title", None) if self.contract.info else None
                     raise ValueError(
                         f"The DuckDB engine does not implement the '{op}' transformation "
                         f"and would silently skip it. Use the Polars/Spark engine, or express "
-                        f"it as a `sql` / `derive` transform instead"
-                        + (f" (contract: {title})" if title else "")
-                        + "."
+                        f"it as a `sql` / `derive` transform instead" + (f" (contract: {title})" if title else "") + "."
                     )
 
     def execute(self, df: Any) -> Tuple[Any, Any]:

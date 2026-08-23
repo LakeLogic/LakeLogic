@@ -6,6 +6,7 @@ Receives the validated `trips` SOURCE frame plus the `drivers` REFERENCE frame
 quality gates and materializes it. Engine-agnostic: the same script runs whether
 LakeLogic hands us a Polars, DuckDB (Polars-backed), or Spark frame.
 """
+
 from typing import Any, Dict, Optional
 
 

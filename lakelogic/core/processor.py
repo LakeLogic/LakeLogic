@@ -444,8 +444,7 @@ class DataProcessor:
         """
         if file_paths and errors and len(errors) == len(file_paths):
             raise RuntimeError(
-                f"File extraction failed for all {len(file_paths)} file(s) using "
-                f"provider '{provider}': {errors[0]}"
+                f"File extraction failed for all {len(file_paths)} file(s) using provider '{provider}': {errors[0]}"
             )
 
     def _enforce_strict(self, data: dict) -> None:
@@ -956,10 +955,7 @@ class DataProcessor:
                             # closed, a trace-building slip would abort a run whose data was
                             # correctly masked. Recording the trace must never be able to do
                             # that.
-                            "strategies": {
-                                f.name: getattr(f, "masking", None) or "redact"
-                                for f in pii_fields
-                            },
+                            "strategies": {f.name: getattr(f, "masking", None) or "redact" for f in pii_fields},
                             "user_groups": user_groups,
                         },
                     )
@@ -4150,7 +4146,6 @@ class DataProcessor:
         # For Spark, optimize by computing counts in a single action where possible
         if self.engine_name == "spark":  # pragma: no cover
             try:
-
                 # Cache good_df and bad_df if they share lineage to avoid recomputation
                 # Then compute counts together
                 good_count = None

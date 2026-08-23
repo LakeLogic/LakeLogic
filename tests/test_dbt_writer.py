@@ -30,7 +30,9 @@ def _write(path, text):
 @pytest.fixture()
 def contract_dir(tmp_path):
     src = tmp_path / "contracts_src"
-    _write(src / "trips_bronze.yaml", """\
+    _write(
+        src / "trips_bronze.yaml",
+        """\
         version: "1.0.0"
         info:
           title: "Trips — raw landing"
@@ -38,8 +40,11 @@ def contract_dir(tmp_path):
           domain: "marketplace"
           system: "rideflow"
         dataset: "bronze_trips"
-        """)
-    _write(src / "trips_silver.yaml", """\
+        """,
+    )
+    _write(
+        src / "trips_silver.yaml",
+        """\
         version: "1.0.0"
         info:
           title: "Trips — cleansed"
@@ -63,8 +68,11 @@ def contract_dir(tmp_path):
           row_rules:
             - name: "fare_amount_range"
               sql: "fare_amount BETWEEN 0 AND 10000"
-        """)
-    _write(src / "trips_gold.yaml", """\
+        """,
+    )
+    _write(
+        src / "trips_gold.yaml",
+        """\
         version: "1.0.0"
         info:
           title: "Trips — daily fact"
@@ -74,7 +82,8 @@ def contract_dir(tmp_path):
         dataset: "fact_trips"
         upstream:
           - "silver_trips"
-        """)
+        """,
+    )
     return src
 
 
@@ -83,11 +92,17 @@ def test_dbt_layout_and_project_file(contract_dir, tmp_path):
     result = scaffold_dbt_project(contract_dir, out)
 
     for rel in (
-        "dbt_project.yml", "profiles.yml.example", "models/sources.yml",
-        "models/silver/silver_trips.sql", "models/silver/schema.yml",
-        "models/gold/fact_trips.sql", "models/gold/schema.yml",
-        "contracts/bronze/bronze_trips.yaml", "contracts/silver/silver_trips.yaml",
-        "contracts/gold/fact_trips.yaml", "README.md",
+        "dbt_project.yml",
+        "profiles.yml.example",
+        "models/sources.yml",
+        "models/silver/silver_trips.sql",
+        "models/silver/schema.yml",
+        "models/gold/fact_trips.sql",
+        "models/gold/schema.yml",
+        "contracts/bronze/bronze_trips.yaml",
+        "contracts/silver/silver_trips.yaml",
+        "contracts/gold/fact_trips.yaml",
+        "README.md",
     ):
         assert (out / rel).is_file(), rel
     assert set(result.files) >= {out / "dbt_project.yml", out / "README.md"}
@@ -124,18 +139,14 @@ def test_silver_sql_casts_and_dedups_per_the_contract(contract_dir, tmp_path):
     # `order by 1` orders by the first projected column, so the generated dbt model
     # would keep a different row than LakeLogic keeps for the same contract — the
     # two implementations of one contract silently disagreeing.
-    assert (
-        "qualify row_number() over (partition by trip_id order by trip_id desc) = 1"
-        in sql
-    )
+    assert "qualify row_number() over (partition by trip_id order by trip_id desc) = 1" in sql
     assert "order by 1)" not in sql
 
 
 def test_schema_yml_tests_and_contract_enforcement(contract_dir, tmp_path):
     out = tmp_path / "dbt"
     scaffold_dbt_project(contract_dir, out)
-    schema = yaml.safe_load(
-        (out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
+    schema = yaml.safe_load((out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
     (model,) = schema["models"]
     assert model["name"] == "silver_trips"
     assert model["config"]["contract"]["enforced"] is True
@@ -147,11 +158,9 @@ def test_schema_yml_tests_and_contract_enforcement(contract_dir, tmp_path):
     # The range row rule lands on ITS column as expression_is_true (row-rule shape the
     # read adapter maps back).
     fare_tests = cols["fare_amount"]["tests"]
-    assert {"dbt_utils.expression_is_true":
-            {"expression": "fare_amount BETWEEN 0 AND 10000"}} in fare_tests
+    assert {"dbt_utils.expression_is_true": {"expression": "fare_amount BETWEEN 0 AND 10000"}} in fare_tests
     # Thin gold model: no fields → no contract enforcement, but still declared.
-    gold_schema = yaml.safe_load(
-        (out / "models" / "gold" / "schema.yml").read_text(encoding="utf-8"))
+    gold_schema = yaml.safe_load((out / "models" / "gold" / "schema.yml").read_text(encoding="utf-8"))
     (gold_model,) = gold_schema["models"]
     assert gold_model["name"] == "fact_trips"
     assert "config" not in gold_model
@@ -162,8 +171,7 @@ def test_drift_gate_roundtrip_through_the_read_adapter(contract_dir, tmp_path):
     contract that matches the canonical one (fields, required, uniqueness, row rule)."""
     out = tmp_path / "dbt"
     scaffold_dbt_project(contract_dir, out)
-    readback = DbtAdapter(out / "models" / "silver" / "schema.yml").model_to_contract(
-        "silver_trips")
+    readback = DbtAdapter(out / "models" / "silver" / "schema.yml").model_to_contract("silver_trips")
 
     fields = {f.name: f for f in readback.model.fields}
     assert set(fields) == {"trip_id", "rider_id", "fare_amount"}
@@ -174,25 +182,21 @@ def test_drift_gate_roundtrip_through_the_read_adapter(contract_dir, tmp_path):
     # unique → dataset rule + primary key; range rule → row rule with the same SQL.
     assert readback.primary_key == ["trip_id"]
     assert any("COUNT(DISTINCT trip_id)" in r.sql for r in readback.quality.dataset_rules)
-    assert any(r.sql == "fare_amount BETWEEN 0 AND 10000"
-               for r in readback.quality.row_rules)
+    assert any(r.sql == "fare_amount BETWEEN 0 AND 10000" for r in readback.quality.row_rules)
 
 
 def test_contracts_copied_byte_for_byte_and_provenance_isolated(contract_dir, tmp_path):
     out = tmp_path / "dbt"
-    prov = Provenance(generator="LakeLogic Medallion Builder",
-                      revision_hash="sha256:abc123", seal_hash="seal:def456")
+    prov = Provenance(generator="LakeLogic Medallion Builder", revision_hash="sha256:abc123", seal_hash="seal:def456")
     scaffold_dbt_project(contract_dir, out, provenance=prov)
-    assert (out / "contracts" / "silver" / "silver_trips.yaml").read_bytes() == \
-        (contract_dir / "trips_silver.yaml").read_bytes()
-    for rel in ("dbt_project.yml", "models/silver/silver_trips.sql",
-                "models/silver/schema.yml", "README.md"):
+    assert (out / "contracts" / "silver" / "silver_trips.yaml").read_bytes() == (
+        contract_dir / "trips_silver.yaml"
+    ).read_bytes()
+    for rel in ("dbt_project.yml", "models/silver/silver_trips.sql", "models/silver/schema.yml", "README.md"):
         assert "sha256:abc123" in (out / rel).read_text(encoding="utf-8"), rel
-    schema = yaml.safe_load(
-        (out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
+    schema = yaml.safe_load((out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
     assert schema["models"][0]["meta"]["lakelogic"]["revision_hash"] == "sha256:abc123"
-    assert "sha256:abc123" not in (
-        out / "contracts" / "silver" / "silver_trips.yaml").read_text(encoding="utf-8")
+    assert "sha256:abc123" not in (out / "contracts" / "silver" / "silver_trips.yaml").read_text(encoding="utf-8")
 
 
 def test_output_is_deterministic(contract_dir, tmp_path):
@@ -204,14 +208,17 @@ def test_output_is_deterministic(contract_dir, tmp_path):
 
 def test_entry_layer_model_without_upstream_gets_an_implicit_source(tmp_path):
     src = tmp_path / "src"
-    _write(src / "orders.yaml", """\
+    _write(
+        src / "orders.yaml",
+        """\
         version: "1.0.0"
         info: {title: "Orders", target_layer: "silver"}
         dataset: "silver_orders"
         model:
           fields:
             - {name: "order_id", type: "string", required: true}
-        """)
+        """,
+    )
     out = tmp_path / "out"
     scaffold_dbt_project(src, out)
     sql = (out / "models" / "silver" / "silver_orders.sql").read_text(encoding="utf-8")
@@ -222,23 +229,32 @@ def test_entry_layer_model_without_upstream_gets_an_implicit_source(tmp_path):
 
 def test_logic_sql_is_used_verbatim(tmp_path):
     src = tmp_path / "src"
-    _write(src / "a.yaml", """\
+    _write(
+        src / "a.yaml",
+        """\
         version: "1.0.0"
         info: {title: "A", target_layer: "silver"}
         dataset: "silver_a"
-        """)
-    _write(src / "b.yaml", """\
+        """,
+    )
+    _write(
+        src / "b.yaml",
+        """\
         version: "1.0.0"
         info: {title: "B", target_layer: "silver"}
         dataset: "silver_b"
-        """)
-    _write(src / "joined.yaml", """\
+        """,
+    )
+    _write(
+        src / "joined.yaml",
+        """\
         version: "1.0.0"
         info: {title: "Joined", target_layer: "gold"}
         dataset: "gold_joined"
         upstream: ["silver_a", "silver_b"]
         logic: "select a.*, b.x from {{ ref('silver_a') }} a join {{ ref('silver_b') }} b on a.id = b.id"
-        """)
+        """,
+    )
     out = tmp_path / "out"
     scaffold_dbt_project(src, out)
     sql = (out / "models" / "gold" / "gold_joined.sql").read_text(encoding="utf-8")
@@ -247,22 +263,31 @@ def test_logic_sql_is_used_verbatim(tmp_path):
 
 def test_multi_upstream_without_logic_is_refused_all_or_nothing(tmp_path):
     src = tmp_path / "src"
-    _write(src / "a.yaml", """\
+    _write(
+        src / "a.yaml",
+        """\
         version: "1.0.0"
         info: {title: "A", target_layer: "silver"}
         dataset: "silver_a"
-        """)
-    _write(src / "b.yaml", """\
+        """,
+    )
+    _write(
+        src / "b.yaml",
+        """\
         version: "1.0.0"
         info: {title: "B", target_layer: "silver"}
         dataset: "silver_b"
-        """)
-    _write(src / "bad.yaml", """\
+        """,
+    )
+    _write(
+        src / "bad.yaml",
+        """\
         version: "1.0.0"
         info: {title: "Bad", target_layer: "gold"}
         dataset: "gold_bad"
         upstream: ["silver_a", "silver_b"]
-        """)
+        """,
+    )
     out = tmp_path / "out"
     with pytest.raises(ScaffoldError, match="never invents a join"):
         scaffold_dbt_project(src, out)
@@ -274,7 +299,9 @@ def test_columnless_row_rule_falls_back_to_model_level_and_reclassifies_on_readb
     reclassifies it as a DATASET rule (SQL intact, category flips) — the documented
     mapping edge, pinned here so a silent behavior change is caught."""
     src = tmp_path / "src"
-    _write(src / "orders.yaml", """\
+    _write(
+        src / "orders.yaml",
+        """\
         version: "1.0.0"
         info: {title: "Orders", target_layer: "silver"}
         dataset: "silver_orders"
@@ -285,25 +312,26 @@ def test_columnless_row_rule_falls_back_to_model_level_and_reclassifies_on_readb
           row_rules:
             - name: "row_sanity"
               sql: "1 = 1"
-        """)
+        """,
+    )
     out = tmp_path / "out"
     scaffold_dbt_project(src, out)
-    schema = yaml.safe_load(
-        (out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
+    schema = yaml.safe_load((out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
     (model,) = schema["models"]
     assert model["tests"] == [{"dbt_utils.expression_is_true": {"expression": "1 = 1"}}]
-    assert "tests" not in {c["name"]: c for c in model["columns"]}["order_id"] or \
-        {"dbt_utils.expression_is_true": {"expression": "1 = 1"}} not in \
-        {c["name"]: c for c in model["columns"]}["order_id"].get("tests", [])
-    readback = DbtAdapter(out / "models" / "silver" / "schema.yml").model_to_contract(
-        "silver_orders")
+    assert "tests" not in {c["name"]: c for c in model["columns"]}["order_id"] or {
+        "dbt_utils.expression_is_true": {"expression": "1 = 1"}
+    } not in {c["name"]: c for c in model["columns"]}["order_id"].get("tests", [])
+    readback = DbtAdapter(out / "models" / "silver" / "schema.yml").model_to_contract("silver_orders")
     assert any(r.sql == "1 = 1" for r in readback.quality.dataset_rules)
     assert not any(r.sql == "1 = 1" for r in (readback.quality.row_rules or []))
 
 
 def test_composite_dedup_key_uses_unique_combination(tmp_path):
     src = tmp_path / "src"
-    _write(src / "events.yaml", """\
+    _write(
+        src / "events.yaml",
+        """\
         version: "1.0.0"
         info: {title: "Events", target_layer: "silver"}
         dataset: "silver_events"
@@ -315,17 +343,16 @@ def test_composite_dedup_key_uses_unique_combination(tmp_path):
           - deduplicate:
               by: ["user_id", "event_ts"]
               sort_by: ["user_id"]
-        """)
+        """,
+    )
     out = tmp_path / "out"
     scaffold_dbt_project(src, out)
-    schema = yaml.safe_load(
-        (out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
+    schema = yaml.safe_load((out / "models" / "silver" / "schema.yml").read_text(encoding="utf-8"))
     (model,) = schema["models"]
     cols = {c["name"]: c for c in model["columns"]}
     assert "unique" not in cols["user_id"].get("tests", [])  # not per-column
-    assert model["tests"] == [{
-        "dbt_utils.unique_combination_of_columns":
-            {"combination_of_columns": ["user_id", "event_ts"]}
-    }]
+    assert model["tests"] == [
+        {"dbt_utils.unique_combination_of_columns": {"combination_of_columns": ["user_id", "event_ts"]}}
+    ]
     sql = (out / "models" / "silver" / "silver_events.sql").read_text(encoding="utf-8")
     assert "partition by user_id, event_ts" in sql

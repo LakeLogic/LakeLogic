@@ -6,6 +6,7 @@ duplicate; it is kept only as a stable import path so existing
 ``lakelogic.core.contracts.olc_v1`` imports keep working, while OLC is the single
 source of truth for the contract spec.
 """
+
 from __future__ import annotations
 
 from olc.models import OLCContractV1, StrictServer

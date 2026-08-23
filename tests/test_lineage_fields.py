@@ -5,6 +5,7 @@ nested `downstream.consumers` (table -> semantic_model -> report) parse into TYP
 not just accepted-and-ignored extras. These classes are imported from `olc.models._nested`,
 so this also proves the runtime tracks the OLC spec's multi-hop lineage.
 """
+
 from __future__ import annotations
 
 from lakelogic.core.models import DataContract

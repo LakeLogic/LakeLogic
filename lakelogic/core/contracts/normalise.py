@@ -19,6 +19,7 @@ conflicts with the OLC schema treating ``schema_policy`` as a top-level field.
 The legacy migration is preserved for ``DataContract`` (runtime) but left out of
 the canonical form until the canonical location is settled.
 """
+
 from __future__ import annotations
 
 import copy

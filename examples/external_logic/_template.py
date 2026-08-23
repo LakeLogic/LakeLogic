@@ -35,6 +35,7 @@ RETURN CONTRACT (pick ONE)
 Returning the frame is the default because it keeps governance in LakeLogic: you
 write compute, the contract owns schema/quality/PII/lineage/materialization.
 """
+
 from typing import Any, Dict, Optional
 
 
@@ -117,7 +118,6 @@ def _emit_test_cases(source: Any, out: Any, kind: str, out_dir: str) -> None:
         source.limit(5).toPandas().to_json(Path(out_dir) / "input.sample.jsonl", orient="records", lines=True)
         out.limit(5).toPandas().to_json(Path(out_dir) / "expected.sample.jsonl", orient="records", lines=True)
     else:
-
         s = source.collect() if (kind == "polars" and hasattr(source, "collect")) else source
         o = out.collect() if (kind == "polars" and hasattr(out, "collect")) else out
         head = (lambda f: f.head(5)) if kind == "polars" else (lambda f: f.head(5))

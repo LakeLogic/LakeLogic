@@ -8,6 +8,7 @@ Phase 1 (additive, non-breaking): this package exists ALONGSIDE the legacy
 ``DataContract``. Nothing here is wired into DataProcessor or the schema
 generator yet — those are later phases of the staged migration.
 """
+
 from lakelogic.core.contracts.normalise import (
     apply_odcs,
     apply_schema_policy_migration,

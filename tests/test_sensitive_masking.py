@@ -69,6 +69,7 @@ def test_lint_flags_sensitive_field_without_masking():
 # Connect frames raised `Unsupported dataframe type` — and the processor's except
 # branch logged a warning and wrote the rows anyway.
 
+
 def test_masking_engine_accepts_spark_connect_dataframes(monkeypatch):
     """A Spark Connect frame must take the Spark masking path.
 
@@ -77,7 +78,8 @@ def test_masking_engine_accepts_spark_connect_dataframes(monkeypatch):
     misses it. Connect is exactly what Databricks serverless hands the engine, so this
     gap made `apply` raise `Unsupported dataframe type` — and the processor then wrote
     the declared-sensitive fields UNMASKED."""
-    import sys, types
+    import sys
+    import types
 
     class _ConnectDF:
         """Stands in for a Connect frame so the test needs no Spark install."""
@@ -89,7 +91,8 @@ def test_masking_engine_accepts_spark_connect_dataframes(monkeypatch):
     eng = MaskingEngine(_contract(), hash_salt="s")
     seen = {}
     monkeypatch.setattr(
-        eng, "_apply_spark",
+        eng,
+        "_apply_spark",
         lambda df, field_strategies: seen.update(fields=set(field_strategies)) or df,
     )
 
@@ -105,6 +108,7 @@ def test_masking_failure_fails_closed_by_default(monkeypatch):
     This is the whole point of declaring a field sensitive: a pipeline that quietly
     writes it in the clear is worse than one that stops."""
     import os
+
     monkeypatch.delenv("LAKELOGIC_ON_MASKING_FAILURE", raising=False)
     default = os.environ.get("LAKELOGIC_ON_MASKING_FAILURE", "fail").strip().lower()
     assert default == "fail", "masking must fail closed unless explicitly overridden"

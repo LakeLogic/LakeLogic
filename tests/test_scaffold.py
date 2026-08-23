@@ -28,7 +28,9 @@ def _write(path, text):
 @pytest.fixture()
 def contract_dir(tmp_path):
     src = tmp_path / "contracts_src"
-    _write(src / "trips_bronze.yaml", """\
+    _write(
+        src / "trips_bronze.yaml",
+        """\
         version: "1.0.0"
         info:
           title: "Trips — raw landing"
@@ -36,8 +38,11 @@ def contract_dir(tmp_path):
           domain: "marketplace"
           system: "rideflow"
         dataset: "bronze_trips"
-        """)
-    _write(src / "trips_silver.yaml", """\
+        """,
+    )
+    _write(
+        src / "trips_silver.yaml",
+        """\
         version: "1.0.0"
         info:
           title: "Trips — cleansed"
@@ -59,8 +64,11 @@ def contract_dir(tmp_path):
           row_rules:
             - name: "trip_id_not_null"
               sql: "trip_id IS NOT NULL"
-        """)
-    _write(src / "trips_gold.yaml", """\
+        """,
+    )
+    _write(
+        src / "trips_gold.yaml",
+        """\
         version: "1.0.0"
         info:
           title: "Trips — daily fact"
@@ -70,7 +78,8 @@ def contract_dir(tmp_path):
         dataset: "fact_trips"
         upstream:
           - "silver_trips"
-        """)
+        """,
+    )
     return src
 
 
@@ -92,7 +101,9 @@ def test_scaffold_layout_and_engine_roundtrip(contract_dir, tmp_path):
     assert registry.domain == "marketplace" and registry.system == "rideflow"
     entities = {c.entity: c.layer for c in registry.contracts}
     assert entities == {
-        "bronze_trips": "bronze", "silver_trips": "silver", "fact_trips": "gold",
+        "bronze_trips": "bronze",
+        "silver_trips": "silver",
+        "fact_trips": "gold",
     }
 
 
@@ -121,7 +132,8 @@ def test_provenance_stamped_when_supplied_absent_otherwise(contract_dir, tmp_pat
 
     stamped = tmp_path / "stamped"
     scaffold_project(
-        contract_dir, stamped,
+        contract_dir,
+        stamped,
         provenance=Provenance(
             generator="LakeLogic Medallion Builder",
             revision_hash="sha256:abc123",
@@ -139,21 +151,27 @@ def test_provenance_stamped_when_supplied_absent_otherwise(contract_dir, tmp_pat
 
 def test_missing_target_layer_fails_clearly(tmp_path):
     src = tmp_path / "src"
-    _write(src / "no_layer.yaml", """\
+    _write(
+        src / "no_layer.yaml",
+        """\
         version: "1.0.0"
         dataset: "mystery"
-        """)
+        """,
+    )
     with pytest.raises(ScaffoldError, match="target_layer"):
         scaffold_project(src, tmp_path / "out")
 
 
 def test_invalid_contract_fails_all_or_nothing(contract_dir, tmp_path):
-    _write(contract_dir / "broken.yaml", """\
+    _write(
+        contract_dir / "broken.yaml",
+        """\
         version: "1.0.0"
         info: {title: "Broken", target_layer: "silver"}
         dataset: "broken"
         primary_key: "not-a-list"
-        """)
+        """,
+    )
     out = tmp_path / "out"
     with pytest.raises(ScaffoldError, match="broken.yaml"):
         scaffold_project(contract_dir, out)
@@ -162,16 +180,22 @@ def test_invalid_contract_fails_all_or_nothing(contract_dir, tmp_path):
 
 def test_duplicate_entities_rejected(tmp_path):
     src = tmp_path / "src"
-    _write(src / "a.yaml", """\
+    _write(
+        src / "a.yaml",
+        """\
         version: "1.0.0"
         info: {title: "A", target_layer: "bronze"}
         dataset: "trips"
-        """)
-    _write(src / "b.yaml", """\
+        """,
+    )
+    _write(
+        src / "b.yaml",
+        """\
         version: "1.0.0"
         info: {title: "B", target_layer: "silver"}
         dataset: "trips"
-        """)
+        """,
+    )
     with pytest.raises(ScaffoldError, match="duplicate entity"):
         scaffold_project(src, tmp_path / "out")
 
@@ -181,7 +205,7 @@ def test_generated_entrypoint_is_valid_python(contract_dir, tmp_path):
     scaffold_project(contract_dir, out, engine="polars")
     code = (out / "run_pipeline.py").read_text(encoding="utf-8")
     compile(code, "run_pipeline.py", "exec")  # syntactically valid
-    assert 'engine=\'polars\'' in code or 'engine="polars"' in code
+    assert "engine='polars'" in code or 'engine="polars"' in code
 
 
 # ── Target flavors: fabric / databricks notebooks ───────────────────────────
@@ -244,16 +268,22 @@ def test_databricks_target_emits_source_notebooks_and_bundle(contract_dir, tmp_p
 
 def test_notebook_targets_only_emit_layers_present(tmp_path):
     src = tmp_path / "src"
-    _write(src / "a.yaml", """\
+    _write(
+        src / "a.yaml",
+        """\
         version: "1.0.0"
         info: {title: "A", target_layer: "bronze"}
         dataset: "bronze_a"
-        """)
-    _write(src / "b.yaml", """\
+        """,
+    )
+    _write(
+        src / "b.yaml",
+        """\
         version: "1.0.0"
         info: {title: "B", target_layer: "silver"}
         dataset: "silver_b"
-        """)
+        """,
+    )
     out = tmp_path / "out"
     scaffold_project(src, out, target="databricks")
     assert (out / "notebooks" / "01_bronze.py").is_file()

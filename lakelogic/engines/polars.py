@@ -1428,8 +1428,10 @@ class PolarsAdapter(EngineAdapter):
                         ctx.register(tbl_name, current_lf)
                     current_lf = ctx.execute(sql)
                     existing_cols = set(current_lf.collect_schema().names())
-            elif trans.date_diff and getattr(trans.date_diff, "from_col", None) and getattr(
-                trans.date_diff, "to_col", None
+            elif (
+                trans.date_diff
+                and getattr(trans.date_diff, "from_col", None)
+                and getattr(trans.date_diff, "to_col", None)
             ):
                 dd = trans.date_diff
                 logger.debug(f"Post-Transform [DateDiff]: {dd.field}")

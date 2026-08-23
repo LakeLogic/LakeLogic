@@ -66,10 +66,10 @@ class ScaffoldError(Exception):
 class Provenance:
     """Optional governance trail stamped into generated files (never into contracts)."""
 
-    generator: Optional[str] = None       # e.g. "LakeLogic Medallion Builder"
-    revision_hash: Optional[str] = None   # the approved blueprint revision hash
-    seal_hash: Optional[str] = None       # the governance review seal
-    source: Optional[str] = None          # e.g. the estate/snapshot reference
+    generator: Optional[str] = None  # e.g. "LakeLogic Medallion Builder"
+    revision_hash: Optional[str] = None  # the approved blueprint revision hash
+    seal_hash: Optional[str] = None  # the governance review seal
+    source: Optional[str] = None  # e.g. the estate/snapshot reference
 
     def lines(self) -> List[str]:
         pairs = [
@@ -152,9 +152,7 @@ def _header(comment: str, provenance: Optional[Provenance]) -> str:
 # stays in the contracts + runner — the notebook is only the platform's front door.
 
 
-def _notebook_markdown(
-    layer: str, reg_domain: str, reg_system: str, provenance: Optional[Provenance]
-) -> str:
+def _notebook_markdown(layer: str, reg_domain: str, reg_system: str, provenance: Optional[Provenance]) -> str:
     lines = [
         f"# {reg_domain}/{reg_system} — {layer}",
         "",
@@ -194,13 +192,17 @@ def _fabric_notebook(
 ) -> str:
     """A standard nbformat-4.5 Jupyter notebook, importable into a Fabric workspace."""
     project_files = f"/lakehouse/default/Files/{reg_domain}_{reg_system}"
-    run_lines = _RUNNER_IMPORTS + [
-        "",
-        "# This project's folder, uploaded into the attached lakehouse's OneLake Files/",
-        "# area (adjust if you uploaded it elsewhere). Requires a default lakehouse.",
-        f"PROJECT_ROOT = {project_files!r}",
-        "",
-    ] + _run_layer_lines(layer, environment)
+    run_lines = (
+        _RUNNER_IMPORTS
+        + [
+            "",
+            "# This project's folder, uploaded into the attached lakehouse's OneLake Files/",
+            "# area (adjust if you uploaded it elsewhere). Requires a default lakehouse.",
+            f"PROJECT_ROOT = {project_files!r}",
+            "",
+        ]
+        + _run_layer_lines(layer, environment)
+    )
 
     def _cell_source(lines: List[str]) -> List[str]:
         return [line + "\n" for line in lines[:-1]] + [lines[-1]]
@@ -211,9 +213,7 @@ def _fabric_notebook(
                 "cell_type": "markdown",
                 "id": "header",
                 "metadata": {},
-                "source": _cell_source(
-                    _notebook_markdown(layer, reg_domain, reg_system, provenance).split("\n")
-                ),
+                "source": _cell_source(_notebook_markdown(layer, reg_domain, reg_system, provenance).split("\n")),
             },
             {
                 "cell_type": "code",
@@ -251,13 +251,18 @@ def _databricks_notebook(
 ) -> str:
     """Databricks source-format notebook (a plain .py file the workspace renders as cells)."""
     md = _notebook_markdown(layer, reg_domain, reg_system, provenance).split("\n")
-    run_lines = ["from pathlib import Path", ""] + _RUNNER_IMPORTS + [
-        "",
-        "# The bundle/project root — this notebook lives in notebooks/, the registry and",
-        "# contracts one level up. Adjust if you moved the notebook.",
-        "PROJECT_ROOT = str(Path.cwd().parent)",
-        "",
-    ] + _run_layer_lines(layer, environment)
+    run_lines = (
+        ["from pathlib import Path", ""]
+        + _RUNNER_IMPORTS
+        + [
+            "",
+            "# The bundle/project root — this notebook lives in notebooks/, the registry and",
+            "# contracts one level up. Adjust if you moved the notebook.",
+            "PROJECT_ROOT = str(Path.cwd().parent)",
+            "",
+        ]
+        + _run_layer_lines(layer, environment)
+    )
     lines = ["# Databricks notebook source"]
     lines += ["# MAGIC %md"] + [f"# MAGIC {line}".rstrip() for line in md]
     lines += ["", "# COMMAND ----------", "", "# MAGIC %pip install lakelogic"]
@@ -277,9 +282,7 @@ def _databricks_bundle(
     for layer in layers_present:
         task: Dict[str, object] = {
             "task_key": layer,
-            "notebook_task": {
-                "notebook_path": f"./notebooks/{_LAYER_ORDINAL[layer]}_{layer}.py"
-            },
+            "notebook_task": {"notebook_path": f"./notebooks/{_LAYER_ORDINAL[layer]}_{layer}.py"},
         }
         if previous:
             task["depends_on"] = [{"task_key": previous}]
@@ -346,8 +349,7 @@ def scaffold_project(
     resolved_engine = engine or ("duckdb" if target == "python" else "spark")
     if target != "python" and resolved_engine != "spark":
         raise ScaffoldError(
-            f"target {target!r} runs on the platform's Spark session — "
-            f"engine must be 'spark' (got {resolved_engine!r})"
+            f"target {target!r} runs on the platform's Spark session — engine must be 'spark' (got {resolved_engine!r})"
         )
     out = Path(out_dir)
     paths = _iter_contract_paths(contracts)
@@ -429,9 +431,7 @@ def scaffold_project(
     registry_path.write_text(registry_text, encoding="utf-8", newline="\n")
     files.append(registry_path)
 
-    layers_present = [
-        layer for layer in _LAYERS if any(item[0] == layer for item in loaded)
-    ]
+    layers_present = [layer for layer in _LAYERS if any(item[0] == layer for item in loaded)]
 
     # -- runnable surface, per target ---------------------------------------
     if target == "python":
@@ -449,14 +449,14 @@ def scaffold_project(
                     "",
                     "def main() -> None:",
                     "    registry = DomainRegistry.from_yaml(",
-                    "        str(Path(__file__).parent / \"_registry.yaml\"),",
+                    '        str(Path(__file__).parent / "_registry.yaml"),',
                     f"        environment={environment!r},",
-                    "        storage_mode=\"direct\",",
+                    '        storage_mode="direct",',
                     "    )",
                     f"    LakehousePipeline(registry, engine={resolved_engine!r}).run()",
                     "",
                     "",
-                    "if __name__ == \"__main__\":",
+                    'if __name__ == "__main__":',
                     "    main()",
                     "",
                 ]
@@ -472,9 +472,7 @@ def scaffold_project(
                 content = _fabric_notebook(layer, reg_domain, reg_system, environment, provenance)
             else:
                 name = f"{_LAYER_ORDINAL[layer]}_{layer}.py"
-                content = _databricks_notebook(
-                    layer, reg_domain, reg_system, environment, provenance
-                )
+                content = _databricks_notebook(layer, reg_domain, reg_system, environment, provenance)
             notebook_path = out / "notebooks" / name
             notebook_path.parent.mkdir(parents=True, exist_ok=True)
             notebook_path.write_text(content, encoding="utf-8", newline="\n")
@@ -537,7 +535,7 @@ Generated by `lakelogic scaffold`. The **contracts are the source of truth** —
 registry and {surface} only arrange them for the pipeline runner; regenerate this
 project rather than hand-editing generated files.
 
-Layers: {counts['bronze']} bronze / {counts['silver']} silver / {counts['gold']} gold.
+Layers: {counts["bronze"]} bronze / {counts["silver"]} silver / {counts["gold"]} gold.
 
 {run_block}
 
@@ -557,6 +555,10 @@ lakelogic validate contracts/ --recursive
 
     logger.info(
         "scaffolded {} contract(s) into {} ({} bronze / {} silver / {} gold)",
-        len(loaded), out, counts["bronze"], counts["silver"], counts["gold"],
+        len(loaded),
+        out,
+        counts["bronze"],
+        counts["silver"],
+        counts["gold"],
     )
     return ScaffoldResult(out_dir=out, registry_path=registry_path, files=tuple(files))

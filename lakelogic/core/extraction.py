@@ -12,6 +12,7 @@ validated, quality-checked, and materialized by the contract like any other colu
 Runs BEFORE schema/quality enforcement (same rationale as external_logic), so the
 contract governs the extracted output.
 """
+
 from typing import Any
 
 from loguru import logger
@@ -79,8 +80,7 @@ def apply_extraction(contract: Any, df: Any, engine_name: str) -> Any:
     ]
     if failures and len(failures) == len(enriched):
         raise RuntimeError(
-            f"Extraction failed for all {len(enriched)} row(s) using provider "
-            f"'{config.provider}': {failures[0]}"
+            f"Extraction failed for all {len(enriched)} row(s) using provider '{config.provider}': {failures[0]}"
         )
     if failures:
         logger.warning(f"Extraction failed for {len(failures)}/{len(enriched)} rows: {failures[0]}")
