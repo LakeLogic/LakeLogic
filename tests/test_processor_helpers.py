@@ -1962,3 +1962,208 @@ def test_spark_schema_for_extracted_rows_handles_all_null_columns():
     assert t["latency_ms"] is LongType
     assert t["cost"] is DoubleType
     assert t["ok"] is BooleanType
+
+
+# -- Partition-presence telemetry --------------------------------------------
+# A landing zone laid out y_2026/m_08/d_02/h_05...h_13 can be missing h_07 and
+# every existing check stays green: row count counts the DataFrame that was
+# read (no partition dimension) and freshness compares the NEWEST timestamp to
+# now, so a hole in the middle of a series is invisible.
+
+
+def _partition_presence_processor(tmp_path):
+    """Processor stub wired for the real local partition scan."""
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.contract = types.SimpleNamespace(
+        _base_path=tmp_path,
+        source=types.SimpleNamespace(type="file", format="json"),
+    )
+    processor._is_uri_path = lambda path: False
+    processor._partition_presence = None
+    return processor
+
+
+def _write_partition(root: Path, key: str, *, empty: bool = False) -> None:
+    part = root / Path(key)
+    part.mkdir(parents=True, exist_ok=True)
+    if not empty:
+        (part / "events.json").write_text("{}", encoding="utf-8")
+
+
+def test_partition_presence_hourly_reports_the_hour_that_never_arrived(tmp_path):
+    landing = tmp_path / "landing"
+    fmt = "y_%Y/m_%m/d_%d/h_%H"
+    for hour in range(24):
+        if hour == 7:
+            continue  # the delivery that never happened
+        _write_partition(landing, f"y_2026/m_08/d_02/h_{hour:02d}")
+
+    processor = _partition_presence_processor(tmp_path)
+    partition_cfg = types.SimpleNamespace(
+        start_date="2026-08-02",
+        end_date="2026-08-02",
+        lookback_days=1,
+        file_pattern="*.json",
+        format=fmt,
+    )
+    files = processor._expand_partitioned_paths(str(landing), partition_cfg)
+    assert len(files) == 23  # row-count / freshness view: data is there, all good
+
+    presence = processor._partition_presence
+    assert presence["grain"] == "hour"
+    assert presence["format"] == fmt
+    assert presence["window_start"] == "2026-08-02T00:00:00"
+    assert presence["window_end"] == "2026-08-02T23:59:59"
+    assert presence["expected_count"] == 24
+    assert presence["missing_keys"] == ["y_2026/m_08/d_02/h_07"]
+    assert presence["missing_count"] == 1
+    assert presence["missing_truncated"] is False
+    assert len(presence["present_keys"]) == 23
+    assert "y_2026/m_08/d_02/h_06" in presence["present_keys"]
+    # Keys are RELATIVE to the landing root - no absolute path, host or creds.
+    assert all(not key.startswith(str(landing)) for key in presence["present_keys"])
+
+
+def test_partition_presence_counts_an_empty_partition_directory_as_missing(tmp_path):
+    landing = tmp_path / "landing"
+    for hour in range(24):
+        _write_partition(landing, f"y_2026/m_08/d_02/h_{hour:02d}", empty=(hour == 9))
+
+    processor = _partition_presence_processor(tmp_path)
+    partition_cfg = types.SimpleNamespace(
+        start_date="2026-08-02",
+        end_date="2026-08-02",
+        lookback_days=1,
+        file_pattern="*.json",
+        format="y_%Y/m_%m/d_%d/h_%H",
+    )
+    processor._expand_partitioned_paths(str(landing), partition_cfg)
+
+    presence = processor._partition_presence
+    # The directory exists; it just holds nothing. An empty folder is not a
+    # delivery, so presence treats it as absent.
+    assert (landing / "y_2026" / "m_08" / "d_02" / "h_09").is_dir()
+    assert presence["missing_keys"] == ["y_2026/m_08/d_02/h_09"]
+    assert presence["missing_count"] == 1
+    assert presence["expected_count"] == 24
+
+
+def test_partition_presence_day_grain(tmp_path):
+    landing = tmp_path / "landing"
+    _write_partition(landing, "2026/08/01")
+    _write_partition(landing, "2026/08/03")
+
+    processor = _partition_presence_processor(tmp_path)
+    partition_cfg = types.SimpleNamespace(
+        start_date="2026-08-01",
+        end_date="2026-08-03",
+        lookback_days=3,
+        file_pattern="*.json",
+        format="%Y/%m/%d",
+    )
+    processor._expand_partitioned_paths(str(landing), partition_cfg)
+
+    presence = processor._partition_presence
+    assert presence["grain"] == "day"
+    assert presence["expected_count"] == 3
+    assert presence["present_keys"] == ["2026/08/01", "2026/08/03"]
+    assert presence["missing_keys"] == ["2026/08/02"]
+    assert presence["missing_count"] == 1
+
+
+def test_partition_presence_truncates_key_lists_but_never_the_count(tmp_path):
+    landing = tmp_path / "landing"
+    # 5 days x 24 hours = 120 slots; deliver only the first 10.
+    for hour in range(10):
+        _write_partition(landing, f"y_2026/m_08/d_01/h_{hour:02d}")
+
+    processor = _partition_presence_processor(tmp_path)
+    partition_cfg = types.SimpleNamespace(
+        start_date="2026-08-01",
+        end_date="2026-08-05",
+        lookback_days=5,
+        file_pattern="*.json",
+        format="y_%Y/m_%m/d_%d/h_%H",
+    )
+    processor._expand_partitioned_paths(str(landing), partition_cfg)
+
+    presence = processor._partition_presence
+    assert presence["expected_count"] == 120
+    assert presence["missing_count"] == 110  # the TRUE total, never capped
+    assert len(presence["missing_keys"]) == 100
+    assert presence["missing_truncated"] is True
+    assert len(presence["present_keys"]) == 10
+
+
+def test_partition_presence_failure_never_fails_the_run(monkeypatch, tmp_path):
+    landing = tmp_path / "landing"
+    _write_partition(landing, "2026/08/01")
+
+    processor = _partition_presence_processor(tmp_path)
+
+    def _boom(**kwargs):
+        raise RuntimeError("telemetry exploded")
+
+    monkeypatch.setattr(processor, "_build_partition_presence", _boom)
+    partition_cfg = types.SimpleNamespace(
+        start_date="2026-08-01",
+        end_date="2026-08-01",
+        lookback_days=1,
+        file_pattern="*.json",
+        format="%Y/%m/%d",
+    )
+    files = processor._expand_partitioned_paths(str(landing), partition_cfg)
+
+    assert len(files) == 1  # ingest is unaffected
+    assert processor._partition_presence is None  # degraded to emitting nothing
+
+
+def _partition_report_processor(tmp_path):
+    processor = object.__new__(proc_mod.DataProcessor)
+    processor.engine_name = "polars"
+    processor.adapter = types.SimpleNamespace(dataset_rule_results=[])
+    processor.contract = types.SimpleNamespace(
+        info=types.SimpleNamespace(title="Events", version="1.0.0", table_name="bronze_events"),
+        dataset="events",
+        materialization=types.SimpleNamespace(target_path="table:catalog.schema.events", path=None),
+        metadata={"domain": "mobility", "system": "app"},
+        contract_file_name="bronze_events.yaml",
+    )
+    processor.stage = "bronze"
+    processor.last_run_id = "run-1"
+    processor.pipeline_run_id = "pipe-1"
+    processor.last_source_path = str(tmp_path / "events.json")
+    processor._source_files = [{"path": str(tmp_path / "events.json")}]
+    processor._source_max_mtime = 1.0
+    processor._resolved_domain = "mobility"
+    processor._resolved_system = "app"
+    processor._resolved_environment = "dev"
+    processor._resolved_data_layer = "bronze"
+    processor._incremental_metadata = {}
+    processor._run_start_time = None
+    return processor
+
+
+def test_report_omits_partition_presence_without_partition_config(tmp_path):
+    # No source.partition -> no scan ran -> the key must be ABSENT. SaaS reads
+    # absence as "not measured"; a zeroed payload would read as a confident pass.
+    processor = _partition_report_processor(tmp_path)
+    processor._partition_presence = None
+    report = processor._build_report("Events", {"source": 1, "good": 1})
+    assert "partition_presence" not in report
+
+    # ...and when a partition scan DID run, the payload rides along on the report.
+    processor._partition_presence = {
+        "grain": "hour",
+        "format": "y_%Y/m_%m/d_%d/h_%H",
+        "window_start": "2026-08-02T00:00:00",
+        "window_end": "2026-08-02T23:59:59",
+        "expected_count": 24,
+        "present_keys": [],
+        "missing_keys": ["y_2026/m_08/d_02/h_07"],
+        "missing_count": 1,
+        "missing_truncated": False,
+    }
+    report = processor._build_report("Events", {"source": 1, "good": 1})
+    assert report["partition_presence"]["missing_keys"] == ["y_2026/m_08/d_02/h_07"]
+    assert report["partition_presence"]["expected_count"] == 24
