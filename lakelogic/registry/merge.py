@@ -37,22 +37,76 @@ def _leaf_provenance(
     prov: Dict[str, Provenance],
     system_file: Optional[str],
     domain_file: Optional[str],
+    *,
+    child_origin: Origin = Origin.SYSTEM,
+    parent_origin: Origin = Origin.DOMAIN,
 ) -> None:
-    """Dotted-path provenance for every leaf under a deep-merged block."""
+    """Dotted-path provenance for every leaf under a deep-merged block.
+
+    ``child_origin``/``parent_origin`` name the two layers being folded. They default to the
+    domain → system merge; :func:`merge_scope` passes ``CONTRACT``/``SYSTEM`` to describe the
+    contract-over-resolved-registry fold with the same code.
+    """
     for k in sorted(set(domain_val) | set(system_val)):
         path = f"{prefix}.{k}"
         in_sys, in_dom = k in system_val, k in domain_val
         if in_sys and not in_dom:
-            prov[path] = Provenance(path, Origin.SYSTEM, Reason.DECLARED, system_file)
+            prov[path] = Provenance(path, child_origin, Reason.DECLARED, system_file)
         elif in_dom and not in_sys:
-            prov[path] = Provenance(path, Origin.DOMAIN, Reason.INHERITED, domain_file)
+            prov[path] = Provenance(path, parent_origin, Reason.INHERITED, domain_file)
         else:
             dv, sv = domain_val[k], system_val[k]
             if isinstance(dv, dict) and isinstance(sv, dict):
                 prov[path] = Provenance(path, Origin.BOTH, Reason.DEEP_MERGED, system_file)
-                _leaf_provenance(dv, sv, path, prov, system_file, domain_file)
+                _leaf_provenance(dv, sv, path, prov, system_file, domain_file,
+                                 child_origin=child_origin, parent_origin=parent_origin)
             else:
-                prov[path] = Provenance(path, Origin.SYSTEM, Reason.OVERRIDDEN, system_file)
+                prov[path] = Provenance(path, child_origin, Reason.OVERRIDDEN, system_file)
+
+
+def merge_scope(
+    inherited: Optional[Dict[str, Any]],
+    declared: Optional[Dict[str, Any]],
+    *,
+    key: str,
+    child_origin: Origin = Origin.CONTRACT,
+    parent_origin: Origin = Origin.SYSTEM,
+    declared_file: Optional[str] = None,
+    inherited_file: Optional[str] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Provenance]]:
+    """Fold one already-resolved block under a narrower scope's own declaration.
+
+    This is the third step of the chain — ``domain → system`` is :func:`merge_domain_system`;
+    this handles ``system → contract``, where a data product (a gold contract) supersedes the
+    system it belongs to. Same deep-merge semantics, same per-leaf provenance, so the two
+    steps can never disagree about what "overridden" means.
+
+    Returns ``(merged, provenance)``. Either side may be empty.
+    """
+    inherited = inherited or {}
+    declared = declared or {}
+    prov: Dict[str, Provenance] = {}
+
+    if not declared:
+        merged = dict(inherited)
+        if inherited:
+            prov[key] = Provenance(key, parent_origin, Reason.INHERITED, inherited_file)
+            _leaf_provenance(inherited, {}, key, prov, declared_file, inherited_file,
+                             child_origin=child_origin, parent_origin=parent_origin)
+        return merged, prov
+
+    if not inherited:
+        merged = dict(declared)
+        prov[key] = Provenance(key, child_origin, Reason.DECLARED, declared_file)
+        _leaf_provenance({}, declared, key, prov, declared_file, inherited_file,
+                         child_origin=child_origin, parent_origin=parent_origin)
+        return merged, prov
+
+    merged = _deep_merge(inherited, declared)
+    prov[key] = Provenance(key, Origin.BOTH, Reason.DEEP_MERGED, declared_file)
+    _leaf_provenance(inherited, declared, key, prov, declared_file, inherited_file,
+                     child_origin=child_origin, parent_origin=parent_origin)
+    return merged, prov
 
 
 def merge_domain_system(

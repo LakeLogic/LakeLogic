@@ -78,6 +78,7 @@ class _StrictManifest(BaseModel):
 # Canonical key classes live in the dependency-free `keys` module (shared with the runtime
 # merge); re-exported here for the models/validator that reference them.
 from lakelogic.registry.keys import IDENTITY_SCALARS, INHERITABLE_KEYS  # noqa: E402,F401  (re-export)
+from lakelogic.registry.ownership import Ownership, OwnershipError  # noqa: E402
 
 
 class DomainManifestV1(_StrictManifest):
@@ -108,6 +109,21 @@ class DomainManifestV1(_StrictManifest):
     materialization: Dict[str, Any] = Field(default_factory=dict)
     server: Dict[str, Any] = Field(default_factory=dict)
 
+
+    @model_validator(mode="after")
+    def validate_ownership_roles(self):
+        """Check the ownership role blocks we define, leave the rest free-form.
+
+        ``ownership`` stays a free-form dict per this module's design — an org's
+        ``cost_center``/``jira_project``/``contacts`` shape is not the manifest's business.
+        But the four role keys ARE ours, so a misspelt accountability category is a typo we
+        can name at parse time rather than a question that silently never routes.
+        """
+        try:
+            Ownership.parse(self.ownership, where="ownership")
+        except OwnershipError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
 
 class SystemManifestV1(_StrictManifest):
     """A raw ``_system.yaml`` — one source/system, its storage/environment wiring, and the
@@ -159,4 +175,19 @@ class SystemManifestV1(_StrictManifest):
                     f"unique within a system"
                 )
             seen[c.entity] = c.layer
+        return self
+
+    @model_validator(mode="after")
+    def validate_ownership_roles(self):
+        """Check the ownership role blocks we define, leave the rest free-form.
+
+        ``ownership`` stays a free-form dict per this module's design — an org's
+        ``cost_center``/``jira_project``/``contacts`` shape is not the manifest's business.
+        But the four role keys ARE ours, so a misspelt accountability category is a typo we
+        can name at parse time rather than a question that silently never routes.
+        """
+        try:
+            Ownership.parse(self.ownership, where="ownership")
+        except OwnershipError as exc:
+            raise ValueError(str(exc)) from exc
         return self

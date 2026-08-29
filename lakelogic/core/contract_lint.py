@@ -608,6 +608,78 @@ def check_continuous_trigger(raw, name, ctx):  # STREAM-002
     return []
 
 
+def check_ownership_single_point(raw, name, ctx):  # OWN-001
+    """A named owner with no fallback group is one holiday away from a stalled design.
+
+    Reads the *resolved* policy (domain <- system) as well as the contract, so a contract
+    that inherits a lone individual is flagged where the reader can see it, not only in the
+    domain file they may never open.
+    """
+    from lakelogic.registry.ownership import lint_ownership
+
+    blocks = [raw.get("ownership")]
+    if ctx is not None and getattr(ctx, "policy", None):
+        blocks.append(ctx.policy.get("ownership"))
+
+    seen, out = set(), []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        for msg in lint_ownership(block, where="ownership"):
+            if "no group" not in msg or msg in seen:
+                continue
+            seen.add(msg)
+            out.append(
+                _c(
+                    name,
+                    "OWN-001",
+                    "warning",
+                    "ownership",
+                    msg,
+                    field="ownership",
+                    suggestion="Add `group:` alongside the person so questions still route when they are away.",
+                )
+            )
+    return out
+
+
+def check_ownership_unroutable_blocking(raw, name, ctx):  # OWN-002
+    """Nobody accountable for blocking questions means every question stalls the design.
+
+    Only meaningful with a resolved policy — in standalone mode a contract legitimately
+    inherits its ownership from files the linter was not given.
+    """
+    from lakelogic.registry.ownership import Ownership, QuestionCategory
+
+    if ctx is None or not getattr(ctx, "policy", None):
+        return []
+    merged = _deep_merge(
+        (ctx.policy.get("ownership") or {}) if isinstance(ctx.policy.get("ownership"), dict) else {},
+        raw.get("ownership") if isinstance(raw.get("ownership"), dict) else {},
+    )
+    if not merged:
+        return []
+    try:
+        own = Ownership.parse(merged, where="ownership")
+    except Exception:
+        return []
+    cat = QuestionCategory.BLOCKING_QUESTIONS.value
+    if own.party_for(cat) is not None or own.legacy_party() is not None:
+        return []
+    return [
+        _c(
+            name,
+            "OWN-002",
+            "warning",
+            "ownership",
+            "nobody is accountable for blocking questions — every question raised against "
+            "this contract will be unroutable and the design cannot be approved.",
+            field="ownership",
+            suggestion="Declare `ownership.business_owner` with `accountable_for: [blocking_questions]`.",
+        )
+    ]
+
+
 _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[ContractFinding]]] = [
     check_pk_missing_for_mutation,
     check_dedup_no_timestamp,
@@ -622,6 +694,8 @@ _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[
     check_no_volume_freshness_slo,
     check_append_on_resumable_stream,
     check_continuous_trigger,
+    check_ownership_single_point,
+    check_ownership_unroutable_blocking,
 ]
 
 

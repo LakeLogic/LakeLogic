@@ -13,7 +13,7 @@ import json
 import os
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -24,6 +24,12 @@ from lakelogic.core.models import DataContract
 from lakelogic.core.observer import RemoteObserver
 from lakelogic.core.processor import DataProcessor
 from lakelogic.core.registry import DomainRegistry, RegistryContract
+from lakelogic.pipeline.impact import (
+    build_restatement_impact,
+    format_restatement_impact,
+    is_restatement_run,
+    topological_order,
+)
 
 
 def _friendly_validation_error(entity: str, exc: Exception) -> str:
@@ -55,6 +61,9 @@ class PipelineRunSummary:
         self.environment = environment
         self.dry_run = dry_run
         self.results: List[Dict[str, Any]] = []
+        # Advisory restatement impact report, populated only when the run
+        # restated data (a reprocess). ``None`` on the common path.
+        self.restatement_impact: Optional[Dict[str, Any]] = None
 
     def append(
         self,
@@ -86,12 +95,17 @@ class PipelineRunSummary:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload: Dict[str, Any] = {
             "run_id": self.run_id,
             "environment": self.environment,
             "dry_run": self.dry_run,
             "results": self.results,
         }
+        # Additive: present only for restatement (reprocess) runs, so the
+        # common-path payload shape is unchanged.
+        if self.restatement_impact is not None:
+            payload["restatement_impact"] = self.restatement_impact
+        return payload
 
     def has_failures(self) -> bool:
         """True if any contract in this run failed."""
@@ -154,6 +168,8 @@ class PipelineRunSummary:
                 lines.append(f"    └─ Error: {str(err)[:70]}")
 
         lines.append("=" * 80)
+        if self.restatement_impact is not None:
+            lines.append(format_restatement_impact(self.restatement_impact))
         return "\n".join(lines)
 
 
@@ -533,33 +549,12 @@ class LakehousePipeline:
         """Sort contracts within a layer by ``depends_on`` (topological order).
 
         Raises ``ValueError`` on circular dependencies.
+
+        Delegates to :func:`lakelogic.pipeline.impact.topological_order`, which
+        owns the shared forward (downstream) edge index — the same index the
+        restatement impact report reads. Behaviour is unchanged.
         """
-        by_entity = {c.entity: c for c in contracts}
-        in_degree: Dict[str, int] = {c.entity: 0 for c in contracts}
-        graph: Dict[str, List[str]] = defaultdict(list)
-
-        for c in contracts:
-            for dep in c.depends_on:
-                if dep in by_entity:
-                    graph[dep].append(c.entity)
-                    in_degree[c.entity] += 1
-
-        queue = deque(e for e, d in in_degree.items() if d == 0)
-        ordered: List[RegistryContract] = []
-
-        while queue:
-            entity = queue.popleft()
-            ordered.append(by_entity[entity])
-            for downstream in graph[entity]:
-                in_degree[downstream] -= 1
-                if in_degree[downstream] == 0:
-                    queue.append(downstream)
-
-        if len(ordered) != len(contracts):
-            remaining = set(in_degree) - {c.entity for c in ordered}
-            raise ValueError(f"Circular dependency detected among contracts: {remaining}")
-
-        return ordered
+        return topological_order(contracts)
 
     @staticmethod
     def _group_by_dependency_level(contracts: List[RegistryContract]) -> List[List[RegistryContract]]:
@@ -2171,7 +2166,51 @@ class LakehousePipeline:
                                     r.get("contract") == c.entity and r.get("layer") == layer for r in summary.results
                                 ):
                                     summary.append(c.entity, layer, "failed")
+
+        # ── 6. Restatement impact (advisory) ──────────────────────────────────
+        # Only for runs that restate already-materialized data. Never blocks,
+        # never changes exit status, never alters what executed.
+        self._attach_restatement_impact(
+            summary,
+            all_active,
+            target_set,
+            reprocess_from=reprocess_from,
+            reprocess_to=reprocess_to,
+            reprocess_column=reprocess_column,
+            reprocess_values=reprocess_values,
+        )
         return summary
+
+    def _attach_restatement_impact(
+        self,
+        summary: PipelineRunSummary,
+        all_active: List[RegistryContract],
+        target_set: Set[str],
+        *,
+        reprocess_from: Optional[str] = None,
+        reprocess_to: Optional[str] = None,
+        reprocess_column: Optional[str] = None,
+        reprocess_values: Optional[List[str]] = None,
+    ) -> None:
+        """Attach + log the restatement impact report, if this run restated data.
+
+        Advisory only: every failure path here is swallowed. A broken impact
+        report must never break a pipeline.
+        """
+        try:
+            if not is_restatement_run(reprocess_from, reprocess_to, reprocess_column, reprocess_values):
+                return
+
+            restated = [
+                (r["layer"], r["contract"]) for r in summary.results if r.get("status") == "success"
+            ]
+            in_run_scope = [(c.layer, c.entity) for c in all_active if c.layer in target_set]
+
+            report = build_restatement_impact(all_active, restated, in_run_scope)
+            summary.restatement_impact = report
+            logger.info("\n" + format_restatement_impact(report))
+        except Exception as e:  # pragma: no cover - defensive; advisory only
+            logger.warning(f"Restatement impact report unavailable (run unaffected): {e}")
 
     # ── Checkpoint helpers ─────────────────────────────────────────────────────
 

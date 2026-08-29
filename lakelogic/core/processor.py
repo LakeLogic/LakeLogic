@@ -915,9 +915,19 @@ class DataProcessor:
         # Apply per-field masking strategies defined in the contract model.
         # This runs AFTER lineage injection so lineage columns are preserved,
         # and BEFORE materialization so masked data is what gets written.
+        # Tagged with ANY of the three categories, matching MaskingEngine's own
+        # selector. This guard used to read `f.pii` alone while the engine masked
+        # `pii or phi or sensitive`, so a contract whose confidential columns were
+        # tagged `sensitive:` (or `phi:`) and none tagged `pii:` never constructed
+        # the engine at all — the capability existed and silently never ran.
+        #
+        # Deliberately NOT also requiring `f.masking` here: the engine warns about
+        # tagged fields that have no strategy, and that warning is the only signal a
+        # user gets that their PII is going out unmasked. Gating on `masking` would
+        # skip the engine and take the warning with it.
         pii_fields = []
         if self.contract.model and self.contract.model.fields:
-            pii_fields = [f for f in self.contract.model.fields if f.pii]
+            pii_fields = [f for f in self.contract.model.fields if f.pii or f.phi or f.sensitive]
 
         if pii_fields and good_df is not None:
             step_start_mask = time.perf_counter()

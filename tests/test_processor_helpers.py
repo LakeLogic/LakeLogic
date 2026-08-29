@@ -450,7 +450,13 @@ def test_processor_run_covers_notifications_drift_slos_and_trace(monkeypatch):
         dataset="orders",
         external_logic=None,
         model=types.SimpleNamespace(
-            fields=[types.SimpleNamespace(name="id", pii=False), types.SimpleNamespace(name="email", pii=True)]
+            fields=[
+                # phi/sensitive are real FieldDefinition attributes; the masking
+                # selector reads all three, so a stub carrying only `pii` is not a
+                # field. Kept explicit rather than defensive getattr in production.
+                types.SimpleNamespace(name="id", pii=False, phi=False, sensitive=False),
+                types.SimpleNamespace(name="email", pii=True, phi=False, sensitive=False),
+            ]
         ),
         schema_policy=None,
         server=types.SimpleNamespace(schema_policy=types.SimpleNamespace(unknown_fields="drop")),

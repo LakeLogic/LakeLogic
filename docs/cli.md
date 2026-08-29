@@ -36,6 +36,7 @@ lakelogic
 ┌─ Governance ──────────────────────────────────────────────────────────────┐
 │ registry   Validate & inspect the mesh registry (_domain/_system.yaml).   │
 │ lint       Lint contracts for governance issues.                          │
+│ diagnose   Read-only diagnostics on already-written data.                 │
 └───────────────────────────────────────────────────────────────────────────┘
 ┌─ Environment Setup ───────────────────────────────────────────────────────┐
 │ setup-oss  Pre-install DuckDB extensions & check OSS dependencies.        │
@@ -346,6 +347,187 @@ LakeLogic.
 > Validating an individual **contract** (not the registry)? Use `lakelogic validate
 > --contract path.yaml` for structural + gate checks, or the portable `olc validate` from
 > the [Open Lakehouse Contract CLI](https://lakelogic.github.io/open-lakehouse-contract/reference/cli/).
+
+---
+
+### Diagnostics
+
+Where `validate` and `lint` inspect **contracts**, `lakelogic diagnose` inspects **data
+that was already written** — to answer questions a contract cannot, such as "did this
+pipeline corrupt a column before the fix landed?" Every command in this group **defaults
+to read-only**. `double-hash` cannot repair at all — SHA-256 destroyed the information.
+`scd2` can, because nothing was destroyed there, but it writes only when you give it an
+explicit output path.
+
+#### `lakelogic diagnose double-hash`
+
+Detect a masked column that was hashed **again** downstream.
+
+Masking is applied write-side, per contract run, and the silver/gold templates propagate
+the `masking:` strategy. A field hashed in bronze could therefore be hashed a second time
+in silver — `sha256(salt + sha256(salt + value))` — and a third time in gold. Nothing
+raised and nothing was logged; the only symptom was that the same person's key stopped
+matching across layers, so cross-layer joins on that key silently returned nothing.
+
+`MaskingEngine`'s idempotence guard prevents **new** double-hashing. This command is for
+data written before that guard existed.
+
+```bash
+lakelogic diagnose double-hash \
+  --upstream  bronze/riders.parquet \
+  --downstream silver/riders.parquet \
+  --column rider_key \
+  --key    rider_id
+```
+
+**The check.** If upstream stores `B` and downstream stores `S` for the same entity, then
+downstream is double-hashed **iff** `H(salt + B) == S`. Three per-row outcomes, kept
+distinct:
+
+| Outcome | Meaning |
+|:--|:--|
+| `double_hashed` | `H(salt + B) == S` — downstream re-hashed an already-hashed value. Broken. |
+| `consistent` | `B == S` — downstream carried the upstream value through. Correct, and salt-independent. |
+| `indeterminate` | Neither matched. A different salt, a different transformation, or a re-sourced column. **Unknown — not clean.** |
+
+The column-level `verdict` is `double_hashed`, `consistent`, `indeterminate`, `mixed`
+(more than one outcome present), `inconclusive`, or `no_overlap` — but the **counts** are
+the authority. A backfill that straddled the fix leaves a column part-damaged, so a
+single boolean per column would hide real damage. Rows that do not join, hold a null, or
+sit on an ambiguous upstream key are excluded from the verdict and reported separately.
+
+**Salt.** Read from `$LAKELOGIC_PII_SALT` (the same variable the pipeline masks with), or
+`--salt`. Without it the salted form cannot be computed: the command falls back to the
+unsalted form, reports **which** form matched (`salt_match`), and — if any row comes back
+indeterminate — marks the whole result `inconclusive`. "No match under an unknown salt"
+is never reported as clean.
+
+!!! danger "This does not repair data"
+    SHA-256 is one-way. A double-hashed column **cannot** be recovered from itself — not
+    by this command, not by any other. There is no in-place fix and none is offered.
+
+    What the command gives you is a *reason to reprocess*: the upstream value `B` is
+    still intact, so re-running the downstream contract from its upstream — with the
+    idempotence guard in place — rewrites the column correctly. That is an ordinary
+    pipeline run, not a data migration.
+
+**Key options:**
+
+| Flag | Short | Description |
+|:-----|:------|:------------|
+| `--upstream` | `-u` | Upstream (e.g. bronze) file or directory — the layer that hashed first |
+| `--downstream` | `-d` | Downstream (e.g. silver/gold) file or directory |
+| `--column` | `-c` | The masked column to check |
+| `--key` | `-k` | An **unmasked** column identifying the same entity in both layers |
+| `--downstream-column` | | Downstream name of the column, if it was renamed |
+| `--salt` | | Masking salt (defaults to `$LAKELOGIC_PII_SALT`) |
+| `--format` | `-f` | `text` or `json` |
+| `--fail-on-damage` | | Exit non-zero if any row is *proven* double-hashed (for CI) |
+
+The same check is available in Python, engine-agnostically (Polars, pandas, Spark,
+DuckDB, or plain dicts):
+
+```python
+from lakelogic.core.masking_diagnostics import diagnose_double_hashing
+
+result = diagnose_double_hashing(
+    bronze_df, silver_df, column="rider_key", join_key="rider_id",
+)
+print(result.double_hashed_rows, result.consistent_rows, result.indeterminate_rows)
+print(result.render())
+```
+
+#### `lakelogic diagnose scd2`
+
+Find — and optionally repair — SCD2 intervals corrupted by a **late-arriving** row.
+
+Before the late-arrival fix, a change date landing inside an already-closed interval was
+appended to the end of history rather than slotted in. One late row produced three
+corruptions at once:
+
+```text
+d1 equire   2024-01-01 → 2024-01-04  is_current=False
+d1 notified 2024-01-03 → 9999-12-31  is_current=True    ← a 3 Jan fact became current
+d1 serius   2024-01-04 → 2024-01-03  is_current=False   ← effective_to BEFORE effective_from
+```
+
+plus overlapping windows — `equire` and `notified` are both valid on 3 Jan.
+
+```bash
+lakelogic diagnose scd2 --table gold/dim_driver.parquet --key driver_id
+```
+
+**The defect taxonomy.** Each is detected independently, per row, after ordering a key's
+versions by `effective_from`:
+
+| Defect | Detected by | Repair |
+|:--|:--|:--|
+| `inverted` | `effective_to < effective_from` | ends at the next version's start (or reopens, if last) |
+| `overlapping` | `effective_to` **>** the next version's `effective_from` | ends at the next version's start |
+| `is_current_wrong` | flag on a non-latest row, on several rows, or on none while the latest is open | flag moves to the single latest open version |
+| `unrepairable` | the key cannot be ordered | **nothing** — reported with a reason |
+
+!!! warning "Gaps are never closed"
+    A record deleted and later re-added legitimately leaves `effective_to` **before** the
+    next version's `effective_from`. That hole is the fact being recorded. Only a
+    *strictly greater* end date is an overlap; `to == next from` (contiguous) and
+    `to < next from` (a gap) are both left alone, and the report counts how many of each
+    it preserved. A conservative repair that eats real history is worse than the bug.
+
+!!! info "Why this one is repairable, unlike `double-hash`"
+    Nothing was destroyed. Every `effective_from` survived the bug, and the correct
+    intervals follow from it: a version ends where the next begins, and the latest holds
+    `is_current`.
+
+    **`effective_from` is therefore never modified**, so the surrogate key
+    `sha256(pk | effective_from)` is byte-identical afterwards and every fact row already
+    holding an SK still resolves. `_version` is derived by ranking on `effective_from`,
+    which the repair does not reorder, so it needs no rewrite either. Only `effective_to`
+    and the current-flag column are ever written.
+
+**Ambiguity is reported, never guessed.** Two versions of one key sharing an
+`effective_from`, or a boundary that will not parse, make the key unorderable. Those keys
+are listed as `unrepairable` with the reason and are left completely untouched rather than
+given an invented order.
+
+To repair, name an output path — omitting it keeps the run read-only:
+
+```bash
+lakelogic diagnose scd2 -t gold/dim_driver.parquet -k driver_id \
+  --repair-out gold/dim_driver.repaired.parquet
+```
+
+| Option | Short | Purpose |
+|:--|:--|:--|
+| `--table` | `-t` | The SCD2 dimension file or directory |
+| `--key` | `-k` | Business key column (repeat for a composite key) |
+| `--effective-from` | | Version-start column (default `effective_from`) — never modified |
+| `--effective-to` | | Version-end column (default `effective_to`) |
+| `--current-flag` | | Live-row column (default `is_current`) |
+| `--open-value` | | Open-interval sentinel (default `9999-12-31`) |
+| `--repair-out` | | Explicit opt-in to writing: path for the repaired copy |
+| `--allow-in-place` | | Permit `--repair-out` to overwrite the source table |
+| `--allow-spark-collect` | | Consent to collecting a Spark dimension to the driver |
+| `--format` | `-f` | `text` or `json` |
+| `--fail-on-defect` | | Exit non-zero if any defect is found (for CI) |
+
+Also available in Python, on Polars / pandas / DuckDB / plain dicts. Diagnosis and repair
+are separate: the default returns `repaired_frame is None`, and the input frame is never
+mutated.
+
+```python
+from lakelogic.core.scd2_diagnostics import diagnose_scd2
+
+result = diagnose_scd2(dim_df, primary_key="driver_id")
+print(result.defect_counts)   # {'inverted': 1, 'overlapping': 2, ...}
+print(result.render())
+
+fixed = diagnose_scd2(dim_df, primary_key="driver_id", repair=True).repaired_frame
+```
+
+Spark is deliberately **not** handled implicitly: ordering every version of every key
+requires a full collect to the driver, which can OOM on a large dimension. The call raises
+`Scd2SparkCollectRequired` explaining this until you pass `allow_collect=True`.
 
 ---
 
