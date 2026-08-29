@@ -24,6 +24,7 @@ Usage:
     good_df, bad_df = adapter.execute()
 """
 
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -97,8 +98,15 @@ class GenericSQLAdapter(EngineAdapter):
         Returns:
             Tuple of (good_results, bad_results) as dicts with counts and details.
         """
+        # Refuse ONLY the ops this adapter genuinely cannot express (join/lookup need
+        # a second relation; explode/pivot/unpivot reshape the set). Everything else
+        # is applied below as chained derived tables. Refusing up front, by name,
+        # keeps the original guarantee: rules never run against data that silently
+        # skipped a transformation.
+        self._assert_transformations_expressible()
+
         start = time.time()
-        table = self.source_table
+        table = self._transformation_source()
 
         # ── 1. Get source row count ──────────────────────────────────────
         count_sql = self._transpile(f"SELECT COUNT(*) FROM {table}")
@@ -473,6 +481,216 @@ class GenericSQLAdapter(EngineAdapter):
     # ═════════════════════════════════════════════════════════════════════
     # Phase 2: CTAS Materialization — good / bad / quarantine tables
     # ═════════════════════════════════════════════════════════════════════
+
+    # Structured transformations this adapter can express. Ops NOT listed here need
+    # a second relation (join/lookup) or set-reshaping (explode/pivot/unpivot) and are
+    # REFUSED by name rather than skipped — the whole reason this guard exists.
+    _SUPPORTED_TRANSFORMS = {
+        "rename", "select", "drop", "cast", "filter", "derive",
+        "coalesce", "trim", "lower", "upper", "deduplicate", "sql",
+    }
+
+    def _assert_transformations_expressible(self) -> None:
+        """Fail loudly on any transformation this adapter cannot render as SQL.
+
+        Named ops, not a blanket ban. The blanket refusal that preceded this rejected
+        every contract with a `transformations:` block — safe, but it made the adapter
+        unusable for the many contracts whose transformations are ordinary projections.
+        Only genuinely inexpressible ops are refused now, and they are refused BY NAME
+        so the message says what to do about it.
+        """
+        unsupported: list[str] = []
+        for trans in getattr(self.contract, "transformations", None) or []:
+            declared = [
+                f for f in type(trans).model_fields
+                if f != "phase" and getattr(trans, f, None) is not None
+            ] if hasattr(type(trans), "model_fields") else []
+            for op in declared:
+                if op not in self._SUPPORTED_TRANSFORMS:
+                    unsupported.append(op)
+
+        if unsupported:
+            raise NotImplementedError(
+                f"The '{self.engine_name}' engine cannot apply these transformations: "
+                f"{sorted(set(unsupported))}. They need a second relation or reshape the "
+                "row set, which this adapter does not express. Running anyway would "
+                "evaluate every quality rule against data that skipped them and report "
+                "success, so the run is refused. Either pre-materialise them as a view "
+                "and point source_table at it, or use an engine that applies them "
+                "(polars, duckdb, spark, snowflake, bigquery)."
+            )
+
+    def _quote(self, name: str) -> str:
+        """Quote an identifier for the target dialect (sqlglot normalises on transpile)."""
+        return f'"{name}"'
+
+    def _transformation_source(self) -> str:
+        """The FROM target for rule evaluation: the source table, or a derived table
+        wrapping the contract's transformations.
+
+        Chained subqueries, deliberately, rather than the temp tables the warehouse
+        engines use. Temp-table syntax and permissions vary across the dialects this
+        adapter claims (``CREATE TEMP`` vs ``CREATE TEMPORARY``; Trino barely has
+        them), whereas a derived table is plain ANSI SQL that needs no DDL rights at
+        all. It also composes with the existing rule SQL untouched: every
+        ``FROM {table}`` in execute() keeps working when *table* becomes
+        ``(SELECT ...) AS lakelogic_src``.
+        """
+        transformations = getattr(self.contract, "transformations", None) or []
+        if not transformations:
+            return self.source_table
+
+        current = self.source_table
+        for trans in transformations:
+            sql = self._transformation_to_sql(trans, current)
+            if sql:
+                current = f"({sql}) AS lakelogic_t"
+        return current
+
+    def _relation_columns(self, source: str) -> List[str]:
+        """Column names of any relation — a table OR a derived table.
+
+        ``_get_table_columns`` uses INFORMATION_SCHEMA, which cannot describe a
+        subquery, so it returns nothing once transformations start chaining. A
+        zero-row probe works on every DB-API driver and for every relation shape,
+        and returns no data.
+        """
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(self._transpile(f"SELECT * FROM {source} WHERE 1=0"))
+            return [d[0] for d in (cursor.description or [])]
+        except Exception as exc:
+            logger.warning(f"Could not resolve columns for {source}: {exc}")
+            return []
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+    def _transformation_to_sql(self, trans, source: str) -> Optional[str]:
+        """Render ONE transformation as a SELECT over *source*, or None if it is a no-op."""
+        cols = self._relation_columns(source)
+        if not cols:
+            # Without the column list a projection would be built as `SELECT  FROM`,
+            # which is a parser error rather than a wrong answer — but refuse
+            # explicitly so the reason is the missing schema, not the broken SQL.
+            raise RuntimeError(
+                f"Cannot apply transformations: no columns resolved for {source}. "
+                "The source relation must be readable by the supplied connection."
+            )
+
+        if getattr(trans, "sql", None):
+            # A raw SQL step names the contract dataset (or `source`) as its FROM.
+            body = str(trans.sql)
+            for alias in filter(None, [self.contract.dataset, "source"]):
+                body = re.sub(rf"\b{re.escape(alias)}\b", source, body)
+            return body
+
+        if getattr(trans, "rename", None):
+            pairs = dict(trans.rename.iter_pairs())
+            if not pairs:
+                return None
+            projected = [
+                f"{self._quote(c)} AS {self._quote(pairs[c])}" if c in pairs else self._quote(c)
+                for c in cols
+            ]
+            return f"SELECT {', '.join(projected)} FROM {source}"
+
+        if getattr(trans, "select", None):
+            keep = list(trans.select.columns or [])
+            return f"SELECT {', '.join(self._quote(c) for c in keep)} FROM {source}" if keep else None
+
+        if getattr(trans, "drop", None):
+            drop = set(trans.drop.columns or [])
+            keep = [c for c in cols if c not in drop]
+            return f"SELECT {', '.join(self._quote(c) for c in keep)} FROM {source}" if keep else None
+
+        if getattr(trans, "filter", None):
+            cond = trans.filter.sql
+            return f"SELECT * FROM {source} WHERE {cond}" if cond else None
+
+        if getattr(trans, "derive", None):
+            return (
+                f"SELECT *, ({trans.derive.sql}) AS {self._quote(trans.derive.field)} FROM {source}"
+            )
+
+        if getattr(trans, "cast", None):
+            casts = dict(trans.cast.columns or {})
+            if not casts:
+                return None
+            projected = [
+                f"CAST({self._quote(c)} AS {self._sql_cast_type(casts[c])}) AS {self._quote(c)}"
+                if c in casts else self._quote(c)
+                for c in cols
+            ]
+            return f"SELECT {', '.join(projected)} FROM {source}"
+
+        for op, fn in (
+            ("trim", "TRIM"),
+            ("lower", "LOWER"),
+            ("upper", "UPPER"),
+        ):
+            cfg = getattr(trans, op, None)
+            if cfg:
+                targets = set(cfg.fields or [])
+                projected = [
+                    f"{fn}({self._quote(c)}) AS {self._quote(c)}" if c in targets else self._quote(c)
+                    for c in cols
+                ]
+                return f"SELECT {', '.join(projected)} FROM {source}"
+
+        if getattr(trans, "coalesce", None):
+            cfg = trans.coalesce
+            srcs = [self._quote(c) for c in (cfg.sources or [])]
+            if not srcs:
+                return None
+            if cfg.default is not None:
+                srcs.append(repr(cfg.default) if isinstance(cfg.default, str) else str(cfg.default))
+            out = cfg.output or cfg.field
+            return f"SELECT *, COALESCE({', '.join(srcs)}) AS {self._quote(out)} FROM {source}"
+
+        if getattr(trans, "deduplicate", None):
+            cfg = trans.deduplicate
+            on = getattr(cfg, "on", None) or []
+            if not on:
+                return None
+            sort_by = getattr(cfg, "sort_by", None) or []
+            if not sort_by:
+                # Mirrors the runtime rule: an unordered dedup is non-deterministic,
+                # so it is refused rather than silently picking an arbitrary row.
+                raise NotImplementedError(
+                    "deduplicate requires sort_by — without it the surviving row is "
+                    "arbitrary and the result is not reproducible."
+                )
+            direction = "DESC" if str(getattr(cfg, "order", "desc")).lower() == "desc" else "ASC"
+            part = ", ".join(self._quote(c) for c in on)
+            order = ", ".join(f"{self._quote(c)} {direction}" for c in sort_by)
+            inner = (
+                f"SELECT *, ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {order}) "
+                f"AS lakelogic_rn FROM {source}"
+            )
+            keep = ", ".join(self._quote(c) for c in cols) if cols else "*"
+            return f"SELECT {keep} FROM ({inner}) AS lakelogic_d WHERE lakelogic_rn = 1"
+
+        return None
+
+    _SQL_CAST_TYPES = {
+        "string": "VARCHAR", "str": "VARCHAR", "text": "VARCHAR",
+        "int": "INTEGER", "integer": "INTEGER", "long": "BIGINT", "bigint": "BIGINT",
+        "float": "DOUBLE PRECISION", "double": "DOUBLE PRECISION", "decimal": "DOUBLE PRECISION",
+        "bool": "BOOLEAN", "boolean": "BOOLEAN",
+        "date": "DATE", "timestamp": "TIMESTAMP", "datetime": "TIMESTAMP",
+    }
+
+    def _sql_cast_type(self, type_name: str) -> str:
+        key = str(type_name).lower()
+        if key not in self._SQL_CAST_TYPES:
+            raise NotImplementedError(
+                f"cast to '{type_name}' is not supported on the {self.engine_name} engine. "
+                f"Supported: {sorted(self._SQL_CAST_TYPES)}."
+            )
+        return self._SQL_CAST_TYPES[key]
 
     def _build_pass_condition(self) -> str:
         """Build the combined WHERE clause for all row rules passing."""
