@@ -422,8 +422,19 @@ class SFTPConnector:
             kwargs["password"] = self.password
         return kwargs
 
-    async def _afetch(self, remote_path: str, file_pattern: str, dest_dir: str) -> List[str]:
-        """Download every matching file; return the local paths."""
+    async def _afetch(
+        self,
+        remote_path: str,
+        file_pattern: str,
+        dest_dir: str,
+        modified_since: Optional[float] = None,
+    ) -> List[str]:
+        """Download every matching file; return the local paths.
+
+        ``modified_since`` (epoch seconds) skips files whose mtime is not newer,
+        so a polled drop-folder re-downloads only what has arrived since the last
+        run. The mtime comes from the server's own stat, not from the local clock.
+        """
         import fnmatch
         import os
 
@@ -437,30 +448,52 @@ class SFTPConnector:
             async with conn.start_sftp_client() as sftp:
                 names = await sftp.listdir(remote_path)
                 matching = sorted(n for n in names if n not in (".", "..") and fnmatch.fnmatch(n, file_pattern))
-                logger.info(f"Found {len(matching)} file(s) matching {file_pattern} in {remote_path}")
+
+                skipped = 0
                 for name in matching:
                     remote_file = f"{remote_path.rstrip('/')}/{name}"
+                    if modified_since is not None:
+                        attrs = await sftp.stat(remote_file)
+                        mtime = getattr(attrs, "mtime", None)
+                        if mtime is not None and mtime <= modified_since:
+                            skipped += 1
+                            continue
                     local_file = os.path.join(dest_dir, name)
                     await sftp.get(remote_file, local_file)
                     local_paths.append(local_file)
+
+                # Say what was skipped: "0 new files" and "the pattern is wrong" look
+                # identical otherwise, and one of them is a broken pipeline.
+                logger.info(
+                    f"{len(matching)} file(s) matched {file_pattern} in {remote_path}; "
+                    f"downloaded {len(local_paths)}"
+                    + (f", skipped {skipped} not modified since watermark" if skipped else "")
+                )
         return local_paths
 
-    def fetch_files(self, remote_path: str, file_pattern: str = "*", dest_dir: Optional[str] = None) -> List[str]:
+    def fetch_files(
+        self,
+        remote_path: str,
+        file_pattern: str = "*",
+        dest_dir: Optional[str] = None,
+        modified_since: Optional[float] = None,
+    ) -> List[str]:
         """Download matching files and return their local paths (sync wrapper)."""
         import asyncio
         import tempfile
 
         dest = dest_dir or tempfile.mkdtemp(prefix="lakelogic-sftp-")
+        coro = lambda: self._afetch(remote_path, file_pattern, dest, modified_since)  # noqa: E731
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self._afetch(remote_path, file_pattern, dest))
+            return asyncio.run(coro())
         # Already inside a loop (notebook/async host): run in a worker thread so we
         # never call asyncio.run() on a running loop.
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, self._afetch(remote_path, file_pattern, dest)).result()
+            return pool.submit(asyncio.run, coro()).result()
 
     def extract_files(
         self,
@@ -468,13 +501,14 @@ class SFTPConnector:
         file_pattern: str = "*",
         file_format: str = "csv",
         as_polars: bool = True,
+        modified_since: Optional[float] = None,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Extract matching files from the SFTP server into one DataFrame."""
         readers = {"csv": pd.read_csv, "json": pd.read_json, "parquet": pd.read_parquet}
         if file_format not in readers:
             raise ValueError(f"Unsupported file format: {file_format}. Supported: {sorted(readers)}")
 
-        local_paths = self.fetch_files(remote_path, file_pattern)
+        local_paths = self.fetch_files(remote_path, file_pattern, modified_since=modified_since)
         if not local_paths:
             # Empty is a legitimate outcome for a polled drop-folder, but it must be
             # visible rather than silently yielding an empty frame.

@@ -218,3 +218,52 @@ def test_a_path_without_a_host_is_refused(sftp_server):
     with pytest.raises(ValueError) as exc:
         DataProcessor(c, engine="polars").run_source()
     assert "host" in str(exc.value).lower()
+
+
+# ── incremental by modification time ─────────────────────────────────────────
+
+
+def test_only_files_modified_since_the_watermark_are_downloaded(sftp_server, tmp_path):
+    """The claim "incremental extraction by modification time" was in the docstring
+    before any code implemented it. Pinned by execution against a real server: an old
+    file is skipped, a newer one is taken."""
+    import os
+    import time
+
+    root = sftp_server.root
+    old, new = root / "orders_1.csv", root / "orders_2.csv"
+    # Push orders_1 into the past and orders_2 into the future relative to the mark.
+    os.utime(old, (1_000_000, 1_000_000))
+    os.utime(new, (3_000_000, 3_000_000))
+
+    paths = _connector(sftp_server).fetch_files("/", "*.csv", modified_since=2_000_000)
+
+    assert len(paths) == 1
+    assert paths[0].endswith("orders_2.csv")
+
+
+def test_no_watermark_takes_everything(sftp_server):
+    """First run must not silently skip files for want of a watermark."""
+    paths = _connector(sftp_server).fetch_files("/", "*.csv", modified_since=None)
+    assert len(paths) == 2
+
+
+def test_skipped_files_are_reported(sftp_server):
+    """"0 new files" and "the pattern is wrong" look identical in silence, and one of
+    them is a broken pipeline."""
+    import os
+
+    from loguru import logger
+
+    os.utime(sftp_server.root / "orders_1.csv", (1_000_000, 1_000_000))
+    os.utime(sftp_server.root / "orders_2.csv", (1_000_000, 1_000_000))
+
+    records: list[str] = []
+    sink = logger.add(lambda m: records.append(str(m)), level="INFO", format="{message}")
+    try:
+        paths = _connector(sftp_server).fetch_files("/", "*.csv", modified_since=2_000_000)
+    finally:
+        logger.remove(sink)
+
+    assert paths == []
+    assert any("skipped 2 not modified since watermark" in r for r in records), records

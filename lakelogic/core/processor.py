@@ -5336,8 +5336,22 @@ class DataProcessor:
             known_hosts=options["known_hosts"] if "known_hosts" in options else "",
         )
 
+        # `load_mode: incremental` re-downloads only files modified since the last
+        # run, using the server's own mtime. Without it a polled drop-folder re-reads
+        # every file it has ever received, every run.
+        modified_since = None
+        if str(getattr(src, "load_mode", "full")).lower() == "incremental":
+            modified_since = self._get_last_source_watermark()
+            logger.info(
+                f"SFTP incremental: only files modified after {modified_since}"
+                if modified_since is not None
+                else "SFTP incremental: first run, taking every matching file."
+            )
+
         logger.info(f"Running SFTP source: {host}:{parsed.port or 22}{remote_dir} pattern={pattern} format={fmt}")
-        df = connector.extract_files(remote_dir, file_pattern=pattern, file_format=fmt)
+        df = connector.extract_files(
+            remote_dir, file_pattern=pattern, file_format=fmt, modified_since=modified_since
+        )
 
         return self.run(df, source_path=f"sftp://{host}{remote_dir}")
 
