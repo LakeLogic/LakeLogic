@@ -1491,12 +1491,13 @@ def _inject_unknown_member_spark(  # pragma: no cover
         "_lakelogic_contract_name",
     }
     _lineage_values: Dict[str, Any] = {"_lakelogic_source": "Unknown"}
-    if result.count() > 0:
-        first_row = result.first()
-        if first_row:
-            for lc in _lineage_cols:
-                if lc in result.columns:
-                    _lineage_values[lc] = first_row[lc]
+    # `first()` returns None on an empty frame, so the previous `count() > 0` guard
+    # bought nothing and cost a full scan to learn what first() reports for free.
+    first_row = result.first()
+    if first_row:
+        for lc in _lineage_cols:
+            if lc in result.columns:
+                _lineage_values[lc] = first_row[lc]
 
     # Build the unknown row dict
     spark = result.sparkSession
@@ -1613,12 +1614,12 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
         "_lakelogic_contract_name",
     }
     _lineage_values = {"_lakelogic_source": "Unknown"}
-    if existing.count() > 0:
-        first_row = existing.first()
-        if first_row:
-            for lc in _lineage_cols:
-                if lc in existing.columns:
-                    _lineage_values[lc] = first_row[lc]
+    # Same as above: first() alone answers this; count() was a full scan for nothing.
+    first_row = existing.first()
+    if first_row:
+        for lc in _lineage_cols:
+            if lc in existing.columns:
+                _lineage_values[lc] = first_row[lc]
 
     # Build the unknown row
     unknown_row = {}
@@ -2706,7 +2707,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
     except Exception:
         pass
 
-    if existing_df is None or existing_df.count() == 0:
+    if existing_df is None or existing_df.isEmpty():
         # Initial load represents pre-existing history: stamp effective_from with
         # the configured start-of-time sentinel (default 1900-01-01) so the first
         # version reads as "valid since the beginning", matching the polars/pandas
@@ -2807,7 +2808,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
         .select(*primary_key)
         .distinct()
     )
-    if late_keys.count() > 0:
+    if not late_keys.isEmpty():
         late_result = _spark_scd2_late_arrivals(
             existing_df,
             incoming_df,
