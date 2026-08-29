@@ -267,3 +267,91 @@ def test_skipped_files_are_reported(sftp_server):
 
     assert paths == []
     assert any("skipped 2 not modified since watermark" in r for r in records), records
+
+
+# ── push: delivering a frame to an SFTP server ───────────────────────────────
+
+
+def test_a_frame_is_delivered_to_the_server(sftp_server):
+    """`sftp://` as a materialization target. Before this it fell through to the
+    parquet default and wrote LOCALLY to a directory named "sftp:" — succeeding
+    quietly and delivering nothing."""
+    from lakelogic.core.materialization import _write_frame
+
+    df = pl.DataFrame({"id": [1, 2], "status": ["ok", "ok"]})
+    target = f"sftp://t@127.0.0.1:{sftp_server.port}/out.csv"
+    _write_frame(df, target, "csv", storage_options={"known_hosts": None})
+
+    delivered = sftp_server.root / "out.csv"
+    assert delivered.exists()
+    assert "id,status" in delivered.read_text()
+
+
+def test_delivery_is_atomic_no_tmp_file_survives(sftp_server):
+    """The file is staged as <name>.tmp and renamed. A partner polling the folder
+    must never see the staging name left behind."""
+    from lakelogic.core.materialization import _write_frame
+
+    _write_frame(
+        pl.DataFrame({"id": [1]}),
+        f"sftp://t@127.0.0.1:{sftp_server.port}/atomic.csv",
+        "csv",
+        storage_options={"known_hosts": None},
+    )
+
+    assert (sftp_server.root / "atomic.csv").exists()
+    assert not (sftp_server.root / "atomic.csv.tmp").exists()
+
+
+def test_a_rerun_replaces_rather_than_duplicates(sftp_server):
+    """Deterministic naming is the point: a retry after a failure must REPLACE the
+    delivery, not leave the partner with two order files."""
+    from lakelogic.core.materialization import _write_frame
+
+    target = f"sftp://t@127.0.0.1:{sftp_server.port}/orders_out.csv"
+    for rows in ([1], [1, 2, 3]):
+        _write_frame(pl.DataFrame({"id": rows}), target, "csv", storage_options={"known_hosts": None})
+
+    delivered = [p.name for p in sftp_server.root.glob("orders_out*")]
+    assert delivered == ["orders_out.csv"], delivered
+    assert len((sftp_server.root / "orders_out.csv").read_text().strip().splitlines()) == 4  # header + 3
+
+
+def test_a_directory_target_is_refused(sftp_server):
+    """Without a filename a retry cannot replace its own delivery."""
+    from lakelogic.core.materialization import _write_frame
+
+    with pytest.raises(ValueError) as exc:
+        _write_frame(
+            pl.DataFrame({"id": [1]}),
+            f"sftp://t@127.0.0.1:{sftp_server.port}/outbound/",
+            "csv",
+            storage_options={"known_hosts": None},
+        )
+    assert "deterministic filename" in str(exc.value)
+
+
+def test_an_undeliverable_format_is_refused(sftp_server):
+    from lakelogic.core.materialization import _write_frame
+
+    with pytest.raises(ValueError) as exc:
+        _write_frame(
+            pl.DataFrame({"id": [1]}),
+            f"sftp://t@127.0.0.1:{sftp_server.port}/x.delta",
+            "delta",
+            storage_options={"known_hosts": None},
+        )
+    assert "delta" in str(exc.value)
+
+
+def test_a_password_in_the_target_is_refused(sftp_server):
+    from lakelogic.core.materialization import _write_frame
+
+    with pytest.raises(ValueError) as exc:
+        _write_frame(
+            pl.DataFrame({"id": [1]}),
+            f"sftp://t:secret@127.0.0.1:{sftp_server.port}/x.csv",
+            "csv",
+            storage_options={"known_hosts": None},
+        )
+    assert "password" in str(exc.value).lower()

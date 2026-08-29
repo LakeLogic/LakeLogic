@@ -526,8 +526,58 @@ class SFTPConnector:
         logger.info(f"Total records extracted: {len(combined)}")
         return pl.from_pandas(combined) if as_polars else combined
 
+    async def _aput(self, local_paths: List[str], remote_dir: str, atomic: bool = True) -> List[str]:
+        """Upload files; return the final remote paths.
+
+        Atomic by default: each file goes up as ``<name>.tmp`` and is renamed into
+        place once the transfer completes. A partner polling the drop-folder would
+        otherwise read a half-written file and process a truncated batch — the
+        failure is silent on their side and looks like missing data on ours.
+        """
+        import os
+
+        try:
+            import asyncssh
+        except ImportError:
+            raise ImportError("asyncssh is not installed. Install with: pip install asyncssh")
+
+        remote_paths: List[str] = []
+        async with asyncssh.connect(**self._connect_kwargs()) as conn:
+            async with conn.start_sftp_client() as sftp:
+                for local in local_paths:
+                    name = os.path.basename(local)
+                    final = f"{remote_dir.rstrip('/')}/{name}"
+                    staged = f"{final}.tmp" if atomic else final
+                    await sftp.put(local, staged)
+                    if atomic:
+                        # Overwrite a leftover from a previous failed run rather than
+                        # letting the rename fail on an existing name.
+                        try:
+                            await sftp.remove(final)
+                        except Exception:
+                            pass
+                        await sftp.rename(staged, final)
+                    remote_paths.append(final)
+                    logger.info(f"Uploaded {name} -> {final}" + (" (atomic rename)" if atomic else ""))
+        return remote_paths
+
+    def put_files(self, local_paths: List[str], remote_dir: str, atomic: bool = True) -> List[str]:
+        """Upload local files to *remote_dir* (sync wrapper). Returns remote paths."""
+        import asyncio
+
+        coro = lambda: self._aput(local_paths, remote_dir, atomic)  # noqa: E731
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro())
+
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro()).result()
+
     def close(self):
-        """No persistent connection is held — each fetch opens and closes its own."""
+        """No persistent connection is held — each transfer opens and closes its own."""
         return None
 
 
