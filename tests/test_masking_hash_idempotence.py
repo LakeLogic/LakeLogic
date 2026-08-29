@@ -204,9 +204,7 @@ def test_spark_hash_guard_is_a_native_expression_not_a_udf():
     # Assert on CODE, not prose. The branch carries a comment saying "no UDF and no
     # collect", so a naive substring check on the raw source finds the very words it
     # is looking for and fails on its own documentation.
-    code = " ".join(
-        line for line in hash_branch.splitlines() if not line.strip().startswith("#")
-    ).lower()
+    code = " ".join(line for line in hash_branch.splitlines() if not line.strip().startswith("#")).lower()
 
     assert "rlike" in code
     assert "f.when" in code

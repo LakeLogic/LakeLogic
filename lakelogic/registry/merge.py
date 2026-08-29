@@ -58,8 +58,9 @@ def _leaf_provenance(
             dv, sv = domain_val[k], system_val[k]
             if isinstance(dv, dict) and isinstance(sv, dict):
                 prov[path] = Provenance(path, Origin.BOTH, Reason.DEEP_MERGED, system_file)
-                _leaf_provenance(dv, sv, path, prov, system_file, domain_file,
-                                 child_origin=child_origin, parent_origin=parent_origin)
+                _leaf_provenance(
+                    dv, sv, path, prov, system_file, domain_file, child_origin=child_origin, parent_origin=parent_origin
+                )
             else:
                 prov[path] = Provenance(path, child_origin, Reason.OVERRIDDEN, system_file)
 
@@ -91,21 +92,45 @@ def merge_scope(
         merged = dict(inherited)
         if inherited:
             prov[key] = Provenance(key, parent_origin, Reason.INHERITED, inherited_file)
-            _leaf_provenance(inherited, {}, key, prov, declared_file, inherited_file,
-                             child_origin=child_origin, parent_origin=parent_origin)
+            _leaf_provenance(
+                inherited,
+                {},
+                key,
+                prov,
+                declared_file,
+                inherited_file,
+                child_origin=child_origin,
+                parent_origin=parent_origin,
+            )
         return merged, prov
 
     if not inherited:
         merged = dict(declared)
         prov[key] = Provenance(key, child_origin, Reason.DECLARED, declared_file)
-        _leaf_provenance({}, declared, key, prov, declared_file, inherited_file,
-                         child_origin=child_origin, parent_origin=parent_origin)
+        _leaf_provenance(
+            {},
+            declared,
+            key,
+            prov,
+            declared_file,
+            inherited_file,
+            child_origin=child_origin,
+            parent_origin=parent_origin,
+        )
         return merged, prov
 
     merged = _deep_merge(inherited, declared)
     prov[key] = Provenance(key, Origin.BOTH, Reason.DEEP_MERGED, declared_file)
-    _leaf_provenance(inherited, declared, key, prov, declared_file, inherited_file,
-                     child_origin=child_origin, parent_origin=parent_origin)
+    _leaf_provenance(
+        inherited,
+        declared,
+        key,
+        prov,
+        declared_file,
+        inherited_file,
+        child_origin=child_origin,
+        parent_origin=parent_origin,
+    )
     return merged, prov
 
 

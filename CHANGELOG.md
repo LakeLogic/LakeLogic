@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.46.0] — 2026-08-29
+
+### Added
+
+- **processor**: Emit partition-presence telemetry
+
+### CI/CD
+
+- Fix PR gate — ruff E501 wraps, pandas in dev deps, changelog push rebase
+
+### Fixed
+
+- _safe_partition_value must replace both / and \ on every OS
 ## [1.45.0] — 2026-08-23
 
 ### Added
@@ -610,6 +623,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.46.0]: https://github.com/lakelogic/LakeLogic/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/lakelogic/LakeLogic/compare/v1.44.0...v1.45.0
 [1.43.0]: https://github.com/lakelogic/LakeLogic/compare/v1.42.0...v1.43.0
 [1.42.0]: https://github.com/lakelogic/LakeLogic/compare/v1.41.0...v1.42.0

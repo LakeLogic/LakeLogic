@@ -2201,9 +2201,7 @@ class LakehousePipeline:
             if not is_restatement_run(reprocess_from, reprocess_to, reprocess_column, reprocess_values):
                 return
 
-            restated = [
-                (r["layer"], r["contract"]) for r in summary.results if r.get("status") == "success"
-            ]
+            restated = [(r["layer"], r["contract"]) for r in summary.results if r.get("status") == "success"]
             in_run_scope = [(c.layer, c.entity) for c in all_active if c.layer in target_set]
 
             report = build_restatement_impact(all_active, restated, in_run_scope)

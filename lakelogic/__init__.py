@@ -42,7 +42,7 @@ from lakelogic.engines.cloud_credentials import (
 from lakelogic.engines.base import ENGINE_DIALECT_MAP
 from lakelogic.engines.generic_sql import GenericSQLAdapter
 
-__version__ = "1.45.0"
+__version__ = "1.46.0"
 
 
 class HelpTopic:

@@ -26,7 +26,6 @@ from lakelogic.registry.ownership import (
 )
 from lakelogic.registry.provenance import Origin, Reason
 
-
 # ── AC-1 / AC-3: schema ──────────────────────────────────────────────────────
 
 
@@ -147,8 +146,8 @@ def test_system_override_keeps_uninvolved_siblings():
         {"ownership": DOMAIN_OWNERSHIP},
     )
     bo = merged["ownership"]["business_owner"]
-    assert bo["name"] == "Sofia Reyes"          # overridden
-    assert bo["group"] == "marketplace-leads"   # inherited, not lost
+    assert bo["name"] == "Sofia Reyes"  # overridden
+    assert bo["group"] == "marketplace-leads"  # inherited, not lost
     assert prov["ownership.business_owner.name"].origin is Origin.SYSTEM
     assert prov["ownership.business_owner.name"].reason is Reason.OVERRIDDEN
     assert prov["ownership.business_owner.group"].origin is Origin.DOMAIN
@@ -402,7 +401,9 @@ def test_contract_without_ownership_still_inherits(tmp_path):
     from lakelogic.core.registry import DomainRegistry
 
     sp = _mesh(
-        tmp_path, _DOMAIN_YAML, _SYSTEM_YAML,
+        tmp_path,
+        _DOMAIN_YAML,
+        _SYSTEM_YAML,
         {"fact_trip_daily_kpis.yaml": "name: fact_trip_daily_kpis\nlayer: gold\n"},
     )
     registry = DomainRegistry.from_yaml(str(sp))
@@ -476,6 +477,8 @@ def test_own002_contract_can_supply_the_missing_owner():
     from lakelogic.core.contract_lint import GovernanceContext
 
     ctx = GovernanceContext(policy={"ownership": {"technical_owner": {"group": "de"}}})
-    raw = {"name": "c", "ownership": {"business_owner": {"name": "M", "group": "g",
-                                                         "accountable_for": ["blocking_questions"]}}}
+    raw = {
+        "name": "c",
+        "ownership": {"business_owner": {"name": "M", "group": "g", "accountable_for": ["blocking_questions"]}},
+    }
     assert _own_findings(raw, ctx) == []

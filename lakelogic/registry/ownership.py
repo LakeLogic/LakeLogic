@@ -40,12 +40,12 @@ class QuestionCategory(str, Enum):
     it". Both are kept.
     """
 
-    BLOCKING_QUESTIONS = "blocking_questions"   # anything that holds a design
-    BUSINESS_SEMANTICS = "business_semantics"   # what does this field/number mean
-    PII_SIGNOFF = "pii_signoff"                 # classification and masking
-    COST = "cost"                               # budget and per-run spend
-    SOURCE_AUTHORITY = "source_authority"       # which source field is authoritative
-    OPERATIONAL = "operational"                 # why did this run fail
+    BLOCKING_QUESTIONS = "blocking_questions"  # anything that holds a design
+    BUSINESS_SEMANTICS = "business_semantics"  # what does this field/number mean
+    PII_SIGNOFF = "pii_signoff"  # classification and masking
+    COST = "cost"  # budget and per-run spend
+    SOURCE_AUTHORITY = "source_authority"  # which source field is authoritative
+    OPERATIONAL = "operational"  # why did this run fail
 
 
 CATEGORIES = frozenset(c.value for c in QuestionCategory)
@@ -90,8 +90,16 @@ class Party:
     identity at all is a governance hole wearing a hat.
     """
 
-    __slots__ = ("name", "user", "group", "accountable_for", "notify",
-                 "may_waive_questions", "escalation_policy", "extra")
+    __slots__ = (
+        "name",
+        "user",
+        "group",
+        "accountable_for",
+        "notify",
+        "may_waive_questions",
+        "escalation_policy",
+        "extra",
+    )
 
     def __init__(
         self,
@@ -124,19 +132,15 @@ class Party:
         so a failure points at the file and key, not just the shape.
         """
         if not isinstance(raw, dict):
-            raise OwnershipError(
-                f"{where}: expected a mapping of owner fields, got {type(raw).__name__}"
-            )
+            raise OwnershipError(f"{where}: expected a mapping of owner fields, got {type(raw).__name__}")
 
-        known = {"name", "user", "group", "accountable_for", "notify",
-                 "may_waive_questions", "escalation_policy"}
+        known = {"name", "user", "group", "accountable_for", "notify", "may_waive_questions", "escalation_policy"}
         accountable = raw.get("accountable_for") or []
         if isinstance(accountable, str):
             accountable = [accountable]
         if not isinstance(accountable, (list, tuple)):
             raise OwnershipError(
-                f"{where}.accountable_for: expected a list of categories, "
-                f"got {type(accountable).__name__}"
+                f"{where}.accountable_for: expected a list of categories, got {type(accountable).__name__}"
             )
 
         bad = [c for c in accountable if str(c) not in CATEGORIES]
@@ -361,9 +365,7 @@ def resolve_route(
     """
     cat = category.value if isinstance(category, QuestionCategory) else str(category)
     if cat not in CATEGORIES:
-        raise OwnershipError(
-            f"unknown question category {cat!r}. Legal values: {sorted(CATEGORIES)}"
-        )
+        raise OwnershipError(f"unknown question category {cat!r}. Legal values: {sorted(CATEGORIES)}")
 
     scopes: List[Tuple[str, Ownership]] = []
     for scope_name, raw in (("contract", contract), ("system", system), ("domain", domain)):

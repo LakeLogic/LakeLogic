@@ -109,7 +109,6 @@ class DomainManifestV1(_StrictManifest):
     materialization: Dict[str, Any] = Field(default_factory=dict)
     server: Dict[str, Any] = Field(default_factory=dict)
 
-
     @model_validator(mode="after")
     def validate_ownership_roles(self):
         """Check the ownership role blocks we define, leave the rest free-form.
@@ -124,6 +123,7 @@ class DomainManifestV1(_StrictManifest):
         except OwnershipError as exc:
             raise ValueError(str(exc)) from exc
         return self
+
 
 class SystemManifestV1(_StrictManifest):
     """A raw ``_system.yaml`` — one source/system, its storage/environment wiring, and the

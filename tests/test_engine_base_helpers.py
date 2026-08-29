@@ -291,7 +291,7 @@ def test_referential_integrity_with_the_documented_wrong_keys_warns_loudly(caplo
                 referential_integrity={
                     "field": "customer_id",
                     "contract": "silver_customers",  # not read
-                    "column": "customer_id",         # read as `field`, never as `key`
+                    "column": "customer_id",  # read as `field`, never as `key`
                     "severity": "critical",
                 }
             )
