@@ -61,6 +61,76 @@ def assert_link_subset_supported(links: Any, engine_name: str) -> None:
             )
 
 
+def parse_struct_members(type_name: Any) -> Optional[List[str]]:
+    """Member names declared by a ``struct<a:int,b:string>`` type, else None.
+
+    Drift detection compares TOP-LEVEL column names, so a struct that lost half its
+    members still satisfied ``struct<a:int,b:string>`` — the declaration was accepted
+    as a label rather than checked as a shape. This parses the declared members so
+    the check can reach inside.
+
+    Nested angle brackets are tracked by depth, so ``struct<a:struct<x:int>,b:string>``
+    yields ``["a", "b"]`` rather than splitting on the inner comma.
+    """
+    text = str(type_name or "").strip()
+    if not text.lower().startswith("struct<") or not text.endswith(">"):
+        return None
+    inner = text[len("struct<") : -1]
+
+    members: List[str] = []
+    depth = 0
+    current = ""
+    for ch in inner:
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+        if ch == "," and depth == 0:
+            members.append(current)
+            current = ""
+        else:
+            current += ch
+    if current.strip():
+        members.append(current)
+
+    names = []
+    for part in members:
+        name = part.split(":", 1)[0].strip()
+        if name:
+            names.append(name)
+    return names or None
+
+
+def struct_drift_errors(contract_fields: Any, actual_members: Any) -> List[str]:
+    """Schema errors for declared struct members that are absent from the data.
+
+    ``actual_members`` maps column name -> the member names actually present (or
+    None when the column is not a struct at all).
+
+    A struct's shape is uniform across the batch, so this is a schema-level breach,
+    not a per-row one — but it is reported through the same schema-error channel so
+    the offending rows are quarantined with attribution rather than accepted.
+    """
+    errors: List[str] = []
+    for field in contract_fields or []:
+        declared = parse_struct_members(getattr(field, "type", None))
+        if not declared:
+            continue
+        name = getattr(field, "name", None)
+        if name not in (actual_members or {}):
+            continue
+        present = actual_members.get(name)
+        if present is None:
+            errors.append(f"Field '{name}' is declared struct<...> but the data is not a struct")
+            continue
+        absent = [m for m in declared if m not in present]
+        if absent:
+            errors.append(
+                f"Struct '{name}' is missing declared member(s): {', '.join(absent)}"
+            )
+    return errors
+
+
 class EngineAdapter(ABC):
     """
     Abstract Base Class for all execution engines.

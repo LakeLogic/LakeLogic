@@ -276,6 +276,82 @@ class SparkAdapter(EngineAdapter):
             except Exception as e:
                 logger.error(f"Error executing dataset rule '{rule.name}': {e}")
 
+    # OLC cast name -> Spark SQL type. Previously inline and missing decimal, date,
+    # timestamp and datetime — and an unmapped cast silently fell back to "string",
+    # so a column declared `cast: decimal` arrived as text and nothing said so.
+    _SPARK_CAST_TYPES = {
+        "float": "double",
+        "double": "double",
+        "int": "int",
+        "integer": "int",
+        "long": "bigint",
+        "bigint": "bigint",
+        "bool": "boolean",
+        "boolean": "boolean",
+        "string": "string",
+        "str": "string",
+        # `double`, not decimal(38,9): DuckDB maps decimal -> DOUBLE and Polars maps
+        # it -> Float64, so a true DecimalType here would make Spark the odd engine
+        # out — the same contract yielding Decimal('12.340000000') on one engine and
+        # 12.34 on the other two. Cross-engine agreement is the property this corpus
+        # exists to protect. Revisit together with the other two if exact decimal
+        # semantics are ever needed, so all three move at once.
+        "decimal": "double",
+        "date": "date",
+        "timestamp": "timestamp",
+        "datetime": "timestamp",
+    }
+
+    @staticmethod
+    def _json_path_for_spark(path: str) -> str:
+        """Rewrite a quoted JSON path key into the bracket form Spark understands.
+
+        ``get_json_object`` does not accept ``$."my key"``: it returns NULL and
+        reports nothing, so a key containing a space was indistinguishable from a
+        key that was absent — silently empty data, the worst of the three engines'
+        behaviours. Spark does accept ``$['my key']``, so translate rather than
+        leaving the user with a column that is quietly always NULL.
+        """
+        import re as _re
+
+        return _re.sub(r'\.\"([^\"]+)\"', lambda m: f"['{m.group(1)}']", str(path))
+
+    def _apply_json_extract(self, current_df: Any, cfg: Any) -> Any:
+        """Project a JSON path into a column. Shared by the pre and post passes.
+
+        This lived only in the post pass, so a ``phase: pre`` json_extract was
+        dropped in silence — the column arrived NULL and pre-phase rules then failed
+        on data that was never extracted.
+
+        ``try_cast`` rather than ``cast``: Spark's ANSI cast ABORTS the whole run on
+        one value that does not fit the declared type. For a document source landing
+        into bronze, one bad field in a million records would destroy the batch.
+        """
+        from pyspark.sql import functions as F
+
+        extracted = F.get_json_object(F.col(cfg.source), self._json_path_for_spark(cfg.path))
+
+        if cfg.cast:
+            key = str(cfg.cast).lower()
+            spark_type = self._SPARK_CAST_TYPES.get(key)
+            if spark_type is None:
+                # Never silently downgrade to string — say which cast was not applied.
+                raise NotImplementedError(
+                    f"json_extract cast '{cfg.cast}' is not supported on the Spark engine. "
+                    f"Supported: {sorted(set(self._SPARK_CAST_TYPES))}. Refusing rather "
+                    "than storing the raw string under a column declared as "
+                    f"'{cfg.cast}'."
+                )
+            try:
+                extracted = extracted.try_cast(spark_type)
+            except AttributeError:  # pragma: no cover - Spark < 4.0
+                extracted = F.expr(
+                    f"try_cast(get_json_object({cfg.source}, "
+                    f"'{self._json_path_for_spark(cfg.path)}') as {spark_type})"
+                )
+
+        return current_df.withColumn(cfg.field, extracted)
+
     def _apply_pre_transformations(self, df: Any) -> Any:
         """
         Apply pre-processing transformations (rename, filter, deduplicate, and cleanup helpers).
@@ -337,6 +413,17 @@ class SparkAdapter(EngineAdapter):
                         current_df.createOrReplaceTempView(self.contract.dataset)
                     current_df = current_df.sparkSession.sql(unpivot_sql)
                     existing = set(current_df.columns)
+                continue
+
+            # JSON extract in the PRE phase. This branch did not exist, so a
+            # `phase: pre` json_extract was dropped silently: the declared column
+            # arrived NULL and pre-phase rules quarantined rows for failing a check
+            # on data that had never been extracted.
+            if getattr(trans, "json_extract", None) and trans_phase == "pre":
+                cfg = trans.json_extract
+                logger.debug(f"Pre-Transform [JSONExtract]: {cfg.source} {cfg.path} -> {cfg.field}")
+                current_df = self._apply_json_extract(current_df, cfg)
+                existing = set(current_df.columns)
                 continue
 
             if trans.rename:
@@ -681,20 +768,7 @@ class SparkAdapter(EngineAdapter):
                 logger.debug(f"Post-Transform [JsonExtract]: {cfg.source} -> {cfg.field}")
                 from pyspark.sql import functions as F
 
-                extracted = F.get_json_object(F.col(cfg.source), cfg.path)
-                if cfg.cast:
-                    spark_type = {
-                        "float": "double",
-                        "double": "double",
-                        "int": "int",
-                        "integer": "int",
-                        "long": "bigint",
-                        "bool": "boolean",
-                        "boolean": "boolean",
-                        "string": "string",
-                    }.get(str(cfg.cast).lower(), "string")
-                    extracted = extracted.cast(spark_type)
-                current_df = current_df.withColumn(cfg.field, extracted)
+                current_df = self._apply_json_extract(current_df, cfg)
             elif getattr(trans, "date_range_explode", None):
                 cfg = trans.date_range_explode
                 logger.debug(f"Post-Transform [DateRangeExplode]: {cfg.start_col}..{cfg.end_col} => {cfg.output}")
@@ -936,6 +1010,17 @@ class SparkAdapter(EngineAdapter):
                 col_expr = F.lit(None)
 
             spark_type = "string" if cast_to_string else self._to_spark_type(field.type)
+
+            # Nested (struct/array/map) -> string must serialise to JSON, not to
+            # Spark's display form. A plain cast renders a struct POSITIONALLY
+            # ('{1, x}') — field names discarded, string members unquoted — which is
+            # neither valid JSON nor round-trippable. to_json() preserves the keys.
+            if spark_type == "string" and field.name in existing:
+                _dtype = dict(df.dtypes).get(field.name, "")
+                if _dtype.startswith(("struct<", "array<", "map<")):
+                    select_exprs.append(F.to_json(F.col(field.name)).alias(field.name))
+                    continue
+
             if spark_type:
                 if field.name in existing and not cast_to_string:
                     err_col = f"__type_err_{field.name}"

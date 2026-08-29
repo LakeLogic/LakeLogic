@@ -286,12 +286,46 @@ class TransformationRename(_olcn.TransformationRename):
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
+    # Keys that carry rename configuration rather than a rename PAIR. Anything else
+    # in extras is treated as the `{old: new}` shorthand.
+    _RENAME_CONFIG_KEYS = {"from_name", "to_name", "mappings", "from", "to", "phase"}
+
     def iter_pairs(self) -> List[tuple[str, str]]:
         if self.mappings:
             return [(src, dst) for src, dst in self.mappings.items() if src and dst]
         if self.from_name and self.to_name:
             return [(self.from_name, self.to_name)]
-        return []
+
+        # Bare shorthand: `rename: {old_status: status}`.
+        #
+        # The model allows extra keys, so this form VALIDATED cleanly and then did
+        # nothing at all — every engine calls iter_pairs(), which only knew about
+        # `mappings` and `from_name`/`to_name`. The column was never renamed, and any
+        # rule referencing the new name failed on a column that did not exist. A
+        # contract that silently does nothing is worse than one that is rejected.
+        extras = self.model_extra or {}
+        pairs = [
+            (src, dst)
+            for src, dst in extras.items()
+            if src
+            and isinstance(dst, str)
+            and dst
+            and src not in self._RENAME_CONFIG_KEYS
+        ]
+        if pairs:
+            # Applied, but NOT canonical OLC: the strict model rejects it outright
+            # ("unknown key(s) not permitted ... transformations.rename.old_status").
+            # So this form works on the lenient runtime and fails the spec gate —
+            # exactly the kind of divergence a user should hear about at the point of
+            # use, not at CI. Doing what they meant AND naming the constraint beats
+            # both silently ignoring it and silently accepting it.
+            logger.warning(
+                f"rename uses the non-canonical shorthand {{{', '.join(f'{s}: {d}' for s, d in pairs)}}}. "
+                "It is applied here, but strict/canonical OLC validation REJECTS it. "
+                "Use `rename: {mappings: {old: new}}` (or from_name/to_name) to be "
+                "portable."
+            )
+        return pairs
 
 
 class TransformationFilter(_olcn.TransformationFilter):

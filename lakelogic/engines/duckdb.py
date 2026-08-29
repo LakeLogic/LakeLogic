@@ -17,7 +17,7 @@ from typing import Any, List, Tuple
 
 from loguru import logger
 
-from lakelogic.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter, struct_drift_errors
 
 
 def _read_ducklake_table_arrow(fq_table: str, columns=None):
@@ -348,7 +348,14 @@ class DuckDBAdapter(EngineAdapter):
                 "timestamp": "TIMESTAMP",
                 "datetime": "TIMESTAMP",
             }
-            cols = [row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()]
+            _describe = self.con.sql(f"SELECT column_name, column_type FROM (DESCRIBE {table_name})").fetchall()
+            cols = [row[0] for row in _describe]
+            # Which columns physically hold a nested value — needed because such a
+            # column CASTs to a DuckDB literal rather than to JSON (see below).
+            _nested_cols = {
+                row[0]: str(row[1] or "").upper().startswith(("STRUCT(", "MAP(")) or str(row[1] or "").endswith("[]")
+                for row in _describe
+            }
             casts = []
             self._type_err_cols = []
             for col in cols:
@@ -356,6 +363,15 @@ class DuckDBAdapter(EngineAdapter):
                 if matched_field:
                     field_type = (matched_field.type or "").lower().split("(")[0].strip()
                     duckdb_type = _TYPE_MAP.get(field_type)
+                    # STRUCT/LIST -> VARCHAR must serialise to JSON, not to DuckDB's
+                    # display form. A plain CAST renders a struct literal
+                    # ("{'a': 1, 'b': x}") with single-quoted keys and unquoted string
+                    # members — not valid JSON, so a nested value stored in a string
+                    # column cannot be read back by anything. to_json() round-trips.
+                    if duckdb_type == "VARCHAR" and _nested_cols.get(col):
+                        casts.append(f'to_json("{col}") AS "{col}"')
+                        continue
+
                     if duckdb_type:
                         err_col = f"__type_err_{col}"
                         self._type_err_cols.append(err_col)
@@ -393,6 +409,38 @@ class DuckDBAdapter(EngineAdapter):
             missing = missing - _scd2_injected
 
         schema_errors: List[str] = []
+
+        # Drift INSIDE a struct. `missing` above compares top-level names only, so a
+        # struct that lost declared members passed as long as the column itself was
+        # present — the declaration was treated as a label, not a shape. Reported
+        # regardless of the evolution policy: losing a declared member breaches the
+        # type, it is not an additive change a lenient policy exists to tolerate.
+        try:
+            _members = {}
+            for _row in self.con.sql(
+                f"SELECT column_name, column_type FROM (DESCRIBE {table_name})"
+            ).fetchall():
+                _name, _type = _row[0], str(_row[1] or "")
+                if _type.upper().startswith("STRUCT("):
+                    _inner, _depth, _cur, _parts = _type[len("STRUCT(") : -1], 0, "", []
+                    for _ch in _inner:
+                        if _ch in "(<":
+                            _depth += 1
+                        elif _ch in ")>":
+                            _depth -= 1
+                        if _ch == "," and _depth == 0:
+                            _parts.append(_cur)
+                            _cur = ""
+                        else:
+                            _cur += _ch
+                    if _cur.strip():
+                        _parts.append(_cur)
+                    _members[_name] = [p.strip().split(" ")[0].strip('"') for p in _parts if p.strip()]
+                else:
+                    _members[_name] = None
+            schema_errors.extend(struct_drift_errors(self.contract.model.fields, _members))
+        except Exception as exc:  # never let the extra check break a working run
+            logger.debug(f"struct drift check skipped: {exc}")
         if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
 
@@ -658,8 +706,21 @@ class DuckDBAdapter(EngineAdapter):
                     logger.warning(f"Pre-Transform [Filter] failed: {e}")
                 continue
 
-            if trans.rename and trans_phase == "pre":
-                mappings = trans.rename.mappings if hasattr(trans.rename, "mappings") else {}
+            # No phase gate — matching Polars and Spark. `phase` defaults to "post",
+            # and this engine has NO rename branch in the post pass, so gating on
+            # "pre" here meant a rename without an explicit `phase: pre` was dropped
+            # in silence: the column kept its old name and every rule referencing the
+            # new one failed against a column that never existed. A rename is a naming
+            # concern that has to land before validation regardless of declared phase.
+            if trans.rename:
+                # iter_pairs(), not .mappings — it is the one accessor that knows all
+                # three declared forms (`mappings:`, `from_name`/`to_name`, and the
+                # bare `{old: new}` shorthand). Reading .mappings directly made this
+                # engine honour only ONE of them and silently ignore the other two:
+                # the column kept its old name and any rule naming the new one failed
+                # against a column that was never created. Every other engine already
+                # goes through iter_pairs().
+                mappings = dict(trans.rename.iter_pairs())
                 if mappings:
                     logger.debug(f"Pre-Transform [Rename]: {mappings}")
                     cols = self._get_current_columns(current)
@@ -697,6 +758,15 @@ class DuckDBAdapter(EngineAdapter):
                     current = view_name
                 except Exception as e:
                     logger.warning(f"Pre-Transform [Deduplicate] failed: {e}")
+                continue
+
+            # JSON extract in the PRE phase. This branch did not exist, so a
+            # `phase: pre` json_extract was dropped in silence — the declared column
+            # arrived NULL and pre-phase rules failed on data that was never
+            # extracted. The guard meant to catch unsupported ops could not see it:
+            # it checks WHICH op was requested, never in which phase.
+            if trans.json_extract:
+                current = self._apply_json_extract(current, trans.json_extract, "pre")
                 continue
 
         return current
@@ -905,21 +975,45 @@ class DuckDBAdapter(EngineAdapter):
 
             # JSON extract — pull a JSON path into a (optionally cast) column.
             if trans.json_extract:
-                cfg = trans.json_extract
-                path = str(cfg.path).replace("'", "''")
-                expr = f"json_extract_string(\"{cfg.source}\", '{path}')"
-                if cfg.cast:
-                    expr = f"CAST({expr} AS {self._DUCKDB_CAST_TYPES.get(str(cfg.cast).lower(), 'VARCHAR')})"
-                cols = self._get_current_columns(current)
-                exclude = f' EXCLUDE ("{cfg.field}")' if cfg.field in cols else ""
-                view_name = f"_post_jsonextract_{id(cfg) & 0xFFFFFF:06x}"
-                self.con.sql(
-                    f'CREATE OR REPLACE VIEW {view_name} AS SELECT *{exclude}, {expr} AS "{cfg.field}" FROM {current}'
-                )
-                current = view_name
+                current = self._apply_json_extract(current, trans.json_extract, "post")
                 continue
 
         return current
+
+    def _apply_json_extract(self, current: str, cfg, phase: str) -> str:
+        """Project a JSON path into a column, as a view over *current*.
+
+        Shared by the pre and post passes. It previously existed ONLY in the post
+        pass, so `phase: pre` json_extract was skipped without a word: the column
+        came out NULL and any pre-phase quality rule then quarantined every row for
+        failing a check on data that was never extracted.
+
+        Two robustness properties, both of which cost a real batch before:
+
+        * ``json_valid`` guard — ``json_extract_string`` RAISES on a malformed
+          document, so a single unparseable record aborted the whole run instead of
+          yielding NULL for that row. Document sources (Mongo/Cosmos landing into
+          bronze) are exactly where one bad record in a million is normal.
+        * ``TRY_CAST`` rather than ``CAST`` — a value that does not fit the declared
+          type yields NULL for that row instead of destroying the batch. Matches
+          Polars, which has always used a non-strict cast here.
+        """
+        path = str(cfg.path).replace("'", "''")
+        src = f'"{cfg.source}"'
+        # NULL in -> NULL out; invalid JSON -> NULL rather than an aborted run.
+        extract = f"CASE WHEN json_valid({src}) THEN json_extract_string({src}, '{path}') END"
+        if cfg.cast:
+            cast_type = self._DUCKDB_CAST_TYPES.get(str(cfg.cast).lower(), "VARCHAR")
+            extract = f"TRY_CAST({extract} AS {cast_type})"
+
+        cols = self._get_current_columns(current)
+        exclude = f' EXCLUDE ("{cfg.field}")' if cfg.field in cols else ""
+        view_name = f"_{phase}_jsonextract_{id(cfg) & 0xFFFFFF:06x}"
+        self.con.sql(
+            f"CREATE OR REPLACE VIEW {view_name} AS "
+            f'SELECT *{exclude}, {extract} AS "{cfg.field}" FROM {current}'
+        )
+        return view_name
 
     # OLC scalar type name → DuckDB CAST type.
     _DUCKDB_CAST_TYPES = {
