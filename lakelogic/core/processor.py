@@ -824,6 +824,12 @@ class DataProcessor:
                 self.last_source_path,
             )
 
+        # If this run's output is going straight back into the same warehouse, tell
+        # the adapter not to bring it home first. Decided BEFORE execute() because
+        # the fetch happens inside it — by the time materialize() runs, the round
+        # trip has already been paid.
+        self._set_defer_fetch(materialize, materialize_target)
+
         # Execute via adapter (pre/post-transforms, schema bounds, and row rules)
         good_df, bad_df = self.adapter.execute(df)
 
@@ -1063,6 +1069,34 @@ class DataProcessor:
                     _is_aggregation = True
                     break
 
+            # The mirror of the aggregation case above. A run that emits MORE rows
+            # than it read is either an intended expansion (the contract declares an
+            # explode) or an unintended fan-out — almost always a join on a
+            # non-unique key, which duplicates revenue and is expensive to find
+            # later because every row still looks individually valid.
+            added = counts.get("pre_transform_added")
+            _added_line = ""
+            if added:
+                _is_expansion = any(
+                    getattr(_t, "explode", None) is not None
+                    or getattr(_t, "date_range_explode", None) is not None
+                    for _t in _transforms
+                )
+                if _is_expansion:
+                    counts["expanded_rows"] = added
+                    counts["pre_transform_added"] = None  # declared, so not a finding
+                    _added_line = f" | Expanded: {added}"
+                else:
+                    # Deliberately NOT reclassified away: nothing in the contract
+                    # explains the extra rows, so this stays visible as itself.
+                    _added_line = f" | UNEXPLAINED ROW INCREASE: {added}"
+                    logger.warning(
+                        f"Run emitted {added} more row(s) than it read "
+                        f"({counts.get('total')} out vs {counts.get('source')} in) and no "
+                        f"explode transformation is declared. A join on a non-unique key "
+                        f"is the usual cause; every duplicated row still validates."
+                    )
+
             # Choose the appropriate label and update counts dict for run log
             if dropped is not None and dropped > 0:
                 if _is_aggregation:
@@ -1083,14 +1117,14 @@ class DataProcessor:
                 logger.info(
                     f"Run complete{tags_display} | "
                     f"Source: {source_total if source_total is not None else 'n/a'} | "
-                    f"Total: {total} | Good: {counts.get('good')} | Quarantine: {bad}{_dropped_line} | "
+                    f"Total: {total} | Good: {counts.get('good')} | Quarantine: {bad}{_dropped_line}{_added_line} | "
                     f"Ratio: {ratio_display}"
                 )
             else:
                 logger.info(
                     f"Run complete{tags_display} | "
                     f"Source: {source_total if source_total is not None else 'n/a'} | "
-                    f"Total: {total}{_dropped_line}"
+                    f"Total: {total}{_dropped_line}{_added_line}"
                 )
 
             if bad > 0:
@@ -1621,6 +1655,10 @@ class DataProcessor:
         # ── database source: native SQL ingestion ─────────────────────────────
         if self.contract.source and self.contract.source.type == "database":
             return self._run_database_source()
+
+        # ── sftp source: contract-driven remote-file ingestion ────────────────
+        if self.contract.source and self.contract.source.type == "sftp":
+            return self._run_sftp_source()
 
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
@@ -2750,7 +2788,22 @@ class DataProcessor:
                             f"fields_list={len(_fields_list) if _fields_list else 'None'}"
                         )
 
-                        if _fields_list and str(fmt).lower() not in ("delta", "iceberg", "hudi"):
+                        # `flatten_nested` means the contract describes the schema AFTER
+                        # flattening (payload_a, payload_b), while the FILE still holds
+                        # the nested column (payload). Forcing the contract schema onto
+                        # the reader therefore asks Spark for columns the file does not
+                        # have: they come back NULL, `payload` is never read at all, and
+                        # the flattening then has nothing to work on — the rows land
+                        # accepted and empty. Let Spark infer here; validation still
+                        # enforces the contract after the flattening step.
+                        _flatten = getattr(getattr(self.contract, "source", None), "flatten_nested", False)
+                        if _flatten and _fields_list:
+                            logger.info(
+                                "Contract schema NOT applied to the Spark reader: "
+                                "source.flatten_nested is set, so the file's own (nested) "
+                                "schema is read and flattened before validation."
+                            )
+                        if _fields_list and not _flatten and str(fmt).lower() not in ("delta", "iceberg", "hudi"):
                             from pyspark.sql.types import (
                                 StructType,
                                 StructField,
@@ -3098,6 +3151,56 @@ class DataProcessor:
         logger.warning("Reprocess date filter: unsupported DataFrame type — skipping filter")
         return df
 
+    def _flatten_json_spark(self, df, target_cols: set):
+        """Flatten JSON-string columns on Spark, in Catalyst.
+
+        Keys are discovered from a bounded sample (the JSON shape is not in the
+        schema), then each becomes ``get_json_object(col, '$.key') AS col_key`` and
+        the original column is dropped — matching the polars/pandas behaviour of
+        ``_flatten_json_df``.
+
+        The sample is the one unavoidable compromise: a key appearing only outside it
+        is not projected. That is bounded and reported, unlike the previous behaviour
+        of dropping the whole operation without a word.
+        """
+        import json as _json
+
+        from pyspark.sql import functions as F
+
+        _SAMPLE = 50
+        string_cols = [f.name for f in df.schema.fields if f.dataType.simpleString() == "string"]
+        candidates = [c for c in string_cols if not target_cols or c in target_cols]
+        if not candidates:
+            return df
+
+        sample = df.select(*candidates).limit(_SAMPLE).collect()  # bounded, not the batch
+        out = df
+        flattened: list[str] = []
+        for col in candidates:
+            keys: list[str] = []
+            for row in sample:
+                val = row[col]
+                if not isinstance(val, str) or val.strip()[:1] != "{":
+                    continue
+                try:
+                    parsed = _json.loads(val)
+                except Exception:
+                    continue  # a malformed document must not abort the flattening
+                if isinstance(parsed, dict):
+                    for k in parsed:
+                        if k not in keys:
+                            keys.append(k)
+            if not keys:
+                continue
+            for k in keys:
+                out = out.withColumn(f"{col}_{k}", F.get_json_object(F.col(col), f"$.{k}"))
+            out = out.drop(col)
+            flattened.append(col)
+
+        if flattened:
+            logger.info(f"flatten_nested applied on Spark to: {', '.join(flattened)}")
+        return out
+
     def _flatten_json_df(self, df, flatten_nested):
         """
         Flatten JSON-string columns in *df* into ``parent_child`` columns.
@@ -3153,6 +3256,16 @@ class DataProcessor:
                     hits += 1
             return checked > 0 and hits / checked >= 0.5
 
+        # ── Spark: flatten natively, never via Python rows ──────────────────
+        # A Spark DataFrame has no .to_dict, so it used to hit the bare `except:
+        # return df` below and flatten_nested became a SILENT no-op: the declared
+        # payload_a/payload_b columns arrived NULL and the rows were ACCEPTED, so a
+        # document source landing into bronze reported a clean run with empty data.
+        # (Conformance case OLC-S-001.) Collecting it to Python would also defeat the
+        # one engine where per-row Python actually hurts, so this stays in Catalyst.
+        if getattr(self, "engine_name", None) == "spark" and hasattr(df, "sparkSession"):
+            return self._flatten_json_spark(df, target_cols)
+
         # ── Convert to row-dict form ───────────────────────────────────────
         if _is_polars:
             rows = df.to_dicts()
@@ -3160,7 +3273,15 @@ class DataProcessor:
             try:
                 rows = df.to_dict(orient="records")
             except Exception:
-                return df  # unknown frame type — leave as-is
+                # Loud, not silent: the contract asked for flattening and it is not
+                # happening, which downstream shows up as a confusing "missing column
+                # payload_a" rather than as the unsupported frame type it really is.
+                logger.warning(
+                    f"source.flatten_nested was NOT applied: unsupported frame type "
+                    f"{type(df).__name__}. The declared flat columns will be absent or "
+                    "null. Supported: polars, pandas, spark."
+                )
+                return df
 
         if not rows:
             # Empty DataFrame — no actual data to flatten, but we still need to
@@ -4148,6 +4269,106 @@ class DataProcessor:
             "system": self._resolved_system,
         }
 
+    # Write strategies the warehouse engines' native writer implements. Kept here so
+    # the routing decision is made BEFORE calling, rather than by catching the
+    # adapter's NotImplementedError — a contract asking for `merge` must reach the
+    # existing dlt path, not blow up.
+    _NATIVE_MATERIALIZE_STRATEGIES = {"append", "overwrite", "replace"}
+
+    def _set_defer_fetch(self, materialize: bool, materialize_target: Any) -> None:
+        """Ask the adapter to leave the results in the warehouse, when nothing needs them here.
+
+        Only when the write is definitely going server-side: the same conditions the
+        native materializer checks, evaluated up front. If any of them is unmet the
+        fetch happens as before, because the normal write path needs real frames.
+
+        Skipping the fetch means ``run()`` returns EMPTY frames. That is right for
+        "validate 500M rows and write them to a table" and wrong for anyone who also
+        inspects the data, so it is never inferred from the engine alone — it
+        requires materialize=True AND a same-warehouse table target AND a strategy
+        the native writer implements.
+        """
+        adapter = getattr(self, "adapter", None)
+        if adapter is None or not hasattr(adapter, "defer_fetch"):
+            return
+        adapter.defer_fetch = False  # never leak a previous run's decision
+        adapter.deferred_counts = None
+        if not materialize:
+            return
+        if not hasattr(adapter, "materialize_native"):
+            return
+
+        mat = getattr(self.contract, "materialization", None)
+        if mat is None:
+            return
+        strategy = str(getattr(mat, "strategy", "append") or "append").lower()
+        if strategy not in self._NATIVE_MATERIALIZE_STRATEGIES:
+            return
+
+        target = materialize_target if materialize_target is not None else getattr(mat, "target_path", None)
+        target_str = str(target or "")
+        if not target_str.startswith("table:") or "://" in target_str:
+            return
+
+        adapter.defer_fetch = True
+
+    def _try_native_materialize(self, target: Any) -> Optional[Dict[str, Any]]:
+        """Write server-side via the engine, or return None to use the normal path.
+
+        On Snowflake/BigQuery the accepted rows are already a table in the warehouse.
+        The default path fetches them into pandas and ships them back through dlt —
+        warehouse to driver to warehouse — so a large run is bounded by driver memory
+        for data that never needed to move. When the target is a table in that same
+        warehouse, the engine can do it as a CTAS instead.
+
+        Deliberately conservative: every condition that is not clearly satisfied
+        returns None and the caller falls back to the established path. This is an
+        optimisation, and an optimisation that changes WHERE data lands, or fails a
+        pipeline that used to work, is not worth having.
+        """
+        adapter = getattr(self, "adapter", None)
+        if adapter is None or not hasattr(adapter, "materialize_native"):
+            return None
+        # No completed run on this adapter (or the results are gone) — nothing to copy.
+        if not getattr(adapter, "good_table", None):
+            return None
+
+        mat = getattr(self.contract, "materialization", None)
+        if mat is None:
+            return None
+
+        strategy = str(getattr(mat, "strategy", "append") or "append").lower()
+        if strategy not in self._NATIVE_MATERIALIZE_STRATEGIES:
+            return None  # e.g. merge/scd2 — the dlt path still owns these
+
+        target_str = str(target if target is not None else (getattr(mat, "target_path", None) or ""))
+        if not target_str:
+            return None
+        # Only a table in the same warehouse. A file/URI target genuinely needs the
+        # data to leave, so the round trip there is not waste.
+        if "://" in target_str or not target_str.startswith("table:"):
+            return None
+        table_name = target_str[len("table:") :]
+        if not table_name:
+            return None
+
+        try:
+            result = adapter.materialize_native(table_name, strategy=strategy)
+        except Exception as exc:
+            # Never let the fast path break a write that would otherwise have
+            # succeeded — say so loudly and let the caller fall back.
+            logger.warning(
+                f"Native {self.engine_name} materialization to '{table_name}' failed "
+                f"({type(exc).__name__}: {exc}); falling back to the standard write path."
+            )
+            return None
+
+        logger.info(
+            f"Materialized server-side on {self.engine_name}: no driver round trip "
+            f"({result.get('rows_written', '?')} rows -> {table_name})."
+        )
+        return result
+
     def materialize(
         self,
         good_df: Any,
@@ -4171,14 +4392,16 @@ class DataProcessor:
             target_str = str(target_path)
             if not target_str.startswith("table:") and "://" not in target_str:
                 target = Path(target_path)
-        result = materialize_dataframe(
-            good_df,
-            self.contract,
-            target_path=target,
-            engine_name=self.engine_name,
-            incremental_metadata=getattr(self, "_incremental_metadata", None),
-            is_reprocess=getattr(self, "_is_reprocess", False),
-        )
+        result = self._try_native_materialize(target)
+        if result is None:
+            result = materialize_dataframe(
+                good_df,
+                self.contract,
+                target_path=target,
+                engine_name=self.engine_name,
+                incremental_metadata=getattr(self, "_incremental_metadata", None),
+                is_reprocess=getattr(self, "_is_reprocess", False),
+            )
 
         if bad_df is not None and self.contract.quarantine and self.contract.quarantine.target:
             try:
@@ -4248,10 +4471,17 @@ class DataProcessor:
                 total = (good_count or 0) + (bad_count or 0)
                 ratio = bad_count / total if total > 0 else None
                 dropped = None
+                added = None
                 if source_count is not None:
-                    dropped = source_count - total
-                    if dropped < 0:
-                        dropped = 0
+                    delta = source_count - total
+                    # A NEGATIVE delta means the run emitted MORE rows than it read.
+                    # That was previously clamped to 0, so a fan-out join silently
+                    # reported "dropped: 0" and nothing else — duplication is invisible
+                    # in a figure that cannot go below zero. Keep `dropped` clamped for
+                    # every existing consumer, and surface the other direction as its own
+                    # number rather than throwing it away.
+                    dropped = max(delta, 0)
+                    added = max(-delta, 0) or None
                 return {
                     "source": source_count,
                     "total": total,
@@ -4259,6 +4489,7 @@ class DataProcessor:
                     "quarantined": bad_count,
                     "quarantine_ratio": ratio,
                     "pre_transform_dropped": dropped,
+                    "pre_transform_added": added,
                 }
             except Exception:
                 pass  # Fall back to individual counts
@@ -4266,6 +4497,16 @@ class DataProcessor:
         # Non-Spark engines: use len() which is O(1) for most dataframe types
         def _count(obj: Any) -> Optional[int]:
             try:
+                # A table NAME is not a dataset. The warehouse engines (snowflake,
+                # bigquery) take the source as a string — `len()` on it returns the
+                # length of the STRING, which was then reported as the source row
+                # count and fed into pre_transform_dropped. A 3-row run through
+                # "PUBLIC.LL_SRC" logged "Source: 13 | Pre-Transform Dropped: 10",
+                # and one through a long fully-qualified BigQuery name logged 43/40 —
+                # both pure fiction, and both indistinguishable from a real count.
+                # Unmeasured must read as unmeasured, never as a confident number.
+                if isinstance(obj, (str, bytes)):
+                    return None
                 if hasattr(obj, "height"):  # Polars
                     return int(obj.height)
                 return len(obj)
@@ -4275,14 +4516,25 @@ class DataProcessor:
         source_total = _count(source_df)
         good = _count(good_df)
         bad = _count(bad_df)
+
+        # When the fetch was skipped the frames are deliberately empty, so counting
+        # them would report 0 good / 0 quarantined for a run that may have written
+        # millions of rows — a far worse lie than the string-length bug, because it
+        # reads as "the run produced nothing". The adapter counted them in the
+        # warehouse instead; those are the real numbers.
+        deferred = getattr(getattr(self, "adapter", None), "deferred_counts", None)
+        if deferred:
+            good = deferred.get("good", good)
+            bad = deferred.get("bad", bad)
         total = None
         if good is not None and bad is not None:
             total = good + bad
         dropped = None
+        added = None
         if source_total is not None and total is not None:
-            dropped = source_total - total
-            if dropped < 0:
-                dropped = 0
+            delta = source_total - total
+            dropped = max(delta, 0)
+            added = max(-delta, 0) or None  # see the Spark branch for why
         ratio = None
         if total is not None and bad is not None and total > 0:
             ratio = bad / total
@@ -4293,6 +4545,7 @@ class DataProcessor:
             "quarantined": bad,
             "quarantine_ratio": ratio,
             "pre_transform_dropped": dropped,
+            "pre_transform_added": added,
         }
 
     def _build_report(
@@ -4909,6 +5162,185 @@ class DataProcessor:
 
     # ── database source integration ────────────────────────────────────────────
 
+    # Operation codes emitted by SQL Server / Azure SQL CDC (`__$operation`).
+    #   1 = delete, 2 = insert, 3 = update BEFORE image, 4 = update AFTER image.
+    # The before-image is dropped: it describes a state that no longer exists, and
+    # merging it would resurrect the pre-update row.
+    _SQLSERVER_CDC_OPS = {1: "delete", 2: "insert", 4: "update"}
+    _SQLSERVER_CDC_BEFORE_IMAGE = 3
+
+    # Postgres logical-decoding action codes (wal2json / pgoutput style).
+    _POSTGRES_CDC_OPS = {"I": "insert", "U": "update", "D": "delete"}
+
+    def _build_cdc_query(
+        self,
+        provider: str,
+        table: str,
+        columns: str,
+        capture_instance: Optional[str] = None,
+        watermark_iso: Optional[str] = None,
+    ) -> str:
+        """Build a NATIVE change-capture query — reading the change log, not polling.
+
+        This is the difference between CDC and the watermark extraction that has been
+        called CDC elsewhere in this codebase. A watermark query
+        (``WHERE updated_at > x``) cannot see a DELETE at all — the row is simply
+        gone, so the target keeps it forever — and it collapses several changes
+        between polls into whatever the final state happened to be. Reading the
+        change table returns every operation, deletes included.
+
+        The result is shaped for the CDC consumption path that already exists
+        (``load_mode: cdc`` -> merge + ``soft_delete_column``): a normalised
+        ``_lakelogic_cdc_op`` column of insert/update/delete, so nothing downstream
+        needs to know which database produced the feed.
+        """
+        provider = (provider or "").lower()
+
+        if provider in ("sqlserver", "mssql", "azuresql", "azure_sql"):
+            # cdc.fn_cdc_get_all_changes_<capture_instance>(from_lsn, to_lsn, 'all')
+            # is the documented reader. The capture instance defaults to SQL Server's
+            # own convention (schema_table) when not given.
+            instance = capture_instance or table.replace(".", "_")
+            if watermark_iso:
+                # Map a timestamp to the first LSN AFTER it, so a re-run does not
+                # replay the change it already consumed.
+                from_lsn = (
+                    "sys.fn_cdc_map_time_to_lsn('smallest greater than', "
+                    f"CAST('{watermark_iso}' AS DATETIME))"
+                )
+            else:
+                from_lsn = "sys.fn_cdc_get_min_lsn('" + instance + "')"
+            return (
+                f"SELECT {columns}, __$operation AS _lakelogic_cdc_op_raw, "
+                f"__$start_lsn AS _lakelogic_cdc_lsn "
+                f"FROM cdc.fn_cdc_get_all_changes_{instance}("
+                f"{from_lsn}, sys.fn_cdc_get_max_lsn(), 'all') "
+                f"WHERE __$operation <> {self._SQLSERVER_CDC_BEFORE_IMAGE} "
+                f"ORDER BY __$start_lsn"
+            )
+
+        if provider in ("postgres", "postgresql"):
+            # Postgres exposes changes through a logical replication slot rather than
+            # a queryable function. Refused by name rather than silently falling back
+            # to a watermark poll, which would look like CDC and miss every delete.
+            raise NotImplementedError(
+                "Postgres native CDC needs a logical replication slot (pgoutput/wal2json), "
+                "which this source path cannot read — it issues ordinary SQL queries. "
+                "Land the change feed first (Debezium -> Kafka, or a slot reader) and "
+                "consume it with `load_mode: cdc`, which handles ops and deletes."
+            )
+
+        raise NotImplementedError(
+            f"No native change-capture reader for provider '{provider}'. "
+            "Supported: sqlserver/azuresql. For anything else, land the change feed "
+            "and consume it with `load_mode: cdc`."
+        )
+
+    def _normalise_cdc_ops(self, df: Any, provider: str) -> Any:
+        """Map a provider's raw operation codes to insert/update/delete.
+
+        Downstream (merge + soft-delete) must not care which database produced the
+        feed, so the provider-specific code column is translated once, here.
+        """
+        provider = (provider or "").lower()
+        if provider in ("sqlserver", "mssql", "azuresql", "azure_sql"):
+            mapping = self._SQLSERVER_CDC_OPS
+        elif provider in ("postgres", "postgresql"):
+            mapping = self._POSTGRES_CDC_OPS
+        else:
+            return df
+
+        raw = "_lakelogic_cdc_op_raw"
+        try:
+            import polars as pl
+
+            if isinstance(df, (pl.DataFrame, pl.LazyFrame)):
+                names = df.collect_schema().names() if isinstance(df, pl.LazyFrame) else df.columns
+                if raw not in names:
+                    return df
+                return df.with_columns(
+                    pl.col(raw)
+                    .replace_strict(mapping, default=None)
+                    .alias(self.CDC_OP_COLUMN)
+                ).drop(raw)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"Could not normalise CDC operations: {exc}")
+        return df
+
+    #: Normalised operation column produced by native change capture.
+    CDC_OP_COLUMN = "_lakelogic_cdc_op"
+
+    def _run_sftp_source(self) -> "ValidationResult":
+        """Fetch files from an SFTP server declared in the contract, then validate.
+
+        Called by :meth:`run_source` when ``source.type == "sftp"``. Before this, the
+        SFTP connector existed but was wired to nothing — you had to call it yourself
+        and hand the frame to ``run()``, so an SFTP drop-folder could not be expressed
+        as a contract the way ``database`` and ``dlt`` sources can.
+
+        Contract shape::
+
+            source:
+              type: sftp
+              path: sftp://user@host:22/inbound/          # host + remote dir
+              pattern: "orders_*.csv"                      # optional, default "*"
+              format: csv                                  # csv | json | parquet
+              options:
+                private_key_path: ~/.ssh/id_ed25519        # or password
+                known_hosts: ~/.ssh/known_hosts            # omit to use the default
+
+        Credentials come from ``options`` (or the matching environment variables), and
+        are never read from ``path`` beyond the username — a password embedded in a
+        URI ends up in logs and run metadata.
+        """
+        from urllib.parse import urlparse
+
+        from lakelogic.engines.integration_connectors import SFTPConnector
+
+        src = self.contract.source
+        raw = src.path or ""
+        if not raw:
+            raise ValueError("SFTP source requires 'source.path' (e.g. sftp://user@host/inbound/)")
+
+        parsed = urlparse(raw if "://" in raw else f"sftp://{raw}")
+        host = parsed.hostname
+        if not host:
+            raise ValueError(f"SFTP source path '{raw}' has no host. Expected sftp://user@host/dir")
+
+        options = dict(getattr(src, "options", {}) or {})
+        remote_dir = parsed.path or "/"
+        pattern = getattr(src, "pattern", None) or options.get("pattern") or "*"
+        fmt = (getattr(src, "format", None) or options.get("format") or "csv").lower()
+
+        username = parsed.username or options.get("username") or os.getenv("LAKELOGIC_SFTP_USER")
+        password = options.get("password") or os.getenv("LAKELOGIC_SFTP_PASSWORD")
+        key_path = options.get("private_key_path") or os.getenv("LAKELOGIC_SFTP_KEY")
+
+        # A password in the URI would be carried into logs and run metadata, so it is
+        # refused rather than quietly accepted.
+        if parsed.password:
+            raise ValueError(
+                "Do not put a password in source.path — it reaches logs and run "
+                "metadata. Use options.password or LAKELOGIC_SFTP_PASSWORD."
+            )
+
+        connector = SFTPConnector(
+            host=host,
+            port=parsed.port or 22,
+            username=username,
+            password=password,
+            private_key_path=key_path,
+            # Default "" = verify against ~/.ssh/known_hosts. Only an explicit
+            # `known_hosts: null` in the contract disables verification, and the
+            # connector warns when it does.
+            known_hosts=options["known_hosts"] if "known_hosts" in options else "",
+        )
+
+        logger.info(f"Running SFTP source: {host}:{parsed.port or 22}{remote_dir} pattern={pattern} format={fmt}")
+        df = connector.extract_files(remote_dir, file_pattern=pattern, file_format=fmt)
+
+        return self.run(df, source_path=f"sftp://{host}{remote_dir}")
+
     def _run_database_source(self) -> "ValidationResult":
         """Extract data natively via Polars, DuckDB, or Spark, then run validation.
 
@@ -4975,6 +5407,33 @@ class DataProcessor:
         load_mode = getattr(self.contract.source, "load_mode", "full")
         watermark_field = getattr(self.contract.source, "watermark_field", None)
 
+        # ── Native change capture ────────────────────────────
+        # `load_mode: cdc` + `options.cdc_provider` reads the database's own change
+        # log instead of polling a watermark column. Declared through `options`
+        # (a free-form dict in the OLC model) so no schema change is needed and an
+        # older runtime simply ignores it rather than failing to load the contract.
+        cdc_provider = options.get("cdc_provider")
+        if load_mode == "cdc" and cdc_provider:
+            _wm = self._get_last_source_watermark()
+            _wm_iso = None
+            if _wm is not None:
+                from datetime import datetime, timezone
+
+                _wm_iso = datetime.fromtimestamp(_wm, tz=timezone.utc).isoformat()
+            query = self._build_cdc_query(
+                provider=cdc_provider,
+                table=dataset,
+                columns=columns,
+                capture_instance=options.get("cdc_capture_instance"),
+                watermark_iso=_wm_iso,
+            )
+            self._cdc_provider = cdc_provider
+            logger.info(
+                f"Native CDC read via '{cdc_provider}' "
+                f"({'incremental from ' + _wm_iso if _wm_iso else 'from earliest available change'}). "
+                "Deletes are captured; the watermark poll cannot see them."
+            )
+
         watermark = None
         if load_mode == "incremental":
             if not watermark_field:
@@ -5039,6 +5498,7 @@ class DataProcessor:
                             batch_idx += 1
                             logger.info(f"Processing database chunk {batch_idx} ({chunk_df.height} rows)...")
 
+                            chunk_df = self._normalise_cdc_ops(chunk_df, getattr(self, "_cdc_provider", None))
                             res = self.run(chunk_df, source_path=f"database://{dataset}")
                             all_good.append(res.good)
                             all_bad.append(res.bad)
@@ -5168,12 +5628,15 @@ class DataProcessor:
                 raise RuntimeError(f"Spark JDBC extraction failed. Error: {msg}") from e
 
             logger.info(f"database (spark jdbc): loaded columns {df.columns}")
+            df = self._normalise_cdc_ops(df, getattr(self, "_cdc_provider", None))
             return self.run(df, source_path=f"database://{dataset}")
 
         else:
             raise ValueError("Database source natively supports engines 'polars', 'duckdb', and 'spark'.")
 
         logger.info(f"database: loaded {df.height} rows, {df.width} columns")
+
+        df = self._normalise_cdc_ops(df, getattr(self, "_cdc_provider", None))
 
         return self.run(
             df,

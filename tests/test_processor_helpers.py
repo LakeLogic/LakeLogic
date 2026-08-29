@@ -130,6 +130,7 @@ def test_processor_counts_report_and_delegates(monkeypatch, tmp_path):
         "quarantined": 1,
         "quarantine_ratio": 1 / 3,
         "pre_transform_dropped": 0,
+        "pre_transform_added": None,
     }
 
     fake_execution_context = types.ModuleType("lakelogic.core.execution_context")
@@ -1310,6 +1311,7 @@ def test_processor_compute_counts_spark_optimized_and_fallback(monkeypatch):
         "quarantined": 1,
         "quarantine_ratio": 0.25,
         "pre_transform_dropped": 1,
+        "pre_transform_added": None,
     }
 
     broken = types.SimpleNamespace(select=lambda expr: (_ for _ in ()).throw(RuntimeError("boom")))
@@ -1321,6 +1323,7 @@ def test_processor_compute_counts_spark_optimized_and_fallback(monkeypatch):
         "quarantined": 1,
         "quarantine_ratio": 1 / 3,
         "pre_transform_dropped": None,
+        "pre_transform_added": None,
     }
 
 
