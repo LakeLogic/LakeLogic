@@ -5,8 +5,9 @@ After the domain → system merge, every top-level key on the effective config c
 ``slo.freshness.bronze.max_delay_minutes`` 30 here?" into a lookup instead of a log grep,
 and gives agents a resolved-with-provenance estate to reason over.
 
-Provenance is tracked at **top-level key** granularity (per the resolution spec's merge
-rules). Deeper per-leaf provenance inside a deep-merged block is a future refinement.
+Provenance is tracked per **top-level key**, and additionally per dotted leaf path inside
+a deep-merged block (``merge._leaf_provenance``) — so ``ownership.business_owner.name`` has
+its own record and the UI can say which of two sibling fields was inherited.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ class Origin(str, Enum):
 
     DOMAIN = "domain"  # inherited wholesale from _domain.yaml
     SYSTEM = "system"  # declared on _system.yaml
+    CONTRACT = "contract"  # declared on the contract itself — supersedes system and domain
     BOTH = "system+domain"  # merged (deep-merge or list concat)
     ENVIRONMENT = "environment"
     DEFAULT = "default"  # neither file set it; model default

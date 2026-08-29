@@ -873,6 +873,22 @@ class EngineAdapter(ABC):
             reference = cfg.get("reference")
             key = cfg.get("key")
             if not field or not reference or not key:
+                # Loudly, because the failure mode is a CONTRACT THAT APPEARS TO ENFORCE
+                # REFERENTIAL INTEGRITY AND ENFORCES NOTHING. Returning None here drops
+                # the rule; the caller skips empty expansions without comment, and static
+                # validation passes, so the only signal a user ever gets is this line.
+                #
+                # The common cause is spelling: `reference` is the name of a `links:`
+                # entry (a loaded reference dataset), and `key` is the column in it. A
+                # contract name is NOT a reference — nothing resolves one to a table
+                # here — so `contract:`/`column:` silently yields no rule.
+                missing = [k for k, v in (("field", field), ("reference", reference), ("key", key)) if not v]
+                logger.warning(
+                    "referential_integrity rule DROPPED — no check will run. Missing: "
+                    f"{', '.join(missing)}. Got keys: {sorted(cfg)}. "
+                    "`reference` must name a `links:` entry and `key` its column; "
+                    "`contract:`/`column:` are not read here."
+                )
                 return None
             name = cfg.get("name") or f"{field}_referential_integrity"
             qfield = self._quote_ident(field)

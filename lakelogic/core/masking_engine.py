@@ -239,10 +239,74 @@ def _apply_decrypt(encrypted_value: str, key: str = "") -> Optional[str]:
         return None
 
 
+# ── Idempotent hashing ───────────────────────────────────────────────────────
+#
+# Masking is applied WRITE-side, per contract run. The silver/gold contract
+# templates propagate the `masking:` strategy downward, so a field hashed in
+# bronze is read back by silver, sees `masking: hash` on its own contract, and
+# gets hashed AGAIN — sha256(salt + sha256(salt + value)). Gold makes it three
+# deep. Nothing raised, nothing logged; the only symptom was that the same
+# person's key stopped matching across layers, so every cross-layer join or
+# reconciliation on a hashed column silently returned nothing.
+#
+# The fix: `hash` is the one strategy whose output has a recognisable, stable
+# shape — `hashlib.sha256(...).hexdigest()` and Spark's `sha2(..., 256)` both
+# produce exactly 64 lowercase hex characters. So when masking with `hash`, a
+# value already in that shape is left alone.
+#
+# TRADEOFF (deliberate): a genuine raw value that happens to be exactly 64
+# lowercase hex characters will NOT be masked. For a PII/PHI column that is
+# vanishingly unlikely, and the failure is *visible* — every skip is counted and
+# logged as a warning naming the column. The alternative, double-hashing, breaks
+# joins irrecoverably and completely silently. A visible, rare under-mask beats
+# an invisible, systematic data-corruption.
+#
+# This check applies to `hash` ONLY. `nullify`, `redact`, `partial` and
+# `encrypt` are not idempotent-by-shape — "***REDACTED***" re-redacts to itself
+# by luck, `partial` re-masks an already-partial value, and `encrypt` produces a
+# fresh nonce every call — so guessing at their output shapes would be wrong.
+_SHA256_HEX_PATTERN = r"^[0-9a-f]{64}$"
+_SHA256_HEX_RE = re.compile(_SHA256_HEX_PATTERN)
+
+
+def _is_already_hashed(value: Any) -> bool:
+    """True if ``value`` is already in this module's hash-masking output shape.
+
+    That shape is exactly 64 lowercase hex characters. Anything else — a 63- or
+    65-character hex string, an UPPERCASE hex string, a non-string — is not
+    output this function ever produced, so it is treated as raw and hashed.
+    """
+    return isinstance(value, str) and _SHA256_HEX_RE.match(value) is not None
+
+
+def _warn_already_hashed(column: str, skipped: int, total: int) -> None:
+    """Log the once-per-column warning for values skipped as already-hashed.
+
+    Silently skipping would just trade one invisible behaviour for another, so
+    every skip is surfaced with the column name and the count.
+    """
+    logger.warning(
+        f"Masking 'hash' on column '{column}': {skipped} of {total} value(s) were already "
+        f"64-char lowercase hex (SHA-256 output shape) and were left UNCHANGED to keep "
+        f"hashing idempotent. This normally means the column was masked upstream and a "
+        f"downstream contract propagated 'masking: hash'; re-hashing would silently break "
+        f"cross-layer joins on this column. If these are genuine raw values, rename the "
+        f"strategy or pre-transform the column — they have NOT been masked."
+    )
+
+
 def _apply_hash(value: Any, salt: str = "") -> Optional[str]:
-    """One-way SHA-256 hash."""
+    """One-way SHA-256 hash — idempotent.
+
+    A value already in this function's own output shape (64 lowercase hex chars,
+    see ``_is_already_hashed``) is returned unchanged, so ``hash(hash(x)) ==
+    hash(x)`` and a key hashed in bronze still joins to the same key in silver
+    and gold. See the module comment above for the deliberate tradeoff.
+    """
     if value is None:
         return None
+    if _is_already_hashed(value):
+        return value
     raw = f"{salt}{value}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
@@ -284,14 +348,18 @@ class MaskingEngine:
         self._pii_fields = self._extract_pii_fields()
 
     def _extract_pii_fields(self) -> List[FieldDefinition]:
-        """Get all fields that require masking — those flagged ``pii: true`` OR
-        ``sensitive: true``. Both are masked through the same ``security_groups`` +
-        ``masking`` mechanism; they differ only in classification (personal data
-        vs confidential business data) and in erasure handling (``sensitive`` is
-        NOT pulled into GDPR/HIPAA erasure)."""
+        """Get all fields that require masking — those flagged ``pii: true``,
+        ``phi: true`` OR ``sensitive: true``. All three mask through the same
+        ``security_groups`` + ``masking`` mechanism; they differ in classification
+        (personal data / protected health data / confidential business data) and in
+        erasure handling (``sensitive`` is NOT pulled into GDPR/HIPAA erasure).
+
+        ``phi`` was previously absent from this list, so a field tagged only as
+        protected health information — the most regulated category the model has —
+        was never masked."""
         if not self.contract.model or not self.contract.model.fields:
             return []
-        return [f for f in self.contract.model.fields if f.pii or f.sensitive]
+        return [f for f in self.contract.model.fields if f.pii or f.phi or f.sensitive]
 
     def get_fields_to_mask(self, user_groups: Optional[List[str]] = None) -> List[FieldDefinition]:
         """
@@ -476,7 +544,27 @@ class MaskingEngine:
                     .otherwise(pl.lit(None))
                     .alias(col_name)
                 )
-            elif strategy in ("hash", "partial", "tokenize", "encrypt"):
+            elif strategy == "hash":
+                # Idempotence guard, expressed natively as a Polars when/then:
+                # values already in SHA-256 output shape pass through untouched.
+                src = pl.col(col_name).cast(pl.Utf8)
+                already = src.str.contains(_SHA256_HEX_PATTERN)
+                skipped = int(df.select(already.fill_null(False).sum()).item() or 0)
+                if skipped:
+                    _warn_already_hashed(col_name, skipped, df.height)
+                df = df.with_columns(
+                    pl.when(already)
+                    .then(src)
+                    .otherwise(
+                        src.map_elements(
+                            lambda v, _n=col_name: self._mask_value(v, "hash", _n, None),
+                            return_dtype=pl.Utf8,
+                            skip_nulls=True,
+                        )
+                    )
+                    .alias(col_name)
+                )
+            elif strategy in ("partial", "tokenize", "encrypt"):
                 df = df.with_columns(
                     pl.col(col_name)
                     .cast(pl.Utf8)
@@ -501,7 +589,20 @@ class MaskingEngine:
                 df[col_name] = None
             elif strategy == "redact":
                 df.loc[df[col_name].notna(), col_name] = "***REDACTED***"
-            elif strategy in ("hash", "partial", "tokenize", "encrypt"):
+            elif strategy == "hash":
+                # Idempotence guard, expressed natively as a pandas boolean mask:
+                # already-hashed values are never passed to the hash at all.
+                # (The DuckDB path funnels through here via `fetchdf()`.)
+                series = df[col_name]
+                already = series.map(_is_already_hashed)
+                skipped = int(already.sum())
+                if skipped:
+                    _warn_already_hashed(col_name, skipped, int(series.shape[0]))
+                to_hash = ~already
+                result = series.astype(object).copy()
+                result[to_hash] = series[to_hash].apply(lambda v, _n=col_name: self._mask_value(v, "hash", _n, None))
+                df[col_name] = result
+            elif strategy in ("partial", "tokenize", "encrypt"):
                 df[col_name] = df[col_name].apply(
                     lambda v, _s=strategy, _n=col_name, _f=fmt: self._mask_value(v, _s, _n, _f)
                 )
@@ -526,11 +627,26 @@ class MaskingEngine:
                 )
 
             elif strategy == "hash":
+                # Idempotence guard, expressed natively as F.when + rlike — no UDF and
+                # no collect, so this stays a pure Catalyst expression and costs nothing
+                # extra on the one engine where per-row Python would be fatal.
                 salt = self.hash_salt
-                if salt:
-                    df = df.withColumn(col_name, F.sha2(F.concat(F.lit(salt), F.col(col_name).cast("string")), 256))
-                else:
-                    df = df.withColumn(col_name, F.sha2(F.col(col_name).cast("string"), 256))
+                src = F.col(col_name).cast("string")
+                hashed = F.sha2(F.concat(F.lit(salt), src), 256) if salt else F.sha2(src, 256)
+                df = df.withColumn(col_name, F.when(src.rlike(_SHA256_HEX_PATTERN), src).otherwise(hashed))
+                # HONESTY NOTE: unlike the pandas/Polars/DuckDB paths, no skipped-value
+                # COUNT is logged here. Counting on a lazy Spark frame needs a separate
+                # action (an extra full pass over the data) and there is no correct place
+                # to read an accumulator back from. Rather than degrade the Spark path or
+                # print a number we did not measure, the guard is announced and the count
+                # is left to the query itself.
+                logger.info(
+                    f"Masking 'hash' on column '{col_name}': idempotence guard active — values "
+                    f"already in SHA-256 output shape (64-char lowercase hex) pass through "
+                    f"unchanged. Skipped-value count is not computed on Spark (it would cost an "
+                    f"extra full pass); count it with "
+                    f"`df.filter(col('{col_name}').rlike('{_SHA256_HEX_PATTERN}')).count()` if needed."
+                )
 
             elif strategy == "partial":
                 if fmt:

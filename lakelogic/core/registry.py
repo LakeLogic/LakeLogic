@@ -365,7 +365,7 @@ class EnvironmentConfig(BaseModel):
 # ONE implementation of the inheritance rules. Imported after the sub-models above (which
 # ``registry.models`` re-uses) but before ``DomainRegistry`` — this ordering keeps the
 # import graph acyclic. ``_deep_merge`` is re-exported for in-repo back-compat callers.
-from lakelogic.registry.merge import _deep_merge, merge_domain_system  # noqa: E402,F401
+from lakelogic.registry.merge import _deep_merge, merge_domain_system, merge_scope  # noqa: E402,F401
 
 
 def _resolve_placeholders(obj: Any, vars_map: Dict[str, str]) -> Any:
@@ -534,6 +534,9 @@ class DomainRegistry(BaseModel):
 
     # Internal state
     _registry_dir: Optional[Path] = None
+    # entity -> {dotted path: Provenance} for the system -> contract ownership fold.
+    # Populated by from_yaml; lets a caller explain why a contract has the owner it has.
+    _ownership_provenance: Dict[str, Any] = {}
 
     @model_validator(mode="after")
     def validate_unique_entities(self) -> "DomainRegistry":
@@ -674,6 +677,8 @@ class DomainRegistry(BaseModel):
             registry.notifications = _resolve_placeholders(registry.notifications, _full_vars)
 
         # 3. Resolve actual DataContracts and absolute paths
+        _ownership_provenance: Dict[str, Any] = {}
+
         for c in registry.contracts:
             if not c.enabled:
                 continue
@@ -805,6 +810,20 @@ class DomainRegistry(BaseModel):
                             for k, v in sys_cfg.items():
                                 c_dict[section].setdefault(k, v)
 
+                # Inject registry-level ownership — the third step of the ownership
+                # chain (domain -> system -> data product). Unlike the sections above this
+                # is a DEEP merge: a contract that names its own business_owner.user must
+                # still inherit the domain's business_owner.group, so a shallow setdefault
+                # on the `ownership` key would silently drop the inherited siblings.
+                if registry.ownership:
+                    c_dict["ownership"], _own_prov = merge_scope(
+                        dict(registry.ownership),
+                        c_dict.get("ownership") or {},
+                        key="ownership",
+                        declared_file=f"contract:{c.entity}",
+                    )
+                    _ownership_provenance[c.entity] = _own_prov
+
                 # Ensure the contract's own observatory block resolves env vars
                 # and normalizes correctly.
                 if "observatory" in c_dict and isinstance(c_dict["observatory"], dict):
@@ -840,6 +859,8 @@ class DomainRegistry(BaseModel):
                             c_dict[k].setdefault(sub_k, _resolve_placeholders(sub_v, storage_vars))
 
                 c.contract_dict = c_dict
+
+        registry._ownership_provenance = _ownership_provenance
 
         return registry
 

@@ -18,15 +18,28 @@ def _load_module(module_name: str, file_path: Path):
 
 def test_cli_module_exports_app_and_main_executes_once(monkeypatch):
     calls = []
-    cli_root = sys.modules.setdefault("lakelogic.cli", types.ModuleType("lakelogic.cli"))
+    # `sys.modules.setdefault(...)` inserted a bare stub when nothing had imported
+    # `lakelogic.cli` yet — and `lakelogic.cli` is a REAL package, so that stub
+    # shadowed it for the rest of the session depending only on test ordering.
+    # Insert through monkeypatch so it is removed again.
+    if "lakelogic.cli" in sys.modules:
+        cli_root = sys.modules["lakelogic.cli"]
+    else:
+        cli_root = types.ModuleType("lakelogic.cli")
+        monkeypatch.setitem(sys.modules, "lakelogic.cli", cli_root)
     main_module = types.ModuleType("lakelogic.cli.main")
 
     def fake_app():
         calls.append("called")
 
     main_module.app = fake_app
-    sys.modules["lakelogic.cli.main"] = main_module
-    cli_root.main = main_module
+    # Via monkeypatch, NOT bare assignment. These were `sys.modules[...] = ...` and
+    # `cli_root.main = ...`, so the stub outlived the test: every later-sorting file
+    # that imported the CLI got a fake `app` and died with
+    # "'function' object has no attribute '_add_completion'". The tests passed in
+    # isolation and failed in the suite, which is the worst way for this to present.
+    monkeypatch.setitem(sys.modules, "lakelogic.cli.main", main_module)
+    monkeypatch.setattr(cli_root, "main", main_module, raising=False)
 
     module = _load_module("test_lakelogic_cli", ROOT / "lakelogic" / "cli.py")
 

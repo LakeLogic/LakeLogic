@@ -269,3 +269,50 @@ def test_add_trace_and_row_count_helpers():
     assert len(adapter.trace) == 1
     assert adapter.trace[0].step == "validate"
     assert adapter.trace[0].details == {"rule": "email"}
+
+
+def test_referential_integrity_with_the_documented_wrong_keys_warns_loudly(caplog):
+    """A dropped RI rule must not be silent.
+
+    `reference`/`key` are the only spellings the engine reads, but OLC's own docstring
+    and the shipped example taught `contract:`/`column:`. Those yield reference=None,
+    key=None, so the rule was dropped — and the caller skips empty expansions without
+    comment while static validation passes. The result was a contract that appeared to
+    enforce referential integrity and enforced nothing, with no signal anywhere.
+    """
+    import loguru
+
+    adapter = _make_adapter()
+    messages: list[str] = []
+    sink_id = loguru.logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        rule = adapter._expand_row_rule(
+            RowRuleReferentialIntegrity(
+                referential_integrity={
+                    "field": "customer_id",
+                    "contract": "silver_customers",  # not read
+                    "column": "customer_id",  # read as `field`, never as `key`
+                    "severity": "critical",
+                }
+            )
+        )
+    finally:
+        loguru.logger.remove(sink_id)
+
+    assert rule is None, "the rule genuinely cannot be built from these keys"
+    warning = " ".join(messages)
+    assert "referential_integrity" in warning and "DROPPED" in warning
+    # It must name what is missing and what it got, or the reader cannot act on it.
+    assert "reference" in warning and "key" in warning
+
+
+def test_referential_integrity_with_the_correct_keys_still_builds():
+    """The guard must not have broken the working spelling."""
+    adapter = _make_adapter()
+    rule = adapter._expand_row_rule(
+        RowRuleReferentialIntegrity(
+            referential_integrity={"field": "customer_id", "reference": "dim_customers", "key": "id"}
+        )
+    )
+    assert rule is not None
+    assert rule.sql == '"customer_id" IN (SELECT "id" FROM dim_customers)'

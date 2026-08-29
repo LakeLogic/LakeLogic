@@ -1571,7 +1571,13 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
     from pyspark.sql import functions as F
     from pyspark.sql import Row
 
-    if not unknown_cfg.get("enabled"):
+    # `enabled` defaults to True here, as it does at every other one of the eleven
+    # read sites. This path alone read it as `if not unknown_cfg.get("enabled")`, so a
+    # contract that declared `unknown_member:` WITHOUT `enabled: true` got the unknown
+    # member on every dataframe engine and silently not on Spark — the same contract,
+    # a different dimension, and every fact whose FK failed to resolve then had no
+    # row to point at on Spark only.
+    if unknown_cfg.get("enabled", True) is False:
         return
 
     sk_column = scd2_cfg.get("surrogate_key", "_sk") if scd2_cfg else None
@@ -1640,9 +1646,113 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
     logger.info(f"Injected unknown member row (SK={sk_value}) into {table_name}")
 
 
+def _scd2_as_datetime(value):
+    """
+    Normalise an SCD2 interval boundary to a naive datetime for interval maths.
+
+    Returns ``None`` when the value cannot be interpreted as a date (nulls,
+    opaque/mixed types, unparseable strings).  Every caller treats ``None`` as
+    "unknown" and falls back to the chronological append path, so a boundary
+    this function cannot read can never trigger a late-arrival split.
+    """
+    import pandas as pd
+
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        # Array-likes / exotic objects: not a date boundary we can reason about.
+        return None
+    try:
+        ts = pd.Timestamp(value)
+    except Exception:
+        return None
+    try:
+        if pd.isna(ts):
+            return None
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("UTC").tz_localize(None)
+    except Exception:
+        return None
+    return ts
+
+
+def _scd2_is_null(value) -> bool:
+    """True when ``value`` is a genuine null (open-ended interval end)."""
+    import pandas as pd
+
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _scd2_locate_interval(merged, key_index, change_dt, effective_from: str, effective_to: str):
+    """
+    Find the existing version whose half-open interval contains ``change_dt``.
+
+    An interval is ``[effective_from, effective_to)``; a null ``effective_to``
+    means open-ended.  Rows whose boundaries cannot be parsed are skipped
+    entirely rather than guessed at.
+
+    Returns ``(index, original_effective_to, from_dt)`` for the containing
+    version, or ``None`` when the change date predates every known version.
+    When (through pre-existing overlap) several intervals contain the date, the
+    one with the latest start wins — that is the version actually in effect.
+    """
+    best = None
+    best_from_dt = None
+    for idx in key_index:
+        from_dt = _scd2_as_datetime(merged.at[idx, effective_from])
+        if from_dt is None or change_dt < from_dt:
+            continue
+        raw_to = merged.at[idx, effective_to]
+        if _scd2_is_null(raw_to):
+            to_dt = None  # open-ended → +infinity
+        else:
+            to_dt = _scd2_as_datetime(raw_to)
+            if to_dt is None:
+                # Unreadable end boundary — refuse to reason about this row.
+                continue
+            if change_dt >= to_dt:
+                continue
+        if best_from_dt is None or from_dt > best_from_dt:
+            best = (idx, raw_to, from_dt)
+            best_from_dt = from_dt
+    return best
+
+
+def _scd2_check_interval(from_value, to_value, context: str) -> None:
+    """
+    Reject an inverted interval (``effective_to`` earlier than ``effective_from``).
+
+    SCD2 must never persist a version that ends before it begins; if this fires
+    it is a bug in the placement logic above, not bad input to be written out.
+    """
+    from_dt = _scd2_as_datetime(from_value)
+    to_dt = _scd2_as_datetime(to_value)
+    if from_dt is None or to_dt is None:
+        return
+    if to_dt < from_dt:
+        raise ValueError(
+            f"SCD2 {context}: refusing to write an inverted interval "
+            f"effective_from={from_value!r} > effective_to={to_value!r}"
+        )
+
+
 def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str, Any]):
     """
     Apply SCD2 changes by closing current records and appending new versions.
+
+    Late-arriving records (a change date that falls inside an already-closed
+    interval) are *slotted into* history rather than appended to the end: the
+    version in effect at that date is split, the new version is inserted closed,
+    and ``is_current`` stays with whichever version genuinely has the latest
+    ``effective_from``.  See the "Late-arrival placement" block below.
 
     Args:
         existing: Existing dataframe.
@@ -1814,8 +1924,15 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     if track_columns:
         compare_cols = [c for c in track_columns if c in existing.columns and c in incoming.columns]
     else:
-        # If no track_columns, compare all non-key, non-SCD2 columns
-        all_data_cols = list(set(existing.columns) | set(incoming.columns) - set(primary_key) - scd2_control)
+        # If no track_columns, compare all non-key, non-SCD2 columns.
+        #
+        # The parentheses are load-bearing: `-` binds tighter than `|`, so the original
+        # `set(existing) | set(incoming) - pk - control` subtracted only from `incoming`
+        # and let the primary key and the SCD2 control columns back in via `existing`.
+        # `effective_from` then landed in compare_cols, where the stored row's sentinel
+        # can never equal the incoming change date — so every column-by-column compare
+        # reported "changed" and an identical re-run cut a fresh version of every row.
+        all_data_cols = list((set(existing.columns) | set(incoming.columns)) - set(primary_key) - scd2_control)
         compare_cols = [c for c in all_data_cols if c in existing.columns and c in incoming.columns]
 
     incoming_keys = incoming[primary_key].drop_duplicates()
@@ -1847,10 +1964,65 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
         # Find the currently active record for this key in the merged dataframe
         current_mask = key_filter & merged[current_flag]
 
-        # Decide whether a change actually happened
+        # Resolve the change-event date from the designated SOURCE column.
+        # change_date_field is set by the user (e.g. "updated_at"); falls back
+        # to effective_from_field for backwards compat when both share a name.
+        # This is resolved BEFORE change detection because *when* the change
+        # happened decides *which* stored version it must be compared against.
+        if change_date_field in inc_row.index and inc_row[change_date_field] is not None:
+            change_date = inc_row[change_date_field]
+        else:
+            change_date = effective_from_default
+
+        # ── Late-arrival placement ───────────────────────────────────
+        # SCD2 historically assumed chronological arrival: it closed the
+        # is_current row and appended after it.  A record whose change date
+        # falls INSIDE an already-closed interval must instead be slotted in —
+        # otherwise the current flag jumps backwards to an older fact, the
+        # closed row is given an effective_to earlier than its effective_from,
+        # and two versions claim the same day.
+        #
+        # Invariant that makes this safe: no existing row's `effective_from` is
+        # ever mutated here.  The surrogate key is sha256(pk | effective_from),
+        # so preserving `effective_from` means no stored SK is renumbered and
+        # facts already holding those keys keep resolving.  Only the split
+        # row's `effective_to` moves.
+        late_split_idx = None  # existing version to split, if any
+        late_split_to = None  # that version's ORIGINAL effective_to
+        late_arrival = False  # change lands inside/before existing history
+        compare_row = None  # the version in effect AT the change date
+
+        change_dt = _scd2_as_datetime(change_date)
+        key_index = merged.index[key_filter]
+        if change_dt is not None and current_mask.any() and len(key_index) > 0:
+            current_from_dt = _scd2_as_datetime(merged.loc[current_mask, effective_from].iloc[0])
+            # Only a change date STRICTLY before the live version's start is
+            # late; anything at or after it is the ordinary chronological path
+            # and is handled exactly as before.
+            if current_from_dt is not None and change_dt < current_from_dt:
+                late_arrival = True
+                located = _scd2_locate_interval(merged, key_index, change_dt, effective_from, effective_to)
+                if located is not None:
+                    late_split_idx, late_split_to, _ = located
+                    compare_row = merged.loc[late_split_idx]
+
+        # Decide whether a change actually happened, comparing against the
+        # version that was in effect at the change date (for a chronological
+        # arrival that is the current row, as before).
         changed = True  # Assume change if no track_columns or no existing current record
         changed_fields = []  # Track which fields changed
-        if current_mask.any():
+        if late_arrival:
+            if compare_row is None:
+                # Earlier than every known version — nothing to compare against.
+                changed = True
+                changed_fields = ["late_arrival"]
+            elif compare_cols:
+                changed_fields = [c for c in compare_cols if str(compare_row.get(c)) != str(inc_row.get(c))]
+                changed = len(changed_fields) > 0
+            else:
+                changed = True
+                changed_fields = ["all"]
+        elif current_mask.any():
             existing_current_row = merged[current_mask].iloc[0]
             if compare_cols:
                 changed_fields = [c for c in compare_cols if str(existing_current_row.get(c)) != str(inc_row.get(c))]
@@ -1864,30 +2036,67 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
             changed_fields = ["initial_load"]
 
         if changed:
-            # Resolve the change-event date from the designated SOURCE column.
-            # change_date_field is set by the user (e.g. "updated_at"); falls back
-            # to effective_from_field for backwards compat when both share a name.
-            if change_date_field in inc_row.index and inc_row[change_date_field] is not None:
-                change_date = inc_row[change_date_field]
-            else:
-                change_date = effective_from_default
-
-            if current_mask.any():
-                # Close the existing current record: set its effective_to to the
-                # new version's start date (the real change-event date from source)
-                merged.loc[current_mask, effective_to] = change_date
-                merged.loc[current_mask, current_flag] = False
-
-            # Prepare the new version row
             new_version_row = inc_row.copy()
-            if not current_mask.any():
-                # Brand-new key — first appearance → use origin sentinel
-                new_version_row[effective_from] = effective_from_default
-            else:
-                # Real change event — use the source change-event date
+
+            if late_arrival:
+                # The incoming row belongs in history, not on the end of it:
+                # it is inserted CLOSED and is_current is left where it is.
                 new_version_row[effective_from] = change_date
-            new_version_row[effective_to] = effective_to_default
-            new_version_row[current_flag] = True
+                if late_split_idx is not None:
+                    # Split the containing version at the change date: it now
+                    # ends where the late version begins, and the late version
+                    # runs to that version's ORIGINAL end.
+                    new_version_row[effective_to] = late_split_to
+                    _scd2_check_interval(
+                        merged.at[late_split_idx, effective_from], change_date, "split of existing version"
+                    )
+                    merged.at[late_split_idx, effective_to] = change_date
+                else:
+                    # No interval contains the change date: it is either before
+                    # every known version, or inside a gap in history.  Either
+                    # way the new version runs up to the start of the next
+                    # version, so it can never overlap what follows.
+                    next_start = None  # raw effective_from of the next version
+                    next_start_dt = None
+                    prev_exists = False  # is there any version at/before it?
+                    for idx in key_index:
+                        idx_dt = _scd2_as_datetime(merged.at[idx, effective_from])
+                        if idx_dt is None:
+                            continue
+                        if idx_dt <= change_dt:
+                            prev_exists = True
+                            continue
+                        if next_start_dt is None or idx_dt < next_start_dt:
+                            next_start = merged.at[idx, effective_from]
+                            next_start_dt = idx_dt
+                    if next_start_dt is not None:
+                        new_version_row[effective_to] = next_start
+                        # Before ALL versions → this becomes the earliest one, so
+                        # it starts at the origin sentinel (what the initial-load
+                        # path gives a first version).  In a gap, history before
+                        # it already exists, so it starts at the change date.
+                        sentinel_dt = _scd2_as_datetime(effective_from_default)
+                        if not prev_exists and sentinel_dt is not None and sentinel_dt < next_start_dt:
+                            new_version_row[effective_from] = effective_from_default
+                    else:
+                        new_version_row[effective_to] = effective_to_default
+                new_version_row[current_flag] = False
+                _scd2_check_interval(
+                    new_version_row[effective_from], new_version_row[effective_to], "late-arriving version"
+                )
+            else:
+                if current_mask.any():
+                    # Close the existing current record: set its effective_to to the
+                    # new version's start date (the real change-event date from source)
+                    merged.loc[current_mask, effective_to] = change_date
+                    merged.loc[current_mask, current_flag] = False
+                    # Real change event — use the source change-event date
+                    new_version_row[effective_from] = change_date
+                else:
+                    # Brand-new key — first appearance → use origin sentinel
+                    new_version_row[effective_from] = effective_from_default
+                new_version_row[effective_to] = effective_to_default
+                new_version_row[current_flag] = True
 
             # Stamp the change reason
             if change_reason_col:
@@ -2244,6 +2453,162 @@ def _spark_merge_dataframe(  # pragma: no cover
     }
 
 
+def _spark_scd2_late_arrivals(  # pragma: no cover
+    existing_df,
+    incoming_df,
+    late_keys,
+    primary_key: List[str],
+    scd2_cfg: Dict[str, Any],
+    effective_from: str,
+    effective_to: str,
+    current_flag: str,
+    effective_from_default: Optional[str],
+):
+    """
+    Slot late-arriving changes into existing Spark SCD2 history.
+
+    Native Spark counterpart of the late-arrival block in ``_scd2_frames``: for
+    keys whose incoming change date falls before the live version's start, split
+    the version whose interval contains that date and insert the incoming row
+    CLOSED, leaving ``is_current`` on the genuinely-latest version.
+
+    As in the pandas engine, no existing row's ``effective_from`` is mutated —
+    the surrogate key is sha256(pk | effective_from), so stored keys never churn
+    and facts already referencing them keep resolving.  Only the split row's
+    ``effective_to`` moves.
+
+    Returns ``(rewritten_existing_rows, inserted_versions)`` for the late keys,
+    left for the caller to column-align and union.
+    """
+    from pyspark.sql import functions as F
+    from pyspark.sql.window import Window
+
+    track_columns = scd2_cfg.get("track_columns")
+    change_reason_col = scd2_cfg.get("change_reason_column", "_change_reason")
+
+    late_existing = existing_df.join(late_keys, on=primary_key, how="inner")
+    late_incoming = incoming_df.join(late_keys, on=primary_key, how="inner")
+
+    # The change date is already stamped onto incoming's effective_from above.
+    change_dates = late_incoming.select(*primary_key, F.col(effective_from).alias("_llg_cd")).distinct()
+    joined = late_existing.join(change_dates, on=primary_key, how="inner")
+
+    # The version whose half-open [effective_from, effective_to) interval
+    # contains the change date; latest start wins if history already overlaps.
+    contained = joined.filter(
+        (F.col(effective_from) <= F.col("_llg_cd"))
+        & (F.col(effective_to).isNull() | (F.col("_llg_cd") < F.col(effective_to)))
+    )
+    container = (
+        contained.withColumn(
+            "_llg_rn",
+            F.row_number().over(Window.partitionBy(*primary_key).orderBy(F.col(effective_from).desc())),
+        )
+        .filter(F.col("_llg_rn") == 1)
+        .drop("_llg_rn")
+    )
+    old_cols = [c for c in (track_columns or []) if c in container.columns and c in late_incoming.columns]
+    container_sel = container.select(
+        *primary_key,
+        F.col(effective_from).alias("_llg_split_from"),
+        F.col(effective_to).alias("_llg_split_to"),
+        *[F.col(c).alias(f"_llg_old_{c}") for c in old_cols],
+    )
+
+    # Where no interval contains the date (pre-history, or a gap in history) the
+    # new version must stop at the start of the next version so it cannot
+    # overlap what follows.  `_llg_has_prev` separates "gap" from "pre-history".
+    bounds = joined.groupBy(*primary_key).agg(
+        F.min(F.when(F.col(effective_from) > F.col("_llg_cd"), F.col(effective_from))).alias("_llg_next_from"),
+        F.max(F.when(F.col(effective_from) <= F.col("_llg_cd"), F.lit(True))).alias("_llg_has_prev"),
+    )
+
+    ctx = late_incoming.join(container_sel, on=primary_key, how="left").join(bounds, on=primary_key, how="left")
+
+    # Change detection compares against the version in effect AT the change
+    # date, not the current row — otherwise a replayed record inserts a
+    # duplicate version that says nothing changed.
+    change_conds = [~F.col(c).eqNullSafe(F.col(f"_llg_old_{c}")) for c in old_cols]
+    if track_columns and change_conds:
+        any_changed = change_conds[0]
+        for cond in change_conds[1:]:
+            any_changed = any_changed | cond
+        changed_expr = F.col("_llg_split_from").isNull() | any_changed
+    else:
+        changed_expr = F.lit(True)
+
+    applied = ctx.filter(changed_expr)
+
+    if change_reason_col:
+        if track_columns and old_cols:
+            reason_expr = F.concat_ws(
+                ",", *[F.when(~F.col(c).eqNullSafe(F.col(f"_llg_old_{c}")), F.lit(c)) for c in old_cols]
+            )
+        else:
+            reason_expr = F.lit("all")
+        applied = applied.withColumn(
+            change_reason_col,
+            F.when(F.col("_llg_split_from").isNull(), F.lit("late_arrival")).otherwise(reason_expr).cast("string"),
+        )
+
+    sentinel = (
+        F.to_timestamp(F.lit(effective_from_default))
+        if effective_from_default is not None
+        else F.lit(None).cast("timestamp")
+    )
+
+    helper_cols = ["_llg_split_from", "_llg_split_to", "_llg_next_from", "_llg_has_prev"] + [
+        f"_llg_old_{c}" for c in old_cols
+    ]
+    inserted = (
+        applied.withColumn(
+            "_llg_new_to",
+            F.when(F.col("_llg_split_from").isNotNull(), F.col("_llg_split_to")).otherwise(
+                F.coalesce(F.col("_llg_next_from"), F.col(effective_to))
+            ),
+        )
+        .withColumn(
+            "_llg_new_from",
+            F.when(F.col("_llg_split_from").isNotNull(), F.col(effective_from))
+            # Before every known version → it becomes the earliest one, so it
+            # starts at the origin sentinel, like an initial load's first
+            # version.  In a gap, history already precedes it: use the change date.
+            .when(F.col("_llg_has_prev").isNull() & (sentinel < F.col("_llg_next_from")), sentinel)
+            .otherwise(F.col(effective_from)),
+        )
+        .withColumn(effective_to, F.col("_llg_new_to"))
+        .withColumn(effective_from, F.col("_llg_new_from"))
+        # A late row lands inside history, so it is closed and is_current does not move.
+        .withColumn(current_flag, F.lit(False))
+        .drop("_llg_new_to", "_llg_new_from", *helper_cols)
+    )
+
+    splits = (
+        applied.filter(F.col("_llg_split_from").isNotNull())
+        .select(
+            *primary_key,
+            F.col("_llg_split_from").alias("_llg_tgt_from"),
+            F.col(effective_from).alias("_llg_cut_at"),
+        )
+        .distinct()
+    )
+    rewritten = (
+        late_existing.join(splits, on=primary_key, how="left")
+        .withColumn(
+            effective_to,
+            F.when(
+                F.col("_llg_tgt_from").isNotNull() & (F.col(effective_from) == F.col("_llg_tgt_from")),
+                F.col("_llg_cut_at"),
+            ).otherwise(F.col(effective_to)),
+        )
+        .drop("_llg_tgt_from", "_llg_cut_at")
+    )
+    if change_reason_col:
+        rewritten = rewritten.withColumn(change_reason_col, F.lit(None).cast("string"))
+
+    return rewritten, inserted
+
+
 def _spark_scd2_dataframe(  # pragma: no cover
     spark,
     incoming_df: Any,
@@ -2422,6 +2787,42 @@ def _spark_scd2_dataframe(  # pragma: no cover
     incoming_keys = incoming_df.select(*primary_key).distinct()
     track_columns = scd2_cfg.get("track_columns")  # optional list of columns to watch
 
+    # ── Late-arrival routing ─────────────────────────────────────
+    # The chronological path below closes the is_current row and appends after
+    # it, which corrupts history when the incoming change date actually falls
+    # inside an already-closed interval (inverted intervals, is_current jumping
+    # backwards onto an older fact, overlapping versions).  Keys whose change
+    # date precedes the live version's start are peeled off here and slotted
+    # into history instead; every other key flows through below untouched.
+    late_result = None
+    late_keys = (
+        incoming_df.select(*primary_key, F.col(effective_from).alias("_llg_new_from"))
+        .distinct()
+        .join(
+            existing_df.filter(F.col(current_flag)).select(*primary_key, F.col(effective_from).alias("_llg_cur_from")),
+            on=primary_key,
+            how="inner",
+        )
+        .filter(F.col("_llg_new_from") < F.col("_llg_cur_from"))
+        .select(*primary_key)
+        .distinct()
+    )
+    if late_keys.count() > 0:
+        late_result = _spark_scd2_late_arrivals(
+            existing_df,
+            incoming_df,
+            late_keys,
+            primary_key,
+            scd2_cfg,
+            effective_from,
+            effective_to,
+            current_flag,
+            effective_from_default,
+        )
+        existing_df = existing_df.join(late_keys, on=primary_key, how="left_anti")
+        incoming_df = incoming_df.join(late_keys, on=primary_key, how="left_anti")
+        incoming_keys = incoming_df.select(*primary_key).distinct()
+
     # Candidate matches: existing current rows whose key appears in incoming
     candidates = existing_df.join(incoming_keys, on=primary_key, how="inner").filter(F.col(current_flag))
 
@@ -2590,6 +2991,14 @@ def _spark_scd2_dataframe(  # pragma: no cover
     # Union all: unchanged (key not in incoming) + still-current (key in incoming,
     # unchanged) + already closed + newly closed + incoming (changed/new versions)
     result = unchanged.union(retained_current).union(already_closed).union(closed_records).union(incoming_df)
+
+    # Late-arriving keys: their rewritten history (split applied) plus the
+    # versions slotted into it.  These keys were excluded from every bucket above.
+    if late_result is not None:
+        late_rewritten, late_inserted = late_result
+        result = result.union(align_columns(late_rewritten, all_columns)).union(
+            align_columns(late_inserted, all_columns)
+        )
 
     # ── Surrogate key injection (Spark) ─────────────────────────
     sk_column = scd2_cfg.get("surrogate_key", "_sk")

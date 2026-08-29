@@ -246,6 +246,10 @@ class DataProcessor:
         self.last_source_path: Optional[str] = None
         self._source_files: List[Dict[str, Any]] = []
         self._source_max_mtime: Optional[float] = None
+        # Partition-presence telemetry for partitioned landing sources.
+        # Stays None unless `source.partition` drove a partition scan — absence
+        # of the key in the run report means "not measured", never "complete".
+        self._partition_presence: Optional[Dict[str, Any]] = None
         self._run_log_mode: Optional[str] = run_log_mode
 
         # ── Resolve contract context once ─────────────────────────────
@@ -911,9 +915,19 @@ class DataProcessor:
         # Apply per-field masking strategies defined in the contract model.
         # This runs AFTER lineage injection so lineage columns are preserved,
         # and BEFORE materialization so masked data is what gets written.
+        # Tagged with ANY of the three categories, matching MaskingEngine's own
+        # selector. This guard used to read `f.pii` alone while the engine masked
+        # `pii or phi or sensitive`, so a contract whose confidential columns were
+        # tagged `sensitive:` (or `phi:`) and none tagged `pii:` never constructed
+        # the engine at all — the capability existed and silently never ran.
+        #
+        # Deliberately NOT also requiring `f.masking` here: the engine warns about
+        # tagged fields that have no strategy, and that warning is the only signal a
+        # user gets that their PII is going out unmasked. Gating on `masking` would
+        # skip the engine and take the warning with it.
         pii_fields = []
         if self.contract.model and self.contract.model.fields:
-            pii_fields = [f for f in self.contract.model.fields if f.pii]
+            pii_fields = [f for f in self.contract.model.fields if f.pii or f.phi or f.sensitive]
 
         if pii_fields and good_df is not None:
             step_start_mask = time.perf_counter()
@@ -3569,6 +3583,11 @@ class DataProcessor:
 
         all_files: List[Dict[str, Any]] = []
         seen_dirs: set = set()  # Deduplicate when step < 1 day but format has no hour token
+        # Partition-presence bookkeeping — populated from the SAME enumeration
+        # and the SAME glob results used for ingestion. No second traversal of
+        # storage happens for telemetry.
+        present_keys: List[str] = []
+        missing_keys: List[str] = []
         current = start_dt
         while current <= end_dt:
             partition_dir = current.strftime(fmt)
@@ -3579,6 +3598,16 @@ class DataProcessor:
                 files = self._expand_source_files(partition_path)
                 if files:
                     all_files.extend(files)
+                    present_keys.append(partition_dir)
+                else:
+                    # A partition directory that EXISTS but contains no matching
+                    # files counts as MISSING for presence purposes: an empty
+                    # folder is not a delivery, and it is indistinguishable from
+                    # an absent one to every downstream consumer.
+                    # (The spec flags "present but empty" as an open question at
+                    # the *dataset* level — §9. At the *partition* level we take
+                    # the decision here and state it: no files == absent.)
+                    missing_keys.append(partition_dir)
             current += step
 
         _range_days = (end_dt - start_dt).days + 1
@@ -3593,7 +3622,59 @@ class DataProcessor:
                 f"{len(seen_dirs)} partitions ({start_dt.date()} to {end_dt.date()})"
             )
 
+        # ── Partition-presence telemetry ────────────────────────────────────
+        # Non-essential observability: it must never break an ingest. Same
+        # degradation precedent as execution-context capture in _build_report()
+        # ("never let context capture break the pipeline") — swallow, degrade to
+        # emitting nothing, and carry on.
+        try:
+            self._partition_presence = self._build_partition_presence(
+                fmt=fmt,
+                grain=("minute" if _has_minute else "hour" if _has_hour else "day"),
+                window_start=start_dt,
+                window_end=end_dt,
+                present_keys=present_keys,
+                missing_keys=missing_keys,
+            )
+        except Exception as e:
+            self._partition_presence = None
+            logger.debug(f"Partition-presence telemetry skipped: {e}")
+
         return all_files if all_files else []
+
+    # Cap for the partition key lists carried in telemetry. A year of missing
+    # hours is 8,760 keys; `missing_count` always reports the true total and
+    # `missing_truncated` says whether the list itself was cut.
+    _PARTITION_KEY_LIST_CAP = 100
+
+    def _build_partition_presence(
+        self,
+        *,
+        fmt: str,
+        grain: str,
+        window_start,
+        window_end,
+        present_keys: List[str],
+        missing_keys: List[str],
+    ) -> Dict[str, Any]:
+        """Assemble the partition-presence telemetry payload.
+
+        Keys are the rendered partition paths RELATIVE to the landing root —
+        no absolute path, no host, no credentials.
+        """
+        cap = self._PARTITION_KEY_LIST_CAP
+        missing_total = len(missing_keys)
+        return {
+            "grain": grain,
+            "format": fmt,
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+            "expected_count": len(present_keys) + missing_total,
+            "present_keys": list(present_keys[:cap]),
+            "missing_keys": list(missing_keys[:cap]),
+            "missing_count": missing_total,
+            "missing_truncated": missing_total > cap,
+        }
 
     def _get_last_source_watermark(self) -> Optional[float]:
         """
@@ -4318,6 +4399,17 @@ class DataProcessor:
             )
         except Exception:
             pass  # never let context capture break the pipeline
+
+        # ── Partition presence (partitioned landing sources only) ───────────
+        # Emitted ONLY when a partition scan actually ran. No `source.partition`
+        # → the key is absent entirely: SaaS reads absence as "not measured",
+        # and a zeroed payload would read as a confident pass.
+        try:
+            _presence = getattr(self, "_partition_presence", None)
+            if _presence:
+                report["partition_presence"] = _presence
+        except Exception:
+            pass  # telemetry must never break the pipeline
 
         return report
 

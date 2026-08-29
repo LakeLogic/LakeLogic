@@ -206,10 +206,12 @@ quality:
     # Referential integrity - checks a FK against ANOTHER contract's PK pool.
     # Requires the referenced contract's data to be available at runtime, so it
     # is left commented for this standalone demo (uncomment inside a mesh run):
+    # `reference` is a links: entry name and `key` its column — these are the only
+    # spellings the engine reads. `contract:`/`column:` produce no rule at all.
     # - referential_integrity:
     #     field: customer_id
-    #     contract: silver_customers
-    #     column: customer_id
+    #     reference: silver_customers
+    #     key: customer_id
     #     severity: critical
   dataset_rules:
     - unique: order_id
