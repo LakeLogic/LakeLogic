@@ -1104,7 +1104,9 @@ def _read_frame(path: Path, output_format: str):
         try:
             import polars as pl
 
-            return pl.read_delta(str(path)).to_pandas()
+            from lakelogic.core.delta_compat import read_delta as _read_delta
+
+            return _read_delta(str(path)).to_pandas()
         except (ImportError, Exception):
             from deltalake import DeltaTable
 

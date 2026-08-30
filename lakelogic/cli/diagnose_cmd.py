@@ -31,7 +31,9 @@ def _read_frame(path: Path) -> Any:
     if path.is_dir():
         # A Delta table directory, or a partitioned parquet dataset.
         try:
-            return pl.read_delta(str(path))
+            from lakelogic.core.delta_compat import read_delta as _read_delta
+
+            return _read_delta(str(path))
         except Exception:
             return pl.read_parquet(str(path / "**" / "*.parquet"))
 

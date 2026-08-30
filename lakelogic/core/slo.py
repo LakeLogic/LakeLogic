@@ -28,23 +28,17 @@ from lakelogic.core.registry import DomainRegistry
 
 
 def _read_delta_local(path: str, storage_options: Optional[dict] = None):
-    """Read a Delta table using the most compatible API available.
+    """Read a Delta table. Delegates to the shared compatibility reader.
 
-    pl.read_delta() has Schema compatibility issues with deltalake 0.17.x.
-    For local paths, DeltaTable.to_pyarrow_table() is used instead.
+    This function used to carry its own workaround for the deltalake 0.17.x Schema
+    incompatibility — and it fell back to ``pl.read_delta`` for CLOUD paths, so it
+    stayed broken exactly where the data is biggest. The same breakage recurred at
+    deltalake 1.x because the workaround lived here while four other modules called
+    ``pl.read_delta`` directly. It is now one shared reader.
     """
-    import polars as pl
-    from pathlib import Path as _P
+    from lakelogic.core.delta_compat import read_delta
 
-    _cloud = any(path.startswith(p) for p in ("abfss://", "s3://", "gs://", "adl://", "https://"))
-    if not _cloud and _P(path).exists():
-        try:
-            from deltalake import DeltaTable as _DT
-
-            return pl.from_arrow(_DT(path).to_pyarrow_table())
-        except Exception:
-            pass
-    return pl.read_delta(path, storage_options=storage_options)
+    return read_delta(path, storage_options=storage_options)
 
 
 def _coerce_utc(ts: Any) -> datetime.datetime:

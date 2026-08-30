@@ -2247,7 +2247,9 @@ class LakehousePipeline:
 
                 storage_opts = enrich_azure_storage_options(resolve_storage_options(run_log_table))
                 try:
-                    df = pl.read_delta(run_log_table, storage_options=storage_opts)
+                    from lakelogic.core.delta_compat import read_delta as _read_delta
+
+                    df = _read_delta(run_log_table, storage_options=storage_opts)
                 except Exception:
                     df = pl.read_parquet(run_log_table, storage_options=storage_opts)
 
