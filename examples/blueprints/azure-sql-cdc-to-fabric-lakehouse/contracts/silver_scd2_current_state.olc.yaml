@@ -1,0 +1,85 @@
+# Module 2 of 2 — Silver SCD2 Current State.
+#
+# Consumes Module 1's bronze events and models current state plus history. Declared
+# `depends_on: [bronze-cdc-event-capture]` in blueprint.yaml, so the Platform can
+# order deployment and compute blast radius when either contract changes.
+#
+# Why SCD2 rather than an overwrite: the bronze product retains every change, so
+# collapsing to current-only here would discard the history that was captured at
+# some cost. Effective dating keeps both.
+version: 1.0.0
+
+info:
+  title: Silver Customer Current State
+  table_name: silver_customer_current_state
+  description: >-
+    Trusted current-state and historical customer product, effective-dated from the
+    bronze change stream. One current row per customer.
+  owner: customer-domain@example.com
+  domain: customers
+  target_layer: silver
+
+source:
+  type: table
+  path: "table:{bronze_catalog}.bronze_customer_cdc_events"
+  load_mode: incremental
+  watermark_field: change_ts
+
+model:
+  fields:
+    - name: customer_id
+      type: string
+      required: true
+
+    - name: email
+      type: string
+      pii: true
+      masking: hash
+
+    - name: status
+      type: string
+
+    - name: effective_from
+      type: timestamp
+      description: Injected by the SCD2 materializer.
+
+    - name: effective_to
+      type: timestamp
+      description: Injected by the SCD2 materializer; open interval for the current row.
+
+    - name: is_current
+      type: boolean
+      description: Injected by the SCD2 materializer.
+
+quality:
+  row_rules:
+    - name: business_key_present
+      sql: "customer_id IS NOT NULL"
+
+    - name: status_is_known
+      sql: "status IN ('active', 'churned', 'suspended')"
+
+  dataset_rules:
+    # Exactly one current row per customer. Without this, a mis-slotted late
+    # arrival can leave two rows flagged current and every downstream join
+    # silently doubles.
+    - name: one_current_row_per_customer
+      sql: >-
+        SELECT COUNT(*) FROM (
+          SELECT customer_id FROM source WHERE is_current = true
+          GROUP BY customer_id HAVING COUNT(*) > 1
+        )
+      must_be_less_than: 1
+
+materialization:
+  strategy: scd2
+  scd2:
+    track_columns: [email, status]
+    effective_from_field: effective_from
+    effective_to_field: effective_to
+    current_flag_field: is_current
+
+service_levels:
+  freshness:
+    max_delay_minutes: 60
+    source_check_columns: [effective_from]

@@ -1,0 +1,86 @@
+# Module 1 of 2 — Bronze CDC Event Capture.
+#
+# An IMMUTABLE change-event product. Every operation is retained, including deletes,
+# because a watermark poll (`WHERE updated_at > x`) cannot see a delete at all: the
+# row is simply gone and the target keeps it forever. That is the reason this
+# blueprint reads the change log rather than polling.
+#
+# Portable OLC: no credentials, no Service Bus or Fabric specifics. Those live in
+# blueprint.yaml `bindings`.
+version: 1.0.0
+
+info:
+  title: Bronze CDC Event Capture
+  table_name: bronze_customer_cdc_events
+  description: >-
+    Immutable stream of Azure SQL change events. One row per change, never
+    collapsed to a final state, so Silver can be rebuilt or replayed from here.
+  owner: data-platform@example.com
+  domain: customers
+  target_layer: bronze
+
+source:
+  type: table
+  # Bound at deploy time to the Service Bus landing table / Fabric bronze path.
+  path: "table:{bronze_catalog}.customer_cdc_events"
+  load_mode: cdc
+  cdc_op_field: _lakelogic_cdc_op
+  cdc_timestamp_field: change_ts
+  cdc_delete_values: ["delete"]
+
+model:
+  fields:
+    - name: customer_id
+      type: string
+      required: true
+      description: Business key carried from the source table.
+
+    - name: _lakelogic_cdc_op
+      type: string
+      required: true
+      description: insert | update | delete — normalised from the provider's codes.
+
+    - name: change_ts
+      type: timestamp
+      required: true
+      description: When the change occurred at source (not when it was ingested).
+
+    - name: change_lsn
+      type: string
+      description: Source log sequence number; makes replay deterministic.
+
+    - name: email
+      type: string
+      pii: true
+      masking: hash
+
+    - name: status
+      type: string
+
+quality:
+  row_rules:
+    # The operation is the whole point of a CDC product. A null here means the
+    # change cannot be applied downstream, so the row is quarantined rather than
+    # silently merged as an insert.
+    - name: cdc_op_present
+      sql: "_lakelogic_cdc_op IS NOT NULL"
+
+    - name: cdc_op_is_known
+      sql: "_lakelogic_cdc_op IN ('insert', 'update', 'delete')"
+
+    - name: business_key_present
+      sql: "customer_id IS NOT NULL"
+
+    - name: change_ts_present
+      sql: "change_ts IS NOT NULL"
+
+materialization:
+  strategy: append          # immutable: events are never updated in place
+  partition_by: [change_ts]
+
+service_levels:
+  freshness:
+    max_delay_minutes: 15
+    source_check_columns: [change_ts]
+  retention:
+    days: 365
