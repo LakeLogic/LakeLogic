@@ -198,6 +198,16 @@ examples/colab/landing/
 examples/colab/*_demo/
 examples/colab/*_wip/
 examples/colab/dlt_pipelines/
+examples/colab/lake/
+examples/colab/*.sqlite
+
+# The docsite renders copies of the notebooks, so executing them there leaves the
+# same run artefacts behind. A lake/ of parquet and three sqlite files were
+# committed this way once already.
+docs/examples/lake/
+docs/examples/*_demo/
+docs/examples/*.sqlite
+docs/examples/*.parquet
 
 
 # LakeGuard state files
