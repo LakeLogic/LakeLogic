@@ -60,9 +60,15 @@ jobs:
       # GDPR -> backfill -- sharing one lakehouse, because the mesh story is the
       # point. -p no:randomly keeps them in filename order; a random order would
       # fail the later ones for reasons that are not defects.
+      # --nbmake-timeout is per CELL and defaults to 300s. Three of the RideFlow
+      # notebooks legitimately need longer: 08d measured 337s and 08c 294s, i.e.
+      # 08d "failed" by 12% and 08c was passing with six seconds to spare. Both
+      # were healthy; the limit was simply too tight, and 08c would have started
+      # flaking on any slower runner. 900s leaves real headroom while still
+      # catching a genuine hang.
       - name: Execute notebooks
         run: |
-          python -m pytest --nbmake examples/colab/ -p no:randomly -v
+          python -m pytest --nbmake --nbmake-timeout=900 examples/colab/ -p no:randomly -v
 
       # Written on success only, so the badge cannot claim a run that failed.
       - name: Record verification
