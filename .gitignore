@@ -351,3 +351,5 @@ databricks.yml
 .claude/
 playwright-mcp/
 .playwright-mcp/
+# Exclusive-resource locks (scripts/with-lock.sh). Runtime state, never shared.
+.locks/
