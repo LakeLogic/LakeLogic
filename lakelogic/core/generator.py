@@ -526,7 +526,10 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "timezone": "timezone",
     "language": "language_name",
     "locale": "language_name",
-    "state": "state",
+    # `state` is NOT here: it lives in the Address block above, next to city/county/
+    # postcode. It was in both, mapping to "state" in each — harmless only because the
+    # values happened to agree; a dict literal silently keeps the last one, so the two
+    # were one edit away from disagreeing invisibly. Caught by ruff F601.
     "province": "administrative_unit",
     "region": "administrative_unit",
     "colour": "color_name",

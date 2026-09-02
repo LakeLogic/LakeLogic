@@ -861,6 +861,98 @@ def generate_alter_ddl(
 
 # ── Execution helpers ────────────────────────────────────────────────────────
 
+
+def split_sql_statements(sql: str) -> List[str]:
+    """Split a DDL script into statements on top-level semicolons only.
+
+    A naive ``sql.split(";")`` truncates any statement whose string literal or
+    quoted identifier contains a semicolon - e.g. a column comment reading
+    ``COMMENT 'Surrogate key; new for each version'`` is cut mid-literal and the
+    backend rejects it with a parse error. This walks the script instead,
+    tracking single quotes, double quotes, backticks and SQL comments, so a
+    semicolon only ends a statement when it appears outside all of them.
+
+    Blank statements are dropped and each returned statement is stripped.
+    """
+    statements: List[str] = []
+    buf: List[str] = []
+    quote: Optional[str] = None  # active quote char, or None
+    in_line_comment = False
+    in_block_comment = False
+    i, n = 0, len(sql)
+
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        if in_line_comment:
+            buf.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if in_block_comment:
+            buf.append(ch)
+            if ch == "*" and nxt == "/":
+                buf.append(nxt)
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+
+        if quote:
+            buf.append(ch)
+            # Backslash escape (Spark/MySQL style) - consume the next char.
+            if ch == "\\" and nxt:
+                buf.append(nxt)
+                i += 2
+                continue
+            if ch == quote:
+                # A doubled quote ('' or "") is an escaped quote, not a close.
+                if nxt == quote:
+                    buf.append(nxt)
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+
+        # Outside quotes and comments
+        if ch == "-" and nxt == "-":
+            in_line_comment = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            buf.append(ch)
+            buf.append(nxt)
+            i += 2
+            continue
+        if ch in ("'", '"', "`"):
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
 # Contract type → PyArrow type mapping for Delta table initialization
 _CONTRACT_TO_ARROW: Dict[str, str] = {
     "string": "string",
@@ -1128,8 +1220,7 @@ def create_table(
 
         con = connection or duckdb.connect(database=str(db_path or ":memory:"))
         try:
-            for statement in ddl.split(";"):
-                statement = statement.strip()
+            for statement in split_sql_statements(ddl):
                 if statement:
                     con.execute(statement)
             # Print a cleaner summary instead of just the first line
@@ -1144,8 +1235,7 @@ def create_table(
 
         con = connection or sqlite3.connect(str(db_path or ":memory:"))
         try:
-            for statement in ddl.split(";"):
-                statement = statement.strip()
+            for statement in split_sql_statements(ddl):
                 if statement:
                     con.execute(statement)
             con.commit()
@@ -1184,8 +1274,7 @@ def create_table(
                             f"CREATE TABLE may fail if schema does not exist."
                         )
 
-            for statement in ddl.split(";"):
-                statement = statement.strip()
+            for statement in split_sql_statements(ddl):
                 if statement:
                     spark.sql(statement)
 
@@ -1198,8 +1287,7 @@ def create_table(
             raise ValueError("Snowflake backend requires a connection object.")
         cursor = connection.cursor()
         try:
-            for statement in ddl.split(";"):
-                statement = statement.strip()
+            for statement in split_sql_statements(ddl):
                 if statement:
                     cursor.execute(statement)
             logger.info(f"Created table via Snowflake: {ddl.splitlines()[0]}")
@@ -1209,8 +1297,7 @@ def create_table(
     elif backend == "bigquery":
         if not connection:
             raise ValueError("BigQuery backend requires a client object as connection.")
-        for statement in ddl.split(";"):
-            statement = statement.strip()
+        for statement in split_sql_statements(ddl):
             if statement:
                 connection.query(statement).result()
         logger.info(f"Created table via BigQuery: {ddl.splitlines()[0]}")
@@ -1220,8 +1307,7 @@ def create_table(
             raise ValueError("PostgreSQL backend requires a connection object.")
         cursor = connection.cursor()
         try:
-            for statement in ddl.split(";"):
-                statement = statement.strip()
+            for statement in split_sql_statements(ddl):
                 if statement:
                     cursor.execute(statement)
             connection.commit()

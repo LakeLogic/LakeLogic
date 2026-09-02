@@ -20,6 +20,7 @@ from lakelogic.core.ddl import (
     generate_drop_ddl,
     init_tables_from_directory,
     is_safe_widening,
+    split_sql_statements,
 )
 from lakelogic.core.models import DataContract, FieldDefinition, Info, Materialization, Model
 
@@ -995,3 +996,104 @@ class TestDeltaInitialization:
 
         ddl = proc.generate_ddl()  # No backend specified → uses polars generic backend or defaults
         assert "INTEGER" in ddl or "INT" in ddl
+
+
+# ── Statement splitting ──────────────────────────────────────────────────────
+
+
+class TestSplitSqlStatements:
+    """A semicolon inside a quoted literal must not end a statement.
+
+    Regression: a column comment such as ``COMMENT 'Surrogate key; new for
+    each version'`` was cut mid-literal by a naive ``ddl.split(";")``, and the
+    backend rejected the fragment with a parse error.
+    """
+
+    def test_semicolon_inside_single_quoted_comment_is_not_a_separator(self):
+        sql = "CREATE TABLE t (a BIGINT COMMENT 'Surrogate key; new for each version', b STRING);"
+        stmts = split_sql_statements(sql)
+        assert len(stmts) == 1
+        assert stmts[0].endswith("b STRING)")
+        assert "Surrogate key; new for each version" in stmts[0]
+
+    def test_top_level_semicolons_still_split(self):
+        stmts = split_sql_statements("CREATE TABLE a (x INT); CREATE TABLE b (y INT);")
+        assert stmts == ["CREATE TABLE a (x INT)", "CREATE TABLE b (y INT)"]
+
+    def test_blank_and_trailing_statements_dropped(self):
+        assert split_sql_statements("  ;\n;  ") == []
+        assert split_sql_statements("SELECT 1") == ["SELECT 1"]
+
+    def test_semicolon_in_double_quotes_and_backticks(self):
+        assert len(split_sql_statements('CREATE TABLE "we;ird" (a INT);')) == 1
+        assert len(split_sql_statements("CREATE TABLE `we;ird` (a INT);")) == 1
+
+    def test_escaped_quotes_do_not_end_the_literal(self):
+        doubled = "CREATE TABLE t (a INT COMMENT 'it''s here; still inside');"
+        assert len(split_sql_statements(doubled)) == 1
+        backslash = "CREATE TABLE t (a INT COMMENT 'it\\'s here; still inside');"
+        assert len(split_sql_statements(backslash)) == 1
+
+    def test_semicolon_in_sql_comments_is_ignored(self):
+        line = "CREATE TABLE t (a INT); -- trailing; note\nCREATE TABLE u (b INT);"
+        assert len(split_sql_statements(line)) == 2
+        block = "CREATE TABLE t (/* a; b */ a INT);"
+        assert len(split_sql_statements(block)) == 1
+
+    def test_generated_ddl_with_semicolon_comment_stays_one_statement(self):
+        contract = _make_contract(
+            fields=[
+                FieldDefinition(
+                    name="city_sk",
+                    type="long",
+                    required=True,
+                    description="Surrogate key; new for each SCD2 version",
+                ),
+                FieldDefinition(name="city_name", type="string"),
+            ],
+            table_name="gold.dim_city",
+        )
+        ddl = generate_ddl(contract, backend="spark")
+        stmts = split_sql_statements(ddl)
+        assert len(stmts) == 1
+        assert "Surrogate key; new for each SCD2 version" in stmts[0]
+        assert stmts[0].count("(") == stmts[0].count(")")
+
+    def test_create_table_executes_one_intact_statement(self, monkeypatch):
+        """End-to-end through create_table: the backend receives whole SQL."""
+        spark_calls = []
+        fake_sql_module = type("FakeSparkModule", (), {})()
+        fake_sql_module.SparkSession = type(
+            "FakeSparkSession",
+            (),
+            {
+                "builder": type(
+                    "Builder",
+                    (),
+                    {
+                        "getOrCreate": staticmethod(
+                            lambda: type("Spark", (), {"sql": lambda self, stmt: spark_calls.append(stmt)})()
+                        )
+                    },
+                )()
+            },
+        )
+        monkeypatch.setitem(sys.modules, "pyspark", type("FakePyspark", (), {})())
+        monkeypatch.setitem(sys.modules, "pyspark.sql", fake_sql_module)
+
+        contract = _make_contract(
+            fields=[
+                FieldDefinition(
+                    name="city_sk",
+                    type="long",
+                    required=True,
+                    description="Surrogate key; new for each SCD2 version",
+                ),
+            ],
+            table_name="gold.dim_city",
+        )
+        create_table(contract, "spark")
+        creates = [s for s in spark_calls if s.startswith("CREATE TABLE")]
+        assert len(creates) == 1
+        assert "Surrogate key; new for each SCD2 version" in creates[0]
+        assert creates[0].rstrip().endswith(")")
