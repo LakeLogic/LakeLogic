@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.48.0] — 2026-09-02
+
+### Added
+
+- Implement split_sql_statements function to handle semicolons in DDL scripts correctly
+
+### Documentation
+
+- Update changelog for v1.47.0
+
+### Fixed
+
+- **deps**: Declare SQLAlchemy, which every database source already required
 ## [1.47.0] — 2026-09-02
 
 ### Added
@@ -651,6 +664,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.48.0]: https://github.com/lakelogic/LakeLogic/compare/v1.47.0...v1.48.0
 [1.47.0]: https://github.com/lakelogic/LakeLogic/compare/v1.46.0...v1.47.0
 [1.46.0]: https://github.com/lakelogic/LakeLogic/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/lakelogic/LakeLogic/compare/v1.44.0...v1.45.0
