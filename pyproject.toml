@@ -110,17 +110,30 @@ delta = [
 polars = ["polars>=0.20.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
 duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
 spark = ["pyspark>=3.3.0"]
+# SQLAlchemy alone — every `source.type: database` contract needs it, whatever the
+# driver, because the batched (`fetch_size`) path builds an SQLAlchemy engine and hands
+# polars a live connection to iterate. SQLite needs NOTHING else, which is why this is a
+# separate extra: `[databases]` drags in pyodbc, whose wheel wants unixODBC headers, so
+# forcing that on someone reading from a local .db file is a build failure for nothing.
+# It was declared in no extra at all until 2026-09-02 — `pip install lakelogic[databases]`
+# gave you every driver and not the library that does the extraction, so a database source
+# raised "Batching requires SQLAlchemy" no matter what you installed.
+sql = ["sqlalchemy>=2.0.0"]
 # Database CDC connectors
 databases = [
+    "sqlalchemy>=2.0.0",  # the batched extraction path itself
     "pyodbc>=5.0.0",  # Azure SQL, SQL Server
     "psycopg2-binary>=2.9.0",  # PostgreSQL
     "pymysql>=1.1.0",  # MySQL
     "pymongo>=4.6.0",  # MongoDB
     "azure-identity>=1.15.0",  # Azure AD for Azure SQL/PostgreSQL
 ]
-azuresql = ["pyodbc>=5.0.0", "azure-identity>=1.15.0"]
-postgresql = ["psycopg2-binary>=2.9.0", "azure-identity>=1.15.0"]
-mysql = ["pymysql>=1.1.0"]
+# Each of these is "enough to read from THIS database", so each carries SQLAlchemy —
+# a driver on its own cannot run the extraction. MongoDB is deliberately absent: it is
+# not an SQLAlchemy dialect and does not use this path.
+azuresql = ["sqlalchemy>=2.0.0", "pyodbc>=5.0.0", "azure-identity>=1.15.0"]
+postgresql = ["sqlalchemy>=2.0.0", "psycopg2-binary>=2.9.0", "azure-identity>=1.15.0"]
+mysql = ["sqlalchemy>=2.0.0", "pymysql>=1.1.0"]
 mongodb = ["pymongo>=4.6.0"]
 # Integration connectors (APIs, SFTP, Messaging)
 integrations = [

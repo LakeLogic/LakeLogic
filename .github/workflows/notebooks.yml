@@ -52,7 +52,11 @@ jobs:
 
       - name: Install project with the extras the notebooks use
         run: |
-          uv pip install --system -e ".[delta,duckdb,sse,sftp]"
+          # `sql` is SQLAlchemy alone — 06_integrations reads a local SQLite file
+          # through the batched `source.type: database` path, which needs it. Not
+          # `databases`: that pulls pyodbc, whose build wants unixODBC headers the
+          # runner does not have.
+          uv pip install --system -e ".[delta,duckdb,sse,sftp,sql]"
           uv pip install --system nbmake pytest jupyter_bokeh
 
       # Ordering is deliberate, not incidental. The 08-series is a CHAIN --
