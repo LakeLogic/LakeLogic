@@ -70,7 +70,9 @@ def _load_link_frames(contract: Any, good_df: Any, engine_name: str) -> Dict[str
                 if fmt == "csv":
                     frame = pl.read_csv(path)
                 elif fmt == "delta":
-                    frame = pl.read_delta(str(path))
+                    from lakelogic.core.delta_compat import read_delta as _read_delta
+
+                    frame = _read_delta(str(path))
                 else:
                     frame = pl.read_parquet(path)
 

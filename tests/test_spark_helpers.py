@@ -168,24 +168,35 @@ class FakeSchema:
 
 
 class FakeSelectableDataFrame:
-    def __init__(self, columns, schema_fields=None):
+    #: A real Spark DataFrame exposes BOTH `schema` (StructType) and `dtypes`
+    #: (name -> type-string pairs). This fake modelled only `schema`, so
+    #: `_apply_schema` raised AttributeError the moment it started reading
+    #: `df.dtypes` to spot struct/array/map columns bound for a string target.
+    #: Defaults to every column being a plain `string`, which is what the
+    #: pre-existing assertions assume; pass `dtypes` to exercise the nested case.
+    def __init__(self, columns, schema_fields=None, dtypes=None):
         self.columns = list(columns)
         self.selected = None
         self.with_columns = []
         self.schema = FakeSchema(schema_fields or [])
+        self._dtypes = dict(dtypes or {})
+
+    @property
+    def dtypes(self):
+        return [(name, self._dtypes.get(name, "string")) for name in self.columns]
 
     def select(self, *exprs):
         self.selected = exprs
         selected_names = [
             getattr(expr, "alias_name", None) or expr.value[1] for expr in exprs if hasattr(expr, "value")
         ]
-        clone = FakeSelectableDataFrame(selected_names, self.schema.fields)
+        clone = FakeSelectableDataFrame(selected_names, self.schema.fields, self._dtypes)
         clone.selected = exprs
         clone.with_columns = list(self.with_columns)
         return clone
 
     def withColumn(self, name, expr):
-        clone = FakeSelectableDataFrame(self.columns, self.schema.fields)
+        clone = FakeSelectableDataFrame(self.columns, self.schema.fields, self._dtypes)
         clone.selected = self.selected
         clone.with_columns = self.with_columns + [(name, expr.value)]
         return clone
@@ -575,6 +586,47 @@ def test_spark_helper_register_links_and_apply_schema(monkeypatch, tmp_path):
     assert "name" in alias_names
     assert "missing_col" in alias_names
     assert any(name.startswith("__type_err_") for name in alias_names)
+
+
+def test_apply_schema_serialises_nested_columns_to_json(monkeypatch):
+    """A struct/array/map column bound for a string field must go through `to_json`.
+
+    This is the branch that reads `df.dtypes` — the attribute the fake DataFrame did not
+    model, so `_apply_schema` raised AttributeError before it could be reached and the
+    behaviour was never actually asserted. A plain cast renders a struct POSITIONALLY
+    ('{1, x}'): field names discarded, string members unquoted, neither valid JSON nor
+    round-trippable.
+    """
+    _install_fake_pyspark(monkeypatch)
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        model={
+            "fields": [
+                {"name": "payload", "type": "string"},
+                {"name": "tags", "type": "string"},
+                {"name": "note", "type": "string"},
+            ]
+        },
+        server={"type": "local", "path": "x"},
+    )
+    adapter = SparkAdapter(contract)
+
+    df = FakeSelectableDataFrame(
+        ["payload", "tags", "note"],
+        dtypes={
+            "payload": "struct<a:int,b:string>",
+            "tags": "array<string>",
+            # A plain string stays a plain string — the guard must not swallow everything.
+            "note": "string",
+        },
+    )
+    selected_df, _ = adapter._apply_schema(df)
+
+    rendered = {expr.alias_name: expr.value for expr in selected_df.selected if getattr(expr, "alias_name", None)}
+    assert rendered["payload"][0] == "to_json"
+    assert rendered["tags"][0] == "to_json"
+    assert rendered["note"][0] != "to_json"
 
 
 def test_spark_helper_cast_to_contract_types(monkeypatch):

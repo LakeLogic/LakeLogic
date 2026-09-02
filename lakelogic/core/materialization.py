@@ -614,6 +614,77 @@ def _safe_write_deltalake(path, data, **kwargs):
         raise e
 
 
+_SFTP_DELIVERY_FORMATS = {"csv", "parquet", "json"}
+
+
+def _write_frame_sftp(
+    df,
+    path_str: str,
+    output_format: str,
+    storage_options: Optional[Dict[str, str]] = None,
+) -> None:
+    """Deliver a frame to an SFTP server declared as ``sftp://user@host/dir/name.csv``.
+
+    Outbound file delivery to a partner, which is a different problem from writing to
+    a lakehouse:
+
+    * **Atomic.** The file is uploaded as ``<name>.tmp`` and renamed into place, so a
+      partner polling the folder never reads a half-written file.
+    * **Deterministic name.** The target names the file, so a re-run after a failure
+      REPLACES that delivery instead of adding a second copy. A timestamped name
+      would make every retry a duplicate order file.
+    * Column-oriented formats only where the partner can read them: csv, json,
+      parquet. Anything else is refused rather than silently delivered as parquet.
+    """
+    import os
+    import tempfile
+    from urllib.parse import urlparse
+
+    from lakelogic.engines.integration_connectors import SFTPConnector
+
+    fmt = (output_format or "csv").lower()
+    if fmt not in _SFTP_DELIVERY_FORMATS:
+        raise ValueError(
+            f"SFTP delivery does not support format '{fmt}'. Supported: "
+            f"{sorted(_SFTP_DELIVERY_FORMATS)}. Refusing rather than delivering a "
+            "file the recipient cannot read."
+        )
+
+    parsed = urlparse(path_str)
+    if not parsed.hostname:
+        raise ValueError(f"SFTP target '{path_str}' has no host. Expected sftp://user@host/dir/name.csv")
+    if parsed.password:
+        raise ValueError(
+            "Do not put a password in the target path — it reaches logs and run "
+            "metadata. Use storage_options/env instead."
+        )
+
+    remote_path = parsed.path or "/"
+    remote_dir, name = os.path.split(remote_path)
+    if not name:
+        raise ValueError(
+            f"SFTP target '{path_str}' names a directory, not a file. Give the "
+            "delivery a deterministic filename so a retry replaces it rather than "
+            "adding a duplicate (e.g. sftp://host/outbound/orders.csv)."
+        )
+
+    opts = dict(storage_options or {})
+    connector = SFTPConnector(
+        host=parsed.hostname,
+        port=parsed.port or 22,
+        username=parsed.username or opts.get("username") or os.getenv("LAKELOGIC_SFTP_USER"),
+        password=opts.get("password") or os.getenv("LAKELOGIC_SFTP_PASSWORD"),
+        private_key_path=opts.get("private_key_path") or os.getenv("LAKELOGIC_SFTP_KEY"),
+        known_hosts=opts["known_hosts"] if "known_hosts" in opts else "",
+    )
+
+    staging = Path(tempfile.mkdtemp(prefix="lakelogic-sftp-out-")) / name
+    _write_frame(df, staging, fmt)  # reuse the ordinary local writers
+
+    connector.put_files([str(staging)], remote_dir or "/", atomic=True)
+    logger.info(f"Delivered {name} to sftp://{parsed.hostname}{remote_dir or '/'} ({fmt})")
+
+
 def _write_frame(
     df,
     path,
@@ -630,6 +701,16 @@ def _write_frame(
         output_format: csv or parquet.
     """
     path_str = str(path)
+
+    # ── SFTP delivery ────────────────────────────────────────────────────────
+    # Handled before the format dispatch because the destination is a server, not a
+    # filesystem the writers can address. Without this branch an `sftp://` target
+    # fell through to the parquet default and attempted a LOCAL write to a directory
+    # literally named "sftp:", which succeeds quietly and delivers nothing.
+    if path_str.startswith("sftp://"):
+        _write_frame_sftp(df, path_str, output_format, storage_options)
+        return
+
     is_remote = _is_remote_path(path_str)
     opts = _build_storage_options(storage_options) if is_remote else None
 
@@ -1023,7 +1104,9 @@ def _read_frame(path: Path, output_format: str):
         try:
             import polars as pl
 
-            return pl.read_delta(str(path)).to_pandas()
+            from lakelogic.core.delta_compat import read_delta as _read_delta
+
+            return _read_delta(str(path)).to_pandas()
         except (ImportError, Exception):
             from deltalake import DeltaTable
 
@@ -1491,12 +1574,13 @@ def _inject_unknown_member_spark(  # pragma: no cover
         "_lakelogic_contract_name",
     }
     _lineage_values: Dict[str, Any] = {"_lakelogic_source": "Unknown"}
-    if result.count() > 0:
-        first_row = result.first()
-        if first_row:
-            for lc in _lineage_cols:
-                if lc in result.columns:
-                    _lineage_values[lc] = first_row[lc]
+    # `first()` returns None on an empty frame, so the previous `count() > 0` guard
+    # bought nothing and cost a full scan to learn what first() reports for free.
+    first_row = result.first()
+    if first_row:
+        for lc in _lineage_cols:
+            if lc in result.columns:
+                _lineage_values[lc] = first_row[lc]
 
     # Build the unknown row dict
     spark = result.sparkSession
@@ -1613,12 +1697,12 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
         "_lakelogic_contract_name",
     }
     _lineage_values = {"_lakelogic_source": "Unknown"}
-    if existing.count() > 0:
-        first_row = existing.first()
-        if first_row:
-            for lc in _lineage_cols:
-                if lc in existing.columns:
-                    _lineage_values[lc] = first_row[lc]
+    # Same as above: first() alone answers this; count() was a full scan for nothing.
+    first_row = existing.first()
+    if first_row:
+        for lc in _lineage_cols:
+            if lc in existing.columns:
+                _lineage_values[lc] = first_row[lc]
 
     # Build the unknown row
     unknown_row = {}
@@ -2706,7 +2790,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
     except Exception:
         pass
 
-    if existing_df is None or existing_df.count() == 0:
+    if existing_df is None or existing_df.isEmpty():
         # Initial load represents pre-existing history: stamp effective_from with
         # the configured start-of-time sentinel (default 1900-01-01) so the first
         # version reads as "valid since the beginning", matching the polars/pandas
@@ -2807,7 +2891,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
         .select(*primary_key)
         .distinct()
     )
-    if late_keys.count() > 0:
+    if not late_keys.isEmpty():
         late_result = _spark_scd2_late_arrivals(
             existing_df,
             incoming_df,

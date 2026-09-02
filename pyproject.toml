@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "1.46.0"
+version = "1.47.0"
 description = "A declarative, contract-driven medallion pipeline engine for data mesh architectures. Write once. Run on Spark, Polars, or DuckDB."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -125,7 +125,7 @@ mongodb = ["pymongo>=4.6.0"]
 # Integration connectors (APIs, SFTP, Messaging)
 integrations = [
     "requests>=2.31.0",  # REST APIs
-    "paramiko>=4.0.1",  # SFTP/SSH
+    "asyncssh>=2.14.0",  # SFTP/SSH
     "azure-servicebus>=7.11.0",  # Azure Service Bus
     "azure-eventgrid>=4.17.0",  # Azure Event Grid
     "azure-identity>=1.15.0",  # Azure AD for messaging
@@ -135,7 +135,7 @@ integrations = [
 api = ["requests>=2.31.0"]
 # dlt — declarative API ingestion driven by Data Contracts
 dlt = ["dlt[parquet]>=1.0", "pyarrow>=23.0.1"]
-sftp = ["paramiko>=4.0.1"]
+sftp = ["asyncssh>=2.14.0"]  # SFTP/SSH; verifies host keys by default (paramiko's AutoAddPolicy did not)
 azure_messaging = ["azure-servicebus>=7.11.0", "azure-eventgrid>=4.17.0", "azure-identity>=1.15.0"]
 aws_messaging = ["boto3>=1.28.0"]
 gcp_messaging = ["google-cloud-pubsub>=2.18.0"]
@@ -307,7 +307,6 @@ constraint-dependencies = [
     "orjson>=3.11.6; python_version >= '3.10'",  # CVE-2025-67221 recursion DoS on deeply nested JSON
     "pytest>=9.0.3; python_version >= '3.10'",  # CVE-2025-71176 predictable tmpdir symlink attack
     "unstructured>=0.18.18; python_version >= '3.10'",  # CVE-2025-64712 MSG attachment path traversal
-    "paramiko>=4.0.1",  # Fix SHA-1 vulnerability in rsakey.py
 ]
 
 [dependency-groups]
@@ -334,7 +333,7 @@ dev = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "1.46.0"
+version         = "1.47.0"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = false

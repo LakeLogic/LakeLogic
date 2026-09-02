@@ -1,0 +1,95 @@
+name: Notebooks
+
+# Executes every published example notebook on a clean Linux runner.
+#
+# Why this exists: the gallery README promises every pattern is "runnable in Colab
+# in ~30 seconds", and nothing verified that. When the notebooks were finally run,
+# 11 of 19 failed — from an unpinned dependency, accumulated API drift and shared
+# state, none of which anyone had seen because no job executed them.
+#
+# It also has to be a LINUX job. Local Windows runs cannot classify these failures:
+# they hit a broken DuckDB delta extension and missing optional extras that Colab
+# installs itself, so a local pass/fail says little about whether a reader can
+# actually run the notebook.
+#
+# The Governed Data Product Blueprints catalogue reads its verification status from
+# this job. A blueprint's badge is only as honest as this gate.
+
+on:
+  pull_request:
+    branches: [dev, stage, main]
+    paths:
+      - "examples/**"
+      - "lakelogic/**"
+      - "pyproject.toml"
+      - ".github/workflows/notebooks.yml"
+  push:
+    branches: [dev]
+  # Dependency drift breaks notebooks without anyone touching them — that is
+  # exactly how this rotted — so it also runs on a schedule.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  execute:
+    name: Execute example notebooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install project with the extras the notebooks use
+        run: |
+          uv pip install --system -e ".[delta,duckdb,sse,sftp]"
+          uv pip install --system nbmake pytest jupyter_bokeh
+
+      # Ordering is deliberate, not incidental. The 08-series is a CHAIN --
+      # marketplace -> payments -> operations -> marketing -> mesh products ->
+      # GDPR -> backfill -- sharing one lakehouse, because the mesh story is the
+      # point. -p no:randomly keeps them in filename order; a random order would
+      # fail the later ones for reasons that are not defects.
+      # --nbmake-timeout is per CELL and defaults to 300s. Three of the RideFlow
+      # notebooks legitimately need longer: 08d measured 337s and 08c 294s, i.e.
+      # 08d "failed" by 12% and 08c was passing with six seconds to spare. Both
+      # were healthy; the limit was simply too tight, and 08c would have started
+      # flaking on any slower runner. 900s leaves real headroom while still
+      # catching a genuine hang.
+      - name: Execute notebooks
+        run: |
+          python -m pytest --nbmake --nbmake-timeout=900 examples/colab/ -p no:randomly -v
+
+      # Written on success only, so the badge cannot claim a run that failed.
+      - name: Record verification
+        if: success()
+        run: |
+          python - <<'PY'
+          import json, subprocess, datetime, pathlib
+          v = subprocess.run(["python", "-c", "import lakelogic; print(lakelogic.__version__)"],
+                             capture_output=True, text=True).stdout.strip()
+          pathlib.Path("examples/colab/.verification.json").write_text(json.dumps({
+              "environment": "ci-linux",
+              "status": "passing",
+              "lakelogic_version": v,
+              "verified_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          }, indent=2))
+          print(pathlib.Path("examples/colab/.verification.json").read_text())
+          PY
+
+      - name: Upload verification
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notebook-verification
+          path: examples/colab/.verification.json

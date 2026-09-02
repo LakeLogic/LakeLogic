@@ -56,9 +56,20 @@ REM       2. Manually prefix: git commit -m "feat: <your message>"
 REM       3. Or amend the last commit: git commit --amend -m "feat: ..."
 REM -----------------------------------------------------------------------
 
+REM Always operate on THIS repo, never on whatever directory the caller happens to
+REM be standing in. Every step below uses relative paths (tests/, pyproject.toml), so
+REM running this from another checkout silently pointed all of them somewhere else.
+REM That is not hypothetical: the sibling OLC release.bat was run from THIS repo and
+REM cheerfully ran LakeLogic's 1814-test suite as the OLC release gate before failing
+REM on a missing path. The failure was the lucky part — `uv lock --upgrade` and the
+REM test gate had already run against the wrong repository and reported green.
+cd /d "%~dp0"
+
 echo.
 echo ======================================================
 echo   LakeLogic Release
+echo ======================================================
+echo   Repo: %CD%
 echo ======================================================
 
 REM Step 0: Upgrade dependencies (pull latest security patches)

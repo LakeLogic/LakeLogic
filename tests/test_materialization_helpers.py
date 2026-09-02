@@ -1357,30 +1357,88 @@ def test_sanitize_arrow_nulls_casts_only_null_columns(monkeypatch):
     assert mat._sanitize_arrow_nulls(clean_table) is clean_table
 
 
-def test_read_frame_delta_iceberg_duckdb_and_soft_delete_spark(monkeypatch, tmp_path):
-    delta_calls = []
+def _fake_delta_stack(monkeypatch, calls, *, arrow_works=True):
+    """Stand in for polars + deltalake, recording the route `_read_frame` actually takes.
 
+    Models what `lakelogic.core.delta_compat` expects of polars: `from_arrow` for the
+    supported route, `read_delta` for the fallback. The previous fixture defined only
+    `read_delta`, so the Arrow route could never run — the test believed it was checking
+    the delta read and was in fact only ever exercising the double fallback.
+    """
     fake_polars = types.ModuleType("polars")
 
-    def fake_read_delta(path):
-        delta_calls.append(("polars", path))
-        raise RuntimeError("delta read failed")
+    def fake_from_arrow(table):
+        calls.append(("pl.from_arrow", table))
+        if not arrow_works:
+            raise RuntimeError("arrow route unavailable")
+        return types.SimpleNamespace(to_pandas=lambda: pd.DataFrame({"id": [2]}))
 
+    def fake_read_delta(path, storage_options=None):
+        calls.append(("pl.read_delta", str(path)))
+        raise RuntimeError("polars' delta bridge is broken against current deltalake")
+
+    fake_polars.from_arrow = fake_from_arrow
     fake_polars.read_delta = fake_read_delta
     monkeypatch.setitem(sys.modules, "polars", fake_polars)
 
     class FakeDeltaTable:
-        def __init__(self, path):
-            delta_calls.append(("delta_table", str(path)))
+        def __init__(self, path, storage_options=None):
+            calls.append(("DeltaTable", str(path)))
+
+        def to_pyarrow_table(self):
+            calls.append(("to_pyarrow_table", None))
+            return "arrow-table"
 
         def to_pandas(self):
-            return pd.DataFrame({"id": [2]})
+            calls.append(("DeltaTable.to_pandas", None))
+            return pd.DataFrame({"id": [9]})
 
     monkeypatch.setitem(sys.modules, "deltalake", types.SimpleNamespace(DeltaTable=FakeDeltaTable))
-    delta_df = mat._read_frame(tmp_path / "orders", "delta")
-    assert list(delta_df["id"]) == [2]
-    assert delta_calls == [("polars", str(tmp_path / "orders")), ("delta_table", str(tmp_path / "orders"))]
 
+
+def test_read_frame_delta_goes_through_arrow_not_polars_delta(monkeypatch, tmp_path):
+    """Delta reads must NOT touch `pl.read_delta` when the Arrow route works.
+
+    `pl.read_delta()` raises `TypeError: 'deltalake._internal.Schema' object is not
+    iterable` against the deltalake polars itself declares, so ba80000 routed every Delta
+    read through deltalake -> Arrow -> polars instead. This test used to assert the
+    opposite order and so pinned the bug that commit removed.
+    """
+    calls = []
+    _fake_delta_stack(monkeypatch, calls)
+
+    delta_df = mat._read_frame(tmp_path / "orders", "delta")
+
+    assert list(delta_df["id"]) == [2]
+    assert calls == [
+        ("DeltaTable", str(tmp_path / "orders")),
+        ("to_pyarrow_table", None),
+        ("pl.from_arrow", "arrow-table"),
+    ]
+    # The specific regression, stated on its own so a failure names it.
+    assert not any(name == "pl.read_delta" for name, _ in calls)
+
+
+def test_read_frame_delta_falls_back_when_the_arrow_route_fails(monkeypatch, tmp_path):
+    """The fallbacks still exist — a future polars fix, or an unforeseen path, must not
+    hard-fail. With BOTH polars routes failing, the deltalake->pandas read is the answer."""
+    calls = []
+    _fake_delta_stack(monkeypatch, calls, arrow_works=False)
+
+    delta_df = mat._read_frame(tmp_path / "orders", "delta")
+
+    assert [name for name, _ in calls] == [
+        "DeltaTable",
+        "to_pyarrow_table",
+        "pl.from_arrow",  # supported route, failed
+        "pl.read_delta",  # delta_compat's own fallback
+        "DeltaTable",
+        "DeltaTable.to_pandas",  # _read_frame's fallback
+    ]
+    assert list(delta_df["id"]) == [9]
+
+
+def test_read_frame_delta_iceberg_duckdb_and_soft_delete_spark(monkeypatch, tmp_path):
     duck_calls = []
 
     class FakeDuckResult:

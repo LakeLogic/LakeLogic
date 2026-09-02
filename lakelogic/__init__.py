@@ -41,8 +41,9 @@ from lakelogic.engines.cloud_credentials import (
 )
 from lakelogic.engines.base import ENGINE_DIALECT_MAP
 from lakelogic.engines.generic_sql import GenericSQLAdapter
+from lakelogic.core.delta_compat import read_delta
 
-__version__ = "1.46.0"
+__version__ = "1.47.0"
 
 
 class HelpTopic:
@@ -205,6 +206,7 @@ observability = help.observability
 
 __all__ = [
     "DataProcessor",
+    "read_delta",
     "DataGenerator",
     "StreamingSimulator",
     "DataContract",

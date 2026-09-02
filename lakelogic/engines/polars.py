@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import polars as pl
 from loguru import logger
 
-from lakelogic.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter, struct_drift_errors
 
 
 class PolarsAdapter(EngineAdapter):
@@ -511,6 +511,41 @@ class PolarsAdapter(EngineAdapter):
 
         return None
 
+    @staticmethod
+    def _json_path_for_polars(path: str) -> str:
+        """Rewrite a quoted JSON path key into the bracket form Polars can compile.
+
+        ``$."my key"`` does not compile — it raises ComputeError ('error compiling
+        JSON path expression') and takes the whole run down, so any key containing a
+        space was unreachable on this engine. ``$['my key']`` works, so translate.
+        """
+        import re as _re
+
+        return _re.sub(r"\.\"([^\"]+)\"", lambda m: f"['{m.group(1)}']", str(path))
+
+    def _json_extract_expr(self, cfg):
+        """Build the json_extract expression, with a cast that actually applies.
+
+        Temporal targets go through ``str.to_datetime``/``str.to_date`` rather than a
+        plain cast. Casting the extracted STRING straight to Datetime silently yields
+        null for a date-only value like "2024-01-15" — so a column declared
+        `cast: timestamp` arrived empty, with nothing reported.
+        """
+        import polars as pl
+
+        extracted = pl.col(cfg.source).str.json_path_match(self._json_path_for_polars(cfg.path))
+        if not cfg.cast:
+            return extracted
+
+        key = str(cfg.cast).lower()
+        if key in ("timestamp", "datetime"):
+            return extracted.str.to_datetime(strict=False)
+        if key == "date":
+            return extracted.str.to_date(strict=False)
+
+        dtype = self._to_polars_dtype(cfg.cast) or pl.Utf8
+        return extracted.cast(dtype, strict=False)
+
     def _to_polars_dtype(self, type_name: str):
         """
         Map contract type names to Polars dtypes.
@@ -602,8 +637,11 @@ class PolarsAdapter(EngineAdapter):
                 if field.name not in current_schema.names():
                     continue
                 current_dtype = current_schema[field.name]
-                # List[*] → String: serialise to JSON string first, then cast
-                if isinstance(current_dtype, pl.List) and dtype == pl.Utf8:
+                # List[*] / Struct → String: serialise to JSON, not to Polars' own
+                # display form. Polars renders a struct POSITIONALLY ('{1,"x"}'),
+                # discarding the field names — lossy, and unparseable by any JSON
+                # reader. A nested value stored in a string column has to round-trip.
+                if isinstance(current_dtype, (pl.List, pl.Struct)) and dtype == pl.Utf8:
                     import json as _json
 
                     exprs.append(
@@ -683,6 +721,22 @@ class PolarsAdapter(EngineAdapter):
             missing = missing - _scd2_injected
 
         schema_errors: List[str] = []
+
+        # Drift INSIDE a struct. `missing` above compares top-level names only, so a
+        # struct that lost declared members passed as long as the column itself was
+        # present — the declaration was treated as a label, not a shape. Reported
+        # regardless of the evolution policy: losing a declared member is a breach of
+        # the type, not an additive change a lenient policy is meant to tolerate.
+        try:
+            _schema = lf.collect_schema()
+            _members = {
+                name: ([f.name for f in dt.fields] if isinstance(dt, pl.Struct) else None)
+                for name, dt in zip(_schema.names(), _schema.dtypes())
+            }
+            schema_errors.extend(struct_drift_errors(self.contract.model.fields, _members))
+        except Exception as exc:  # never let the extra check break a working run
+            logger.debug(f"struct drift check skipped: {exc}")
+
         if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
 
@@ -1006,10 +1060,7 @@ class PolarsAdapter(EngineAdapter):
                     logger.warning(f"Pre-Transform [JsonExtract]: source column '{cfg.source}' not found, skipping.")
                     continue
                 logger.debug(f"Pre-Transform [JsonExtract]: {cfg.source}[{cfg.path}] -> {cfg.field}")
-                extracted = pl.col(cfg.source).str.json_path_match(cfg.path)
-                if cfg.cast:
-                    dtype = self._to_polars_dtype(cfg.cast) or pl.Utf8
-                    extracted = extracted.cast(dtype, strict=False)
+                extracted = self._json_extract_expr(cfg)
                 current_lf = current_lf.with_columns(extracted.alias(cfg.field))
                 existing = set(current_lf.collect_schema().names())
                 continue
@@ -1463,10 +1514,7 @@ class PolarsAdapter(EngineAdapter):
             elif trans.json_extract:
                 cfg = trans.json_extract
                 logger.debug(f"Post-Transform [JsonExtract]: {cfg.source} -> {cfg.field} via {cfg.path}")
-                extracted = pl.col(cfg.source).str.json_path_match(cfg.path)
-                if cfg.cast:
-                    dtype = self._to_polars_dtype(cfg.cast) or pl.Utf8
-                    extracted = extracted.cast(dtype, strict=False)
+                extracted = self._json_extract_expr(cfg)
                 current_lf = current_lf.with_columns(extracted.alias(cfg.field))
             elif trans.date_range_explode:
                 cfg = trans.date_range_explode

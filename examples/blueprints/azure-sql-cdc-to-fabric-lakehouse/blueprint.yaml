@@ -1,0 +1,115 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LakeLogic blueprint — canonical definition.
+#
+# ONE blueprint, MANY contract modules. A blueprint is a solution outcome; the
+# contracts inside it are the data products it produces. Splitting at the transport
+# boundary instead (CDC -> Service Bus, then Service Bus -> Fabric) would give a
+# blueprint whose outcome is "a message arrived somewhere" — a pipeline step, not a
+# governed data product, and the beginning of a generic orchestration catalogue.
+#
+# The website gallery and the Platform library both read THIS file. Nothing about a
+# blueprint is written twice.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: lakelogic.io/blueprint/v1
+id: azure-sql-cdc-to-fabric-lakehouse
+
+# Two titles, deliberately. The visitor sees `title`; search engines see `seo_title`.
+# Forcing one string to do both jobs produces either a keyword soup nobody reads or
+# a clean title nobody finds.
+title: Azure SQL CDC to Microsoft Fabric Lakehouse
+seo_title: >-
+  Azure SQL CDC to Microsoft Fabric Lakehouse with Service Bus — governed bronze
+  and silver data products
+subtitle: >-
+  Capture changes through Azure Service Bus, retain replayable Bronze events and
+  publish a governed Silver current-state product.
+
+tier: open-source            # open-source | enterprise
+categories: [ingest, govern]
+technologies: [azure-sql, service-bus, microsoft-fabric, spark, cdc, scd2]
+
+# ── Contract modules ─────────────────────────────────────────────────────────
+# Each module is a data product with its own OLC contract and owner. `depends_on`
+# makes the chain explicit, which is what a flat orchestration catalogue cannot
+# express — and what lets the Platform order deployment and compute blast radius.
+modules:
+  - id: bronze-cdc-event-capture
+    name: Bronze CDC Event Capture
+    output: Immutable change-event product
+    contract: contracts/bronze_cdc_events.olc.yaml
+    pins:
+      - operation (insert / update / delete), never collapsed to a final state
+      - event timestamp and source LSN for replay
+      - business key and before/after payload
+      - retention and freshness
+
+  - id: silver-scd2-current-state
+    name: Silver SCD2 Current State
+    output: Trusted current-state and historical product
+    contract: contracts/silver_scd2_current_state.olc.yaml
+    depends_on: [bronze-cdc-event-capture]
+    pins:
+      - business keys and effective dating
+      - uniqueness of the current row per key
+      - quality rules and service levels
+
+# ── Environment ──────────────────────────────────────────────────────────────
+# A contract READS and WRITES. That is the whole model, and the chain of
+# bronze/silver contracts above already expresses the pipeline — so this section
+# only supplies the values their `source.path` and `materialization.target_path`
+# resolve to per environment. Nothing here invents new pipeline stages.
+#
+# References, never values. Commented-out connection strings are how real
+# credentials end up committed: someone uncomments to test locally and forgets.
+environment:
+  substitutions:
+    landing_path:   abfss://${ADLS_CONTAINER}@${ADLS_ACCOUNT}.dfs.core.windows.net/landing/customers/
+    bronze_catalog: ${FABRIC_LAKEHOUSE}.bronze
+    silver_catalog: ${FABRIC_LAKEHOUSE}.silver
+
+  required:
+    - ADLS_ACCOUNT / ADLS_CONTAINER — where change events land as files
+    - FABRIC_LAKEHOUSE — workspace lakehouse holding bronze and silver
+
+# ── Upstream (NOT LakeLogic) ─────────────────────────────────────────────────
+# Getting change events out of Azure SQL and into the landing path is the
+# orchestrator's job. LakeLogic reads what has landed, validates it, writes the
+# governed output and produces evidence. Stated here so the boundary is explicit
+# rather than implied by omission.
+upstream:
+  produces: change events as files in `landing_path`
+  typical: Azure SQL CDC -> Service Bus -> ADF / Kestra / Fabric pipeline
+  orchestration: [kestra, airflow, fabric-pipelines]
+
+# ── Verification ─────────────────────────────────────────────────────────────
+# Scoped to a VERSION and an ENVIRONMENT, and written by CI — never by hand.
+# "Executed once" is not a durable status: a blueprint verified against
+# lakelogic 1.46.0 says nothing about 1.47.0, and one verified in Colab says
+# nothing about Fabric. A hand-written badge would still read "verified" today for
+# the ten example notebooks that stopped running when an unpinned dependency moved.
+verification:
+  - environment: colab
+    scope: contract + validation logic, synthetic CDC events
+    status: pending            # written by CI: passing | failing | pending
+    lakelogic_version: null
+    verified_at: null
+
+  - environment: microsoft-fabric
+    scope: full bindings, real Azure SQL CDC through Service Bus
+    status: not-attempted
+    lakelogic_version: null
+    verified_at: null
+
+# What the visitor is promised, and nothing more. `colab` runs the logic on
+# synthetic data — it does NOT stand up Azure SQL, Service Bus or Fabric, and the
+# gallery must not imply that it does.
+runnable:
+  colab:
+    notebook: notebook.ipynb
+    requires_credentials: false
+    covers: [bronze-cdc-event-capture, silver-scd2-current-state]
+    excludes: [service-bus transport, fabric lakehouse write]
+  platform:
+    requires_credentials: true
+    covers: all

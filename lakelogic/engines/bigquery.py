@@ -40,6 +40,30 @@ class BigQueryAdapter(EngineAdapter):
     This adapter executes contracts directly in BigQuery using SQL.
     """
 
+    # Row count above which pulling the result through the driver is called out as
+    # the scalability cliff it is. Override with LAKELOGIC_BIGQUERY_FETCH_WARN_ROWS.
+    FETCH_WARN_ROWS = 1_000_000
+
+    #: Names of the BigQuery tables holding the last run's results.
+    #:
+    #: Every stage of this engine is pushed down — the accepted and quarantined sets
+    #: already exist as tables in BigQuery. Returning only pandas frames meant the one
+    #: door out of the warehouse was ``to_dataframe()``, so a large run computed
+    #: correctly in BigQuery and then funnelled through driver RAM, with no way to opt
+    #: out: these names were locals.
+    #:
+    #: Exposing them is purely additive — ``execute()`` still returns the same frames.
+    #: They are TEMP tables scoped to the run's session, whose id is on
+    #: ``_session_id``; bind to that session (see ``_job_config``) to read them::
+    #:
+    #:     good, bad = processor.run("project.dataset.src")
+    #:     client.query(
+    #:         f"CREATE TABLE target AS SELECT * FROM {adapter.good_table}",
+    #:         job_config=adapter._job_config(),
+    #:     )
+    good_table: Optional[str] = None
+    bad_table: Optional[str] = None
+
     def execute(self, df: Any) -> Tuple[Any, Any]:
         """
         Execute the contract using BigQuery SQL.
@@ -72,8 +96,34 @@ class BigQueryAdapter(EngineAdapter):
         self._run_dataset_rules(client, good_table)
         good_table = self._apply_transformations(client, good_table, phase="post")
 
-        good_df = self._fetch_dataframe(client, good_table)
-        bad_df = self._fetch_dataframe(client, bad_table)
+        # Publish the handles BEFORE fetching, so a fetch that falls over — the exact
+        # case the size warning is about — still leaves the caller able to reach the
+        # results, which are sitting complete in BigQuery.
+        self.good_table = good_table
+        self.bad_table = bad_table
+
+        if self.defer_fetch:
+            # About to write these rows back into BigQuery, so bringing them home
+            # first is pure waste. Count them in place — the counts must stay REAL,
+            # or a run that wrote 500M rows would log "Good: 0" purely because
+            # nothing was fetched.
+            self.deferred_counts = {
+                "good": self._count_rows(client, good_table),
+                "bad": self._count_rows(client, bad_table),
+            }
+            logger.info(
+                f"BigQuery: results left in the warehouse "
+                f"({self.deferred_counts['good']:,} accepted, "
+                f"{self.deferred_counts['bad']:,} quarantined) — no rows fetched to the "
+                f"driver. The returned frames are EMPTY by design; read the data from "
+                f"{good_table} / {bad_table}, or run without server-side "
+                f"materialization to receive it here."
+            )
+            good_df = self._empty_frame()
+            bad_df = self._empty_frame()
+        else:
+            good_df = self._fetch_dataframe(client, good_table)
+            bad_df = self._fetch_dataframe(client, bad_table)
 
         include_errors = True
         if self.contract.quarantine:
@@ -82,6 +132,80 @@ class BigQueryAdapter(EngineAdapter):
             bad_df = bad_df.drop(columns=[self.ERROR_COLUMN, self.CATEGORY_COLUMN], errors="ignore")
 
         return good_df, bad_df
+
+    # Set by the processor when the run's output is going straight back into the
+    # warehouse, so fetching it to the driver first would be pure waste. Off by
+    # default: skipping the fetch means the returned frames are EMPTY, which is only
+    # correct when the caller genuinely does not need the rows in-process.
+    defer_fetch: bool = False
+
+    #: Real row counts when ``defer_fetch`` skipped the fetch — ``{"good": n, "bad": m}``.
+    #: Without this the run log would derive its counts from the empty frames and
+    #: report zero for a run that wrote millions of rows.
+    deferred_counts: Optional[Dict[str, int]] = None
+
+    def _count_rows(self, client, table_name: str) -> int:
+        job = client.query(f"SELECT COUNT(*) FROM {table_name}", job_config=self._job_config())
+        return int(list(job.result())[0][0])
+
+    @staticmethod
+    def _empty_frame():
+        """An empty pandas frame — the shape callers expect, with no rows."""
+        import pandas as pd
+
+        return pd.DataFrame()
+
+    # Strategies the native writer implements. Anything else is refused rather than
+    # quietly downgraded — writing an append where the contract asked for a merge is
+    # a data error, not a performance one.
+    _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace"}
+
+    def materialize_native(self, target_table: str, strategy: str = "overwrite") -> Dict[str, Any]:
+        """Write this run's accepted rows to ``target_table`` INSIDE BigQuery.
+
+        The default write path goes BigQuery -> to_dataframe() -> pandas -> dlt ->
+        BigQuery: the result crosses the driver and is pushed back where it came
+        from. The accepted set is already a BigQuery table (:attr:`good_table`), so a
+        CTAS/INSERT keeps it server-side.
+
+        Unlike Snowflake this needs no special session handling — the engine never
+        closes its session, and every statement is bound to it via ``_job_config``.
+        """
+        if not self.good_table:
+            raise RuntimeError(
+                "materialize_native() needs the results of a completed run: "
+                "good_table is unset. Call it after execute(), in the same session."
+            )
+        if strategy not in self._NATIVE_WRITE_STRATEGIES:
+            raise NotImplementedError(
+                f"BigQuery native materialization supports "
+                f"{sorted(self._NATIVE_WRITE_STRATEGIES)}, not '{strategy}'. Refusing "
+                "rather than writing a different strategy than the contract asked for."
+            )
+
+        client = self._get_client()
+        target = self._quote_table(target_table)
+
+        if strategy == "append":
+            sql = f"INSERT INTO {target} SELECT * FROM {self.good_table}"
+        else:  # overwrite / replace
+            sql = f"CREATE OR REPLACE TABLE {target} AS SELECT * FROM {self.good_table}"
+
+        self._execute(client, sql)
+
+        rows_job = client.query(f"SELECT COUNT(*) FROM {target}", job_config=self._job_config())
+        rows = list(rows_job.result())[0][0]
+
+        logger.info(
+            f"BigQuery native materialization: {self.good_table} -> {target} "
+            f"({strategy}, {rows:,} rows) — server-side, no driver round trip."
+        )
+        return {
+            "target": target_table,
+            "rows_written": rows,
+            "strategy": strategy,
+            "server_side": True,
+        }
 
     def _get_client(self):
         """
@@ -936,4 +1060,23 @@ class BigQueryAdapter(EngineAdapter):
             pandas.DataFrame
         """
         job = client.query(f"SELECT * FROM {table_name}", job_config=self._job_config())
-        return job.result().to_dataframe()
+        rows = job.result()
+
+        # ``total_rows`` is populated before any row is materialised, so the size of
+        # the result is known without a second query and without paying for the
+        # fetch — the warning lands BEFORE the step it warns about, not after.
+        total = getattr(rows, "total_rows", None)
+        threshold = int(os.getenv("LAKELOGIC_BIGQUERY_FETCH_WARN_ROWS", self.FETCH_WARN_ROWS))
+        if total is not None and total > threshold:
+            logger.warning(
+                f"BigQuery: pulling {total:,} rows from {table_name} into pandas "
+                f"(to_dataframe) — the whole result crosses the network and must fit in "
+                f"this process's memory. The contract itself ran entirely in BigQuery; "
+                f"only this fetch is client-side. To keep the data in the warehouse, read "
+                f"the result server-side from adapter.good_table / adapter.bad_table "
+                f"within the same session (adapter._session_id), e.g. "
+                f"CREATE TABLE <target> AS SELECT * FROM {table_name}. "
+                f"Threshold: LAKELOGIC_BIGQUERY_FETCH_WARN_ROWS (currently {threshold:,})."
+            )
+
+        return rows.to_dataframe()

@@ -53,6 +53,35 @@ class SnowflakeAdapter(EngineAdapter):
         """
         cls._shared_connection = conn
 
+    # Row count above which pulling the result through the driver is called out as
+    # the scalability cliff it is. Override with LAKELOGIC_SNOWFLAKE_FETCH_WARN_ROWS.
+    FETCH_WARN_ROWS = 1_000_000
+
+    #: Names of the Snowflake tables holding the last run's results.
+    #:
+    #: Every stage of this engine is pushed down — the accepted and quarantined sets
+    #: already exist as tables inside Snowflake. Returning only pandas frames meant
+    #: the one door out of the warehouse was ``fetch_pandas_all()``, so a large run
+    #: computed correctly in the warehouse and then funnelled through driver RAM,
+    #: with no way to opt out: these names were locals and the TEMP tables died with
+    #: the session on close.
+    #:
+    #: Exposing them is purely additive — ``execute()`` still returns the same
+    #: frames — but a caller who supplies its own connection via
+    #: :meth:`set_shared_connection` can now keep the data server-side::
+    #:
+    #:     SnowflakeAdapter.set_shared_connection(conn)   # session outlives the run
+    #:     good, bad = processor.run("SRC_TABLE")
+    #:     conn.cursor().execute(
+    #:         f"CREATE TABLE target AS SELECT * FROM {adapter.good_table}"
+    #:     )
+    #:
+    #: Only valid while that session lives. When the engine opens its own connection
+    #: it closes it on the way out and these tables are gone — which is why the
+    #: handles are useful only in the shared-connection case.
+    good_table: Optional[str] = None
+    bad_table: Optional[str] = None
+
     def execute(self, df: Any) -> Tuple[Any, Any]:
         """
         Execute the contract using Snowflake SQL.
@@ -85,8 +114,34 @@ class SnowflakeAdapter(EngineAdapter):
             self._run_dataset_rules(conn, good_table)
             good_table = self._apply_transformations(conn, good_table, phase="post")
 
-            good_df = self._fetch_dataframe(conn, good_table)
-            bad_df = self._fetch_dataframe(conn, bad_table)
+            # Publish the handles BEFORE fetching: if the fetch is what falls over
+            # (the exact case the warning is about), the caller can still see which
+            # tables held the answer rather than losing the run entirely.
+            self.good_table = good_table
+            self.bad_table = bad_table
+
+            if self.defer_fetch:
+                # The caller is about to write these rows back into Snowflake, so
+                # pulling them home first would be pure waste. Count them in place —
+                # the counts must stay REAL, or a run that wrote 500M rows would log
+                # "Good: 0" simply because nothing was brought back.
+                self.deferred_counts = {
+                    "good": self._count_rows(conn, good_table),
+                    "bad": self._count_rows(conn, bad_table),
+                }
+                logger.info(
+                    f"Snowflake: results left in the warehouse "
+                    f"({self.deferred_counts['good']:,} accepted, "
+                    f"{self.deferred_counts['bad']:,} quarantined) — no rows fetched to "
+                    f"the driver. The returned frames are EMPTY by design; read the "
+                    f"data from {good_table} / {bad_table}, or run without "
+                    f"server-side materialization to receive it here."
+                )
+                good_df = self._empty_frame()
+                bad_df = self._empty_frame()
+            else:
+                good_df = self._fetch_dataframe(conn, good_table)
+                bad_df = self._fetch_dataframe(conn, bad_table)
 
             include_errors = True
             if self.contract.quarantine:
@@ -101,6 +156,96 @@ class SnowflakeAdapter(EngineAdapter):
                     conn.close()
                 except Exception:
                     pass
+
+    # Set by the processor when the run's output is going straight back into the
+    # warehouse, so fetching it to the driver first would be pure waste. Off by
+    # default: skipping the fetch means the returned frames are EMPTY, which is only
+    # correct when the caller genuinely does not need the rows in-process.
+    defer_fetch: bool = False
+
+    #: Real row counts when ``defer_fetch`` skipped the fetch — ``{"good": n, "bad": m}``.
+    #: Without this the run log would derive its counts from the empty frames and
+    #: report zero for a run that wrote millions of rows.
+    deferred_counts: Optional[Dict[str, int]] = None
+
+    def _count_rows(self, conn, table_name: str) -> int:
+        cursor = conn.cursor()
+        try:
+            return int(cursor.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0])
+        finally:
+            cursor.close()
+
+    @staticmethod
+    def _empty_frame():
+        """An empty pandas frame — the shape callers expect, with no rows."""
+        import pandas as pd
+
+        return pd.DataFrame()
+
+    # Strategies the native writer implements. Anything else is refused rather than
+    # quietly downgraded — writing an append where the contract asked for a merge is
+    # a data error, not a performance one.
+    _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace"}
+
+    def materialize_native(self, target_table: str, strategy: str = "overwrite") -> Dict[str, Any]:
+        """Write this run's accepted rows to ``target_table`` INSIDE Snowflake.
+
+        The default write path goes warehouse -> fetch_pandas_all() -> pandas -> dlt
+        -> warehouse: the result is dragged through the driver and pushed straight
+        back to where it came from. The accepted set is already a Snowflake table
+        (:attr:`good_table`), so a CTAS/INSERT keeps it server-side and the data
+        never leaves the warehouse.
+
+        Requires the run's session to still be open — i.e. a shared connection (see
+        :meth:`set_shared_connection`). With an engine-owned connection the TEMP
+        tables are dropped when ``execute()`` returns, so there would be nothing left
+        to copy; this raises rather than silently writing an empty table.
+        """
+        if not self.good_table:
+            raise RuntimeError(
+                "materialize_native() needs the results of a completed run: "
+                "good_table is unset. Call it after execute(), in the same session."
+            )
+        if strategy not in self._NATIVE_WRITE_STRATEGIES:
+            raise NotImplementedError(
+                f"Snowflake native materialization supports "
+                f"{sorted(self._NATIVE_WRITE_STRATEGIES)}, not '{strategy}'. Refusing "
+                "rather than writing a different strategy than the contract asked for."
+            )
+        if SnowflakeAdapter._shared_connection is None:
+            raise RuntimeError(
+                "materialize_native() requires a shared connection — the engine closes "
+                "its own connection at the end of execute(), which drops the TEMP "
+                "result tables. Call SnowflakeAdapter.set_shared_connection(conn) "
+                "before running so the session (and its results) survive."
+            )
+
+        conn = SnowflakeAdapter._shared_connection
+        target = self._quote_qualified(target_table)
+
+        if strategy == "append":
+            sql = f"INSERT INTO {target} SELECT * FROM {self.good_table}"
+        else:  # overwrite / replace
+            sql = f"CREATE OR REPLACE TABLE {target} AS SELECT * FROM {self.good_table}"
+
+        self._execute(conn, sql)
+
+        cursor = conn.cursor()
+        try:
+            rows = cursor.execute(f"SELECT COUNT(*) FROM {target}").fetchone()[0]
+        finally:
+            cursor.close()
+
+        logger.info(
+            f"Snowflake native materialization: {self.good_table} -> {target} "
+            f"({strategy}, {rows:,} rows) — server-side, no driver round trip."
+        )
+        return {
+            "target": target_table,
+            "rows_written": rows,
+            "strategy": strategy,
+            "server_side": True,
+        }
 
     def _connect(self):
         """
@@ -786,6 +931,30 @@ class SnowflakeAdapter(EngineAdapter):
         """
         cursor = conn.cursor()
         try:
+            # Count first. Every stage before this ran inside Snowflake; this line is
+            # where the result leaves the warehouse and becomes bounded by driver RAM.
+            # Counting first means the warning arrives BEFORE the fetch that would
+            # fail, not after — a warning printed only on success would be silent in
+            # exactly the case it exists for.
+            try:
+                rows = cursor.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            except Exception:  # never let the advisory break a working run
+                rows = None
+
+            threshold = int(os.getenv("LAKELOGIC_SNOWFLAKE_FETCH_WARN_ROWS", self.FETCH_WARN_ROWS))
+            if rows is not None and rows > threshold:
+                logger.warning(
+                    f"Snowflake: pulling {rows:,} rows from {table_name} into pandas "
+                    f"(fetch_pandas_all) — the whole result crosses the network and must "
+                    f"fit in this process's memory. The contract itself ran entirely in "
+                    f"Snowflake; only this fetch is client-side. To keep the data in the "
+                    f"warehouse, share your connection "
+                    f"(SnowflakeAdapter.set_shared_connection(conn)) and read the result "
+                    f"server-side from adapter.good_table / adapter.bad_table, e.g. "
+                    f"CREATE TABLE <target> AS SELECT * FROM {table_name}. "
+                    f"Threshold: LAKELOGIC_SNOWFLAKE_FETCH_WARN_ROWS (currently {threshold:,})."
+                )
+
             cursor.execute(f"SELECT * FROM {table_name}")
             return cursor.fetch_pandas_all()
         finally:

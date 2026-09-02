@@ -74,3 +74,20 @@ source:
   path: '{bronze_path}/{bronze_layer}_{system}_trip_completed'
   load_mode: incremental
   watermark_strategy: pipeline_log
+
+transformations:
+  # Bronze retains every event as it arrived, duplicates included — a re-delivered
+  # or replayed trip_completed event appears twice. Silver is where that is
+  # resolved, so the uniqueness rule below has something it can actually hold.
+  #
+  # Without this the contract behaved correctly and halted the pipeline
+  # (trip_id_unique = 59), which left silver_rideflow_trips empty and broke every
+  # downstream notebook that reads it. The fix belongs here, not in the rule.
+  #
+  # sort_by is required, not optional: without it the surviving row is arbitrary
+  # and the run is not reproducible.
+  - phase: pre
+    deduplicate:
+      on: [trip_id]
+      sort_by: [dropoff_at]
+      order: desc

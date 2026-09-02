@@ -1442,3 +1442,102 @@ def test_generator_spark_output_format(monkeypatch):
 
     with pytest.raises(ValueError, match="output_format must be 'polars', 'pandas', 'duckdb', or 'spark'"):
         instance._to_frame([{"id": 1}], "invalid_fmt")
+
+
+def test_a_generic_tail_does_not_beat_the_head_noun():
+    """`city_name` is the name OF A CITY, not a person's name.
+
+    Matching the suffix first resolved it to Faker's `name()`, so a city column generated
+    "Phyllis Brown" and "Kristin Combs". Seen in real output, not in review.
+
+    The pattern was already known and patched one field at a time: `country_name` and
+    `company_name` are exact entries in _SEMANTIC_HINTS purely to dodge this rule, and
+    `city_name` was missed. These pin the RULE so the next compound field does not have to
+    be found by eye.
+    """
+    assert gen._match_semantic_hint("city_name") == "city"
+    assert gen._match_semantic_hint("city_code") == "city"
+    # The two that were previously hand-patched must keep working through the rule.
+    assert gen._match_semantic_hint("country_name") == "country"
+    assert gen._match_semantic_hint("company_name") == "company"
+
+
+def test_a_meaningful_tail_still_wins():
+    """The head only wins when the tail is a GENERIC qualifier.
+
+    `user_email` is an email; the tail names what the value IS. Deferring to `user` there
+    would break every field this rule was not written for.
+    """
+    assert gen._match_semantic_hint("user_email") == "email"
+    assert gen._match_semantic_hint("billing_address") == "address"
+    assert gen._match_semantic_hint("first_name") == "first_name"
+    assert gen._match_semantic_hint("last_name") == "last_name"
+
+
+def test_identifier_tails_are_not_treated_as_qualifiers():
+    """`customer_id` must not resolve to whatever `customer` maps to.
+
+    `id` and `key` are deliberately absent from the qualifier set: treating them as
+    qualifiers would put a company name in a foreign-key column, which is the same class of
+    bug pointing the other way.
+    """
+    assert gen._match_semantic_hint("customer_id") is None
+
+
+def test_only_one_semantic_hint_matcher_exists():
+    """A second, regex-based matcher used to shadow this one.
+
+    Python keeps the last definition, so the earlier one was unreachable — and its
+    `city` rule was the one that would have prevented this bug. A duplicate that silently
+    does nothing is worse than no duplicate: it looks like the code that runs.
+    """
+    import inspect
+
+    source = inspect.getsource(gen)
+    assert source.count("def _match_semantic_hint(") == 1
+
+
+def test_a_person_head_gives_a_person_name():
+    """`customer_name` is a person. Stated explicitly, not reached by accident.
+
+    It used to resolve by matching the `name` tail — the same accident that put people in
+    `city_name` and `product_name`. With an unrecognised head now stopping instead of
+    falling through, "this head is a person" has to be declared.
+    """
+    for field in ("customer_name", "driver_name", "rider_name", "assignee_name"):
+        assert gen._match_semantic_hint(field) == "name", field
+
+
+def test_an_unknown_head_produces_nothing_rather_than_a_person():
+    """`product_name` has no `product` provider, so it yields None.
+
+    None hands the field to the type-based generator, which emits a generic string:
+    visibly filler, and therefore not mistaken for a product catalogue. Matching the tail
+    instead would fill it with people, which is a confident wrong answer.
+    """
+    assert gen._match_semantic_hint("product_name") is None
+    assert gen._match_semantic_hint("venue_name") is None
+
+
+def test_identifiers_never_resolve_through_their_prefix():
+    """`customer_id` is a key.
+
+    The prefix fallback exists for `email_opt_in` -> `email`. Once person heads were added,
+    that same fallback started resolving `customer_id` to a person's name — a name in a
+    foreign-key column, which is the `city_name` defect pointing the other way.
+    """
+    for field in ("customer_id", "driver_id", "rider_key", "merchant_fk"):
+        assert gen._match_semantic_hint(field) is None, field
+    # ...while a field with its own explicit hint still wins.
+    assert gen._match_semantic_hint("order_id") is not None
+    assert gen._match_semantic_hint("city_uuid") == "uuid4"
+
+
+def test_a_name_qualifier_does_not_flatten_a_more_precise_exact_hint():
+    """`currency_name` is "US Dollar"; `currency_code` is "USD".
+
+    The head-noun rule would resolve both through `currency` and return the code for each.
+    An exact entry keeps the distinction, because the two columns hold different things.
+    """
+    assert gen._match_semantic_hint("currency_name") == "currency_name"
+    assert gen._match_semantic_hint("currency_code") == "currency_code"
