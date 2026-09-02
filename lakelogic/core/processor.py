@@ -5522,7 +5522,11 @@ class DataProcessor:
                     return ValidationResult(combined_good, combined_bad)
 
                 except ImportError:
-                    raise ImportError("Batching requires SQLAlchemy. (Tip: pip install SQLAlchemy)")
+                    raise ImportError(
+                        "Batching requires SQLAlchemy. "
+                        'Install it with the extra that declares it: pip install "lakelogic[sql]" '
+                        "(or [databases] / [postgresql] / [mysql] / [azuresql] for the drivers too)."
+                    )
                 except Exception as e:
                     raise RuntimeError(f"Polars batched DB extraction failed. Error: {e}")
 
