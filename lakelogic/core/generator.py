@@ -428,29 +428,11 @@ _DATE_NAME_SUFFIXES = ("_date", "_on")
 _DATE_NAME_CONTAINS = ("date_", "day_")
 
 
-def _match_semantic_hint(name: str) -> Optional[str]:
-    """
-    Map a field name to a Faker method name using regex/word boundaries.
-    """
-    # Simplified mapping for common fields
-    _HINTS = {
-        r"\bemail\b": "email",
-        r"\b(first_?name|given_?name)\b": "first_name",
-        r"\b(last_?name|family_?name|surname)\b": "last_name",
-        r"\bcity\b": "city",
-        r"\bcountry\b": "country",
-        r"\bpostcode\b": "postcode",
-        r"\bphone\b": "phone_number",
-        r"\baddress\b": "address",
-        r"\bcompany\b": "company",
-        r"\bjob\b": "job",
-        r"\b(url|website)\b": "url",
-        r"\bip\b": "ipv4",
-    }
-    for pattern, method in _HINTS.items():
-        if re.search(pattern, name, re.IGNORECASE):
-            return method
-    return None
+# NOTE: a second, regex-based `_match_semantic_hint` used to sit here. Python keeps the
+# LAST definition, so it was unreachable — and its `city` rule was exactly the one that
+# would have stopped `city_name` resolving to a person's name. Two functions with one name,
+# where the better of the pair is the dead one, is a trap; removed rather than left as a
+# thing someone edits and watches have no effect.
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +478,63 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "lon": "longitude",
     "country": "country",
     "country_name": "country",
+
+    # ── Head nouns for compound fields ────────────────────────────────────
+    # These exist so `<head>_name` / `<head>_code` resolve through the head, per
+    # _GENERIC_QUALIFIER_TAILS. Only nouns Faker has a provider that genuinely MEANS are
+    # listed: a hint pointing at `word` would fill `department_name` with "blue" and look
+    # like inference rather than a shrug.
+    #
+    # People are listed EXPLICITLY rather than left to fall through. They used to reach a
+    # person name by accident — by matching the `name` tail — and that same accident is what
+    # put people in `product_name` and `city_name`. Now that an unrecognised head stops
+    # instead of falling through, "this head is a person" has to be stated.
+    # Heads that denote a PERSON, so `<head>_name` is a person's name.
+    "customer": "name",
+    "client": "name",
+    "driver": "name",
+    "rider": "name",
+    "passenger": "name",
+    "employee": "name",
+    "member": "name",
+    "contact": "name",
+    "author": "name",
+    "owner": "name",
+    "manager": "name",
+    "agent": "name",
+    "patient": "name",
+    "student": "name",
+    "teacher": "name",
+    "guest": "name",
+    "subscriber": "name",
+    "recipient": "name",
+    "sender": "name",
+    "assignee": "name",
+    "reviewer": "name",
+    "approver": "name",
+
+    "merchant": "company",
+    "vendor": "company",
+    "supplier": "company",
+    "store": "company",
+    "retailer": "company",
+    "brand": "company",
+    "publisher": "company",
+    "carrier": "company",
+    "issuer": "company",
+    "currency": "currency_code",
+    # Exact, so it beats the head-noun rule: `currency_name` is "US Dollar", not "USD".
+    "currency_name": "currency_name",
+    "timezone": "timezone",
+    "language": "language_name",
+    "locale": "language_name",
+    "state": "state",
+    "province": "administrative_unit",
+    "region": "administrative_unit",
+    "colour": "color_name",
+    "color": "color_name",
+    "mime": "mime_type",
+
     "country_code": "country_code",
     "country_code_alpha2": "country_code",
     "country_code_alpha3": "bothify(text='???', letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ')",
@@ -745,6 +784,25 @@ _SEMANTIC_HINTS: Dict[str, str] = {
 }
 
 
+#: Tails that QUALIFY a field rather than name what it holds. `name`, `code` and `label`
+#: describe the shape of the value; the word before them says what the value is about. When
+#: one of these ends a compound field name, the head noun wins.
+#:
+#: Not `id` or `key`: `customer_id` should stay an identifier rather than resolving to
+#: whatever `customer` maps to, which would put a company name in a foreign-key column.
+#: Tails that make a field an IDENTIFIER. The prefix fallback must not fire for these:
+#: `customer_id` is a key, and resolving it through `customer` would put a person's name in
+#: a foreign-key column — the same defect as `city_name`, pointing the other way.
+_IDENTIFIER_TAILS = frozenset({
+    "id", "ids", "key", "keys", "fk", "pk", "uuid", "guid", "ref", "sk", "hk",
+})
+
+_GENERIC_QUALIFIER_TAILS = frozenset({
+    "name", "names", "code", "codes", "label", "labels",
+    "title", "desc", "description", "text", "value",
+})
+
+
 def _match_semantic_hint(name_lower: str) -> Optional[str]:
     """
     Match a field name to a Faker method using word-boundary-aware matching.
@@ -761,20 +819,48 @@ def _match_semantic_hint(name_lower: str) -> Optional[str]:
     if name_lower in _SEMANTIC_HINTS:
         return _SEMANTIC_HINTS[name_lower]
 
-    # 2. Word-boundary match — split on underscores and check each word/suffix
     parts = name_lower.split("_")
-    # Try progressively longer suffixes: for "user_email_address",
-    # try "address", then "email_address", then "user_email_address"
+
+    # 2. A GENERIC TAIL defers to the head noun.
+    #
+    #    `city_name` means "the name of a city", so the subject is `city`, not `name`.
+    #    Matching the suffix first resolved it to Faker's `name()` and filled a city column
+    #    with people: "Phyllis Brown", "Kristin Combs". Same for `product_name`,
+    #    `venue_name`, and anything else qualified by a generic tail.
+    #
+    #    The pattern was already known and patched one field at a time — `country_name` and
+    #    `company_name` are exact entries in _SEMANTIC_HINTS purely to dodge this, and
+    #    `city_name` was simply missed. Fixing the rule retires the whole class instead of
+    #    waiting for the next column to be found by eye.
+    if len(parts) > 1 and parts[-1] in _GENERIC_QUALIFIER_TAILS:
+        for i in range(len(parts) - 1, 0, -1):
+            head = "_".join(parts[:i])
+            if head in _SEMANTIC_HINTS:
+                return _SEMANTIC_HINTS[head]
+        # Head not recognised: stop, rather than falling through and matching the tail.
+        #
+        # `product_name` has no `product` hint, and letting it match `name` fills a product
+        # column with people. `None` hands the field to the type-based generator, which
+        # produces a generic string — visibly filler, and therefore not mistaken for a
+        # product catalogue. A confident wrong answer is worse than an obvious placeholder.
+        return None
+
+    # 3. Word-boundary match — split on underscores and check each suffix.
+    #    Try progressively longer suffixes: for "user_email_address",
+    #    try "address", then "email_address", then "user_email_address"
     for i in range(len(parts) - 1, -1, -1):
         suffix = "_".join(parts[i:])
         if suffix in _SEMANTIC_HINTS:
             return _SEMANTIC_HINTS[suffix]
 
-    # 3. Also try prefixes for patterns like "email_opt_in" → "email"
-    for i in range(1, len(parts)):
-        prefix = "_".join(parts[:i])
-        if prefix in _SEMANTIC_HINTS:
-            return _SEMANTIC_HINTS[prefix]
+    # 4. Also try prefixes for patterns like "email_opt_in" → "email".
+    #    Never for identifiers: `customer_id` must stay a key, not become whatever
+    #    `customer` maps to.
+    if parts[-1] not in _IDENTIFIER_TAILS:
+        for i in range(1, len(parts)):
+            prefix = "_".join(parts[:i])
+            if prefix in _SEMANTIC_HINTS:
+                return _SEMANTIC_HINTS[prefix]
 
     return None
 
