@@ -45,11 +45,7 @@ def read_delta(path: str, storage_options: Optional[dict] = None) -> Any:
     try:
         from deltalake import DeltaTable
 
-        table = (
-            DeltaTable(str(path), storage_options=storage_options)
-            if storage_options
-            else DeltaTable(str(path))
-        )
+        table = DeltaTable(str(path), storage_options=storage_options) if storage_options else DeltaTable(str(path))
         return pl.from_arrow(table.to_pyarrow_table())
     except Exception as exc:
         logger.debug(f"Arrow route failed for {path} ({exc}); trying pl.read_delta.")

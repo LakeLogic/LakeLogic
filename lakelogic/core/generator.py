@@ -478,7 +478,6 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "lon": "longitude",
     "country": "country",
     "country_name": "country",
-
     # ── Head nouns for compound fields ────────────────────────────────────
     # These exist so `<head>_name` / `<head>_code` resolve through the head, per
     # _GENERIC_QUALIFIER_TAILS. Only nouns Faker has a provider that genuinely MEANS are
@@ -512,7 +511,6 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "assignee": "name",
     "reviewer": "name",
     "approver": "name",
-
     "merchant": "company",
     "vendor": "company",
     "supplier": "company",
@@ -534,7 +532,6 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "colour": "color_name",
     "color": "color_name",
     "mime": "mime_type",
-
     "country_code": "country_code",
     "country_code_alpha2": "country_code",
     "country_code_alpha3": "bothify(text='???', letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ')",
@@ -793,14 +790,37 @@ _SEMANTIC_HINTS: Dict[str, str] = {
 #: Tails that make a field an IDENTIFIER. The prefix fallback must not fire for these:
 #: `customer_id` is a key, and resolving it through `customer` would put a person's name in
 #: a foreign-key column — the same defect as `city_name`, pointing the other way.
-_IDENTIFIER_TAILS = frozenset({
-    "id", "ids", "key", "keys", "fk", "pk", "uuid", "guid", "ref", "sk", "hk",
-})
+_IDENTIFIER_TAILS = frozenset(
+    {
+        "id",
+        "ids",
+        "key",
+        "keys",
+        "fk",
+        "pk",
+        "uuid",
+        "guid",
+        "ref",
+        "sk",
+        "hk",
+    }
+)
 
-_GENERIC_QUALIFIER_TAILS = frozenset({
-    "name", "names", "code", "codes", "label", "labels",
-    "title", "desc", "description", "text", "value",
-})
+_GENERIC_QUALIFIER_TAILS = frozenset(
+    {
+        "name",
+        "names",
+        "code",
+        "codes",
+        "label",
+        "labels",
+        "title",
+        "desc",
+        "description",
+        "text",
+        "value",
+    }
+)
 
 
 def _match_semantic_hint(name_lower: str) -> Optional[str]:

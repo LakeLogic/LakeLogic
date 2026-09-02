@@ -125,9 +125,7 @@ def struct_drift_errors(contract_fields: Any, actual_members: Any) -> List[str]:
             continue
         absent = [m for m in declared if m not in present]
         if absent:
-            errors.append(
-                f"Struct '{name}' is missing declared member(s): {', '.join(absent)}"
-            )
+            errors.append(f"Struct '{name}' is missing declared member(s): {', '.join(absent)}")
     return errors
 
 

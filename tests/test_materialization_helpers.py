@@ -1428,9 +1428,12 @@ def test_read_frame_delta_falls_back_when_the_arrow_route_fails(monkeypatch, tmp
     delta_df = mat._read_frame(tmp_path / "orders", "delta")
 
     assert [name for name, _ in calls] == [
-        "DeltaTable", "to_pyarrow_table", "pl.from_arrow",   # supported route, failed
-        "pl.read_delta",                                      # delta_compat's own fallback
-        "DeltaTable", "DeltaTable.to_pandas",                 # _read_frame's fallback
+        "DeltaTable",
+        "to_pyarrow_table",
+        "pl.from_arrow",  # supported route, failed
+        "pl.read_delta",  # delta_compat's own fallback
+        "DeltaTable",
+        "DeltaTable.to_pandas",  # _read_frame's fallback
     ]
     assert list(delta_df["id"]) == [9]
 

@@ -486,8 +486,18 @@ class GenericSQLAdapter(EngineAdapter):
     # a second relation (join/lookup) or set-reshaping (explode/pivot/unpivot) and are
     # REFUSED by name rather than skipped — the whole reason this guard exists.
     _SUPPORTED_TRANSFORMS = {
-        "rename", "select", "drop", "cast", "filter", "derive",
-        "coalesce", "trim", "lower", "upper", "deduplicate", "sql",
+        "rename",
+        "select",
+        "drop",
+        "cast",
+        "filter",
+        "derive",
+        "coalesce",
+        "trim",
+        "lower",
+        "upper",
+        "deduplicate",
+        "sql",
     }
 
     def _assert_transformations_expressible(self) -> None:
@@ -501,10 +511,11 @@ class GenericSQLAdapter(EngineAdapter):
         """
         unsupported: list[str] = []
         for trans in getattr(self.contract, "transformations", None) or []:
-            declared = [
-                f for f in type(trans).model_fields
-                if f != "phase" and getattr(trans, f, None) is not None
-            ] if hasattr(type(trans), "model_fields") else []
+            declared = (
+                [f for f in type(trans).model_fields if f != "phase" and getattr(trans, f, None) is not None]
+                if hasattr(type(trans), "model_fields")
+                else []
+            )
             for op in declared:
                 if op not in self._SUPPORTED_TRANSFORMS:
                     unsupported.append(op)
@@ -591,10 +602,7 @@ class GenericSQLAdapter(EngineAdapter):
             pairs = dict(trans.rename.iter_pairs())
             if not pairs:
                 return None
-            projected = [
-                f"{self._quote(c)} AS {self._quote(pairs[c])}" if c in pairs else self._quote(c)
-                for c in cols
-            ]
+            projected = [f"{self._quote(c)} AS {self._quote(pairs[c])}" if c in pairs else self._quote(c) for c in cols]
             return f"SELECT {', '.join(projected)} FROM {source}"
 
         if getattr(trans, "select", None):
@@ -611,9 +619,7 @@ class GenericSQLAdapter(EngineAdapter):
             return f"SELECT * FROM {source} WHERE {cond}" if cond else None
 
         if getattr(trans, "derive", None):
-            return (
-                f"SELECT *, ({trans.derive.sql}) AS {self._quote(trans.derive.field)} FROM {source}"
-            )
+            return f"SELECT *, ({trans.derive.sql}) AS {self._quote(trans.derive.field)} FROM {source}"
 
         if getattr(trans, "cast", None):
             casts = dict(trans.cast.columns or {})
@@ -621,7 +627,8 @@ class GenericSQLAdapter(EngineAdapter):
                 return None
             projected = [
                 f"CAST({self._quote(c)} AS {self._sql_cast_type(casts[c])}) AS {self._quote(c)}"
-                if c in casts else self._quote(c)
+                if c in casts
+                else self._quote(c)
                 for c in cols
             ]
             return f"SELECT {', '.join(projected)} FROM {source}"
@@ -635,8 +642,7 @@ class GenericSQLAdapter(EngineAdapter):
             if cfg:
                 targets = set(cfg.fields or [])
                 projected = [
-                    f"{fn}({self._quote(c)}) AS {self._quote(c)}" if c in targets else self._quote(c)
-                    for c in cols
+                    f"{fn}({self._quote(c)}) AS {self._quote(c)}" if c in targets else self._quote(c) for c in cols
                 ]
                 return f"SELECT {', '.join(projected)} FROM {source}"
 
@@ -666,21 +672,28 @@ class GenericSQLAdapter(EngineAdapter):
             direction = "DESC" if str(getattr(cfg, "order", "desc")).lower() == "desc" else "ASC"
             part = ", ".join(self._quote(c) for c in on)
             order = ", ".join(f"{self._quote(c)} {direction}" for c in sort_by)
-            inner = (
-                f"SELECT *, ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {order}) "
-                f"AS lakelogic_rn FROM {source}"
-            )
+            inner = f"SELECT *, ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {order}) AS lakelogic_rn FROM {source}"
             keep = ", ".join(self._quote(c) for c in cols) if cols else "*"
             return f"SELECT {keep} FROM ({inner}) AS lakelogic_d WHERE lakelogic_rn = 1"
 
         return None
 
     _SQL_CAST_TYPES = {
-        "string": "VARCHAR", "str": "VARCHAR", "text": "VARCHAR",
-        "int": "INTEGER", "integer": "INTEGER", "long": "BIGINT", "bigint": "BIGINT",
-        "float": "DOUBLE PRECISION", "double": "DOUBLE PRECISION", "decimal": "DOUBLE PRECISION",
-        "bool": "BOOLEAN", "boolean": "BOOLEAN",
-        "date": "DATE", "timestamp": "TIMESTAMP", "datetime": "TIMESTAMP",
+        "string": "VARCHAR",
+        "str": "VARCHAR",
+        "text": "VARCHAR",
+        "int": "INTEGER",
+        "integer": "INTEGER",
+        "long": "BIGINT",
+        "bigint": "BIGINT",
+        "float": "DOUBLE PRECISION",
+        "double": "DOUBLE PRECISION",
+        "decimal": "DOUBLE PRECISION",
+        "bool": "BOOLEAN",
+        "boolean": "BOOLEAN",
+        "date": "DATE",
+        "timestamp": "TIMESTAMP",
+        "datetime": "TIMESTAMP",
     }
 
     def _sql_cast_type(self, type_name: str) -> str:

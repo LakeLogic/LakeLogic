@@ -9,6 +9,7 @@ This mirrors the treatment row REDUCTION already had: a decrease explained by a
 declared aggregation is reclassified as `aggregated_rows`, and only an
 unexplained decrease stays a finding. An increase now works the same way.
 """
+
 from __future__ import annotations
 
 import types

@@ -249,7 +249,7 @@ def test_no_watermark_takes_everything(sftp_server):
 
 
 def test_skipped_files_are_reported(sftp_server):
-    """"0 new files" and "the pattern is wrong" look identical in silence, and one of
+    """ "0 new files" and "the pattern is wrong" look identical in silence, and one of
     them is a broken pipeline."""
     import os
 

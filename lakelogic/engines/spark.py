@@ -314,7 +314,7 @@ class SparkAdapter(EngineAdapter):
         """
         import re as _re
 
-        return _re.sub(r'\.\"([^\"]+)\"', lambda m: f"['{m.group(1)}']", str(path))
+        return _re.sub(r"\.\"([^\"]+)\"", lambda m: f"['{m.group(1)}']", str(path))
 
     def _apply_json_extract(self, current_df: Any, cfg: Any) -> Any:
         """Project a JSON path into a column. Shared by the pre and post passes.
@@ -346,8 +346,7 @@ class SparkAdapter(EngineAdapter):
                 extracted = extracted.try_cast(spark_type)
             except AttributeError:  # pragma: no cover - Spark < 4.0
                 extracted = F.expr(
-                    f"try_cast(get_json_object({cfg.source}, "
-                    f"'{self._json_path_for_spark(cfg.path)}') as {spark_type})"
+                    f"try_cast(get_json_object({cfg.source}, '{self._json_path_for_spark(cfg.path)}') as {spark_type})"
                 )
 
         return current_df.withColumn(cfg.field, extracted)

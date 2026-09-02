@@ -59,9 +59,7 @@ def _contract(rename_spec: dict, phase: str | None = None) -> dict:
 def test_canonical_forms_are_honoured(engine, form):
     """The rule names the POST-rename column, so if the rename is skipped nothing
     passes — which is exactly how the silent drop used to present."""
-    good, bad = DataProcessor(_contract(CANONICAL_FORMS[form]), engine=engine).run(
-        pl.DataFrame(ROWS)
-    )
+    good, bad = DataProcessor(_contract(CANONICAL_FORMS[form]), engine=engine).run(pl.DataFrame(ROWS))
     assert len(good) == 1, f"{engine}/{form}: rename not applied"
     assert len(bad) == 1
 
@@ -70,18 +68,14 @@ def test_canonical_forms_are_honoured(engine, form):
 def test_rename_without_an_explicit_phase_is_applied(engine):
     """`phase` defaults to "post" and DuckDB had no post rename branch, so an
     un-phased rename silently vanished on that engine while working on Polars."""
-    good, _ = DataProcessor(_contract(CANONICAL_FORMS["mappings"]), engine=engine).run(
-        pl.DataFrame(ROWS)
-    )
+    good, _ = DataProcessor(_contract(CANONICAL_FORMS["mappings"]), engine=engine).run(pl.DataFrame(ROWS))
     assert len(good) == 1
 
 
 @pytest.mark.parametrize("engine", ["polars", "duckdb"])
 def test_explicit_pre_phase_still_works(engine):
     """Removing the phase gate must not break contracts that DO declare it."""
-    good, _ = DataProcessor(
-        _contract(CANONICAL_FORMS["mappings"], phase="pre"), engine=engine
-    ).run(pl.DataFrame(ROWS))
+    good, _ = DataProcessor(_contract(CANONICAL_FORMS["mappings"], phase="pre"), engine=engine).run(pl.DataFrame(ROWS))
     assert len(good) == 1
 
 

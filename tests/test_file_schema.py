@@ -5,6 +5,7 @@ split the first CSV line and parsed the first JSON record by hand. That approach
 ever report every column as a string, silently disagrees with the framework about which
 extensions are Excel, and has no route to cloud storage at all.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,9 +27,7 @@ def files(tmp_path):
     df = pl.DataFrame({"id": [1, 2], "name": ["a", "b"], "amt": [1.5, 2.5]})
     df.write_parquet(tmp_path / "a.parquet")
     df.write_csv(tmp_path / "a.csv")
-    (tmp_path / "a.ndjson").write_text(
-        '{"id": 1, "name": "a", "nested": {"x": 1}}\n{"id": 2, "name": "b"}\n'
-    )
+    (tmp_path / "a.ndjson").write_text('{"id": 1, "name": "a", "nested": {"x": 1}}\n{"id": 2, "name": "b"}\n')
     (tmp_path / "a.json").write_text(json.dumps([{"id": 1, "name": "a"}]))
     return tmp_path
 
@@ -195,9 +194,7 @@ def test_bytes_and_path_agree(files, name):
 
     by_path = probe_schema(str(files / name))
     by_bytes = probe_schema_bytes((files / name).read_bytes(), file_name=name)
-    assert [(c.name, c.data_type) for c in by_path.columns] == [
-        (c.name, c.data_type) for c in by_bytes.columns
-    ]
+    assert [(c.name, c.data_type) for c in by_path.columns] == [(c.name, c.data_type) for c in by_bytes.columns]
     assert by_path.file_format == by_bytes.file_format
 
 

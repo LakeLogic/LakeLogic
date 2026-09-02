@@ -521,7 +521,7 @@ class PolarsAdapter(EngineAdapter):
         """
         import re as _re
 
-        return _re.sub(r'\.\"([^\"]+)\"', lambda m: f"['{m.group(1)}']", str(path))
+        return _re.sub(r"\.\"([^\"]+)\"", lambda m: f"['{m.group(1)}']", str(path))
 
     def _json_extract_expr(self, cfg):
         """Build the json_extract expression, with a cast that actually applies.

@@ -417,9 +417,7 @@ class DuckDBAdapter(EngineAdapter):
         # type, it is not an additive change a lenient policy exists to tolerate.
         try:
             _members = {}
-            for _row in self.con.sql(
-                f"SELECT column_name, column_type FROM (DESCRIBE {table_name})"
-            ).fetchall():
+            for _row in self.con.sql(f"SELECT column_name, column_type FROM (DESCRIBE {table_name})").fetchall():
                 _name, _type = _row[0], str(_row[1] or "")
                 if _type.upper().startswith("STRUCT("):
                     _inner, _depth, _cur, _parts = _type[len("STRUCT(") : -1], 0, "", []
@@ -1010,8 +1008,7 @@ class DuckDBAdapter(EngineAdapter):
         exclude = f' EXCLUDE ("{cfg.field}")' if cfg.field in cols else ""
         view_name = f"_{phase}_jsonextract_{id(cfg) & 0xFFFFFF:06x}"
         self.con.sql(
-            f"CREATE OR REPLACE VIEW {view_name} AS "
-            f'SELECT *{exclude}, {extract} AS "{cfg.field}" FROM {current}'
+            f'CREATE OR REPLACE VIEW {view_name} AS SELECT *{exclude}, {extract} AS "{cfg.field}" FROM {current}'
         )
         return view_name
 

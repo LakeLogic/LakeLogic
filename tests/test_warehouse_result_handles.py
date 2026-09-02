@@ -113,9 +113,7 @@ def test_snowflake_warning_names_the_escape_hatch_not_just_the_problem():
     """A warning that only reports the cliff, offering nothing to do about it, is
     nagging. It must name the server-side route."""
     adapter = _snowflake_adapter()
-    _, warnings = _capture_warnings(
-        lambda: adapter._fetch_dataframe(_FakeSnowflakeConn(rows=2_000_000), "LG_GOOD_X")
-    )
+    _, warnings = _capture_warnings(lambda: adapter._fetch_dataframe(_FakeSnowflakeConn(rows=2_000_000), "LG_GOOD_X"))
 
     msg = warnings[0]
     assert "set_shared_connection" in msg
@@ -125,18 +123,14 @@ def test_snowflake_warning_names_the_escape_hatch_not_just_the_problem():
 
 def test_snowflake_small_fetch_is_silent():
     adapter = _snowflake_adapter()
-    _, warnings = _capture_warnings(
-        lambda: adapter._fetch_dataframe(_FakeSnowflakeConn(rows=10), "LG_GOOD_X")
-    )
+    _, warnings = _capture_warnings(lambda: adapter._fetch_dataframe(_FakeSnowflakeConn(rows=10), "LG_GOOD_X"))
     assert warnings == []
 
 
 def test_snowflake_threshold_is_configurable(monkeypatch):
     monkeypatch.setenv("LAKELOGIC_SNOWFLAKE_FETCH_WARN_ROWS", "5")
     adapter = _snowflake_adapter()
-    _, warnings = _capture_warnings(
-        lambda: adapter._fetch_dataframe(_FakeSnowflakeConn(rows=10), "LG_GOOD_X")
-    )
+    _, warnings = _capture_warnings(lambda: adapter._fetch_dataframe(_FakeSnowflakeConn(rows=10), "LG_GOOD_X"))
     assert len(warnings) == 1
     assert "currently 5" in warnings[0]
 
@@ -154,9 +148,7 @@ def test_snowflake_count_failure_never_breaks_a_working_run():
     conn = _FakeSnowflakeConn(rows=0)
     conn._cursor = _ExplodingCursor(0)
 
-    out, warnings = _capture_warnings(
-        lambda: _snowflake_adapter()._fetch_dataframe(conn, "LG_GOOD_X")
-    )
+    out, warnings = _capture_warnings(lambda: _snowflake_adapter()._fetch_dataframe(conn, "LG_GOOD_X"))
     assert out is not None
     assert warnings == []
 
@@ -233,9 +225,7 @@ def test_bigquery_warns_before_materialising_rows():
 
 def test_bigquery_warning_names_the_escape_hatch():
     adapter = _bigquery_adapter()
-    _, warnings = _capture_warnings(
-        lambda: adapter._fetch_dataframe(_FakeBQClient(total_rows=2_000_000), "tmp_good")
-    )
+    _, warnings = _capture_warnings(lambda: adapter._fetch_dataframe(_FakeBQClient(total_rows=2_000_000), "tmp_good"))
     msg = warnings[0]
     assert "good_table" in msg
     assert "_session_id" in msg
@@ -244,18 +234,14 @@ def test_bigquery_warning_names_the_escape_hatch():
 
 def test_bigquery_small_fetch_is_silent():
     adapter = _bigquery_adapter()
-    _, warnings = _capture_warnings(
-        lambda: adapter._fetch_dataframe(_FakeBQClient(total_rows=10), "tmp_good")
-    )
+    _, warnings = _capture_warnings(lambda: adapter._fetch_dataframe(_FakeBQClient(total_rows=10), "tmp_good"))
     assert warnings == []
 
 
 def test_bigquery_threshold_is_configurable(monkeypatch):
     monkeypatch.setenv("LAKELOGIC_BIGQUERY_FETCH_WARN_ROWS", "5")
     adapter = _bigquery_adapter()
-    _, warnings = _capture_warnings(
-        lambda: adapter._fetch_dataframe(_FakeBQClient(total_rows=10), "tmp_good")
-    )
+    _, warnings = _capture_warnings(lambda: adapter._fetch_dataframe(_FakeBQClient(total_rows=10), "tmp_good"))
     assert len(warnings) == 1
     assert "currently 5" in warnings[0]
 

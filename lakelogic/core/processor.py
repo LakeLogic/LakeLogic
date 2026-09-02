@@ -1078,8 +1078,7 @@ class DataProcessor:
             _added_line = ""
             if added:
                 _is_expansion = any(
-                    getattr(_t, "explode", None) is not None
-                    or getattr(_t, "date_range_explode", None) is not None
+                    getattr(_t, "explode", None) is not None or getattr(_t, "date_range_explode", None) is not None
                     for _t in _transforms
                 )
                 if _is_expansion:
@@ -5204,10 +5203,7 @@ class DataProcessor:
             if watermark_iso:
                 # Map a timestamp to the first LSN AFTER it, so a re-run does not
                 # replay the change it already consumed.
-                from_lsn = (
-                    "sys.fn_cdc_map_time_to_lsn('smallest greater than', "
-                    f"CAST('{watermark_iso}' AS DATETIME))"
-                )
+                from_lsn = f"sys.fn_cdc_map_time_to_lsn('smallest greater than', CAST('{watermark_iso}' AS DATETIME))"
             else:
                 from_lsn = "sys.fn_cdc_get_min_lsn('" + instance + "')"
             return (
@@ -5259,9 +5255,7 @@ class DataProcessor:
                 if raw not in names:
                     return df
                 return df.with_columns(
-                    pl.col(raw)
-                    .replace_strict(mapping, default=None)
-                    .alias(self.CDC_OP_COLUMN)
+                    pl.col(raw).replace_strict(mapping, default=None).alias(self.CDC_OP_COLUMN)
                 ).drop(raw)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(f"Could not normalise CDC operations: {exc}")
@@ -5349,9 +5343,7 @@ class DataProcessor:
             )
 
         logger.info(f"Running SFTP source: {host}:{parsed.port or 22}{remote_dir} pattern={pattern} format={fmt}")
-        df = connector.extract_files(
-            remote_dir, file_pattern=pattern, file_format=fmt, modified_since=modified_since
-        )
+        df = connector.extract_files(remote_dir, file_pattern=pattern, file_format=fmt, modified_since=modified_since)
 
         return self.run(df, source_path=f"sftp://{host}{remote_dir}")
 

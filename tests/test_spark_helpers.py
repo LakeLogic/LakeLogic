@@ -623,11 +623,7 @@ def test_apply_schema_serialises_nested_columns_to_json(monkeypatch):
     )
     selected_df, _ = adapter._apply_schema(df)
 
-    rendered = {
-        expr.alias_name: expr.value
-        for expr in selected_df.selected
-        if getattr(expr, "alias_name", None)
-    }
+    rendered = {expr.alias_name: expr.value for expr in selected_df.selected if getattr(expr, "alias_name", None)}
     assert rendered["payload"][0] == "to_json"
     assert rendered["tags"][0] == "to_json"
     assert rendered["note"][0] != "to_json"

@@ -61,8 +61,7 @@ def test_a_table_name_source_reports_unmeasured_not_its_length(table_name):
     counts = _counts(table_name, GOOD, BAD)
 
     assert counts["source"] is None, (
-        f"source counted the NAME: got {counts['source']} for {table_name!r} "
-        f"(len={len(table_name)})"
+        f"source counted the NAME: got {counts['source']} for {table_name!r} (len={len(table_name)})"
     )
     # ...and nothing derived from it may be invented either.
     assert counts["pre_transform_dropped"] in (None, 0)

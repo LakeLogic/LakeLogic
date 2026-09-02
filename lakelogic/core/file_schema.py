@@ -25,6 +25,7 @@ written. The row COUNT is reported only when a format states it in metadata — 
 lines in a CSV means reading the file, and an estimate presented as a count is worse than
 saying it is unknown.
 """
+
 from __future__ import annotations
 
 import io
@@ -46,9 +47,7 @@ FORMAT_EXTENSIONS: Dict[str, Tuple[str, ...]] = {
 }
 
 #: Every extension this module can read, flattened.
-DATA_EXTENSIONS: Tuple[str, ...] = tuple(
-    ext for exts in FORMAT_EXTENSIONS.values() for ext in exts
-)
+DATA_EXTENSIONS: Tuple[str, ...] = tuple(ext for exts in FORMAT_EXTENSIONS.values() for ext in exts)
 
 
 @dataclass(frozen=True)
@@ -162,8 +161,7 @@ def probe_schema(
                 # polars reads Excel through a byte-oriented engine with no cloud plumbing.
                 # Saying so beats a confusing failure deep inside the reader.
                 logger.warning(
-                    "probe_schema: excel over remote storage is not supported "
-                    "({}) — download it or use a local path.",
+                    "probe_schema: excel over remote storage is not supported ({}) — download it or use a local path.",
                     p,
                 )
                 return None

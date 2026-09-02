@@ -307,10 +307,7 @@ class TransformationRename(_olcn.TransformationRename):
         pairs = [
             (src, dst)
             for src, dst in extras.items()
-            if src
-            and isinstance(dst, str)
-            and dst
-            and src not in self._RENAME_CONFIG_KEYS
+            if src and isinstance(dst, str) and dst and src not in self._RENAME_CONFIG_KEYS
         ]
         if pairs:
             # Applied, but NOT canonical OLC: the strict model rejects it outright

@@ -36,9 +36,7 @@ def _processor(adapter, *, strategy="overwrite", target="table:DB.T"):
     p = object.__new__(DataProcessor)
     p.adapter = adapter
     p.engine_name = "snowflake"
-    p.contract = type(
-        "C", (), {"materialization": type("M", (), {"strategy": strategy, "target_path": target})()}
-    )()
+    p.contract = type("C", (), {"materialization": type("M", (), {"strategy": strategy, "target_path": target})()})()
     return p
 
 
