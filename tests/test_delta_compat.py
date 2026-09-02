@@ -1,13 +1,15 @@
 """Delta reads must not go through polars' broken Delta bridge.
 
-``pl.read_delta()`` and ``pl.scan_delta()`` both raise against the CURRENT supported
-combination — polars 1.40.1 with deltalake 1.6.2, where polars itself declares
+``pl.read_delta()`` and ``pl.scan_delta()`` both raise on the versions this package
+still supports — e.g. polars 1.40.1 with deltalake 1.6.2, where polars itself declares
 ``deltalake>=1.0.0``::
 
     TypeError: 'deltalake._internal.Schema' object is not iterable
 
 deltalake is fine; ``DeltaTable.to_pyarrow_table()`` works. Only polars' bridge is
-broken, so every read goes deltalake -> Arrow -> polars instead.
+broken, so every read goes deltalake -> Arrow -> polars instead. Newer pairs (polars
+1.44.1 / deltalake 1.6.3) have it fixed, so the two "is it still broken" tests probe
+and skip rather than assert — see ``_probe_bridge``.
 
 This was hit once before at deltalake 0.17.x and worked around inside
 ``core/slo.py`` alone, while four other modules kept calling ``pl.read_delta``
@@ -40,18 +42,41 @@ def test_reads_a_delta_table(delta_table):
     assert set(df.columns) == {"id", "v"}
 
 
+def _probe_bridge(call, entry_point: str):
+    """Report whether polars' Delta bridge is still broken on the installed pair.
+
+    Kept as a probe rather than a hard assertion: it is version-dependent, and this
+    package supports a range. Broken -> the failure mode is pinned, so the reason
+    delta_compat exists stays documented. Fixed -> skip with a note, so the news
+    reaches whoever reads the run instead of turning CI red for good behaviour.
+    """
+    try:
+        call()
+    except TypeError as exc:
+        assert "not iterable" in str(exc), f"pl.{entry_point} broke differently than pinned: {exc}"
+    else:
+        pytest.skip(
+            f"pl.{entry_point} works on polars {pl.__version__} / deltalake "
+            f"{_deltalake_version()} — delta_compat's Arrow hop is no longer needed "
+            "for this pair, and the indirection can go once the supported floor "
+            "moves past the broken versions."
+        )
+
+
+def _deltalake_version() -> str:
+    import deltalake
+
+    return getattr(deltalake, "__version__", "unknown")
+
+
 def test_the_polars_bridge_is_genuinely_broken(delta_table):
-    """Pins WHY this module exists. If polars ever fixes read_delta this fails, and
-    whoever sees it can delete the indirection — rather than it surviving forever as
-    unexplained defensive code."""
-    with pytest.raises(TypeError, match="not iterable"):
-        pl.read_delta(delta_table)
+    """Pins WHY this module exists, on the versions where the bridge is broken."""
+    _probe_bridge(lambda: pl.read_delta(delta_table), "read_delta")
 
 
 def test_scan_delta_is_broken_too(delta_table):
-    """Both entry points fail, so there is no lazy escape hatch either."""
-    with pytest.raises(TypeError, match="not iterable"):
-        pl.scan_delta(delta_table).collect()
+    """Both entry points fail together, so there is no lazy escape hatch either."""
+    _probe_bridge(lambda: pl.scan_delta(delta_table).collect(), "scan_delta")
 
 
 def test_returns_a_polars_frame_not_arrow(delta_table):

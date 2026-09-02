@@ -58,7 +58,10 @@ jobs:
 
       - name: Install Project & Test Dependencies
         run: |
-          uv pip install --system -e ".[dev,cli,engines]"
+          # bigquery: the native-materialization tests drive a fake client, but the
+          # code under test calls _job_config(), which builds a real QueryJobConfig.
+          # Without google-cloud-bigquery those two tests fail on the import inside it.
+          uv pip install --system -e ".[dev,cli,engines,bigquery]"
           uv pip install --system pytest pytest-cov
 
       - name: Run Tests
