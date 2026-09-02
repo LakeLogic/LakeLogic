@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [Unreleased]
+
+### Documentation
+
+- Update changelog for v1.46.0
 ## [1.46.0] — 2026-08-29
 
 ### Added
@@ -24,6 +29,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Enhance SLOFreshnessConfig and deduplication logic
+- Add JSON schema for system manifests and implement schema generation
+- Update hero banner styling and increment CSS version for improved layout
+
+### Build
+
+- **release**: Exit cleanly when there is nothing to bump
 
 ### Documentation
 
@@ -31,8 +42,30 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **ci**: Green the branch — ruff lint + stale spark counts test
 - **docs**: Update banner image reference in README and index files
+- **release-script**: Update tagging process to use annotated tags for proper push
 - **styles**: Add bottom margin to flex container for improved spacing
+## [1.44.0] — 2026-08-15
+
+### Added
+
+- **ducklake**: Write Parquet to cloud object storage (S3 / GCS / Azure ADLS)
+- **ducklake**: Read table: links from the DuckLake catalog on the duckdb engine
+- **ducklake**: Materialize contracts to DuckLake (local + MotherDuck)
+- **iceberg**: Non-Spark engines write catalog-registered Iceberg (Glue)
+- Add banner image to README for enhanced visual appeal
+- Implement external logic framework and enrich trips example
+
+### Documentation
+
+- Enhance index.md with LakeLogic vs. LakeLogic Platform comparison
+
+### Fixed
+
+- **duckdb**: Don't ERROR on dataset rules referencing not-yet-injected columns
+- **duckdb-engine**: Rewrite Spark to_date() to DuckDB-native SQL
+- **spark/iceberg**: Stop Catalyst plan explosion on merge; honor Iceberg for quarantine + run-log
 ## [1.43.0] — 2026-08-13
 
 ### Added
@@ -48,38 +81,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **bigquery**: Make the BigQuery engine run live (7 dialect/runtime fixes)
 - **slo**: Treat naive timestamps as UTC in freshness/retention, never host-localize
 ## [1.41.0] — 2026-08-03
 
 ### Added
 
-- **ducklake**: Write Parquet to cloud object storage (S3 / GCS / Azure ADLS)
-- **ducklake**: Read table: links from the DuckLake catalog on the duckdb engine
-- **ducklake**: Materialize contracts to DuckLake (local + MotherDuck)
-- **iceberg**: Non-Spark engines write catalog-registered Iceberg (Glue)
-- Add JSON schema for system manifests and implement schema generation
-- Update hero banner styling and increment CSS version for improved layout
-- Add banner image to README for enhanced visual appeal
-- Implement external logic framework and enrich trips example
 - Add Streaming API documentation and navigation entry
-
-### Build
-
-- **release**: Exit cleanly when there is nothing to bump
-
-### Documentation
-
-- Enhance index.md with LakeLogic vs. LakeLogic Platform comparison
 
 ### Fixed
 
-- **bigquery**: Make the BigQuery engine run live (7 dialect/runtime fixes)
-- **ci**: Green the branch — ruff lint + stale spark counts test
-- **duckdb**: Don't ERROR on dataset rules referencing not-yet-injected columns
-- **duckdb-engine**: Rewrite Spark to_date() to DuckDB-native SQL
-- **release-script**: Update tagging process to use annotated tags for proper push
 - **snowflake**: TRY_CAST via TO_VARCHAR + shared-connection for Notebook use
-- **spark/iceberg**: Stop Catalyst plan explosion on merge; honor Iceberg for quarantine + run-log
 ## [1.40.6] — 2026-07-30
 
 ### Fixed
@@ -116,7 +128,29 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **database**: Add Spark JDBC ingestion with fetchsize batching and partitioned reads
+
+### Changed
+
+- **examples**: Make Colab notebooks engine-neutral and fix demo correctness
+
+### Styling
+
+- **tests**: Wrap multi-line lambda definitions to satisfy ruff
+## [1.39.0] — 2026-07-16
+
+### Added
+
 - **sensitive**: Introduce handling for confidential non-personal fields
+
+### Fixed
+
+- **duckdb**: Apply deduplicate transform in duckdb engine
+- **processor**: Glob-expand non-partitioned cloud landing directories
+- **registry**: Preserve 'on' join key when loading contract YAML
+## [1.38.2] — 2026-07-07
+
+### Added
+
 - Add option method to FakeWriter for test transparency in spark_save_as_table
 - Disable deletion vectors in _spark_save_as_table to support delta-rs compatibility
 - Enhance _spark_scd2_dataframe to retain current rows with unchanged keys during processing
@@ -125,26 +159,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Add observatory spool for telemetry pushes with bounded retry
 - Knowledge scanner, DuckDB adapter tests, notebook hooks, registry/processor refactors
 
-### Changed
-
-- **examples**: Make Colab notebooks engine-neutral and fix demo correctness
-
 ### Documentation
 
 - Update index.md to enhance clarity and detail of data contract framework
 
 ### Fixed
 
-- **duckdb**: Apply deduplicate transform in duckdb engine
 - **generator,engine**: Robust ingest of string-typed numeric/temporal/boolean columns
-- **processor**: Glob-expand non-partitioned cloud landing directories
-- **registry**: Preserve 'on' join key when loading contract YAML
 - Resolve pyarrow CVE GHSA-rgxp-2hwp-jwgg (IPC pre-buffering use-after-free)
 - Update monkeypatch for dlt_adapter and warnings to match expected signatures
-
-### Styling
-
-- **tests**: Wrap multi-line lambda definitions to satisfy ruff
 
 ### Testing
 
@@ -529,8 +552,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v1.46.0...HEAD
 [1.46.0]: https://github.com/lakelogic/LakeLogic/compare/v1.45.0...v1.46.0
 [1.45.0]: https://github.com/lakelogic/LakeLogic/compare/v1.44.0...v1.45.0
+[1.44.0]: https://github.com/lakelogic/LakeLogic/compare/v1.43.0...v1.44.0
 [1.43.0]: https://github.com/lakelogic/LakeLogic/compare/v1.42.0...v1.43.0
 [1.42.0]: https://github.com/lakelogic/LakeLogic/compare/v1.41.0...v1.42.0
 [1.41.0]: https://github.com/lakelogic/LakeLogic/compare/v1.40.6...v1.41.0
@@ -538,8 +563,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [1.40.4]: https://github.com/lakelogic/LakeLogic/compare/v1.40.3...v1.40.4
 [1.40.3]: https://github.com/lakelogic/LakeLogic/compare/v1.40.2...v1.40.3
 [1.40.2]: https://github.com/lakelogic/LakeLogic/compare/v1.40.1...v1.40.2
-[1.40.1]: https://github.com/lakelogic/LakeLogic/compare/v1.39.0...v1.40.1
-[1.40.0]: https://github.com/lakelogic/LakeLogic/compare/v1.31.0...v1.40.0
+[1.40.1]: https://github.com/lakelogic/LakeLogic/compare/v1.40.0...v1.40.1
+[1.40.0]: https://github.com/lakelogic/LakeLogic/compare/v1.39.0...v1.40.0
+[1.39.0]: https://github.com/lakelogic/LakeLogic/compare/v1.38.2...v1.39.0
+[1.38.2]: https://github.com/lakelogic/LakeLogic/compare/v1.31.0...v1.38.2
 [1.31.0]: https://github.com/lakelogic/LakeLogic/compare/v1.30.0...v1.31.0
 [1.30.0]: https://github.com/lakelogic/LakeLogic/compare/v1.25.0...v1.30.0
 [1.25.0]: https://github.com/lakelogic/LakeLogic/compare/v1.24.0...v1.25.0
