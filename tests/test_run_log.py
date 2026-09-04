@@ -258,7 +258,12 @@ def test_write_run_log_secondary_targets_and_observatory_push(monkeypatch, tmp_p
     payload = posts[0][1]["json"]
     assert payload["status"] == "success"
     assert payload["quality_score"] == round(118 / 120, 6)
-    assert payload["quarantined_rows"] == [{"id": 1}, {"id": 2}]
+    # Deliberate change: attribution moved to metadata.row_rule_failures. A non-empty
+    # `quarantined_rows` makes the consumer create one signal per entry and skip its
+    # aggregate-promotion branch — the branch that understands this emitter's field
+    # names — so populating it made attribution worse than leaving it out.
+    assert payload["quarantined_rows"] is None
+    assert payload["metadata"]["row_rule_failures"] == [{"id": 1}, {"id": 2}]
     assert posts[0][1]["headers"]["X-API-Key"] == "key"
     assert any("Ingested" in message for message in infos)
 
@@ -1104,3 +1109,159 @@ def test_write_run_log_table_dlt_backend(monkeypatch, tmp_path: Path):
     assert target == "duckdb:lake.run_logs"
     assert resource_calls == [("run_logs", "append")]
     assert pipeline_calls[0]["destination"] == ("duckdb-dest", {"credentials": "secret", "extra_option": "x"})
+
+
+# ── Observatory attribution payload (default-on) ──────────────────────────────
+
+
+def _observatory_contract(tmp_path, observatory_overrides=None, quality=None):
+    """Contract wired for an Observatory push; `observatory_overrides` merges in."""
+    obs = {
+        "enabled": True,
+        "endpoint": "https://obs.example/ingest",
+        "api_key": "key",
+        "emit_on": ["success"],
+    }
+    obs.update(observatory_overrides or {})
+    return types.SimpleNamespace(
+        metadata={"run_log_dir": "logs"},
+        _base_path=tmp_path,
+        materialization=types.SimpleNamespace(secondary_targets=[]),
+        observatory=obs,
+        quality=quality,
+    )
+
+
+def _capture_push(monkeypatch, report, contract, tmp_path):
+    posts = []
+
+    class FakeResponse:
+        status_code = 201
+        text = "created"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        types.SimpleNamespace(post=lambda *a, **kw: posts.append((a, kw)) or FakeResponse()),
+    )
+    write_run_log(report, contract, engine_name="polars", run_log_mode="dir")
+    return posts[0][1]["json"] if posts else None
+
+
+def test_rule_attribution_is_sent_without_any_flag(monkeypatch, tmp_path: Path):
+    """The bug this fixes: attribution was gated behind `include_quarantine_sample`,
+    whose name implied it carried records, so it was defaulted off — and the SaaS's
+    entire failure-attribution path was dead for a default install."""
+    report = _sample_report(run_id="attr-1")
+    report["status"] = "succeeded"
+    report["row_rule_failures"] = [{"name": "email_valid", "count": 3, "category": "validity"}]
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert payload["metadata"]["row_rule_failures"] == report["row_rule_failures"]
+    # NOT the legacy top-level field: see the consumer note above.
+    assert payload["quarantined_rows"] is None
+
+
+def test_an_explicit_opt_out_is_still_honoured(monkeypatch, tmp_path: Path):
+    # The key is deprecated, not removed: it ships in existing _domain.yaml files and
+    # somebody set it to false on purpose.
+    report = _sample_report(run_id="attr-2")
+    report["status"] = "succeeded"
+    report["row_rule_failures"] = [{"name": "email_valid", "count": 3}]
+
+    contract = _observatory_contract(tmp_path, {"include_quarantine_sample": False})
+    payload = _capture_push(monkeypatch, report, contract, tmp_path)
+
+    assert payload["metadata"]["row_rule_failures"] is None
+
+
+def test_schema_drift_reaches_metadata(monkeypatch, tmp_path: Path):
+    # Present in the report since it was written; the emitter never mapped it, so the
+    # SaaS's schema-drift strategy could never fire. Field names only, no values.
+    drift = {"missing_fields": ["order_ts"], "unknown_fields": ["extra_col"], "policy": "strict"}
+    report = _sample_report(run_id="attr-3")
+    report["status"] = "succeeded"
+    report["schema_drift"] = drift
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert payload["metadata"]["schema_drift"] == drift
+
+
+def test_schema_drift_is_also_sent_flattened(monkeypatch, tmp_path: Path):
+    """The consumer reads drift TWO ways and sending one shape blinds half of it:
+    the run-detail failure list reads schema_drift.{missing,unknown}, while the
+    rollups and the schema-issue count read flat metadata.missing_fields /
+    unknown_fields."""
+    report = _sample_report(run_id="attr-7")
+    report["status"] = "succeeded"
+    report["schema_drift"] = {"missing_fields": ["order_ts"], "unknown_fields": ["extra_col"]}
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert payload["metadata"]["missing_fields"] == ["order_ts"]
+    assert payload["metadata"]["unknown_fields"] == ["extra_col"]
+
+
+def test_dataset_rules_are_sent_in_full_not_just_the_failures(monkeypatch, tmp_path: Path):
+    """Consumers count `passed is False` themselves, so a failures-only list would read
+    as "no dataset rules ran" — and dataset rules are the other half of the quality
+    picture (row rules quarantine rows; dataset rules assert over the whole table)."""
+    results = [
+        {"name": "row_count_within_range", "passed": True, "value": "1200 >= 480"},
+        {"name": "revenue_reconciles", "passed": False, "value": "0.94 >= 0.99"},
+    ]
+    report = _sample_report(run_id="attr-8")
+    report["status"] = "succeeded"
+    report["dataset_rules"] = results
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert payload["metadata"]["dataset_rules"] == results
+    failed = [r for r in payload["metadata"]["dataset_rules"] if not r["passed"]]
+    assert [r["name"] for r in failed] == ["revenue_reconciles"]
+
+
+def test_rule_counts_are_sent_when_the_contract_declares_rules(monkeypatch, tmp_path: Path):
+    quality = types.SimpleNamespace(
+        row_rules=[object(), object(), object()],  # 3 configured row rules
+        dataset_rules=[object()],  # 1 dataset rule
+    )
+    report = _sample_report(run_id="attr-4")
+    report["status"] = "succeeded"
+    report["row_rule_failures"] = [{"name": "a", "count": 1}]
+    report["dataset_rules"] = [{"name": "d", "passed": False}]
+
+    payload = _capture_push(
+        monkeypatch, report, _observatory_contract(tmp_path, quality=quality), tmp_path
+    )
+
+    assert payload["rules_evaluated"] == 4
+    assert payload["rules_failed"] == 2  # one row rule + one dataset rule
+    assert payload["rules_passed"] == 2
+    assert payload["rules_evaluated"] == payload["rules_passed"] + payload["rules_failed"]
+
+
+def test_rule_counts_are_omitted_rather_than_zeroed_when_unknowable(monkeypatch, tmp_path: Path):
+    """Absent must stay absent. A 0 here reads as a measurement — the Observatory
+    rendered "0 evaluated, 0 passed, 0 failed" for every OSS run before this."""
+    report = _sample_report(run_id="attr-5")
+    report["status"] = "succeeded"
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert "rules_evaluated" not in payload
+    assert "rules_passed" not in payload
+    assert "rules_failed" not in payload
+
+
+def test_attribution_is_capped_and_says_when_it_truncated(monkeypatch, tmp_path: Path):
+    report = _sample_report(run_id="attr-6")
+    report["status"] = "succeeded"
+    report["row_rule_failures"] = [{"name": f"rule_{i}", "count": 1} for i in range(60)]
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert len(payload["metadata"]["row_rule_failures"]) == 50
+    assert payload["metadata"]["row_rule_failures_truncated"] is True

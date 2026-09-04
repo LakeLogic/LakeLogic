@@ -37,7 +37,7 @@ The current `observatory:` integration maps a run report into this hosted payloa
 | **Context** | Source path, SLO JSON, and an error message when present |
 | **Cost** | Estimated cost, currency, and confidence when available |
 
-`include_quarantine_sample` controls whether rule-failure detail is included. In the current OSS implementation, this is built from aggregated failure descriptors such as rule name, expression, category, message, and count—not complete failed source rows.
+`include_quarantine_sample` controls whether rule-failure detail is included: for each rule that failed, its name, SQL expression, category, message and a count. **Failing source rows are never captured or transmitted.** There is no option that sends them and none has ever existed — the detail is read from LakeLogic's own rule-annotation columns, never from your data columns.
 
 For the smallest metadata surface, set:
 
