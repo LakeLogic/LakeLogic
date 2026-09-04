@@ -1691,7 +1691,9 @@ def write_run_log(
                 try:
                     _quality_cfg = getattr(contract, "quality", None)
                     _row_rules = list(getattr(_quality_cfg, "row_rules", None) or []) if _quality_cfg else []
-                    _cfg_dataset_rules = list(getattr(_quality_cfg, "dataset_rules", None) or []) if _quality_cfg else []
+                    _cfg_dataset_rules = (
+                        list(getattr(_quality_cfg, "dataset_rules", None) or []) if _quality_cfg else []
+                    )
                     if _row_rules or _cfg_dataset_rules or _dataset_rules:
                         _rules_evaluated = len(_row_rules) + max(len(_cfg_dataset_rules), len(_dataset_rules))
                         # A rule is counted once whether it failed on 1 row or 10,000.
