@@ -10,6 +10,7 @@ The misleading names survive on the wire (`include_quarantine_sample`, the paylo
 a future change could quietly start reading data columns and every name in the codebase
 would seem to endorse it. These tests fail if that ever happens.
 """
+
 from __future__ import annotations
 
 import pytest
