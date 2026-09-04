@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "1.48.0"
+version = "1.49.0"
 description = "A declarative, contract-driven medallion pipeline engine for data mesh architectures. Write once. Run on Spark, Polars, or DuckDB."
 readme = "README.md"
 requires-python = ">=3.10"
