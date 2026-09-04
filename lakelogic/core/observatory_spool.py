@@ -16,7 +16,7 @@ Design constraints (all deliberate):
   * **Time-budgeted flush** — draining the backlog can never add more than a few
     seconds to a run (stops on the first still-failing attempt, and on a wall
     clock budget).
-  * **Privacy** — the quarantine row sample is stripped before anything is
+  * **Privacy** — the rule-attribution list is stripped before anything is
     written to disk; only run metadata is spooled.
   * **Portable** — stdlib + ``requests`` (already a dependency). Works on local
     and Databricks job clusters; on ephemeral serverless filesystems, point
@@ -117,10 +117,14 @@ def resolve_observatory_config(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if "enabled" not in cfg and (key_from_env or endpoint_from_env):
         cfg["enabled"] = True
 
-    # Env-key connections default the quarantine sample ON — failing-row samples
-    # are what make cloud diagnosis good. Explicit YAML users keep the metadata-
-    # only default (False) unless they opt in. Samples are capped and always
+    # Env-key connections default rule attribution ON — knowing WHICH rule failed
+    # is what makes cloud diagnosis good. Explicit YAML users keep the metadata-
+    # only default (False) unless they opt in. The list is capped and always
     # stripped before anything is written to the local spool.
+    #
+    # NB: this carries no customer data. It is built from the rule-annotation
+    # columns only (see ChainProcessor._extract_row_rule_failures) — rule name,
+    # SQL, category, count. Failing source rows are never captured or sent.
     if key_from_env and "include_quarantine_sample" not in cfg:
         cfg["include_quarantine_sample"] = True
 
@@ -149,8 +153,12 @@ def _dir(cfg: Dict[str, Any]) -> Path:
 
 
 def strip_for_spool(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Copy of ``payload`` safe to persist: the quarantine row sample is removed
-    so potentially-sensitive rows are never written to disk. Run metadata only."""
+    """Copy of ``payload`` safe to persist: the rule-attribution list is removed
+    so the spool stays run-metadata only.
+
+    The list holds no source rows — it never has — so this is size hygiene and
+    defence in depth, not the control that keeps data local. What keeps data
+    local is that failing rows are never collected in the first place."""
     safe = dict(payload)
     safe.pop("quarantined_rows", None)
     safe["_spooled"] = True
@@ -182,7 +190,7 @@ def _enforce_caps(cfg: Dict[str, Any], d: Path) -> None:
 
 
 def spool_payload(cfg: Dict[str, Any], payload: Dict[str, Any]) -> bool:
-    """Persist a failed push for later retry (quarantine sample stripped).
+    """Persist a failed push for later retry (rule attribution stripped).
     Returns True if buffered. Never raises."""
     try:
         if not _enabled(cfg):

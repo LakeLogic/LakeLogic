@@ -389,7 +389,7 @@ observatory:
   emit_on: [success, partial, failed]   # which run statuses to send
   environments: [production]            # optional allow-list (empty = all)
   layers: [silver, gold]                # optional allow-list (empty = all)
-  include_quarantine_sample: false      # send up to 50 failing rows (off by default)
+  include_quarantine_sample: false      # rule attribution: which rules failed + counts (max 50)
 
   # Offline durability — buffer failed pushes and replay them later.
   spool:
@@ -401,7 +401,7 @@ observatory:
     max_seconds: 5.0           # wall-clock budget for an inline replay
 ```
 
-Only **run-level metadata** leaves your environment (contract, status, row counts, quality score, SLOs, cost). Raw data stays in your lakehouse. The optional quarantine sample is capped at 50 rows and is **off by default**.
+Only **run-level metadata** leaves your environment (contract, status, row counts, quality score, SLOs, cost). Raw data stays in your lakehouse — **failing source rows are never captured or transmitted; there is no option that does so.** `include_quarantine_sample` adds *rule attribution* only: for each rule that failed, its name, SQL expression, category and a count. It is capped at 50 distinct rules.
 
 ### Telemetry resilience (offline spool & retry)
 
@@ -409,7 +409,7 @@ The push is fire-and-forget so it never blocks or breaks a pipeline. To avoid *s
 
 - **Buffered:** network errors, timeouts, and `5xx`/`429`/`408` responses.
 - **Dropped (not retried):** other `4xx` (bad payload / auth) — retrying can't help.
-- **Privacy:** the quarantine row sample is **stripped before anything is written to disk** — only run metadata is spooled.
+- **Privacy:** rule attribution is **stripped before anything is written to disk** — only run metadata is spooled. (No source rows exist in the payload to begin with.)
 - **Bounded & safe:** the spool is capped by `max_files` (ring buffer) and `ttl_days`; replay is time-boxed (`max_seconds`) and stops on the first still-failing attempt, so a backlog can never stall a pipeline.
 - **Idempotent:** the SaaS ingest endpoint deduplicates on `run_id`, so replays never create duplicates.
 

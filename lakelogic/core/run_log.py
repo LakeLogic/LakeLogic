@@ -1659,14 +1659,45 @@ def write_run_log(
                 _counts_quarantined = _counts.get("quarantined") or report.get("counts_quarantined", 0) or 0
                 _counts_total = _counts.get("total") or report.get("counts_total", 0) or 0
 
-                _quality = float(_counts_good) / float(_counts_source) if _counts_source > 0 else 1.0
+                _quality_score = float(_counts_good) / float(_counts_source) if _counts_source > 0 else 1.0
 
-                # Build quarantined_rows list from report if configured
-                _quarantined_rows = None
-                include_quarantine = observatory_cfg.get("include_quarantine_sample", False)
-                if include_quarantine:
-                    _raw_failures = report.get("row_rule_failures") or []
-                    _quarantined_rows = _raw_failures[:50] if _raw_failures else None
+                # Rule attribution: which rules failed and how often. Built from the
+                # rule-annotation columns only — name, SQL, category, count. Failing
+                # source rows are never captured or transmitted. The payload field is
+                # named `quarantined_rows` for wire compatibility; it holds no rows.
+                #
+                # Sent by DEFAULT. It used to be gated behind `include_quarantine_sample`,
+                # whose name implied it carried records — so it was defaulted off, and the
+                # SaaS's whole failure-attribution path was dead for a default install:
+                # a run reported "150 rows quarantined" with nothing saying which rule.
+                # An explicit `include_quarantine_sample: false` is still honoured for
+                # anyone who set it; the key is deprecated, not removed, because it ships
+                # in existing _domain.yaml files.
+                _raw_failures = report.get("row_rule_failures") or []
+                _opted_out = observatory_cfg.get("include_quarantine_sample") is False
+                _rule_failures = None if _opted_out else (_raw_failures[:50] or None)
+                _rule_failures_truncated = bool(_rule_failures) and len(_raw_failures) > 50
+
+                # Dataset-level rule outcomes carry their own pass/fail.
+                _dataset_rules = report.get("dataset_rules") or []
+                _dataset_failed = [r for r in _dataset_rules if isinstance(r, dict) and not r.get("passed")]
+
+                # Rule counts. Emitted ONLY when the contract lets us count the rules that
+                # were configured — an absent count must stay absent rather than become a
+                # confident 0, which is what the Observatory rendered for every OSS run
+                # before this ("0 evaluated, 0 passed, 0 failed" on runs that ran rules).
+                _rules_evaluated = _rules_passed = _rules_failed = None
+                try:
+                    _quality_cfg = getattr(contract, "quality", None)
+                    _row_rules = list(getattr(_quality_cfg, "row_rules", None) or []) if _quality_cfg else []
+                    _cfg_dataset_rules = list(getattr(_quality_cfg, "dataset_rules", None) or []) if _quality_cfg else []
+                    if _row_rules or _cfg_dataset_rules or _dataset_rules:
+                        _rules_evaluated = len(_row_rules) + max(len(_cfg_dataset_rules), len(_dataset_rules))
+                        # A rule is counted once whether it failed on 1 row or 10,000.
+                        _rules_failed = len(_raw_failures) + len(_dataset_failed)
+                        _rules_passed = max(0, _rules_evaluated - _rules_failed)
+                except Exception:  # pragma: no cover - counts are best-effort, never fatal
+                    _rules_evaluated = _rules_passed = _rules_failed = None
 
                 # Contract version + a schema fingerprint, so the SaaS can correlate
                 # an incident to the contract revision that shipped it (feeds
@@ -1702,9 +1733,11 @@ def write_run_log(
                     "rows_valid": _counts_good,
                     "rows_quarantined": _counts_quarantined,
                     "rows_output": _counts_total,
-                    "quality_score": round(_quality, 6),
+                    "quality_score": round(_quality_score, 6),
                     "error_message": report.get("error_message"),
-                    "quarantined_rows": _quarantined_rows,
+                    # Legacy field name — kept so older SaaS builds keep reading
+                    # attribution. It holds rule descriptors, never rows.
+                    "quarantined_rows": _rule_failures,
                     "metadata": {
                         "domain": report.get("domain"),
                         "system": report.get("system"),
@@ -1715,12 +1748,29 @@ def write_run_log(
                         "slo_json": report.get("slo_json"),
                         "contract_version": _contract_version,
                         "contract_fingerprint": _contract_fp,
+                        # Attribution under its own name — what the SaaS's per-rule
+                        # strategy actually looks for. Same list as `quarantined_rows`.
+                        "row_rule_failures": _rule_failures,
+                        "row_rule_failures_truncated": _rule_failures_truncated,
+                        # Field NAMES only: {missing_fields, unknown_fields, policy,
+                        # evolution}. The report has carried this all along and the
+                        # emitter simply never mapped it, so the SaaS's schema-drift
+                        # path could never fire.
+                        "schema_drift": report.get("schema_drift") or None,
+                        "dataset_rule_failures": _dataset_failed or None,
                     },
                     # Cost observability
                     "estimated_cost": report.get("estimated_cost"),
                     "cost_currency": report.get("cost_currency"),
                     "cost_confidence": report.get("cost_confidence"),
                 }
+
+                # Omitted, not zeroed, when the rules could not be counted: the SaaS
+                # renders an absent count as "not reported" but a 0 as a measurement.
+                if _rules_evaluated is not None:
+                    payload["rules_evaluated"] = _rules_evaluated
+                    payload["rules_passed"] = _rules_passed
+                    payload["rules_failed"] = _rules_failed
 
                 logger.info(f"📡 [3/5] Posting to {endpoint} (contract={payload['contract_name']})")
 
