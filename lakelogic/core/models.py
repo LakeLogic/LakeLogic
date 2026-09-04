@@ -1706,10 +1706,13 @@ class DataContract(BaseModel):
             pass
 
         # Strip 'on/off/yes/no' → not booleans; keep true/false.
-        for _key, _mappings in list(_Loader.yaml_implicit_resolvers.items()):
-            _Loader.yaml_implicit_resolvers[_key] = [
-                (tag, regex) for tag, regex in _mappings if tag != "tag:yaml.org,2002:bool"
-            ]
+        # REBIND, never mutate in place: `yaml_implicit_resolvers` is inherited from
+        # SafeLoader, so assigning into it edited PyYAML's own loader process-wide —
+        # loading one contract changed what `yaml.safe_load` meant everywhere else.
+        _Loader.yaml_implicit_resolvers = {
+            _key: [(tag, regex) for tag, regex in _mappings if tag != "tag:yaml.org,2002:bool"]
+            for _key, _mappings in _Loader.yaml_implicit_resolvers.items()
+        }
         _Loader.add_implicit_resolver(
             "tag:yaml.org,2002:bool",
             _re.compile(r"^(?:true|false)$", _re.IGNORECASE),

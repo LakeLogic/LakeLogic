@@ -42,10 +42,15 @@ class ContractLoader:
         class Loader(yaml.SafeLoader):
             pass
 
-        for key, mappings in list(Loader.yaml_implicit_resolvers.items()):
-            Loader.yaml_implicit_resolvers[key] = [
-                (tag, regex) for tag, regex in mappings if tag != "tag:yaml.org,2002:bool"
-            ]
+        # REBIND, never mutate in place. `yaml_implicit_resolvers` is inherited from
+        # SafeLoader — the subclass has no copy of its own — so assigning into it edited
+        # PyYAML's SafeLoader for the whole process. Constructing one ContractLoader
+        # therefore changed what `yaml.safe_load` meant everywhere else, including in
+        # code that never asked for contract semantics. Same behaviour here, contained.
+        Loader.yaml_implicit_resolvers = {
+            key: [(tag, regex) for tag, regex in mappings if tag != "tag:yaml.org,2002:bool"]
+            for key, mappings in Loader.yaml_implicit_resolvers.items()
+        }
 
         bool_regex = re.compile(r"^(?:true|false)$", re.IGNORECASE)
         Loader.add_implicit_resolver("tag:yaml.org,2002:bool", bool_regex, list("tTfF"))
