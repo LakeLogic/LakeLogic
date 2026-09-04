@@ -258,7 +258,12 @@ def test_write_run_log_secondary_targets_and_observatory_push(monkeypatch, tmp_p
     payload = posts[0][1]["json"]
     assert payload["status"] == "success"
     assert payload["quality_score"] == round(118 / 120, 6)
-    assert payload["quarantined_rows"] == [{"id": 1}, {"id": 2}]
+    # Deliberate change: attribution moved to metadata.row_rule_failures. A non-empty
+    # `quarantined_rows` makes the consumer create one signal per entry and skip its
+    # aggregate-promotion branch — the branch that understands this emitter's field
+    # names — so populating it made attribution worse than leaving it out.
+    assert payload["quarantined_rows"] is None
+    assert payload["metadata"]["row_rule_failures"] == [{"id": 1}, {"id": 2}]
     assert posts[0][1]["headers"]["X-API-Key"] == "key"
     assert any("Ingested" in message for message in infos)
 
@@ -1153,8 +1158,9 @@ def test_rule_attribution_is_sent_without_any_flag(monkeypatch, tmp_path: Path):
 
     payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
 
-    assert payload["quarantined_rows"] == report["row_rule_failures"], "legacy field"
-    assert payload["metadata"]["row_rule_failures"] == report["row_rule_failures"], "new name"
+    assert payload["metadata"]["row_rule_failures"] == report["row_rule_failures"]
+    # NOT the legacy top-level field: see the consumer note above.
+    assert payload["quarantined_rows"] is None
 
 
 def test_an_explicit_opt_out_is_still_honoured(monkeypatch, tmp_path: Path):
@@ -1167,7 +1173,6 @@ def test_an_explicit_opt_out_is_still_honoured(monkeypatch, tmp_path: Path):
     contract = _observatory_contract(tmp_path, {"include_quarantine_sample": False})
     payload = _capture_push(monkeypatch, report, contract, tmp_path)
 
-    assert payload["quarantined_rows"] is None
     assert payload["metadata"]["row_rule_failures"] is None
 
 
@@ -1182,6 +1187,40 @@ def test_schema_drift_reaches_metadata(monkeypatch, tmp_path: Path):
     payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
 
     assert payload["metadata"]["schema_drift"] == drift
+
+
+def test_schema_drift_is_also_sent_flattened(monkeypatch, tmp_path: Path):
+    """The consumer reads drift TWO ways and sending one shape blinds half of it:
+    the run-detail failure list reads schema_drift.{missing,unknown}, while the
+    rollups and the schema-issue count read flat metadata.missing_fields /
+    unknown_fields."""
+    report = _sample_report(run_id="attr-7")
+    report["status"] = "succeeded"
+    report["schema_drift"] = {"missing_fields": ["order_ts"], "unknown_fields": ["extra_col"]}
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert payload["metadata"]["missing_fields"] == ["order_ts"]
+    assert payload["metadata"]["unknown_fields"] == ["extra_col"]
+
+
+def test_dataset_rules_are_sent_in_full_not_just_the_failures(monkeypatch, tmp_path: Path):
+    """Consumers count `passed is False` themselves, so a failures-only list would read
+    as "no dataset rules ran" — and dataset rules are the other half of the quality
+    picture (row rules quarantine rows; dataset rules assert over the whole table)."""
+    results = [
+        {"name": "row_count_within_range", "passed": True, "value": "1200 >= 480"},
+        {"name": "revenue_reconciles", "passed": False, "value": "0.94 >= 0.99"},
+    ]
+    report = _sample_report(run_id="attr-8")
+    report["status"] = "succeeded"
+    report["dataset_rules"] = results
+
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
+
+    assert payload["metadata"]["dataset_rules"] == results
+    failed = [r for r in payload["metadata"]["dataset_rules"] if not r["passed"]]
+    assert [r["name"] for r in failed] == ["revenue_reconciles"]
 
 
 def test_rule_counts_are_sent_when_the_contract_declares_rules(monkeypatch, tmp_path: Path):
@@ -1224,5 +1263,5 @@ def test_attribution_is_capped_and_says_when_it_truncated(monkeypatch, tmp_path:
 
     payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path), tmp_path)
 
-    assert len(payload["quarantined_rows"]) == 50
+    assert len(payload["metadata"]["row_rule_failures"]) == 50
     assert payload["metadata"]["row_rule_failures_truncated"] is True

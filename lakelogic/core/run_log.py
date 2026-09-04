@@ -1681,6 +1681,7 @@ def write_run_log(
                 # Dataset-level rule outcomes carry their own pass/fail.
                 _dataset_rules = report.get("dataset_rules") or []
                 _dataset_failed = [r for r in _dataset_rules if isinstance(r, dict) and not r.get("passed")]
+                _drift = report.get("schema_drift") or {}
 
                 # Rule counts. Emitted ONLY when the contract lets us count the rules that
                 # were configured — an absent count must stay absent rather than become a
@@ -1735,9 +1736,14 @@ def write_run_log(
                     "rows_output": _counts_total,
                     "quality_score": round(_quality_score, 6),
                     "error_message": report.get("error_message"),
-                    # Legacy field name — kept so older SaaS builds keep reading
-                    # attribution. It holds rule descriptors, never rows.
-                    "quarantined_rows": _rule_failures,
+                    # Deliberately NOT populated. The consumer treats a non-empty
+                    # `quarantined_rows` as "the client enumerated its own signals" and
+                    # creates one per entry, skipping the aggregate-promotion branch —
+                    # the branch that actually understands this emitter's field names and
+                    # attaches the run's rows_quarantined. Sending the list here therefore
+                    # made attribution WORSE than omitting it. Attribution travels in
+                    # metadata.row_rule_failures, which that branch reads.
+                    "quarantined_rows": None,
                     "metadata": {
                         "domain": report.get("domain"),
                         "system": report.get("system"),
@@ -1756,8 +1762,17 @@ def write_run_log(
                         # evolution}. The report has carried this all along and the
                         # emitter simply never mapped it, so the SaaS's schema-drift
                         # path could never fire.
-                        "schema_drift": report.get("schema_drift") or None,
-                        "dataset_rule_failures": _dataset_failed or None,
+                        "schema_drift": _drift or None,
+                        # The SAME drift, flattened. The consumer reads it two ways:
+                        # the run-detail failure list wants schema_drift.{missing,unknown}
+                        # while the rollups and schema-issue count read these flat keys.
+                        # Sending one shape leaves half the surfaces blind.
+                        "missing_fields": (_drift.get("missing_fields") or None) if _drift else None,
+                        "unknown_fields": (_drift.get("unknown_fields") or None) if _drift else None,
+                        # Full results, not just the failures: consumers count
+                        # `passed is False` themselves, so a failures-only list would
+                        # read as "no dataset rules ran".
+                        "dataset_rules": _dataset_rules or None,
                     },
                     # Cost observability
                     "estimated_cost": report.get("estimated_cost"),
