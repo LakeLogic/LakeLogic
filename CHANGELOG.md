@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [Unreleased]
+
+### Added
+
+- **observatory**: Send rule attribution by default; never send source rows
+
+### Documentation
+
+- Update changelog for v1.48.0
+
+### Fixed
+
+- **ci**: Green Core Tests — version-aware Delta probe + bigquery extra
+- **observatory**: Send attribution in metadata, not quarantined_rows
+- **run_log**: Improve readability of dataset rules extraction in write_run_log function
+- **yaml**: Contain the contract loader's resolver edit to the loader
 ## [1.48.0] — 2026-09-02
 
 ### Added
@@ -588,6 +604,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[Unreleased]: https://github.com/lakelogic/LakeLogic/compare/v1.48.0...HEAD
 [1.48.0]: https://github.com/lakelogic/LakeLogic/compare/v1.47.0...v1.48.0
 [1.47.0]: https://github.com/lakelogic/LakeLogic/compare/v1.46.0...v1.47.0
 [1.46.0]: https://github.com/lakelogic/LakeLogic/compare/v1.45.0...v1.46.0
