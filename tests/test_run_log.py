@@ -1233,9 +1233,7 @@ def test_rule_counts_are_sent_when_the_contract_declares_rules(monkeypatch, tmp_
     report["row_rule_failures"] = [{"name": "a", "count": 1}]
     report["dataset_rules"] = [{"name": "d", "passed": False}]
 
-    payload = _capture_push(
-        monkeypatch, report, _observatory_contract(tmp_path, quality=quality), tmp_path
-    )
+    payload = _capture_push(monkeypatch, report, _observatory_contract(tmp_path, quality=quality), tmp_path)
 
     assert payload["rules_evaluated"] == 4
     assert payload["rules_failed"] == 2  # one row rule + one dataset rule
