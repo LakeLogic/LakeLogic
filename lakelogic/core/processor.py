@@ -191,6 +191,25 @@ def _sqlalchemy_uri_to_jdbc(uri: str) -> dict:
     )
 
 
+
+def _compact_entity(name: str, layer: Optional[str], system: Optional[str]) -> str:
+    """Drop the leading `<layer>_` / `<system>_` from a table name for log display.
+
+    `bronze_rideflow_rider_profiles` inside a line already tagged
+    `marketplace/rideflow/bronze/` repeats both facts. Stripping them leaves
+    `rider_profiles`, which is the part that actually identifies the table.
+
+    Only leading segments are removed, and only when they match the run's own layer
+    and system, so a table legitimately called `bronze_totals` in some other layer
+    keeps its name.
+    """
+    compact = str(name)
+    for prefix in (layer, system):
+        if prefix and compact.lower().startswith(f"{str(prefix).lower()}_"):
+            compact = compact[len(str(prefix)) + 1 :]
+    return compact or str(name)
+
+
 class DataProcessor:
     """
     The main entry point for running LakeLogic contracts.
@@ -1044,20 +1063,19 @@ class DataProcessor:
                 or getattr(_info, "title", None)
                 or "unknown"
             )
-            tags = []
-            if domain:
-                tags.append(f"domain={domain}")
-            if system:
-                tags.append(f"system={system}")
-            if data_layer:
-                tags.append(f"layer={data_layer}")
-            # The dataset is what makes these lines tellable apart: one system emits a
-            # "Run complete" per contract, so domain/system/layer alone repeat verbatim
-            # and only the failing line names an entity. Reading such a log you can see
-            # THAT a silver run moved 1,455 of 1,683 rows but not WHICH table did.
+            # Scope as a path rather than key=value pairs. The dataset is what makes
+            # these lines tellable apart — one system emits a "Run complete" per
+            # contract, so domain/system/layer alone repeat verbatim — but spelled out
+            # as `[domain=marketplace, system=rideflow, layer=bronze,
+            # dataset=bronze_rideflow_rider_profiles]` that is 91 characters saying
+            # "rideflow" and "bronze" twice each, because the table name already
+            # carries both. The path form is 44 characters and holds the same four
+            # facts, which is the difference between a log line that fits one row and
+            # one that wraps.
+            tags = [part for part in (domain, system, data_layer) if part]
             if _target_name and _target_name != "unknown":
-                tags.append(f"dataset={_target_name}")
-            tags_display = f" [{', '.join(tags)}]" if tags else ""
+                tags.append(_compact_entity(_target_name, data_layer, system))
+            tags_display = f" [{'/'.join(tags)}]" if tags else ""
             ratio = counts.get("quarantine_ratio")
             ratio_display = f"{ratio:.2%}" if ratio is not None else "n/a"
             dropped = counts.get("pre_transform_dropped")
@@ -1123,18 +1141,22 @@ class DataProcessor:
 
             _dropped_display = f", {_dropped_label}: {dropped}" if dropped is not None and dropped > 0 else ""  # noqa: F841
             _source_display = f"Source: {source_total}, " if source_total is not None else ""  # noqa: F841
+            # Abbreviated field names, same fields. "Source: 391 | Total: 391 | Good:
+            # 391 | Quarantine: 0 | Ratio: 0.00%" is 70 characters of mostly labels;
+            # "src=391 rows=391 ok=391 qtn=0 0.00%" is 35 and still says every one of
+            # them. `n/a` is preserved deliberately: an unmeasured source must never
+            # render as a confident 0.
+            _src_display = source_total if source_total is not None else "n/a"
             if quality_enabled:
                 logger.info(
                     f"Run complete{tags_display} | "
-                    f"Source: {source_total if source_total is not None else 'n/a'} | "
-                    f"Total: {total} | Good: {counts.get('good')} | Quarantine: {bad}{_dropped_line}{_added_line} | "
-                    f"Ratio: {ratio_display}"
+                    f"src={_src_display} rows={total} ok={counts.get('good')} "
+                    f"qtn={bad}{_dropped_line}{_added_line} {ratio_display}"
                 )
             else:
                 logger.info(
                     f"Run complete{tags_display} | "
-                    f"Source: {source_total if source_total is not None else 'n/a'} | "
-                    f"Total: {total}{_dropped_line}{_added_line}"
+                    f"src={_src_display} rows={total}{_dropped_line}{_added_line}"
                 )
 
             if bad > 0:

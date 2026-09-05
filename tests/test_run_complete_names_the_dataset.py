@@ -8,6 +8,9 @@ identical but for their numbers::
     Run complete [domain=marketplace, system=rideflow, layer=silver] | Source: 1683 ...
     Run complete [domain=marketplace, system=rideflow, layer=silver] | Source: 391 ...
 
+The tag is now a path — `[marketplace/rideflow/silver/trip_cancellations]` — which
+carries the same four facts in half the characters, so the line fits one row.
+
 Only the ERROR that followed named an entity, so the successful lines could not be
 attributed to a table at all: you could see that a run dropped 228 rows, but not
 which table dropped them.
@@ -52,14 +55,13 @@ def _run_and_capture(contract_dict, capfd):
 def test_run_complete_names_the_dataset(capfd):
     done = _run_and_capture(_contract(), capfd)
     assert done, "no 'Run complete' line was emitted"
-    assert any("dataset=silver_rideflow_trip_cancellations" in ln for ln in done), done
+    assert any("/trip_cancellations]" in ln for ln in done), done
 
 
 def test_the_existing_tags_are_kept(capfd):
     """The dataset is added to the tags, not swapped in for them."""
     line = _run_and_capture(_contract(), capfd)[0]
-    for tag in ("domain=marketplace", "system=rideflow", "layer=silver"):
-        assert tag in line, f"{tag} missing from: {line}"
+    assert "[marketplace/rideflow/silver/" in line, line
 
 
 def test_two_contracts_in_one_system_are_tellable_apart(capfd):
@@ -99,17 +101,38 @@ def test_table_name_outranks_dataset_and_title(capfd):
     line = _run_and_capture(
         _bare(dataset="orders_ds", info={"title": "Nice Title", "table_name": "silver_trips"}), capfd
     )[0]
-    assert "dataset=silver_trips" in line, line
+    assert "[silver_trips]" in line, line
 
 
 def test_dataset_outranks_title(capfd):
     """The regression: a prose title must not stand in for a real identifier."""
     line = _run_and_capture(_bare(dataset="orders_ds", info={"title": "Nice Title"}), capfd)[0]
-    assert "dataset=orders_ds" in line, line
+    assert "[orders_ds]" in line, line
     assert "Nice Title" not in line, line
 
 
 def test_title_is_used_only_as_a_last_resort(capfd):
     """Still better than an unattributable line when nothing else is given."""
     line = _run_and_capture(_bare(info={"title": "Nice Title"}), capfd)[0]
-    assert "dataset=Nice Title" in line, line
+    assert "[Nice Title]" in line, line
+
+
+# ── one line, one row ────────────────────────────────────────────────────────
+
+
+def test_the_line_stays_short_enough_to_read_in_one_row(capfd):
+    """The Databricks log pane wraps past ~150 characters including loguru's own
+    73-character prefix, and a wrapped line is why these were unreadable. Budget the
+    MESSAGE at 100 so a realistic scope + counts still fits on one row."""
+    line = _run_and_capture(_contract(), capfd)[0]
+    message = line.split(" - ", 1)[1] if " - " in line else line
+    assert len(message) <= 100, f"{len(message)} chars, too long for one row: {message}"
+
+
+def test_the_redundant_layer_and_system_prefixes_are_dropped(capfd):
+    """`bronze_rideflow_rider_profiles` under `marketplace/rideflow/bronze/` repeats
+    both facts; the tag keeps only the part that identifies the table."""
+    contract = _contract("bronze_rideflow_rider_profiles")
+    contract["info"]["target_layer"] = "bronze"
+    line = _run_and_capture(contract, capfd)[0]
+    assert "[marketplace/rideflow/bronze/rider_profiles]" in line, line
