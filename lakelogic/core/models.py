@@ -1479,6 +1479,14 @@ class DataContract(BaseModel):
     # handle.  Keys in ``_PRIVATE_EXTRA_KEYS`` are silently allowed because
     # they are injected at runtime by the processor / pipeline runner.
     _KNOWN_KEYS: set = {
+        # Written onto every contract by the registry loader itself, as the third
+        # step of the ownership chain (domain -> system -> data product). It has no
+        # typed field, so without listing it here the loader warned about a key it
+        # had just injected — once per contract, and claiming "this key will be
+        # ignored by LakeLogic" when the merged value is in fact retained on the
+        # model and carries its own provenance. A false warning about your own
+        # governance config is worse than no warning.
+        "ownership",
         # Pydantic-declared fields
         "version",
         "info",
