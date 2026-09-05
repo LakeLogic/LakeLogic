@@ -22,6 +22,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import types as _types
+
 from loguru import logger
 
 from lakelogic.core.models import DataContract, FieldDefinition, Materialization
@@ -32,189 +34,11 @@ from lakelogic.core.models import DataContract, FieldDefinition, Materialization
 # Contract types are intentionally simple (string, int, float, boolean, etc.)
 # and mapped to the most appropriate backend type.
 
-_TYPE_MAP: Dict[str, Dict[str, str]] = {
-    # contract_type → {backend: sql_type}
-    "string": {
-        "spark": "STRING",
-        "databricks": "STRING",
-        "duckdb": "VARCHAR",
-        "sqlite": "TEXT",
-        "snowflake": "VARCHAR",
-        "bigquery": "STRING",
-        "postgresql": "TEXT",
-    },
-    "varchar": {
-        "spark": "STRING",
-        "databricks": "STRING",
-        "duckdb": "VARCHAR",
-        "sqlite": "TEXT",
-        "snowflake": "VARCHAR",
-        "bigquery": "STRING",
-        "postgresql": "VARCHAR",
-    },
-    "text": {
-        "spark": "STRING",
-        "databricks": "STRING",
-        "duckdb": "VARCHAR",
-        "sqlite": "TEXT",
-        "snowflake": "VARCHAR",
-        "bigquery": "STRING",
-        "postgresql": "TEXT",
-    },
-    "int": {
-        "spark": "INT",
-        "databricks": "INT",
-        "duckdb": "INTEGER",
-        "sqlite": "INTEGER",
-        "snowflake": "INTEGER",
-        "bigquery": "INT64",
-        "postgresql": "INTEGER",
-    },
-    "integer": {
-        "spark": "INT",
-        "databricks": "INT",
-        "duckdb": "INTEGER",
-        "sqlite": "INTEGER",
-        "snowflake": "INTEGER",
-        "bigquery": "INT64",
-        "postgresql": "INTEGER",
-    },
-    "bigint": {
-        "spark": "BIGINT",
-        "databricks": "BIGINT",
-        "duckdb": "BIGINT",
-        "sqlite": "INTEGER",
-        "snowflake": "BIGINT",
-        "bigquery": "INT64",
-        "postgresql": "BIGINT",
-    },
-    "long": {
-        "spark": "BIGINT",
-        "databricks": "BIGINT",
-        "duckdb": "BIGINT",
-        "sqlite": "INTEGER",
-        "snowflake": "BIGINT",
-        "bigquery": "INT64",
-        "postgresql": "BIGINT",
-    },
-    "smallint": {
-        "spark": "SMALLINT",
-        "databricks": "SMALLINT",
-        "duckdb": "SMALLINT",
-        "sqlite": "INTEGER",
-        "snowflake": "SMALLINT",
-        "bigquery": "INT64",
-        "postgresql": "SMALLINT",
-    },
-    "tinyint": {
-        "spark": "TINYINT",
-        "databricks": "TINYINT",
-        "duckdb": "TINYINT",
-        "sqlite": "INTEGER",
-        "snowflake": "TINYINT",
-        "bigquery": "INT64",
-        "postgresql": "SMALLINT",
-    },
-    "float": {
-        "spark": "FLOAT",
-        "databricks": "FLOAT",
-        "duckdb": "FLOAT",
-        "sqlite": "REAL",
-        "snowflake": "FLOAT",
-        "bigquery": "FLOAT64",
-        "postgresql": "REAL",
-    },
-    "double": {
-        "spark": "DOUBLE",
-        "databricks": "DOUBLE",
-        "duckdb": "DOUBLE",
-        "sqlite": "REAL",
-        "snowflake": "DOUBLE",
-        "bigquery": "FLOAT64",
-        "postgresql": "DOUBLE PRECISION",
-    },
-    "boolean": {
-        "spark": "BOOLEAN",
-        "databricks": "BOOLEAN",
-        "duckdb": "BOOLEAN",
-        "sqlite": "INTEGER",
-        "snowflake": "BOOLEAN",
-        "bigquery": "BOOL",
-        "postgresql": "BOOLEAN",
-    },
-    "bool": {
-        "spark": "BOOLEAN",
-        "databricks": "BOOLEAN",
-        "duckdb": "BOOLEAN",
-        "sqlite": "INTEGER",
-        "snowflake": "BOOLEAN",
-        "bigquery": "BOOL",
-        "postgresql": "BOOLEAN",
-    },
-    "date": {
-        "spark": "DATE",
-        "databricks": "DATE",
-        "duckdb": "DATE",
-        "sqlite": "TEXT",
-        "snowflake": "DATE",
-        "bigquery": "DATE",
-        "postgresql": "DATE",
-    },
-    "timestamp": {
-        "spark": "TIMESTAMP",
-        "databricks": "TIMESTAMP",
-        "duckdb": "TIMESTAMP",
-        "sqlite": "TEXT",
-        "snowflake": "TIMESTAMP_NTZ",
-        "bigquery": "TIMESTAMP",
-        "postgresql": "TIMESTAMP",
-    },
-    "timestamp_ntz": {
-        "spark": "TIMESTAMP_NTZ",
-        "databricks": "TIMESTAMP_NTZ",
-        "duckdb": "TIMESTAMP",
-        "sqlite": "TEXT",
-        "snowflake": "TIMESTAMP_NTZ",
-        "bigquery": "TIMESTAMP",
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-    },
-    "timestamp_tz": {
-        "spark": "TIMESTAMP",
-        "databricks": "TIMESTAMP",
-        "duckdb": "TIMESTAMPTZ",
-        "sqlite": "TEXT",
-        "snowflake": "TIMESTAMP_TZ",
-        "bigquery": "TIMESTAMP",
-        "postgresql": "TIMESTAMP WITH TIME ZONE",
-    },
-    "binary": {
-        "spark": "BINARY",
-        "databricks": "BINARY",
-        "duckdb": "BLOB",
-        "sqlite": "BLOB",
-        "snowflake": "BINARY",
-        "bigquery": "BYTES",
-        "postgresql": "BYTEA",
-    },
-    "json": {
-        "spark": "STRING",
-        "databricks": "STRING",
-        "duckdb": "JSON",
-        "sqlite": "TEXT",
-        "snowflake": "VARIANT",
-        "bigquery": "JSON",
-        "postgresql": "JSONB",
-    },
-    "array": {
-        "spark": "ARRAY<STRING>",
-        "databricks": "ARRAY<STRING>",
-        "duckdb": "VARCHAR[]",
-        "sqlite": "TEXT",
-        "snowflake": "ARRAY",
-        "bigquery": "ARRAY<STRING>",
-        "postgresql": "TEXT[]",
-    },
-}
+# Derived from lakelogic.core.types — the single registry of what a contract type
+# means. It used to be a literal here, which is how it came to disagree with the
+# engines' own cast maps about the width of `float` and `integer`. Kept under the
+# same name so existing callers are unaffected.
+_TYPE_MAP: Dict[str, Dict[str, str]] = _types.as_ddl_map()
 
 # Backends that support PARTITIONED BY / PARTITION BY
 _PARTITION_BACKENDS = {"spark", "databricks", "bigquery"}
@@ -954,29 +778,9 @@ def split_sql_statements(sql: str) -> List[str]:
 
 
 # Contract type → PyArrow type mapping for Delta table initialization
-_CONTRACT_TO_ARROW: Dict[str, str] = {
-    "string": "string",
-    "varchar": "string",
-    "text": "string",
-    "char": "string",
-    "int": "int32",
-    "integer": "int32",
-    "bigint": "int64",
-    "long": "int64",
-    "smallint": "int16",
-    "tinyint": "int8",
-    "float": "float32",
-    "double": "float64",
-    "boolean": "bool",
-    "bool": "bool",
-    "date": "date32",
-    "timestamp": "timestamp[us]",
-    "timestamp_ntz": "timestamp[us]",
-    "timestamp_tz": "timestamp[us, tz=UTC]",
-    "binary": "binary",
-    "json": "string",
-    "array": "string",
-}
+# Derived from the same registry, so an Arrow schema can never disagree with the
+# column the DDL creates.
+_CONTRACT_TO_ARROW: Dict[str, str] = _types.as_arrow_map()
 
 
 def _resolve_arrow_type(contract_type: str):

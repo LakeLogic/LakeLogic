@@ -60,7 +60,11 @@ def test_polars_helper_dtype_schema_and_join_sql():
     lf = pl.DataFrame({"id": ["1"], "tags": [["a", "b"]], "extra": ["x"], "_lakelogic_run_id": ["r1"]}).lazy()
     casted_lf, schema_errors = adapter._apply_schema(lf)
     casted = casted_lf.collect()
-    assert casted.schema["id"] == pl.Int64
+    # `integer` is 32-bit. This read `pl.Int64` before, pinning the same defect the
+    # Spark helper test did: the DDL CREATEs INTEGER while Polars produced Int64,
+    # so a contract's declared width silently depended on which engine ran it.
+    # Both now resolve through lakelogic.core.types.
+    assert casted.schema["id"] == pl.Int32
     assert casted.schema["tags"] == pl.Utf8
     assert casted["tags"].to_list() == ['["a","b"]']
     assert "extra" not in casted.columns

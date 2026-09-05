@@ -5,6 +5,8 @@ from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter
 
+from ..core import types as _types
+
 
 class SparkAdapter(EngineAdapter):
     """
@@ -279,28 +281,7 @@ class SparkAdapter(EngineAdapter):
     # OLC cast name -> Spark SQL type. Previously inline and missing decimal, date,
     # timestamp and datetime — and an unmapped cast silently fell back to "string",
     # so a column declared `cast: decimal` arrived as text and nothing said so.
-    _SPARK_CAST_TYPES = {
-        "float": "double",
-        "double": "double",
-        "int": "int",
-        "integer": "int",
-        "long": "bigint",
-        "bigint": "bigint",
-        "bool": "boolean",
-        "boolean": "boolean",
-        "string": "string",
-        "str": "string",
-        # `double`, not decimal(38,9): DuckDB maps decimal -> DOUBLE and Polars maps
-        # it -> Float64, so a true DecimalType here would make Spark the odd engine
-        # out — the same contract yielding Decimal('12.340000000') on one engine and
-        # 12.34 on the other two. Cross-engine agreement is the property this corpus
-        # exists to protect. Revisit together with the other two if exact decimal
-        # semantics are ever needed, so all three move at once.
-        "decimal": "double",
-        "date": "date",
-        "timestamp": "timestamp",
-        "datetime": "timestamp",
-    }
+    _SPARK_CAST_TYPES = _types.as_cast_map("spark")
 
     @staticmethod
     def _json_path_for_spark(path: str) -> str:
@@ -560,19 +541,7 @@ class SparkAdapter(EngineAdapter):
         return current_df
 
     # Contract type → Spark SQL cast type
-    _CONTRACT_TO_SPARK_TYPE = {
-        "integer": "INT",
-        "long": "BIGINT",
-        "double": "DOUBLE",
-        "float": "FLOAT",
-        "boolean": "BOOLEAN",
-        "date": "DATE",
-        "timestamp": "TIMESTAMP",
-        "decimal": "DECIMAL(38,10)",
-        "short": "SMALLINT",
-        "byte": "TINYINT",
-        "binary": "BINARY",
-    }
+    _CONTRACT_TO_SPARK_TYPE = _types.as_cast_map("spark")
 
     def _cast_to_contract_types(self, df: Any) -> Any:
         """Cast string columns to their contract-declared types.
@@ -608,7 +577,11 @@ class SparkAdapter(EngineAdapter):
         for col_name in current_df.columns:
             contract_type = field_types.get(col_name, "string")
             spark_type = self._CONTRACT_TO_SPARK_TYPE.get(contract_type)
-            if spark_type:
+            # This branch only runs when EVERY column is already StringType, so a
+            # cast to STRING is a no-op that costs a withColumn per field. The map
+            # used to omit string types entirely, which skipped them by accident;
+            # now the registry knows every type, so skip them on purpose.
+            if spark_type and _types.kind_of(contract_type) != _types.STRING:
                 current_df = current_df.withColumn(col_name, F.col(col_name).cast(spark_type))
                 cast_count += 1
 
@@ -935,30 +908,20 @@ class SparkAdapter(EngineAdapter):
             Spark SQL type string.
         """
         type_name = (type_name or "").lower().strip()
-        mapping = {
-            "string": "string",
-            "varchar": "string",
-            "text": "string",
-            "int": "long",
-            "integer": "long",
-            "long": "long",
-            "bigint": "long",
-            "float": "double",
-            "double": "double",
-            "decimal": "double",
-            "bool": "boolean",
-            "boolean": "boolean",
-            "date": "date",
-            "timestamp": "timestamp",
-            "datetime": "timestamp",
-        }
 
         # If the type looks like a complex DDL string (struct<...>, array<...>, etc.),
         # return it as-is so Spark can parse it natively.
         if type_name.startswith(("struct<", "array<", "map<")):
             return type_name
 
-        return mapping.get(type_name)
+        # One registry, shared with core/ddl — so the type this casts to and the
+        # type the column was CREATEd as cannot disagree. Returns None for an
+        # unknown type, which callers already handle by falling back to the raw
+        # name; the registry itself raises for unknown types, so swallow that here
+        # rather than change this helper's contract.
+        if not _types.is_known(type_name):
+            return None
+        return _types.cast_type(type_name, "spark").lower()
 
     def _apply_schema(self, df: Any) -> Tuple[Any, List[str]]:
         """

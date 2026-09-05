@@ -4724,6 +4724,24 @@ def materialize_dataframe(
                     logger.info(f"SCD2 merge result: {len(merged)} rows (existing {len(existing)} + changes)")
                     arrow_data = pa.Table.from_pandas(merged, preserve_index=False)
                     arrow_data = _sanitize_arrow_nulls(arrow_data)
+                    # Re-align to the table's own schema. The incoming frame was
+                    # cast to the table schema ABOVE, but that was before this
+                    # merge: the pandas concat (and the unknown-member row, whose
+                    # Python ints are always 64-bit) can widen a column again, and
+                    # Delta then rejects the overwrite with "Schema of data does
+                    # not match table schema". Caught by OLC-SCD2-001 once the
+                    # type registry made `integer` a real INT32 rather than
+                    # everything being int64 by accident.
+                    try:
+                        _existing_schema = dt.schema().to_pyarrow()
+                        _fields = [
+                            _existing_schema.field(name) if name in _existing_schema.names
+                            else arrow_data.schema.field(name)
+                            for name in arrow_data.schema.names
+                        ]
+                        arrow_data = arrow_data.cast(pa.schema(_fields))
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.warning(f"Could not re-align SCD2 result to the table schema: {exc}")
                     _safe_write_deltalake(
                         target_str,
                         arrow_data,

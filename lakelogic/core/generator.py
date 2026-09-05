@@ -115,29 +115,17 @@ def _polars_dtype(ftype: str):
     except ImportError:
         return None
 
-    _MAP = {
-        "string": pl.Utf8,
-        "str": pl.Utf8,
-        "text": pl.Utf8,
-        "varchar": pl.Utf8,
-        "integer": pl.Int64,
-        "int": pl.Int64,
-        "int32": pl.Int32,
-        "int64": pl.Int64,
-        "long": pl.Int64,
-        "double": pl.Float64,
-        "float": pl.Float64,
-        "float32": pl.Float32,
-        "float64": pl.Float64,
-        "decimal": pl.Float64,
-        "number": pl.Float64,
-        "boolean": pl.Boolean,
-        "bool": pl.Boolean,
-        "date": pl.Utf8,  # stored as ISO string; processor parses
-        "timestamp": pl.Utf8,
-        "datetime": pl.Utf8,
-    }
-    return _MAP.get(ftype.lower().split("(")[0].strip())
+    # Widths come from the one registry, so generated data lands in the column
+    # width the contract declares. Temporal types stay Utf8 here on purpose: the
+    # generator emits ISO strings and the processor parses them — a transport
+    # decision, not a type disagreement, so it is stated rather than implied.
+    from . import types as _types
+
+    if not _types.is_known(ftype):
+        return None
+    if _types.kind_of(ftype) == _types.TEMPORAL:
+        return pl.Utf8
+    return _types.polars_dtype(ftype)
 
 
 # ---------------------------------------------------------------------------

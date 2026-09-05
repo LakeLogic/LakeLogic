@@ -9,6 +9,7 @@ Supports any DB-API 2.0 compatible connection (psycopg2, pyodbc, mysql-connector
 
 Usage:
     import psycopg2
+
     from lakelogic import DataContract
     from lakelogic.engines.generic_sql import GenericSQLAdapter
 
@@ -32,6 +33,8 @@ from loguru import logger
 
 from lakelogic.core.models import DataContract
 from lakelogic.engines.base import ENGINE_DIALECT_MAP, EngineAdapter
+
+from ..core import types as _types
 
 
 class GenericSQLAdapter(EngineAdapter):
@@ -678,23 +681,10 @@ class GenericSQLAdapter(EngineAdapter):
 
         return None
 
-    _SQL_CAST_TYPES = {
-        "string": "VARCHAR",
-        "str": "VARCHAR",
-        "text": "VARCHAR",
-        "int": "INTEGER",
-        "integer": "INTEGER",
-        "long": "BIGINT",
-        "bigint": "BIGINT",
-        "float": "DOUBLE PRECISION",
-        "double": "DOUBLE PRECISION",
-        "decimal": "DOUBLE PRECISION",
-        "bool": "BOOLEAN",
-        "boolean": "BOOLEAN",
-        "date": "DATE",
-        "timestamp": "TIMESTAMP",
-        "datetime": "TIMESTAMP",
-    }
+    # Rendered for the PostgreSQL dialect, the same one core/ddl uses to CREATE
+    # these columns. Previously `float` cast to DOUBLE PRECISION against a REAL
+    # column.
+    _SQL_CAST_TYPES = _types.as_cast_map("postgresql")
 
     def _sql_cast_type(self, type_name: str) -> str:
         key = str(type_name).lower()

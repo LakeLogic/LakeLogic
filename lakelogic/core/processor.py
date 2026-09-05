@@ -2840,28 +2840,11 @@ class DataProcessor:
                                 StructType,
                                 StructField,
                                 StringType,
-                                LongType,
-                                IntegerType,
-                                DoubleType,
-                                FloatType,
-                                BooleanType,
-                                TimestampType,
-                                DateType,
                             )
 
-                            _type_map = {
-                                "string": StringType(),
-                                "long": LongType(),
-                                "bigint": LongType(),
-                                "integer": IntegerType(),
-                                "int": IntegerType(),
-                                "double": DoubleType(),
-                                "float": FloatType(),
-                                "boolean": BooleanType(),
-                                "bool": BooleanType(),
-                                "timestamp": TimestampType(),
-                                "date": DateType(),
-                            }
+                            # Resolved through lakelogic.core.types so the reader
+                            # schema matches the CAST and the CREATE TABLE.
+                            from lakelogic.core import types as _types
                             spark_fields = []
                             for f in _fields_list:
                                 fname = f.get("name") if isinstance(f, dict) else getattr(f, "name", None)
@@ -2871,7 +2854,9 @@ class DataProcessor:
                                 else:
                                     freq = getattr(f, "required", False)
                                 nullable = not freq
-                                spark_type = _type_map.get((ftype or "string").lower(), StringType())
+                                _t = (ftype or "string").lower()
+                                spark_type = (_types.spark_type_object(_t)
+                                              if _types.is_known(_t) else None) or StringType()
                                 if fname:
                                     spark_fields.append(StructField(fname, spark_type, nullable))
                             if spark_fields:
@@ -4464,6 +4449,52 @@ class DataProcessor:
 
         return result
 
+    # ── Attributing dropped rows ─────────────────────────────────────────────
+    # `pre_transform_dropped` says HOW MANY rows disappeared between the source
+    # and the processed frame; on its own it cannot say WHY. A silver contract
+    # that read 4,572 rows and kept 3,166 reported 1,406 rows gone with nothing
+    # to explain them, which reads as data loss even when it is a declared
+    # `deduplicate:` doing exactly its job.
+    #
+    # Attribution is derived from the CONTRACT, not by re-counting the frame: an
+    # extra count() is a full Spark job per contract, and the whole point of the
+    # run log is that it costs nothing to keep. When exactly one declared
+    # operation can remove rows, every dropped row is attributable to it. When
+    # several can, the honest answer is that we do not know — the count is left
+    # None ("not measured") rather than guessed or silently zeroed, because a
+    # confident 0 next to 1,406 missing rows is worse than an admitted blank.
+
+    #: Transformation attributes that can change a frame's row count.
+    _ROW_REMOVING_TRANSFORMS = ("deduplicate", "deduplicate_by_latest", "filter")
+    #: Transformations whose row-count effect is opaque, so attribution is unsafe.
+    _ROW_OPAQUE_TRANSFORMS = ("sql", "rollup", "pivot", "unnest", "explode")
+
+    def _attribute_dropped_rows(self, dropped: Optional[int]) -> Dict[str, Optional[int]]:
+        """Split `dropped` across the declared operation that caused it, if it is
+        unambiguous. Returns {} when there is nothing to attribute."""
+        if not dropped:
+            return {}
+        try:
+            transformations = list(getattr(self.contract, "transformations", None) or [])
+        except Exception:  # pragma: no cover - defensive
+            return {}
+
+        removers, opaque = [], 0
+        for trans in transformations:
+            for attr in self._ROW_OPAQUE_TRANSFORMS:
+                if getattr(trans, attr, None):
+                    opaque += 1
+            for attr in self._ROW_REMOVING_TRANSFORMS:
+                if getattr(trans, attr, None):
+                    removers.append("deduplicated" if attr.startswith("deduplicate") else "filtered")
+                    break
+
+        # More than one candidate, or anything that could move rows in ways we
+        # cannot see, means the split is unknowable from counts alone.
+        if opaque or len(removers) != 1:
+            return {}
+        return {removers[0]: dropped}
+
     def _compute_counts(self, source_df: Any, good_df: Any, bad_df: Any) -> Dict[str, Optional[int]]:
         """
         Compute row counts and quarantine ratio for a run.
@@ -4522,6 +4553,7 @@ class DataProcessor:
                     "quarantine_ratio": ratio,
                     "pre_transform_dropped": dropped,
                     "pre_transform_added": added,
+                    **self._attribute_dropped_rows(dropped),
                 }
             except Exception:
                 pass  # Fall back to individual counts
@@ -4578,6 +4610,7 @@ class DataProcessor:
             "quarantine_ratio": ratio,
             "pre_transform_dropped": dropped,
             "pre_transform_added": added,
+            **self._attribute_dropped_rows(dropped),
         }
 
     def _build_report(

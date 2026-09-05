@@ -479,7 +479,14 @@ def test_spark_helper_type_mapping_and_utils():
     adapter = SparkAdapter(contract)
 
     assert adapter._quote_ident("my`col") == "`my``col`"
-    assert adapter._to_spark_type("integer") == "long"
+    # `integer` is 32-bit. This assertion previously read `== "long"`, pinning the
+    # very defect that broke the RideFlow silver run: the DDL CREATEs an INT
+    # column, the cast produced BIGINT, and Delta refused the write with
+    # DELTA_FAILED_TO_MERGE_FIELDS on `estimated_eta_minutes`. The test was green
+    # throughout — it asserted the wrong answer confidently. The width now comes
+    # from lakelogic.core.types, which the DDL uses too, so the two cannot differ.
+    assert adapter._to_spark_type("integer") == "int"
+    assert adapter._to_spark_type("bigint") == "bigint"
     assert adapter._to_spark_type("struct<a:string>") == "struct<a:string>"
     assert adapter._to_spark_type("unknown") is None
     assert adapter._should_broadcast("ref") is True

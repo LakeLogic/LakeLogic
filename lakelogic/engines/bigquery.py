@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter
+from ..core import types as _types
 
 
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
@@ -803,23 +804,9 @@ class BigQueryAdapter(EngineAdapter):
             BigQuery SQL type.
         """
         type_name = (type_name or "").lower().strip()
-        mapping = {
-            "string": "STRING",
-            "varchar": "STRING",
-            "text": "STRING",
-            "int": "INT64",
-            "integer": "INT64",
-            "long": "INT64",
-            "bigint": "INT64",
-            "float": "FLOAT64",
-            "double": "FLOAT64",
-            "decimal": "FLOAT64",
-            "bool": "BOOL",
-            "boolean": "BOOL",
-            "date": "DATE",
-            "timestamp": "TIMESTAMP",
-            "datetime": "TIMESTAMP",
-        }
+        # One registry (lakelogic.core.types), shared with the DDL that CREATEs
+        # the column, so this cast cannot disagree with it about the stored type.
+        mapping = _types.as_cast_map("bigquery")
         return mapping.get(type_name, "STRING")
 
     def _apply_schema(self, client, table_name: str) -> Tuple[str, List[str]]:

@@ -11,6 +11,7 @@ demos, and SQL-heavy contracts.
 """
 
 import os
+
 import time
 from pathlib import Path
 from typing import Any, List, Tuple
@@ -18,6 +19,7 @@ from typing import Any, List, Tuple
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter, struct_drift_errors
+from ..core import types as _types
 
 
 def _read_ducklake_table_arrow(fq_table: str, columns=None):
@@ -331,23 +333,11 @@ class DuckDBAdapter(EngineAdapter):
             table_name = "_typed"
         else:
             # Cast fields to contract types
-            _TYPE_MAP = {
-                "string": "VARCHAR",
-                "varchar": "VARCHAR",
-                "text": "VARCHAR",
-                "int": "BIGINT",
-                "integer": "BIGINT",
-                "long": "BIGINT",
-                "bigint": "BIGINT",
-                "float": "DOUBLE",
-                "double": "DOUBLE",
-                "decimal": "DOUBLE",
-                "bool": "BOOLEAN",
-                "boolean": "BOOLEAN",
-                "date": "DATE",
-                "timestamp": "TIMESTAMP",
-                "datetime": "TIMESTAMP",
-            }
+            # One registry (lakelogic.core.types), shared with the DDL that CREATEs
+            # the column. This map used to say int->BIGINT and float->DOUBLE while
+            # the DDL said INTEGER/FLOAT, and while this engine's OWN
+            # _DUCKDB_CAST_TYPES said INTEGER/FLOAT — three answers, one word.
+            _TYPE_MAP = _types.as_cast_map("duckdb")
             _describe = self.con.sql(f"SELECT column_name, column_type FROM (DESCRIBE {table_name})").fetchall()
             cols = [row[0] for row in _describe]
             # Which columns physically hold a nested value — needed because such a
@@ -1013,23 +1003,7 @@ class DuckDBAdapter(EngineAdapter):
         return view_name
 
     # OLC scalar type name → DuckDB CAST type.
-    _DUCKDB_CAST_TYPES = {
-        "string": "VARCHAR",
-        "str": "VARCHAR",
-        "text": "VARCHAR",
-        "int": "INTEGER",
-        "integer": "INTEGER",
-        "long": "BIGINT",
-        "bigint": "BIGINT",
-        "float": "FLOAT",
-        "double": "DOUBLE",
-        "decimal": "DOUBLE",
-        "bool": "BOOLEAN",
-        "boolean": "BOOLEAN",
-        "date": "DATE",
-        "timestamp": "TIMESTAMP",
-        "datetime": "TIMESTAMP",
-    }
+    _DUCKDB_CAST_TYPES = _types.as_cast_map("duckdb")
 
     def _build_column_replace_sql(self, trans: Any) -> str:
         """Build the REPLACE(...) body for lower/upper/trim/cast; '' if none apply."""

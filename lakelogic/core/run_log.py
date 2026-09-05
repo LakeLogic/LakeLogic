@@ -280,7 +280,12 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "status": report.get("status"),
         "error_message": report.get("error_message"),
         "error_traceback": report.get("error_traceback"),
-        "lakelogic_version": report.get("lakelogic_version"),
+        # Stamped on EVERY run, not just failures. It was previously set only by
+        # capture_failure(), so the column was null for every successful run —
+        # exactly backwards: "which build is actually running in production" is a
+        # question you ask about green runs, and "did this regress after an
+        # upgrade?" needs the version on the runs BEFORE the failure too.
+        "lakelogic_version": report.get("lakelogic_version") or _lakelogic_version(),
         "source_path": report.get("source_path"),
         # ── Counts (high-frequency dashboard metrics) ─────────────────
         "counts_source": counts.get("source"),
@@ -289,6 +294,13 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "counts_quarantined": counts.get("quarantined"),
         "counts_aggregated": _int(counts.get("aggregated_rows")),
         "counts_dropped": _int(counts.get("pre_transform_dropped")),
+        # WHY rows were dropped, not just how many. `counts_dropped` is the total
+        # (source - total); these attribute it to the declared operation that did
+        # it, so "1,406 rows vanished" becomes "1,406 removed by deduplicate".
+        # Named for what the pipeline DID: a row removed by `deduplicate:` is not
+        # necessarily a duplicate, only one the dedup key ranked lower.
+        "counts_deduplicated": _int(counts.get("deduplicated")),
+        "counts_filtered": _int(counts.get("filtered")),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
         # ── Cost observability ────────────────────────────────────────
         "estimated_cost": _num(report.get("estimated_cost")),
@@ -390,6 +402,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("counts_total", LongType(), True),
                 StructField("counts_good", LongType(), True),
                 StructField("counts_quarantined", LongType(), True),
+                StructField("counts_aggregated", LongType(), True),
+                StructField("counts_dropped", LongType(), True),
+                StructField("counts_deduplicated", LongType(), True),
+                StructField("counts_filtered", LongType(), True),
                 StructField("quarantine_ratio", DoubleType(), True),
                 StructField("estimated_cost", DoubleType(), True),
                 StructField("cost_currency", StringType(), True),
@@ -453,7 +469,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     ("data_layer", "STRING"),
                     ("counts_source", "BIGINT"),
                     ("counts_good", "BIGINT"),
+                    ("counts_total", "BIGINT"),
                     ("counts_quarantined", "BIGINT"),
+                    ("counts_aggregated", "BIGINT"),
+                    ("counts_dropped", "BIGINT"),
+                    ("counts_deduplicated", "BIGINT"),
+                    ("counts_filtered", "BIGINT"),
                     ("quarantine_ratio", "DOUBLE"),
                     ("estimated_cost", "DOUBLE"),
                     ("cost_currency", "STRING"),
@@ -577,6 +598,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_total BIGINT,
                 counts_good BIGINT,
                 counts_quarantined BIGINT,
+                counts_aggregated BIGINT,
+                counts_dropped BIGINT,
+                counts_deduplicated BIGINT,
+                counts_filtered BIGINT,
                 quarantine_ratio DOUBLE,
                 estimated_cost DOUBLE,
                 cost_currency VARCHAR,
@@ -636,6 +661,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_total",
             "counts_good",
             "counts_quarantined",
+            "counts_aggregated",
+            "counts_dropped",
+            "counts_deduplicated",
+            "counts_filtered",
             "quarantine_ratio",
             "estimated_cost",
             "cost_currency",
@@ -693,6 +722,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 counts_total INTEGER,
                 counts_good INTEGER,
                 counts_quarantined INTEGER,
+                counts_aggregated INTEGER,
+                counts_dropped INTEGER,
+                counts_deduplicated INTEGER,
+                counts_filtered INTEGER,
                 quarantine_ratio REAL,
                 estimated_cost REAL,
                 cost_currency TEXT,
@@ -720,7 +753,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("data_layer", "TEXT"),
                 ("counts_source", "INTEGER"),
                 ("counts_good", "INTEGER"),
+                ("counts_total", "INTEGER"),
                 ("counts_quarantined", "INTEGER"),
+                ("counts_aggregated", "INTEGER"),
+                ("counts_dropped", "INTEGER"),
+                ("counts_deduplicated", "INTEGER"),
+                ("counts_filtered", "INTEGER"),
                 ("quarantine_ratio", "REAL"),
                 ("estimated_cost", "REAL"),
                 ("cost_currency", "TEXT"),
@@ -758,6 +796,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "counts_total",
             "counts_good",
             "counts_quarantined",
+            "counts_aggregated",
+            "counts_dropped",
+            "counts_deduplicated",
+            "counts_filtered",
             "quarantine_ratio",
             "estimated_cost",
             "cost_currency",
@@ -830,6 +872,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("counts_total", pa.int64()),
                 ("counts_good", pa.int64()),
                 ("counts_quarantined", pa.int64()),
+                ("counts_aggregated", pa.int64()),
+                ("counts_dropped", pa.int64()),
+                ("counts_deduplicated", pa.int64()),
+                ("counts_filtered", pa.int64()),
                 ("quarantine_ratio", pa.float64()),
                 ("estimated_cost", pa.float64()),
                 ("cost_currency", pa.string()),
@@ -970,6 +1016,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("counts_total", pa.int64()),
                 ("counts_good", pa.int64()),
                 ("counts_quarantined", pa.int64()),
+                ("counts_aggregated", pa.int64()),
+                ("counts_dropped", pa.int64()),
+                ("counts_deduplicated", pa.int64()),
+                ("counts_filtered", pa.int64()),
                 ("quarantine_ratio", pa.float64()),
                 ("estimated_cost", pa.float64()),
                 ("cost_currency", pa.string()),
@@ -1040,6 +1090,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("counts_total", pa.int64()),
                 ("counts_good", pa.int64()),
                 ("counts_quarantined", pa.int64()),
+                ("counts_aggregated", pa.int64()),
+                ("counts_dropped", pa.int64()),
+                ("counts_deduplicated", pa.int64()),
+                ("counts_filtered", pa.int64()),
                 ("quarantine_ratio", pa.float64()),
                 ("estimated_cost", pa.float64()),
                 ("cost_currency", pa.string()),
@@ -1659,6 +1713,10 @@ def write_run_log(
                 ("counts_total", pa.int64()),
                 ("counts_good", pa.int64()),
                 ("counts_quarantined", pa.int64()),
+                ("counts_aggregated", pa.int64()),
+                ("counts_dropped", pa.int64()),
+                ("counts_deduplicated", pa.int64()),
+                ("counts_filtered", pa.int64()),
                 ("quarantine_ratio", pa.float64()),
             ]
             schema = pa.schema(_rl_cols)
@@ -1842,8 +1900,21 @@ def write_run_log(
                         "run_id": report.get("run_id"),
                         "slo_json": report.get("slo_json"),
                         "contract_version": _contract_version,
-                        "lakelogic_version": report.get("lakelogic_version"),
+                        "lakelogic_version": report.get("lakelogic_version") or _lakelogic_version(),
                         "contract_fingerprint": _contract_fp,
+                        # Rows that left the pipeline WITHOUT being quarantined, and
+                        # why. `rows_input` minus `rows_output` was previously an
+                        # unexplained gap on the platform (4,572 in, 3,166 out, 1,406
+                        # unaccounted), which reads as data loss even when a declared
+                        # `deduplicate:` is doing its job. Sent under metadata rather
+                        # than as top-level fields because the receiver validates and
+                        # DISCARDS undeclared top-level keys — the same way it silently
+                        # dropped `error_traceback` until its DTO learned the name.
+                        # `deduplicated`/`filtered` are None when several declared
+                        # operations could have removed the rows: not measured, not zero.
+                        "rows_dropped": _counts.get("pre_transform_dropped"),
+                        "rows_deduplicated": _counts.get("deduplicated"),
+                        "rows_filtered": _counts.get("filtered"),
                         # Attribution under its own name — what the SaaS's per-rule
                         # strategy actually looks for. Same list as `quarantined_rows`.
                         "row_rule_failures": _rule_failures,

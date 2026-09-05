@@ -1,4 +1,5 @@
 import time
+
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -6,6 +7,7 @@ import polars as pl
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter, struct_drift_errors
+from ..core import types as _types
 
 
 class PolarsAdapter(EngineAdapter):
@@ -557,24 +559,12 @@ class PolarsAdapter(EngineAdapter):
             Polars dtype or None.
         """
         type_name = (type_name or "").lower().strip()
-        mapping = {
-            "string": pl.Utf8,
-            "varchar": pl.Utf8,
-            "text": pl.Utf8,
-            "int": pl.Int64,
-            "integer": pl.Int64,
-            "long": pl.Int64,
-            "bigint": pl.Int64,
-            "float": pl.Float64,
-            "double": pl.Float64,
-            "decimal": pl.Float64,
-            "bool": pl.Boolean,
-            "boolean": pl.Boolean,
-            "date": pl.Date,
-            "timestamp": pl.Datetime,
-            "datetime": pl.Datetime,
-        }
-        return mapping.get(type_name)
+        # One registry, shared with the DDL. This map said Float64 for `float`
+        # while the column was created FLOAT — the same disagreement that broke
+        # the Spark write, just silent here because Polars does not check.
+        if not _types.is_known(type_name):
+            return None
+        return _types.polars_dtype(type_name)
 
     def _apply_schema(self, lf: pl.LazyFrame) -> Tuple[pl.LazyFrame, List[str]]:
         """

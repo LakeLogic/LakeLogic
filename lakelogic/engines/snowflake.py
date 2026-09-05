@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter
+from ..core import types as _types
 
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
 
@@ -682,23 +683,9 @@ class SnowflakeAdapter(EngineAdapter):
             Snowflake SQL type.
         """
         type_name = (type_name or "").lower().strip()
-        mapping = {
-            "string": "VARCHAR",
-            "varchar": "VARCHAR",
-            "text": "VARCHAR",
-            "int": "NUMBER",
-            "integer": "NUMBER",
-            "long": "NUMBER",
-            "bigint": "NUMBER",
-            "float": "FLOAT",
-            "double": "FLOAT",
-            "decimal": "FLOAT",
-            "bool": "BOOLEAN",
-            "boolean": "BOOLEAN",
-            "date": "DATE",
-            "timestamp": "TIMESTAMP_NTZ",
-            "datetime": "TIMESTAMP_NTZ",
-        }
+        # One registry (lakelogic.core.types), shared with the DDL that CREATEs
+        # the column, so this cast cannot disagree with it about the stored type.
+        mapping = _types.as_cast_map("snowflake")
         return mapping.get(type_name, "VARCHAR")
 
     def _apply_schema(self, conn, table_name: str) -> Tuple[str, List[str]]:
