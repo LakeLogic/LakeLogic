@@ -71,6 +71,16 @@ jobs:
       # flaking on any slower runner. 900s leaves real headroom while still
       # catching a genuine hang.
       - name: Execute notebooks
+        # LAKELOGIC_LOCAL points the notebooks' own install cell at THIS checkout.
+        # Without it they run `pip install lakelogic` and pull the last PUBLISHED
+        # wheel over the editable install above, so the gate verified PyPI rather
+        # than the branch: 07_dlt_prefect_pipeline passed at 19:53 on 2026-09-04
+        # and failed at 20:02, with no code change between the two runs -- 1.49.0
+        # was published at 19:58 in between. A red check told you nothing about
+        # your PR, and a green one no more. Colab is unaffected: the notebooks
+        # fall back to PyPI when this variable is unset.
+        env:
+          LAKELOGIC_LOCAL: ${{ github.workspace }}
         run: |
           python -m pytest --nbmake --nbmake-timeout=900 examples/colab/ -p no:randomly -v
 
