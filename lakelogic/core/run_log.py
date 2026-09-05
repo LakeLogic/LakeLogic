@@ -751,6 +751,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "data_layer",
             "status",
             "error_message",
+            "error_traceback",
+            "lakelogic_version",
             "source_path",
             "counts_source",
             "counts_total",
@@ -1818,6 +1820,11 @@ def write_run_log(
                     "rows_output": _counts_total,
                     "quality_score": round(_quality_score, 6),
                     "error_message": report.get("error_message"),
+                    # The platform has carried an `error_traceback` column since its
+                    # telemetry carve; nothing ever filled it, because nothing sent it.
+                    # Without frames the receiving end can only re-print the message it
+                    # was given, which is why triage there could not name a code location.
+                    "error_traceback": report.get("error_traceback"),
                     # Deliberately NOT populated. The consumer treats a non-empty
                     # `quarantined_rows` as "the client enumerated its own signals" and
                     # creates one per entry, skipping the aggregate-promotion branch —
@@ -1835,6 +1842,7 @@ def write_run_log(
                         "run_id": report.get("run_id"),
                         "slo_json": report.get("slo_json"),
                         "contract_version": _contract_version,
+                        "lakelogic_version": report.get("lakelogic_version"),
                         "contract_fingerprint": _contract_fp,
                         # Attribution under its own name — what the SaaS's per-rule
                         # strategy actually looks for. Same list as `quarantined_rows`.
