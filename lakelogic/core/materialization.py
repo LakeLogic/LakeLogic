@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -3757,6 +3758,30 @@ def _partition_aware_merge(
     }
 
 
+def _secondary_target_as_mapping(sec: Any) -> Dict[str, Any]:
+    """Return a secondary target as a plain mapping, whatever shape it arrives in.
+
+    `secondary_targets` used to be raw dicts straight off the YAML. OLC 0.8.0 began
+    parsing them into typed `SecondaryTarget` models, and every `sec.get(...)` here
+    started raising `AttributeError: 'SecondaryTarget' object has no attribute 'get'`
+    — so ANY contract declaring a dual-write failed at materialization, on a release
+    of a dependency rather than a change in this package.
+
+    Both shapes stay supported: a contract loaded from a dict is still a dict, and
+    the OLC model is dumped by field name (excluding unset keys, so the `.get(key,
+    default)` calls below still see their own defaults rather than a stored None).
+    """
+    if isinstance(sec, Mapping):
+        return dict(sec)
+    dump = getattr(sec, "model_dump", None)
+    if callable(dump):
+        return dump(exclude_unset=True)
+    to_dict = getattr(sec, "dict", None)  # pydantic v1 fallback
+    if callable(to_dict):
+        return to_dict(exclude_unset=True)
+    return dict(vars(sec))
+
+
 def _run_secondary_targets(
     mat, contract, df, strategy: str, primary_key: list, rows_written: int, result: dict
 ) -> dict:
@@ -3792,6 +3817,7 @@ def _run_secondary_targets(
 
     result["secondary_writes"] = []
     for i, sec in enumerate(secondary_targets):
+        sec = _secondary_target_as_mapping(sec)
         sec_format = sec.get("format", "dlt")
         _raw_table = sec.get("table_name")
         # "auto" or missing → derive from the contract's dataset name
@@ -3923,6 +3949,7 @@ def write_to_secondary_targets(
     results = []
 
     for i, sec in enumerate(secondary_targets):
+        sec = _secondary_target_as_mapping(sec)
         sec_format = sec.get("format", "dlt")
         fail_on_error = sec.get("fail_on_error", False)
         try:
