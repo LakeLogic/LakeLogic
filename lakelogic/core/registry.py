@@ -12,7 +12,7 @@ import os
 import re as _re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -499,6 +499,55 @@ def _validate_observatory_config(
     return cfg
 
 
+# ── Storage addressing modes ─────────────────────────────────────────────────
+# How a contract's targets are ADDRESSED, which is a property of the addressing
+# scheme rather than of any one platform:
+#
+#   "catalog" — catalog-addressed (`catalog.schema.table`). True of Unity Catalog,
+#               Snowflake, BigQuery, Fabric and DuckLake alike.
+#   "path"    — location-addressed (`abfss://`, `s3://`, or a local directory).
+#
+# The former names were "uc" and "direct". "uc" named ONE vendor's product for a
+# behaviour every warehouse shares, so a Snowflake user had to pick an option
+# referring to a Databricks catalog they do not have; "direct" named no scheme at
+# all. Both still work — see `normalize_storage_mode`.
+STORAGE_MODES: Tuple[str, ...] = ("catalog", "path")
+
+_STORAGE_MODE_ALIASES: Dict[str, str] = {
+    "uc": "catalog",
+    "unity_catalog": "catalog",
+    "direct": "path",
+}
+
+
+def normalize_storage_mode(value: Optional[str]) -> str:
+    """Resolve a storage mode to its canonical name.
+
+    Accepts the legacy ``uc``/``direct`` spellings (with a deprecation warning) and
+    is case-insensitive. Anything else RAISES: the previous code compared with
+    ``== "uc"`` and ``== "direct"``, so an unrecognised value such as ``"UC"`` matched
+    neither branch and silently took a third, undefined path — resolving every target
+    the wrong way while looking correct in the config.
+    """
+    if value is None:
+        return "catalog"
+    cleaned = str(value).strip().lower()
+    if cleaned in STORAGE_MODES:
+        return cleaned
+    if cleaned in _STORAGE_MODE_ALIASES:
+        canonical = _STORAGE_MODE_ALIASES[cleaned]
+        logger.warning(
+            f"storage_mode='{value}' is deprecated - use '{canonical}'. "
+            f"'{canonical}' names how targets are addressed rather than one vendor's "
+            f"catalog, so it reads correctly on every supported platform."
+        )
+        return canonical
+    raise ValueError(
+        f"Unknown storage_mode '{value}'. Valid values: {', '.join(STORAGE_MODES)} "
+        f"(deprecated aliases: {', '.join(sorted(_STORAGE_MODE_ALIASES))})."
+    )
+
+
 class DomainRegistry(BaseModel):
     """
     Typed representation of a Data Mesh Domain Registry (e.g., _registry.yaml).
@@ -506,7 +555,7 @@ class DomainRegistry(BaseModel):
 
     domain: str
     system: str
-    storage_mode: str = "uc"  # "uc" (Unity Catalog) | "direct" (ADLS / cloud paths)
+    storage_mode: str = "catalog"  # "catalog" (catalog.schema.table) | "path" (storage URI)
     # Layer aliases — override to rename medallion layers (e.g. bronze_layer: "raw")
     bronze_layer: str = "bronze"
     silver_layer: str = "silver"
@@ -552,7 +601,7 @@ class DomainRegistry(BaseModel):
         return self
 
     @classmethod
-    def from_yaml(cls, path: str, environment: str = "dev", storage_mode: str = "uc") -> "DomainRegistry":
+    def from_yaml(cls, path: str, environment: str = "dev", storage_mode: str = "catalog") -> "DomainRegistry":
         """
         Load a registry from a YAML file, resolving environment tokens and contract paths.
 
@@ -563,10 +612,17 @@ class DomainRegistry(BaseModel):
         environment : str
             Environment name to resolve (e.g. "dev", "staging", "prod").
         storage_mode : str
-            ``"uc"``  — resolve paths using Unity Catalog Volumes / table names
-            (Databricks pipelines).  ``"direct"`` — resolve paths using cloud
-            storage URIs such as ``abfss://`` (Azure Functions, non-Spark runtimes).
+            ``"catalog"`` — targets are catalog-addressed (``catalog.schema.table``),
+            as on Unity Catalog, Snowflake, BigQuery or Fabric.  ``"path"`` — targets
+            are location-addressed under ``storage.external_location_root``
+            (``abfss://``, ``s3://`` or a local directory).
+            The legacy ``"uc"``/``"direct"`` spellings still work, with a warning.
         """
+        # Canonicalise before anything reads it: the legacy uc/direct spellings and
+        # any casing all collapse here, so no downstream comparison has to know about
+        # aliases and an unknown value fails loudly rather than matching no branch.
+        storage_mode = normalize_storage_mode(storage_mode)
+
         yaml_path = Path(path)
         if not yaml_path.exists():
             raise FileNotFoundError(f"Registry not found: {yaml_path}")
@@ -736,11 +792,11 @@ class DomainRegistry(BaseModel):
                         if isinstance(lv, str):
                             storage_vars.setdefault(lk, lv)
                 storage_vars.update(sub_map)  # env vars (catalog, storage_account, etc.)
-                # In "direct" mode (Azure Functions / non-Spark), override UC
+                # In "path" mode (Azure Functions / non-Spark), override catalog
                 # _root variables with their ADLS _path equivalents so that
                 # contracts resolve to cloud storage URIs.
-                # In "uc" mode (Databricks), keep _root values as-is.
-                if storage_mode == "direct":
+                # In "catalog" mode (Databricks et al), keep _root values as-is.
+                if storage_mode == "path":
                     _root_to_path = {
                         "landing_root": "landing_path",
                         "contract_root": "contract_path",

@@ -171,7 +171,7 @@ def _run_layer_lines(layer: str, environment: str) -> List[str]:
         "registry = DomainRegistry.from_yaml(",
         '    f"{PROJECT_ROOT}/_registry.yaml",',
         f"    environment={environment!r},",
-        '    storage_mode="direct",',
+        '    storage_mode="path",',
         ")",
         f'LakehousePipeline(registry, engine="spark", spark=spark).run(target_layers={layer!r})',
     ]
@@ -393,7 +393,7 @@ def scaffold_project(
     registry: Dict[str, object] = {
         "domain": reg_domain,
         "system": reg_system,
-        "storage_mode": "direct",
+        "storage_mode": "path",
         # Direct mode requires storage.external_location_root at run time (the runner
         # derives per-layer paths from it). Each target gets its most-runnable default:
         # a local folder for python, the OneLake Files mount for fabric, a UC volume
@@ -451,7 +451,7 @@ def scaffold_project(
                     "    registry = DomainRegistry.from_yaml(",
                     '        str(Path(__file__).parent / "_registry.yaml"),',
                     f"        environment={environment!r},",
-                    '        storage_mode="direct",',
+                    '        storage_mode="path",',
                     "    )",
                     f"    LakehousePipeline(registry, engine={resolved_engine!r}).run()",
                     "",

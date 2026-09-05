@@ -221,7 +221,11 @@ class LakehousePipeline:
         self.registry = registry
         self.engine = engine
         self.spark = spark
-        self.storage_mode = getattr(registry, "storage_mode", "uc")
+        # Registries built by hand (not via from_yaml) can still carry a legacy
+        # spelling, so normalise here too rather than trusting the attribute.
+        from lakelogic.core.registry import normalize_storage_mode
+
+        self.storage_mode = normalize_storage_mode(getattr(registry, "storage_mode", None))
         self.run_id = str(uuid.uuid4())
 
         # ── Engine / storage mode compatibility check ─────────────────────
@@ -246,7 +250,7 @@ class LakehousePipeline:
             except ImportError:  # pragma: no cover
                 pass  # pragma: no cover
 
-        if self.engine == "spark" and self.storage_mode == "direct" and self.spark:  # pragma: no cover
+        if self.engine == "spark" and self.storage_mode == "path" and self.spark:  # pragma: no cover
             import os
 
             # If no contracts reference cloud paths (abfs/wasbs/s3/gs), skip the
@@ -321,7 +325,7 @@ class LakehousePipeline:
         """
         if explicit_mode:
             return explicit_mode
-        if self.storage_mode == "uc":
+        if self.storage_mode == "catalog":
             metadata = (contract_dict or {}).get("metadata", {})
             if metadata.get("run_log_table"):
                 return "table"
@@ -370,7 +374,7 @@ class LakehousePipeline:
         storage = self.registry.storage if self.registry else None
 
         # ── Step 1: Derive missing paths from table_name ──────────────────
-        _is_direct = self.storage_mode == "direct"
+        _is_direct = self.storage_mode == "path"
 
         # ── Direct-mode pre-flight checks ─────────────────────────────────
         if _is_direct and table_name and storage:
@@ -488,7 +492,7 @@ class LakehousePipeline:
                         contract_dict["source"] = source
 
         # ── Step 2: Auto-prefix table: in UC mode ────────────────────────
-        if self.storage_mode == "uc":
+        if self.storage_mode == "catalog":
             # Materialization target_path
             mat = contract_dict.get("materialization") or {}
             tp = mat.get("target_path", "")
