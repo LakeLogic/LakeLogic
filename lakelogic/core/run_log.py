@@ -279,6 +279,8 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "data_layer": report.get("data_layer"),
         "status": report.get("status"),
         "error_message": report.get("error_message"),
+        "error_traceback": report.get("error_traceback"),
+        "lakelogic_version": report.get("lakelogic_version"),
         "source_path": report.get("source_path"),
         # ── Counts (high-frequency dashboard metrics) ─────────────────
         "counts_source": counts.get("source"),
@@ -381,6 +383,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("data_layer", StringType(), True),
                 StructField("status", StringType(), True),
                 StructField("error_message", StringType(), True),
+                StructField("error_traceback", StringType(), True),
+                StructField("lakelogic_version", StringType(), True),
                 StructField("source_path", StringType(), True),
                 StructField("counts_source", LongType(), True),
                 StructField("counts_total", LongType(), True),
@@ -458,6 +462,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     ("max_watermark_value", "STRING"),
                     ("status", "STRING"),
                     ("error_message", "STRING"),
+                    ("error_traceback", "STRING"),
+                    ("lakelogic_version", "STRING"),
                     ("dlt_state_json", "STRING"),
                     ("slo_json", "STRING"),
                 ]:
@@ -564,6 +570,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 data_layer VARCHAR,
                 status VARCHAR,
                 error_message VARCHAR,
+                error_traceback VARCHAR,
+                lakelogic_version VARCHAR,
                 source_path VARCHAR,
                 counts_source BIGINT,
                 counts_total BIGINT,
@@ -621,6 +629,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "data_layer",
             "status",
             "error_message",
+            "error_traceback",
+            "lakelogic_version",
             "source_path",
             "counts_source",
             "counts_total",
@@ -676,6 +686,8 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 data_layer TEXT,
                 status TEXT,
                 error_message TEXT,
+                error_traceback TEXT,
+                lakelogic_version TEXT,
                 source_path TEXT,
                 counts_source INTEGER,
                 counts_total INTEGER,
@@ -1449,6 +1461,74 @@ def write_slo_checks(
 
 
 # ── Public API ──
+
+
+# ── Failure context ──────────────────────────────────────────────────────────
+
+_TRACEBACK_LIMIT = 2000
+_MESSAGE_LIMIT = 500
+
+
+def _sanitise_frame_path(path: str) -> str:
+    """Shorten an absolute path to something portable and non-identifying.
+
+    A frame reads `/local_disk0/.ephemeral_nfs/envs/pythonEnv-1929f34d-63a1-4fd1-.../
+    site-packages/lakelogic/pipeline/runner.py`, of which only the last part means
+    anything — and the rest leaks the host's directory layout into a table that is
+    read by people who cannot see that host.
+    """
+    normalised = str(path).replace(chr(92), "/")
+    for marker in ("/site-packages/", "/dist-packages/", "/Workspace/", "/lakelogic/"):
+        idx = normalised.rfind(marker)
+        if idx != -1:
+            keep = normalised[idx + 1 :] if marker != "/lakelogic/" else normalised[idx + 1 :]
+            return keep
+    return normalised.rsplit("/", 2)[-1] if "/" in normalised else normalised
+
+
+def capture_failure(exc: BaseException) -> Dict[str, Any]:
+    """Split a failure into a groupable message, a locating traceback and a version.
+
+    Three fields rather than one string, because they are read differently:
+
+    * ``error_message`` — the exception's FIRST LINE only. It is the grouping key:
+      the same fault across two datasets must produce the same text, and a traceback
+      never does (line numbers, temp paths, run ids all vary). It is also what the
+      incident card shows as a headline.
+    * ``error_traceback`` — where the code actually failed. Its absence is why a
+      Python failure recorded 31 characters (``'Column' object is not callable``)
+      while a JVM failure recorded 2000 characters of Scala frames: the frames were
+      never attached, so the one question worth asking — which line? — was
+      unanswerable from the log.
+    * ``lakelogic_version`` — which build produced it, as a column rather than prose
+      so "failures by version" is a query and not a text search.
+    """
+    import traceback as _tb
+
+    message = str(exc).strip().splitlines()
+    first_line = message[0] if message else exc.__class__.__name__
+
+    frames = []
+    for frame in _tb.extract_tb(exc.__traceback__):
+        frames.append(f"{_sanitise_frame_path(frame.filename)}:{frame.lineno} in {frame.name}")
+    # Keep the DEEPEST frames: the raising site identifies the bug, while the outer
+    # ones are the same pipeline scaffolding on every failure.
+    rendered = f"{exc.__class__.__name__}: {first_line}\n" + "\n".join(frames[-12:])
+
+    return {
+        "error_message": first_line[:_MESSAGE_LIMIT],
+        "error_traceback": rendered[:_TRACEBACK_LIMIT],
+        "lakelogic_version": _lakelogic_version(),
+    }
+
+
+def _lakelogic_version() -> Optional[str]:
+    try:
+        import lakelogic
+
+        return getattr(lakelogic, "__version__", None)
+    except Exception:  # pragma: no cover - version is best-effort, never fatal
+        return None
 
 
 def write_run_log(

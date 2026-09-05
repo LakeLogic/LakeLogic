@@ -2839,10 +2839,20 @@ class LakehousePipeline:
             try:
                 from lakelogic.core.run_log import write_run_log
 
+                # Never let the enrichment cost us the log entry itself. This whole
+                # block sits under `except Exception: pass`, so anything raised while
+                # BUILDING the failure record silently discards the record — the run
+                # would fail with nothing written explaining why.
+                try:
+                    from lakelogic.core.run_log import capture_failure
+
+                    _failure = capture_failure(e)
+                except Exception:  # pragma: no cover - defensive
+                    _failure = {"error_message": str(e).splitlines()[0][:500] if str(e) else type(e).__name__}
                 _report = getattr(processor, "last_report", None) if "processor" in dir() else None
                 if _report:
                     _report["status"] = "failed"
-                    _report["error_message"] = str(e)[:2000]
+                    _report.update(_failure)
                     write_run_log(
                         _report,
                         processor.contract,
@@ -2866,7 +2876,7 @@ class LakehousePipeline:
                         "environment": (c.contract_dict or {}).get("metadata", {}).get("environment", "unknown"),
                         "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                         "status": "failed",
-                        "error_message": str(e)[:2000],
+                        **_failure,
                     }
                     # Use processor.contract if available (already constructed);
                     # fall back to building a minimal contract from the raw dict.

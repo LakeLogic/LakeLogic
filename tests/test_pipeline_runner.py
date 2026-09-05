@@ -1027,6 +1027,10 @@ def test_process_single_contract_success_and_failure_logging(monkeypatch):
     fake_run_log.write_run_log = lambda payload, contract, engine_name=None, run_log_mode=None: reports.append(
         (payload, engine_name, run_log_mode)
     )
+    # The runner also asks this module to build the failure record.
+    from lakelogic.core.run_log import capture_failure as _real_capture_failure
+
+    fake_run_log.capture_failure = _real_capture_failure
     monkeypatch.setitem(sys.modules, "lakelogic.core.run_log", fake_run_log)
 
     registry = types.SimpleNamespace(

@@ -92,6 +92,8 @@ SYSTEM_TABLE_SCHEMA_LOGS = (
     "  data_layer STRING,\n"
     "  status STRING,\n"
     "  error_message STRING,\n"
+    "  error_traceback STRING,\n"
+    "  lakelogic_version STRING,\n"
     "  source_path STRING,\n"
     "  counts_source BIGINT,\n"
     "  counts_total BIGINT,\n"
