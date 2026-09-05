@@ -1031,12 +1031,17 @@ class DataProcessor:
             domain = self._resolved_domain
             system = self._resolved_system
             data_layer = self._resolved_data_layer
-            # Resolve a human-readable target identifier for parallel-mode logs
+            # Resolve the target identifier for the run logs, most specific first.
+            # `table_name` is what the run actually writes, so it wins; `dataset` is
+            # the contract's own identifier; `title` is prose ("Trip cancellations")
+            # and is a last resort — before this ordering a contract carrying BOTH a
+            # dataset and a title logged the TITLE, so the line named something that
+            # matches no table in the catalog.
             _info = getattr(self.contract, "info", None)
             _target_name = (
                 getattr(_info, "table_name", None)
-                or getattr(_info, "title", None)
                 or getattr(self.contract, "dataset", None)
+                or getattr(_info, "title", None)
                 or "unknown"
             )
             tags = []
@@ -1046,6 +1051,12 @@ class DataProcessor:
                 tags.append(f"system={system}")
             if data_layer:
                 tags.append(f"layer={data_layer}")
+            # The dataset is what makes these lines tellable apart: one system emits a
+            # "Run complete" per contract, so domain/system/layer alone repeat verbatim
+            # and only the failing line names an entity. Reading such a log you can see
+            # THAT a silver run moved 1,455 of 1,683 rows but not WHICH table did.
+            if _target_name and _target_name != "unknown":
+                tags.append(f"dataset={_target_name}")
             tags_display = f" [{', '.join(tags)}]" if tags else ""
             ratio = counts.get("quarantine_ratio")
             ratio_display = f"{ratio:.2%}" if ratio is not None else "n/a"
