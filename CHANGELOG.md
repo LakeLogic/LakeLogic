@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.50.0] — 2026-09-05
+
+### Added
+
+- **logs**: Name the dataset in the "Run complete" line
+
+### Documentation
+
+- Update changelog for v1.49.0
+
+### Fixed
+
+- **ci**: Run the example notebooks against this checkout, not PyPI
+- **logs**: Prefer the table name over a prose title in the run log
+- **materialization**: Accept OLC SecondaryTarget models, not just dicts
 ## [1.49.0] — 2026-09-04
 
 ### Added
@@ -680,6 +695,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.50.0]: https://github.com/lakelogic/LakeLogic/compare/v1.49.0...v1.50.0
 [1.49.0]: https://github.com/lakelogic/LakeLogic/compare/v1.48.0...v1.49.0
 [1.48.0]: https://github.com/lakelogic/LakeLogic/compare/v1.47.0...v1.48.0
 [1.47.0]: https://github.com/lakelogic/LakeLogic/compare/v1.46.0...v1.47.0

@@ -43,7 +43,7 @@ from lakelogic.engines.base import ENGINE_DIALECT_MAP
 from lakelogic.engines.generic_sql import GenericSQLAdapter
 from lakelogic.core.delta_compat import read_delta
 
-__version__ = "1.49.0"
+__version__ = "1.50.0"
 
 
 class HelpTopic:

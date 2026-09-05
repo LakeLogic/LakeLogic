@@ -107,7 +107,7 @@ Generate schema-aware synthetic data from any Data Contract YAML.
 from lakelogic import DataGenerator
 
 gen = DataGenerator("contracts/bronze_orders.yaml", seed=42)
-df  = gen.generate(rows=1_000, invalid_ratio=0.1)
+df = gen.generate(rows=1_000, invalid_ratio=0.1)
 ```
 
 ### Constructor

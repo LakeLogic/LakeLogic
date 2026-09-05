@@ -15,9 +15,9 @@ good_df, bad_df = proc.run_source("data.parquet")
 
 # ALSO CORRECT: Use attributes
 result = proc.run(df)
-result.raw    # Original source data (pre-validation)
-result.good   # Records that passed validation (same as good_df)
-result.bad    # Records that failed validation (quarantined, same as bad_df)
+result.raw  # Original source data (pre-validation)
+result.good  # Records that passed validation (same as good_df)
+result.bad  # Records that failed validation (quarantined, same as bad_df)
 result.trace  # Step-by-step execution trace
 ```
 
@@ -94,8 +94,7 @@ source_count = len(result.raw)
 good_count = len(good_df)
 bad_count = len(bad_df)
 
-assert source_count == good_count + bad_count, \
-    f"Reconciliation failed: {source_count} != {good_count} + {bad_count}"
+assert source_count == good_count + bad_count, f"Reconciliation failed: {source_count} != {good_count} + {bad_count}"
 
 print(f"✅ 100% reconciliation: {source_count} = {good_count} + {bad_count}")
 ```
@@ -111,8 +110,7 @@ THRESHOLD = 0.10  # 10%
 
 if quarantine_ratio > THRESHOLD:
     raise ValueError(
-        f"Quarantine ratio {quarantine_ratio:.2%} exceeds threshold {THRESHOLD:.2%}. "
-        f"Investigate before materializing."
+        f"Quarantine ratio {quarantine_ratio:.2%} exceeds threshold {THRESHOLD:.2%}. Investigate before materializing."
     )
 
 proc.materialize(good_df, bad_df)
@@ -136,20 +134,18 @@ good_df, bad_df = proc.run_source("data.parquet")
 
 if len(bad_df) > 0:
     print(f"\n🛑 {len(bad_df)} records quarantined\n")
-    
+
     # View error reasons (Polars example)
     import polars as pl
-    
-    errors = (
-        bad_df
-        .select([
+
+    errors = bad_df.select(
+        [
             "customer_id",
             pl.col("_lakelogic_errors").alias("errors"),
-            pl.col("_lakelogic_categories").alias("categories")
-        ])
-        .explode(["errors", "categories"])
-    )
-    
+            pl.col("_lakelogic_categories").alias("categories"),
+        ]
+    ).explode(["errors", "categories"])
+
     print(errors)
 ```
 

@@ -40,16 +40,15 @@ external_logic:
 ```python
 import polars as pl
 
+
 def build_sales_gold(df: pl.DataFrame) -> pl.DataFrame:
     """Custom business logic for Gold layer."""
-    return (
-        df
-        .with_columns([
+    return df.with_columns(
+        [
             (pl.col("amount") * 1.1).alias("amount_with_tax"),
             pl.col("sale_date").dt.month().alias("sale_month"),
-        ])
-        .filter(pl.col("amount") > 100)
-    )
+        ]
+    ).filter(pl.col("amount") > 100)
 ```
 
 ## Option 2: Jupyter Notebook

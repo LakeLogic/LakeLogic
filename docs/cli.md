@@ -431,7 +431,10 @@ DuckDB, or plain dicts):
 from lakelogic.core.masking_diagnostics import diagnose_double_hashing
 
 result = diagnose_double_hashing(
-    bronze_df, silver_df, column="rider_key", join_key="rider_id",
+    bronze_df,
+    silver_df,
+    column="rider_key",
+    join_key="rider_id",
 )
 print(result.double_hashed_rows, result.consistent_rows, result.indeterminate_rows)
 print(result.render())
@@ -519,7 +522,7 @@ mutated.
 from lakelogic.core.scd2_diagnostics import diagnose_scd2
 
 result = diagnose_scd2(dim_df, primary_key="driver_id")
-print(result.defect_counts)   # {'inverted': 1, 'overlapping': 2, ...}
+print(result.defect_counts)  # {'inverted': 1, 'overlapping': 2, ...}
 print(result.render())
 
 fixed = diagnose_scd2(dim_df, primary_key="driver_id", repair=True).repaired_frame

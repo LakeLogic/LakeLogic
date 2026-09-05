@@ -15,9 +15,9 @@ processor = DataProcessor(contract="contract.yaml")
 result = processor.run_source()
 
 # Access via descriptive names
-original_data = result.raw      # Raw data before validation
-validated_data = result.good    # Records that passed validation
-quarantined_data = result.bad   # Records that failed validation
+original_data = result.raw  # Raw data before validation
+validated_data = result.good  # Records that passed validation
+quarantined_data = result.bad  # Records that failed validation
 
 print(result)  # ValidationResult(good=150, bad=10, raw=160)
 ```
@@ -80,7 +80,7 @@ metrics = {
     "total_records": len(result.raw),
     "valid_records": len(result.good),
     "quarantined_records": len(result.bad),
-    "pass_rate": len(result.good) / len(result.raw) * 100
+    "pass_rate": len(result.good) / len(result.raw) * 100,
 }
 
 dashboard.update(metrics)
@@ -106,11 +106,11 @@ The `ValidationResult` class implements both protocols:
 ```python
 class ValidationResult:
     def __init__(self, good, bad, raw):
-        self.good = good    # Named attributes
+        self.good = good  # Named attributes
         self.bad = bad
         self.raw = raw
-    
-    def __iter__(self):     # Tuple unpacking
+
+    def __iter__(self):  # Tuple unpacking
         yield self.raw
         yield self.good
         yield self.bad

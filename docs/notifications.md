@@ -440,8 +440,8 @@ ownership = {
     "domain_owner": "Marketing Analytics Team",
     "contacts": [
         {"name": "Lead", "role": "domain_lead", "email": "lead@acme.com", "slack": "#data"},
-        {"name": "OnCall", "role": "oncall", "email": "oncall@acme.com"}
-    ]
+        {"name": "OnCall", "role": "oncall", "email": "oncall@acme.com"},
+    ],
 }
 
 channels = resolve_ownership_contacts(ownership, "failure")

@@ -9,7 +9,7 @@ When LakeLogic reads a dictionary or YAML file, it automatically detects the ODC
 ```python
 from lakelogic.core.models import DataContract
 
-contract = DataContract(**my_odcs_dict)      # dict → executable contract
+contract = DataContract(**my_odcs_dict)  # dict → executable contract
 contract = DataContract.from_yaml("contract.yaml")
 ```
 
@@ -211,7 +211,7 @@ customProperties:
 Any LakeLogic contract can be exported to a valid ODCS v3.x document — the reverse of the mapping above:
 
 ```python
-odcs_dict = contract.to_odcs()          # method
+odcs_dict = contract.to_odcs()  # method
 # or: from lakelogic.core.models import to_odcs; to_odcs(contract)
 ```
 

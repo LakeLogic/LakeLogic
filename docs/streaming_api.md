@@ -9,10 +9,16 @@ All classes below are importable directly from the package:
 
 ```python
 from lakelogic import (
-    StreamSink, StreamRunSummary,
-    Checkpoint, CheckpointStore, SQLiteCheckpointStore,
-    KafkaOffsetSource, SSEOffsetSource, WatermarkChunkSource,
-    SparkStreamSink, SparkBatchResult,
+    StreamSink,
+    StreamRunSummary,
+    Checkpoint,
+    CheckpointStore,
+    SQLiteCheckpointStore,
+    KafkaOffsetSource,
+    SSEOffsetSource,
+    WatermarkChunkSource,
+    SparkStreamSink,
+    SparkBatchResult,
 )
 ```
 

@@ -15,7 +15,7 @@ logger.add(
     sys.stderr,
     level="INFO",  # or "DEBUG" with --verbose
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
-    filter=split_long_message  # Splits long messages across multiple lines
+    filter=split_long_message,  # Splits long messages across multiple lines
 )
 ```
 
@@ -143,7 +143,7 @@ logger.add(
     rotation="1 day",
     retention="30 days",
     compression="zip",
-    filter=None  # No truncation for file logs
+    filter=None,  # No truncation for file logs
 )
 ```
 
@@ -163,23 +163,25 @@ For log aggregation (Datadog, Splunk, ELK):
 ```python
 import json
 
+
 def json_formatter(record):
     """Format log records as JSON."""
-    return json.dumps({
-        "timestamp": record["time"].isoformat(),
-        "level": record["level"].name,
-        "message": record["message"],
-        "file": record["file"].name,
-        "function": record["function"],
-        "line": record["line"],
-    }) + "\n"
+    return (
+        json.dumps(
+            {
+                "timestamp": record["time"].isoformat(),
+                "level": record["level"].name,
+                "message": record["message"],
+                "file": record["file"].name,
+                "function": record["function"],
+                "line": record["line"],
+            }
+        )
+        + "\n"
+    )
 
-logger.add(
-    "logs/lakelogic.jsonl",
-    level="DEBUG",
-    format=json_formatter,
-    serialize=True
-)
+
+logger.add("logs/lakelogic.jsonl", level="DEBUG", format=json_formatter, serialize=True)
 ```
 
 **Output:**
@@ -198,7 +200,7 @@ logger.add(
     sys.stderr,
     level="DEBUG",
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
-    filter=truncate_message  # 500 chars
+    filter=truncate_message,  # 500 chars
 )
 ```
 
@@ -211,7 +213,7 @@ logger.add(
     sys.stderr,
     level="INFO",
     format="{time:HH:mm:ss} | {level: <8} | {message}",
-    filter=truncate_message  # 500 chars
+    filter=truncate_message,  # 500 chars
 )
 
 # File: Full messages, JSON
@@ -222,7 +224,7 @@ logger.add(
     rotation="1 day",
     retention="30 days",
     compression="zip",
-    filter=None  # No truncation
+    filter=None,  # No truncation
 )
 ```
 
@@ -236,7 +238,7 @@ logger.add(
     level="INFO",
     format="{time:HH:mm:ss} | {level: <8} | {message}",
     colorize=False,
-    filter=None  # No truncation (CI logs are searchable)
+    filter=None,  # No truncation (CI logs are searchable)
 )
 ```
 
@@ -271,12 +273,7 @@ logger.add("debug.log", level="DEBUG", filter=None)
 
 **Solution:** Use JSON logs for structured parsing:
 ```python
-logger.add(
-    "logs/lakelogic.jsonl",
-    level="INFO",
-    serialize=True,
-    format=json_formatter
-)
+logger.add("logs/lakelogic.jsonl", level="INFO", serialize=True, format=json_formatter)
 ```
 
 Then parse with `jq`:
@@ -316,7 +313,7 @@ logger.add(
     sys.stderr,
     level="INFO",
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
-    filter=truncate_message
+    filter=truncate_message,
 )
 
 # DEBUG and above to file (full)
@@ -324,7 +321,7 @@ logger.add(
     "logs/debug.log",
     level="DEBUG",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
-    filter=None
+    filter=None,
 )
 
 # ERROR and above to separate file (full)
@@ -332,7 +329,7 @@ logger.add(
     "logs/errors.log",
     level="ERROR",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}\n{exception}",
-    filter=None
+    filter=None,
 )
 ```
 
@@ -381,14 +378,18 @@ logger.remove()
 env = os.getenv("ENVIRONMENT", "development")
 max_message_length = int(os.getenv("LAKELOGIC_MAX_LOG_LENGTH", "500"))
 
+
 # Truncation filter
 def truncate_message(record):
     """Truncate log messages to prevent console overflow."""
     if record["level"].name in ["INFO", "DEBUG"]:
         message = record["message"]
         if len(message) > max_message_length:
-            record["message"] = message[:max_message_length] + f"... (truncated {len(message) - max_message_length} chars)"
+            record["message"] = (
+                message[:max_message_length] + f"... (truncated {len(message) - max_message_length} chars)"
+            )
     return True
+
 
 # Console handler (always)
 logger.add(
@@ -396,7 +397,7 @@ logger.add(
     level="INFO" if env == "production" else "DEBUG",
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
     filter=truncate_message,
-    colorize=(env != "ci")
+    colorize=(env != "ci"),
 )
 
 # File handler (production only)
@@ -408,22 +409,27 @@ if env == "production":
         rotation="1 day",
         retention="30 days",
         compression="zip",
-        filter=None  # No truncation
+        filter=None,  # No truncation
     )
-    
+
     # JSON logs for aggregation
     logger.add(
         "logs/lakelogic.jsonl",
         level="INFO",
         serialize=True,
-        format=lambda record: json.dumps({
-            "timestamp": record["time"].isoformat(),
-            "level": record["level"].name,
-            "message": record["message"],
-            "file": record["file"].name,
-            "function": record["function"],
-            "line": record["line"],
-        }) + "\n"
+        format=lambda record: (
+            json.dumps(
+                {
+                    "timestamp": record["time"].isoformat(),
+                    "level": record["level"].name,
+                    "message": record["message"],
+                    "file": record["file"].name,
+                    "function": record["function"],
+                    "line": record["line"],
+                }
+            )
+            + "\n"
+        ),
     )
 ```
 

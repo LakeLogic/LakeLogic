@@ -65,6 +65,16 @@ REM on a missing path. The failure was the lucky part — `uv lock --upgrade` an
 REM test gate had already run against the wrong repository and reported green.
 cd /d "%~dp0"
 
+REM Use THIS repo's virtualenv, not whatever `python` happens to be first on PATH.
+REM That is not hypothetical either: on the release box `python` resolved to a
+REM SIBLING project's .venv (LakeLogic_SaaS), which has no google-cloud-bigquery —
+REM so the compatibility gate failed a BigQuery test that passes here, and blocked
+REM a release over an environment it was never meant to be testing. The same wrong
+REM interpreter could just as easily pass a gate it should have failed.
+set "PY=python"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+echo   Python: %PY%
+
 echo.
 echo ======================================================
 echo   LakeLogic Release
@@ -84,7 +94,7 @@ git add uv.lock
 REM Step 0b: Compatibility check — abort release if upgraded deps break tests
 echo.
 echo [0b/6] Running compatibility tests...
-python -m pytest tests/ -x -q --tb=short
+"%PY%" -m pytest tests/ -x -q --tb=short
 if errorlevel 1 (
     echo.
     echo ERROR: Tests failed after dependency upgrade. Review uv.lock changes.
@@ -103,9 +113,9 @@ REM Step 1: Bump version (creates tag + bump commit)
 echo.
 echo [1/6] Bumping version...
 if "%1"=="" (
-    python -m commitizen bump --yes
+    "%PY%" -m commitizen bump --yes
 ) else (
-    python -m commitizen bump --increment %1 --yes
+    "%PY%" -m commitizen bump --increment %1 --yes
 )
 set "BUMP_RC=%ERRORLEVEL%"
 

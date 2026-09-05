@@ -19,8 +19,8 @@ else:
         print(f"  [{err.field}] {err.message}")
 
 # ── Get JSON Schema for UI forms ─────────────────────────────
-schema = contract_schema()           # Python dict
-schema_json = contract_schema_json() # JSON string for REST API
+schema = contract_schema()  # Python dict
+schema_json = contract_schema_json()  # JSON string for REST API
 ```
 
 ---
@@ -60,14 +60,9 @@ Each `ValidationError` has:
 === "Dict"
 
     ```python
-    result = validate_contract({
-        "version": "1.0",
-        "model": {
-            "fields": [
-                {"name": "order_id", "type": "long", "required": True}
-            ]
-        }
-    })
+    result = validate_contract(
+        {"version": "1.0", "model": {"fields": [{"name": "order_id", "type": "long", "required": True}]}}
+    )
     ```
 
 === "YAML File"
@@ -116,20 +111,22 @@ When the `server:` block contains per-layer keys (`bronze:`, `silver:`, `gold:`)
 
 ```python
 # System-level server block — per-layer, no type/path required
-result = validate_contract({
-    "version": "1.0",
-    "server": {
-        "bronze": {
-            "mode": "ingest",
-            "schema_policy": {"evolution": "append", "unknown_fields": "allow"},
-            "cast_to_string": True,
+result = validate_contract(
+    {
+        "version": "1.0",
+        "server": {
+            "bronze": {
+                "mode": "ingest",
+                "schema_policy": {"evolution": "append", "unknown_fields": "allow"},
+                "cast_to_string": True,
+            },
+            "silver": {
+                "mode": "validate",
+                "schema_policy": {"evolution": "strict", "unknown_fields": "quarantine"},
+            },
         },
-        "silver": {
-            "mode": "validate",
-            "schema_policy": {"evolution": "strict", "unknown_fields": "quarantine"},
-        },
-    },
-})
+    }
+)
 assert result.valid  # ✅ No type/path required at system level
 ```
 
@@ -174,16 +171,18 @@ The following legacy keys are still accepted but will emit deprecation warnings:
 
 ```python
 # Legacy keys produce warnings, not errors
-result = validate_contract({
-    "version": "1.0",
-    "server": {
-        "type": "local",
-        "path": ".",
-        "schema_evolution": "strict",       # ⚠️ deprecated
-        "allow_schema_drift": False,        # ⚠️ deprecated
-    },
-})
-assert result.valid    # Still valid — just warns
+result = validate_contract(
+    {
+        "version": "1.0",
+        "server": {
+            "type": "local",
+            "path": ".",
+            "schema_evolution": "strict",  # ⚠️ deprecated
+            "allow_schema_drift": False,  # ⚠️ deprecated
+        },
+    }
+)
+assert result.valid  # Still valid — just warns
 assert len(result.warnings) >= 2  # Deprecation warnings
 ```
 

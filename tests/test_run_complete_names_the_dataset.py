@@ -65,7 +65,11 @@ def test_the_existing_tags_are_kept(capfd):
 def test_two_contracts_in_one_system_are_tellable_apart(capfd):
     """The point of the change: same domain/system/layer, different lines."""
     a = _run_and_capture(_contract("silver_rideflow_trips"), capfd)[0].split("Run complete")[1].split("|")[0]
-    b = _run_and_capture(_contract("silver_rideflow_trip_cancellations"), capfd)[0].split("Run complete")[1].split("|")[0]
+    b = (
+        _run_and_capture(_contract("silver_rideflow_trip_cancellations"), capfd)[0]
+        .split("Run complete")[1]
+        .split("|")[0]
+    )
     assert a != b, f"tags identical for two different tables: {a!r}"
 
 

@@ -30,7 +30,7 @@ from lakelogic import DataProcessor
 # Create contract with Delta format
 processor = DataProcessor(
     engine="polars",  # or "duckdb", "pandas"
-    contract="contracts/customers.yaml"
+    contract="contracts/customers.yaml",
 )
 
 # Run against Delta table (automatically uses Delta-RS)
@@ -83,10 +83,7 @@ from lakelogic import DataProcessor
 from databricks.sdk import WorkspaceClient
 
 # Step 1: Get table path from Unity Catalog
-w = WorkspaceClient(
-    host="https://your-workspace.cloud.databricks.com",
-    token="YOUR_TOKEN"
-)
+w = WorkspaceClient(host="https://your-workspace.cloud.databricks.com", token="YOUR_TOKEN")
 table = w.tables.get(full_name="main.default.customers")
 table_path = table.storage_location
 
@@ -127,18 +124,12 @@ adapter = DeltaAdapter()
 existing_df = adapter.read("s3://bucket/table/")
 
 # New data
-new_data = pl.DataFrame({
-    "id": [1, 2, 3],
-    "name": ["Alice", "Bob", "Charlie"],
-    "updated_at": ["2026-02-09", "2026-02-09", "2026-02-09"]
-})
+new_data = pl.DataFrame(
+    {"id": [1, 2, 3], "name": ["Alice", "Bob", "Charlie"], "updated_at": ["2026-02-09", "2026-02-09", "2026-02-09"]}
+)
 
 # MERGE (atomic upsert, no Spark required)
-stats = adapter.merge(
-    target_path="s3://bucket/table/",
-    source_df=new_data,
-    merge_key="id"
-)
+stats = adapter.merge(target_path="s3://bucket/table/", source_df=new_data, merge_key="id")
 
 print(f"Updated: {stats['num_updated']}, Inserted: {stats['num_inserted']}")
 ```
@@ -156,10 +147,7 @@ adapter = DeltaAdapter()
 df_v1 = adapter.read("s3://bucket/table/", version=1)
 
 # Read at specific timestamp
-df_yesterday = adapter.read(
-    "s3://bucket/table/",
-    timestamp="2026-02-08T00:00:00Z"
-)
+df_yesterday = adapter.read("s3://bucket/table/", timestamp="2026-02-08T00:00:00Z")
 
 # Get table history
 history = adapter.get_history("s3://bucket/table/", limit=10)
@@ -197,30 +185,25 @@ adapter.vacuum("s3://bucket/table/", retention_hours=168, dry_run=False)
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
-adapter = DeltaAdapter(storage_options={
-    "AWS_REGION": "us-west-2",
-    "AWS_ACCESS_KEY_ID": "YOUR_KEY",
-    "AWS_SECRET_ACCESS_KEY": "YOUR_SECRET"
-})
+adapter = DeltaAdapter(
+    storage_options={"AWS_REGION": "us-west-2", "AWS_ACCESS_KEY_ID": "YOUR_KEY", "AWS_SECRET_ACCESS_KEY": "YOUR_SECRET"}
+)
 
 df = adapter.read("s3://bucket/table/")
 ```
 
 #### **Azure Blob/ADLS:**
 ```python
-adapter = DeltaAdapter(storage_options={
-    "AZURE_STORAGE_ACCOUNT_NAME": "your_account",
-    "AZURE_STORAGE_ACCOUNT_KEY": "YOUR_KEY"
-})
+adapter = DeltaAdapter(
+    storage_options={"AZURE_STORAGE_ACCOUNT_NAME": "your_account", "AZURE_STORAGE_ACCOUNT_KEY": "YOUR_KEY"}
+)
 
 df = adapter.read("abfss://container@account.dfs.core.windows.net/table/")
 ```
 
 #### **GCP GCS:**
 ```python
-adapter = DeltaAdapter(storage_options={
-    "GOOGLE_SERVICE_ACCOUNT": "/path/to/service-account.json"
-})
+adapter = DeltaAdapter(storage_options={"GOOGLE_SERVICE_ACCOUNT": "/path/to/service-account.json"})
 
 df = adapter.read("gs://bucket/table/")
 ```
@@ -302,11 +285,9 @@ server:
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
-adapter = DeltaAdapter(storage_options={
-    "AWS_REGION": "us-west-2",
-    "AWS_ACCESS_KEY_ID": "YOUR_KEY",
-    "AWS_SECRET_ACCESS_KEY": "YOUR_SECRET"
-})
+adapter = DeltaAdapter(
+    storage_options={"AWS_REGION": "us-west-2", "AWS_ACCESS_KEY_ID": "YOUR_KEY", "AWS_SECRET_ACCESS_KEY": "YOUR_SECRET"}
+)
 ```
 
 ---

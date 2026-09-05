@@ -137,7 +137,7 @@ from datetime import datetime, timedelta
 
 gen = DataGenerator("contracts/bronze_events.yaml")
 
-end   = datetime.now()
+end = datetime.now()
 start = end - timedelta(minutes=5)
 df = gen.generate(rows=100, window_start=start, window_end=end)
 # Every timestamp in df falls within [start, end]
@@ -192,9 +192,9 @@ The `SLOValidator` automatically checks every active contract against your layer
 from lakelogic.core.registry import DomainRegistry
 from lakelogic.core.slo import SLOValidator
 
-registry  = DomainRegistry.from_yaml("_system.yaml")
+registry = DomainRegistry.from_yaml("_system.yaml")
 validator = SLOValidator(registry=registry, polars=True)
-breaches  = validator.check_freshness()
+breaches = validator.check_freshness()
 ```
 
 Output:
@@ -449,19 +449,17 @@ from lakelogic.core.gdpr import forget_subjects, mask_pii_columns
 
 # Erase specific subjects
 cleaned_df = forget_subjects(
-    df, contract,
-    subject_column="customer_id",
-    subject_ids=["CUST-10042", "CUST-88391"],
-    erasure_strategy="nullify"
+    df, contract, subject_column="customer_id", subject_ids=["CUST-10042", "CUST-88391"], erasure_strategy="nullify"
 )
 
 # Partition-scoped erasure (e.g. only French customers)
 cleaned_df = forget_subjects(
-    df, contract,
+    df,
+    contract,
     subject_column="customer_id",
     subject_ids=["CUST-55210"],
     erasure_strategy="hash",
-    partition_filter={"column": "country_code", "value": "FR"}
+    partition_filter={"column": "country_code", "value": "FR"},
 )
 
 # Mask ALL PII columns for a dev/test copy
@@ -484,9 +482,7 @@ Every erasure operation:
 from lakelogic.core.gdpr import generate_erasure_report
 
 report = generate_erasure_report(
-    contract, subject_column="customer_id",
-    subject_ids=["CUST-10042"], erasure_strategy="nullify",
-    affected_rows=58
+    contract, subject_column="customer_id", subject_ids=["CUST-10042"], erasure_strategy="nullify", affected_rows=58
 )
 # Returns: {report_type, timestamp, contract, subjects_erased,
 #           erasure_strategy, pii_columns_affected, compliance_note}

@@ -161,11 +161,13 @@ from lakelogic import DataProcessor
 
 proc = DataProcessor(contract="events.yaml")
 
+
 # Use LakeLogic inside foreachBatch
 def validate_batch(batch_df, batch_id):
     result = proc.run_dataframe(batch_df)
     result.good.write.format("delta").mode("append").save(silver_path)
     result.bad.write.format("delta").mode("append").save(quarantine_path)
+
 
 stream.writeStream.foreachBatch(validate_batch).start()
 ```
@@ -176,6 +178,7 @@ stream.writeStream.foreachBatch(validate_batch).start()
 # Triggered by S3/ADLS file arrival
 def handler(event):
     from lakelogic import DataProcessor
+
     file_path = event["Records"][0]["s3"]["object"]["key"]
     result = DataProcessor(contract="events.yaml").run_source(file_path)
     # Bad data triggers Slack alert automatically (via contract notifications)
@@ -218,10 +221,7 @@ LakeLogic works with any orchestrator. Use the CLI or Python API:
     # Databricks notebook cell
     from lakelogic import DataProcessor
 
-    result = DataProcessor(
-        contract="/Workspace/contracts/customers_silver.yaml",
-        engine="spark"
-    ).run()
+    result = DataProcessor(contract="/Workspace/contracts/customers_silver.yaml", engine="spark").run()
     ```
 
 === "Prefect / Dagster"
@@ -229,6 +229,7 @@ LakeLogic works with any orchestrator. Use the CLI or Python API:
     ```python
     from prefect import flow
     from lakelogic import DataProcessor
+
 
     @flow
     def validate_customers():

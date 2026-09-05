@@ -162,7 +162,7 @@ LakeLogic physically writes encrypted values (`enc:gAAAAABh...`) into your Bronz
     from pyspark.sql import functions as F
 
     spark = SparkSession.builder.getOrCreate()
-    
+
     # 1. Prepare the same padded key used during pipeline masking
     raw_key = os.environ["LAKELOGIC_PII_KEY"]
     padded_key = (raw_key * ((16 // len(raw_key)) + 1))[:16]
@@ -175,8 +175,8 @@ LakeLogic physically writes encrypted values (`enc:gAAAAABh...`) into your Bronz
         "user_id",
         F.when(
             F.col("user_id").startswith("enc:"),
-            F.expr(f"CAST(aes_decrypt(unbase64(substring(user_id, 5)), '{padded_key}') AS STRING)")
-        ).otherwise(F.col("user_id"))
+            F.expr(f"CAST(aes_decrypt(unbase64(substring(user_id, 5)), '{padded_key}') AS STRING)"),
+        ).otherwise(F.col("user_id")),
     )
     ```
 
@@ -198,8 +198,7 @@ LakeLogic physically writes encrypted values (`enc:gAAAAABh...`) into your Bronz
     df = df.with_columns(
         pl.col("user_id")
         .map_elements(
-            lambda v: fern.decrypt(v[4:].encode("ascii")).decode("utf-8")
-            if v and v.startswith("enc:") else v,
+            lambda v: fern.decrypt(v[4:].encode("ascii")).decode("utf-8") if v and v.startswith("enc:") else v,
             return_dtype=pl.Utf8,
         )
         .alias("user_id")

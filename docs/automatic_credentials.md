@@ -32,10 +32,7 @@ credential = DefaultAzureCredential()
 token = credential.get_token("https://storage.azure.com/.default")
 
 # Manually configure storage options
-adapter = DeltaAdapter(storage_options={
-    "AZURE_STORAGE_ACCOUNT_NAME": "onelake",
-    "BEARER_TOKEN": token.token
-})
+adapter = DeltaAdapter(storage_options={"AZURE_STORAGE_ACCOUNT_NAME": "onelake", "BEARER_TOKEN": token.token})
 
 df = adapter.read("abfss://workspace@onelake.dfs.fabric.microsoft.com/...")
 ```
@@ -185,11 +182,8 @@ from lakelogic.engines.delta_adapter import DeltaAdapter
 
 # Disable automatic credential resolution
 adapter = DeltaAdapter(
-    storage_options={
-        "AWS_ACCESS_KEY_ID": "AKIA...",
-        "AWS_SECRET_ACCESS_KEY": "..."
-    },
-    auto_resolve_credentials=False  # Disable automatic resolution
+    storage_options={"AWS_ACCESS_KEY_ID": "AKIA...", "AWS_SECRET_ACCESS_KEY": "..."},
+    auto_resolve_credentials=False,  # Disable automatic resolution
 )
 
 df = adapter.read("s3://bucket/table/")
@@ -219,10 +213,12 @@ adapter = DeltaAdapter()
 
 ```python
 # DON'T DO THIS - credentials in code!
-adapter = DeltaAdapter(storage_options={
-    "AWS_ACCESS_KEY_ID": "AKIA...",  # ❌ Hardcoded
-    "AWS_SECRET_ACCESS_KEY": "..."   # ❌ Hardcoded
-})
+adapter = DeltaAdapter(
+    storage_options={
+        "AWS_ACCESS_KEY_ID": "AKIA...",  # ❌ Hardcoded
+        "AWS_SECRET_ACCESS_KEY": "...",  # ❌ Hardcoded
+    }
+)
 ```
 
 ---

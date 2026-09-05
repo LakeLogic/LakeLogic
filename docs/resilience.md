@@ -33,8 +33,8 @@ If `table_a` hits an unexpected extraction error or exhausts its `entity_timeout
 ```python
 pipeline.run(
     layers="bronze,silver",
-    retry_attempts=3,              # Try each entity up to 3 times
-    retry_base_wait_seconds=30,    # 30s → 60s → 120s between attempts
+    retry_attempts=3,  # Try each entity up to 3 times
+    retry_base_wait_seconds=30,  # 30s → 60s → 120s between attempts
 )
 ```
 
@@ -88,7 +88,7 @@ Every failed attempt logs the **full exception type, message, and traceback**. N
 ```python
 pipeline.run(
     layers="bronze,silver",
-    entity_timeout_minutes=10,    # 10 minutes per entity
+    entity_timeout_minutes=10,  # 10 minutes per entity
 )
 ```
 
@@ -100,8 +100,8 @@ Each entity runs inside a monitored thread. If it exceeds the timeout, LakeLogic
 # Combined: timeout + retry
 pipeline.run(
     layers="bronze,silver",
-    entity_timeout_minutes=10,          # 10 min per entity attempt
-    retry_attempts=2,                # Retry once if timed out
+    entity_timeout_minutes=10,  # 10 min per entity attempt
+    retry_attempts=2,  # Retry once if timed out
     retry_base_wait_seconds=60,
 )
 ```
@@ -129,7 +129,7 @@ pipeline.run(
     layers="bronze,silver,gold",
     retry_attempts=3,
     retry_base_wait_seconds=30,
-    max_consecutive_failures=3,    # Stop after 3 entities fail in a row
+    max_consecutive_failures=3,  # Stop after 3 entities fail in a row
 )
 ```
 
@@ -233,17 +233,13 @@ For production data mesh pipelines, use all four together:
 ```python
 pipeline.run(
     layers="bronze,silver,gold",
-
     # Retry: recover from transient failures
     retry_attempts=3,
     retry_base_wait_seconds=30,
-
     # Timeout: prevent runaway entities
     entity_timeout_minutes=10,
-
     # Circuit breaker: fast-fail on infrastructure outage
     max_consecutive_failures=3,
-
     # Checkpoint: resume from last failure
     resume_from_run=last_failed_run_id,  # or None for fresh run
 )
@@ -289,10 +285,10 @@ result = retry_call(
     label="API fetch",
 )
 
+
 # Decorator style
 @with_retry(attempts=3, base_wait_seconds=5)
-def upload_to_storage(data, path):
-    ...
+def upload_to_storage(data, path): ...
 ```
 
 ---

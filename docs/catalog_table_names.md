@@ -39,6 +39,7 @@ path = resolve_catalog_path("myworkspace.sales_lakehouse.customers", platform="f
 
 # Then use with processor
 from lakelogic import DataProcessor
+
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
 good_df, bad_df = processor.run_source(path)
 ```
@@ -60,6 +61,7 @@ path = resolve_catalog_path("salesdb.dbo.customers", platform="synapse")
 
 # Then use with processor
 from lakelogic import DataProcessor
+
 processor = DataProcessor(engine="polars", contract="contracts/customers.yaml")
 good_df, bad_df = processor.run_source(path)
 ```
@@ -112,21 +114,17 @@ export DATABRICKS_TOKEN="dapi..."
 - Or pass directly:
 ```python
 from lakelogic.engines.unity_catalog import UnityCatalogResolver
-resolver = UnityCatalogResolver(
-    host="https://your-workspace.cloud.databricks.com",
-    token="dapi..."
-)
+
+resolver = UnityCatalogResolver(host="https://your-workspace.cloud.databricks.com", token="dapi...")
 ```
 
 **Data Access (AWS S3):**
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
-adapter = DeltaAdapter(storage_options={
-    "AWS_REGION": "us-west-2",
-    "AWS_ACCESS_KEY_ID": "AKIA...",
-    "AWS_SECRET_ACCESS_KEY": "..."
-})
+adapter = DeltaAdapter(
+    storage_options={"AWS_REGION": "us-west-2", "AWS_ACCESS_KEY_ID": "AKIA...", "AWS_SECRET_ACCESS_KEY": "..."}
+)
 df = adapter.read("main.default.customers")
 ```
 
@@ -134,10 +132,9 @@ Required IAM: `s3:GetObject`, `s3:ListBucket` on the Unity Catalog storage bucke
 
 **Data Access (Azure ADLS):**
 ```python
-adapter = DeltaAdapter(storage_options={
-    "AZURE_STORAGE_ACCOUNT_NAME": "your_account",
-    "AZURE_STORAGE_ACCOUNT_KEY": "..."
-})
+adapter = DeltaAdapter(
+    storage_options={"AZURE_STORAGE_ACCOUNT_NAME": "your_account", "AZURE_STORAGE_ACCOUNT_KEY": "..."}
+)
 ```
 
 Required role: **Storage Blob Data Reader** on the storage account.
@@ -158,10 +155,7 @@ workspace.lakehouse.table
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
-adapter = DeltaAdapter(storage_options={
-    "AZURE_STORAGE_ACCOUNT_NAME": "onelake",
-    "AZURE_STORAGE_ACCOUNT_KEY": "..."
-})
+adapter = DeltaAdapter(storage_options={"AZURE_STORAGE_ACCOUNT_NAME": "onelake", "AZURE_STORAGE_ACCOUNT_KEY": "..."})
 df = adapter.read("myworkspace.sales_lakehouse.customers")
 ```
 
@@ -172,10 +166,7 @@ from azure.identity import DefaultAzureCredential
 credential = DefaultAzureCredential()
 token = credential.get_token("https://storage.azure.com/.default")
 
-adapter = DeltaAdapter(storage_options={
-    "AZURE_STORAGE_ACCOUNT_NAME": "onelake",
-    "BEARER_TOKEN": token.token
-})
+adapter = DeltaAdapter(storage_options={"AZURE_STORAGE_ACCOUNT_NAME": "onelake", "BEARER_TOKEN": token.token})
 ```
 
 ---
@@ -198,10 +189,9 @@ export SYNAPSE_STORAGE_ACCOUNT="mysynapsestorage"
 ```python
 from lakelogic.engines.delta_adapter import DeltaAdapter
 
-adapter = DeltaAdapter(storage_options={
-    "AZURE_STORAGE_ACCOUNT_NAME": "mysynapsestorage",
-    "AZURE_STORAGE_ACCOUNT_KEY": "..."
-})
+adapter = DeltaAdapter(
+    storage_options={"AZURE_STORAGE_ACCOUNT_NAME": "mysynapsestorage", "AZURE_STORAGE_ACCOUNT_KEY": "..."}
+)
 df = adapter.read("salesdb.dbo.customers")
 ```
 
@@ -334,11 +324,7 @@ df = adapter.read("main.default.customers")
 adapter.write(df, "s3://bucket/output/", mode="append")
 
 # Merge (upsert)
-stats = adapter.merge(
-    target_path="s3://bucket/table/",
-    source_df=new_data,
-    merge_key="id"
-)
+stats = adapter.merge(target_path="s3://bucket/table/", source_df=new_data, merge_key="id")
 ```
 
 ### Cache Table Paths for Performance

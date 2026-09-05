@@ -50,10 +50,7 @@ from lakelogic.engines.streaming_connectors import WebSocketConnector
 
 connector = WebSocketConnector(
     url="wss://ws-feed.exchange.coinbase.com",
-    subscribe_message={
-        "type": "subscribe",
-        "channels": [{"name": "ticker", "product_ids": ["BTC-USD"]}]
-    }
+    subscribe_message={"type": "subscribe", "channels": [{"name": "ticker", "product_ids": ["BTC-USD"]}]},
 )
 
 for event in connector.stream():
@@ -64,11 +61,7 @@ for event in connector.stream():
 ```python
 from lakelogic.engines.streaming_connectors import KafkaConnector
 
-connector = KafkaConnector(
-    brokers=["localhost:9092"],
-    topic="production_orders",
-    consumer_group="lakelogic_processor"
-)
+connector = KafkaConnector(brokers=["localhost:9092"], topic="production_orders", consumer_group="lakelogic_processor")
 
 for event in connector.stream():
     # LakeLogic automatically parses JSON messages
@@ -96,15 +89,15 @@ that same proven guarantee to **every** engine through **one contract**:
 from lakelogic import StreamSink, SQLiteCheckpointStore
 
 sink = StreamSink(
-    "contracts/bronze_orders.yaml",   # the SAME contract you use for batch
-    connector,                        # any connector above, or an iterable of dicts
-    engine="polars",                  # or "duckdb" / "spark"
+    "contracts/bronze_orders.yaml",  # the SAME contract you use for batch
+    connector,  # any connector above, or an iterable of dicts
+    engine="polars",  # or "duckdb" / "spark"
     checkpoint=SQLiteCheckpointStore("checkpoints.sqlite"),
     checkpoint_key="orders",
     batch_size=1000,
 )
 
-summary = sink.run("available_now")   # drain to the current end, then exit
+summary = sink.run("available_now")  # drain to the current end, then exit
 print(summary.good_count, summary.bad_count, summary.cursor)
 ```
 
@@ -166,8 +159,8 @@ silver = spark.readStream.format("delta").load("lake/bronze_orders")
 SparkStreamSink(
     "contracts/silver_orders.yaml",
     silver,
-    checkpoint_location="/checkpoints/silver_orders",   # Spark owns resume
-    trigger="available_now",                            # or "processing_time"
+    checkpoint_location="/checkpoints/silver_orders",  # Spark owns resume
+    trigger="available_now",  # or "processing_time"
 ).run()
 ```
 

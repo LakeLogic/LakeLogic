@@ -31,7 +31,7 @@ good, bad = proc.run(tickets_df)
 
 # Binary source (PDF, image) — point the engine at the file via a DataFrame
 files_df = pl.DataFrame({"file_path": ["invoice.pdf"]})
-good, bad = proc.run(files_df)   # contract.extraction.preprocessing.file_column: file_path
+good, bad = proc.run(files_df)  # contract.extraction.preprocessing.file_column: file_path
 ```
 
 ---

@@ -15,8 +15,8 @@ imports → receive frames → transform → (optional) quality → (optional) t
 
 ```python
 def run(good_df, links=None, engine="polars", contract=None, **kwargs):
-    drivers = links["drivers"]          # reference frame (already subset by the contract)
-    return good_df.join(drivers, ...)   # LakeLogic validates + materializes this
+    drivers = links["drivers"]  # reference frame (already subset by the contract)
+    return good_df.join(drivers, ...)  # LakeLogic validates + materializes this
 ```
 
 | Arg | Meaning |

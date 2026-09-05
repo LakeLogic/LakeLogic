@@ -242,6 +242,7 @@ def my_function(param1: str, param2: int) -> bool:
 import pytest
 from lakelogic import DataProcessor
 
+
 def test_feature_name():
     """Test that feature works correctly"""
     # Arrange
