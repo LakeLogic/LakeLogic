@@ -75,3 +75,37 @@ def test_no_dataset_tag_when_the_name_is_unknown(capfd):
     lines = _run_and_capture(bare, capfd)
     assert lines, "no 'Run complete' line was emitted"
     assert "dataset=unknown" not in lines[0], lines[0]
+
+
+# ── which name wins ──────────────────────────────────────────────────────────
+#
+# table_name is what the run WRITES, so it outranks everything. `dataset` is the
+# contract's own identifier. `title` is prose and comes last: before this order
+# was fixed, a contract carrying both a dataset and a title logged the title, so
+# the line named something that matches no table in the catalog.
+
+
+def _bare(**kw):
+    c = {"version": "1.0.0", "model": {"fields": [{"name": "id", "type": "int"}]}}
+    c.update(kw)
+    return c
+
+
+def test_table_name_outranks_dataset_and_title(capfd):
+    line = _run_and_capture(
+        _bare(dataset="orders_ds", info={"title": "Nice Title", "table_name": "silver_trips"}), capfd
+    )[0]
+    assert "dataset=silver_trips" in line, line
+
+
+def test_dataset_outranks_title(capfd):
+    """The regression: a prose title must not stand in for a real identifier."""
+    line = _run_and_capture(_bare(dataset="orders_ds", info={"title": "Nice Title"}), capfd)[0]
+    assert "dataset=orders_ds" in line, line
+    assert "Nice Title" not in line, line
+
+
+def test_title_is_used_only_as_a_last_resort(capfd):
+    """Still better than an unattributable line when nothing else is given."""
+    line = _run_and_capture(_bare(info={"title": "Nice Title"}), capfd)[0]
+    assert "dataset=Nice Title" in line, line

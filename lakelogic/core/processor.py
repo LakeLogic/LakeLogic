@@ -1031,12 +1031,17 @@ class DataProcessor:
             domain = self._resolved_domain
             system = self._resolved_system
             data_layer = self._resolved_data_layer
-            # Resolve a human-readable target identifier for the run logs.
+            # Resolve the target identifier for the run logs, most specific first.
+            # `table_name` is what the run actually writes, so it wins; `dataset` is
+            # the contract's own identifier; `title` is prose ("Trip cancellations")
+            # and is a last resort — before this ordering a contract carrying BOTH a
+            # dataset and a title logged the TITLE, so the line named something that
+            # matches no table in the catalog.
             _info = getattr(self.contract, "info", None)
             _target_name = (
                 getattr(_info, "table_name", None)
-                or getattr(_info, "title", None)
                 or getattr(self.contract, "dataset", None)
+                or getattr(_info, "title", None)
                 or "unknown"
             )
             tags = []
