@@ -185,6 +185,33 @@ class EntityTimeoutError(Exception):
     pass
 
 
+
+def _ownership_for_contract(contract_dict: Dict[str, Any], registry: Any) -> Dict[str, Any]:
+    """The ownership block that answers for THIS contract.
+
+    The registry resolves ownership across three scopes — domain -> system -> data
+    product — and writes the deep-merged result onto each contract, so the contract's
+    own block already carries everything it inherited. Routing used the registry-level
+    block instead, which is only the outer two scopes: a contract naming its own owner
+    was resolved, recorded with provenance, linted by OWN-001, ranked last-and-therefore
+    winning in ``SCOPE_ORDER`` — and then ignored when the alert was actually sent.
+
+    Use case it fixes: the `payments` domain is owned by the Payments team, but the gold
+    contract `gold_stripe_fact_payment_reconciliation` is jointly owned by Finance Ops,
+    who must be paged when reconciliation breaks. Declaring `ownership.contacts` on that
+    one contract now routes its alerts to Finance Ops, while every other payments
+    contract still pages the domain owner.
+
+    Falling back to the registry keeps contracts that declare nothing unchanged, and
+    covers the case where a contract declares ownership but the registry declares none —
+    which previously discarded the only ownership information available.
+    """
+    contract_ownership = contract_dict.get("ownership") if isinstance(contract_dict, dict) else None
+    if contract_ownership:
+        return contract_ownership
+    return getattr(registry, "ownership", {}) or {}
+
+
 class LakehousePipeline:
     """
     Executes a DomainRegistry through a pipeline run.
@@ -2616,8 +2643,8 @@ class LakehousePipeline:
             processor = DataProcessor(
                 contract=c.contract_dict, engine=self.engine, pipeline_run_id=self.run_id, run_log_mode=resolved_mode
             )
-            # Inject domain ownership and notifications configuration
-            processor._ownership = getattr(self.registry, "ownership", {}) or {}
+            # Inject ownership and notifications configuration
+            processor._ownership = _ownership_for_contract(c.contract_dict, self.registry)
             processor._notifications = getattr(self.registry, "notifications", []) or []
             processor._notifications_enabled = getattr(self.registry, "notifications_enabled", True)
             result = processor.run_source(
