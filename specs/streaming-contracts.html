@@ -1,0 +1,3189 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source reference framework for Open Lakehouse Contracts. Validate and execute OLC contracts across Polars, DuckDB and Spark.">
+      
+      
+        <meta name="author" content="LakeLogic Team">
+      
+      
+        <link rel="canonical" href="https://LakeLogic.github.io/LakeLogic/specs/streaming-contracts.html">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Streaming & Resumable Ingestion Contracts - LakeLogic</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css?v=3">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#streaming-resumable-ingestion-contracts" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="LakeLogic" class="md-header__button md-logo" aria-label="LakeLogic" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LakeLogic
+            <span class="ll-docs-badge">Docs</span>
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Streaming &amp; Resumable Ingestion Contracts
+            
+          </span>
+        </div>
+      </div>
+    </div><nav class="ll-metanav" aria-label="Documentation sections">
+      <a class="ll-metanav__link" href="../installation.html">Get started</a>
+      <a class="ll-metanav__link" href="../concepts.html">Guides</a>
+      <a class="ll-metanav__link" href="../api.html">Developer</a>
+      <a class="ll-metanav__link" href="../cli.html">Reference</a>
+      <a class="ll-metanav__link" href="../examples.html">Tutorials</a>
+      <a class="ll-metanav__link" href="../maintenance.html">Release notes</a>
+    </nav>
+
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    <div class="ll-header-extra">
+      <a class="ll-header-extra__link" href="https://lakelogic.org" target="_blank" rel="noopener">Website</a>
+    </div>
+
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lakelogic/LakeLogic" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakelogic/LakeLogic
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="LakeLogic" class="md-nav__button md-logo" aria-label="LakeLogic" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    LakeLogic
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lakelogic/LakeLogic" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakelogic/LakeLogic
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture_diagram.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../odcs.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Open Data Contract Standard (ODCS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../organization.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contract Organization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingestion.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingestion & Cloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../llm_extraction.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unstructured Data (LLM Extraction)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reprocessing.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reprocessing & Partitioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resilience.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline Resilience
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines & Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment_patterns.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Observability
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring & Lineage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notifications.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications & Alerting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compliance & Governance
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Compliance & Governance
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/compliance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/slo.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Level Objectives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../contracts/index.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contracts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/domain_config.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain Config (_domain.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/system_config.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Config (_system.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/inheritance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Resolution & Inheritance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../contracts/data_product_contracts/index.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Product Contracts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8_5" id="__nav_8_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_8_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data Product Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/data_product_contracts/ingestion.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingestion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/data_product_contracts/watermark_strategies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Watermark Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/data_product_contracts/transformations.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/data_product_contracts/quality.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/data_product_contracts/materialization.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Materialization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/data_product_contracts/dimensional_modeling.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dimensional Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/schema_model.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schema & Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/schema_api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schema Validation API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contracts/versioning.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contract_template.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Complete Contract Template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../return_values.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Return Values
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../automatic_credentials.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Automatic Credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog_table_names.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog Table Names
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../delta_lake_support.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Delta Lake (Spark-Free)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../driver.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Driver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bootstrap.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../capabilities.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capability Matrix
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming_sources.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Streaming Sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming_api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming API (StreamSink)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../logging_configuration.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validation_result.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation Result
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../maintenance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release & Maintenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why LakeLogic?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-problem-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Problem &amp; goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-core-principle-contract-declares-intent-runtime-picks-compute-cadence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Core principle: contract declares intent, runtime picks compute &amp; cadence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-contract-fields-cadence-independent-data-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Contract fields (cadence-independent data semantics)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-runtime-binding-per-deployment-not-in-the-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Runtime binding (per deployment — NOT in the contract)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Runtime binding (per deployment — NOT in the contract)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-serverless-suitability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Serverless suitability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-execution-model-one-resumable-loop-two-lifetimes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Execution model — one resumable loop, two lifetimes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-per-source-cursor-end-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Per-source cursor &amp; end-snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-checkpoint-store-the-store-doesnt-create-real-time-it-bounds-how-you-commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Checkpoint store — the store doesn't create real-time; it bounds how you commit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-delivery-semantics-at-least-once-contract-idempotency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Delivery semantics — at-least-once + contract idempotency
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-engine-capability-boundary-derived-lint-enforced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Engine capability boundary (derived, lint-enforced)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-failure-resumability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Failure &amp; Resumability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Failure &amp; Resumability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-fetch_size-existing-simple-all-or-nothing-not-resumable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 fetch_size (existing) — simple, all-or-nothing, NOT resumable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-checkpointed-micro-batch-this-spec-resumable-memory-bounded-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 Checkpointed micro-batch (this spec) — resumable, memory-bounded writes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-relationship-to-existing-mechanisms-what-we-reuse-not-rebuild" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Relationship to existing mechanisms (what we reuse, not rebuild)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-acceptance-criteria-done-all-true" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Acceptance criteria (done = all true)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Acceptance criteria (done = all true)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-contract-runtime-separation-24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Contract ⁄ runtime separation (§2–§4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-execution-resumability-56" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Execution &amp; resumability (§5–§6)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-engine-boundary-lint-9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C. Engine boundary &amp; lint (§9)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#d-failure-semantics-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        D. Failure semantics (§10)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#e-observability-78" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E. Observability (§7–§8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-success-criteria-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Success criteria (outcome)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-test-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Test plan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-open-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Open decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="streaming-resumable-ingestion-contracts">Streaming &amp; Resumable Ingestion Contracts</h1>
+<p><strong>Status:</strong> MVP implemented (core loop + checkpoint); remainder proposed
+<strong>Scope:</strong> LakeLogic OSS core — one contract vocabulary spanning batch, resumable
+micro-batch (AvailableNow-style), and continuous streaming, plus the failure /
+resumability model that the current <code>fetch_size</code> path lacks.
+<strong>Related:</strong> <code>docs/streaming.md</code> (connectors), <code>docs/streaming_sources.md</code>,
+<code>lakelogic/core/stream_sink.py</code> (<strong>this MVP</strong>), <code>lakelogic/core/incremental.py</code>,
+<code>lakelogic/core/run_log.py</code>, <code>lakelogic/engines/streaming_connectors.py</code>,
+<code>lakelogic/core/processor.py</code> (<code>run_source</code>, <code>fetch_size</code> path).</p>
+<h3 id="implementation-status">Implementation status</h3>
+<p><strong>Built</strong> (<code>lakelogic/core/stream_sink.py</code> + <code>contract_lint.py</code>;
+<code>tests/test_stream_sink.py</code> 35 tests + <code>test_contract_lint.py</code> STREAM checks):
+- <code>StreamSink</code> — micro-batch loop over any <code>.stream()</code> connector or iterable of
+  event dicts; <code>available_now</code> (drain + exit) and <code>continuous</code> (<code>max_batches</code>-bounded)
+  modes; engine-agnostic validation via <code>DataProcessor.run(df)</code>; write via
+  <code>materialize</code>; <strong>commit-after-write</strong> → at-least-once; memory-bounded (one batch
+  buffered). Exported from <code>lakelogic</code>.
+- <code>CheckpointStore</code> (ABC) + <code>SQLiteCheckpointStore</code> — zero-dep stdlib SQLite,
+  key→cursor upsert; externalized state → ephemeral/serverless-safe.
+- <strong>Offset-aware source protocol</strong> (<code>seek(cursor)</code> + <code>current_cursor()</code>) with
+  <code>KafkaOffsetSource</code> — auto-commit off; cursor = <code>{"topic:partition": next_offset}</code>;
+  seek-to-committed-offsets on resume; StreamSink commits the broker cursor after
+  the write. Verified against a fake broker: drain, resume-with-no-reprocess,
+  consume-only-new-after-resume, crash-before-commit resume-from-offset (no gap/dup).
+- <strong><code>SSEOffsetSource</code></strong> — second reference implementation of the offset-aware
+  protocol; cursor = the SSE <code>Last-Event-ID</code> (a scalar string) armed on the next
+  connect; events without an <code>id</code> don't advance the cursor (per the SSE spec).
+  Verified against a fake feed: drain, resume-after-id-no-reprocess, consume-only-
+  new-after-resume, id-less-event-no-advance, crash-before-commit resume-from-id.
+- Resume verified by crash-injection for count-, offset- and Last-Event-ID cursors:
+  no gap / no dup (with idempotent write); at-least-once reprocessing on
+  commit-failure shown.
+- <strong><code>SparkStreamSink</code></strong> — Spark Structured Streaming path for the stateful tier:
+  runs the SAME contract engine (<code>DataProcessor.run</code> + <code>materialize</code>) inside
+  <code>writeStream.foreachBatch</code>, with <strong>Spark's</strong> offset/commit log under
+  <code>checkpointLocation</code> as the single resumability source of truth (shared-checkpoint
+  path — no double-booked cursor). <code>available_now</code> (drain + block) and
+  <code>processing_time</code> triggers; deterministic <code>batch_id</code> → effectively-once with an
+  idempotent write. <code>on_batch</code> hook exposes per-micro-batch results for run-log /
+  metrics emission. Verified with a fake Structured Streaming writer.
+- <strong><code>WatermarkChunkSource</code></strong> — offset-aware keyset-paged source (cursor = last
+  watermark value) delivering §15.3's intent: large DB/file loads become resumable
+  + memory-bounded through the same micro-batch loop, <em>without</em> changing the batch
+  <code>fetch_size</code> path. Third proof the offset-aware protocol generalizes.
+- <strong>Push-source guard</strong> — <code>available_now</code> on a <code>continuous_only</code> source (raw
+  WebSocket/Webhook, no snapshotable end, §6) fails fast instead of never
+  terminating.
+- <strong>Lint rules (§9)</strong> in <code>contract_lint.py</code>: <code>STREAM-001</code> warns on bare <code>append</code>
+  for a streaming/resumable source (at-least-once replays duplicate); <code>STREAM-002</code>
+  flags <code>trigger: continuous</code> as an always-on-cluster cost advisory.
+- <strong>Effectively-once</strong> proven end-to-end: a real <code>merge</code> contract replayed over
+  already-processed ids leaves the Delta target with no duplicates.</p>
+<p><strong>Pending</strong> (still proposed): SQS / Pub-Sub ack cursors (the offset-aware protocol
+is in place — Kafka, SSE and watermark sources prove it generalizes across dict-,
+scalar- and value-cursor sources; these just implement it). Everything else in the
+spec is built and tested.</p>
+<hr />
+<h2 id="1-problem-goals">1. Problem &amp; goals</h2>
+<p>LakeLogic's contract engine is engine-agnostic (Polars / DuckDB / Spark) but
+<strong>batch-only</strong>: every engine assumes a materialized DataFrame and does
+count/collect/aggregate passes. Streaming today is partial and fragmented:</p>
+<ul>
+<li>Connectors (<code>streaming_connectors.py</code>) are real transports that yield
+  <code>Iterator[dict]</code>, but <strong>nothing consumes them into a governed landing/bronze
+  layer</strong> — the one consumer (<code>core/streaming_processor.py</code>) is orphaned and its
+  sinks are <code>StdOutSink</code>/CSV <code>TODO</code> stubs.</li>
+<li><code>core.streaming.StreamingSimulator</code> is a <strong>batch test-data generator</strong>, not a
+  stream.</li>
+<li>The <code>fetch_size</code> "massive initial load" path is <strong>accumulate-then-write</strong>:
+  all-or-nothing, not resumable, and its memory-safety does not extend to the
+  write (§10).</li>
+</ul>
+<p><strong>Goals</strong></p>
+<ol>
+<li>A single <strong>contract</strong> that expresses data semantics + freshness once, and
+   runs as batch, resumable micro-batch, or continuous stream <strong>without change</strong>.</li>
+<li>A <strong>resumable checkpoint</strong> that both continuous and micro-batch modes share —
+   "continue from the last committed point" (AvailableNow semantics).</li>
+<li>An engine-agnostic <strong>StreamSink</strong> (Polars/DuckDB) that lands governed
+   bronze + quarantine, with Spark as the scale/stateful path — not the only path.</li>
+<li>Honest, documented <strong>delivery + failure semantics</strong>.</li>
+</ol>
+<p><strong>Non-goals</strong></p>
+<ul>
+<li>Native contract execution on an unbounded streaming DataFrame (physically
+  impossible for the count/collect passes; streaming is always batch-per-
+  micro-batch, exactly as Spark <code>foreachBatch</code> works).</li>
+<li>Making Polars/DuckDB do cross-batch stateful ops (dedup/aggregation/SCD2 across
+  batches / streaming joins) — that tier is Spark (§9).</li>
+</ul>
+<hr />
+<h2 id="2-core-principle-contract-declares-intent-runtime-picks-compute-cadence">2. Core principle: contract declares intent, runtime picks compute &amp; cadence</h2>
+<p>Cadence (how often, on what compute, continuous vs scheduled) is an
+<strong>orchestration</strong> concern, not a contract concern. The same <code>silver.trips</code>
+contract must run nightly-batch in dev and AvailableNow-every-5-min in prod
+<strong>unchanged</strong>. Therefore:</p>
+<ul>
+<li><strong>Contract</strong> = data semantics + correctness + <em>how fresh</em> (portable).</li>
+<li><strong>Runtime binding</strong> = <em>when</em> and <em>with what compute</em> (per deployment).</li>
+<li><strong>Checkpoint</strong> = the shared cursor both run-modes read and advance.</li>
+</ul>
+<p>The latency <em>requirement</em> lives in the contract as a <strong>freshness SLO</strong>; the
+<em>mechanism</em> to meet it (continuous vs scheduled drain) lives in the runtime.</p>
+<hr />
+<h2 id="3-contract-fields-cadence-independent-data-semantics">3. Contract fields (cadence-independent data semantics)</h2>
+<p>Additive to the existing <code>model</code> / <code>quality</code> / <code>service_levels</code> /
+<code>materialization</code> / <code>incremental</code> schema. <strong>No <code>trigger</code>, <code>interval</code>, <code>engine</code>,
+or <code>checkpoint.location</code> in the contract</strong> — those are runtime (§4).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">source</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kafka</span><span class="w">           </span><span class="c1"># file | database | landing | delta | kafka | eventhubs</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">                        </span><span class="c1"># | sse | websocket | sqs | pubsub | servicebus | eventgrid</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="c1"># connection details are referenced by name/env, not hard-coded secrets</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="nv">...</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">          </span><span class="c1"># unchanged — schema</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nt">quality</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="nv">...</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">        </span><span class="c1"># unchanged — row/dataset rules (run per micro-batch)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="nt">incremental</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">max_target</span><span class="w">  </span><span class="c1"># existing: max_target | delta_version | pipeline_log | watermark</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span><span class="nt">watermark_field</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">event_ts</span><span class="w">   </span><span class="c1"># existing</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">  </span><span class="nt">event_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">event_ts</span><span class="w">        </span><span class="c1"># streaming event-time</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span><span class="nt">allowed_lateness</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10m</span><span class="w">       </span><span class="c1"># → stateful (Spark) dedup/aggregation window</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span><span class="nt">dedup_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">event_id</span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># identify duplicates on replay (see §8)</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="nt">materialization</span><span class="p">:</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rideflow.silver.trips</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="nt">layer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">silver</span><span class="w">               </span><span class="c1"># bronze | silver | gold</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">merge</span><span class="w">                 </span><span class="c1"># append | overwrite | merge | scd2</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">  </span><span class="nt">merge_keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">trip_id</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># required for merge/upsert</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">  </span><span class="nt">scd2</span><span class="p">:</span><span class="w">                       </span><span class="c1"># for dimensions</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="nt">business_key</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">driver_id</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="nt">hash_columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">name</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">license</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">rating</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="nt">effective_from</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">valid_from</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">    </span><span class="nt">effective_to</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">valid_to</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="nt">service_levels</span><span class="p">:</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">  </span><span class="nt">freshness</span><span class="p">:</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">    </span><span class="nt">max_delay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5m</span><span class="w">             </span><span class="c1"># THE latency intent — the runtime chooses how to meet it</span>
+</code></pre></div>
+<p><code>materialization.mode</code> + keys, <code>incremental.event_time/allowed_lateness/
+dedup_keys</code>, and <code>freshness</code> are all true regardless of cadence — they describe
+<em>the dataset</em>, not <em>the schedule</em>.</p>
+<hr />
+<h2 id="4-runtime-binding-per-deployment-not-in-the-contract">4. Runtime binding (per deployment — NOT in the contract)</h2>
+<p>Carried by the CLI flags / Databricks Asset Bundle job / Workflow config:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">runtime</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">            </span><span class="c1"># auto | polars | duckdb | spark  (subject to §9 lint)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">trigger</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">available_now</span><span class="w">   </span><span class="c1"># once | available_now | micro_batch | continuous</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30s</span><span class="w">          </span><span class="c1"># ONLY for micro_batch / continuous (implies always-on compute)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">checkpoint</span><span class="p">:</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">location</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">abfss://.../_ckpt/silver_trips</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">store</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">duckdb</span><span class="w">          </span><span class="c1"># duckdb | sqlite | delta | spark_native  (see §7)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span><span class="nt">delivery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">at_least_once</span><span class="w">  </span><span class="c1"># at_least_once | effectively_once</span>
+</code></pre></div>
+<p>Cadence maps to Databricks compute:</p>
+<table>
+<thead>
+<tr>
+<th><code>trigger.type</code></th>
+<th>Databricks Workflow</th>
+<th>Compute</th>
+<th>Latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>available_now</code> (recommended default)</td>
+<td>scheduled cron / file-arrival</td>
+<td>spins up, drains, <strong>stops</strong></td>
+<td>= schedule interval (mins)</td>
+</tr>
+<tr>
+<td><code>continuous</code> / <code>micro_batch: 30s</code></td>
+<td><code>continuous: {}</code> job</td>
+<td><strong>24/7 cluster</strong></td>
+<td>seconds / sub-second</td>
+</tr>
+<tr>
+<td><code>once</code></td>
+<td>one-shot job</td>
+<td>runs once</td>
+<td>n/a (backfill)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Streaming ≠ 24/7 by necessity.</strong> Only <code>continuous</code>/<code>micro_batch</code> keep a
+cluster alive. <code>available_now</code> gives streaming <em>checkpoint semantics</em> with
+<em>batch economics</em>. Reserve always-on compute for a genuine sub-minute SLO.</p>
+</blockquote>
+<h3 id="41-serverless-suitability">4.1 Serverless suitability</h3>
+<p>The checkpoint <strong>externalizes state</strong> — the offset/watermark lives in the durable
+checkpoint store, not in process memory — so the compute is free to be
+<strong>ephemeral</strong>: a run can start, drain, exit (or crash) and the next invocation
+resumes exactly from the last committed cursor. This is precisely what makes
+<strong>serverless the ideal fit</strong> for the <code>available_now</code> cadence, and it's a
+deliberate design property, not an accident.</p>
+<table>
+<thead>
+<tr>
+<th>Latency need</th>
+<th>Serverless verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>minutes → low-seconds (<code>available_now</code>)</td>
+<td><strong>best fit</strong> — trigger → spin up → drain → commit → <strong>scale to zero</strong>; pay only for processing; checkpoint-resumable</td>
+</tr>
+<tr>
+<td>few seconds, steady</td>
+<td>serverless continuous <em>or</em> scheduled both fine</td>
+</tr>
+<tr>
+<td><strong>true sub-second, always-on</strong> (<code>continuous</code>)</td>
+<td>needs a long-running process → serverless-<strong>managed</strong> (always-on, billed 24/7) or dedicated; the scale-to-zero benefit is gone — "serverless" then means <em>managed</em>, not <em>cheap/bursty</em></td>
+</tr>
+</tbody>
+</table>
+<p>Where it maps:</p>
+<ul>
+<li><strong>Databricks Serverless Jobs / DLT</strong> — scheduled <code>available_now</code>, scale-to-zero
+  between runs. The native, cheapest Databricks path.</li>
+<li><strong>Serverless containers</strong> (Cloud Run, Azure Container Apps, Fargate) — ideal for
+  the DuckDB StreamSink drain-and-stop: lightweight single-node, spin up, drain,
+  exit.</li>
+<li><strong>FaaS</strong> (Lambda / Azure Functions) — works for <em>modest</em> drain-and-stop within
+  the function time limit; the checkpoint makes chained short invocations safe.</li>
+</ul>
+<p><strong>Boundary:</strong> FaaS execution-time limits + cold starts make it a poor host for a
+24/7 blocking consumer; and a "serverless" <em>continuous</em> stream is still always-on
+compute (its cost model converges with a dedicated cluster). So: <strong>serverless
+covers the common case cheaply; you pay for always-on only when the freshness SLO
+is genuinely sub-second</strong> — the same boundary drawn in §7 (checkpoint commit
+latency) and §9 (engine capability).</p>
+<hr />
+<h2 id="5-execution-model-one-resumable-loop-two-lifetimes">5. Execution model — one resumable loop, two lifetimes</h2>
+<p>The pivot: a <strong>single checkpoint</strong> both modes consume. The only difference
+between "streaming" and "micro-batch" is the loop lifetime, decided by compute.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>load cursor from checkpoint                 # "continue from last point"
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>snapshot end := latest available now        # AvailableNow bound (per source, §6)
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>loop:
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    read records in (cursor, end], chunked by max_records
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    result = run_dataframe(chunk)           # normal batch contract engine
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    write result.good  -&gt; target (append/merge/scd2)
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    write result.bad   -&gt; quarantine
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    commit cursor                           # AFTER durable write (§8)
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    ── continuous (24/7): re-snapshot end, block for new records, keep looping
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    ── available_now (scheduled): cursor == end -&gt; exit
+</code></pre></div>
+<ul>
+<li><strong>Continuous</strong> never exits and streams; <strong>AvailableNow</strong> drains to the start
+  snapshot and stops. Same code, same checkpoint, same "process each record once."</li>
+<li><strong>Spark</strong> gets this natively: identical <code>checkpointLocation</code>, switch
+  <code>.trigger(availableNow=True)</code> ↔ <code>.trigger(processingTime=...)</code>. Zero contract
+  change. The engine-agnostic StreamSink reproduces it with the checkpoint store.</li>
+</ul>
+<hr />
+<h2 id="6-per-source-cursor-end-snapshot">6. Per-source cursor &amp; end-snapshot</h2>
+<p>AvailableNow needs a <strong>queryable "end."</strong> Sources split into two camps:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Cursor</th>
+<th>End snapshot</th>
+<th>Resumable AvailableNow?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Kafka</td>
+<td>partition offsets</td>
+<td>high-water offsets at start</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Delta source</td>
+<td>table version</td>
+<td>latest version (<code>delta_version</code> strategy exists)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Database (watermark col)</td>
+<td><code>WHERE wm &gt; last</code></td>
+<td><code>MAX(wm)</code> at start</td>
+<td>✅ (see §11)</td>
+</tr>
+<tr>
+<td>File / landing</td>
+<td><code>max_source_mtime</code></td>
+<td>current file listing (exists)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>SQS / Service Bus / Pub/Sub</td>
+<td>broker ack/receipt</td>
+<td>drain-until-empty</td>
+<td>✅ (broker-managed)</td>
+</tr>
+<tr>
+<td>SSE</td>
+<td><code>Last-Event-ID</code></td>
+<td>— (only if server supports)</td>
+<td>⚠️ partial</td>
+</tr>
+<tr>
+<td>WebSocket / Webhook</td>
+<td>none</td>
+<td><strong>no snapshotable end</strong></td>
+<td>❌ continuous-only</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Boundary to document:</strong> pure-push sources with no snapshotable end
+(raw WebSocket/Webhook) cannot do bounded "drain to now, stop" — they are
+<strong>continuous-only</strong> (or at-most-once). Everything else supports AvailableNow.</p>
+<hr />
+<h2 id="7-checkpoint-store-the-store-doesnt-create-real-time-it-bounds-how-you-commit">7. Checkpoint store — the store doesn't create real-time; it bounds how you commit</h2>
+<p>Real-time is achieved by the <strong>execution model</strong> (continuous loop + <em>blocking</em>
+live reads + small windows), not by the store. The store choice determines how
+fast / durably / concurrently you can commit the cursor — which bounds how
+real-time you can safely go.</p>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Commit latency</th>
+<th>Concurrency</th>
+<th>Best fit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>DuckDB / SQLite</strong> (local file)</td>
+<td>sub-ms–low-ms</td>
+<td>single-writer, single node</td>
+<td><strong>sub-second continuous on one node</strong> (default for the agnostic StreamSink)</td>
+</tr>
+<tr>
+<td><strong>Delta</strong> (ADLS/S3)</td>
+<td>100s ms/commit (a transaction)</td>
+<td>multi-writer, governed, shareable</td>
+<td><strong>AvailableNow / micro-batch cadence</strong>, lakehouse governance</td>
+</tr>
+<tr>
+<td><strong>Spark native <code>checkpointLocation</code></strong></td>
+<td>Spark-managed</td>
+<td>distributed executors</td>
+<td><strong>scalable continuous streaming</strong> (hot path bypasses our store)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Trap:</strong> committing to Delta every few hundred ms bloats the transaction log /
+small files and <em>raises</em> latency. Delta's transactionality is a liability at high
+commit frequency, an asset at low.</p>
+<p><strong>Defaults:</strong>
+- Agnostic StreamSink → <strong>DuckDB/SQLite local</strong> (fast commits unlock low-latency
+  single-node streaming; zero-dep; matches the run-log DB backend).
+- Databricks / lakehouse, AvailableNow → <strong>Delta</strong> (governed, shareable cursor).
+- Spark continuous → <strong>native <code>checkpointLocation</code></strong>; mirror the committed offset
+  into Delta / run-log for Observatory/Zeus visibility only.</p>
+<p>Persistence is modeled on the existing multi-backend writer in <code>run_log.py</code>
+(duckdb/sqlite/delta/spark, fsspec cloud paths), reusing the proven
+<code>get_last_run_dlt_state()</code> / <code>get_last_run_watermark()</code> round-trip pattern.</p>
+<hr />
+<h2 id="8-delivery-semantics-at-least-once-contract-idempotency">8. Delivery semantics — at-least-once + contract idempotency</h2>
+<p><strong>Commit-after-write ⇒ at-least-once.</strong> A crash between the durable write and the
+cursor commit reprocesses that last batch on restart. Exactly-once is not
+promised (same honest ceiling as Spark structured streaming).</p>
+<p><strong>The contract's own fields make replays idempotent ⇒ effectively-once:</strong></p>
+<ul>
+<li><code>dedup_keys</code> → drop already-seen records.</li>
+<li><code>materialization.mode: merge</code> + <code>merge_keys</code> → upsert instead of duplicate.</li>
+<li><code>materialization.mode: overwrite</code> → wholesale replace (clean on retry).</li>
+</ul>
+<blockquote>
+<p><strong>Any resumable/retried load MUST use <code>overwrite</code> or <code>merge</code> (never bare
+<code>append</code>)</strong> — replays are expected, and <code>append</code> duplicates. Lint should warn
+when <code>append</code> is combined with a resumable trigger.</p>
+</blockquote>
+<p><code>pipeline_logs</code> role: <strong>observability + audit + fallback</strong>, not the hot-path
+cursor. Emit one run log per <em>window</em> (not per micro-batch — avoid flooding),
+stamp the committed offset into <code>max_watermark_value</code>, and allow recovering an
+approximate position from the last run log if the checkpoint store is lost.</p>
+<hr />
+<h2 id="9-engine-capability-boundary-derived-lint-enforced">9. Engine capability boundary (derived, lint-enforced)</h2>
+<p>The contract does <strong>not</strong> name an engine; its semantic fields <em>imply</em> a
+requirement, and the linter validates the chosen runtime engine against it.</p>
+<table>
+<thead>
+<tr>
+<th>Contract option</th>
+<th>Polars / DuckDB</th>
+<th>Spark</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode: append/overwrite</code>, <code>trigger: available_now/micro_batch</code></td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><code>mode: merge</code> (Delta upsert)</td>
+<td>⚠️ delta-rs, limited</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><code>mode: scd2</code>, <code>dedup_keys</code>, <code>allowed_lateness</code> (cross-batch state)</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><code>trigger: continuous</code>, streaming joins, <code>output_mode: update/complete</code></td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<p>Lint examples:
+- <code>mode: scd2</code> + engine polars → <strong>reject</strong>: "requires a stateful engine (spark)."
+- <code>trigger: continuous</code> on any engine → <strong>warn</strong>: "implies an always-on cluster;
+  confirm the freshness SLO justifies it, else use <code>available_now</code>."
+- <code>mode: append</code> + resumable trigger → <strong>warn</strong>: "replays will duplicate; use
+  merge/overwrite."</p>
+<hr />
+<h2 id="10-failure-resumability">10. Failure &amp; Resumability</h2>
+<p>Two ingestion paths with very different failure behavior. Choose by load size /
+failure tolerance.</p>
+<h3 id="101-fetch_size-existing-simple-all-or-nothing-not-resumable">10.1 <code>fetch_size</code> (existing) — simple, all-or-nothing, NOT resumable</h3>
+<p><code>source.options.fetch_size</code> chunks the DB round-trip (Polars, SQLAlchemy
+<code>yield_per</code>), validating each chunk independently — but it is
+<strong>accumulate-then-write</strong>: all chunks are concatenated in memory and materialized
+<strong>once at the end</strong> (<code>processor.py</code> <code>run_source</code> polars branch;
+<code>Runner._run_contract_stage</code> materializes once). Therefore:</p>
+<ul>
+<li><strong>Mid-run failure ⇒ nothing is written.</strong> A failure in chunk <em>K</em> aborts the run
+  <strong>before</strong> <code>materialize()</code>. The target is untouched (no partial rows, no
+  rollback needed); <strong>all</strong> in-memory progress from chunks 1…K-1 is discarded.</li>
+<li><strong>Watermark does not advance</strong> on failure — the run-log row carrying
+  <code>max_source_mtime</code> is written only on the success path, so a re-run reissues
+  the same query from the last committed watermark.</li>
+<li><strong>Not resumable:</strong> <code>batch_idx</code> is a bare counter; there is no per-chunk
+  checkpoint. A re-run restarts from row 0 / the last committed watermark, never
+  mid-fetch.</li>
+<li><strong>The write is NOT memory-bounded:</strong> <code>pl.concat</code> buffers the entire good/bad
+  result. A genuinely huge load can OOM at the concat/write even though each
+  chunk was small — <code>fetch_size</code>'s "flat memory" promise holds for <em>reading /
+  validating</em>, not for <em>writing</em>.</li>
+<li><strong>Re-run duplication depends on <code>mode</code>:</strong> <code>append</code> → duplicates; <code>overwrite</code> →
+  clean replace; <code>merge</code> → idempotent upsert.</li>
+</ul>
+<p><strong>Verdict:</strong> fail-<em>safe</em> against partial-target corruption (all-or-nothing) but
+coarse — a failure discards the whole run, and it does not scale the write.
+Fine as a first bulk load of a bounded table with <code>mode: overwrite</code>/<code>merge</code>.</p>
+<blockquote>
+<p>The <code>fetch_size</code> branch now logs this explicitly on entry and carries a
+semantics comment (<code>processor.py</code>), so operators are not surprised.</p>
+</blockquote>
+<h3 id="102-checkpointed-micro-batch-this-spec-resumable-memory-bounded-writes">10.2 Checkpointed micro-batch (this spec) — resumable, memory-bounded writes</h3>
+<p>The §5 loop <strong>writes each chunk and commits the cursor after each write</strong>.
+Consequently:</p>
+<ul>
+<li><strong>Mid-run failure ⇒ resume from the last committed chunk</strong>, not row 0. Work
+  already written stays written; only the in-flight chunk is retried.</li>
+<li><strong>Writes are memory-bounded</strong> — one chunk in memory at a time; no full-result
+  <code>concat</code>. This is what makes genuinely large loads safe.</li>
+<li><strong>Idempotent retries</strong> via <code>dedup_keys</code> / <code>merge</code> (§8), so re-processing the
+  in-flight chunk does not duplicate.</li>
+</ul>
+<p><strong>This is not only the streaming engine — it is also the correct engine for
+large / failure-prone batch loads.</strong> The same <code>read → validate → write → commit</code>
+loop fixes both <code>fetch_size</code> limitations (whole-run loss + write-memory ceiling)
+and provides streaming. <code>fetch_size</code> remains the simple path for small bounded
+tables; the checkpointed loop is the path for large batch <em>and</em> streaming.</p>
+<hr />
+<h2 id="11-relationship-to-existing-mechanisms-what-we-reuse-not-rebuild">11. Relationship to existing mechanisms (what we reuse, not rebuild)</h2>
+<ul>
+<li><strong>Pull / queryable sources are ~80% there today.</strong> Combine <code>fetch_size</code>
+  (memory-safe first read) + existing incremental (<code>max_target</code> /
+  <code>delta_version</code> / <code>max_source_mtime</code>, run-log-backed with read-back) and you
+  already have resumable, AvailableNow-style ingestion: first run drains the
+  table, records the watermark; later runs read <code>WHERE wm &gt; last</code>. <strong>The
+  watermark is the checkpoint.</strong> The new checkpoint store is needed mainly for
+  <strong>event/queue connectors with no queryable watermark</strong> (Kafka offsets, SSE
+  last-id, broker acks).</li>
+<li><strong>Run logs</strong> already persist locally (duckdb/sqlite/json) <em>and</em> read back
+  (<code>get_last_run_watermark</code>, <code>get_last_run_dlt_state</code>, <code>RunLogReader.last_success</code>),
+  filtering out <code>failed</code> / <code>no_new_data</code> — the proven "commit a cursor, reload on
+  startup" pattern. The checkpoint store generalizes it to connector offsets.</li>
+<li><strong><code>incremental.py</code></strong> strategies (<code>max_target</code>, <code>delta_version</code>, <code>pipeline_log</code>,
+  <code>manifest</code>) provide the batch/pull-source cursor; the StreamSink adds the
+  connector-offset cursor and the continuous lifetime.</li>
+</ul>
+<hr />
+<h2 id="12-acceptance-criteria-done-all-true">12. Acceptance criteria (done = all true)</h2>
+<h3 id="a-contract-runtime-separation-24">A. Contract ⁄ runtime separation (§2–§4)</h3>
+<ul>
+<li>[ ] A <strong>single, unchanged</strong> contract runs as <code>once</code> (batch), <code>available_now</code>
+      (drain + stop), and <code>continuous</code> (stream) — only the runtime binding differs.</li>
+<li>[ ] The contract carries <strong>no</strong> <code>trigger</code> / <code>interval</code> / <code>engine</code> /
+      <code>checkpoint.location</code>; a lint check rejects those keys inside a contract.</li>
+<li>[ ] <code>service_levels.freshness.max_delay</code> is the only latency expression in the
+      contract; removing/altering the runtime trigger does not change the contract.</li>
+<li>[ ] The same contract file validates identically across Polars, DuckDB and Spark
+      for the batch/append case (byte-identical <code>good</code>/<code>bad</code> counts on a fixture).</li>
+</ul>
+<h3 id="b-execution-resumability-56">B. Execution &amp; resumability (§5–§6)</h3>
+<ul>
+<li>[ ] Checkpoint is committed <strong>after</strong> the durable write, never before.</li>
+<li>[ ] <strong>Crash-injection test:</strong> kill the process mid-run after N chunks; re-run;
+      assert (a) no source record is skipped (no gap) and (b) with <code>mode: merge</code>
+      no record is duplicated (idempotent resume from last committed cursor).</li>
+<li>[ ] <code>available_now</code> snapshots an end position at start, drains <code>(cursor, end]</code>,
+      commits, and <strong>exits</strong>; <code>continuous</code> re-snapshots and keeps looping — both
+      from the <strong>same</strong> checkpoint.</li>
+<li>[ ] Offset-queryable sources (Kafka, Delta, DB-watermark, file, broker queues)
+      resume from their native cursor; push-only sources (WebSocket/Webhook) are
+      correctly rejected for <code>available_now</code> with a clear "continuous-only" error.</li>
+<li>[ ] Writes are <strong>memory-bounded</strong> — peak RSS stays flat across a load an order
+      of magnitude larger than memory (no full-result <code>concat</code>).</li>
+</ul>
+<h3 id="c-engine-boundary-lint-9">C. Engine boundary &amp; lint (§9)</h3>
+<ul>
+<li>[ ] <code>mode: scd2</code> (or <code>allowed_lateness</code>/cross-batch <code>dedup</code>) with a non-Spark
+      engine → lint <strong>rejection</strong> naming the offending field.</li>
+<li>[ ] <code>trigger: continuous</code> → lint <strong>warning</strong> referencing the freshness SLO.</li>
+<li>[ ] <code>mode: append</code> + a resumable trigger → lint <strong>warning</strong> ("replays will
+      duplicate; use merge/overwrite").</li>
+<li>[ ] Engine requirement is <strong>derivable from the contract alone</strong> (no engine field
+      needed) and the derivation is unit-tested per rule.</li>
+</ul>
+<h3 id="d-failure-semantics-10">D. Failure semantics (§10)</h3>
+<ul>
+<li>[ ] <code>fetch_size</code> path logs its accumulate-then-write / not-resumable / write-not-
+      memory-bounded semantics on entry, and carries the explanatory comment. <em>(done)</em></li>
+<li>[ ] A mid-run <code>fetch_size</code> failure leaves the target <strong>untouched</strong> (no partial
+      rows) and does <strong>not</strong> advance the incremental watermark — asserted by a test
+      that injects an error in chunk K and checks target + run-log state.</li>
+<li>[ ] The checkpointed loop, on the same injected failure, leaves chunks 1…K-1
+      <strong>written</strong> and resumes at chunk K on re-run.</li>
+</ul>
+<h3 id="e-observability-78">E. Observability (§7–§8)</h3>
+<ul>
+<li>[ ] Streaming emits a run log per <strong>window</strong> (not per micro-batch) with the
+      committed offset stamped into <code>max_watermark_value</code>; Observatory/Zeus render
+      freshness/quarantine for the stream exactly as for batch.</li>
+<li>[ ] If the checkpoint store is deleted, the loop recovers an approximate position
+      from the last run log (fallback path) and logs that it did so.</li>
+<li>[ ] Spark path uses native <code>checkpointLocation</code>; agnostic path uses the
+      configured store; a test shows both resume identically from the same offsets.</li>
+</ul>
+<h2 id="13-success-criteria-outcome">13. Success criteria (outcome)</h2>
+<ol>
+<li><strong>One contract, three cadences — provably.</strong> The identical <code>silver.trips</code>
+   contract ships to a nightly batch, a 5-minute AvailableNow job, and a 24/7
+   continuous cluster with <strong>zero diffs to the contract file</strong>. (Demo-verifiable.)</li>
+<li><strong>No 24/7 compute unless the SLO demands it.</strong> The default deployable is
+   AvailableNow on a scheduled/file-arrival Workflow — streaming checkpoints,
+   batch economics. Continuous compute appears only where <code>freshness.max_delay</code>
+   is sub-minute. Measured: cluster-uptime ∝ data volume, not wall-clock.</li>
+<li><strong>Resumable by construction.</strong> A killed load never loses committed work and
+   never duplicates (with <code>merge</code>/<code>overwrite</code>) — the crash-injection test passes
+   on every source type, and large loads complete under a fixed memory ceiling.
+   This is the concrete fix for the <code>fetch_size</code> whole-run-loss failure mode.</li>
+<li><strong>Engine-agnostic where it can be, Spark where it must be — honestly.</strong>
+   Bronze ingest + append/overwrite/merge run on Polars/DuckDB with no cluster;
+   only genuinely stateful tiers (scd2, cross-batch dedup/aggregation, streaming
+   joins) require Spark, and the contract <em>says so</em> via lint before deploy — never
+   a runtime surprise.</li>
+<li><strong>Truthful capability claims.</strong> Marketing/exec claims trace to shipped behavior:
+   "streaming ingestion into governed bronze, resumable, engine-agnostic" and
+   "runs inside Spark Structured Streaming via foreachBatch for stateful silver/
+   gold." No claim of native streaming contract execution or exactly-once.</li>
+</ol>
+<h2 id="14-test-plan">14. Test plan</h2>
+<ul>
+<li><strong>Unit:</strong> engine-requirement derivation per §9 rule; end-snapshot resolver per
+  source; cursor serialize/reload round-trip (mirrors <code>get_last_run_dlt_state</code>).</li>
+<li><strong>Resumability (integration):</strong> for each offset-queryable source — seed a bounded
+  set, kill after K chunks, re-run, assert no-gap + no-dup (<code>merge</code>) and correct
+  resume offset. Repeat for <code>fetch_size</code> to assert the <em>opposite</em> (whole-run
+  restart, no partial target, watermark unchanged).</li>
+<li><strong>Memory:</strong> load a source ≫ memory through the checkpointed loop; assert flat
+  peak RSS; contrast with <code>fetch_size</code> OOM ceiling (documented, not a gate).</li>
+<li><strong>Lint:</strong> table-driven cases for each rejection/warning in §9 + the
+  "no runtime keys in contract" check in §12.A.</li>
+<li><strong>Parity:</strong> same contract, Spark-native checkpoint vs agnostic store, resume from
+  identical offsets → identical <code>good</code>/<code>bad</code>/target state.</li>
+<li><strong>Cadence:</strong> one contract executed <code>once</code> / <code>available_now</code> / <code>continuous</code>;
+  assert identical per-record outcomes, differing only in run lifetime.</li>
+</ul>
+<h2 id="15-open-decisions">15. Open decisions</h2>
+<ol>
+<li><strong>Inferred vs explicit engine:</strong> derive engine from semantics (<code>scd2</code> ⇒ spark)
+   or require it explicit in the runtime binding? (Lean: derive + allow override,
+   lint validates.)</li>
+<li><strong>Default checkpoint store:</strong> DuckDB/SQLite (zero-dep, matches run-log DB) vs
+   Delta (lakehouse-native). (Lean: DuckDB/SQLite default; Delta for Databricks.)</li>
+<li><strong>Per-chunk commit for <code>fetch_size</code> bounded loads:</strong> ship the checkpointed
+   loop as an opt-in <code>resumable: true</code> on database/file sources so large initial
+   loads become resumable + memory-bounded without changing the connector story.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+
+
+<!-- Footer links grid -->
+<footer class="ll-footer">
+  <div class="ll-footer__grid md-grid">
+    <a href="https://lakelogic.org" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Visit LakeLogic
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic/discussions" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Join the conversation
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 22V18.13a3.07 3.07 0 0 0-.94-2.36c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.07 3.07 0 0 0 9 18.13V22"/></svg>
+      Develop with LakeLogic
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic/issues" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+      Share your feedback
+    </a>
+    <a href="https://pypi.org/project/lakelogic/" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      Get the package
+    </a>
+    <a href="https://lakelogic.org/blog" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Read the latest on our blog
+    </a>
+  </div>
+
+  <!-- Bottom bar -->
+  <div class="ll-footer__bottom md-grid">
+    <div class="ll-footer__meta">
+      <span>&copy; Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · Open core — Apache 2.0 · <a href="https://github.com/lakelogic/LakeLogic" target="_blank">GitHub</a>
+</span>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.top", "navigation.footer", "navigation.indexes", "navigation.sections", "navigation.expand", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../javascripts/theme-switcher.js"></script>
+      
+    
+  </body>
+</html>

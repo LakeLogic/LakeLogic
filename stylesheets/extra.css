@@ -1,0 +1,1378 @@
+/* ============================================================================
+   LakeLogic Documentation — "Modern Docs" theme
+   Boxy · hairline dividers · cyan-teal accent · premium-minimal
+   Ported from the LakeLogic-Docs-modern reference onto MkDocs Material.
+
+   Design tokens (reference):
+     accent   #0e8fa8 (light) / #2fd2e8 (dark)
+     bg       #ffffff (light) / #08090b (dark)
+     hairline #e5e7eb (light) / #1c2127 (dark)
+     radii    boxy — 5–7px max
+   ============================================================================ */
+
+/* ---------------------------------------------------------------------------
+   1. Design tokens per colour scheme
+   Both the reference (--ll-*) tokens AND Material's (--md-*) variables are set
+   here so every surface adapts correctly in dark AND light.
+   --------------------------------------------------------------------------- */
+
+/* ---- LIGHT (Material "default") -------------------------------------------- */
+[data-md-color-scheme="default"] {
+  /* reference tokens */
+  --ll-bg:            #ffffff;
+  --ll-bg-alt:        #fbfbfc;
+  --ll-bg-inset:      #f4f5f7;
+  --ll-bg-hover:      #eef0f2;
+  --ll-bg-code:       #f7f8fa;
+  --ll-bg-code-head:  #eef0f3;
+  --ll-text:          #0b0d10;
+  --ll-text-secondary:#3f464e;
+  --ll-text-muted:    #697079;
+  --ll-text-subtle:   #9aa1a9;
+  --ll-border:        #e5e7eb;
+  --ll-border-strong: #d3d7dd;
+  --ll-accent:        #0e8fa8;
+  --ll-accent-strong: #0b7488;
+  --ll-accent-soft:   rgba(14,143,168,.10);
+  --ll-accent-line:   rgba(14,143,168,.32);
+  --ll-green:         #12855a;
+  --ll-red:           #c0384b;
+  --ll-amber:         #a9711a;
+  --ll-text-dim:      #697079;
+  --ll-shadow-1:      0 1px 2px rgba(16,20,26,.04), 0 2px 8px rgba(16,20,26,.05);
+  --ll-shadow-2:      0 12px 40px rgba(16,20,26,.10), 0 2px 8px rgba(16,20,26,.05);
+  /* code token colours */
+  --ll-c-key:  #0b7488;
+  --ll-c-str:  #227044;
+  --ll-c-num:  #9a5416;
+  --ll-c-com:  #8b929b;
+  --ll-c-bool: #8a3fb0;
+
+  /* --- Material variable overrides --- */
+  --md-default-bg-color:          var(--ll-bg);
+  --md-default-bg-color--light:   var(--ll-bg-alt);
+  --md-default-bg-color--lighter: var(--ll-bg-inset);
+  --md-default-bg-color--lightest:var(--ll-bg-hover);
+  --md-default-fg-color:          var(--ll-text);
+  --md-default-fg-color--light:   var(--ll-text-secondary);
+  --md-default-fg-color--lighter: var(--ll-text-muted);
+  --md-default-fg-color--lightest:var(--ll-border);
+
+  --md-primary-fg-color:          var(--ll-accent);
+  --md-primary-fg-color--light:   var(--ll-accent-strong);
+  --md-primary-fg-color--dark:    var(--ll-accent-strong);
+  --md-primary-bg-color:          var(--ll-text);
+  --md-primary-bg-color--light:   var(--ll-text-secondary);
+
+  --md-accent-fg-color:           var(--ll-accent);
+  --md-accent-fg-color--transparent: var(--ll-accent-soft);
+
+  --md-typeset-a-color:           var(--ll-accent-strong);
+
+  --md-code-bg-color:             var(--ll-bg-code);
+  --md-code-fg-color:             var(--ll-text-secondary);
+
+  /* pygments syntax token colours */
+  --md-code-hl-color:             var(--ll-accent-soft);
+  --md-code-hl-number-color:      var(--ll-c-num);
+  --md-code-hl-special-color:     var(--ll-c-key);
+  --md-code-hl-function-color:    var(--ll-c-bool);
+  --md-code-hl-constant-color:    var(--ll-c-bool);
+  --md-code-hl-keyword-color:     var(--ll-c-key);
+  --md-code-hl-string-color:      var(--ll-c-str);
+  --md-code-hl-name-color:        var(--ll-text-secondary);
+  --md-code-hl-operator-color:    var(--ll-text-muted);
+  --md-code-hl-punctuation-color: var(--ll-text-muted);
+  --md-code-hl-comment-color:     var(--ll-c-com);
+  --md-code-hl-generic-color:     var(--ll-text-muted);
+  --md-code-hl-variable-color:    var(--ll-text-secondary);
+
+  --md-footer-bg-color:           var(--ll-bg-alt);
+  --md-footer-bg-color--dark:     var(--ll-bg-inset);
+}
+
+/* ---- DARK (Material "slate") ----------------------------------------------- */
+[data-md-color-scheme="slate"] {
+  /* reference tokens */
+  --ll-bg:            #08090b;
+  --ll-bg-alt:        #0b0d10;
+  --ll-bg-inset:      #111418;
+  --ll-bg-hover:      #171b20;
+  --ll-bg-code:       #0c0f13;
+  --ll-bg-code-head:  #12161b;
+  --ll-text:          #e9ebee;
+  --ll-text-secondary:#b3b9c0;
+  --ll-text-muted:    #828a93;
+  --ll-text-subtle:   #5b636c;
+  --ll-border:        #1c2127;
+  --ll-border-strong: #272d35;
+  --ll-accent:        #2fd2e8;
+  --ll-accent-strong: #5adcee;
+  --ll-accent-soft:   rgba(47,210,232,.11);
+  --ll-accent-line:   rgba(47,210,232,.30);
+  --ll-green:         #38d29a;
+  --ll-red:           #ff7086;
+  --ll-amber:         #e0a94a;
+  --ll-text-dim:      #828a93;
+  --ll-shadow-1:      0 1px 2px rgba(0,0,0,.4), 0 2px 10px rgba(0,0,0,.3);
+  --ll-shadow-2:      0 16px 44px rgba(0,0,0,.55);
+  /* code token colours */
+  --ll-c-key:  #4fd6c0;
+  --ll-c-str:  #8fd58a;
+  --ll-c-num:  #e0a94a;
+  --ll-c-com:  #5b636c;
+  --ll-c-bool: #c79be8;
+
+  /* --- Material variable overrides --- */
+  --md-default-bg-color:          var(--ll-bg);
+  --md-default-bg-color--light:   var(--ll-bg-alt);
+  --md-default-bg-color--lighter: var(--ll-bg-inset);
+  --md-default-bg-color--lightest:var(--ll-bg-hover);
+  --md-default-fg-color:          var(--ll-text);
+  --md-default-fg-color--light:   var(--ll-text-secondary);
+  --md-default-fg-color--lighter: var(--ll-text-muted);
+  --md-default-fg-color--lightest:var(--ll-border);
+
+  --md-primary-fg-color:          var(--ll-accent);
+  --md-primary-fg-color--light:   var(--ll-accent-strong);
+  --md-primary-fg-color--dark:    var(--ll-accent-strong);
+  --md-primary-bg-color:          var(--ll-text);
+  --md-primary-bg-color--light:   var(--ll-text-secondary);
+
+  --md-accent-fg-color:           var(--ll-accent);
+  --md-accent-fg-color--transparent: var(--ll-accent-soft);
+
+  --md-typeset-a-color:           var(--ll-accent-strong);
+
+  --md-code-bg-color:             var(--ll-bg-code);
+  --md-code-fg-color:             var(--ll-text-secondary);
+
+  /* pygments syntax token colours */
+  --md-code-hl-color:             var(--ll-accent-soft);
+  --md-code-hl-number-color:      var(--ll-c-num);
+  --md-code-hl-special-color:     var(--ll-c-key);
+  --md-code-hl-function-color:    var(--ll-c-bool);
+  --md-code-hl-constant-color:    var(--ll-c-bool);
+  --md-code-hl-keyword-color:     var(--ll-c-key);
+  --md-code-hl-string-color:      var(--ll-c-str);
+  --md-code-hl-name-color:        var(--ll-text);
+  --md-code-hl-operator-color:    var(--ll-text-muted);
+  --md-code-hl-punctuation-color: var(--ll-text-muted);
+  --md-code-hl-comment-color:     var(--ll-c-com);
+  --md-code-hl-generic-color:     var(--ll-text-muted);
+  --md-code-hl-variable-color:    var(--ll-text);
+
+  /* keep the dark canvas fully black rather than Material's default slate */
+  --md-default-bg-color--rgb: 8,9,11;
+  --md-footer-bg-color:           var(--ll-bg-alt);
+  --md-footer-bg-color--dark:     var(--ll-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   2. Header + top tabs — hairline, page-coloured (not a solid cyan bar)
+   --------------------------------------------------------------------------- */
+.md-header {
+  background: var(--ll-bg);
+  color: var(--ll-text);
+  border-bottom: 1px solid var(--ll-border);
+  box-shadow: none;
+}
+
+.md-header--shadow {
+  box-shadow: none;
+  border-bottom: 1px solid var(--ll-border);
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  width: 34px !important;
+  height: 34px !important;
+}
+
+.md-header__title {
+  font-size: 1rem;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+
+/* Tabs bar sits under the header, same page colour + hairline */
+.md-tabs {
+  background: var(--ll-bg);
+  color: var(--ll-text-secondary);
+  border-bottom: 1px solid var(--ll-border);
+}
+
+.md-tabs__link {
+  font-size: 0.78rem;
+  font-weight: 500;
+  opacity: 0.72;
+  color: var(--ll-text-secondary);
+  transition: opacity 0.18s, color 0.18s;
+}
+
+.md-tabs__link:hover {
+  opacity: 1;
+  color: var(--ll-text);
+}
+
+.md-tabs__link--active,
+.md-tabs__item--active .md-tabs__link {
+  opacity: 1;
+  color: var(--ll-accent-strong);
+}
+
+/* Header search field — boxy inset */
+.md-search__form {
+  background: var(--ll-bg-inset);
+  border: 1px solid var(--ll-border);
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.md-search__form:hover {
+  background: var(--ll-bg-inset);
+  border-color: var(--ll-border-strong);
+}
+
+.md-search__input {
+  border-radius: 7px;
+  color: var(--ll-text);
+}
+
+.md-search__input::placeholder {
+  color: var(--ll-text-muted);
+}
+
+.md-search__input:focus {
+  box-shadow: 0 0 0 2px var(--ll-accent-line);
+}
+
+[data-md-color-scheme="slate"] .md-search__form {
+  background: var(--ll-bg-inset);
+}
+
+/* Search results panel */
+.md-search__output,
+.md-search__scrollwrap {
+  background: var(--ll-bg-alt);
+}
+
+.md-search-result__meta {
+  background: var(--ll-bg-inset);
+  color: var(--ll-text-muted);
+}
+
+/* ---- DOCS badge next to the wordmark ---- */
+.ll-docs-badge {
+  display: inline-block;
+  font-size: 0.56rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 0.22em 0.42em;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+  border-radius: 5px;
+  color: var(--ll-accent-strong);
+  background: var(--ll-accent-soft);
+  border: 1px solid var(--ll-accent-line);
+}
+
+/* ---- Topbar meta-nav link row ---- */
+.ll-metanav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 0.9rem;
+}
+
+.ll-metanav__link {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--ll-text-secondary);
+  padding: 0.32rem 0.55rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: color 0.18s, background 0.18s;
+}
+
+.ll-metanav__link:hover {
+  color: var(--ll-text);
+  background: var(--ll-bg-hover);
+}
+
+.ll-metanav__link.ll-metanav__link--active {
+  color: var(--ll-accent-strong);
+}
+
+/* ---- Right-side Product / App links ---- */
+.ll-header-extra {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.ll-header-extra__link {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--ll-text-secondary);
+  padding: 0.32rem 0.5rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: color 0.18s, background 0.18s;
+}
+
+.ll-header-extra__link:hover {
+  color: var(--ll-text);
+  background: var(--ll-bg-hover);
+}
+
+/* Push search + source to the right when meta-nav has claimed the middle.
+   ll-header-extra already carries margin-left:auto so search/source follow it. */
+.md-header__title {
+  flex: 0 1 auto;
+}
+
+/* ⌘K hint chip on the desktop search field */
+@media screen and (min-width: 76.25em) {
+  .md-search__form::after {
+    content: "⌘K";
+    position: absolute;
+    top: 50%;
+    right: 0.5rem;
+    transform: translateY(-50%);
+    font-family: var(--md-code-font-family, "JetBrains Mono", monospace);
+    font-size: 0.6rem;
+    line-height: 1;
+    padding: 0.2em 0.35em;
+    border-radius: 4px;
+    color: var(--ll-text-subtle);
+    background: var(--ll-bg);
+    border: 1px solid var(--ll-border-strong);
+    pointer-events: none;
+    opacity: 0.9;
+  }
+  /* hide the hint once the field is focused/typing so it doesn't collide */
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__form::after {
+    display: none;
+  }
+}
+
+/* Hide the meta-nav + product links on smaller screens (Material collapses
+   the header there and the drawer takes over). */
+@media screen and (max-width: 1220px) {
+  .ll-metanav { display: none; }
+}
+@media screen and (max-width: 76.1875em) {
+  .ll-header-extra { display: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   3. Typography
+   --------------------------------------------------------------------------- */
+.md-typeset {
+  font-size: 0.8rem;
+  line-height: 1.7;
+  font-weight: 400;
+  color: var(--ll-text-secondary);
+}
+
+.md-typeset h1 {
+  font-weight: 660;
+  font-size: 1.95rem;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--ll-text);
+}
+
+.md-typeset h2 {
+  font-weight: 640;
+  font-size: 1.4rem;
+  letter-spacing: -0.025em;
+  margin-top: 1.9rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ll-border);
+  color: var(--ll-text);
+}
+
+.md-typeset h3 { font-weight: 600; font-size: 1.1rem; letter-spacing: -0.015em; color: var(--ll-text); }
+.md-typeset h4 { font-weight: 600; font-size: 0.9rem; color: var(--ll-text); }
+
+.md-typeset a {
+  color: var(--md-typeset-a-color);
+  text-decoration: none;
+}
+.md-typeset a:hover {
+  color: var(--ll-accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   4. Left sidebar navigation — boxy, hairline, cyan active rail
+   --------------------------------------------------------------------------- */
+.md-sidebar--primary {
+  border-right: 1px solid var(--ll-border);
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--primary,
+[data-md-color-scheme="default"] .md-sidebar--primary {
+  background: var(--ll-bg);
+}
+
+.md-nav__title {
+  font-weight: 650;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  color: var(--ll-text-subtle);
+}
+
+.md-nav__item {
+  font-weight: 400;
+}
+
+.md-nav__link {
+  font-size: 0.75rem;
+  padding: 0.34rem 0.55rem;
+  border-radius: 6px;
+  color: var(--ll-text-secondary);
+  transition: color 0.16s ease, background 0.16s ease;
+  border-left: 2px solid transparent;
+}
+
+.md-nav__link:hover {
+  background: var(--ll-bg-hover);
+  color: var(--ll-text);
+}
+
+.md-nav__link .md-ellipsis {
+  color: inherit;
+}
+
+.md-nav__item .md-nav__link--active,
+.md-nav__link--active {
+  font-weight: 540;
+  color: var(--ll-accent-strong) !important;
+  background: var(--ll-accent-soft);
+  border-left: 2px solid var(--ll-accent);
+  border-radius: 0 6px 6px 0;
+}
+
+/* Section headings in nav */
+.md-nav__item--section > .md-nav__link {
+  font-weight: 650;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ll-text-muted);
+}
+
+.md-nav__item--nested > .md-nav__link::after {
+  transition: transform 0.2s ease;
+}
+
+/* Hide stray emoji icons in the sidebar nav — keep it clean */
+.md-nav .twemoji,
+.md-nav .emojione {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   5. Right sidebar — "On this page" TOC
+   --------------------------------------------------------------------------- */
+.md-sidebar--secondary {
+  border-left: 1px solid var(--ll-border);
+}
+
+[data-md-color-scheme="slate"] .md-sidebar--secondary,
+[data-md-color-scheme="default"] .md-sidebar--secondary {
+  background: var(--ll-bg);
+}
+
+.md-sidebar--secondary .md-nav__title {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  color: var(--ll-text-subtle);
+}
+
+.md-sidebar--secondary .md-nav__link {
+  font-size: 0.72rem;
+  border-left: 2px solid var(--ll-border);
+  border-radius: 0;
+  padding: 0.28rem 0.7rem;
+  color: var(--ll-text-muted);
+  background: transparent;
+}
+
+.md-sidebar--secondary .md-nav__link:hover {
+  color: var(--ll-text);
+  background: transparent;
+}
+
+.md-sidebar--secondary .md-nav__link--active {
+  border-left: 2px solid var(--ll-accent);
+  color: var(--ll-accent-strong) !important;
+  background: transparent;
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------------
+   6. Code blocks — boxy window, hairline border, header chrome
+   --------------------------------------------------------------------------- */
+.md-typeset pre > code,
+.md-typeset .highlight {
+  border-radius: 7px;
+}
+
+.md-typeset .highlight {
+  border: 1px solid var(--ll-border-strong);
+  border-radius: 7px;
+  background: var(--ll-bg-code);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.md-typeset .highlight:hover {
+  box-shadow: var(--ll-shadow-1);
+}
+
+.md-typeset pre {
+  border-radius: 7px;
+}
+
+.md-typeset pre > code {
+  background: var(--ll-bg-code);
+  border-radius: 7px;
+}
+
+/* Filename chrome (```lang title="file.yaml") — code-window header look */
+.md-typeset .highlight [data-md-color-scheme] > span,
+.md-typeset .highlight span.filename,
+.md-typeset .highlighttable .filename,
+.md-typeset .highlight .filename {
+  background: var(--ll-bg-code-head);
+  border-bottom: 1px solid var(--ll-border);
+  color: var(--ll-text-muted);
+  font-family: var(--md-code-font-family, "JetBrains Mono", monospace);
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.4rem 0.85rem;
+  border-radius: 7px 7px 0 0;
+}
+
+/* Copy button on code blocks */
+.md-clipboard {
+  color: var(--ll-text-muted);
+}
+.md-clipboard:hover {
+  color: var(--ll-accent-strong);
+}
+
+/* Line highlight (hl_lines) */
+.md-typeset .highlight .hll {
+  background: var(--ll-accent-soft);
+  box-shadow: inset 3px 0 0 var(--ll-accent);
+}
+
+/* Inline code */
+.md-typeset code {
+  background-color: var(--ll-accent-soft);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.85em;
+  color: var(--ll-accent-strong);
+}
+
+.md-typeset pre code,
+.md-typeset pre > code {
+  background-color: transparent;
+  color: var(--md-code-fg-color);
+}
+
+/* Line numbers gutter */
+.md-typeset .highlighttable .linenos,
+.md-typeset .highlight .linenodiv pre {
+  color: var(--ll-text-subtle);
+  background: var(--ll-bg-code);
+  border-right: 1px solid var(--ll-border);
+}
+
+/* ---------------------------------------------------------------------------
+   7. Buttons — boxy, cyan primary, hairline secondary
+   --------------------------------------------------------------------------- */
+.md-typeset .md-button {
+  border-radius: 6px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  border: 1px solid var(--ll-border);
+  color: var(--ll-text);
+  background: var(--ll-bg-inset);
+  transition: transform 0.13s ease, background 0.18s, border-color 0.18s, box-shadow 0.18s;
+}
+
+.md-typeset .md-button:hover {
+  background: var(--ll-bg-hover);
+  border-color: var(--ll-border-strong);
+  color: var(--ll-text);
+  transform: translateY(-1px);
+}
+
+.md-typeset .md-button--primary {
+  background: var(--ll-accent);
+  border-color: var(--ll-accent);
+  color: #ffffff;
+  box-shadow: 0 6px 18px var(--ll-accent-soft);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary {
+  color: #04222a;
+}
+
+.md-typeset .md-button--primary:hover {
+  background: var(--ll-accent-strong);
+  border-color: var(--ll-accent-strong);
+  box-shadow: 0 8px 22px var(--ll-accent-soft);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary:hover {
+  color: #04222a;
+}
+
+/* explicit secondary variant used in the hero */
+.md-typeset .md-button--secondary {
+  background: var(--ll-bg-inset);
+  border-color: var(--ll-border);
+  color: var(--ll-text);
+}
+.md-typeset .md-button--secondary:hover {
+  background: var(--ll-bg-hover);
+  border-color: var(--ll-border-strong);
+}
+
+/* ---------------------------------------------------------------------------
+   8. Admonitions / details — boxy, hairline, cyan accent bar
+   --------------------------------------------------------------------------- */
+.md-typeset .admonition,
+.md-typeset details {
+  border: 1px solid var(--ll-border);
+  border-left: 3px solid var(--ll-accent);
+  border-radius: 6px;
+  background: var(--ll-bg-alt);
+  box-shadow: none;
+  font-size: 0.76rem;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background: var(--ll-accent-soft);
+  border-radius: 0;
+  font-weight: 600;
+}
+
+.md-typeset .admonition-title::before,
+.md-typeset summary::before {
+  background-color: var(--ll-accent-strong);
+}
+
+/* keep note/info/tip/warning/danger accent hues but stay hairline + boxy */
+.md-typeset .admonition.note,
+.md-typeset details.note { border-left-color: var(--ll-accent); }
+.md-typeset .admonition.tip,
+.md-typeset details.tip,
+.md-typeset .admonition.success,
+.md-typeset details.success { border-left-color: var(--ll-green); }
+.md-typeset .admonition.warning,
+.md-typeset details.warning { border-left-color: var(--ll-amber); }
+.md-typeset .admonition.danger,
+.md-typeset details.danger,
+.md-typeset .admonition.failure,
+.md-typeset details.failure { border-left-color: var(--ll-red); }
+
+/* ---------------------------------------------------------------------------
+   9. Content tabs (pymdownx.tabbed) — boxy segmented control
+   --------------------------------------------------------------------------- */
+.md-typeset .tabbed-set > label {
+  font-size: 0.76rem;
+  font-weight: 530;
+  color: var(--ll-text-muted);
+  transition: color 0.18s;
+}
+
+.md-typeset .tabbed-set > label:hover {
+  color: var(--ll-text);
+}
+
+.md-typeset .tabbed-labels {
+  box-shadow: inset 0 -1px 0 var(--ll-border);
+}
+
+.md-typeset .tabbed-labels > label > [href]:focus {
+  color: var(--ll-accent-strong);
+}
+
+.md-typeset .tabbed-set > input:checked + label {
+  color: var(--ll-accent-strong);
+  border-color: var(--ll-accent);
+}
+
+/* the sliding underline indicator */
+.js .md-typeset .tabbed-labels::before {
+  background: var(--ll-accent);
+}
+
+.md-typeset .tabbed-content {
+  border: 1px solid var(--ll-border);
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+  padding: 0.6rem 0.9rem;
+  background: var(--ll-bg-alt);
+}
+
+/* ---------------------------------------------------------------------------
+   10. Tables — hairline, boxy, cyan hover
+   --------------------------------------------------------------------------- */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--ll-border);
+  border-radius: 7px;
+  overflow: hidden;
+  font-size: 0.75rem;
+}
+
+.md-typeset table:not([class]) th {
+  background: var(--ll-bg-inset);
+  color: var(--ll-text);
+  font-weight: 600;
+  border-bottom: 1px solid var(--ll-border);
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--ll-border);
+  color: var(--ll-text-secondary);
+}
+
+.md-typeset table:not([class]) tr:hover {
+  background: var(--ll-accent-soft);
+}
+
+/* ---------------------------------------------------------------------------
+   11. Cards (grid.cards) — boxy hairline, cyan top-bar on hover
+   --------------------------------------------------------------------------- */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > .card {
+  border-radius: 8px;
+  border: 1px solid var(--ll-border);
+  background: var(--ll-bg-alt);
+  transition: transform 0.22s ease, border-color 0.22s, box-shadow 0.22s, background 0.22s;
+  position: relative;
+  overflow: hidden;
+}
+
+.md-typeset .grid.cards > ul > li::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 2px;
+  background: var(--ll-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--ll-shadow-2);
+  border-color: var(--ll-border-strong);
+  background: var(--ll-bg);
+}
+
+.md-typeset .grid.cards > ul > li:hover::after {
+  transform: scaleX(1);
+}
+
+.md-typeset .grid.cards > ul > li > hr {
+  margin: 0.8em 0;
+  border: 0;
+  border-bottom: 1px solid var(--ll-border);
+}
+
+/* ---------------------------------------------------------------------------
+   12. Feedback section ("Was this page helpful?")
+   --------------------------------------------------------------------------- */
+.ll-feedback {
+  border-top: 1px solid var(--ll-border);
+  padding: 1.5rem 0;
+  text-align: center;
+  background: var(--ll-bg);
+}
+
+.ll-feedback__inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.ll-feedback__label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ll-text);
+}
+
+.ll-feedback__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.38rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--ll-border);
+  background: var(--ll-bg-inset);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--ll-text);
+}
+
+.ll-feedback__btn:hover {
+  border-color: var(--ll-accent-line);
+  background: var(--ll-accent-soft);
+  color: var(--ll-accent-strong);
+  transform: translateY(-1px);
+}
+
+.ll-feedback__thanks {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ll-green);
+}
+
+/* ---------------------------------------------------------------------------
+   13. Footer (custom links grid + bottom bar)
+   --------------------------------------------------------------------------- */
+.ll-footer {
+  border-top: 1px solid var(--ll-border);
+  padding: 0;
+  background: var(--ll-bg-alt);
+}
+
+.ll-footer__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem 2rem;
+  padding: 1.35rem 1rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+@media screen and (max-width: 600px) {
+  .ll-footer__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.ll-footer__link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ll-text-secondary) !important;
+  text-decoration: none !important;
+  padding: 0.2rem 0;
+  transition: color 0.15s;
+}
+
+.ll-footer__link:hover {
+  color: var(--ll-accent-strong) !important;
+}
+
+.ll-footer__link svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.ll-footer__link:hover svg {
+  opacity: 1;
+}
+
+.ll-footer__bottom {
+  border-top: 1px solid var(--ll-border);
+  padding: 0.7rem 1rem;
+  text-align: center;
+  background: var(--ll-bg);
+}
+
+.ll-footer__meta {
+  font-size: 0.72rem;
+  color: var(--ll-text-muted);
+}
+
+.ll-footer__meta a {
+  color: var(--ll-text-muted) !important;
+  text-decoration: none !important;
+  transition: color 0.15s;
+}
+
+.ll-footer__meta a:hover {
+  color: var(--ll-accent-strong) !important;
+}
+
+.ll-footer__sep {
+  margin: 0 0.5rem;
+  opacity: 0.4;
+}
+
+/* Hide MkDocs Material default footer — we use our custom one */
+.md-footer {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   14. Hero section (landing page) — boxy hairline panel, cyan accent
+   --------------------------------------------------------------------------- */
+/* ---- status pill + eyebrow (above the hero) ---- */
+.ll-statusbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.2rem 0 0.9rem;
+}
+
+.ll-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--ll-text-muted);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--ll-border);
+  border-radius: 6px;
+  background: var(--ll-bg-alt);
+}
+
+.ll-status-pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ll-green);
+  position: relative;
+  flex: 0 0 auto;
+}
+.ll-status-pill__dot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: var(--ll-green);
+  opacity: 0.35;
+  animation: ll-ping 2.4s cubic-bezier(.32,.72,0,1) infinite;
+}
+@keyframes ll-ping {
+  0%   { transform: scale(1);   opacity: 0.35; }
+  70%,
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.ll-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ll-text-muted);
+  margin-bottom: 0.9rem;
+}
+.ll-eyebrow__pip {
+  width: 5px;
+  height: 5px;
+  background: var(--ll-accent);
+  border-radius: 1px;
+  flex: 0 0 auto;
+}
+
+/* ---- hero two-column layout ---- */
+.hero-banner {
+  margin: 0 0 1.5rem 0;
+}
+
+.hero-banner img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--ll-border);
+}
+
+.hero-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 2rem;
+  padding: 2.4rem 2rem 2.6rem 2rem;
+  border: 1px solid var(--ll-border);
+  border-radius: 10px;
+  background: var(--ll-bg-alt);
+  margin: 0 0 2rem 0;
+}
+
+.hero-content {
+  min-width: 0;
+  text-align: left;
+}
+
+.hero-visual {
+  min-width: 0;
+  position: relative;
+  filter: none;
+  padding-bottom: 1.6rem;
+}
+
+/* Give any hero code tabs the boxy window look */
+.hero-visual .highlight {
+  box-shadow: var(--ll-shadow-2);
+}
+
+@media screen and (max-width: 76.1875em) {
+  .hero-section {
+    grid-template-columns: 1fr;
+    padding: 2.2rem 1.4rem;
+    gap: 2.4rem;
+  }
+  .hero-visual {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+.hero-title {
+  font-size: 2.1rem;
+  font-weight: 680;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  margin-bottom: 1rem;
+  color: var(--ll-text);
+}
+
+.hero-subtitle {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--ll-text-secondary);
+  margin-bottom: 2rem;
+  max-width: 30rem;
+}
+
+.hero-cta {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+@media screen and (max-width: 76.1875em) {
+  .hero-title { font-size: 2rem; }
+  .hero-subtitle { font-size: 0.9rem; max-width: none; }
+}
+
+/* ---- hero layered product visual: code window + PR-check card ---- */
+.ll-win {
+  background: var(--ll-bg-code);
+  border: 1px solid var(--ll-border-strong);
+  border-radius: 9px;
+  overflow: hidden;
+  box-shadow: var(--ll-shadow-2);
+}
+
+.ll-win__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 34px;
+  padding: 0 0.75rem;
+  background: var(--ll-bg-code-head);
+  border-bottom: 1px solid var(--ll-border);
+}
+.ll-win__dots { display: flex; gap: 6px; }
+.ll-win__dots i {
+  width: 10px; height: 10px; border-radius: 50%;
+  display: block; background: var(--ll-border-strong);
+}
+.ll-win__name {
+  font-family: var(--md-code-font-family, "JetBrains Mono", monospace);
+  font-size: 0.68rem;
+  color: var(--ll-text-muted);
+  margin-left: 0.25rem;
+}
+
+.md-typeset .ll-code,
+.ll-code {
+  margin: 0;
+  padding: 0.85rem 0.9rem;
+  font-family: var(--md-code-font-family, "JetBrains Mono", monospace);
+  font-size: 0.72rem;
+  line-height: 1.65;
+  overflow-x: auto;
+  color: var(--ll-text-secondary);
+  white-space: pre;
+  tab-size: 2;
+  background: var(--ll-bg-code);
+  border: 0;
+  border-radius: 0;
+}
+.ll-code .k { color: var(--ll-c-key); }
+.ll-code .s { color: var(--ll-c-str); }
+.ll-code .n { color: var(--ll-c-num); }
+.ll-code .c { color: var(--ll-c-com); font-style: italic; }
+.ll-code .b { color: var(--ll-c-bool); }
+.ll-code .hl {
+  display: block;
+  background: var(--ll-accent-soft);
+  box-shadow: inset 3px 0 0 var(--ll-accent);
+  margin: 0 -0.9rem;
+  padding: 0 0.9rem;
+}
+
+/* PR-check card, floated over the code window's lower-right */
+.ll-pr {
+  position: absolute;
+  right: -0.6rem;
+  bottom: -0.4rem;
+  width: 68%;
+  min-width: 240px;
+  z-index: 3;
+  background: var(--ll-bg);
+  border: 1px solid var(--ll-border-strong);
+  border-radius: 9px;
+  box-shadow: var(--ll-shadow-2);
+  transform: rotate(1.2deg);
+  transition: transform 0.5s cubic-bezier(.32,.72,0,1);
+}
+.hero-visual:hover .ll-pr {
+  transform: rotate(0deg) translateY(-4px);
+}
+
+.ll-pr__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--ll-border);
+}
+.ll-pr__num { font-size: 0.7rem; font-weight: 600; color: var(--ll-text); }
+.ll-pr__count { margin-left: auto; font-size: 0.66rem; color: var(--ll-text-muted); }
+
+.ll-pr__check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.7rem;
+  border-bottom: 1px solid var(--ll-border);
+}
+.ll-pr__check:last-child { border-bottom: 0; }
+.ll-pr__name { color: var(--ll-text-secondary); }
+.ll-pr__name b { color: var(--ll-text); font-weight: 560; }
+.ll-res { margin-left: auto; font-size: 0.66rem; font-weight: 560; }
+.ll-res--ok { color: var(--ll-green); }
+.ll-res--no { color: var(--ll-red); }
+
+.ll-ck {
+  width: 16px; height: 16px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.ll-ck--ok { background: var(--ll-green); }
+.ll-ck--no { background: var(--ll-red); }
+
+@media screen and (max-width: 76.1875em) {
+  .ll-pr {
+    position: relative;
+    right: 0; bottom: 0;
+    width: 100%;
+    transform: none;
+    margin-top: 1rem;
+  }
+  .hero-visual { padding-bottom: 0; }
+}
+
+/* "How it works" tab set sits full-width below the hero */
+.ll-howitworks {
+  margin: 0.4rem 0 1.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   15. Mermaid diagrams
+   --------------------------------------------------------------------------- */
+.md-typeset .mermaid {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.md-typeset .mermaid svg {
+  min-width: 800px;
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   16. Notebook / output styling
+   --------------------------------------------------------------------------- */
+.jp-OutputArea-output {
+  background: var(--ll-bg-code);
+  border: 1px solid var(--ll-border);
+  border-radius: 7px;
+  padding: 1rem;
+}
+
+/* ---------------------------------------------------------------------------
+   17. Utility classes
+   --------------------------------------------------------------------------- */
+.quality-gate-good { color: var(--ll-green); font-weight: 600; }
+.quality-gate-bad  { color: var(--ll-red);   font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   18. Page load animation
+   --------------------------------------------------------------------------- */
+.md-content {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-content { animation: none; }
+  * { scroll-behavior: auto; }
+}
+
+/* ---------------------------------------------------------------------------
+   19. Smooth scrolling
+   --------------------------------------------------------------------------- */
+html {
+  scroll-behavior: smooth;
+}
+
+/* ---------------------------------------------------------------------------
+   20. Content width — match the reference (~1500px).
+   Material's default `.md-grid` max-width (61rem ≈ 976px) leaves the content
+   choked in a narrow column with dead space on wide screens; the reference
+   spans ~1500px. Widen the grid (header + tabs + main) and give the content
+   column room so the hero stops wrapping heavily.
+   --------------------------------------------------------------------------- */
+/* Layout width — informed by inspecting docs.snowflake.com: it caps its content
+   (~1175px + 32px padding, not edge-to-edge) and leans on whitespace + big type +
+   generous spacing to feel premium. So: a comfortable wide cap (not full-bleed),
+   real content padding, and an airier vertical rhythm. */
+.md-grid {
+  max-width: 1760px;
+}
+.md-main__inner {
+  margin-top: 0;
+}
+.md-content {
+  padding-inline: 1rem 1.5rem;
+}
+.md-content__inner {
+  margin-inline: 1.4rem 2rem;
+  padding-top: 1.2rem;
+}
+/* comfortable reading measure for prose (Snowflake ~540–700px); wide blocks
+   (tables, code, the hero, card grids) opt back out below */
+.md-typeset {
+  --ll-measure: 52rem;
+}
+.md-typeset > p,
+.md-typeset > ul,
+.md-typeset > ol,
+.md-typeset > blockquote {
+  max-width: var(--ll-measure);
+}
+.md-typeset > .md-typeset__table,
+.md-typeset > pre,
+.md-typeset > .highlight,
+.md-typeset > .tabbed-set,
+.md-typeset > .grid,
+.md-typeset > .hero-section,
+.md-typeset > .ll-howitworks,
+.md-typeset > .admonition {
+  max-width: none;
+}
+
+/* Airier typography/spacing (Snowflake: 48px/700 h1, ~96px section gaps, 16/1.6 body) */
+.md-typeset { font-size: 0.95rem; line-height: 1.65; }
+.md-typeset h1 { font-size: 2.55rem; font-weight: 720; line-height: 1.12; letter-spacing: -0.025em; margin: 0 0 1.3rem; }
+.md-content .md-typeset h1.hero-title { font-size: 1.7rem; line-height: 1.14; margin: 0 0 1.1rem; }   /* hero: 2 clean lines (root is 24px here) */
+.md-typeset h2 { font-size: 1.65rem; font-weight: 680; margin: 3.2rem 0 1rem; letter-spacing: -0.015em; }
+.md-typeset h3 { font-size: 1.2rem; font-weight: 640; margin: 2.2rem 0 0.7rem; }
+.md-typeset p { margin: 0 0 1.05rem; }
+
+/* Premium hairline dividers between top-level sidebar groups (Snowflake-style) */
+.md-sidebar--primary .md-nav--primary > .md-nav__list > .md-nav__item + .md-nav__item {
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+}
+
+/* ---------------------------------------------------------------------------
+   21. Desktop density
+   Match the useful proportions of an 80% browser zoom at native 100% zoom.
+   Material starts from a large desktop root size; reduce the application shell
+   while holding long-form article copy near 15px for comfortable reading.
+   --------------------------------------------------------------------------- */
+@media screen and (min-width: 76.25em) {
+  html {
+    font-size: 106.25%;
+  }
+
+  .md-grid {
+    max-width: 1400px;
+  }
+
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  .md-content {
+    padding-inline: 0.75rem 1rem;
+  }
+
+  .md-content__inner {
+    margin-inline: 1rem 1.35rem;
+    padding-top: 1rem;
+  }
+
+  .md-typeset {
+    font-size: 0.88rem;
+    line-height: 1.58;
+  }
+
+  .md-typeset h1 {
+    font-size: 1.75rem;
+  }
+
+  .md-typeset h2 {
+    font-size: 1.25rem;
+    margin-top: 2rem;
+  }
+
+  .md-typeset h3 {
+    font-size: 1rem;
+    margin-top: 1.5rem;
+  }
+}
