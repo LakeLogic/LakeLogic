@@ -62,7 +62,20 @@ dependencies = [
     # the contract spec rather than defining its own. Lightweight (pydantic-only).
     # Until published to PyPI it is installed from the OLC repo (editable in dev,
     # a pinned git ref in CI/prod).
-    "open-lakehouse-contract[models]>=0.1.0",
+    # Upper bound is load-bearing, not caution. OLC is pre-1.0, so a MINOR bump is
+    # where breaking changes land: 0.8.0 turned `secondary_targets` from mappings
+    # into typed models, every `sec.get(...)` raised AttributeError, and the whole
+    # RideFlow mesh broke — from a release we never chose to adopt, because the
+    # requirement was an open `>=`. Raise this deliberately, with the conformance
+    # harness green, rather than inheriting the next spec change by accident.
+    "open-lakehouse-contract[models]>=0.1.0,<0.12.0",
+    # A CONSTRAINT, not a feature: `rich` is transitive (via typer), and rich 15
+    # is incompatible with pyiceberg (<15), which lakelogic itself imports for
+    # Iceberg catalogs in core/materialization, core/quarantine and core/run_log.
+    # Installing lakelogic on a runtime that ships pyiceberg (Databricks does) was
+    # therefore breaking OUR OWN Iceberg lane, announced only as a pip resolver
+    # warning nobody reads.
+    "rich<15",
 ]
 
 [project.optional-dependencies]

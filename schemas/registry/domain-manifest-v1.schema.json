@@ -198,6 +198,18 @@
     "SLORowCountAnomalyConfig": {
       "description": "Anomaly detection against historical run log baselines.",
       "properties": {
+        "check_field": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Field"
+        },
         "enabled": {
           "default": false,
           "title": "Enabled",

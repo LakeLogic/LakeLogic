@@ -437,7 +437,12 @@ class SLOValidator:
             max_rows = layer_slo.max_rows
             check_field = layer_slo.check_field or "counts_good"
 
-            if min_rows is None and max_rows is None:
+            _anomaly_cfg = getattr(layer_slo, "anomaly", None)
+            _anomaly_on = bool(_anomaly_cfg and _anomaly_cfg.enabled)
+            if min_rows is None and max_rows is None and not _anomaly_on:
+                # Nothing configured for this layer. Note the `and not _anomaly_on`:
+                # without it a contract that configures ONLY drift detection (no
+                # min/max bounds) was skipped here and its anomaly check never ran.
                 continue
 
             try:
@@ -538,18 +543,46 @@ class SLOValidator:
             else:
                 status = "; ".join(status_parts)
 
-            results.append(
-                SLOCheckResult(
-                    layer=layer,
-                    entity=entity,
-                    status=status,
-                    passed=passed,
-                    row_count=actual_count,
-                    slo_min_rows=min_rows,
-                    slo_max_rows=max_rows,
-                    latest_ts=str(row["timestamp"]) if row["timestamp"] else None,
+            if min_rows is not None or max_rows is not None:
+                results.append(
+                    SLOCheckResult(
+                        layer=layer,
+                        entity=entity,
+                        status=status,
+                        passed=passed,
+                        row_count=actual_count,
+                        slo_min_rows=min_rows,
+                        slo_max_rows=max_rows,
+                        latest_ts=str(row["timestamp"]) if row["timestamp"] else None,
+                    )
                 )
-            )
+
+            # ── Drift against the historical baseline ───────────────────────
+            # This is the call the detector never had: check_row_count_anomaly was
+            # fully implemented, configurable and covered by run-log columns, and
+            # nothing in the codebase invoked it. Min/max bounds catch a value
+            # outside a FIXED range; only this catches "normal for this contract
+            # has changed" — a dedup that usually removes 31% removing 68% today.
+            #
+            # Safe to switch on: `enabled` defaults to False, so no existing
+            # contract changes behaviour, and `min_runs_before_enforcement` keeps
+            # it quiet until there is a baseline worth comparing against.
+            if _anomaly_on:
+                try:
+                    anomaly_result = self.check_row_count_anomaly(
+                        entity, layer, actual_count, _anomaly_cfg, check_field=check_field
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug(f"Anomaly check raised for {entity}: {exc}")
+                    anomaly_result = None
+                if anomaly_result is not None:
+                    if getattr(layer_slo, "warn_only", False):
+                        # warn_only is already honoured by the min/max path; the
+                        # drift result must not be the one thing that fails a run
+                        # the contract asked to be advisory.
+                        anomaly_result.passed = True
+                        anomaly_result.severity = "warn"
+                    results.append(anomaly_result)
 
         return results
 
@@ -846,7 +879,8 @@ class SLOValidator:
         return results
 
     def check_row_count_anomaly(
-        self, entity: str, layer: str, actual_count: int, anomaly_cfg
+        self, entity: str, layer: str, actual_count: int, anomaly_cfg,
+        check_field: Optional[str] = None,
     ) -> Optional[SLOCheckResult]:
         """
         Compare actual row count against historical baseline from run logs.
@@ -865,7 +899,13 @@ class SLOValidator:
         run_log_table.replace("`", "")
 
         try:
-            check_field_name = anomaly_cfg.check_field if hasattr(anomaly_cfg, "check_field") else "counts_good"
+            # `check_field` may be set on the anomaly config OR inherited from the
+            # parent row-count config. The old line read it off anomaly_cfg only,
+            # where the attribute did not exist, so hasattr() was always False and
+            # the setting was silently ignored on every contract.
+            check_field_name = (
+                getattr(anomaly_cfg, "check_field", None) or check_field or "counts_good"
+            )
             spark_ref = resolve_run_log_ref(run_log_table, "spark")
             duckdb_ref = resolve_run_log_ref(run_log_table, "duckdb")
             if self.spark:

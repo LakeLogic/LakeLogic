@@ -2801,6 +2801,22 @@ class LakehousePipeline:
             if not _already_logged:
                 _report = getattr(processor, "last_report", None) or {}
                 _report["status"] = "succeeded"
+                # A run that read NOTHING is not the same as a run that processed
+                # everything, but both reported plain "succeeded" — which is how a
+                # gold layer sat green while its silver source was empty because
+                # silver had failed. The status VALUE stays `succeeded` on purpose:
+                # the platform's enum is closed (success/partial/failed/running) and
+                # `emit_on` filters on it, so a novel status would silently stop the
+                # telemetry for precisely the runs worth seeing. Instead the fact is
+                # carried as its own flag, so a consumer can distinguish the two, and
+                # said out loud in the log where an operator will actually see it.
+                _empty_counts = (_report.get("counts") or {})
+                if _empty_counts.get("source") == 0 and not _empty_counts.get("total"):
+                    _report["no_source_rows"] = True
+                    logger.warning(
+                        f"⚠️ {c.entity} [{layer}] succeeded but read 0 source rows — "
+                        f"nothing was processed. Check the upstream layer produced data."
+                    )
                 try:
                     from lakelogic.core.run_log import write_run_log
 

@@ -152,6 +152,19 @@ class SLORowCountAnomalyConfig(BaseModel):
     max_ratio: float = 2.0
     method: str = "median"  # "median" | "rolling_average"
     min_runs_before_enforcement: int = 5
+    #: Which run-log column (or SQL expression) to baseline. `None` inherits the
+    #: parent SLORowCountConfig.check_field. The detector previously read this off
+    #: THIS object while it only existed on the parent, so `hasattr` was always
+    #: False and every configuration silently fell back to `counts_good` — a knob
+    #: that looked wired and was not.
+    #:
+    #: On the Spark and DuckDB paths this is interpolated into the SELECT, so an
+    #: expression works and is usually what you want for drift: a raw
+    #: `counts_deduplicated` grows with volume, whereas
+    #: `counts_deduplicated / NULLIF(counts_source, 0)` is the RATIO — "this
+    #: contract normally dedups 31%, today it removed 68%" — which is the signal
+    #: that separates a healthy at-least-once source from a broken upstream join.
+    check_field: Optional[str] = None
 
 
 class SLORowCountConfig(BaseModel):

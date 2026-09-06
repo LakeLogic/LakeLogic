@@ -1912,6 +1912,11 @@ def write_run_log(
                         # dropped `error_traceback` until its DTO learned the name.
                         # `deduplicated`/`filtered` are None when several declared
                         # operations could have removed the rows: not measured, not zero.
+                        # True when the run succeeded having read nothing. The status
+                        # stays "success" (closed enum + emit_on filtering), so this
+                        # is how a consumer tells "processed everything" apart from
+                        # "there was nothing to process".
+                        "no_source_rows": bool(report.get("no_source_rows")),
                         "rows_dropped": _counts.get("pre_transform_dropped"),
                         "rows_deduplicated": _counts.get("deduplicated"),
                         "rows_filtered": _counts.get("filtered"),
