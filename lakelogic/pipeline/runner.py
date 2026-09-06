@@ -185,7 +185,6 @@ class EntityTimeoutError(Exception):
     pass
 
 
-
 def _ownership_for_contract(contract_dict: Dict[str, Any], registry: Any) -> Dict[str, Any]:
     """The ownership block that answers for THIS contract.
 
@@ -2810,7 +2809,7 @@ class LakehousePipeline:
                 # telemetry for precisely the runs worth seeing. Instead the fact is
                 # carried as its own flag, so a consumer can distinguish the two, and
                 # said out loud in the log where an operator will actually see it.
-                _empty_counts = (_report.get("counts") or {})
+                _empty_counts = _report.get("counts") or {}
                 if _empty_counts.get("source") == 0 and not _empty_counts.get("total"):
                     _report["no_source_rows"] = True
                     logger.warning(

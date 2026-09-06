@@ -116,14 +116,18 @@ class TypeSpec:
         return self.cast_overrides.get(dialect, self.ddl[dialect])
 
 
-def _spec(logical, kind, arrow, polars, bits=None, cast_overrides=None,
-          transport_kind=None, **ddl) -> TypeSpec:
+def _spec(logical, kind, arrow, polars, bits=None, cast_overrides=None, transport_kind=None, **ddl) -> TypeSpec:
     missing = [d for d in DIALECTS if d not in ddl]
     if missing:
         raise ValueError(f"type {logical!r} has no rendering for {missing}")
     return TypeSpec(
-        logical=logical, kind=kind, arrow=arrow, polars=polars, bits=bits,
-        ddl=dict(ddl), cast_overrides=dict(cast_overrides or {}),
+        logical=logical,
+        kind=kind,
+        arrow=arrow,
+        polars=polars,
+        bits=bits,
+        ddl=dict(ddl),
+        cast_overrides=dict(cast_overrides or {}),
         transport_kind=transport_kind,
     )
 
@@ -143,97 +147,309 @@ def _add(spec: TypeSpec, *aliases: str) -> None:
 
 
 # ── strings ──────────────────────────────────────────────────────────────────
-_add(_spec("string", STRING, arrow="string", polars="Utf8",
-           spark="STRING", databricks="STRING", duckdb="VARCHAR", sqlite="TEXT",
-           snowflake="VARCHAR", bigquery="STRING", postgresql="TEXT"),
-     "text", "char")
-_add(_spec("varchar", STRING, arrow="string", polars="Utf8",
-           spark="STRING", databricks="STRING", duckdb="VARCHAR", sqlite="TEXT",
-           snowflake="VARCHAR", bigquery="STRING", postgresql="VARCHAR"))
+_add(
+    _spec(
+        "string",
+        STRING,
+        arrow="string",
+        polars="Utf8",
+        spark="STRING",
+        databricks="STRING",
+        duckdb="VARCHAR",
+        sqlite="TEXT",
+        snowflake="VARCHAR",
+        bigquery="STRING",
+        postgresql="TEXT",
+    ),
+    "text",
+    "char",
+)
+_add(
+    _spec(
+        "varchar",
+        STRING,
+        arrow="string",
+        polars="Utf8",
+        spark="STRING",
+        databricks="STRING",
+        duckdb="VARCHAR",
+        sqlite="TEXT",
+        snowflake="VARCHAR",
+        bigquery="STRING",
+        postgresql="VARCHAR",
+    )
+)
 
 # ── integers ─────────────────────────────────────────────────────────────────
-_add(_spec("tinyint", INT, bits=8, arrow="int8", polars="Int8",
-           spark="TINYINT", databricks="TINYINT", duckdb="TINYINT", sqlite="INTEGER",
-           snowflake="TINYINT", bigquery="INT64",
-           # PostgreSQL has no 8-bit integer; SMALLINT is the narrowest that
-           # holds every value the contract allows. Widening is safe, narrowing
-           # would silently truncate.
-           postgresql="SMALLINT"),
-     "byte")
-_add(_spec("smallint", INT, bits=16, arrow="int16", polars="Int16",
-           spark="SMALLINT", databricks="SMALLINT", duckdb="SMALLINT", sqlite="INTEGER",
-           snowflake="SMALLINT", bigquery="INT64", postgresql="SMALLINT"),
-     "short")
-_add(_spec("int", INT, bits=32, arrow="int32", polars="Int32",
-           spark="INT", databricks="INT", duckdb="INTEGER", sqlite="INTEGER",
-           snowflake="INTEGER", bigquery="INT64", postgresql="INTEGER"),
-     "integer", "int32")
-_add(_spec("bigint", INT, bits=64, arrow="int64", polars="Int64",
-           spark="BIGINT", databricks="BIGINT", duckdb="BIGINT", sqlite="INTEGER",
-           snowflake="BIGINT", bigquery="INT64", postgresql="BIGINT"),
-     "long", "int64")
+_add(
+    _spec(
+        "tinyint",
+        INT,
+        bits=8,
+        arrow="int8",
+        polars="Int8",
+        spark="TINYINT",
+        databricks="TINYINT",
+        duckdb="TINYINT",
+        sqlite="INTEGER",
+        snowflake="TINYINT",
+        bigquery="INT64",
+        # PostgreSQL has no 8-bit integer; SMALLINT is the narrowest that
+        # holds every value the contract allows. Widening is safe, narrowing
+        # would silently truncate.
+        postgresql="SMALLINT",
+    ),
+    "byte",
+)
+_add(
+    _spec(
+        "smallint",
+        INT,
+        bits=16,
+        arrow="int16",
+        polars="Int16",
+        spark="SMALLINT",
+        databricks="SMALLINT",
+        duckdb="SMALLINT",
+        sqlite="INTEGER",
+        snowflake="SMALLINT",
+        bigquery="INT64",
+        postgresql="SMALLINT",
+    ),
+    "short",
+)
+_add(
+    _spec(
+        "int",
+        INT,
+        bits=32,
+        arrow="int32",
+        polars="Int32",
+        spark="INT",
+        databricks="INT",
+        duckdb="INTEGER",
+        sqlite="INTEGER",
+        snowflake="INTEGER",
+        bigquery="INT64",
+        postgresql="INTEGER",
+    ),
+    "integer",
+    "int32",
+)
+_add(
+    _spec(
+        "bigint",
+        INT,
+        bits=64,
+        arrow="int64",
+        polars="Int64",
+        spark="BIGINT",
+        databricks="BIGINT",
+        duckdb="BIGINT",
+        sqlite="INTEGER",
+        snowflake="BIGINT",
+        bigquery="INT64",
+        postgresql="BIGINT",
+    ),
+    "long",
+    "int64",
+)
 
 # ── floats ───────────────────────────────────────────────────────────────────
-_add(_spec("float", FLOAT, bits=32, arrow="float32", polars="Float32",
-           spark="FLOAT", databricks="FLOAT", duckdb="FLOAT", sqlite="REAL",
-           snowflake="FLOAT", bigquery="FLOAT64", postgresql="REAL"),
-     "float32", "real")
-_add(_spec("double", FLOAT, bits=64, arrow="float64", polars="Float64",
-           spark="DOUBLE", databricks="DOUBLE", duckdb="DOUBLE", sqlite="REAL",
-           snowflake="DOUBLE", bigquery="FLOAT64", postgresql="DOUBLE PRECISION"),
-     "float64", "number")
+_add(
+    _spec(
+        "float",
+        FLOAT,
+        bits=32,
+        arrow="float32",
+        polars="Float32",
+        spark="FLOAT",
+        databricks="FLOAT",
+        duckdb="FLOAT",
+        sqlite="REAL",
+        snowflake="FLOAT",
+        bigquery="FLOAT64",
+        postgresql="REAL",
+    ),
+    "float32",
+    "real",
+)
+_add(
+    _spec(
+        "double",
+        FLOAT,
+        bits=64,
+        arrow="float64",
+        polars="Float64",
+        spark="DOUBLE",
+        databricks="DOUBLE",
+        duckdb="DOUBLE",
+        sqlite="REAL",
+        snowflake="DOUBLE",
+        bigquery="FLOAT64",
+        postgresql="DOUBLE PRECISION",
+    ),
+    "float64",
+    "number",
+)
 # Bare `decimal` is a 64-bit float everywhere — see the module docstring. Before
 # this, the DDL passed it through as DECIMAL while every engine cast it to double,
 # so a `decimal` column hit the same merge failure as float and integer did.
-_add(_spec("decimal", FLOAT, bits=64, arrow="float64", polars="Float64",
-           spark="DOUBLE", databricks="DOUBLE", duckdb="DOUBLE", sqlite="REAL",
-           snowflake="DOUBLE", bigquery="FLOAT64", postgresql="DOUBLE PRECISION"),
-     "numeric")
+_add(
+    _spec(
+        "decimal",
+        FLOAT,
+        bits=64,
+        arrow="float64",
+        polars="Float64",
+        spark="DOUBLE",
+        databricks="DOUBLE",
+        duckdb="DOUBLE",
+        sqlite="REAL",
+        snowflake="DOUBLE",
+        bigquery="FLOAT64",
+        postgresql="DOUBLE PRECISION",
+    ),
+    "numeric",
+)
 
 # ── booleans ─────────────────────────────────────────────────────────────────
-_add(_spec("boolean", BOOL, arrow="bool", polars="Boolean",
-           spark="BOOLEAN", databricks="BOOLEAN", duckdb="BOOLEAN", sqlite="INTEGER",
-           snowflake="BOOLEAN", bigquery="BOOL", postgresql="BOOLEAN"),
-     "bool")
+_add(
+    _spec(
+        "boolean",
+        BOOL,
+        arrow="bool",
+        polars="Boolean",
+        spark="BOOLEAN",
+        databricks="BOOLEAN",
+        duckdb="BOOLEAN",
+        sqlite="INTEGER",
+        snowflake="BOOLEAN",
+        bigquery="BOOL",
+        postgresql="BOOLEAN",
+    ),
+    "bool",
+)
 
 # ── temporal ─────────────────────────────────────────────────────────────────
-_add(_spec("date", TEMPORAL, arrow="date32", polars="Date",
-           spark="DATE", databricks="DATE", duckdb="DATE", sqlite="TEXT",
-           snowflake="DATE", bigquery="DATE", postgresql="DATE"))
-_add(_spec("timestamp", TEMPORAL, arrow="timestamp[us]", polars="Datetime",
-           spark="TIMESTAMP", databricks="TIMESTAMP", duckdb="TIMESTAMP", sqlite="TEXT",
-           snowflake="TIMESTAMP_NTZ", bigquery="TIMESTAMP", postgresql="TIMESTAMP"),
-     "datetime")
-_add(_spec("timestamp_ntz", TEMPORAL, arrow="timestamp[us]", polars="Datetime",
-           spark="TIMESTAMP_NTZ", databricks="TIMESTAMP_NTZ", duckdb="TIMESTAMP",
-           sqlite="TEXT", snowflake="TIMESTAMP_NTZ", bigquery="TIMESTAMP",
-           postgresql="TIMESTAMP WITHOUT TIME ZONE"))
-_add(_spec("timestamp_tz", TEMPORAL, arrow="timestamp[us, tz=UTC]", polars="Datetime",
-           spark="TIMESTAMP", databricks="TIMESTAMP", duckdb="TIMESTAMPTZ", sqlite="TEXT",
-           snowflake="TIMESTAMP_TZ", bigquery="TIMESTAMP",
-           postgresql="TIMESTAMP WITH TIME ZONE"))
+_add(
+    _spec(
+        "date",
+        TEMPORAL,
+        arrow="date32",
+        polars="Date",
+        spark="DATE",
+        databricks="DATE",
+        duckdb="DATE",
+        sqlite="TEXT",
+        snowflake="DATE",
+        bigquery="DATE",
+        postgresql="DATE",
+    )
+)
+_add(
+    _spec(
+        "timestamp",
+        TEMPORAL,
+        arrow="timestamp[us]",
+        polars="Datetime",
+        spark="TIMESTAMP",
+        databricks="TIMESTAMP",
+        duckdb="TIMESTAMP",
+        sqlite="TEXT",
+        snowflake="TIMESTAMP_NTZ",
+        bigquery="TIMESTAMP",
+        postgresql="TIMESTAMP",
+    ),
+    "datetime",
+)
+_add(
+    _spec(
+        "timestamp_ntz",
+        TEMPORAL,
+        arrow="timestamp[us]",
+        polars="Datetime",
+        spark="TIMESTAMP_NTZ",
+        databricks="TIMESTAMP_NTZ",
+        duckdb="TIMESTAMP",
+        sqlite="TEXT",
+        snowflake="TIMESTAMP_NTZ",
+        bigquery="TIMESTAMP",
+        postgresql="TIMESTAMP WITHOUT TIME ZONE",
+    )
+)
+_add(
+    _spec(
+        "timestamp_tz",
+        TEMPORAL,
+        arrow="timestamp[us, tz=UTC]",
+        polars="Datetime",
+        spark="TIMESTAMP",
+        databricks="TIMESTAMP",
+        duckdb="TIMESTAMPTZ",
+        sqlite="TEXT",
+        snowflake="TIMESTAMP_TZ",
+        bigquery="TIMESTAMP",
+        postgresql="TIMESTAMP WITH TIME ZONE",
+    )
+)
 
 # ── binary / complex ─────────────────────────────────────────────────────────
-_add(_spec("binary", BINARY, arrow="binary", polars="Binary",
-           spark="BINARY", databricks="BINARY", duckdb="BLOB", sqlite="BLOB",
-           snowflake="BINARY", bigquery="BYTES", postgresql="BYTEA"))
-_add(_spec("json", COMPLEX, arrow="string", polars="Utf8",
-           spark="STRING", databricks="STRING", duckdb="JSON", sqlite="TEXT",
-           snowflake="VARIANT", bigquery="JSON", postgresql="JSONB",
-           # JSON is carried as text in a DataFrame on every engine; only the
-           # stored column type differs. Declared, not implied.
-           transport_kind=STRING,
-           cast_overrides={"duckdb": "VARCHAR", "snowflake": "VARCHAR",
-                           "bigquery": "STRING", "postgresql": "TEXT"}))
-_add(_spec("array", COMPLEX, arrow="string", polars="Utf8",
-           spark="ARRAY<STRING>", databricks="ARRAY<STRING>", duckdb="VARCHAR[]",
-           sqlite="TEXT", snowflake="ARRAY", bigquery="ARRAY<STRING>",
-           postgresql="TEXT[]"))
+_add(
+    _spec(
+        "binary",
+        BINARY,
+        arrow="binary",
+        polars="Binary",
+        spark="BINARY",
+        databricks="BINARY",
+        duckdb="BLOB",
+        sqlite="BLOB",
+        snowflake="BINARY",
+        bigquery="BYTES",
+        postgresql="BYTEA",
+    )
+)
+_add(
+    _spec(
+        "json",
+        COMPLEX,
+        arrow="string",
+        polars="Utf8",
+        spark="STRING",
+        databricks="STRING",
+        duckdb="JSON",
+        sqlite="TEXT",
+        snowflake="VARIANT",
+        bigquery="JSON",
+        postgresql="JSONB",
+        # JSON is carried as text in a DataFrame on every engine; only the
+        # stored column type differs. Declared, not implied.
+        transport_kind=STRING,
+        cast_overrides={"duckdb": "VARCHAR", "snowflake": "VARCHAR", "bigquery": "STRING", "postgresql": "TEXT"},
+    )
+)
+_add(
+    _spec(
+        "array",
+        COMPLEX,
+        arrow="string",
+        polars="Utf8",
+        spark="ARRAY<STRING>",
+        databricks="ARRAY<STRING>",
+        duckdb="VARCHAR[]",
+        sqlite="TEXT",
+        snowflake="ARRAY",
+        bigquery="ARRAY<STRING>",
+        postgresql="TEXT[]",
+    )
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Lookups
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class UnknownContractType(KeyError):
     """A contract type with no registered mapping.
@@ -313,6 +529,7 @@ def as_arrow_map() -> Dict[str, str]:
 # The guard that runs on import
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def validate_registry() -> None:
     """Fail at import if any CAST override disagrees with its DDL type.
 
@@ -341,17 +558,37 @@ def validate_registry() -> None:
 
 
 _KIND_BY_PHYSICAL = {
-    "STRING": STRING, "VARCHAR": STRING, "TEXT": STRING,
-    "TINYINT": INT, "SMALLINT": INT, "INT": INT, "INTEGER": INT,
-    "BIGINT": INT, "INT64": INT,
-    "FLOAT": FLOAT, "DOUBLE": FLOAT, "REAL": FLOAT, "FLOAT64": FLOAT,
-    "DOUBLE PRECISION": FLOAT, "NUMBER": FLOAT,
-    "BOOLEAN": BOOL, "BOOL": BOOL,
-    "DATE": TEMPORAL, "TIMESTAMP": TEMPORAL, "TIMESTAMP_NTZ": TEMPORAL,
-    "TIMESTAMP_TZ": TEMPORAL, "TIMESTAMPTZ": TEMPORAL,
-    "TIMESTAMP WITHOUT TIME ZONE": TEMPORAL, "TIMESTAMP WITH TIME ZONE": TEMPORAL,
-    "BINARY": BINARY, "BLOB": BINARY, "BYTES": BINARY, "BYTEA": BINARY,
-    "JSON": COMPLEX, "JSONB": COMPLEX, "VARIANT": COMPLEX,
+    "STRING": STRING,
+    "VARCHAR": STRING,
+    "TEXT": STRING,
+    "TINYINT": INT,
+    "SMALLINT": INT,
+    "INT": INT,
+    "INTEGER": INT,
+    "BIGINT": INT,
+    "INT64": INT,
+    "FLOAT": FLOAT,
+    "DOUBLE": FLOAT,
+    "REAL": FLOAT,
+    "FLOAT64": FLOAT,
+    "DOUBLE PRECISION": FLOAT,
+    "NUMBER": FLOAT,
+    "BOOLEAN": BOOL,
+    "BOOL": BOOL,
+    "DATE": TEMPORAL,
+    "TIMESTAMP": TEMPORAL,
+    "TIMESTAMP_NTZ": TEMPORAL,
+    "TIMESTAMP_TZ": TEMPORAL,
+    "TIMESTAMPTZ": TEMPORAL,
+    "TIMESTAMP WITHOUT TIME ZONE": TEMPORAL,
+    "TIMESTAMP WITH TIME ZONE": TEMPORAL,
+    "BINARY": BINARY,
+    "BLOB": BINARY,
+    "BYTES": BINARY,
+    "BYTEA": BINARY,
+    "JSON": COMPLEX,
+    "JSONB": COMPLEX,
+    "VARIANT": COMPLEX,
 }
 
 
@@ -360,7 +597,6 @@ def _physical_kind(physical: str) -> str:
     if base.endswith("[]") or base.startswith("ARRAY"):
         return COMPLEX
     return _KIND_BY_PHYSICAL.get(base, base)
-
 
 
 def polars_dtype(contract_type: str):
@@ -375,9 +611,7 @@ def polars_dtype(contract_type: str):
     name = spec_for(contract_type).polars
     dtype = getattr(pl, name, None)
     if dtype is None:  # pragma: no cover - a Polars rename would be a hard error
-        raise UnknownContractType(
-            f"polars has no dtype named {name!r} (contract type {contract_type!r})"
-        )
+        raise UnknownContractType(f"polars has no dtype named {name!r} (contract type {contract_type!r})")
     return dtype
 
 
@@ -386,16 +620,22 @@ def as_polars_map() -> Dict[str, object]:
     return {logical: polars_dtype(logical) for logical in _REGISTRY}
 
 
-
 # Spark type OBJECTS, for building a StructType. Kept here rather than in the
 # processor so the reader schema, the CAST and the CREATE TABLE all come from one
 # row — the processor's own copy of this map was a tenth place for `float` to
 # mean something different.
 _SPARK_OBJECT_BY_ARROW = {
-    "string": "StringType", "int8": "ByteType", "int16": "ShortType",
-    "int32": "IntegerType", "int64": "LongType", "float32": "FloatType",
-    "float64": "DoubleType", "bool": "BooleanType", "date32": "DateType",
-    "timestamp[us]": "TimestampType", "timestamp[us, tz=UTC]": "TimestampType",
+    "string": "StringType",
+    "int8": "ByteType",
+    "int16": "ShortType",
+    "int32": "IntegerType",
+    "int64": "LongType",
+    "float32": "FloatType",
+    "float64": "DoubleType",
+    "bool": "BooleanType",
+    "date32": "DateType",
+    "timestamp[us]": "TimestampType",
+    "timestamp[us, tz=UTC]": "TimestampType",
     "binary": "BinaryType",
 }
 

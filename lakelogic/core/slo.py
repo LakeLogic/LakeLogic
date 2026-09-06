@@ -879,7 +879,11 @@ class SLOValidator:
         return results
 
     def check_row_count_anomaly(
-        self, entity: str, layer: str, actual_count: int, anomaly_cfg,
+        self,
+        entity: str,
+        layer: str,
+        actual_count: int,
+        anomaly_cfg,
         check_field: Optional[str] = None,
     ) -> Optional[SLOCheckResult]:
         """
@@ -903,9 +907,7 @@ class SLOValidator:
             # parent row-count config. The old line read it off anomaly_cfg only,
             # where the attribute did not exist, so hasattr() was always False and
             # the setting was silently ignored on every contract.
-            check_field_name = (
-                getattr(anomaly_cfg, "check_field", None) or check_field or "counts_good"
-            )
+            check_field_name = getattr(anomaly_cfg, "check_field", None) or check_field or "counts_good"
             spark_ref = resolve_run_log_ref(run_log_table, "spark")
             duckdb_ref = resolve_run_log_ref(run_log_table, "duckdb")
             if self.spark:

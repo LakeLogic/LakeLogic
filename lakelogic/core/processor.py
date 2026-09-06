@@ -191,7 +191,6 @@ def _sqlalchemy_uri_to_jdbc(uri: str) -> dict:
     )
 
 
-
 def _compact_entity(name: str, layer: Optional[str], system: Optional[str]) -> str:
     """Drop the leading `<layer>_` / `<system>_` from a table name for log display.
 
@@ -1154,10 +1153,7 @@ class DataProcessor:
                     f"qtn={bad}{_dropped_line}{_added_line} {ratio_display}"
                 )
             else:
-                logger.info(
-                    f"Run complete{tags_display} | "
-                    f"src={_src_display} rows={total}{_dropped_line}{_added_line}"
-                )
+                logger.info(f"Run complete{tags_display} | src={_src_display} rows={total}{_dropped_line}{_added_line}")
 
             if bad > 0:
                 reason_summary = ""
@@ -2845,6 +2841,7 @@ class DataProcessor:
                             # Resolved through lakelogic.core.types so the reader
                             # schema matches the CAST and the CREATE TABLE.
                             from lakelogic.core import types as _types
+
                             spark_fields = []
                             for f in _fields_list:
                                 fname = f.get("name") if isinstance(f, dict) else getattr(f, "name", None)
@@ -2855,8 +2852,9 @@ class DataProcessor:
                                     freq = getattr(f, "required", False)
                                 nullable = not freq
                                 _t = (ftype or "string").lower()
-                                spark_type = (_types.spark_type_object(_t)
-                                              if _types.is_known(_t) else None) or StringType()
+                                spark_type = (
+                                    _types.spark_type_object(_t) if _types.is_known(_t) else None
+                                ) or StringType()
                                 if fname:
                                     spark_fields.append(StructField(fname, spark_type, nullable))
                             if spark_fields:

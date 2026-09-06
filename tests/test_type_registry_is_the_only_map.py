@@ -13,6 +13,7 @@ The scan is deliberately shape-based, not name-based: it looks for a dict litera
 whose keys are contract type names, wherever it appears and whatever it is
 called. Renaming the variable does not evade it.
 """
+
 from __future__ import annotations
 
 import ast
@@ -70,8 +71,7 @@ def _type_map_literals(tree: ast.AST):
     for node in ast.walk(tree):
         if not isinstance(node, ast.Dict):
             continue
-        keys = [k.value for k in node.keys
-                if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+        keys = [k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
         if not keys:
             continue
         hits = [k for k in keys if k.lower() in KNOWN]
@@ -102,12 +102,18 @@ def test_no_module_declares_its_own_contract_type_map():
 def test_the_registry_is_actually_reachable_from_the_engines():
     """A guard that only forbids is useless if nothing uses the replacement."""
     importers = [
-        rel for rel, path in _python_files()
+        rel
+        for rel, path in _python_files()
         if "types as _types" in path.read_text(encoding="utf-8")
         or "from .types import" in path.read_text(encoding="utf-8")
     ]
-    for expected in ("core/ddl.py", "engines/spark.py", "engines/duckdb.py",
-                     "engines/polars.py", "engines/generic_sql.py"):
+    for expected in (
+        "core/ddl.py",
+        "engines/spark.py",
+        "engines/duckdb.py",
+        "engines/polars.py",
+        "engines/generic_sql.py",
+    ):
         assert expected in importers, f"{expected} no longer imports the type registry"
 
 
@@ -115,9 +121,12 @@ def test_import_time_validation_rejects_a_disagreeing_cast():
     """The other guard: a cast override that changes the stored type must fail
     at import, not on a cluster. Proven by constructing one."""
     bad = registry.TypeSpec(
-        logical="broken", kind=registry.INT, bits=32,
+        logical="broken",
+        kind=registry.INT,
+        bits=32,
         ddl={d: "INT" for d in registry.DIALECTS},
-        arrow="int32", polars="Int32",
+        arrow="int32",
+        polars="Int32",
         cast_overrides={"spark": "STRING"},
     )
     registry._REGISTRY["broken"] = bad

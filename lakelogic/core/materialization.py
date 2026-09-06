@@ -4735,7 +4735,8 @@ def materialize_dataframe(
                     try:
                         _existing_schema = dt.schema().to_pyarrow()
                         _fields = [
-                            _existing_schema.field(name) if name in _existing_schema.names
+                            _existing_schema.field(name)
+                            if name in _existing_schema.names
                             else arrow_data.schema.field(name)
                             for name in arrow_data.schema.names
                         ]

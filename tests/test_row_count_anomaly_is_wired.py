@@ -17,6 +17,7 @@ Three defects, all of which look like a working feature from the outside:
 These tests pin the wiring, not the maths: the arithmetic already worked, which is
 precisely why nobody noticed it was never executed.
 """
+
 from __future__ import annotations
 
 import ast
@@ -34,7 +35,8 @@ def test_the_anomaly_check_has_a_caller():
     source = Path(slo_mod.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     calls = [
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "check_row_count_anomaly"
@@ -67,9 +69,7 @@ def test_a_drift_only_contract_is_not_skipped_before_the_check():
     hit `if min_rows is None and max_rows is None: continue` and never reached
     the anomaly call."""
     source = inspect.getsource(slo_mod.SLOValidator.check_row_counts)
-    assert "and not _anomaly_on" in source, (
-        "the early-continue still skips contracts that configure drift alone"
-    )
+    assert "and not _anomaly_on" in source, "the early-continue still skips contracts that configure drift alone"
 
 
 def test_drift_detection_is_off_unless_asked_for():
@@ -85,10 +85,13 @@ def test_a_baseline_is_required_before_enforcement():
     assert SLORowCountAnomalyConfig().min_runs_before_enforcement >= 2
 
 
-@pytest.mark.parametrize("expression", [
-    "counts_deduplicated",
-    "counts_deduplicated / NULLIF(counts_source, 0)",
-])
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "counts_deduplicated",
+        "counts_deduplicated / NULLIF(counts_source, 0)",
+    ],
+)
 def test_check_field_carries_a_ratio_expression_unchanged(expression):
     """Drift on a RAW dedup count is mostly a volume signal — double the input and
     the count doubles with nothing wrong. The ratio is what says "this contract

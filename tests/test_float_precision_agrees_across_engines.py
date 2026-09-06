@@ -17,6 +17,7 @@ line that broke": it walks every logical→physical map and asserts they agree o
 what `float` and `double` mean. A new engine, or a second map inside an existing
 engine, that widens `float` to 64-bit fails here.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -34,8 +35,13 @@ SINGLE_FLOAT_DIALECTS = {"bigquery", "sqlite", "snowflake"}
 # PostgreSQL's REAL (4 bytes) — SQLite's same-named 8-byte type is exempted above.
 BIT32 = {"float", "FLOAT", "float32", "Float32", "REAL", "FLOAT4"}
 BIT64 = {
-    "double", "DOUBLE", "float64", "Float64", "FLOAT64",
-    "DOUBLE PRECISION", "FLOAT8",
+    "double",
+    "DOUBLE",
+    "float64",
+    "Float64",
+    "FLOAT64",
+    "DOUBLE PRECISION",
+    "FLOAT8",
 }
 
 
@@ -49,6 +55,7 @@ def _width(physical) -> int:
 
 
 # ── the DDL map is the source of truth: it CREATEs the column ────────────────
+
 
 def test_ddl_creates_float_as_32_bit():
     """Whatever else changes, this is the width the physical column actually has."""
@@ -73,6 +80,7 @@ def test_the_arrow_map_agrees_with_the_ddl():
 
 
 # ── every Spark cast map must agree with it ──────────────────────────────────
+
 
 def test_spark_cast_maps_agree_with_the_ddl():
     """BOTH of Spark's maps, not just the one named in the traceback.
@@ -109,6 +117,7 @@ def test_bootstrap_maps_already_agree():
 
 # ── every other engine's cast map ───────────────────────────────────────────
 
+
 def test_duckdb_cast_maps_agree_with_the_ddl():
     """DuckDB carried two maps that contradicted each other, like Spark did:
     the pipeline `_TYPE_MAP` said DOUBLE while `_DUCKDB_CAST_TYPES` said FLOAT."""
@@ -140,6 +149,7 @@ def test_generic_sql_cast_map_agrees_with_the_ddl():
     assert _width(GenericSQLAdapter._SQL_CAST_TYPES["float"]) == 32
     assert _width(GenericSQLAdapter._SQL_CAST_TYPES["double"]) == 64
 
+
 # ── the same defect, for integers ────────────────────────────────────────────
 #
 # `float` was not special. `_to_spark_type` also widened `int`/`integer` to
@@ -154,10 +164,25 @@ def test_generic_sql_cast_map_agrees_with_the_ddl():
 # type must survive the trip from contract to column, not just floats.
 
 INT_WIDTHS = {
-    "TINYINT": 8, "tinyint": 8, "byte": 8, "Int8": 8,
-    "SMALLINT": 16, "smallint": 16, "short": 16, "Int16": 16,
-    "INT": 32, "int": 32, "INTEGER": 32, "integer": 32, "Int32": 32, "int32": 32,
-    "BIGINT": 64, "bigint": 64, "long": 64, "Int64": 64, "int64": 64,
+    "TINYINT": 8,
+    "tinyint": 8,
+    "byte": 8,
+    "Int8": 8,
+    "SMALLINT": 16,
+    "smallint": 16,
+    "short": 16,
+    "Int16": 16,
+    "INT": 32,
+    "int": 32,
+    "INTEGER": 32,
+    "integer": 32,
+    "Int32": 32,
+    "int32": 32,
+    "BIGINT": 64,
+    "bigint": 64,
+    "long": 64,
+    "Int64": 64,
+    "int64": 64,
 }
 
 
@@ -168,10 +193,17 @@ def _int_width(physical) -> int:
     return INT_WIDTHS[name]
 
 
-@pytest.mark.parametrize("logical,expected", [
-    ("tinyint", 8), ("smallint", 16), ("int", 32), ("integer", 32),
-    ("long", 64), ("bigint", 64),
-])
+@pytest.mark.parametrize(
+    "logical,expected",
+    [
+        ("tinyint", 8),
+        ("smallint", 16),
+        ("int", 32),
+        ("integer", 32),
+        ("long", 64),
+        ("bigint", 64),
+    ],
+)
 def test_ddl_never_creates_an_integer_narrower_than_declared(logical, expected):
     """A dialect may WIDEN when it lacks the exact type — PostgreSQL has no
     TINYINT, so SMALLINT there is correct. It must never NARROW: that would
@@ -183,9 +215,15 @@ def test_ddl_never_creates_an_integer_narrower_than_declared(logical, expected):
         assert _int_width(physical) >= expected, f"{dialect} creates {logical} as {physical}"
 
 
-@pytest.mark.parametrize("logical,expected", [
-    ("int", 32), ("integer", 32), ("long", 64), ("bigint", 64),
-])
+@pytest.mark.parametrize(
+    "logical,expected",
+    [
+        ("int", 32),
+        ("integer", 32),
+        ("long", 64),
+        ("bigint", 64),
+    ],
+)
 def test_spark_casts_integers_at_the_declared_width(logical, expected):
     """`_to_spark_type` widened int/integer to `long`; the DDL says INT."""
     from lakelogic.engines.spark import SparkAdapter
@@ -206,9 +244,11 @@ def test_no_spark_cast_map_widens_a_type_the_ddl_narrowed():
         ddl = dialects.get("databricks")
         if ddl not in widths:
             continue  # not a numeric type
-        for source in (SparkAdapter._SPARK_CAST_TYPES.get(logical),
-                       SparkAdapter._CONTRACT_TO_SPARK_TYPE.get(logical),
-                       SparkAdapter._to_spark_type(SparkAdapter, logical)):
+        for source in (
+            SparkAdapter._SPARK_CAST_TYPES.get(logical),
+            SparkAdapter._CONTRACT_TO_SPARK_TYPE.get(logical),
+            SparkAdapter._to_spark_type(SparkAdapter, logical),
+        ):
             if source is None or source not in widths:
                 continue
             assert widths[source] == widths[ddl], (

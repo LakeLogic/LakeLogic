@@ -18,6 +18,7 @@ on the row is missing from ANY backend's schema. That is the class of bug, not
 the instance — the same shape as `error_traceback`, which had to be added to six
 places by hand and would have been caught here.
 """
+
 from __future__ import annotations
 
 import re
@@ -48,8 +49,14 @@ BACKENDS = {
 # Counts are the fields this change is about; assert on them specifically so a
 # regression names the column rather than dumping a 35-field diff.
 COUNT_FIELDS = {
-    "counts_source", "counts_total", "counts_good", "counts_quarantined",
-    "counts_aggregated", "counts_dropped", "counts_deduplicated", "counts_filtered",
+    "counts_source",
+    "counts_total",
+    "counts_good",
+    "counts_quarantined",
+    "counts_aggregated",
+    "counts_dropped",
+    "counts_deduplicated",
+    "counts_filtered",
 }
 
 
@@ -74,12 +81,12 @@ def test_the_new_counts_are_emitted_at_all():
 
 # ── attribution ──────────────────────────────────────────────────────────────
 
+
 class _Trans:
     """A stand-in for a contract transformation; only truthiness per attr matters."""
 
     def __init__(self, **kw):
-        for attr in ("deduplicate", "deduplicate_by_latest", "filter",
-                     "sql", "rollup", "pivot", "unnest", "explode"):
+        for attr in ("deduplicate", "deduplicate_by_latest", "filter", "sql", "rollup", "pivot", "unnest", "explode"):
             setattr(self, attr, kw.get(attr))
 
 
@@ -91,7 +98,7 @@ class _Contract:
 def _attribute(dropped, *transformations):
     from lakelogic.core.processor import DataProcessor
 
-    proc = object.__new__(DataProcessor)          # no __init__: this is a pure helper
+    proc = object.__new__(DataProcessor)  # no __init__: this is a pure helper
     proc.contract = _Contract(*transformations)
     return DataProcessor._attribute_dropped_rows(proc, dropped)
 
@@ -141,6 +148,7 @@ def test_attribution_never_raises_on_a_malformed_contract():
 
 # ── the wire format ──────────────────────────────────────────────────────────
 
+
 def test_the_telemetry_payload_carries_the_drop_counts():
     """The platform showed `rows_input` 4,572 and `rows_output` 3,166 with no way
     to explain the gap, because the payload never sent one.
@@ -151,7 +159,7 @@ def test_the_telemetry_payload_carries_the_drop_counts():
     free-form dict on both ends, so this reaches the platform without needing a
     migration first.
     """
-    payload_block = re.search(r'payload = \{(.*?)\n                \}', SOURCE, re.S)
+    payload_block = re.search(r"payload = \{(.*?)\n                \}", SOURCE, re.S)
     assert payload_block, "could not locate the telemetry payload"
     body = payload_block.group(1)
     for key in ('"rows_dropped"', '"rows_deduplicated"', '"rows_filtered"'):
@@ -159,6 +167,7 @@ def test_the_telemetry_payload_carries_the_drop_counts():
 
 
 # ── build provenance ─────────────────────────────────────────────────────────
+
 
 def test_the_version_is_stamped_on_successful_runs_too():
     """`lakelogic_version` was written only by capture_failure(), so it was NULL on
