@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.52.0] — 2026-09-06
+
+### Added
+
+- **run-log**: Enhance payload structure for backward compatibility and clarity in contract identification
 ## [1.51.0] — 2026-09-06
 
 ### Added
@@ -717,6 +722,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.52.0]: https://github.com/lakelogic/LakeLogic/compare/v1.51.0...v1.52.0
 [1.51.0]: https://github.com/lakelogic/LakeLogic/compare/v1.50.0...v1.51.0
 [1.50.0]: https://github.com/lakelogic/LakeLogic/compare/v1.49.0...v1.50.0
 [1.49.0]: https://github.com/lakelogic/LakeLogic/compare/v1.48.0...v1.49.0
