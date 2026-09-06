@@ -1865,7 +1865,23 @@ def write_run_log(
                     _contract_fp = None
 
                 payload = {
+                    # `contract_name` stays a fallback chain for backward
+                    # compatibility: receivers built against it must keep working.
                     "contract_name": report.get("contract") or report.get("dataset"),
+                    # ...but the dataset ALSO travels under its own name.
+                    #
+                    # Collapsing both into `contract_name` meant the receiver was
+                    # handed either a display name ("Bronze - RideFlow Rider
+                    # Profiles") or a table name ("bronze_rideflow_driver_profiles")
+                    # with no way to tell which. A platform matching that string
+                    # against its contract catalogue resolved 1 run in 4,219.
+                    #
+                    # This is the only contract identity an OSS run can supply: a
+                    # platform-side contract id cannot cross the boundary, because
+                    # LakeLogic runs for people who have no platform account. Sent
+                    # alongside domain/system/data_layer, it identifies the contract
+                    # by the table the run actually wrote.
+                    "dataset": report.get("dataset"),
                     "status": status,
                     "engine": report.get("engine"),
                     "tier": report.get("data_layer"),
