@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.52.1] — 2026-09-07
+
+### Changed
+
+- **SLOValidator**: Remove redundant storage variable assignments
 ## [1.52.0] — 2026-09-06
 
 ### Added
@@ -722,6 +727,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.52.1]: https://github.com/lakelogic/LakeLogic/compare/v1.52.0...v1.52.1
 [1.52.0]: https://github.com/lakelogic/LakeLogic/compare/v1.51.0...v1.52.0
 [1.51.0]: https://github.com/lakelogic/LakeLogic/compare/v1.50.0...v1.51.0
 [1.50.0]: https://github.com/lakelogic/LakeLogic/compare/v1.49.0...v1.50.0
