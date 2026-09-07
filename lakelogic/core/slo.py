@@ -81,11 +81,39 @@ class SLOCheckResult(BaseModel):
     # Anomaly detection
     anomaly_ratio: Optional[float] = None  # actual / baseline
     anomaly_baseline: Optional[float] = None  # median/avg of lookback
+    # ── Retention ────────────────────────────────────────────────────────────
+    # ITS OWN FIELDS, not freshness's. Retention used to write its age and limit
+    # into `source_delay_minutes` / `source_slo_max_minutes`, which are documented
+    # as UPSTREAM DATA STALENESS — so one column meant two different things
+    # depending on `check_type`, and a query for "tables near their retention
+    # limit" could not be written without parsing the status prose.
+    #
+    # `retention_period` is the DECLARED promise (P7D), which was persisted nowhere
+    # at all: only the parsed minutes existed, and only inside a sentence.
+    retention_period: Optional[str] = None          # ISO 8601, e.g. "P7D"
+    retention_age_minutes: Optional[float] = None   # age of the OLDEST record
+    retention_limit_minutes: Optional[int] = None   # the period, parsed
     # Quality
     quality_ratio: Optional[float] = None
     quality_severity: Optional[str] = None  # highest failing severity
     # Duration
     duration_seconds: Optional[float] = None
+    # ── WHICH RUN PRODUCED THE DATA THIS VERDICT IS ABOUT ────────────────────
+    # Distinct from the check's own `pipeline_run_id`, which records the pipeline
+    # execution that TRIGGERED the check and is legitimately null for the hourly
+    # service-level job (it is downstream of no single run; one check run covers
+    # 20 entities last written by 20 different runs).
+    #
+    # These name the run-log row the check actually READ, so a verdict can be
+    # joined back to the run that produced the data it judged. `produced_by_run_id` is
+    # per-entity (the exact row); `produced_by_pipeline_run_id` is shared by every
+    # entity in one pipeline invocation, so it rolls the verdicts up to a batch.
+    #
+    # Null is MEANINGFUL here: freshness reads `MAX(updated_at)` off the table
+    # itself and the anomaly check aggregates a lookback window, so neither has a
+    # single run behind it. Only checks that read one run-log row can fill these.
+    produced_by_run_id: Optional[str] = None
+    produced_by_pipeline_run_id: Optional[str] = None
 
 
 class SLOReport(BaseModel):
@@ -141,6 +169,29 @@ class SLOValidator:
         self.duckdb_con = duckdb_con
         self._storage_options = storage_options
 
+    def _run_log_table(self) -> Optional[str]:
+        """The run-log table, wherever the registry declares it.
+
+        TWO HOMES, ONE MEANING. The PIPELINE reads `metadata.run_log_table`
+        (`run_log.py`, `processor.py`, and `resolve_run_log_ref`'s own docstring call
+        it that). The SLO validator read `storage.run_log_table` instead — a field
+        that exists on the model but which the meshes do not set.
+
+        Live consequence: every domain declares
+            metadata:
+              run_log_table: "{domain_catalog}._pipeline_run_log"
+        and the validator still logged "No run_log_table configured in storage;
+        cannot check row counts" on every run. The pipeline was writing the table the
+        whole time; the checker was looking somewhere else for it.
+
+        `storage` wins when set, so an explicit override still works, then metadata.
+        """
+        from_storage = getattr(self.registry.storage, "run_log_table", None)
+        if from_storage:
+            return from_storage
+        metadata = getattr(self.registry, "metadata", None) or {}
+        return metadata.get("run_log_table")
+
     def _resolve_storage_opts(self, path: str) -> dict:
         """Resolve storage options for Polars reads.
 
@@ -153,6 +204,23 @@ class SLOValidator:
         from lakelogic.engines.cloud_credentials import resolve_storage_options
 
         return enrich_azure_storage_options(resolve_storage_options(path))
+
+    def _entity_table_name(self, reg_contract, layer: str, entity: str) -> str:
+        """The physical table for a contract, from the contract itself.
+
+        `make_table_name()` composes `{layer}_{system}_{entity}`, which is only
+        right when `entity` is a bare business name. Registry entity keys now carry
+        their layer (`bronze_rideflow_rider_profiles`), so composing would yield
+        `bronze_rideflow_bronze_rideflow_rider_profiles`. The contract's own
+        resolved `info.table_name` is the authority — it is what the pipeline
+        writes to — and composition is only the fallback for contracts that
+        declare none.
+        """
+        info = (getattr(reg_contract, "contract_dict", None) or {}).get("info") or {}
+        declared = info.get("table_name")
+        if declared:
+            return str(declared)
+        return make_table_name(layer, self.registry.system, entity)
 
     def check_freshness(self) -> List[SLOCheckResult]:
         """
@@ -195,16 +263,44 @@ class SLOValidator:
                 entity=entity,
             )
 
-            if not self.polars and not self.duckdb_con and not schema_root and not polars_path:
+            # A CATALOG IS ALSO A WAY TO NAME A TABLE.
+            # This mesh addresses everything as `catalog`.`schema`.`table` and sets
+            # no *_root and no materialization path, so the guard below skipped all
+            # 18 contracts and the run logged "scanning 18 contracts" then
+            # "0 checks" one millisecond later — for months. Freshness was declared
+            # in every domain and measured in none of them, and the _slo_checks
+            # table has 158 rows without a single freshness verdict among them.
+            domain_catalog = getattr(storage, "domain_catalog", None)
+
+            # NEITHER A SCHEMA ROOT NOR A PATH MEANS THERE IS NO TABLE TO NAME.
+            # That is true on every engine, so the test cannot depend on which one is
+            # active. The old guard read
+            #     not self.polars and not self.duckdb_con and not schema_root and not polars_path
+            # which skipped the contract only when NO engine was selected — so with
+            # `polars=True` (or duckdb) the first two terms were False, the guard never
+            # fired, and an unresolvable contract fell straight through to
+            # `to_sql_table_ref(None)` -> AttributeError: 'NoneType' has no attribute
+            # 'replace'. On Spark it silently skipped every contract instead, which is
+            # how a run reported "scanning 18 contracts" and "0 checks" in the same breath.
+            if not schema_root and not polars_path and not domain_catalog:
+                # Never silently: a skipped contract is an objective that was
+                # promised and not measured, which reads downstream as "no problem".
+                logger.warning(
+                    f"SLO freshness skipped for {layer}.{entity}: no {layer}_root, "
+                    f"no materialization path and no domain_catalog — nothing names "
+                    f"a table to measure."
+                )
                 continue
 
             # Build engine-specific SQL table reference
-            entity_table = make_table_name(layer, self.registry.system, entity)
-            table_name = (
-                f"{schema_root}.{entity_table}".replace("`", "")
-                if schema_root
-                else to_sql_table_ref(polars_path, "spark")
-            )
+            entity_table = self._entity_table_name(reg_contract, layer, entity)
+            if schema_root:
+                table_name = f"{schema_root}.{entity_table}".replace("`", "")
+            elif polars_path:
+                table_name = to_sql_table_ref(polars_path, "spark")
+            else:
+                # Catalog addressing: `{catalog}`.{schema}.{table}
+                table_name = f"{domain_catalog}.{entity_table}".replace("`", "")
 
             # Get the SLO rules for this specific layer
             layer_slo = freshness_config.get(layer)
@@ -410,7 +506,7 @@ class SLOValidator:
         results = []
         row_count_config = self.registry.slo.row_count
         storage = self.registry.storage
-        run_log_table = storage.run_log_table
+        run_log_table = self._run_log_table()
 
         if not run_log_table:
             logger.warning("No run_log_table configured in storage; cannot check row counts.")
@@ -447,27 +543,63 @@ class SLOValidator:
 
             try:
                 if self.spark:
-                    row = self.spark.sql(f"""
-                        SELECT {check_field}, timestamp
+                    # pipeline_run_id/run_id ride along: this is the row whose
+                    # count is being judged, so its identity is the correlation
+                    # key, and it comes back in the same fetch.
+                    #
+                    # FALLING BACK IS THE POINT. A run log written before those
+                    # columns existed (or a foreign table) would fail the wide
+                    # SELECT, and letting that surface would turn a CORRECT verdict
+                    # into "NO DATA" — the exact false-negative this release fixed
+                    # for bronze. Provenance is worth having; it is not worth a
+                    # wrong answer.
+                    _sel = f"""
+                        SELECT {check_field}, timestamp, pipeline_run_id, run_id
                         FROM {spark_table_ref}
                         WHERE data_layer = '{layer}'
                           AND dataset = '{entity}'
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
-                    """).first()
+                    """
+                    try:
+                        row = self.spark.sql(_sel).first()
+                    except Exception:
+                        row = self.spark.sql(f"""
+                            SELECT {check_field}, timestamp
+                            FROM {spark_table_ref}
+                            WHERE data_layer = '{layer}'
+                              AND dataset = '{entity}'
+                              AND stage NOT IN ('no_new_data', 'reprocess')
+                            ORDER BY timestamp DESC
+                            LIMIT 1
+                        """).first()
                 elif self.duckdb_con:
-                    result = self.duckdb_con.execute(f"""
-                        SELECT {check_field}, timestamp
+                    _where = f"""
                         FROM {duckdb_table_ref}
                         WHERE data_layer = '{layer}'
                           AND dataset = '{entity}'
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
-                    """).fetchone()
+                    """
+                    try:
+                        result = self.duckdb_con.execute(
+                            f"SELECT {check_field}, timestamp, pipeline_run_id, run_id {_where}"
+                        ).fetchone()
+                    except Exception:
+                        result = self.duckdb_con.execute(
+                            f"SELECT {check_field}, timestamp {_where}"
+                        ).fetchone()
                     if result:
-                        row = {check_field: result[0], "timestamp": result[1]}
+                        # Index defensively: a row from a run log without the
+                        # produced-by columns must still yield a verdict.
+                        row = {
+                            check_field: result[0],
+                            "timestamp": result[1],
+                            "pipeline_run_id": result[2] if len(result) > 2 else None,
+                            "run_id": result[3] if len(result) > 3 else None,
+                        }
                     else:
                         row = None
                 else:
@@ -496,7 +628,12 @@ class SLOValidator:
 
                     if not filtered.is_empty():
                         row_dict = filtered.to_dicts()[0]
-                        row = {check_field: row_dict.get(check_field), "timestamp": row_dict.get("timestamp")}
+                        row = {
+                            check_field: row_dict.get(check_field),
+                            "timestamp": row_dict.get("timestamp"),
+                            "pipeline_run_id": row_dict.get("pipeline_run_id"),
+                            "run_id": row_dict.get("run_id"),
+                        }
                     else:
                         row = None
 
@@ -548,12 +685,24 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
+                        # MUST be explicit. `check_type` DEFAULTS to "freshness",
+                        # and this call never set it — so every row-count verdict
+                        # was filed as a freshness one. That is not cosmetic:
+                        # `emit_slo_report` keys the platform payload BY check_type,
+                        # so `slo_json.freshness` was being populated with row
+                        # counts, and `_freshness_status()` read a row count as a
+                        # statement about data age. 13 of 33 rows in the live
+                        # _slo_checks table were mislabelled this way.
+                        check_type="row_count",
                         status=status,
                         passed=passed,
                         row_count=actual_count,
                         slo_min_rows=min_rows,
                         slo_max_rows=max_rows,
                         latest_ts=str(row["timestamp"]) if row["timestamp"] else None,
+                        # The run whose count this verdict is about.
+                        produced_by_pipeline_run_id=row["pipeline_run_id"],
+                        produced_by_run_id=row["run_id"],
                     )
                 )
 
@@ -570,7 +719,10 @@ class SLOValidator:
             if _anomaly_on:
                 try:
                     anomaly_result = self.check_row_count_anomaly(
-                        entity, layer, actual_count, _anomaly_cfg, check_field=check_field
+                        entity, layer, actual_count, _anomaly_cfg,
+                        check_field=check_field,
+                        produced_by_run_id=row["run_id"],
+                        produced_by_pipeline_run_id=row["pipeline_run_id"],
                     )
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.debug(f"Anomaly check raised for {entity}: {exc}")
@@ -802,7 +954,7 @@ class SLOValidator:
             return results
 
         storage = self.registry.storage
-        run_log_table = storage.run_log_table
+        run_log_table = self._run_log_table()
         if not run_log_table:
             return results
 
@@ -816,34 +968,54 @@ class SLOValidator:
             counts: Optional[Dict[str, Any]] = None
             try:
                 if self.spark:
-                    row = self.spark.sql(f"""
-                        SELECT counts_source, counts_total, counts_good, counts_quarantined
+                    _q_where = f"""
                         FROM {spark_ref}
                         WHERE data_layer = '{layer}'
                           AND dataset = '{entity}'
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
-                    """).first()
+                    """
+                    _q_cols = "counts_source, counts_total, counts_good, counts_quarantined"
+                    try:
+                        row = self.spark.sql(
+                            f"SELECT {_q_cols}, pipeline_run_id, run_id {_q_where}"
+                        ).first()
+                    except Exception:
+                        row = self.spark.sql(f"SELECT {_q_cols} {_q_where}").first()
                     if row:
                         counts = {
                             "source": row["counts_source"],
                             "total": row["counts_total"],
                             "good": row["counts_good"],
                             "quarantined": row["counts_quarantined"],
+                            "_pipeline_run_id": (
+                                row["pipeline_run_id"] if "pipeline_run_id" in row.__fields__ else None
+                            ),
+                            "_run_id": row["run_id"] if "run_id" in row.__fields__ else None,
                         }
                 elif self.duckdb_con:
-                    res = self.duckdb_con.execute(f"""
-                        SELECT counts_source, counts_total, counts_good, counts_quarantined
+                    _q_where = f"""
                         FROM {duckdb_ref}
                         WHERE data_layer = '{layer}'
                           AND dataset = '{entity}'
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
-                    """).fetchone()
+                    """
+                    _q_cols = "counts_source, counts_total, counts_good, counts_quarantined"
+                    try:
+                        res = self.duckdb_con.execute(
+                            f"SELECT {_q_cols}, pipeline_run_id, run_id {_q_where}"
+                        ).fetchone()
+                    except Exception:
+                        res = self.duckdb_con.execute(f"SELECT {_q_cols} {_q_where}").fetchone()
                     if res:
-                        counts = {"source": res[0], "total": res[1], "good": res[2], "quarantined": res[3]}
+                        counts = {
+                            "source": res[0], "total": res[1], "good": res[2], "quarantined": res[3],
+                            "_pipeline_run_id": res[4] if len(res) > 4 else None,
+                            "_run_id": res[5] if len(res) > 5 else None,
+                        }
                 else:
                     import polars as pl
 
@@ -868,13 +1040,22 @@ class SLOValidator:
                             "total": d.get("counts_total"),
                             "good": d.get("counts_good"),
                             "quarantined": d.get("counts_quarantined"),
+                            "_pipeline_run_id": d.get("pipeline_run_id"),
+                            "_run_id": d.get("run_id"),
                         }
             except Exception as e:
                 logger.debug(f"Quality run-log read failed for {entity}: {e}")
                 continue
 
             if counts is not None:
-                results.extend(self._evaluate_quality_counts(entity, counts, quality))
+                # `_evaluate_quality_counts` is shared with the in-report path,
+                # which has no run log behind it — so the produced-by ids are stamped
+                # here, where the row was actually read, rather than threaded
+                # through a signature that cannot always supply it.
+                for r in self._evaluate_quality_counts(entity, counts, quality):
+                    r.produced_by_pipeline_run_id = counts.get("_pipeline_run_id")
+                    r.produced_by_run_id = counts.get("_run_id")
+                    results.append(r)
 
         return results
 
@@ -885,6 +1066,8 @@ class SLOValidator:
         actual_count: int,
         anomaly_cfg,
         check_field: Optional[str] = None,
+        produced_by_run_id: Optional[str] = None,
+        produced_by_pipeline_run_id: Optional[str] = None,
     ) -> Optional[SLOCheckResult]:
         """
         Compare actual row count against historical baseline from run logs.
@@ -896,7 +1079,7 @@ class SLOValidator:
             return None
 
         storage = self.registry.storage
-        run_log_table = storage.run_log_table
+        run_log_table = self._run_log_table()
         if not run_log_table:
             return None
 
@@ -918,7 +1101,7 @@ class SLOValidator:
                       AND dataset = '{entity}'
                       AND stage NOT IN ('no_new_data', 'reprocess')
                     ORDER BY timestamp DESC
-                    LIMIT {anomaly_cfg.lookback_runs}
+                    LIMIT {anomaly_cfg.lookback_runs + 1}
                 """).collect()
             elif self.duckdb_con:
                 duckdb_rows = self.duckdb_con.execute(f"""
@@ -928,7 +1111,7 @@ class SLOValidator:
                       AND dataset = '{entity}'
                       AND stage NOT IN ('no_new_data', 'reprocess')
                     ORDER BY timestamp DESC
-                    LIMIT {anomaly_cfg.lookback_runs}
+                    LIMIT {anomaly_cfg.lookback_runs + 1}
                 """).fetchall()
                 rows = [{"cnt": r[0]} for r in duckdb_rows]
             else:
@@ -952,7 +1135,7 @@ class SLOValidator:
                         & (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
                     )
                     .sort("timestamp", descending=True)
-                    .head(anomaly_cfg.lookback_runs)
+                    .head(anomaly_cfg.lookback_runs + 1)
                 )
 
                 rows = [{"cnt": r.get(check_field_name)} for r in filtered.to_dicts()]
@@ -961,7 +1144,18 @@ class SLOValidator:
             logger.debug(f"Anomaly check query failed for {entity}: {e}")
             return None
 
-        historical = [r["cnt"] for r in rows if r["cnt"] is not None]
+        # A BASELINE MUST NOT CONTAIN THE VALUE IT IS JUDGING.
+        # `actual_count` comes from the newest run-log row, and this query is
+        # ordered newest-first — so that same row was the first element of its own
+        # baseline. Live, that made the check unable to detect anything: with a
+        # steady series the median simply BECAME the current value and every verdict
+        # read `ratio=1.00x, baseline == rows`. A real shift would be pulled toward
+        # 1 by its own presence, most strongly on the small windows where drift
+        # detection matters most.
+        #
+        # One extra row is fetched above so dropping the newest still leaves a full
+        # `lookback_runs` window of genuine history.
+        historical = [r["cnt"] for r in rows if r["cnt"] is not None][1:]
 
         if len(historical) < anomaly_cfg.min_runs_before_enforcement:
             logger.debug(
@@ -1001,6 +1195,13 @@ class SLOValidator:
             row_count=actual_count,
             anomaly_ratio=round(ratio, 4),
             anomaly_baseline=round(baseline, 1),
+            # The LOOKBACK is the baseline, not the subject. This verdict judges
+            # `actual_count`, which came from one specific run-log row, so it
+            # carries that row's identity like the bounds check does. Without it an
+            # anomaly is the one verdict you most want to trace — "volume dropped
+            # 70%" is useless if you cannot name the run that dropped it.
+            produced_by_run_id=produced_by_run_id,
+            produced_by_pipeline_run_id=produced_by_pipeline_run_id,
         )
 
     def check_retention(self) -> List[SLOCheckResult]:
@@ -1035,25 +1236,51 @@ class SLOValidator:
             "gold": storage.gold_root,
         }
 
+        # ── Parse each layer's period ONCE, not once per contract ────────────
+        # `retention:` declares three values (bronze/silver/gold) and this loop runs
+        # per CONTRACT — 18 of them here — so the same three ISO strings were parsed
+        # 18 times. Worse, an unparseable period warned once per contract rather
+        # than once per layer, so one typo in `gold:` produced six identical
+        # warnings and read like six problems.
+        retention_by_layer: Dict[str, tuple] = {}
+        for _layer, _iso in (self.registry.retention or {}).items():
+            _minutes = _iso_period_to_minutes(_iso)
+            if not _minutes:
+                logger.warning(
+                    f"  ⚠ Retention [{_layer}]: could not parse period '{_iso}' — "
+                    f"no contract in this layer will be retention-checked."
+                )
+                continue
+            retention_by_layer[_layer] = (_iso, _minutes)
+
         for reg_contract in self.registry.get_active_contracts():
             layer = reg_contract.layer
             entity = reg_contract.entity
 
-            iso_period = self.registry.retention.get(layer)
-            if not iso_period:
+            _period = retention_by_layer.get(layer)
+            if not _period:
                 continue
+            iso_period, retention_minutes = _period
 
-            retention_minutes = _iso_period_to_minutes(iso_period)
-            if not retention_minutes:
-                logger.warning(f"  ⚠ Retention [{layer}]: could not parse period '{iso_period}' — skipping {entity}")
-                continue
-
-            # Source columns to probe — prefer freshness SLO config, fall back to common names
+            # Source columns to probe — prefer freshness SLO config, fall back to
+            # the audit columns the framework always writes.
+            #
+            # THE FALLBACK THE COMMENT PROMISED AND THE CODE DID NOT HAVE.
+            # This read `check_columns` off `slo.freshness` and, finding none,
+            # `continue`d at DEBUG level. So a domain that declares `retention:`
+            # but no freshness objective silently measured nothing — retention is a
+            # legal promise about deletion, and its absence looked identical to a
+            # pass. The two are declared in different blocks (`retention:` is
+            # top-level next to compliance; `slo.freshness` is a service level), so
+            # one must not be able to switch the other off.
             layer_slo = freshness_config.get(layer)
             source_cols = list(layer_slo.check_columns) if layer_slo else []
             if not source_cols:
-                logger.debug(f"  ⏭ Retention [{layer}] {entity}: no check_columns configured — skipped")
-                continue
+                source_cols = ["_lakelogic_processed_at", "_lakelogic_loaded_at"]
+                logger.debug(
+                    f"  Retention [{layer}] {entity}: no freshness check_columns "
+                    f"configured; probing the audit columns {source_cols}."
+                )
 
             schema_root = layer_roots.get(layer)
             polars_path = resolve_materialization_path(
@@ -1064,12 +1291,28 @@ class SLOValidator:
                 entity=entity,
             )
 
-            entity_table = make_table_name(layer, self.registry.system, entity)
-            table_name = (
-                f"{schema_root}.{entity_table}".replace("`", "")
-                if schema_root
-                else to_sql_table_ref(polars_path, "spark")
-            )
+            # THE SAME THREE WAYS TO NAME A TABLE AS check_freshness.
+            # This site was fixed for the crash but not for the catalog: a mesh that
+            # addresses tables as `catalog`.schema.table sets no root and no path, so
+            # every contract was skipped and `retention` produced ZERO rows — while
+            # bronze P7D / silver P90D / gold P7Y sat declared and unmeasured, exactly
+            # as freshness did. Fixing one of two identical sites is not fixing it.
+            domain_catalog = getattr(storage, "domain_catalog", None)
+            if not schema_root and not polars_path and not domain_catalog:
+                logger.warning(
+                    f"SLO retention skipped for {layer}.{entity}: no {layer}_root, "
+                    f"no materialization path and no domain_catalog — nothing names "
+                    f"a table to measure."
+                )
+                continue
+
+            entity_table = self._entity_table_name(reg_contract, layer, entity)
+            if schema_root:
+                table_name = f"{schema_root}.{entity_table}".replace("`", "")
+            elif polars_path:
+                table_name = to_sql_table_ref(polars_path, "spark")
+            else:
+                table_name = f"{domain_catalog}.{entity_table}".replace("`", "")
 
             min_ts = None
             col_used = None
@@ -1122,12 +1365,17 @@ class SLOValidator:
             age_minutes = round((now - min_utc).total_seconds() / 60, 1)
             passed = age_minutes <= retention_minutes
 
+            _age = _humanise_minutes(age_minutes)
+            _limit = _humanise_minutes(retention_minutes)
             status = (
-                f"✅ OK (oldest record {age_minutes:.0f}min, limit {retention_minutes}min via '{col_used}')"
+                f"✅ OK (oldest record {_age}, limit {iso_period} = {_limit} via '{col_used}')"
                 if passed
+                # The breach string began with a literal "?" — a mojibaked emoji, so
+                # the one verdict here that signals legal exposure was the only one
+                # without a marker, while every pass showed a tick.
                 else (
-                    f"? RETENTION BREACH: oldest record {age_minutes:.0f}min old exceeds "
-                    f"{iso_period} ({retention_minutes}min) via '{col_used}'"
+                    f"❌ RETENTION BREACH: oldest record {_age} exceeds "
+                    f"{iso_period} = {_limit} via '{col_used}'"
                 )
             )
             logger.debug(f"   🗄 Retention [{layer}] {entity}: {status}")
@@ -1140,10 +1388,13 @@ class SLOValidator:
                     status=status,
                     passed=passed,
                     severity="pass" if passed else "fail",
-                    source_delay_minutes=age_minutes,
-                    source_slo_max_minutes=retention_minutes,
+                    retention_period=iso_period,
+                    retention_age_minutes=age_minutes,
+                    retention_limit_minutes=retention_minutes,
+                    # `source_column_used` IS shared on purpose: it means "which
+                    # timestamp column was resolved" for freshness and retention
+                    # alike — same word, same meaning. The two above are not.
                     source_column_used=col_used,
-                    source_passed=passed,
                 )
             )
 
@@ -1288,6 +1539,30 @@ class SLOValidator:
 
 
 # ── Standalone helpers (used by DataProcessor.run) ───────────────────────────
+
+
+def _humanise_minutes(minutes: float) -> str:
+    """Render a duration in the unit a reader actually thinks in.
+
+    Retention periods are declared in ISO 8601 (P7D, P90D, P7Y) and compared in
+    minutes, so the verdict read "oldest record 1431min, limit 10080min" — and for
+    gold, "limit 3679200min". Nobody can check that against a P7Y promise at a
+    glance, which matters because retention is a legal statement about deletion and
+    someone has to be able to read it.
+
+    MINUTES REMAIN THE ONE STORED UNIT. `source_delay_minutes` and
+    `source_slo_max_minutes` are unchanged, so nothing downstream re-learns a second
+    unit; this only formats the human-facing string.
+    """
+    if minutes < 90:
+        return f"{minutes:.0f} min"
+    hours = minutes / 60
+    if hours < 48:
+        return f"{hours:.1f} hours"
+    days = hours / 24
+    if days < 730:
+        return f"{days:.1f} days"
+    return f"{days / 365:.1f} years"
 
 
 def _parse_duration_seconds(value: Any) -> Optional[float]:

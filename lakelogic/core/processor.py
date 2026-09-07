@@ -3510,6 +3510,43 @@ class DataProcessor:
         schema = StructType([StructField(k, _type_for(k), True) for k in keys])
         return schema, keys
 
+    def _local_mount_prefix(self) -> Optional[str]:
+        """The prefix that makes an engine-relative storage path readable by THIS process.
+
+        Some platforms address one location two ways: the engine resolves a storage-relative
+        path against the attached catalog, while Python sees the same bytes only through a
+        local mount. On Microsoft Fabric, Spark reads ``Files/landing/...`` and CANNOT read
+        ``/lakehouse/default/Files/landing/...``; the local filesystem is the exact opposite.
+        Neither form works for both, so a single string cannot serve the enumerator and the
+        reader — it has to be translated at the boundary.
+
+        Derived from the contract's OWN location rather than a per-platform constant: the
+        contract was loaded through the local mount, so everything before its storage root
+        IS the prefix. ``/lakehouse/default/Files/_contracts/d/s/c.yaml`` yields
+        ``/lakehouse/default``. Returns None when nothing needs translating — an absolute
+        path, a URI, or a platform whose two views already agree — which is every platform
+        except this case.
+        """
+        raw = getattr(self.contract, "_contract_path", None)
+        if not raw:
+            return None
+        text = str(raw).replace("\\", "/")
+        marker = "/Files/"
+        if marker not in text:
+            return None
+        prefix = text.split(marker, 1)[0]
+        return prefix or None
+
+    def _mounted(self, path: str) -> Optional[str]:
+        """``path`` as this process can open it, or None when no translation applies."""
+        if not path or self._is_uri_path(path) or os.path.isabs(path):
+            return None
+        prefix = self._local_mount_prefix()
+        if not prefix:
+            return None
+        candidate = f"{prefix}/{str(path).lstrip('/')}"
+        return candidate if candidate != path else None
+
     def _expand_source_files(self, path: str) -> Optional[List[Dict[str, Any]]]:
         """
         Expand file patterns into concrete file paths and mtimes.
@@ -3604,15 +3641,34 @@ class DataProcessor:
         # quarantine, run_log, and the engine link resolvers.
         pattern = path
         files = [f for f in glob(pattern, recursive=True) if Path(f).is_file()]
+
+        # ENUMERATE THROUGH THE LOCAL MOUNT, READ THROUGH THE ENGINE'S PATH.
+        #
+        # A storage-relative pattern is resolved by `glob` against the PROCESS CWD, which on
+        # a cluster is a container scratch directory and never the data root. It therefore
+        # matched nothing, and a partitioned source reported `no_new_data` over a directory
+        # holding ten files — indistinguishable from a genuinely empty zone.
+        #
+        # Retry through the local mount, then hand the results back in the ENGINE's address
+        # space: the paths returned here are read afterwards, and on Fabric the engine cannot
+        # open the mounted form at all (`400 Bad Request`). Translating one way and not the
+        # other just moves the failure downstream.
+        mounted = None
+        if not files:
+            mounted = self._mounted(pattern)
+            if mounted:
+                files = [f for f in glob(mounted, recursive=True) if Path(f).is_file()]
+
         results = []
         for file in sorted(files):
             try:
-                results.append(
-                    {
-                        "path": str(Path(file).resolve()),
-                        "mtime": Path(file).stat().st_mtime,
-                    }
-                )
+                resolved = str(Path(file).resolve())
+                if mounted:
+                    prefix = self._local_mount_prefix()
+                    normalised = resolved.replace("\\", "/")
+                    if prefix and normalised.startswith(prefix):
+                        resolved = normalised[len(prefix):].lstrip("/")
+                results.append({"path": resolved, "mtime": Path(file).stat().st_mtime})
             except Exception:
                 continue
         return results or None

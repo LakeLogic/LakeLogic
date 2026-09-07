@@ -1213,9 +1213,20 @@ def _flatten_slo_check(
         "slo_max_rows": result.slo_max_rows,
         "anomaly_ratio": result.anomaly_ratio,
         "anomaly_baseline": result.anomaly_baseline,
+        "retention_period": getattr(result, "retention_period", None),
+        "retention_age_minutes": getattr(result, "retention_age_minutes", None),
+        "retention_limit_minutes": getattr(result, "retention_limit_minutes", None),
         "quality_ratio": result.quality_ratio,
         "quality_severity": result.quality_severity,
         "duration_seconds": result.duration_seconds,
+        # WHICH RUN PRODUCED THE DATA — not what triggered the check. `pipeline_run_id` above is the execution
+        # that triggered this check — null for the scheduled service-level job,
+        # which is downstream of no single run. These two name the run-log row the
+        # check READ, so a verdict joins back to the run that produced the data it
+        # judged. Null for freshness (reads the table) and anomaly (aggregates a
+        # window): neither has one run behind it.
+        "produced_by_run_id": getattr(result, "produced_by_run_id", None),
+        "produced_by_pipeline_run_id": getattr(result, "produced_by_pipeline_run_id", None),
         "details_json": result.model_dump_json(),
     }
 
@@ -1283,15 +1294,30 @@ def _write_slo_checks_table(
                 StructField("slo_max_rows", LongType(), True),
                 StructField("anomaly_ratio", DoubleType(), True),
                 StructField("anomaly_baseline", DoubleType(), True),
+                StructField("retention_period", StringType(), True),
+                StructField("retention_age_minutes", DoubleType(), True),
+                StructField("retention_limit_minutes", LongType(), True),
                 StructField("quality_ratio", DoubleType(), True),
                 StructField("quality_severity", StringType(), True),
                 StructField("duration_seconds", DoubleType(), True),
+                StructField("produced_by_run_id", StringType(), True),
+                StructField("produced_by_pipeline_run_id", StringType(), True),
                 StructField("details_json", StringType(), True),
             ]
         )
         df = spark.createDataFrame(records, schema=schema)
         if spark.catalog.tableExists(table_name):
-            df.write.mode("append").format("delta").saveAsTable(table_name)
+            # mergeSchema: this table is APPEND-ONLY and long-lived, so a table
+            # created before a column existed is the normal case, not an edge one.
+            # Without it, adding `produced_by_run_id` would make every append fail
+            # against the 92 rows already written under the older schema — the
+            # check would run, produce a correct verdict, and lose it on write.
+            (
+                df.write.mode("append")
+                .format("delta")
+                .option("mergeSchema", "true")
+                .saveAsTable(table_name)
+            )
         else:
             df.write.mode("overwrite").format("delta").saveAsTable(table_name)
         logger.info(f"Wrote {len(records)} SLO check rows to Spark table {table_name}")
@@ -1585,6 +1611,236 @@ def _lakelogic_version() -> Optional[str]:
         return getattr(lakelogic, "__version__", None)
     except Exception:  # pragma: no cover - version is best-effort, never fatal
         return None
+
+
+def emit_slo_report(
+    registry: Any,
+    results: Any,
+    *,
+    environment: str = "dev",
+    pipeline_run_id: Optional[str] = None,
+    timeout: float = 15.0,
+) -> int:
+    """Send SLO results to the Observatory through the SAME path the pipeline uses.
+
+    WHY NOT `RemoteObserver`
+    The standalone SLO notebook reported via `RemoteObserver`, which is a different
+    mechanism entirely: off unless `LAKELOGIC_REMOTE_OBSERVER=true`, addressed by
+    `LINEAGELOGIC_REPORT_URL` (an env var nothing sets), and posting a
+    `{"type": "slo"}` body the platform has no handler for. The notebook even
+    checked `registry.cloud.report_url` and then constructed the observer WITHOUT
+    passing it. Net effect: 0 of 2,082 recorded runs ever carried an SLO result.
+
+    This uses the pipeline's route instead — `resolve_observatory_config`, the same
+    `X-API-Key` header, the same endpoint, the same spool-on-transient behaviour —
+    and shapes the body as `RunLogIngest`, writing the result under
+    `run_metadata.slo_json` - the key `_metadata_slo()` actually reads. No platform
+    change needed.
+
+    ONE ROW PER ENTITY, not one per run: Data Products is keyed by dataset, so a
+    single combined row could not say which product met its objective.
+
+    WHY THE BUDGET IS NOT THE PIPELINE'S 3s
+    `write_run_log` justifies its 3s as "short timeout to prevent blocking the
+    pipeline" — it is a side-effect bolted onto real work, so it must not slow the
+    load down. That reasoning does not transfer: REPORTING IS THIS JOB'S ONLY
+    PURPOSE. A check that measured everything correctly and then spooled the answer
+    because the endpoint took 3.1s has failed at the one thing it was scheduled to
+    do. The budget is per row and the breaker below bounds the worst case.
+
+    Returns the number of rows accepted.
+    """
+    import time as _time
+
+    import requests as _requests
+
+    from .observatory_spool import flush_spool, resolve_observatory_config, spool_payload
+
+    observatory_cfg = resolve_observatory_config(getattr(registry, "observatory", None))
+    if not (observatory_cfg and observatory_cfg.get("enabled")):
+        logger.info("SLO report not sent: observatory is not enabled for this registry.")
+        return 0
+
+    endpoint = observatory_cfg.get("endpoint")
+    if not endpoint:
+        logger.warning("SLO report not sent: observatory is enabled but has no endpoint.")
+        return 0
+
+    # SAME GATING AS THE PIPELINE, SAME DIAGNOSTIC.
+    # `write_run_log` honours the block's `environments` filter and prints its
+    # resolved config BEFORE dialling, so a failure tells you whether the config
+    # even resolved. This path did neither: it pushed from every environment and
+    # its first sign of trouble was a timeout, indistinguishable from a bad key.
+    #
+    # `emit_on` deliberately does NOT transfer. It filters on a pipeline RUN's
+    # status, and the analogue here would drop passing SLO rows — but a met
+    # objective is exactly the evidence Data Products needs. Only the environment
+    # filter has the same meaning on both paths.
+    target_envs = observatory_cfg.get("environments", [])
+    if target_envs and environment not in target_envs:
+        logger.info(
+            f"SLO report not sent: environment={environment} is not in {target_envs}."
+        )
+        return 0
+
+    logger.info(
+        f"📡 SLO report: config resolved (endpoint={bool(endpoint)}, "
+        f"key={bool(observatory_cfg.get('api_key'))}, env={environment})"
+    )
+
+    headers = {"Content-Type": "application/json"}
+    api_key = observatory_cfg.get("api_key")
+    if api_key:
+        headers["X-API-Key"] = api_key
+
+    # Group the flat result list by the entity it is about.
+    by_entity: Dict[str, list] = {}
+    for r in results or []:
+        by_entity.setdefault(getattr(r, "entity", "") or "unknown", []).append(r)
+
+    # ONE POST PER ENTITY IS THE PIPELINE'S SHAPE; THE LOOP IS WHAT'S NEW.
+    # `write_run_log` posts once per invocation, so a dead endpoint costs it one
+    # 3s timeout and one warning. Here the same code runs 13+ times in a row: the
+    # notebook stalled ~40s and printed the identical "unreachable" line for every
+    # entity, which reads as 13 problems instead of one. Once the transport has
+    # failed, stop dialling — spool the rest with no network call and say it once.
+    accepted = 0
+    unreachable: Optional[str] = None
+    buffered: list = []
+    for entity, entity_results in by_entity.items():
+        # Shape the sections `_slo_signal_counts` reads: a section counts as
+        # CONFIGURED when it carries a threshold or an explicit pass.
+        slo_obj: Dict[str, Any] = {}
+        for r in entity_results:
+            kind = getattr(r, "check_type", "freshness") or "freshness"
+            section: Dict[str, Any] = {"pass": bool(getattr(r, "passed", False))}
+            delay = getattr(r, "delay_minutes", None)
+            threshold_min = getattr(r, "slo_max_minutes", None)
+            if delay is not None:
+                section["seconds"] = float(delay) * 60.0
+            if threshold_min is not None:
+                section["threshold_seconds"] = float(threshold_min) * 60.0
+            if getattr(r, "row_count", None) is not None:
+                section["rows"] = r.row_count
+            if getattr(r, "slo_min_rows", None) is not None:
+                section["min"] = r.slo_min_rows
+            if getattr(r, "slo_max_rows", None) is not None:
+                section["max"] = r.slo_max_rows
+            # Retention reached the platform as `{"pass": true}` and nothing else,
+            # because the section is built from delay_minutes/slo_max_minutes and
+            # retention leaves both null. A bare boolean cannot answer "how close to
+            # the limit are we" — the question anyone asks before a breach.
+            if getattr(r, "retention_age_minutes", None) is not None:
+                section["age_minutes"] = r.retention_age_minutes
+                section["limit_minutes"] = r.retention_limit_minutes
+                section["period"] = r.retention_period
+            # The run this section's verdict is about, carried to the platform so
+            # the correlation survives the trip. `_slo_signal_counts` ignores keys
+            # it does not know, so adding these cannot change configured/passing.
+            if getattr(r, "produced_by_run_id", None):
+                section["produced_by_run_id"] = r.produced_by_run_id
+            if getattr(r, "produced_by_pipeline_run_id", None):
+                section["produced_by_pipeline_run_id"] = r.produced_by_pipeline_run_id
+            if getattr(r, "anomaly_ratio", None) is not None:
+                section["anomaly_ratio"] = r.anomaly_ratio
+                section["anomaly_baseline"] = r.anomaly_baseline
+
+            # SEVERAL RESULTS SHARE A check_type, AND REPLACING LOSES EVIDENCE.
+            # Bounds and drift are both `row_count`: one says "915 rows, within
+            # 1..500000", the other "0.3x the 14-run median". Wholesale replacement
+            # kept only the later one, so a drift breach arrived with no thresholds
+            # and a bounds pass erased the drift ratio entirely.
+            #
+            # Union the evidence, and AND the verdicts so a failure on either side
+            # fails the section — a passing sibling must never mask a breach.
+            existing = slo_obj.get(kind)
+            if existing is None:
+                slo_obj[kind] = section
+            else:
+                merged = dict(existing)
+                merged.update({k: v for k, v in section.items() if v is not None})
+                merged["pass"] = bool(existing.get("pass", True)) and bool(section.get("pass", True))
+                slo_obj[kind] = merged
+
+        layer = next((getattr(r, "layer", None) for r in entity_results), None)
+        all_passed = all(bool(getattr(r, "passed", False)) for r in entity_results)
+
+        payload = {
+            "contract_name": entity,
+            "dataset": entity,
+            # An SLO check reads tables; it writes none. Counts stay 0 and the status
+            # describes the CHECK, so this row is never mistaken for a data load.
+            "status": "success" if all_passed else "failed",
+            "engine": "slo",
+            "tier": layer,
+            "pipeline_run_id": pipeline_run_id or None,
+            "metadata": {
+                # `slo_json`, NOT `slo`. The platform's reader is
+                #     _metadata_slo(): metadata.get("slo_json") or metadata.get("slos")
+                # and every `get("slo")` in the SaaS reads the DECLARED objective from
+                # contract config, not a run's result. Emitting `slo` put 36 records in
+                # the database that no code path could see: the products drawer kept
+                # saying "No objectives configured - not evaluated" while the evidence
+                # sat one key away. The section SHAPE below is already what
+                # `_slo_signal_counts` reads (pass / threshold_seconds / min / max).
+                "slo_json": slo_obj,
+                "environment": environment,
+                "domain": getattr(registry, "domain", None),
+                "system": getattr(registry, "system", None),
+                "record_type": "slo_check",
+                "lakelogic_version": _lakelogic_version(),
+            },
+        }
+
+        # Endpoint already proven down this run — buffer without re-dialling.
+        if unreachable is not None:
+            spool_payload(observatory_cfg, payload)
+            buffered.append(entity)
+            continue
+
+        try:
+            _t0 = _time.monotonic()
+            try:
+                resp = _requests.post(endpoint, json=payload, headers=headers, timeout=timeout)
+            except Exception:
+                # ONE RETRY BEFORE CONDEMNING THE ENDPOINT. A first call from a cold
+                # cluster pays DNS + TLS + whatever the tunnel needs to wake; the
+                # second is warm. Tripping the breaker on a single cold attempt would
+                # spool the whole report over a hiccup.
+                resp = _requests.post(endpoint, json=payload, headers=headers, timeout=timeout)
+            _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+            if resp.status_code < 300:
+                accepted += 1
+                if accepted == 1:
+                    # First success only: the number that says whether the budget is
+                    # the problem. Absent this, a timeout is indistinguishable from a
+                    # server that is merely slow.
+                    logger.info(f"📡 SLO report: first row accepted in {_elapsed_ms}ms.")
+            elif resp.status_code in (408, 429) or resp.status_code >= 500:
+                # Server-side, not payload-specific: the next entity would hit the
+                # same wall, so trip the breaker rather than repeat it per row.
+                spool_payload(observatory_cfg, payload)
+                buffered.append(entity)
+                unreachable = f"HTTP {resp.status_code}"
+            else:
+                # 4xx is about THIS payload (bad body / auth), so keep going —
+                # and retrying wouldn't help, so it is not buffered.
+                logger.warning(f"Observatory rejected {entity}: {resp.status_code} {resp.text[:200]}")
+        except Exception as exc:
+            spool_payload(observatory_cfg, payload)
+            buffered.append(entity)
+            unreachable = str(exc)
+
+    if unreachable:
+        logger.warning(
+            f"📡 Observatory unreachable ({unreachable}); "
+            f"{len(buffered)} SLO row(s) buffered for retry on a later run: "
+            f"{', '.join(buffered[:5])}{'…' if len(buffered) > 5 else ''}"
+        )
+    if accepted:
+        flush_spool(observatory_cfg, endpoint, headers)
+    logger.info(f"SLO report: {accepted}/{len(by_entity)} entity rows accepted by the Observatory.")
+    return accepted
 
 
 def write_run_log(

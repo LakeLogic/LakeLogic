@@ -775,13 +775,17 @@ def test_row_count_anomaly_duckdb_polars_and_disabled_edges(monkeypatch):
         is None
     )
 
+    # The NEWEST row is the value under test (100), exactly as the real caller
+    # supplies it: `check_row_counts` reads the latest run-log row and passes its
+    # count in. It is excluded from the baseline, which is therefore the average of
+    # the two older runs — 90 and 110 — still 100.0.
     log_df = pl.DataFrame(
         {
-            "data_layer": ["bronze", "bronze", "bronze", "silver"],
-            "dataset": ["orders", "orders", "orders", "orders"],
-            "stage": ["ok", "reprocess", "ok", "ok"],
-            "counts_good": [90, 999, 110, 1000],
-            "timestamp": [3, 4, 2, 1],
+            "data_layer": ["bronze", "bronze", "bronze", "bronze", "silver"],
+            "dataset": ["orders", "orders", "orders", "orders", "orders"],
+            "stage": ["ok", "ok", "reprocess", "ok", "ok"],
+            "counts_good": [100, 90, 999, 110, 1000],
+            "timestamp": [5, 3, 4, 2, 1],
         }
     )
     monkeypatch.setattr(SLOValidator, "_resolve_storage_opts", lambda self, path: {})
