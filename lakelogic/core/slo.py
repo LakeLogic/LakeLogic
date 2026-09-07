@@ -505,7 +505,6 @@ class SLOValidator:
 
         results = []
         row_count_config = self.registry.slo.row_count
-        storage = self.registry.storage
         run_log_table = self._run_log_table()
 
         if not run_log_table:
@@ -954,7 +953,6 @@ class SLOValidator:
         if not self.spark and not self.polars and not self.duckdb_con:
             return results
 
-        storage = self.registry.storage
         run_log_table = self._run_log_table()
         if not run_log_table:
             return results
@@ -1080,7 +1078,6 @@ class SLOValidator:
         if not self.spark and not self.polars and not self.duckdb_con:
             return None
 
-        storage = self.registry.storage
         run_log_table = self._run_log_table()
         if not run_log_table:
             return None
