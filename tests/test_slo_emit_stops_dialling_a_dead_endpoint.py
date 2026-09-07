@@ -9,6 +9,7 @@ identical "Observatory unreachable" line 13 times, which reads as 13 faults.
 Once the transport has failed, the remaining rows are spooled with no network call.
 A 4xx is different: it is about that one payload, so the loop keeps going.
 """
+
 from __future__ import annotations
 
 import types
@@ -54,14 +55,13 @@ def _emit(monkeypatch, post, entities=("a", "b", "c")):
         return post(len(calls))
 
     monkeypatch.setattr("requests.post", _post)
-    accepted = run_log.emit_slo_report(
-        _registry(), [_Result(e) for e in entities], environment="dev"
-    )
+    accepted = run_log.emit_slo_report(_registry(), [_Result(e) for e in entities], environment="dev")
     return accepted, calls
 
 
 def test_a_timeout_stops_the_loop_dialling(monkeypatch, wired):
     """THE DEFECT: every entity paid its own 3s timeout."""
+
     def _post(_n):
         raise OSError("read timed out")
 
@@ -74,6 +74,7 @@ def test_a_timeout_stops_the_loop_dialling(monkeypatch, wired):
 
 def test_the_rows_are_still_buffered_after_the_breaker_trips(monkeypatch, wired):
     """Not dialling must not mean dropping — every row is spooled for a later run."""
+
     def _post(_n):
         raise OSError("read timed out")
 
@@ -99,6 +100,7 @@ def test_a_server_error_also_trips_the_breaker(monkeypatch, wired):
 
     No retry here: the call RETURNED, so there was no cold start to absorb.
     """
+
     def _post(_n):
         return types.SimpleNamespace(status_code=503, text="down")
 
@@ -109,6 +111,7 @@ def test_a_server_error_also_trips_the_breaker(monkeypatch, wired):
 
 def test_a_rejected_payload_does_not_stop_the_others(monkeypatch, wired):
     """400 is about THAT payload; the remaining entities must still be tried."""
+
     def _post(_n):
         return types.SimpleNamespace(status_code=400, text="bad field")
 
@@ -159,9 +162,7 @@ def test_an_in_scope_environment_is_pushed(monkeypatch, wired):
             "environments": ["dev", "prod"],
         },
     )
-    monkeypatch.setattr(
-        "requests.post", lambda *a, **k: types.SimpleNamespace(status_code=200, text="ok")
-    )
+    monkeypatch.setattr("requests.post", lambda *a, **k: types.SimpleNamespace(status_code=200, text="ok"))
     assert run_log.emit_slo_report(_registry(), [_Result("a")], environment="dev") == 1
 
 
@@ -178,9 +179,7 @@ def test_a_passing_check_is_still_sent(monkeypatch, wired):
             "emit_on": ["failed"],
         },
     )
-    monkeypatch.setattr(
-        "requests.post", lambda *a, **k: types.SimpleNamespace(status_code=200, text="ok")
-    )
+    monkeypatch.setattr("requests.post", lambda *a, **k: types.SimpleNamespace(status_code=200, text="ok"))
     passing = _Result("a")
     assert passing.passed is True
     assert run_log.emit_slo_report(_registry(), [passing], environment="dev") == 1
@@ -200,9 +199,7 @@ def test_a_cold_first_attempt_is_retried_before_condemning_the_endpoint(monkeypa
         return types.SimpleNamespace(status_code=200, text="ok")
 
     monkeypatch.setattr("requests.post", _post)
-    accepted = run_log.emit_slo_report(
-        _registry(), [_Result("a"), _Result("b")], environment="dev"
-    )
+    accepted = run_log.emit_slo_report(_registry(), [_Result("a"), _Result("b")], environment="dev")
     assert accepted == 2, "the cold first attempt should not have tripped the breaker"
 
 

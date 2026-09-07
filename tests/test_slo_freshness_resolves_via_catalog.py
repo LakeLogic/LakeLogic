@@ -21,6 +21,7 @@ THE CAUSE
     table, which resolves from `domain_catalog` — so the failure was invisible
     behind checks that did work.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -31,7 +32,9 @@ from lakelogic.core.slo import SLOValidator
 
 def _registry(**storage_kw):
     storage = SimpleNamespace(
-        bronze_root=None, silver_root=None, gold_root=None,
+        bronze_root=None,
+        silver_root=None,
+        gold_root=None,
         domain_catalog="`rideflow_dev_demo`.marketplace",
     )
     for k, v in storage_kw.items():
@@ -42,12 +45,16 @@ def _registry(**storage_kw):
         contract_dict={"info": {"table_name": "bronze_rideflow_rider_profiles"}},
     )
     return SimpleNamespace(
-        domain="marketplace", system="rideflow", storage=storage,
-        slo=SimpleNamespace(freshness={
-            "bronze": SimpleNamespace(max_delay_minutes=60,
-                                      check_columns=["updated_at"],
-                                      exclude_tables=[], include_tables=[]),
-        }),
+        domain="marketplace",
+        system="rideflow",
+        storage=storage,
+        slo=SimpleNamespace(
+            freshness={
+                "bronze": SimpleNamespace(
+                    max_delay_minutes=60, check_columns=["updated_at"], exclude_tables=[], include_tables=[]
+                ),
+            }
+        ),
         get_active_contracts=lambda: [contract],
         metadata={},
     )
@@ -87,9 +94,7 @@ def test_the_declared_table_name_wins_over_composition():
     """
     spark = _Spark()
     SLOValidator(_registry(), spark=spark).check_freshness()
-    assert "bronze_rideflow_bronze_rideflow" not in spark.queries[0], (
-        "the entity's layer prefix was composed on twice"
-    )
+    assert "bronze_rideflow_bronze_rideflow" not in spark.queries[0], "the entity's layer prefix was composed on twice"
 
 
 def test_a_root_configured_mesh_is_unaffected():
@@ -129,14 +134,18 @@ def _retention_registry():
         contract_dict={"info": {"table_name": "bronze_rideflow_rider_profiles"}},
     )
     return SimpleNamespace(
-        domain="marketplace", system="rideflow",
-        storage=SimpleNamespace(bronze_root=None, silver_root=None, gold_root=None,
-                                domain_catalog="`rideflow_dev_demo`.marketplace"),
-        slo=SimpleNamespace(freshness={
-            "bronze": SimpleNamespace(max_delay_minutes=60,
-                                      check_columns=["updated_at"],
-                                      exclude_tables=[], include_tables=[]),
-        }),
+        domain="marketplace",
+        system="rideflow",
+        storage=SimpleNamespace(
+            bronze_root=None, silver_root=None, gold_root=None, domain_catalog="`rideflow_dev_demo`.marketplace"
+        ),
+        slo=SimpleNamespace(
+            freshness={
+                "bronze": SimpleNamespace(
+                    max_delay_minutes=60, check_columns=["updated_at"], exclude_tables=[], include_tables=[]
+                ),
+            }
+        ),
         retention={"bronze": "P7D"},
         get_active_contracts=lambda: [contract],
         metadata={},
@@ -189,11 +198,13 @@ def test_retention_does_not_depend_on_a_freshness_objective():
         contract_dict={"info": {"table_name": "bronze_rideflow_rider_profiles"}},
     )
     registry = SimpleNamespace(
-        domain="marketplace", system="rideflow",
-        storage=SimpleNamespace(bronze_root=None, silver_root=None, gold_root=None,
-                                domain_catalog="`rideflow_dev_demo`.marketplace"),
-        slo=SimpleNamespace(freshness={}),      # NO freshness objective at all
-        retention={"bronze": "P7D"},            # but retention IS declared
+        domain="marketplace",
+        system="rideflow",
+        storage=SimpleNamespace(
+            bronze_root=None, silver_root=None, gold_root=None, domain_catalog="`rideflow_dev_demo`.marketplace"
+        ),
+        slo=SimpleNamespace(freshness={}),  # NO freshness objective at all
+        retention={"bronze": "P7D"},  # but retention IS declared
         get_active_contracts=lambda: [contract],
         metadata={},
     )
@@ -233,9 +244,14 @@ def test_the_slo_checks_row_carries_the_retention_numbers():
 
     spark = _RetentionSpark()
     result = SLOValidator(_retention_registry(), spark=spark).check_retention()[0]
-    row = _flatten_slo_check(result, check_run_id="c1", pipeline_run_id=None,
-                             checked_at="2026-09-07T00:00:00Z",
-                             domain="marketplace", system="rideflow")
+    row = _flatten_slo_check(
+        result,
+        check_run_id="c1",
+        pipeline_run_id=None,
+        checked_at="2026-09-07T00:00:00Z",
+        domain="marketplace",
+        system="rideflow",
+    )
     assert row["retention_period"] == "P7D"
     assert row["retention_limit_minutes"] == 10080
     assert row["retention_age_minutes"] is not None
@@ -252,9 +268,10 @@ def test_the_platform_receives_more_than_a_boolean():
     result = SLOValidator(_retention_registry(), spark=_RetentionSpark()).check_retention()[0]
     reg = types.SimpleNamespace(
         observatory={"enabled": True, "endpoint": "https://x/i", "api_key": "k"},
-        domain="marketplace", system="rideflow")
-    with patch("requests.post") as post, \
-         patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
+        domain="marketplace",
+        system="rideflow",
+    )
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
         post.return_value = MagicMock(status_code=200, text="ok")
         run_log.emit_slo_report(reg, [result], environment="dev")
         section = post.call_args_list[0].kwargs["json"]["metadata"]["slo_json"]["retention"]

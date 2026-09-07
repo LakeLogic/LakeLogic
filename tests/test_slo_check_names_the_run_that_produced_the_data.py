@@ -24,6 +24,7 @@ THE RULE - plain names, because `source_*` is already taken
     anomaly check aggregates a lookback window, so neither has one run behind it.
     A null here means "no single run produced this verdict", not "we lost it".
 """
+
 from __future__ import annotations
 
 from lakelogic.core.run_log import _flatten_slo_check
@@ -34,15 +35,15 @@ ENTITY_RUN = "9ee54926-40f4-46c8-8b90-2cc5a61ea7e0"
 
 
 def _result(**kw):
-    base = dict(layer="bronze", entity="bronze_rideflow_rider_profiles",
-                status="OK", passed=True)
+    base = dict(layer="bronze", entity="bronze_rideflow_rider_profiles", status="OK", passed=True)
     base.update(kw)
     return SLOCheckResult(**base)
 
 
 def test_the_result_model_can_carry_the_run_it_measured():
-    r = _result(check_type="row_count", row_count=915,
-                produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN)
+    r = _result(
+        check_type="row_count", row_count=915, produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN
+    )
     assert r.produced_by_run_id == ENTITY_RUN
     assert r.produced_by_pipeline_run_id == PIPELINE_RUN
 
@@ -56,10 +57,12 @@ def test_provenance_defaults_to_none_not_to_a_guess():
 
 def test_the_slo_checks_row_carries_both_ids():
     row = _flatten_slo_check(
-        _result(check_type="row_count", produced_by_run_id=ENTITY_RUN,
-                produced_by_pipeline_run_id=PIPELINE_RUN),
-        check_run_id="check-1", pipeline_run_id=None,
-        checked_at="2026-09-07T08:39:03Z", domain="marketplace", system="rideflow",
+        _result(check_type="row_count", produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN),
+        check_run_id="check-1",
+        pipeline_run_id=None,
+        checked_at="2026-09-07T08:39:03Z",
+        domain="marketplace",
+        system="rideflow",
     )
     assert row["produced_by_run_id"] == ENTITY_RUN
     assert row["produced_by_pipeline_run_id"] == PIPELINE_RUN
@@ -69,11 +72,12 @@ def test_the_trigger_and_the_measured_run_are_different_columns():
     """The distinction the whole change rests on: a scheduled check has no trigger
     but still measures a specific run."""
     row = _flatten_slo_check(
-        _result(check_type="row_count", produced_by_run_id=ENTITY_RUN,
-                produced_by_pipeline_run_id=PIPELINE_RUN),
+        _result(check_type="row_count", produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN),
         check_run_id="check-1",
         pipeline_run_id=None,  # scheduled: downstream of no single run
-        checked_at="2026-09-07T08:39:03Z", domain="marketplace", system="rideflow",
+        checked_at="2026-09-07T08:39:03Z",
+        domain="marketplace",
+        system="rideflow",
     )
     assert row["pipeline_run_id"] is None, "a scheduled check must not invent a trigger"
     assert row["produced_by_run_id"] == ENTITY_RUN, "but it does know what it measured"
@@ -83,8 +87,11 @@ def test_a_freshness_verdict_has_no_source_run():
     """Freshness reads the TABLE, so null here is the honest answer."""
     row = _flatten_slo_check(
         _result(check_type="freshness", delay_minutes=12.0),
-        check_run_id="check-1", pipeline_run_id=None,
-        checked_at="2026-09-07T08:39:03Z", domain="marketplace", system="rideflow",
+        check_run_id="check-1",
+        pipeline_run_id=None,
+        checked_at="2026-09-07T08:39:03Z",
+        domain="marketplace",
+        system="rideflow",
     )
     assert row["produced_by_run_id"] is None
     assert row["produced_by_pipeline_run_id"] is None
@@ -118,10 +125,18 @@ def _emit_and_capture(monkeypatch, results):
 
 
 def test_the_platform_payload_carries_the_measured_run(monkeypatch):
-    sent = _emit_and_capture(monkeypatch, [
-        _result(check_type="row_count", row_count=915, slo_min_rows=1,
-                produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN),
-    ])
+    sent = _emit_and_capture(
+        monkeypatch,
+        [
+            _result(
+                check_type="row_count",
+                row_count=915,
+                slo_min_rows=1,
+                produced_by_run_id=ENTITY_RUN,
+                produced_by_pipeline_run_id=PIPELINE_RUN,
+            ),
+        ],
+    )
     section = sent[0]["metadata"]["slo_json"]["row_count"]
     assert section["produced_by_run_id"] == ENTITY_RUN
     assert section["produced_by_pipeline_run_id"] == PIPELINE_RUN
@@ -130,9 +145,12 @@ def test_the_platform_payload_carries_the_measured_run(monkeypatch):
 def test_a_section_without_provenance_omits_the_keys(monkeypatch):
     """Omitted, not null: the platform reads absence as 'not applicable' and a
     null would look like a lost value."""
-    sent = _emit_and_capture(monkeypatch, [
-        _result(check_type="freshness", delay_minutes=12.0, slo_max_minutes=60),
-    ])
+    sent = _emit_and_capture(
+        monkeypatch,
+        [
+            _result(check_type="freshness", delay_minutes=12.0, slo_max_minutes=60),
+        ],
+    )
     section = sent[0]["metadata"]["slo_json"]["freshness"]
     assert "produced_by_run_id" not in section
     assert "produced_by_pipeline_run_id" not in section
@@ -142,15 +160,20 @@ def test_provenance_does_not_change_the_configured_count(monkeypatch):
     """`_slo_signal_counts` counts a section CONFIGURED from threshold/min/max/pass.
     Adding produced-by keys must not make an unconfigured section look configured.
     """
-    sent = _emit_and_capture(monkeypatch, [
-        _result(check_type="row_count", row_count=915,
-                produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN),
-    ])
+    sent = _emit_and_capture(
+        monkeypatch,
+        [
+            _result(
+                check_type="row_count",
+                row_count=915,
+                produced_by_run_id=ENTITY_RUN,
+                produced_by_pipeline_run_id=PIPELINE_RUN,
+            ),
+        ],
+    )
     section = sent[0]["metadata"]["slo_json"]["row_count"]
     signal_fields = {"threshold", "threshold_seconds", "min", "max"}
-    assert not (signal_fields & set(section)), (
-        "no threshold was configured, so no threshold key may appear"
-    )
+    assert not (signal_fields & set(section)), "no threshold was configured, so no threshold key may appear"
     assert section["pass"] is True
 
 
@@ -189,11 +212,13 @@ def test_a_run_log_without_the_columns_still_produces_a_verdict():
             return R()
 
     registry = SimpleNamespace(
-        slo=SimpleNamespace(row_count={
-            "bronze": SimpleNamespace(min_rows=10, max_rows=1000,
-                                      check_field="counts_good",
-                                      exclude_tables=[], anomaly=None),
-        }),
+        slo=SimpleNamespace(
+            row_count={
+                "bronze": SimpleNamespace(
+                    min_rows=10, max_rows=1000, check_field="counts_good", exclude_tables=[], anomaly=None
+                ),
+            }
+        ),
         storage=SimpleNamespace(run_log_table="run_logs"),
         get_active_contracts=lambda: [SimpleNamespace(layer="bronze", entity="orders")],
     )
@@ -230,11 +255,13 @@ def test_a_row_count_verdict_is_labelled_row_count_not_freshness():
             return R()
 
     registry = SimpleNamespace(
-        slo=SimpleNamespace(row_count={
-            "bronze": SimpleNamespace(min_rows=10, max_rows=1000,
-                                      check_field="counts_good",
-                                      exclude_tables=[], anomaly=None),
-        }),
+        slo=SimpleNamespace(
+            row_count={
+                "bronze": SimpleNamespace(
+                    min_rows=10, max_rows=1000, check_field="counts_good", exclude_tables=[], anomaly=None
+                ),
+            }
+        ),
         storage=SimpleNamespace(run_log_table="run_logs"),
         get_active_contracts=lambda: [SimpleNamespace(layer="bronze", entity="orders")],
     )
@@ -247,9 +274,12 @@ def test_a_row_count_verdict_is_labelled_row_count_not_freshness():
 def test_a_row_count_lands_in_its_own_payload_section(monkeypatch):
     """The consequence of the mislabel, pinned: a row count must not appear under
     `freshness`, which the platform reads as a statement about data age."""
-    sent = _emit_and_capture(monkeypatch, [
-        _result(check_type="row_count", row_count=915, slo_min_rows=1),
-    ])
+    sent = _emit_and_capture(
+        monkeypatch,
+        [
+            _result(check_type="row_count", row_count=915, slo_min_rows=1),
+        ],
+    )
     slo_json = sent[0]["metadata"]["slo_json"]
     assert "row_count" in slo_json
     assert "freshness" not in slo_json, "a row count is not a freshness verdict"
@@ -269,9 +299,15 @@ def test_the_anomaly_verdict_names_the_run_that_drifted():
 
     from lakelogic.core.slo import SLOValidator
 
-    cfg = SimpleNamespace(enabled=True, lookback_runs=14, min_ratio=0.5,
-                          max_ratio=2.0, method="median",
-                          min_runs_before_enforcement=5, check_field=None)
+    cfg = SimpleNamespace(
+        enabled=True,
+        lookback_runs=14,
+        min_ratio=0.5,
+        max_ratio=2.0,
+        method="median",
+        min_runs_before_enforcement=5,
+        check_field=None,
+    )
 
     class Con:
         def execute(self, query):
@@ -291,8 +327,12 @@ def test_the_anomaly_verdict_names_the_run_that_drifted():
     )
     v = SLOValidator(registry, duckdb_con=Con())
     result = v.check_row_count_anomaly(
-        "orders", "bronze", 300, cfg,
-        produced_by_run_id="run-1", produced_by_pipeline_run_id="pipe-1",
+        "orders",
+        "bronze",
+        300,
+        cfg,
+        produced_by_run_id="run-1",
+        produced_by_pipeline_run_id="pipe-1",
     )
     assert result is not None and result.passed is False, "0.3x should breach min_ratio"
     assert result.anomaly_ratio == 0.3
@@ -304,12 +344,23 @@ def test_bounds_and_drift_share_a_section_without_erasing_each_other(monkeypatch
     """Both are check_type="row_count". Replacement kept only the later verdict, so
     a drift breach arrived with no thresholds and a bounds pass erased the ratio.
     """
-    bounds = _result(check_type="row_count", row_count=915,
-                     slo_min_rows=1, slo_max_rows=500000,
-                     produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN)
-    drift = _result(check_type="row_count", row_count=915, passed=False,
-                    anomaly_ratio=0.3, anomaly_baseline=3000.0,
-                    produced_by_run_id=ENTITY_RUN, produced_by_pipeline_run_id=PIPELINE_RUN)
+    bounds = _result(
+        check_type="row_count",
+        row_count=915,
+        slo_min_rows=1,
+        slo_max_rows=500000,
+        produced_by_run_id=ENTITY_RUN,
+        produced_by_pipeline_run_id=PIPELINE_RUN,
+    )
+    drift = _result(
+        check_type="row_count",
+        row_count=915,
+        passed=False,
+        anomaly_ratio=0.3,
+        anomaly_baseline=3000.0,
+        produced_by_run_id=ENTITY_RUN,
+        produced_by_pipeline_run_id=PIPELINE_RUN,
+    )
 
     sent = _emit_and_capture(monkeypatch, [bounds, drift])
     section = sent[0]["metadata"]["slo_json"]["row_count"]
@@ -321,8 +372,7 @@ def test_bounds_and_drift_share_a_section_without_erasing_each_other(monkeypatch
 
 def test_a_passing_sibling_cannot_mask_a_breach(monkeypatch):
     """Order must not decide the verdict."""
-    drift = _result(check_type="row_count", passed=False, anomaly_ratio=0.3,
-                    anomaly_baseline=3000.0)
+    drift = _result(check_type="row_count", passed=False, anomaly_ratio=0.3, anomaly_baseline=3000.0)
     bounds = _result(check_type="row_count", row_count=915, slo_min_rows=1)
 
     for order in ([drift, bounds], [bounds, drift]):
@@ -353,8 +403,15 @@ CFG = None
 def _cfg(**kw):
     from types import SimpleNamespace
 
-    base = dict(enabled=True, lookback_runs=14, min_ratio=0.5, max_ratio=2.0,
-                method="median", min_runs_before_enforcement=2, check_field="counts_good")
+    base = dict(
+        enabled=True,
+        lookback_runs=14,
+        min_ratio=0.5,
+        max_ratio=2.0,
+        method="median",
+        min_runs_before_enforcement=2,
+        check_field="counts_good",
+    )
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -386,7 +443,7 @@ def test_a_steady_series_still_reads_as_normal():
 def test_a_full_window_of_history_survives_the_exclusion():
     """One extra row is fetched, so dropping the newest still leaves lookback_runs
     of genuine history rather than one fewer."""
-    counts = [500] + [100] * 14          # newest + 14 historical
+    counts = [500] + [100] * 14  # newest + 14 historical
     v = _anomaly_validator(counts)
     r = v.check_row_count_anomaly("orders", "bronze", 500, _cfg(lookback_runs=14))
     assert r is not None
@@ -398,6 +455,4 @@ def test_enforcement_counts_history_not_the_current_row():
     """With min_runs_before_enforcement=5, four historical runs plus the current one
     is still four — not enough."""
     v = _anomaly_validator([100, 100, 100, 100, 100])
-    assert v.check_row_count_anomaly(
-        "orders", "bronze", 100, _cfg(min_runs_before_enforcement=5)
-    ) is None
+    assert v.check_row_count_anomaly("orders", "bronze", 100, _cfg(min_runs_before_enforcement=5)) is None

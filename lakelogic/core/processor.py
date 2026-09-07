@@ -3667,7 +3667,7 @@ class DataProcessor:
                     prefix = self._local_mount_prefix()
                     normalised = resolved.replace("\\", "/")
                     if prefix and normalised.startswith(prefix):
-                        resolved = normalised[len(prefix):].lstrip("/")
+                        resolved = normalised[len(prefix) :].lstrip("/")
                 results.append({"path": resolved, "mtime": Path(file).stat().st_mtime})
             except Exception:
                 continue

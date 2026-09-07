@@ -1312,12 +1312,7 @@ def _write_slo_checks_table(
             # Without it, adding `produced_by_run_id` would make every append fail
             # against the 92 rows already written under the older schema — the
             # check would run, produce a correct verdict, and lose it on write.
-            (
-                df.write.mode("append")
-                .format("delta")
-                .option("mergeSchema", "true")
-                .saveAsTable(table_name)
-            )
+            (df.write.mode("append").format("delta").option("mergeSchema", "true").saveAsTable(table_name))
         else:
             df.write.mode("overwrite").format("delta").saveAsTable(table_name)
         logger.info(f"Wrote {len(records)} SLO check rows to Spark table {table_name}")
@@ -1678,9 +1673,7 @@ def emit_slo_report(
     # filter has the same meaning on both paths.
     target_envs = observatory_cfg.get("environments", [])
     if target_envs and environment not in target_envs:
-        logger.info(
-            f"SLO report not sent: environment={environment} is not in {target_envs}."
-        )
+        logger.info(f"SLO report not sent: environment={environment} is not in {target_envs}.")
         return 0
 
     logger.info(

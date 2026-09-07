@@ -27,6 +27,7 @@ THE DEFECT
 
 The rule is engine-independent: no root and no path means there is no table to name.
 """
+
 from __future__ import annotations
 
 from lakelogic.core.registry import (
@@ -49,8 +50,11 @@ def _unresolvable_registry() -> DomainRegistry:
         storage=RegistryStorage(),  # no bronze/silver/gold root, no run_log_table
         contracts=[
             RegistryContract(
-                layer="bronze", entity="trips", path="dummy.yaml",
-                enabled=True, contract_dict={"info": {}},
+                layer="bronze",
+                entity="trips",
+                path="dummy.yaml",
+                enabled=True,
+                contract_dict={"info": {}},
             ),
         ],
     )
@@ -87,9 +91,9 @@ def test_the_guard_does_not_ask_which_engine_is_active():
     # Skip comments: the fix's own comment QUOTES the old broken guard verbatim, so a
     # naive scan finds the documentation of the bug instead of the code.
     guard = next(
-        line for line in src.splitlines()
-        if "not schema_root" in line and "not polars_path" in line
-        and not line.lstrip().startswith("#")
+        line
+        for line in src.splitlines()
+        if "not schema_root" in line and "not polars_path" in line and not line.lstrip().startswith("#")
     )
     assert "self.polars" not in guard, "the guard must not depend on the active engine"
     assert "self.duckdb_con" not in guard, "the guard must not depend on the active engine"
@@ -104,7 +108,7 @@ def _registry_with_metadata_run_log() -> DomainRegistry:
         domain="marketplace",
         system="rideflow",
         slo=RegistrySLO(),
-        storage=RegistryStorage(),           # storage does NOT carry it
+        storage=RegistryStorage(),  # storage does NOT carry it
         metadata={"run_log_table": "`cat`.marketplace._pipeline_run_log"},
         contracts=[],
     )

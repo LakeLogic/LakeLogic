@@ -18,6 +18,7 @@ THE ROUTE THAT WORKS
     the platform reads `run_metadata.slo`. So no platform change is needed — the
     results just have to go through the pipeline's own observatory path.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -38,10 +39,24 @@ class _Registry:
 
 def _results():
     return [
-        SLOCheckResult(layer="bronze", entity="trips", check_type="freshness",
-                       status="PASS", passed=True, delay_minutes=10, slo_max_minutes=60),
-        SLOCheckResult(layer="silver", entity="charges", check_type="row_count",
-                       status="FAIL", passed=False, row_count=0, slo_min_rows=1),
+        SLOCheckResult(
+            layer="bronze",
+            entity="trips",
+            check_type="freshness",
+            status="PASS",
+            passed=True,
+            delay_minutes=10,
+            slo_max_minutes=60,
+        ),
+        SLOCheckResult(
+            layer="silver",
+            entity="charges",
+            check_type="row_count",
+            status="FAIL",
+            passed=False,
+            row_count=0,
+            slo_min_rows=1,
+        ),
     ]
 
 
@@ -56,7 +71,7 @@ def test_it_posts_to_the_observatory_endpoint_with_the_api_key_header():
     this machine buffered during a past outage — 12 of them here — which would be
     counted as posts made by this function.
     """
-    with patch("requests.post") as post,          patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
         post.return_value = MagicMock(status_code=200, text="ok")
         emit_slo_report(_Registry(), _results(), environment="dev")
 
@@ -68,7 +83,7 @@ def test_it_posts_to_the_observatory_endpoint_with_the_api_key_header():
 
 def test_the_results_land_where_the_platform_reads_them():
     """`run_metadata.slo_json` — the field `_slo_signal_counts` inspects."""
-    with patch("requests.post") as post,          patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
         post.return_value = MagicMock(status_code=200, text="ok")
         emit_slo_report(_Registry(), _results(), environment="dev")
 
@@ -82,7 +97,7 @@ def test_the_results_land_where_the_platform_reads_them():
 def test_one_row_per_entity_so_each_product_gets_its_own_verdict():
     """Data Products is keyed by dataset; one combined row could not say which
     product met its objective."""
-    with patch("requests.post") as post,          patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
         post.return_value = MagicMock(status_code=200, text="ok")
         emit_slo_report(_Registry(), _results(), environment="dev")
 
@@ -90,7 +105,7 @@ def test_one_row_per_entity_so_each_product_gets_its_own_verdict():
 
 
 def test_a_failing_check_is_reported_as_failed():
-    with patch("requests.post") as post,          patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
         post.return_value = MagicMock(status_code=200, text="ok")
         emit_slo_report(_Registry(), _results(), environment="dev")
 
@@ -102,7 +117,7 @@ def test_a_failing_check_is_reported_as_failed():
 def test_the_row_is_marked_as_a_check_not_a_data_load():
     """An SLO check reads tables and writes none. Without this the row would be
     indistinguishable from a pipeline run that produced zero rows."""
-    with patch("requests.post") as post,          patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
         post.return_value = MagicMock(status_code=200, text="ok")
         emit_slo_report(_Registry(), _results(), environment="dev")
 
@@ -122,8 +137,7 @@ def test_nothing_is_sent_when_the_observatory_is_disabled():
 
 def test_a_transient_failure_is_buffered_rather_than_dropped():
     """Same spool-on-5xx behaviour the pipeline's run logs get."""
-    with patch("requests.post") as post, \
-         patch("lakelogic.core.observatory_spool.spool_payload") as spool:
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.spool_payload") as spool:
         post.return_value = MagicMock(status_code=503, text="unavailable")
         emit_slo_report(_Registry(), _results(), environment="dev")
     assert spool.call_count == 2
@@ -147,11 +161,9 @@ def test_the_result_lands_under_the_key_the_platform_actually_reads():
     to the consumer. It now names the consumer's key, which is the only thing that
     makes the record readable.
     """
-    with patch("requests.post") as post,          patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
+    with patch("requests.post") as post, patch("lakelogic.core.observatory_spool.flush_spool", return_value=0):
         post.return_value = MagicMock(status_code=200, text="ok")
         emit_slo_report(_Registry(), _results(), environment="dev")
     body = _posts(post)[0]
     assert "slo_json" in body["metadata"], "the platform reads slo_json, not slo"
-    assert "slo" not in body["metadata"], (
-        "emitting the old key too would leave a second, unread copy of the verdict"
-    )
+    assert "slo" not in body["metadata"], "emitting the old key too would leave a second, unread copy of the verdict"

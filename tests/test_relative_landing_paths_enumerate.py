@@ -12,6 +12,7 @@ THE LIVE FAILURE. On Microsoft Fabric one location has two addresses: Spark read
 container's scratch CWD, matched nothing, and a partitioned bronze source reported
 `no_new_data` over a directory holding ten files — for hours, with no error anywhere.
 """
+
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,7 @@ def _estate(tmp_path: Path):
     contract_path = mount / "Files" / "_contracts" / "internal" / "internal" / "c.yaml"
     contract_path.parent.mkdir(parents=True)
     contract_path.write_text(
-        'version: 1.0.0\n'
+        "version: 1.0.0\n"
         "info:\n  title: cities\n  table_name: bronze_internal_cities\n"
         "model:\n  fields:\n    - name: city_code\n      type: string\n"
         "source:\n  type: landing\n  path: Files/landing_internal/internal/cities\n  format: csv\n",

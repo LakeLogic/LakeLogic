@@ -90,9 +90,9 @@ class SLOCheckResult(BaseModel):
     #
     # `retention_period` is the DECLARED promise (P7D), which was persisted nowhere
     # at all: only the parsed minutes existed, and only inside a sentence.
-    retention_period: Optional[str] = None          # ISO 8601, e.g. "P7D"
-    retention_age_minutes: Optional[float] = None   # age of the OLDEST record
-    retention_limit_minutes: Optional[int] = None   # the period, parsed
+    retention_period: Optional[str] = None  # ISO 8601, e.g. "P7D"
+    retention_age_minutes: Optional[float] = None  # age of the OLDEST record
+    retention_limit_minutes: Optional[int] = None  # the period, parsed
     # Quality
     quality_ratio: Optional[float] = None
     quality_severity: Optional[str] = None  # highest failing severity
@@ -588,9 +588,7 @@ class SLOValidator:
                             f"SELECT {check_field}, timestamp, pipeline_run_id, run_id {_where}"
                         ).fetchone()
                     except Exception:
-                        result = self.duckdb_con.execute(
-                            f"SELECT {check_field}, timestamp {_where}"
-                        ).fetchone()
+                        result = self.duckdb_con.execute(f"SELECT {check_field}, timestamp {_where}").fetchone()
                     if result:
                         # Index defensively: a row from a run log without the
                         # produced-by columns must still yield a verdict.
@@ -719,7 +717,10 @@ class SLOValidator:
             if _anomaly_on:
                 try:
                     anomaly_result = self.check_row_count_anomaly(
-                        entity, layer, actual_count, _anomaly_cfg,
+                        entity,
+                        layer,
+                        actual_count,
+                        _anomaly_cfg,
                         check_field=check_field,
                         produced_by_run_id=row["run_id"],
                         produced_by_pipeline_run_id=row["pipeline_run_id"],
@@ -978,9 +979,7 @@ class SLOValidator:
                     """
                     _q_cols = "counts_source, counts_total, counts_good, counts_quarantined"
                     try:
-                        row = self.spark.sql(
-                            f"SELECT {_q_cols}, pipeline_run_id, run_id {_q_where}"
-                        ).first()
+                        row = self.spark.sql(f"SELECT {_q_cols}, pipeline_run_id, run_id {_q_where}").first()
                     except Exception:
                         row = self.spark.sql(f"SELECT {_q_cols} {_q_where}").first()
                     if row:
@@ -1012,7 +1011,10 @@ class SLOValidator:
                         res = self.duckdb_con.execute(f"SELECT {_q_cols} {_q_where}").fetchone()
                     if res:
                         counts = {
-                            "source": res[0], "total": res[1], "good": res[2], "quarantined": res[3],
+                            "source": res[0],
+                            "total": res[1],
+                            "good": res[2],
+                            "quarantined": res[3],
                             "_pipeline_run_id": res[4] if len(res) > 4 else None,
                             "_run_id": res[5] if len(res) > 5 else None,
                         }
@@ -1373,10 +1375,7 @@ class SLOValidator:
                 # The breach string began with a literal "?" — a mojibaked emoji, so
                 # the one verdict here that signals legal exposure was the only one
                 # without a marker, while every pass showed a tick.
-                else (
-                    f"❌ RETENTION BREACH: oldest record {_age} exceeds "
-                    f"{iso_period} = {_limit} via '{col_used}'"
-                )
+                else (f"❌ RETENTION BREACH: oldest record {_age} exceeds {iso_period} = {_limit} via '{col_used}'")
             )
             logger.debug(f"   🗄 Retention [{layer}] {entity}: {status}")
 
