@@ -227,6 +227,11 @@ class DataProcessor:
         trace: bool = False,
         run_log_mode: Optional[str] = None,
         strict: bool = False,
+        #: Where this contract was LOADED FROM, when the caller knows and the contract itself
+        #: cannot say. A pipeline passes contracts as dicts, so `contract._contract_path` is
+        #: unset on every real run — and the local-mount translation that depends on it then
+        #: silently does nothing. See :meth:`_local_mount_prefix`.
+        contract_path: Optional[Union[str, Path]] = None,
     ):
         """
         Initialize the DataProcessor.
@@ -245,6 +250,7 @@ class DataProcessor:
         """
         self._configure_logging()
         self._strict = strict
+        self._explicit_contract_path = contract_path
         self.engine_name = (engine or self._discover_engine()).lower()
         self.stage = stage
         self.contract = self._load_contract(contract)
@@ -3527,7 +3533,12 @@ class DataProcessor:
         path, a URI, or a platform whose two views already agree — which is every platform
         except this case.
         """
-        raw = getattr(self.contract, "_contract_path", None)
+        # The caller's answer first: a pipeline hands the processor a DICT, so the contract
+        # cannot carry where it came from. Relying on `_contract_path` alone meant this
+        # returned None on every pipeline run — the fix was in place and did nothing.
+        raw = getattr(self, "_explicit_contract_path", None) or getattr(
+            self.contract, "_contract_path", None
+        )
         if not raw:
             return None
         text = str(raw).replace("\\", "/")

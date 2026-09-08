@@ -1615,6 +1615,7 @@ def emit_slo_report(
     environment: str = "dev",
     pipeline_run_id: Optional[str] = None,
     timeout: float = 15.0,
+    check_run_id: Optional[str] = None,
 ) -> int:
     """Send SLO results to the Observatory through the SAME path the pipeline uses.
 
@@ -1635,6 +1636,18 @@ def emit_slo_report(
     ONE ROW PER ENTITY, not one per run: Data Products is keyed by dataset, so a
     single combined row could not say which product met its objective.
 
+    WHICH IS WHY THE ROWS MUST CARRY `check_run_id`
+    Splitting by entity is right for the product page and wrong for everything that
+    needs to reason about the INVOCATION. `run_checks()` mints a `check_run_id` for
+    each pass and it reached the Delta table only, so the platform received N
+    independent posts with nothing joining them: it could not say "14 of 51 objectives
+    breached" (it never saw the 51) and could not send one notification per run instead
+    of one per entity. Stamping the id — and the run's own totals, which are computable
+    right here from `results` — closes that without giving up the per-entity row.
+
+    Pass either the results list or the whole ``SLOReport``; the report carries the id,
+    so a caller that already has one needs no other change.
+
     WHY THE BUDGET IS NOT THE PIPELINE'S 3s
     `write_run_log` justifies its 3s as "short timeout to prevent blocking the
     pipeline" — it is a side-effect bolted onto real work, so it must not slow the
@@ -1650,6 +1663,20 @@ def emit_slo_report(
     import requests as _requests
 
     from .observatory_spool import flush_spool, resolve_observatory_config, spool_payload
+
+    # Duck-typed so `emit_slo_report(registry, report)` and
+    # `emit_slo_report(registry, report.results)` both work — the first carries the
+    # check_run_id for free, the second keeps every existing caller compiling.
+    if check_run_id is None:
+        check_run_id = getattr(results, "check_run_id", None) or None
+    results = getattr(results, "results", results)
+
+    # The run's own denominator. A notification saying "14 of 51 objectives breached"
+    # needs the 51, and only this side of the wire knows it: each posted row sees one
+    # entity. Computed, never guessed — an unmeasured denominator is worse than none.
+    _all = list(results or [])
+    _total_objectives = len(_all)
+    _breached_objectives = sum(1 for r in _all if not bool(getattr(r, "passed", False)))
 
     observatory_cfg = resolve_observatory_config(getattr(registry, "observatory", None))
     if not (observatory_cfg and observatory_cfg.get("enabled")):
@@ -1781,6 +1808,11 @@ def emit_slo_report(
                 "domain": getattr(registry, "domain", None),
                 "system": getattr(registry, "system", None),
                 "record_type": "slo_check",
+                # The invocation these rows belong to, so the platform can group them
+                # back together — one notification per check run rather than per entity.
+                "check_run_id": check_run_id,
+                "check_run_objectives": _total_objectives,
+                "check_run_breached": _breached_objectives,
                 "lakelogic_version": _lakelogic_version(),
             },
         }

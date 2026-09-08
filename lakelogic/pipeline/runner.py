@@ -2646,6 +2646,13 @@ class LakehousePipeline:
             processor = DataProcessor(
                 contract=c.contract_dict, engine=self.engine, pipeline_run_id=self.run_id, run_log_mode=resolved_mode
             )
+            # WHERE THIS CONTRACT CAME FROM. Injected rather than passed to the constructor,
+            # like the two lines below it: the dict cannot say where it was loaded from, and
+            # the processor needs it to translate a storage-relative source path into
+            # something the local filesystem can enumerate (`_local_mount_prefix`). A
+            # constructor argument would also break every caller that substitutes its own
+            # processor, for a value only this read path uses.
+            processor._explicit_contract_path = getattr(c, "resolved_path", None)
             # Inject ownership and notifications configuration
             processor._ownership = _ownership_for_contract(c.contract_dict, self.registry)
             processor._notifications = getattr(self.registry, "notifications", []) or []
@@ -2681,6 +2688,24 @@ class LakehousePipeline:
             if is_good_empty and is_bad_empty:
                 logger.info(f"No new rows for {c.entity} - proceeding to ensure target schema existence.")
                 _status = "no_new_rows"
+            elif is_good_empty:
+                # EVERY ROW WAS REJECTED. That is not a success, whatever
+                # `fail_on_quarantine` says.
+                #
+                # `fail_on_quarantine` is all-or-nothing — it raises on a single bad row — so
+                # an estate that deliberately injects invalid rows has to leave it off, and
+                # then the opposite extreme reports clean too. Live: silver read 10 rows,
+                # quarantined 10, wrote 0, and reported `succeeded`; gold then read the empty
+                # table and also reported `succeeded`. Three green layers, no data.
+                #
+                # A distinct terminal status rather than a raise: the run genuinely completed
+                # and the rows are in quarantine to be looked at, which is different from a
+                # crash — but it must never be counted alongside a run that produced data.
+                logger.warning(
+                    f"⚠️ {c.entity} [{layer}] quarantined EVERY row it read — "
+                    f"0 rows written. The quarantine table carries the reason."
+                )
+                _status = "all_rows_quarantined"
 
             # Spark compatibility layer: if the adapter already returned
             # native Spark DataFrames (SparkAdapter does), skip conversion.
