@@ -10,6 +10,7 @@ So on every real run the attribute was None, the translation silently no-opped, 
 deploy reproduced the original failure exactly. The unit test passed because it built the
 processor from a path — the one construction shape production never uses.
 """
+
 from pathlib import Path
 
 import pytest
@@ -81,5 +82,5 @@ def test_the_runner_supplies_the_path_it_resolved(tmp_path):
     # path uses.
     assert "_explicit_contract_path" in src, "the runner no longer supplies the path"
     # And specifically on the READ path, which is the one that enumerates source files.
-    read_site = src[src.index("run_log_mode=resolved_mode"):][:700]
+    read_site = src[src.index("run_log_mode=resolved_mode") :][:700]
     assert "_explicit_contract_path" in read_site

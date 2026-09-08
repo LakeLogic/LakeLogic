@@ -8,6 +8,7 @@ instead of one per failing entity, which is the difference between 15 messages a
 
 `run_checks()` has minted a `check_run_id` all along; it just never left the Delta table.
 """
+
 import json
 
 import pytest
@@ -25,6 +26,7 @@ class _Result:
 
 class _Report:
     """Shaped like `SLOReport` — what `run_checks()` returns."""
+
     def __init__(self, results, check_run_id):
         self.results = results
         self.check_run_id = check_run_id
@@ -54,6 +56,7 @@ def posted(monkeypatch):
         return _Resp()
 
     import requests
+
     monkeypatch.setattr(requests, "post", _post)
     return bodies
 
@@ -108,6 +111,8 @@ def test_one_row_per_entity_is_unchanged(posted):
     emit_slo_report(_Registry(), _Report(RESULTS, "run-abc"), environment="dev")
 
     assert [b["contract_name"] for b in posted] == [
-        "silver_trips", "silver_riders", "gold_dim_driver",
+        "silver_trips",
+        "silver_riders",
+        "gold_dim_driver",
     ]
     assert json.dumps(posted[0]["metadata"]["slo_json"])  # still per-entity evidence

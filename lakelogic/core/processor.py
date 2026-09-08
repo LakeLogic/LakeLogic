@@ -3536,9 +3536,7 @@ class DataProcessor:
         # The caller's answer first: a pipeline hands the processor a DICT, so the contract
         # cannot carry where it came from. Relying on `_contract_path` alone meant this
         # returned None on every pipeline run — the fix was in place and did nothing.
-        raw = getattr(self, "_explicit_contract_path", None) or getattr(
-            self.contract, "_contract_path", None
-        )
+        raw = getattr(self, "_explicit_contract_path", None) or getattr(self.contract, "_contract_path", None)
         if not raw:
             return None
         text = str(raw).replace("\\", "/")

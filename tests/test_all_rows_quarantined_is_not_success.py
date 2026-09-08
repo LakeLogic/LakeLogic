@@ -10,6 +10,7 @@ Three green layers and an empty estate. `fail_on_quarantine` cannot cover this: 
 SINGLE bad row, so any estate that deliberately seeds invalid rows must leave it off — and then
 the opposite extreme reports clean too.
 """
+
 import inspect
 
 from lakelogic.pipeline import runner
@@ -18,7 +19,7 @@ from lakelogic.pipeline import runner
 def _status_block():
     src = inspect.getsource(runner)
     start = src.index('            _status = "success"')
-    return src[start:start + 2000]
+    return src[start : start + 2000]
 
 
 def test_a_fully_quarantined_run_gets_its_own_status():
