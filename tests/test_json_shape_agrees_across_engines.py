@@ -66,17 +66,13 @@ def _write_ndjson(dirpath: Path, batches: int = 4) -> None:
     size = len(ROWS) // batches
     for i in range(batches):
         chunk = ROWS[i * size : (i + 1) * size]
-        (dirpath / f"batch_{i:02d}.json").write_text(
-            "\n".join(json.dumps(r) for r in chunk), encoding="utf-8"
-        )
+        (dirpath / f"batch_{i:02d}.json").write_text("\n".join(json.dumps(r) for r in chunk), encoding="utf-8")
 
 
 def _read(tmp_path: Path, contract: dict) -> int:
     from lakelogic.core.processor import DataProcessor
 
-    good, _bad = DataProcessor(contract=contract, engine="polars").run_source(
-        str(tmp_path / "*.json")
-    )
+    good, _bad = DataProcessor(contract=contract, engine="polars").run_source(str(tmp_path / "*.json"))
     return good.height if hasattr(good, "height") else len(good)
 
 

@@ -100,7 +100,7 @@ def test_a_majority_rejected_run_gets_its_own_status():
 
 
 def test_it_is_a_majority_test_not_a_tuned_percentage():
-    """"More rejected than kept" needs no threshold to argue about and no configuration to
+    """ "More rejected than kept" needs no threshold to argue about and no configuration to
     get wrong — and a run that quarantines a deliberate 10% still reads as the success it is."""
     src = inspect.getsource(runner)
     block = src[src.index("MORE ROWS REJECTED THAN KEPT") :][:1400]

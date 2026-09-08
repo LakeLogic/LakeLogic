@@ -89,9 +89,7 @@ def test_leading_whitespace_does_not_fool_it(tmp_path):
 def test_an_unreadable_file_falls_back_to_the_previous_behaviour():
     """A sniff that cannot read must not quietly change how every existing estate is parsed."""
     proc = DataProcessor.__new__(DataProcessor)
-    assert processor.DataProcessor._json_is_one_value_per_file(
-        proc, ["/does/not/exist.json"], None
-    ) is True
+    assert processor.DataProcessor._json_is_one_value_per_file(proc, ["/does/not/exist.json"], None) is True
 
 
 def test_nothing_to_sniff_falls_back_too():

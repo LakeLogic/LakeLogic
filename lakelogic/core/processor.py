@@ -2134,10 +2134,7 @@ class DataProcessor:
                                 _o = getattr(getattr(self.contract, "source", None), "options", {}) or {}
                                 _declared = _o.get("multiLine", _o.get("multiline"))
                                 if _declared is False:
-                                    return [
-                                        _json.loads(line)
-                                        for line in text.strip().splitlines() if line.strip()
-                                    ]
+                                    return [_json.loads(line) for line in text.strip().splitlines() if line.strip()]
                                 try:
                                     return _json.loads(text)
                                 except _json.JSONDecodeError:
@@ -2148,10 +2145,7 @@ class DataProcessor:
                                         # field exists to make visible.
                                         raise
                                     # NDJSON: one JSON object per line
-                                    return [
-                                        _json.loads(line)
-                                        for line in text.strip().splitlines() if line.strip()
-                                    ]
+                                    return [_json.loads(line) for line in text.strip().splitlines() if line.strip()]
 
                             def _read_json_flat(filepath: str) -> "pl.DataFrame":
                                 """Read a .json file and cast any nested Struct/List columns
