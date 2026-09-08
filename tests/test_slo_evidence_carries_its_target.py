@@ -55,7 +55,7 @@ def test_a_quality_breach_states_the_floor_it_missed():
 
 
 def test_a_passing_quality_check_carries_it_too():
-    """"Which is fine, and by how much" is the question asked BEFORE a breach."""
+    """ "Which is fine, and by how much" is the question asked BEFORE a breach."""
     [result] = SLOValidator._evaluate_quality_counts("pipeline", _counts(good=100, quarantined=0), _Quality(0.99))
 
     assert result.passed is True
@@ -129,11 +129,23 @@ def _section(bodies, kind):
 
 def test_the_quality_section_reaches_the_wire_with_both_numbers(posted):
     """THE DEFECT, at the boundary: this section used to be `{"pass": false}` alone."""
-    emit_slo_report(_Registry(), [SLOCheckResult(
-        layer="silver", entity="silver_trips", check_type="quality",
-        status="fail", passed=False, quality_ratio=0.55, quality_min_ratio=0.99,
-        quality_quarantine_ratio=0.45, quality_max_quarantine_ratio=0.01,
-    )], environment="dev")
+    emit_slo_report(
+        _Registry(),
+        [
+            SLOCheckResult(
+                layer="silver",
+                entity="silver_trips",
+                check_type="quality",
+                status="fail",
+                passed=False,
+                quality_ratio=0.55,
+                quality_min_ratio=0.99,
+                quality_quarantine_ratio=0.45,
+                quality_max_quarantine_ratio=0.01,
+            )
+        ],
+        environment="dev",
+    )
 
     section = _section(posted, "quality")
     assert section["good_ratio"] == 0.55
@@ -145,11 +157,21 @@ def test_the_quality_section_reaches_the_wire_with_both_numbers(posted):
 
 def test_the_schedule_section_carries_the_deadline(posted):
     """`seconds` with no deadline is a number and no promise."""
-    emit_slo_report(_Registry(), [SLOCheckResult(
-        layer="schedule", entity="pipeline", check_type="schedule",
-        status="late", passed=False, delay_minutes=39.6,
-        schedule_deadline_utc="06:00",
-    )], environment="dev")
+    emit_slo_report(
+        _Registry(),
+        [
+            SLOCheckResult(
+                layer="schedule",
+                entity="pipeline",
+                check_type="schedule",
+                status="late",
+                passed=False,
+                delay_minutes=39.6,
+                schedule_deadline_utc="06:00",
+            )
+        ],
+        environment="dev",
+    )
 
     section = _section(posted, "schedule")
     assert section["deadline_utc"] == "06:00"
@@ -159,10 +181,19 @@ def test_the_schedule_section_carries_the_deadline(posted):
 def test_a_check_with_no_declared_target_adds_no_keys(posted):
     """A domain that declared nothing must not gain an invented floor of None — the
     platform reads a present key as a reported measurement."""
-    emit_slo_report(_Registry(), [SLOCheckResult(
-        layer="silver", entity="silver_trips", check_type="quality",
-        status="warn", passed=True,
-    )], environment="dev")
+    emit_slo_report(
+        _Registry(),
+        [
+            SLOCheckResult(
+                layer="silver",
+                entity="silver_trips",
+                check_type="quality",
+                status="warn",
+                passed=True,
+            )
+        ],
+        environment="dev",
+    )
 
     section = _section(posted, "quality")
     assert "good_ratio" not in section

@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.55.0] — 2026-09-08
+
+### Added
+
+- Update version to 1.54.0 and enhance run log reporting for quality and schedule metrics
 ## [1.53.0] — 2026-09-08
 
 ### Added
@@ -732,6 +737,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.55.0]: https://github.com/lakelogic/LakeLogic/compare/v1.53.0...v1.55.0
 [1.53.0]: https://github.com/lakelogic/LakeLogic/compare/v1.52.1...v1.53.0
 [1.52.1]: https://github.com/lakelogic/LakeLogic/compare/v1.52.0...v1.52.1
 [1.52.0]: https://github.com/lakelogic/LakeLogic/compare/v1.51.0...v1.52.0

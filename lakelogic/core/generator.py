@@ -819,9 +819,7 @@ _CODE_QUALIFIER_TAILS = frozenset({"code", "codes"})
 
 #: Faker methods (or parameterised expressions) that already produce a code rather than
 #: prose, so a `<head>_code` field may safely inherit them from its head noun.
-_CODE_SHAPED_HINTS = frozenset(
-    {"country_code", "currency_code", "postcode", "zipcode", "swift", "bban", "iban"}
-)
+_CODE_SHAPED_HINTS = frozenset({"country_code", "currency_code", "postcode", "zipcode", "swift", "bban", "iban"})
 
 
 def _is_code_shaped(hint: str) -> bool:
@@ -1111,9 +1109,29 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
     "city_code": [
         _code.upper()
         for _code in (
-            "lon", "nyc", "ber", "par", "tyo", "syd", "lax", "chi", "sfo", "tor",
-            "mex", "bom", "sin", "dxb", "ams", "mad", "rom", "sel", "pek", "sha",
-            "hkg", "bkk", "ist",
+            "lon",
+            "nyc",
+            "ber",
+            "par",
+            "tyo",
+            "syd",
+            "lax",
+            "chi",
+            "sfo",
+            "tor",
+            "mex",
+            "bom",
+            "sin",
+            "dxb",
+            "ams",
+            "mad",
+            "rom",
+            "sel",
+            "pek",
+            "sha",
+            "hkg",
+            "bkk",
+            "ist",
         )
     ],
     "city": [
