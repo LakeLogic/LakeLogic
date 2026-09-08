@@ -82,3 +82,41 @@ def test_the_run_log_write_uses_the_mapping_rather_than_a_literal():
     src = inspect.getsource(runner)
     assert '_report["status"] = run_log_status(_status)' in src
     assert '_report["status"] = "succeeded"' not in src
+
+
+# ── more rejected than kept is not a success either ──────────────────────────────────────
+#
+# `all_rows_quarantined` fires only at exactly 100%, and the interesting failures sit just
+# under it. Live, on Fabric:
+#
+#     silver_rideflow_driver_locations  src=210  good=3  qtn=143   succeeded
+#     gold  dim_rideflow_driver_locations  src=3  good=3           succeeded
+#
+# Silver kept 1.4% of what it read; gold then built a dimension out of three rows. Both green.
+
+
+def test_a_majority_rejected_run_gets_its_own_status():
+    assert runner.run_log_status("mostly_quarantined") == "partial"
+
+
+def test_it_is_a_majority_test_not_a_tuned_percentage():
+    """"More rejected than kept" needs no threshold to argue about and no configuration to
+    get wrong — and a run that quarantines a deliberate 10% still reads as the success it is."""
+    src = inspect.getsource(runner)
+    block = src[src.index("MORE ROWS REJECTED THAN KEPT") :][:1400]
+    assert "rows_bad > rows_good" in block
+    assert "rows_good > 0" in block, "0 good is `all_rows_quarantined`, not this"
+
+
+def test_it_does_not_override_the_stronger_verdicts():
+    """A fully quarantined run keeps its own status; so does one that read nothing."""
+    src = inspect.getsource(runner)
+    block = src[src.index("MORE ROWS REJECTED THAN KEPT") :][:1400]
+    assert '_status == "success"' in block
+
+
+def test_the_operator_is_told_the_two_numbers():
+    src = inspect.getsource(runner)
+    block = src[src.index("MORE ROWS REJECTED THAN KEPT") :][:1400]
+    assert "quarantined MORE rows than it kept" in block
+    assert "rejected" in block and "written" in block

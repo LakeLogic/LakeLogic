@@ -67,6 +67,9 @@ _RUN_LOG_STATUS = {
     "success": "succeeded",
     "no_new_rows": "succeeded",
     "all_rows_quarantined": "partial",
+    # Not every row, but more than half. Same verdict: the run completed and the data did not
+    # survive it, so it must not be counted beside a run that produced what it read.
+    "mostly_quarantined": "partial",
 }
 
 
@@ -2793,6 +2796,35 @@ class LakehousePipeline:
             row_count = rows_good if rows_good is not None else "?"
 
             logger.debug(f"Row counts (from report): raw={rows_raw}, good={rows_good}, bad={rows_bad}")
+
+            # MORE ROWS REJECTED THAN KEPT IS NOT A SUCCESS EITHER.
+            #
+            # `all_rows_quarantined` fires only at exactly 100%, and the interesting failures
+            # sit just under it. Live, on Fabric:
+            #
+            #     silver_rideflow_driver_locations  src=210  good=3  qtn=143
+            #     gold  dim_rideflow_driver_locations  src=3  good=3
+            #
+            # Silver kept 1.4% of what it read and reported `succeeded`; gold then built a
+            # dimension out of three rows and reported `succeeded` too. Every screen green
+            # over an estate that had effectively lost the table.
+            #
+            # A MAJORITY test rather than a tuned percentage: "more rows were rejected than
+            # were kept" needs no threshold to argue about and no configuration to get wrong.
+            # A run that quarantines a deliberate 10% still reads as the success it is.
+            if (
+                _status == "success"
+                and isinstance(rows_good, int)
+                and isinstance(rows_bad, int)
+                and rows_good > 0
+                and rows_bad > rows_good
+            ):
+                logger.warning(
+                    f"⚠️ {c.entity} [{layer}] quarantined MORE rows than it kept — "
+                    f"{rows_bad} rejected, {rows_good} written. The quarantine table carries "
+                    f"the reason."
+                )
+                _status = "mostly_quarantined"
 
             _is_empty_run = (is_good_empty or rows_good == 0) and (is_bad_empty or rows_bad == 0 or rows_bad is None)
 

@@ -2116,6 +2116,43 @@ class DataProcessor:
                             # Eager fallback — JSON, XML, Excel (no scan_* support)
                             import json as _json
 
+                            def _parse_json_text(text: str) -> Any:
+                                """One JSON value, or one per line — whichever the file holds.
+
+                                THE CONTRACT DECIDES WHEN IT SAYS SO. `source.options.multiLine`
+                                is the same field the Spark reader consumes, so a contract that
+                                declares its shape gets the SAME answer from both engines. That
+                                is the whole point: Spark hardcoded `multiLine=true`, polars
+                                auto-detected, and one landing zone was therefore read as 200
+                                rows locally and 10 rows on Fabric — from the same contract, with
+                                the local dry-run passing.
+
+                                Auto-detection stays the default, because it is strictly better
+                                than a guess: absent a declaration, try the whole file and fall
+                                back to line-by-line.
+                                """
+                                _o = getattr(getattr(self.contract, "source", None), "options", {}) or {}
+                                _declared = _o.get("multiLine", _o.get("multiline"))
+                                if _declared is False:
+                                    return [
+                                        _json.loads(line)
+                                        for line in text.strip().splitlines() if line.strip()
+                                    ]
+                                try:
+                                    return _json.loads(text)
+                                except _json.JSONDecodeError:
+                                    if _declared is True:
+                                        # The contract SAID one value per file and the file is
+                                        # not that. Coping silently would hide a contract that
+                                        # no longer describes its data — the failure this whole
+                                        # field exists to make visible.
+                                        raise
+                                    # NDJSON: one JSON object per line
+                                    return [
+                                        _json.loads(line)
+                                        for line in text.strip().splitlines() if line.strip()
+                                    ]
+
                             def _read_json_flat(filepath: str) -> "pl.DataFrame":
                                 """Read a .json file and cast any nested Struct/List columns
                                 to JSON strings so they match a flat contract schema.
@@ -2128,13 +2165,13 @@ class DataProcessor:
                                     _sopts = self._get_cloud_storage_options(filepath)
                                     with fsspec.open(filepath, "r", **_sopts) as f:
                                         text = f.read()
-                                    try:
-                                        raw = _json.loads(text)
-                                    except _json.JSONDecodeError:
-                                        # NDJSON: one JSON object per line
-                                        raw = [_json.loads(line) for line in text.strip().splitlines() if line.strip()]
                                 else:
-                                    raw = _json.loads(Path(filepath).read_text(encoding="utf-8"))
+                                    # The SAME parser as the cloud branch. This branch used to
+                                    # call `json.loads` bare, with no line-by-line fallback, so a
+                                    # LOCAL JSON Lines file raised while the identical file in
+                                    # cloud storage read fine.
+                                    text = Path(filepath).read_text(encoding="utf-8")
+                                raw = _parse_json_text(text)
                                 rows = [raw] if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
                                 # Normalise nested objects to JSON strings
                                 flat = [
@@ -2794,7 +2831,36 @@ class DataProcessor:
                         if fmt == "csv":
                             reader = reader.option("header", "true")
                         elif fmt == "json":
-                            reader = reader.option("multiLine", "true")
+                            # WHETHER A JSON FILE HOLDS ONE VALUE OR ONE PER LINE IS A
+                            # PROPERTY OF THE DATA, so the contract decides it.
+                            #
+                            # This was hardcoded to `true`, which tells Spark to parse each
+                            # FILE as a single JSON value. Against JSON Lines — the ordinary
+                            # landing-zone shape, and Spark's own default — that reads the
+                            # first object and silently discards the rest. Live: a landing
+                            # zone holding 200 rows across ten `batch_NN_*.json` files was
+                            # ingested as TEN rows. No error, no warning; bronze reported
+                            # success, and 190 rows were simply gone.
+                            #
+                            # An estate that lands JSON Lines can say so outright:
+                            #   source:
+                            #     options:
+                            #       multiLine: false
+                            #
+                            # ABSENT A DECLARATION, SNIFF — the same answer the polars reader
+                            # has always given. Polars tries the whole file and falls back to
+                            # line-by-line, so it read the landing zone correctly while Spark
+                            # truncated it. One contract, two engines, two answers, and the
+                            # local dry run (polars) passed: conformance case OLC-S-003
+                            # reproduces exactly that in fourteen seconds.
+                            #
+                            # The sniff is one character of one file. A JSON array starts `[`;
+                            # anything else is one value per line.
+                            _json_opts = getattr(self.contract.source, "options", {}) or {}
+                            _multiline = _json_opts.get("multiLine", _json_opts.get("multiline"))
+                            if _multiline is None:
+                                _multiline = self._json_is_one_value_per_file(file_paths, path)
+                            reader = reader.option("multiLine", "true" if _multiline else "false")
                         # When reading a directory (no explicit file list), enable
                         # recursive scanning so Spark finds files in partition
                         # subdirectories (e.g. y_2026/m_03/d_21/data.csv).
@@ -3515,6 +3581,46 @@ class DataProcessor:
 
         schema = StructType([StructField(k, _type_for(k), True) for k in keys])
         return schema, keys
+
+    def _json_is_one_value_per_file(self, file_paths, path) -> bool:
+        """Does this JSON source hold one value per FILE (an array), or one per line?
+
+        Read from the data, because it is a property of the data. The polars reader has
+        always worked this out — it tries the whole file and falls back to line-by-line —
+        while Spark was told `multiLine=true` unconditionally and truncated a JSON Lines
+        landing zone to one row per file. Same contract, same bytes, two answers, and the
+        local dry run (polars) passed. See conformance case OLC-S-003.
+
+        One character of one file: a JSON array starts `[`. Anything else is JSON Lines.
+        A file we cannot open falls back to `True`, the previous behaviour — a sniff that
+        cannot read must not quietly change how every existing estate is parsed.
+        """
+        candidate = None
+        if file_paths:
+            candidate = file_paths[0]
+        elif path and not str(path).endswith("/") and "*" not in str(path):
+            candidate = str(path)
+        if not candidate:
+            return True
+        try:
+            if self._is_uri_path(candidate):
+                import fsspec
+
+                with fsspec.open(candidate, "r", **self._get_cloud_storage_options(candidate)) as f:
+                    head = f.read(512)
+            else:
+                with open(candidate, "r", encoding="utf-8") as f:
+                    head = f.read(512)
+        except Exception as exc:
+            logger.debug(f"JSON shape sniff failed for {candidate}: {exc}; assuming multiLine")
+            return True
+        stripped = (head or "").lstrip()
+        one_per_file = stripped.startswith("[")
+        logger.info(
+            f"JSON shape: {'one value per file (array)' if one_per_file else 'one value per line'} "
+            f"— inferred from {candidate}"
+        )
+        return one_per_file
 
     def _local_mount_prefix(self) -> Optional[str]:
         """The prefix that makes an engine-relative storage path readable by THIS process.
