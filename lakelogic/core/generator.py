@@ -813,6 +813,22 @@ _GENERIC_QUALIFIER_TAILS = frozenset(
     }
 )
 
+#: The subset of :data:`_GENERIC_QUALIFIER_TAILS` that asks for an IDENTIFIER rather than
+#: prose. `city_name` wants a city; `city_code` wants something short you can join on.
+_CODE_QUALIFIER_TAILS = frozenset({"code", "codes"})
+
+#: Faker methods (or parameterised expressions) that already produce a code rather than
+#: prose, so a `<head>_code` field may safely inherit them from its head noun.
+_CODE_SHAPED_HINTS = frozenset(
+    {"country_code", "currency_code", "postcode", "zipcode", "swift", "bban", "iban"}
+)
+
+
+def _is_code_shaped(hint: str) -> bool:
+    """Whether a hint yields a short identifier. Parameterised generators (`bothify`,
+    `lexify`, `numerify`) are code-shaped by construction — they spell out a mask."""
+    return hint in _CODE_SHAPED_HINTS or hint.startswith(("bothify(", "lexify(", "numerify("))
+
 
 def _match_semantic_hint(name_lower: str) -> Optional[str]:
     """
@@ -844,9 +860,23 @@ def _match_semantic_hint(name_lower: str) -> Optional[str]:
     #    `city_name` was simply missed. Fixing the rule retires the whole class instead of
     #    waiting for the next column to be found by eye.
     if len(parts) > 1 and parts[-1] in _GENERIC_QUALIFIER_TAILS:
+        # A `_code` tail is NOT the same request as a `_name` tail. Deferring to the head
+        # noun is right for "the name/label/title OF a city"; it is wrong for "the CODE of a
+        # city", which asked for a short identifier and got "Manchester" — the head's prose
+        # generator, in a column typed as a code, joinable to nothing.
+        #
+        # `country_code`, `currency_code`, `postal_code` and `product_code` are exact entries
+        # in _SEMANTIC_HINTS purely to dodge this one field at a time. Any `<head>_code` that
+        # nobody thought to list still falls through, so the rule is fixed here instead.
+        _wants_a_code = parts[-1] in _CODE_QUALIFIER_TAILS
         for i in range(len(parts) - 1, 0, -1):
             head = "_".join(parts[:i])
             if head in _SEMANTIC_HINTS:
+                if _wants_a_code and not _is_code_shaped(_SEMANTIC_HINTS[head]):
+                    # Stop rather than answer with prose. `None` hands the field to the
+                    # type-based generator, which produces something visibly filler — and a
+                    # placeholder that looks like a placeholder beats a confident wrong value.
+                    return None
                 return _SEMANTIC_HINTS[head]
         # Head not recognised: stop, rather than falling through and matching the tail.
         #
@@ -1071,6 +1101,21 @@ _TRIPLET_INVALID_PATTERNS = {
 # ---------------------------------------------------------------------------
 
 _REALISTIC_POOLS: Dict[str, List[str]] = {
+    # A CODE, NOT A NAME. `city_code` resolved through its head noun (`city`) and was filled
+    # with "Manchester", "Bristol" — city names in a column the contract types as a short
+    # code, which anyone reading the grid spots at once and nothing downstream can join on.
+    #
+    # These are exactly the short codes `_CITY_GEO_COORDS` already keys on, so a generated
+    # `city_code` still resolves to real coordinates for any correlated lat/lng field. A
+    # random three letters would have looked right and broken that silently.
+    "city_code": [
+        _code.upper()
+        for _code in (
+            "lon", "nyc", "ber", "par", "tyo", "syd", "lax", "chi", "sfo", "tor",
+            "mex", "bom", "sin", "dxb", "ams", "mad", "rom", "sel", "pek", "sha",
+            "hkg", "bkk", "ist",
+        )
+    ],
     "city": [
         "London",
         "Manchester",

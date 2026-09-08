@@ -1456,7 +1456,13 @@ def test_a_generic_tail_does_not_beat_the_head_noun():
     be found by eye.
     """
     assert gen._match_semantic_hint("city_name") == "city"
-    assert gen._match_semantic_hint("city_code") == "city"
+    # `city_code` USED TO BE ASSERTED HERE, and the assertion was the bug.
+    #
+    # Deferring to the head is right for a name-like tail and wrong for a code: it filled a
+    # short-code column with "Manchester", "Bristol" — seen in the live grid, again not in
+    # review. The rule now stops for `_code` unless the head's own hint is code-shaped, and
+    # `city_code` has a pool of real short codes. See tests/test_code_fields_are_not_prose.py.
+    assert gen._match_semantic_hint("city_code") != "city"
     # The two that were previously hand-patched must keep working through the rule.
     assert gen._match_semantic_hint("country_name") == "country"
     assert gen._match_semantic_hint("company_name") == "company"

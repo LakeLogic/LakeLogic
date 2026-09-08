@@ -93,11 +93,29 @@ class SLOCheckResult(BaseModel):
     retention_period: Optional[str] = None  # ISO 8601, e.g. "P7D"
     retention_age_minutes: Optional[float] = None  # age of the OLDEST record
     retention_limit_minutes: Optional[int] = None  # the period, parsed
-    # Quality
+    # ── Quality ──────────────────────────────────────────────────────────────
+    # `quality_min_ratio` is the DECLARED floor this ratio was judged against. It
+    # existed only inside the status prose ("55.0% good") and in the domain config,
+    # so the platform received `{"pass": false}` and could not say what "good"
+    # was supposed to mean — the same defect retention had above.
+    #
+    # THE TARGET IS CAPTURED WITH THE EVIDENCE, not looked up later. A floor raised
+    # from 0.95 to 0.99 must not retroactively fail every evaluation that met the
+    # rule in force at the time; an evaluation is only interpretable against the
+    # promise that applied when it ran. This is the same reason `contract_version`
+    # and `contract_fingerprint` are stamped on every run log.
     quality_ratio: Optional[float] = None
+    quality_min_ratio: Optional[float] = None  # the declared floor, as evaluated
+    quality_max_quarantine_ratio: Optional[float] = None  # the declared ceiling
+    quality_quarantine_ratio: Optional[float] = None  # what was observed
     quality_severity: Optional[str] = None  # highest failing severity
-    # Duration
+    # ── Duration / schedule ──────────────────────────────────────────────────
+    # `schedule_deadline_utc` is the promise ("06:00"); `delay_minutes` carries the
+    # observed distance from it. The deadline was computed, used to decide
+    # pass/fail, and then discarded, so a late pipeline reported "breached" with
+    # nothing to say how late against what.
     duration_seconds: Optional[float] = None
+    schedule_deadline_utc: Optional[str] = None
     # ── WHICH RUN PRODUCED THE DATA THIS VERDICT IS ABOUT ────────────────────
     # Distinct from the check's own `pipeline_run_id`, which records the pipeline
     # execution that TRIGGERED the check and is legitimately null for the hourly
@@ -773,6 +791,7 @@ class SLOValidator:
                             passed=True,
                             severity="pass",
                             delay_minutes=round((now - deadline).total_seconds() / 60, 1),
+                            schedule_deadline_utc=schedule.expected_completion_utc,
                         )
                     )
                 else:
@@ -785,6 +804,7 @@ class SLOValidator:
                             passed=False,
                             severity="fail",
                             delay_minutes=round((now - deadline).total_seconds() / 60, 1),
+                            schedule_deadline_utc=schedule.expected_completion_utc,
                         )
                     )
             except Exception as e:
@@ -805,6 +825,7 @@ class SLOValidator:
                             status="⚠️ Check if pipeline has started",
                             passed=True,
                             severity="warn",
+                            schedule_deadline_utc=schedule.expected_start_utc,
                         )
                     )
             except Exception:
@@ -853,6 +874,7 @@ class SLOValidator:
                                 passed=False,
                                 severity="fail" if sev in ("critical", "high") else "warn",
                                 quality_ratio=round(sev_good_ratio, 4),
+                                quality_min_ratio=threshold.min_good_ratio,
                                 quality_severity=sev,
                             )
                         )
@@ -903,6 +925,9 @@ class SLOValidator:
                         passed=False,
                         severity="fail",
                         quality_ratio=0.0,
+                        quality_min_ratio=quality.min_good_ratio,
+                        quality_quarantine_ratio=round(quarantine_ratio, 4),
+                        quality_max_quarantine_ratio=quality.max_quarantine_ratio,
                     )
                 )
             else:
@@ -938,6 +963,12 @@ class SLOValidator:
                     passed=passed,
                     severity="pass" if passed else "fail",
                     quality_ratio=round(good_ratio, 4),
+                    # BOTH sides of the gate, as it was evaluated. `passed` above is an
+                    # AND of two conditions, so reporting only the good ratio would leave
+                    # a quarantine-driven failure looking inexplicable.
+                    quality_min_ratio=quality.min_good_ratio,
+                    quality_quarantine_ratio=round(quarantine_ratio, 4),
+                    quality_max_quarantine_ratio=quality.max_quarantine_ratio,
                 )
             )
         return results

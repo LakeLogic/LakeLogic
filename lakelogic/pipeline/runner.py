@@ -53,6 +53,29 @@ def _friendly_validation_error(entity: str, exc: Exception) -> str:
     )
 
 
+#: Engine outcome → the status written to the RUN LOG.
+#:
+#: The engine distinguishes three good-path outcomes; the run log's enum has four values and
+#: `emit_on` filters on them, so the mapping has to be explicit rather than implied. It used
+#: to be a hardcoded `"succeeded"`, which is how a silver step that quarantined all 10 of the
+#: 10 rows it read appeared in the pipeline log table as a success.
+#:
+#: `all_rows_quarantined` maps to `partial`, NOT to a new value: `partial` is already in the
+#: default `emit_on` set, so the run still emits — a novel status would silently drop the
+#: telemetry for exactly the runs someone needs to see.
+_RUN_LOG_STATUS = {
+    "success": "succeeded",
+    "no_new_rows": "succeeded",
+    "all_rows_quarantined": "partial",
+}
+
+
+def run_log_status(pipeline_status: str) -> str:
+    """The run-log status for an engine outcome. Unknown outcomes report `succeeded`, because
+    this is only ever called on the path where the entity completed without raising."""
+    return _RUN_LOG_STATUS.get(pipeline_status, "succeeded")
+
+
 class PipelineRunSummary:
     """Standardized summary of a pipeline execution."""
 
@@ -2824,7 +2847,23 @@ class LakehousePipeline:
             _already_logged = getattr(processor, "_run_log_already_written", False)
             if not _already_logged:
                 _report = getattr(processor, "last_report", None) or {}
-                _report["status"] = "succeeded"
+                # THE RUN LOG CARRIES THE SAME VERDICT THE SUMMARY DOES.
+                #
+                # `_status` was computed above and then thrown away here: the log was
+                # hardcoded to "succeeded" whatever it said. Live, silver read 10 rows,
+                # quarantined 10, wrote 0 — and the pipeline log table showed `succeeded`,
+                # because `all_rows_quarantined` only ever reached the in-memory summary.
+                # The screen that governs the estate was reporting the opposite of what the
+                # engine had already worked out.
+                #
+                # `partial` rather than a novel status: the platform's enum is closed
+                # (success/partial/failed/running) and `emit_on` filters on it, so a new
+                # value would silently stop the telemetry for precisely the runs worth
+                # seeing. `partial` is in the DEFAULT emit_on set, so this emits and reads
+                # as not-success on every consumer that already understands the enum.
+                _report["status"] = run_log_status(_status)
+                if _status == "all_rows_quarantined":
+                    _report["all_rows_quarantined"] = True
                 # A run that read NOTHING is not the same as a run that processed
                 # everything, but both reported plain "succeeded" — which is how a
                 # gold layer sat green while its silver source was empty because

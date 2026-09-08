@@ -1764,6 +1764,29 @@ def emit_slo_report(
             if getattr(r, "anomaly_ratio", None) is not None:
                 section["anomaly_ratio"] = r.anomaly_ratio
                 section["anomaly_baseline"] = r.anomaly_baseline
+            # Quality reached the platform as `{"pass": true}` and nothing else — the
+            # identical shape retention had before the block above was written, and for
+            # the identical reason: the section is built from freshness's fields, and
+            # quality populates none of them. A bare boolean cannot answer "how far below
+            # the floor were we", which is the question asked before and after a breach.
+            #
+            # The floor rides WITH the verdict rather than being joined from the domain
+            # config at read time. Raising a floor from 0.95 to 0.99 must not retroactively
+            # fail every evaluation that met the promise in force when it ran.
+            if getattr(r, "quality_ratio", None) is not None:
+                section["good_ratio"] = r.quality_ratio
+                section["min_good_ratio"] = getattr(r, "quality_min_ratio", None)
+                if getattr(r, "quality_quarantine_ratio", None) is not None:
+                    section["quarantine_ratio"] = r.quality_quarantine_ratio
+                    section["max_quarantine_ratio"] = getattr(r, "quality_max_quarantine_ratio", None)
+                if getattr(r, "quality_severity", None):
+                    section["severity_band"] = r.quality_severity
+            # Schedule wrote `seconds` (from delay_minutes) with nothing to compare it
+            # against, so a late pipeline reported a number and no promise.
+            if getattr(r, "schedule_deadline_utc", None):
+                section["deadline_utc"] = r.schedule_deadline_utc
+            if getattr(r, "duration_seconds", None) is not None:
+                section["duration_seconds"] = r.duration_seconds
 
             # SEVERAL RESULTS SHARE A check_type, AND REPLACING LOSES EVIDENCE.
             # Bounds and drift are both `row_count`: one says "915 rows, within
