@@ -441,14 +441,10 @@ class SLOValidator:
                         # BOTH `rider_id` and `RIDER_ID`, so folding them collapses two
                         # real columns into a duplicate and the write fails outright.
                         try:
-                            row = self._snowflake_fetchone(
-                                f"SELECT MAX({col}) AS latest_ts FROM {table_name}"
-                            )
+                            row = self._snowflake_fetchone(f"SELECT MAX({col}) AS latest_ts FROM {table_name}")
                         except Exception:
                             quoted = '"' + str(col).replace('"', '""') + '"'
-                            row = self._snowflake_fetchone(
-                                f"SELECT MAX({quoted}) AS latest_ts FROM {table_name}"
-                            )
+                            row = self._snowflake_fetchone(f"SELECT MAX({quoted}) AS latest_ts FROM {table_name}")
                         latest_ts = row[0] if row else None
                     elif self.duckdb_con:
                         try:
