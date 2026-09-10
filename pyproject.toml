@@ -55,7 +55,15 @@ dependencies = [
     "polars>=0.20.0",
     "duckdb>=0.9.0",
     "typer>=0.9.0",
-    "deltalake>=0.15.0",
+    # >=1.0.0, not >=0.15.0. Three reasons, all observed rather than assumed:
+    #  - polars declares `deltalake>=1.0.0` for its own delta extra, so the old floor
+    #    was already below what a peer in the same extra requires.
+    #  - 0.17.x is ABI-incompatible with current numpy/pyarrow: importing it under
+    #    pytest overflows the stack ("datetime.datetime size changed, Expected 48 from
+    #    C header, got 56"), which took the whole suite down rather than one test.
+    #  - `core/delta_compat` already documents 0.17.x as a known-broken pairing.
+    # We only use DeltaTable and write_deltalake, both stable across the 1.x boundary.
+    "deltalake>=1.0.0",
     "pyarrow>=23.0.1",
     # Canonical Open Lakehouse Contract spec — provides `olc.models` (OLCContractV1,
     # the strict standard). LakeLogic CONSUMES this as the single source of truth for
@@ -88,7 +96,7 @@ engines = [
     "polars>=0.20.0",
     "duckdb>=0.9.0",
     "pyarrow>=23.0.1",
-    "deltalake>=0.15.0",
+    "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
     "lxml>=4.9.0",
     "openpyxl>=3.1.0",
@@ -109,7 +117,7 @@ notify = [
     "hvac>=2.0.0",
 ]
 delta = [
-    "deltalake>=0.15.0",  # Delta Lake support without Spark
+    "deltalake>=1.0.0",  # Delta Lake support without Spark
     # Azure (Fabric LakeDB, Synapse Analytics, Unity Catalog on Azure)
     "azure-identity>=1.15.0",  # Azure AD authentication
     "azure-storage-blob>=12.19.0",  # Azure Blob Storage
@@ -120,8 +128,8 @@ delta = [
     # GCP (Unity Catalog on GCP, GCS)
     "google-cloud-storage>=2.10.0",  # GCP GCS access
 ]
-polars = ["polars>=0.20.0", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
-duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=0.15.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
+polars = ["polars>=0.20.0", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
+duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
 spark = ["pyspark>=3.3.0"]
 # SQLAlchemy alone — every `source.type: database` contract needs it, whatever the
 # driver, because the batched (`fetch_size`) path builds an SQLAlchemy engine and hands
@@ -212,7 +220,7 @@ all = [
     "polars>=0.20.0",
     "duckdb>=0.9.0",
     "pyarrow>=23.0.1",
-    "deltalake>=0.15.0",
+    "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
     "lxml>=4.9.0",
     "openpyxl>=3.1.0",

@@ -259,6 +259,30 @@ class SLOValidator:
 
         return enrich_azure_storage_options(resolve_storage_options(path))
 
+    def _dataset_predicate(self, reg_contract, layer: str, entity: str) -> str:
+        """SQL matching this contract's rows in the run log, under EITHER spelling.
+
+        THE TWO SPELLINGS. The registry names a bronze contract by its bare entity
+        (`rider_profiles`) while silver and gold already carry their layer
+        (`silver_rideflow_rider_profiles`). The run log, written by the pipeline, records
+        the RESOLVED table name for every layer. So `dataset = '{entity}'` matched silver
+        and gold by luck and missed every bronze row — and a volume objective with no run
+        log to compare against reports "NO DATA", which reads as a pipeline that never ran
+        rather than as a lookup that used the wrong name.
+
+        Matching both is deliberately permissive rather than switching to the resolved name
+        alone: other runtimes write the bare entity, and this module cannot tell which wrote
+        the log it is reading. The two spellings differ only by a layer/system prefix and
+        name the same dataset, so accepting either cannot match the wrong row.
+        """
+        names = {entity}
+        try:
+            names.add(self._entity_table_name(reg_contract, layer, entity))
+        except Exception:  # noqa: BLE001 - a resolution failure must not lose the check
+            pass
+        quoted = ", ".join("'" + n.replace("'", "''") + "'" for n in sorted(names))
+        return f"dataset IN ({quoted})"
+
     def _entity_table_name(self, reg_contract, layer: str, entity: str) -> str:
         """The physical table for a contract, from the contract itself.
 
@@ -398,7 +422,33 @@ class SLOValidator:
                         # A TABLE, like Spark — not a path like duckdb/polars. Snowflake
                         # holds the medallion in real tables, so the same `table_name` the
                         # engine writes to is the one to read.
-                        row = self._snowflake_fetchone(f"SELECT MAX({col}) AS latest_ts FROM {table_name}")
+                        # UNQUOTED FIRST, THEN QUOTED VERBATIM.
+                        #
+                        # Snowflake folds an unquoted identifier to upper, so `MAX(col)`
+                        # finds UPDATED_AT but never a column physically stored as
+                        # "_lakelogic_processed_at". Frames written with
+                        # `quote_identifiers=True` keep whatever case they had, and the
+                        # framework's audit columns are lowercase while business columns
+                        # are upper — so one table can hold both conventions at once.
+                        #
+                        # A table with a business timestamp passed and the rest fell
+                        # through to the audit columns and reported `invalid identifier
+                        # '_LAKELOGIC_PROCESSED_AT'`, which reads as a missing column
+                        # rather than a case mismatch. Trying the quoted spelling second
+                        # costs one failed parse and reads either convention.
+                        #
+                        # NOT fixed by uppercasing the frame on write: these frames carry
+                        # BOTH `rider_id` and `RIDER_ID`, so folding them collapses two
+                        # real columns into a duplicate and the write fails outright.
+                        try:
+                            row = self._snowflake_fetchone(
+                                f"SELECT MAX({col}) AS latest_ts FROM {table_name}"
+                            )
+                        except Exception:
+                            quoted = '"' + str(col).replace('"', '""') + '"'
+                            row = self._snowflake_fetchone(
+                                f"SELECT MAX({quoted}) AS latest_ts FROM {table_name}"
+                            )
                         latest_ts = row[0] if row else None
                     elif self.duckdb_con:
                         try:
@@ -618,7 +668,7 @@ class SLOValidator:
                         SELECT {check_field}, timestamp, pipeline_run_id, run_id
                         FROM {spark_table_ref}
                         WHERE data_layer = '{layer}'
-                          AND dataset = '{entity}'
+                          AND {self._dataset_predicate(contract, layer, entity)}
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
@@ -630,7 +680,7 @@ class SLOValidator:
                             SELECT {check_field}, timestamp
                             FROM {spark_table_ref}
                             WHERE data_layer = '{layer}'
-                              AND dataset = '{entity}'
+                              AND {self._dataset_predicate(contract, layer, entity)}
                               AND stage NOT IN ('no_new_data', 'reprocess')
                             ORDER BY timestamp DESC
                             LIMIT 1
@@ -644,7 +694,7 @@ class SLOValidator:
                     _sf_where = f"""
                         FROM {run_log_table}
                         WHERE data_layer = '{layer}'
-                          AND dataset = '{entity}'
+                          AND {self._dataset_predicate(contract, layer, entity)}
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
@@ -674,7 +724,7 @@ class SLOValidator:
                     _where = f"""
                         FROM {duckdb_table_ref}
                         WHERE data_layer = '{layer}'
-                          AND dataset = '{entity}'
+                          AND {self._dataset_predicate(contract, layer, entity)}
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
@@ -1080,7 +1130,7 @@ class SLOValidator:
                     _q_where = f"""
                         FROM {spark_ref}
                         WHERE data_layer = '{layer}'
-                          AND dataset = '{entity}'
+                          AND {self._dataset_predicate(contract, layer, entity)}
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
@@ -1105,7 +1155,7 @@ class SLOValidator:
                     _q_where = f"""
                         FROM {duckdb_ref}
                         WHERE data_layer = '{layer}'
-                          AND dataset = '{entity}'
+                          AND {self._dataset_predicate(contract, layer, entity)}
                           AND stage NOT IN ('no_new_data', 'reprocess')
                         ORDER BY timestamp DESC
                         LIMIT 1
@@ -1207,7 +1257,7 @@ class SLOValidator:
                     SELECT {check_field_name} as cnt
                     FROM {spark_ref}
                     WHERE data_layer = '{layer}'
-                      AND dataset = '{entity}'
+                      AND {self._dataset_predicate(None, layer, entity)}
                       AND stage NOT IN ('no_new_data', 'reprocess')
                     ORDER BY timestamp DESC
                     LIMIT {anomaly_cfg.lookback_runs + 1}
@@ -1217,7 +1267,7 @@ class SLOValidator:
                     SELECT {check_field_name} as cnt
                     FROM {duckdb_ref}
                     WHERE data_layer = '{layer}'
-                      AND dataset = '{entity}'
+                      AND {self._dataset_predicate(None, layer, entity)}
                       AND stage NOT IN ('no_new_data', 'reprocess')
                     ORDER BY timestamp DESC
                     LIMIT {anomaly_cfg.lookback_runs + 1}

@@ -689,10 +689,15 @@ def test_check_row_counts_duckdb_polars_and_configuration_edges(monkeypatch):
             return self._value
 
     class DuckCon:
+        # Matches the QUOTED ENTITY, not the whole predicate. The run-log lookup now
+        # accepts either spelling of a dataset (`orders` or `bronze_<system>_orders`)
+        # because the registry names bronze contracts bare while the run log records the
+        # resolved table — so the clause is `dataset IN (...)`, and a double keyed on
+        # `dataset = 'orders'` stopped recognising its own query.
         def execute(self, query):
-            if "dataset = 'orders'" in query:
+            if "'orders'" in query:
                 return DuckResult((150, now))
-            if "dataset = 'empty'" in query:
+            if "'empty'" in query:
                 return DuckResult(None)
             raise AssertionError(query)
 

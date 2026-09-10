@@ -322,7 +322,12 @@ class LakehousePipeline:
 
         if self.spark:
             try:
-                # Force strictly OSS-compatible Delta tables to ensure Polars interoperability
+                # Force strictly OSS-compatible Delta tables.
+                #
+                # "for Polars interoperability" was the original reason and is now stale:
+                # Polars and DuckDB both read deletion-vector tables on deltalake 1.6.3.
+                # The live blocker is `to_pyarrow_table()`, which does not — see the
+                # write-time disable in `core/materialization` for the full reasoning.
                 self.spark.conf.set("spark.databricks.delta.properties.defaults.enableDeletionVectors", "false")
                 logger.debug(
                     "Disabled DeletionVectors by default in Spark session for OSS compatibility."

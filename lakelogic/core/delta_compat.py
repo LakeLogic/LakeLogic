@@ -14,6 +14,25 @@ deltalake itself is fine — ``DeltaTable.to_pyarrow_table()`` works. Only polar
 bridge is broken, so this reads through deltalake and hands polars Arrow, which it
 consumes natively. That also makes the read independent of whether polars ever
 fixes its integration.
+
+**Both halves of that have since flipped, and the fallback is why this still works.**
+Re-measured on polars 1.40.1 / deltalake 1.6.3:
+
+* ``pl.read_delta`` and ``pl.scan_delta`` work again — the two tests in
+  ``tests/test_delta_compat.py`` now skip themselves, saying so.
+* ``to_pyarrow_table()`` — the *preferred* route above — is the one that now fails, on
+  any table carrying deletion vectors: "requires reader feature 'deletionVectors' ...
+  not supported using pyarrow Datasets".
+
+So on a DV table this function takes its fallback on every call: one failed Arrow
+attempt, a DEBUG line, then a correct answer from polars. That is also the ONLY reason
+the framework tolerates DV tables at all — the other ~16 ``to_pyarrow_*`` call sites
+have no fallback, which is why deletion vectors stay disabled at write time
+(see ``core/materialization``).
+
+The order is deliberately left as-is rather than flipped to polars-first: it is correct
+on both pairings, and the version that made the Arrow hop necessary is still inside the
+supported floor (``deltalake>=1.0.0``).
 """
 
 from __future__ import annotations

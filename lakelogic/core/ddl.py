@@ -452,6 +452,11 @@ def generate_ddl(
     table_props = getattr(mat, "table_properties", None) or {}
     if backend in ("spark", "databricks"):
         props_dict = dict(table_props)
+        # Default deletion vectors OFF unless the contract asks otherwise. Not because
+        # Polars/DuckDB cannot read them — as of deltalake 1.6.3 they can — but because
+        # `to_pyarrow_table()`/`to_pyarrow_dataset()` still cannot, and this framework
+        # reads through those in ~17 places with one fallback between them. Full
+        # reasoning and exit criteria: `core/materialization` (the write-time disable).
         if "delta.enableDeletionVectors" not in props_dict:
             props_dict["delta.enableDeletionVectors"] = "false"
         props = ", ".join(

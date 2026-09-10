@@ -253,13 +253,31 @@ def _spark_save_as_table(  # pragma: no cover
                 logger.debug(f"Schema creation skipped: {e}")
 
         # Write data directly to the external storage path.
-        # Disable deletion vectors at WRITE time so the Delta protocol never
-        # advertises the `deletionVectors` reader feature — which blocks
-        # delta-rs (Polars/DuckDB) with "reader features: {'deletionVectors'}
-        # not yet supported". A writer-level option is honoured on serverless,
-        # where the session-default conf
-        # (spark.databricks.delta.properties.defaults.enableDeletionVectors) is
-        # silently ignored.
+        #
+        # DISABLE DELETION VECTORS AT WRITE TIME so the Delta protocol never advertises the
+        # `deletionVectors` reader feature.
+        #
+        # THE ORIGINAL REASON IS NO LONGER THE REASON. This was added because delta-rs
+        # (Polars/DuckDB) could not read such tables at all. Re-measured on deltalake 1.6.3
+        # / polars 1.40.1, that is fixed: `pl.read_delta` and duckdb's `delta_scan` both
+        # read a table with materialised deletion vectors correctly.
+        #
+        # What still breaks is `DeltaTable.to_pyarrow_table()` / `.to_pyarrow_dataset()` —
+        # "requires reader feature 'deletionVectors' ... not supported using pyarrow
+        # Datasets". This framework calls those in ~17 places across materialization,
+        # processor, run_log, delta_adapter, the duckdb/polars engines and runner, and
+        # exactly ONE of them (`core/delta_compat`) catches the failure and falls back. The
+        # other sixteen would raise. The SaaS reader hits the same wall on its run-log
+        # tables (`medallion_verify`, `medallion_lakehouse_run_log`).
+        #
+        # WHEN THIS CAN GO: once those call sites move off `to_pyarrow_*`, or delta-rs
+        # supports DVs there AND the `deltalake` floor in pyproject is raised past the
+        # first version that does. Re-testing only Polars will show a green light that
+        # the other sixteen callers do not share.
+        #
+        # A writer-level option is honoured on serverless, where the session-default conf
+        # (spark.databricks.delta.properties.defaults.enableDeletionVectors) is silently
+        # ignored.
         writer.option("delta.enableDeletionVectors", "false").mode(mode).save(resolved_loc)
 
         # Register (or confirm) the table in UC pointing to that location
@@ -268,7 +286,7 @@ def _spark_save_as_table(  # pragma: no cover
         except Exception as e:
             logger.debug(f"Table registration skipped (may already exist): {e}")
     else:
-        # Same DV-disable for managed-table writes (see external branch above).
+        # Same DV-disable for managed-table writes, same reasoning (see external branch).
         writer.option("delta.enableDeletionVectors", "false").mode(mode).saveAsTable(table_name)
 
 
