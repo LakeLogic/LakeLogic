@@ -398,9 +398,7 @@ class SLOValidator:
                         # A TABLE, like Spark — not a path like duckdb/polars. Snowflake
                         # holds the medallion in real tables, so the same `table_name` the
                         # engine writes to is the one to read.
-                        row = self._snowflake_fetchone(
-                            f"SELECT MAX({col}) AS latest_ts FROM {table_name}"
-                        )
+                        row = self._snowflake_fetchone(f"SELECT MAX({col}) AS latest_ts FROM {table_name}")
                         latest_ts = row[0] if row else None
                     elif self.duckdb_con:
                         try:
@@ -656,9 +654,7 @@ class SLOValidator:
                             f"SELECT {check_field}, timestamp, pipeline_run_id, run_id {_sf_where}"
                         )
                     except Exception:
-                        result = self._snowflake_fetchone(
-                            f"SELECT {check_field}, timestamp {_sf_where}"
-                        )
+                        result = self._snowflake_fetchone(f"SELECT {check_field}, timestamp {_sf_where}")
                     if result:
                         # NAMED, like the duckdb branch. The consumer below reads
                         # `row[check_field]` — a Spark Row supports that, a DB-API tuple

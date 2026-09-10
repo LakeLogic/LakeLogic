@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.57.0] — 2026-09-10
+
+### Added
+
+- **Snowflake**: Implement Snowflake backend for run log and SLO checks with connection handling and table management
 ## [1.56.0] — 2026-09-08
 
 ### Added
@@ -742,6 +747,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.57.0]: https://github.com/lakelogic/LakeLogic/compare/v1.56.0...v1.57.0
 [1.56.0]: https://github.com/lakelogic/LakeLogic/compare/v1.55.0...v1.56.0
 [1.55.0]: https://github.com/lakelogic/LakeLogic/compare/v1.53.0...v1.55.0
 [1.53.0]: https://github.com/lakelogic/LakeLogic/compare/v1.52.1...v1.53.0

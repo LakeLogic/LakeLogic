@@ -123,7 +123,7 @@ def test_the_source_module_queries_a_table_not_a_path():
     import inspect
 
     src = inspect.getsource(SLOValidator)
-    branch = src[src.index("elif self.snowflake_con:"):]
+    branch = src[src.index("elif self.snowflake_con:") :]
     branch = branch[: branch.index("elif self.duckdb_con:")]
 
     assert "FROM {table_name}" in branch
@@ -138,7 +138,7 @@ def test_the_row_count_branch_returns_a_named_row():
     import inspect
 
     src = inspect.getsource(SLOValidator.check_row_counts)
-    branch = src[src.index("elif self.snowflake_con:"):]
+    branch = src[src.index("elif self.snowflake_con:") :]
     branch = branch[: branch.index("elif self.duckdb_con:")]
 
     assert "row = {" in branch
@@ -153,7 +153,7 @@ def test_the_wide_select_falls_back():
     import inspect
 
     src = inspect.getsource(SLOValidator.check_row_counts)
-    branch = src[src.index("elif self.snowflake_con:"):]
+    branch = src[src.index("elif self.snowflake_con:") :]
     branch = branch[: branch.index("elif self.duckdb_con:")]
 
     assert "except Exception:" in branch

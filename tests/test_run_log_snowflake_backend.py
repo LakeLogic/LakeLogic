@@ -10,6 +10,7 @@ That is the exact shape the project keeps banning elsewhere: a declaration that 
 capability while the surface behind it does nothing. A warning is not a failure, so
 nothing ever went red.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -143,6 +144,7 @@ def test_run_log_snowflake_backend_writes_one_row(conn, monkeypatch):
 
 def _contract_for(registry):
     """`_write_run_log_table` reads its config off a contract's registry."""
+
     class Contract:
         def __init__(self):
             self.registry = registry

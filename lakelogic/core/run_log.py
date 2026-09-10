@@ -1255,11 +1255,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         ]
         cur = conn.cursor()
         try:
-            cur.execute(
-                f"CREATE TABLE IF NOT EXISTS {table_name} ("
-                + ", ".join(f"{n} {t}" for n, t in cols)
-                + ")"
-            )
+            cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
             # Widen an older table rather than failing the insert. Columns were added to
             # this schema over several releases and a mesh that logged before them has a
             # narrower table; ADD COLUMN IF NOT EXISTS is a no-op when it is already there.
@@ -1663,11 +1659,7 @@ def _write_slo_checks_table(
         ]
         cur = conn.cursor()
         try:
-            cur.execute(
-                f"CREATE TABLE IF NOT EXISTS {table_name} ("
-                + ", ".join(f"{n} {t}" for n, t in cols)
-                + ")"
-            )
+            cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
             for name, sql_type in cols:
                 cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
         finally:
