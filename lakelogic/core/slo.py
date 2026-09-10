@@ -180,12 +180,48 @@ class SLOValidator:
         polars: bool = False,
         duckdb_con: Any = None,
         storage_options: dict = None,
+        snowflake_con: Any = None,
     ):
         self.registry = registry
         self.spark = spark
         self.polars = polars
         self.duckdb_con = duckdb_con
+        #: A `snowflake.connector` connection (or a Snowpark session's `.connection`).
+        #:
+        #: WHY IT IS A FOURTH ENGINE AND NOT A duckdb LOOKALIKE. Both expose
+        #: `.execute()`, so a Snowflake connection can be passed as `duckdb_con` and will
+        #: appear to work — until it does not: the duckdb branch scans FILES
+        #: (`delta_scan(path)`), and Snowflake has no files to scan. It would fail every
+        #: check and, because a failed check yields no result rather than an error, the
+        #: report would come back EMPTY AND PASSING. That is the one outcome this class
+        #: must never produce, so the engine gets a real branch of its own.
+        self.snowflake_con = snowflake_con
         self._storage_options = storage_options
+
+    def _has_engine(self) -> bool:
+        """Can this validator read anything at all?
+
+        Every check calls this before running. Without it a validator with no engine
+        returns `[]` from each check and the report is `passed` — a green tick over
+        nothing measured, which is worse than no check at all.
+        """
+        return bool(self.spark or self.polars or self.duckdb_con or self.snowflake_con)
+
+    def _snowflake_fetchone(self, sql: str):
+        """Run one query on the Snowflake connection and return the first row, or None.
+
+        Identifiers are left UNQUOTED on purpose. Snowflake folds unquoted identifiers to
+        UPPERCASE, and the mesh is uppercase throughout (its deploy explicitly unsets
+        QUOTED_IDENTIFIERS_IGNORE_CASE for exactly this reason), so an unquoted
+        `MAX(updated_at)` resolves to the real `UPDATED_AT`. Quoting them here would make
+        every column lookup fail.
+        """
+        cur = self.snowflake_con.cursor()
+        try:
+            cur.execute(sql)
+            return cur.fetchone()
+        finally:
+            cur.close()
 
     def _run_log_table(self) -> Optional[str]:
         """The run-log table, wherever the registry declares it.
@@ -244,9 +280,10 @@ class SLOValidator:
         """
         Check the freshness of all active contracts against the layer SLOs.
         """
-        if not self.spark and not self.polars and not self.duckdb_con:
+        if not self._has_engine():
             logger.warning(
-                "SLOValidator.check_freshness requires a Spark session, polars=True, or duckdb_con. Skipping."
+                "SLOValidator.check_freshness requires a Spark session, polars=True, "
+                "duckdb_con, or snowflake_con. Skipping."
             )
             return []
 
@@ -357,6 +394,14 @@ class SLOValidator:
                     if self.spark:
                         row = self.spark.sql(f"SELECT MAX({col}) as latest_ts FROM {table_name}").first()
                         latest_ts = row["latest_ts"]
+                    elif self.snowflake_con:
+                        # A TABLE, like Spark — not a path like duckdb/polars. Snowflake
+                        # holds the medallion in real tables, so the same `table_name` the
+                        # engine writes to is the one to read.
+                        row = self._snowflake_fetchone(
+                            f"SELECT MAX({col}) AS latest_ts FROM {table_name}"
+                        )
+                        latest_ts = row[0] if row else None
                     elif self.duckdb_con:
                         try:
                             result = self.duckdb_con.execute(
@@ -515,9 +560,10 @@ class SLOValidator:
         Reads from the run log table (no live COUNT queries) using the existing
         ``counts_good`` / ``counts_source`` / ``counts_total`` columns.
         """
-        if not self.spark and not self.polars and not self.duckdb_con:
+        if not self._has_engine():
             logger.warning(
-                "SLOValidator.check_row_counts requires a Spark session, polars=True, or duckdb_con. Skipping."
+                "SLOValidator.check_row_counts requires a Spark session, polars=True, "
+                "duckdb_con, or snowflake_con. Skipping."
             )
             return []
 
@@ -591,6 +637,43 @@ class SLOValidator:
                             ORDER BY timestamp DESC
                             LIMIT 1
                         """).first()
+                elif self.snowflake_con:
+                    # Same shape as the Spark branch above, including its fallback: a run
+                    # log written before `pipeline_run_id`/`run_id` existed would fail the
+                    # wide SELECT, and letting that surface would turn a correct verdict
+                    # into "NO DATA". Provenance is worth having; it is not worth a wrong
+                    # answer.
+                    _sf_where = f"""
+                        FROM {run_log_table}
+                        WHERE data_layer = '{layer}'
+                          AND dataset = '{entity}'
+                          AND stage NOT IN ('no_new_data', 'reprocess')
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """
+                    try:
+                        result = self._snowflake_fetchone(
+                            f"SELECT {check_field}, timestamp, pipeline_run_id, run_id {_sf_where}"
+                        )
+                    except Exception:
+                        result = self._snowflake_fetchone(
+                            f"SELECT {check_field}, timestamp {_sf_where}"
+                        )
+                    if result:
+                        # NAMED, like the duckdb branch. The consumer below reads
+                        # `row[check_field]` — a Spark Row supports that, a DB-API tuple
+                        # does not, and returning the tuple raw would raise
+                        # `TypeError: tuple indices must be integers` on the first real
+                        # row. Indexed defensively so a run log without the produced-by
+                        # columns still yields a verdict.
+                        row = {
+                            check_field: result[0],
+                            "timestamp": result[1],
+                            "pipeline_run_id": result[2] if len(result) > 2 else None,
+                            "run_id": result[3] if len(result) > 3 else None,
+                        }
+                    else:
+                        row = None
                 elif self.duckdb_con:
                     _where = f"""
                         FROM {duckdb_table_ref}

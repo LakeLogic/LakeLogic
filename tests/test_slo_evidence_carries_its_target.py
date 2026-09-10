@@ -198,3 +198,65 @@ def test_a_check_with_no_declared_target_adds_no_keys(posted):
     section = _section(posted, "quality")
     assert "good_ratio" not in section
     assert "min_good_ratio" not in section
+
+
+def test_the_retention_section_carries_its_period_and_the_limit(posted):
+    """Retention had this bug FIRST and was fixed without a wire test.
+
+    Between 1.52.0 and 1.52.1 the section on the wire was `{"pass": true}` and nothing
+    else — 54 such rows are still in the platform's telemetry. The fix landed in
+    `run_log.py` ("Retention reached the platform as `{"pass": true}` and nothing else"),
+    and quality and schedule each got a test here afterwards while retention, the original,
+    got none. This is that missing guard.
+
+    A bare boolean cannot answer "how close to the limit are we", which is the question
+    asked BEFORE a breach — and on the Compliance surface it reads as "no retention promise
+    declared", turning a checked dataset into an apparent governance gap.
+    """
+    emit_slo_report(
+        _Registry(),
+        [
+            SLOCheckResult(
+                layer="bronze",
+                entity="bronze_trips",
+                check_type="retention",
+                status="pass",
+                passed=True,
+                retention_period="P7D",
+                retention_age_minutes=4320.0,
+                retention_limit_minutes=10080,
+            )
+        ],
+        environment="dev",
+    )
+
+    section = _section(posted, "retention")
+    assert section["period"] == "P7D", "the declared promise, on the wire"
+    assert section["age_minutes"] == 4320.0
+    assert section["limit_minutes"] == 10080
+    assert section["pass"] is True
+
+
+def test_a_retention_breach_carries_the_period_it_exceeded(posted):
+    """The breach is the row someone acts on; it must say what was promised."""
+    emit_slo_report(
+        _Registry(),
+        [
+            SLOCheckResult(
+                layer="bronze",
+                entity="bronze_riders",
+                check_type="retention",
+                status="fail",
+                passed=False,
+                retention_period="P7D",
+                retention_age_minutes=55256.0,
+                retention_limit_minutes=10080,
+            )
+        ],
+        environment="dev",
+    )
+
+    section = _section(posted, "retention")
+    assert section["pass"] is False
+    assert section["period"] == "P7D"
+    assert section["age_minutes"] > section["limit_minutes"], "which is what a breach IS"

@@ -178,6 +178,67 @@ def _resolve_path(raw_path: str, base_path: Optional[Path]) -> Path:
     return path
 
 
+def _snowflake_log_connection(metadata: Dict[str, Any]) -> Optional[Any]:
+    """The connection to write log tables through, or None if we cannot get one.
+
+    PREFER THE SESSION THE PIPELINE IS ALREADY USING. `SnowflakeAdapter` holds a shared
+    connection when the caller set one (a Snowflake Notebook, or the mesh's own driver),
+    and reusing it means the log rows land in the same session, same role and same
+    transaction context as the data they describe. Opening a second connection here would
+    both cost a warehouse resume and risk writing under a different role.
+
+    Falls back to the same metadata/env parameters `SnowflakeAdapter._connect` uses, so a
+    caller that never set a shared connection still works.
+    """
+    try:
+        from lakelogic.engines.snowflake import SnowflakeAdapter
+    except Exception:  # pragma: no cover - engine extra not installed
+        SnowflakeAdapter = None  # type: ignore[assignment]
+
+    if SnowflakeAdapter is not None and SnowflakeAdapter._shared_connection is not None:
+        return SnowflakeAdapter._shared_connection
+
+    try:
+        import snowflake.connector
+    except Exception as exc:
+        logger.warning(f"Snowflake log backend unavailable: {exc}")
+        return None
+
+    params = {
+        "account": metadata.get("snowflake_account") or os.getenv("SNOWFLAKE_ACCOUNT"),
+        "user": metadata.get("snowflake_user") or os.getenv("SNOWFLAKE_USER"),
+        "password": metadata.get("snowflake_password") or os.getenv("SNOWFLAKE_PASSWORD"),
+        "warehouse": metadata.get("snowflake_warehouse") or os.getenv("SNOWFLAKE_WAREHOUSE"),
+        "database": metadata.get("snowflake_database") or os.getenv("SNOWFLAKE_DATABASE"),
+        "schema": metadata.get("snowflake_schema") or os.getenv("SNOWFLAKE_SCHEMA"),
+        "role": metadata.get("snowflake_role") or os.getenv("SNOWFLAKE_ROLE"),
+    }
+    if not all(params.get(k) for k in ("account", "user", "password")):
+        logger.warning(
+            "Snowflake log backend needs account/user/password (metadata or "
+            "SNOWFLAKE_* env), or a connection via SnowflakeAdapter.set_shared_connection."
+        )
+        return None
+    return snowflake.connector.connect(**{k: v for k, v in params.items() if v})
+
+
+def _snowflake_insert(conn, table: str, columns: List[str], records: List[Dict[str, Any]]) -> None:
+    """Append rows with one parameterised multi-row INSERT.
+
+    `executemany` on the Snowflake connector rewrites a VALUES insert into a single
+    statement anyway; doing it explicitly keeps one round trip per batch rather than one
+    per row, which matters when a check run posts 60+ objectives.
+    """
+    placeholders = ", ".join(["%s"] * len(columns))
+    sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
+    rows = [tuple(rec.get(c) for c in columns) for rec in records]
+    cur = conn.cursor()
+    try:
+        cur.executemany(sql, rows)
+    finally:
+        cur.close()
+
+
 def _prepare_table_name(name: str, backend: str) -> str:
     """Normalize table names for backend constraints (e.g., SQLite schemas)."""
     if backend == "sqlite":
@@ -1146,6 +1207,71 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         logger.info(f"Wrote run log via dlt to {destination}:{dataset_name}.{rl_table_name}")
         return f"{destination}:{dataset_name}.{rl_table_name}"
 
+    if backend == "snowflake":
+        conn = _snowflake_log_connection(metadata)
+        if conn is None:
+            return None
+
+        # A warehouse has no filesystem, so the path-style fallbacks the duckdb/delta
+        # branches carry do not apply — `run_log_table` here is always a real identifier
+        # (`{domain_catalog}._pipeline_run_log` resolves to DB.SCHEMA.TABLE).
+        cols = [
+            ("pipeline_run_id", "VARCHAR"),
+            ("run_id", "VARCHAR"),
+            ("timestamp", "VARCHAR"),
+            ("start_time", "VARCHAR"),
+            ("end_time", "VARCHAR"),
+            ("run_duration_seconds", "FLOAT"),
+            ("engine", "VARCHAR"),
+            ("contract", "VARCHAR"),
+            ("stage", "VARCHAR"),
+            ("dataset", "VARCHAR"),
+            ("domain", "VARCHAR"),
+            ("system", "VARCHAR"),
+            ("environment", "VARCHAR"),
+            ("data_layer", "VARCHAR"),
+            ("status", "VARCHAR"),
+            ("error_message", "VARCHAR"),
+            ("error_traceback", "VARCHAR"),
+            ("lakelogic_version", "VARCHAR"),
+            ("source_path", "VARCHAR"),
+            ("counts_source", "NUMBER"),
+            ("counts_total", "NUMBER"),
+            ("counts_good", "NUMBER"),
+            ("counts_quarantined", "NUMBER"),
+            ("counts_aggregated", "NUMBER"),
+            ("counts_dropped", "NUMBER"),
+            ("counts_deduplicated", "NUMBER"),
+            ("counts_filtered", "NUMBER"),
+            ("quarantine_ratio", "FLOAT"),
+            ("estimated_cost", "FLOAT"),
+            ("cost_currency", "VARCHAR"),
+            ("cost_confidence", "VARCHAR"),
+            ("max_source_mtime", "FLOAT"),
+            ("max_watermark_value", "VARCHAR"),
+            ("dlt_state_json", "VARCHAR"),
+            ("slo_json", "VARCHAR"),
+            ("report_json", "VARCHAR"),
+        ]
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {table_name} ("
+                + ", ".join(f"{n} {t}" for n, t in cols)
+                + ")"
+            )
+            # Widen an older table rather than failing the insert. Columns were added to
+            # this schema over several releases and a mesh that logged before them has a
+            # narrower table; ADD COLUMN IF NOT EXISTS is a no-op when it is already there.
+            for name, sql_type in cols:
+                cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
+        finally:
+            cur.close()
+
+        _snowflake_insert(conn, table_name, [n for n, _ in cols], [record])
+        logger.info(f"Wrote run log to Snowflake table {table_name}")
+        return table_name
+
     logger.warning(f"Unsupported run_log_backend: {backend}")
     return None
 
@@ -1502,6 +1628,54 @@ def _write_slo_checks_table(
                     logger.warning(f"Failed to write SLO checks to Delta {table_name}: {exc}")
                     return None
                 time.sleep((2**attempt) * 0.1 + random.uniform(0.05, 0.2))
+
+    if backend == "snowflake":
+        conn = _snowflake_log_connection(metadata)
+        if conn is None:
+            return None
+
+        cols = [
+            ("check_run_id", "VARCHAR"),
+            ("pipeline_run_id", "VARCHAR"),
+            ("checked_at", "VARCHAR"),
+            ("domain", "VARCHAR"),
+            ("system", "VARCHAR"),
+            ("layer", "VARCHAR"),
+            ("entity", "VARCHAR"),
+            ("check_type", "VARCHAR"),
+            ("passed", "BOOLEAN"),
+            ("severity", "VARCHAR"),
+            ("status", "VARCHAR"),
+            ("delay_minutes", "FLOAT"),
+            ("slo_max_minutes", "NUMBER"),
+            ("source_delay_minutes", "FLOAT"),
+            ("source_slo_max_minutes", "NUMBER"),
+            ("source_column_used", "VARCHAR"),
+            ("row_count", "NUMBER"),
+            ("slo_min_rows", "NUMBER"),
+            ("slo_max_rows", "NUMBER"),
+            ("anomaly_ratio", "FLOAT"),
+            ("anomaly_baseline", "FLOAT"),
+            ("quality_ratio", "FLOAT"),
+            ("quality_severity", "VARCHAR"),
+            ("duration_seconds", "FLOAT"),
+            ("details_json", "VARCHAR"),
+        ]
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {table_name} ("
+                + ", ".join(f"{n} {t}" for n, t in cols)
+                + ")"
+            )
+            for name, sql_type in cols:
+                cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
+        finally:
+            cur.close()
+
+        _snowflake_insert(conn, table_name, _SLO_CHECKS_COLUMNS, records)
+        logger.info(f"Wrote {len(records)} SLO check rows to Snowflake table {table_name}")
+        return table_name
 
     logger.warning(f"Unsupported slo_checks_backend: {backend}")
     return None
