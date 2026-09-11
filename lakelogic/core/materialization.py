@@ -2210,6 +2210,7 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
 
     if new_versions:
         new_df = pd.DataFrame(new_versions)
+
         merged = pd.concat([merged, new_df], ignore_index=True)
 
     # ── Surrogate key injection ──────────────────────────────────
@@ -2261,6 +2262,42 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
 
     other_cols = [c for c in merged.columns if c not in front_cols]
     merged = merged[front_cols + other_cols]
+
+    # ── One representation per timestamp column ──────────────────
+    #
+    # Two separate paths write a pandas Timestamp into these columns: a NEW version takes
+    # `effective_from` from the contract's `timestamp_field` (so it inherits that source
+    # column's dtype), and CLOSING an existing row writes `effective_to`. Rows already in the
+    # table come back from Delta as STRINGS whenever the table stores them as strings — which
+    # it does whenever the first load used the '1900-01-01' default. Mixing the two gives an
+    # `object` column of both, and the write dies in pa.Table.from_pandas with
+    #
+    #     ("Expected bytes, got a 'Timestamp' object",
+    #      'Conversion failed for column effective_to with type object')
+    #
+    # Normalising HERE rather than at either write site is deliberate: fixing only the
+    # concat moved the failure from effective_from to effective_to, because the close path
+    # writes somewhere else entirely. This is the one point every mutation has passed
+    # through.
+    #
+    # It only bites when a version is actually cut, which is what made it look
+    # table-specific: dim_driver cut 6 versions and crashed while dim_rider cut none and
+    # passed — one changed row away from the same failure.
+    #
+    # A column that is genuinely datetime64 end-to-end is left alone; this only acts on an
+    # object column that has ended up holding both.
+    for _ts_col in (effective_from, effective_to):
+        if _ts_col not in merged.columns:
+            continue
+        _col = merged[_ts_col]
+        if not pd.api.types.is_object_dtype(_col):
+            continue
+        _has_ts = any(isinstance(v, pd.Timestamp) for v in _col.dropna())
+        _has_text = any(isinstance(v, str) for v in _col.dropna())
+        if _has_ts and _has_text:
+            # isoformat(), matching how `now_value` is produced above, so a value cut today
+            # has the same shape as one written by the default path.
+            merged[_ts_col] = _col.map(lambda v: v.isoformat() if isinstance(v, pd.Timestamp) else v)
 
     return merged
 
