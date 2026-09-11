@@ -1289,7 +1289,30 @@ class DuckDBAdapter(EngineAdapter):
         if not rules:
             return
 
+        # Same deferral as the Polars engine. `_run_dataset_rules` runs during VALIDATION
+        # (step 6, above), while the SCD2 materializer injects the surrogate key and the
+        # effective_from/to, is_current and version_number control columns afterwards — so a
+        # rule over any of them evaluates against an all-NULL column and fails with a number
+        # that looks like evidence. See tests/test_scd2_dataset_rule_deferred.py.
+        deferred_cols = self._scd2_injected_columns()
+
         for rule in rules:
+            target = self._rule_targets_deferred_column(rule, deferred_cols)
+            if target:
+                logger.info(
+                    f"Quality Check: {rule.name} | DEFERRED — '{target}' is injected by the "
+                    "SCD2 materializer after validation, so it cannot be evaluated here"
+                )
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": f"not evaluated — '{target}' is materialized after validation",
+                        "passed": None,
+                        "deferred": True,
+                        "description": rule.description,
+                    }
+                )
+                continue
             try:
                 sql = rule.sql.replace("{dataset}", table_name)
                 res = self.con.sql(sql).fetchone()

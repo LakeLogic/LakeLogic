@@ -988,7 +988,46 @@ class PolarsAdapter(EngineAdapter):
         if tbl_name != "source":
             ctx.register("source", lf)
 
+        # Columns the SCD2 materializer has not created yet. This method runs during
+        # VALIDATION; the materializer injects the surrogate key, effective_from/to,
+        # is_current and version_number AFTERWARDS.
+        #
+        # A rule over one of them is not merely unhelpful here, it is guaranteed to fail
+        # and to fail with a number that looks meaningful. `unique: driver_sk` compiles to
+        # `COUNT(*) - COUNT(DISTINCT driver_sk)`; against an all-NULL column COUNT(DISTINCT)
+        # is 0, so the rule returns the ROW COUNT and reports it as that many duplicates.
+        # Observed in the RideFlow estate as `driver_sk_unique | 249 (expected < 1.0)` on a
+        # run where all 249 rows were valid, and `2042 (expected < 1.0)` on a larger one —
+        # the "duplicate count" always equals the row count, which is the tell.
+        #
+        # The cost is not just a bad number: `failed_rules > 0` pins the product to
+        # Degraded/Failing forever, and a gate that can never pass teaches people to
+        # ignore gates.
+        #
+        # `_scd2_injected_columns` already exists for exactly this and its docstring says so
+        # ("checks that run BEFORE materialization ... must treat them as derived — not
+        # missing"). The schema-drift check consults it; this path never did.
+        deferred_cols = self._scd2_injected_columns()
+
         for rule in rules:
+            target = self._rule_targets_deferred_column(rule, deferred_cols)
+            if target:
+                # DEFERRED, not passed and not failed. Recording it as passed would assert
+                # a uniqueness this run never checked.
+                logger.info(
+                    f"Quality Check: {rule.name} | DEFERRED — '{target}' is injected by the "
+                    "SCD2 materializer after validation, so it cannot be evaluated here"
+                )
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": f"not evaluated — '{target}' is materialized after validation",
+                        "passed": None,
+                        "deferred": True,
+                        "description": rule.description,
+                    }
+                )
+                continue
             try:
                 sql = rule.sql.replace("{dataset}", tbl_name)
                 res = ctx.execute(sql).collect()

@@ -1,3 +1,4 @@
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -257,6 +258,33 @@ class EngineAdapter(ABC):
             if val:
                 injected.add(val)
         return injected
+
+    @staticmethod
+    def _rule_targets_deferred_column(rule, deferred: set):
+        """The deferred column this dataset rule is written against, or None.
+
+        Matched against the rule's compiled SQL rather than its name. The name is a
+        convention (``{column}_unique``) and conventions drift; the SQL is what actually
+        runs, so a rule that references the column under any spelling is caught.
+
+        Word-boundary matched so ``driver_sk`` does not also swallow a rule about
+        ``driver_sk_backup`` or ``prev_driver_sk``.
+        """
+        if not deferred:
+            return None
+        sql = str(getattr(rule, "sql", "") or "")
+        if not sql:
+            return None
+        # Tokenised rather than regex-escaped per column: identifiers are word characters,
+        # so splitting the SQL into identifier tokens gives exact whole-word matching with
+        # no escaping. (The first cut used a  word-boundary pattern; written through a
+        # shell heredoc the escape arrived as a literal backspace byte and the helper
+        # silently matched nothing.)
+        tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", sql))
+        for col in sorted(deferred):
+            if col and col in tokens:
+                return col
+        return None
 
     def get_row_rules(self) -> List[QualityRule]:
         """

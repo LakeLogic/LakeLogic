@@ -5186,8 +5186,30 @@ class DataProcessor:
 
         failures = []
         for (err, cat), count in pair_counts.items():
-            if isinstance(err, str) and err.startswith("Rule failed: "):
-                payload = err[len("Rule failed: ") :]
+            # An optional leading "[phase] " marker is stripped before the prefix test.
+            #
+            # The Spark engine writes "[pre] Rule failed: X (sql)" / "[post] Rule failed: …"
+            # while Polars, DuckDB, BigQuery and Snowflake all write a bare
+            # "Rule failed: …". This branch tested `startswith("Rule failed: ")`, so every
+            # Spark failure fell through to the else and lost BOTH `name` and `sql` — while
+            # keeping `count` and `category`, which are set in both branches.
+            #
+            # That is exactly what a SaaS consumer then reported: "238 rule failures · no
+            # field recorded … the pipeline recorded a failure but not which rule produced
+            # it", on a contract whose YAML names the rule `positive_spend`. The name was
+            # never missing — it was sitting inside `message`, one prefix away from being
+            # parsed. The phase is worth keeping rather than discarding: pre- and
+            # post-transformation failures mean different things.
+            text = err if isinstance(err, str) else str(err)
+            phase = None
+            if text.startswith("["):
+                close = text.find("] ")
+                if close != -1:
+                    phase = text[1:close]
+                    text = text[close + 2 :]
+
+            if text.startswith("Rule failed: "):
+                payload = text[len("Rule failed: ") :]
                 name = payload
                 sql = None
                 if " (" in payload and payload.endswith(")"):
@@ -5196,6 +5218,8 @@ class DataProcessor:
                 entry = {"name": name, "sql": sql, "message": err, "count": count}
             else:
                 entry = {"message": str(err), "count": count}
+            if phase:
+                entry["phase"] = phase
             if cat:
                 entry["category"] = cat
             failures.append(entry)
