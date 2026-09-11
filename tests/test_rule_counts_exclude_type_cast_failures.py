@@ -27,6 +27,7 @@ unchanged. They are simply not rules, so they are not counted as rules.
 Sibling of test_rule_counts_exclude_deferred.py: the same function, the same class of
 error — a number beside the payload disagreeing with the payload.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -34,11 +35,14 @@ import pytest
 from lakelogic.core.run_log import compute_rule_counts
 
 # The real payload from the run that exposed this, trimmed to the shape that matters.
-RULE_FAILURE = {"name": "positive_spend", "sql": "fare_amount >= 0",
-                "message": "Rule failed: positive_spend (fare_amount >= 0)",
-                "count": 173, "category": "correctness"}
-CAST_FAILURE = {"message": "Type Mismatch: fare_amount cannot be cast to float",
-                "count": 21, "category": "schema"}
+RULE_FAILURE = {
+    "name": "positive_spend",
+    "sql": "fare_amount >= 0",
+    "message": "Rule failed: positive_spend (fare_amount >= 0)",
+    "count": 173,
+    "category": "correctness",
+}
+CAST_FAILURE = {"message": "Type Mismatch: fare_amount cannot be cast to float", "count": 21, "category": "schema"}
 ROW_RULES = [{"name": "positive_spend"}, {"name": "valid_rating"}]
 
 

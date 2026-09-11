@@ -1989,8 +1989,15 @@ def emit_slo_report(
                 # The rule the drift verdict was judged against, riding WITH it — so the
                 # platform draws the exact line that fired instead of recomputing one, and a
                 # config change never re-judges this run (core/volume_baseline.py).
-                for _key in ("anomaly_floor", "anomaly_ceiling", "anomaly_method", "anomaly_seasonal",
-                             "anomaly_samples", "anomaly_environment", "anomaly_severity"):
+                for _key in (
+                    "anomaly_floor",
+                    "anomaly_ceiling",
+                    "anomaly_method",
+                    "anomaly_seasonal",
+                    "anomaly_samples",
+                    "anomaly_environment",
+                    "anomaly_severity",
+                ):
                     if getattr(r, _key, None) is not None:
                         section[_key] = getattr(r, _key)
             # Quality reached the platform as `{"pass": true}` and nothing else — the
