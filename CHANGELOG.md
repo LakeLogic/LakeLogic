@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.59.0] — 2026-09-11
+
+### Added
+
+- Enhance error handling for rule failures and implement deferred column evaluation in SCD2 materializer
 ## [1.58.0] — 2026-09-10
 
 ### Added
@@ -752,6 +757,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.59.0]: https://github.com/lakelogic/LakeLogic/compare/v1.58.0...v1.59.0
 [1.58.0]: https://github.com/lakelogic/LakeLogic/compare/v1.57.0...v1.58.0
 [1.57.0]: https://github.com/lakelogic/LakeLogic/compare/v1.56.0...v1.57.0
 [1.56.0]: https://github.com/lakelogic/LakeLogic/compare/v1.55.0...v1.56.0
