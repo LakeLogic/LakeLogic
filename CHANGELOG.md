@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.60.0] — 2026-09-11
+
+### Added
+
+- Normalize timestamp columns to prevent type mixing in SCD2 merges
 ## [1.59.0] — 2026-09-11
 
 ### Added
@@ -757,6 +762,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.60.0]: https://github.com/lakelogic/LakeLogic/compare/v1.59.0...v1.60.0
 [1.59.0]: https://github.com/lakelogic/LakeLogic/compare/v1.58.0...v1.59.0
 [1.58.0]: https://github.com/lakelogic/LakeLogic/compare/v1.57.0...v1.58.0
 [1.57.0]: https://github.com/lakelogic/LakeLogic/compare/v1.56.0...v1.57.0
