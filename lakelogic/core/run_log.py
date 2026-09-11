@@ -24,6 +24,62 @@ from loguru import logger
 _CLOUD_PREFIXES = ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
 
 
+def compute_rule_counts(row_rules, configured_dataset_rules, dataset_results, row_failures):
+    """(evaluated, passed, failed) for a run, or (None, None, None) when nothing is countable.
+
+    Named and lifted out of `write_run_log` so it can be tested. It was six inline lines in a
+    900-line function, which is how it came to disagree with the payload it sits beside.
+
+    A DEFERRED dataset rule (``passed: None``, ``deferred: True``) counts as NEITHER passed
+    nor failed, and is removed from `evaluated` as well: it was not evaluated, so counting it
+    would understate `passed` by exactly the deferred count.
+
+    The failure test is ``is False``, not ``not passed``. Under a falsy test ``not None`` is
+    True, so a rule that explicitly could not be evaluated was counted as a failure — and
+    ``rules_failed > 0`` is what pins a data product to Degraded. That produced runs whose
+    ``dataset_rules`` said "not evaluated … deferred: true" while ``rules_failed`` beside it
+    said 1, and the product stayed Degraded on the evidence of a rule that never ran.
+
+    An absent count stays absent rather than becoming a confident 0 — the Observatory used to
+    render "0 evaluated, 0 passed, 0 failed" for runs that did evaluate rules.
+
+    ONLY A RULE CAN FAIL A RULE COUNT. `row_failures` is the quarantine breakdown, and not
+    every quarantine reason is a rule — a value that cannot be cast to its declared type is
+    a SCHEMA failure with no rule behind it:
+
+        {"message": "Type Mismatch: fare_amount cannot be cast to float", "count": 21,
+         "category": "schema"}                                     <- no `name`
+        {"name": "positive_spend", "sql": "fare_amount >= 0", "count": 173,
+         "category": "correctness"}                                <- a rule
+
+    Counting both gave `silver_rideflow_trips` **2 rules evaluated, 11 failed** on a real run:
+    2 configured row rules, 1 of which failed, plus 10 type-cast failures across 10 different
+    columns. `failed > evaluated` is not a number anyone can act on, and `passed` was driven
+    to 0 by the subtraction below, so a contract with a passing rule reported none.
+
+    The cast failures are not being hidden — they are already carried as quarantine signals
+    under `category: "schema"`, which is where a type mismatch belongs. They are simply not
+    rules, so they are not counted as rules.
+    """
+    row_rules = list(row_rules or [])
+    configured_dataset_rules = list(configured_dataset_rules or [])
+    dataset_results = list(dataset_results or [])
+    row_failures = list(row_failures or [])
+
+    if not (row_rules or configured_dataset_rules or dataset_results):
+        return None, None, None
+
+    deferred = [r for r in dataset_results if isinstance(r, dict) and r.get("deferred") is True]
+    dataset_failed = [r for r in dataset_results if isinstance(r, dict) and r.get("passed") is False]
+
+    evaluated = len(row_rules) + max(len(configured_dataset_rules), len(dataset_results))
+    evaluated = max(0, evaluated - len(deferred))
+    named_row_failures = [f for f in row_failures if isinstance(f, dict) and str(f.get("name") or "").strip()]
+    failed = len(named_row_failures) + len(dataset_failed)
+    passed = max(0, evaluated - failed)
+    return evaluated, passed, failed
+
+
 def _is_cloud_path(path: str) -> bool:
     """Return True if the path is a cloud storage URI (ADLS, S3, GCS)."""
     return any(str(path).startswith(prefix) for prefix in _CLOUD_PREFIXES)
@@ -1930,6 +1986,13 @@ def emit_slo_report(
             if getattr(r, "anomaly_ratio", None) is not None:
                 section["anomaly_ratio"] = r.anomaly_ratio
                 section["anomaly_baseline"] = r.anomaly_baseline
+                # The rule the drift verdict was judged against, riding WITH it — so the
+                # platform draws the exact line that fired instead of recomputing one, and a
+                # config change never re-judges this run (core/volume_baseline.py).
+                for _key in ("anomaly_floor", "anomaly_ceiling", "anomaly_method", "anomaly_seasonal",
+                             "anomaly_samples", "anomaly_environment", "anomaly_severity"):
+                    if getattr(r, _key, None) is not None:
+                        section[_key] = getattr(r, _key)
             # Quality reached the platform as `{"pass": true}` and nothing else — the
             # identical shape retention had before the block above was written, and for
             # the identical reason: the section is built from freshness's fields, and
@@ -2290,13 +2353,8 @@ def write_run_log(
 
                 # Dataset-level rule outcomes carry their own pass/fail.
                 _dataset_rules = report.get("dataset_rules") or []
-                _dataset_failed = [r for r in _dataset_rules if isinstance(r, dict) and not r.get("passed")]
                 _drift = report.get("schema_drift") or {}
 
-                # Rule counts. Emitted ONLY when the contract lets us count the rules that
-                # were configured — an absent count must stay absent rather than become a
-                # confident 0, which is what the Observatory rendered for every OSS run
-                # before this ("0 evaluated, 0 passed, 0 failed" on runs that ran rules).
                 _rules_evaluated = _rules_passed = _rules_failed = None
                 try:
                     _quality_cfg = getattr(contract, "quality", None)
@@ -2304,11 +2362,9 @@ def write_run_log(
                     _cfg_dataset_rules = (
                         list(getattr(_quality_cfg, "dataset_rules", None) or []) if _quality_cfg else []
                     )
-                    if _row_rules or _cfg_dataset_rules or _dataset_rules:
-                        _rules_evaluated = len(_row_rules) + max(len(_cfg_dataset_rules), len(_dataset_rules))
-                        # A rule is counted once whether it failed on 1 row or 10,000.
-                        _rules_failed = len(_raw_failures) + len(_dataset_failed)
-                        _rules_passed = max(0, _rules_evaluated - _rules_failed)
+                    _rules_evaluated, _rules_passed, _rules_failed = compute_rule_counts(
+                        _row_rules, _cfg_dataset_rules, _dataset_rules, _raw_failures
+                    )
                 except Exception:  # pragma: no cover - counts are best-effort, never fatal
                     _rules_evaluated = _rules_passed = _rules_failed = None
 

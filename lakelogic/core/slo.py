@@ -60,6 +60,26 @@ def _coerce_utc(ts: Any) -> datetime.datetime:
     return ts.replace(tzinfo=datetime.timezone.utc)
 
 
+#: Newest rows of ONE dataset's history the drift check reads before scoping it by environment
+#: and window. Bounded so a long-lived hourly dataset cannot pull its whole run log.
+_ANOMALY_HISTORY_CAP = 1000
+
+
+def _named(row: Any, names: tuple) -> Dict[str, Any]:
+    """A result row — Spark Row, DB-API tuple or dict — as a dict of the requested columns.
+
+    A column the row does not carry is simply absent, so the baseline can tell "this run log
+    has no environment" apart from "this run's environment is null".
+    """
+    if isinstance(row, dict):
+        return {n: row.get(n) for n in names if n in row}
+    if hasattr(row, "asDict"):
+        d = row.asDict()
+        return {n: d.get(n) for n in names if n in d}
+    values = tuple(row)
+    return {n: values[i] for i, n in enumerate(names) if i < len(values)}
+
+
 class SLOCheckResult(BaseModel):
     layer: str
     entity: str
@@ -81,6 +101,18 @@ class SLOCheckResult(BaseModel):
     # Anomaly detection
     anomaly_ratio: Optional[float] = None  # actual / baseline
     anomaly_baseline: Optional[float] = None  # median/avg of lookback
+    # WHAT THE DRIFT VERDICT WAS JUDGED AGAINST, stamped with it (core/volume_baseline.py).
+    # Same reason as the quality floor below: a config change must never re-judge an old run,
+    # and a chart must be able to draw the exact line that fired.
+    anomaly_floor: Optional[float] = None  # breach below this many rows
+    anomaly_ceiling: Optional[float] = None  # breach above this many rows
+    anomaly_method: Optional[str] = None
+    anomaly_seasonal: Optional[bool] = None  # baseline from same-weekday runs only
+    anomaly_samples: Optional[int] = None  # runs the baseline was taken over
+    anomaly_environment: Optional[str] = None  # the environment the history was scoped to
+    # "pass" | "warn" | "critical". Separate from `severity`, whose pass/warn/fail meaning
+    # every consumer already relies on.
+    anomaly_severity: Optional[str] = None
     # ── Retention ────────────────────────────────────────────────────────────
     # ITS OWN FIELDS, not freshness's. Retention used to write its age and limit
     # into `source_delay_minutes` / `source_slo_max_minutes`, which are documented
@@ -1231,14 +1263,24 @@ class SLOValidator:
         if not anomaly_cfg or not anomaly_cfg.enabled:
             return None
 
-        if not self.spark and not self.polars and not self.duckdb_con:
+        # Snowflake is an engine here too. This guard used to list three engines, so on the
+        # Snowflake mesh — the one estate where dev, staging and prod share a run log — the
+        # drift check silently never ran.
+        if not self._has_engine():
             return None
 
         run_log_table = self._run_log_table()
         if not run_log_table:
             return None
 
-        run_log_table.replace("`", "")
+        from .volume_baseline import describe, row_count_baseline, row_count_verdict, stamp
+
+        # ENOUGH HISTORY TO SCOPE. The baseline is filtered to the judged run's environment
+        # and, for `seasonal_median`, to a window of days — both in Python, after the fetch,
+        # so one query shape serves every engine. Fetching only `lookback_runs + 1` rows would
+        # leave a shared run log with a handful of same-environment runs, so fetch a bounded
+        # slice of this one dataset's history instead.
+        fetch = max(int(getattr(anomaly_cfg, "lookback_runs", 14) or 14) + 1, _ANOMALY_HISTORY_CAP)
 
         try:
             # `check_field` may be set on the anomaly config OR inherited from the
@@ -1246,29 +1288,52 @@ class SLOValidator:
             # where the attribute did not exist, so hasattr() was always False and
             # the setting was silently ignored on every contract.
             check_field_name = getattr(anomaly_cfg, "check_field", None) or check_field or "counts_good"
-            spark_ref = resolve_run_log_ref(run_log_table, "spark")
-            duckdb_ref = resolve_run_log_ref(run_log_table, "duckdb")
+
+            def _query(columns: str, ref: str) -> str:
+                return f"""
+                    SELECT {columns}
+                    FROM {ref}
+                    WHERE data_layer = '{layer}'
+                      AND {self._dataset_predicate(None, layer, entity)}
+                      AND stage NOT IN ('no_new_data', 'reprocess')
+                    ORDER BY timestamp DESC
+                    LIMIT {fetch}
+                """
+
+            # Newest columns first; a run log written before `environment` existed still
+            # yields a verdict, just not an environment-scoped one.
+            column_sets = (
+                (f"{check_field_name} as cnt, timestamp, environment", ("cnt", "timestamp", "environment")),
+                (f"{check_field_name} as cnt, timestamp", ("cnt", "timestamp")),
+                (f"{check_field_name} as cnt", ("cnt",)),
+            )
+
+            def _first_that_runs(run):
+                last_exc = None
+                for columns, names in column_sets:
+                    try:
+                        return [_named(r, names) for r in run(columns)]
+                    except Exception as exc:  # the column is absent in this run log
+                        last_exc = exc
+                raise last_exc
+
             if self.spark:
-                rows = self.spark.sql(f"""
-                    SELECT {check_field_name} as cnt
-                    FROM {spark_ref}
-                    WHERE data_layer = '{layer}'
-                      AND {self._dataset_predicate(None, layer, entity)}
-                      AND stage NOT IN ('no_new_data', 'reprocess')
-                    ORDER BY timestamp DESC
-                    LIMIT {anomaly_cfg.lookback_runs + 1}
-                """).collect()
+                spark_ref = resolve_run_log_ref(run_log_table, "spark")
+                rows = _first_that_runs(lambda cols: self.spark.sql(_query(cols, spark_ref)).collect())
+            elif self.snowflake_con:
+
+                def _sf(cols):
+                    cur = self.snowflake_con.cursor()
+                    try:
+                        cur.execute(_query(cols, run_log_table))
+                        return cur.fetchall()
+                    finally:
+                        cur.close()
+
+                rows = _first_that_runs(_sf)
             elif self.duckdb_con:
-                duckdb_rows = self.duckdb_con.execute(f"""
-                    SELECT {check_field_name} as cnt
-                    FROM {duckdb_ref}
-                    WHERE data_layer = '{layer}'
-                      AND {self._dataset_predicate(None, layer, entity)}
-                      AND stage NOT IN ('no_new_data', 'reprocess')
-                    ORDER BY timestamp DESC
-                    LIMIT {anomaly_cfg.lookback_runs + 1}
-                """).fetchall()
-                rows = [{"cnt": r[0]} for r in duckdb_rows]
+                duckdb_ref = resolve_run_log_ref(run_log_table, "duckdb")
+                rows = _first_that_runs(lambda cols: self.duckdb_con.execute(_query(cols, duckdb_ref)).fetchall())
             else:
                 import polars as pl
 
@@ -1290,10 +1355,15 @@ class SLOValidator:
                         & (~pl.col("stage").is_in(["no_new_data", "reprocess"]))
                     )
                     .sort("timestamp", descending=True)
-                    .head(anomaly_cfg.lookback_runs + 1)
+                    .head(fetch)
                 )
-
-                rows = [{"cnt": r.get(check_field_name)} for r in filtered.to_dicts()]
+                has_env = "environment" in filtered.columns
+                rows = []
+                for r in filtered.to_dicts():
+                    row = {"cnt": r.get(check_field_name), "timestamp": r.get("timestamp")}
+                    if has_env:
+                        row["environment"] = r.get("environment")
+                    rows.append(row)
 
         except Exception as e:
             logger.debug(f"Anomaly check query failed for {entity}: {e}")
@@ -1304,52 +1374,32 @@ class SLOValidator:
         # ordered newest-first — so that same row was the first element of its own
         # baseline. Live, that made the check unable to detect anything: with a
         # steady series the median simply BECAME the current value and every verdict
-        # read `ratio=1.00x, baseline == rows`. A real shift would be pulled toward
-        # 1 by its own presence, most strongly on the small windows where drift
-        # detection matters most.
-        #
-        # One extra row is fetched above so dropping the newest still leaves a full
-        # `lookback_runs` window of genuine history.
-        historical = [r["cnt"] for r in rows if r["cnt"] is not None][1:]
+        # read `ratio=1.00x, baseline == rows`. The newest row is therefore the JUDGED
+        # run — which is also where its environment and weekday come from — and only
+        # the rows after it are history.
+        if not rows:
+            return None
+        judged, history = rows[0], rows[1:]
 
-        if len(historical) < anomaly_cfg.min_runs_before_enforcement:
+        baseline = row_count_baseline(judged, history, anomaly_cfg)
+        if baseline is None:
             logger.debug(
-                f"Anomaly check skipped for {entity}: only {len(historical)} "
-                f"runs (need {anomaly_cfg.min_runs_before_enforcement})"
+                f"Anomaly check skipped for {entity}: not enough history "
+                f"(need {getattr(anomaly_cfg, 'min_runs_before_enforcement', 5)} runs)"
             )
             return None
 
-        # Compute baseline
-        if anomaly_cfg.method == "median":
-            sorted_h = sorted(historical)
-            mid = len(sorted_h) // 2
-            baseline = sorted_h[mid] if len(sorted_h) % 2 == 1 else (sorted_h[mid - 1] + sorted_h[mid]) / 2
-        else:  # rolling_average
-            baseline = sum(historical) / len(historical)
-
-        if baseline == 0:
-            return None
-
-        ratio = actual_count / baseline
-        passed = anomaly_cfg.min_ratio <= ratio <= anomaly_cfg.max_ratio
-
-        if passed:
-            status = f"✅ OK (ratio={ratio:.2f}x vs {anomaly_cfg.method})"
-        elif ratio < anomaly_cfg.min_ratio:
-            status = f"❌ VOLUME DROP ({ratio:.2f}x < {anomaly_cfg.min_ratio}x baseline)"
-        else:
-            status = f"❌ VOLUME SPIKE ({ratio:.2f}x > {anomaly_cfg.max_ratio}x baseline)"
+        verdict = row_count_verdict(actual_count, baseline, anomaly_cfg)
 
         return SLOCheckResult(
             layer=layer,
             entity=entity,
             check_type="row_count",
-            status=status,
-            passed=passed,
-            severity="pass" if passed else "warn",
+            status=describe(actual_count, baseline, verdict, anomaly_cfg),
+            passed=verdict.passed,
+            severity="pass" if verdict.passed else "warn",
             row_count=actual_count,
-            anomaly_ratio=round(ratio, 4),
-            anomaly_baseline=round(baseline, 1),
+            **stamp(baseline, verdict),
             # The LOOKBACK is the baseline, not the subject. This verdict judges
             # `actual_count`, which came from one specific run-log row, so it
             # carries that row's identity like the bounds check does. Without it an

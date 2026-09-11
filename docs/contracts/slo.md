@@ -83,11 +83,20 @@ The second check is critical — without it, your pipeline could run on time but
           lookback_runs: 14            # Compare against last 14 runs
           min_ratio: 0.5               # Alert if < 50% of baseline
           max_ratio: 2.0               # Alert if > 200% of baseline
-          method: "median"             # median | rolling_average
-          min_runs_before_enforcement: 5
+          method: "seasonal_median"    # median | rolling_average | seasonal_median
+          lookback_days: 35            # seasonal_median: days of history
+          critical_ratio: 0.3          # below 30% of baseline (or zero rows) = critical
+          min_runs_before_enforcement: 3
     ```
 
 **Anomaly detection** is the smart version of min/max — instead of hard-coding thresholds, it learns your baseline and alerts on deviations. This catches gradual drift (data volume slowly declining) that fixed thresholds miss.
+
+How the baseline is built:
+
+- **Per environment.** A run is compared only with earlier runs from its own environment, so a small dev run is never judged against prod volume, even when both write to one run log.
+- **`seasonal_median`** compares a run with the same weekday over `lookback_days`, because weekends are often quieter by design. With fewer same-weekday runs than `min_runs_before_enforcement`, it uses the median of the whole window instead. Runs that wrote 0 rows are left out of the baseline.
+- **`median` / `rolling_average`** use the last `lookback_runs` runs, zeros included — they also baseline ratio expressions, where 0 is a real value.
+- **Severity.** A breach is a warning. A drop below `critical_ratio`, or to zero rows, is **critical**. The result carries `anomaly_severity` with the expected count, floor, ceiling, method, sample count and environment it was judged against.
 
 ---
 

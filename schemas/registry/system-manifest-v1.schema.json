@@ -583,10 +583,27 @@
           "default": null,
           "title": "Check Field"
         },
+        "critical_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Critical Ratio"
+        },
         "enabled": {
           "default": false,
           "title": "Enabled",
           "type": "boolean"
+        },
+        "lookback_days": {
+          "default": 35,
+          "title": "Lookback Days",
+          "type": "integer"
         },
         "lookback_runs": {
           "default": 14,

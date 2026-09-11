@@ -1575,9 +1575,13 @@ service_levels:
       max_ratio: 2.0
       # Alert if row count is >200% of historical baseline
       method: "median"
-      # Options: median (default, robust to outliers), rolling_average
+      # Options: median (default, robust to outliers), rolling_average, seasonal_median
       # median: single spike doesn't permanently inflate baseline
       # rolling_average: more sensitive but skews after anomalies
+      # seasonal_median: same weekday over lookback_days (quiet weekends stay normal)
+      # lookback_days: 35      # seasonal_median only
+      # critical_ratio: 0.3    # drop below 30% (or zero rows) = critical
+      # History is always compared within the judged run's environment.
       min_runs_before_enforcement: 5
       # Skip anomaly checks until at least N historical runs exist.
       # Prevents false positives during initial pipeline setup.

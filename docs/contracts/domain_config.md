@@ -242,8 +242,12 @@ Statistical anomaly detection against historical baselines.
 | `lookback_runs` | `int` | `14` | Number of historical runs to compare against |
 | `min_ratio` | `float` | `0.5` | Alert if current count < `min_ratio × baseline` |
 | `max_ratio` | `float` | `2.0` | Alert if current count > `max_ratio × baseline` |
-| `method` | `string` | `"median"` | `"median"` or `"rolling_average"` |
+| `method` | `string` | `"median"` | `"median"`, `"rolling_average"`, or `"seasonal_median"` (same weekday over `lookback_days`, trailing median when too few) |
 | `min_runs_before_enforcement` | `int` | `5` | Don't enforce until this many runs exist |
+| `lookback_days` | `int` | `35` | `seasonal_median` only: days of history |
+| `critical_ratio` | `float` | unset | A drop below `critical_ratio × baseline`, or to zero rows, is critical |
+
+History is always scoped to the environment of the run being judged.
 
 #### `slo.quality`
 

@@ -150,8 +150,16 @@ class SLORowCountAnomalyConfig(BaseModel):
     lookback_runs: int = 14
     min_ratio: float = 0.5
     max_ratio: float = 2.0
-    method: str = "median"  # "median" | "rolling_average"
+    #: "median" | "rolling_average" over the last `lookback_runs`, or "seasonal_median" — the
+    #: same-weekday median over `lookback_days`, falling back to the trailing median of that
+    #: window when there are too few same-weekday runs. See `core/volume_baseline.py`.
+    method: str = "median"
     min_runs_before_enforcement: int = 5
+    #: History window for `seasonal_median`, in days. Ignored by the run-count methods.
+    lookback_days: int = 35
+    #: A drop below this × expected is CRITICAL (so is zero rows against a positive baseline).
+    #: Unset = a drop is only ever a warning. Carried as `anomaly_severity` on the result.
+    critical_ratio: Optional[float] = None
     #: Which run-log column (or SQL expression) to baseline. `None` inherits the
     #: parent SLORowCountConfig.check_field. The detector previously read this off
     #: THIS object while it only existed on the parent, so `hasattr` was always
