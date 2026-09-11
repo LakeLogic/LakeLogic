@@ -3,7 +3,7 @@ import sys
 import yaml
 import re
 import warnings
-from typing import Any, Tuple, Union, Dict, Optional, List
+from typing import Any, Tuple, Union, Dict, Optional, List, Sequence
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -270,6 +270,10 @@ class DataProcessor:
         self.last_source_path: Optional[str] = None
         self._source_files: List[Dict[str, Any]] = []
         self._source_max_mtime: Optional[float] = None
+        # Hive-style landing keys (`country=GB/`) the CONTRACT declares as fields. Resolved
+        # per read (see `_declared_path_keys`); empty for every contract that declares none,
+        # which is what keeps this from changing any existing pipeline's schema.
+        self._path_key_fields: Tuple[str, ...] = ()
         # Partition-presence telemetry for partitioned landing sources.
         # Stays None unless `source.partition` drove a partition scan — absence
         # of the key in the run report means "not measured", never "complete".
@@ -1627,6 +1631,52 @@ class DataProcessor:
         except Exception:  # pragma: no cover - defensive: sample conversion tolerated to fail
             return "(sample conversion failed)"
 
+    @staticmethod
+    def _path_key_values(file_path: str) -> Dict[str, str]:
+        """`{key: value}` for every `key=value` folder in one file's path.
+
+        `landing/orders/country=GB/dt=2026-09-11/part.parquet` ->
+        `{"country": "GB", "dt": "2026-09-11"}`. Order is outermost-first; a later segment
+        wins on the (pathological) repeat, which is the folder nearest the file.
+        """
+        out: Dict[str, str] = {}
+        for segment in str(file_path).replace("\\", "/").split("/"):
+            if "=" not in segment:
+                continue
+            key, _, value = segment.partition("=")
+            key, value = key.strip(), value.strip()
+            if key and value and key.replace("_", "").isalnum():
+                out[key] = value
+        return out
+
+    def _declared_path_keys(self, file_paths: Sequence[str]) -> Tuple[str, ...]:
+        """The `key=value` landing keys this contract DECLARES as model fields.
+
+        A landing laid out as `country=GB/...` carries the country in the PATH, not in the
+        files: every engine here read those folders and produced no `country` column, so a
+        contract declaring the field logged "schema drift: missing=['country']" on every run
+        and a `partition_by: [country]` was pruned at write time — the layout the data
+        arrived in could not survive being read.
+
+        Narrow on purpose. Only a key the contract already declares becomes a column, so a
+        contract that says nothing about its folders reads exactly as it did before: no new
+        columns, no new drift, nothing to re-approve.
+        """
+        model = getattr(self.contract, "model", None)
+        declared = {
+            str(getattr(f, "name", "")).lower()
+            for f in (getattr(model, "fields", None) or [])
+            if getattr(f, "name", None)
+        }
+        if not declared:
+            return ()
+        found: List[str] = []
+        for fp in file_paths or []:
+            for key in self._path_key_values(fp):
+                if key.lower() in declared and key not in found:
+                    found.append(key)
+        return tuple(found)
+
     def run_source(
         self,
         source: Optional[Union[str, Path]] = None,
@@ -2040,15 +2090,29 @@ class DataProcessor:
                             # _lakelogic_source shows actual filenames
                             # rather than just the parent directory.
                             _tag_source = len(file_paths) > 1
+                            # A declared `key=value` folder becomes a real column. Reading
+                            # per file is what makes it per ROW correct — one read across a
+                            # multi-country glob cannot say which rows came from which folder.
+                            self._path_key_fields = self._declared_path_keys(file_paths)
+                            _tag_source = _tag_source or bool(self._path_key_fields)
+
+                            def _file_cols(_p: str) -> list:
+                                """The literal columns carried by THIS file's own path."""
+                                cols = [pl.lit(_p).alias("_source_file")]
+                                _vals = self._path_key_values(_p)
+                                cols += [
+                                    pl.lit(_vals[k]).alias(k)
+                                    for k in self._path_key_fields
+                                    if k in _vals
+                                ]
+                                return cols
 
                             _read_opts = {"storage_options": _pl_sopts} if _pl_sopts else {}
                             if source_fmt == "parquet" or path.endswith(".parquet"):
                                 if _tag_source:
                                     df = pl.concat(  # pragma: no cover
                                         [
-                                            pl.read_parquet(p, **_read_opts).with_columns(
-                                                pl.lit(p).alias("_source_file")
-                                            )
+                                            pl.read_parquet(p, **_read_opts).with_columns(_file_cols(p))
                                             for p in file_paths
                                         ],
                                         how=_concat_how,
@@ -2060,9 +2124,7 @@ class DataProcessor:
                                 if _tag_source:
                                     df = pl.concat(  # pragma: no cover
                                         [
-                                            pl.read_ndjson(p, **_read_opts).with_columns(
-                                                pl.lit(p).alias("_source_file")
-                                            )
+                                            pl.read_ndjson(p, **_read_opts).with_columns(_file_cols(p))
                                             for p in file_paths
                                         ],
                                         how=_concat_how,
@@ -2089,9 +2151,7 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
                                             [
-                                                pl.read_csv(p, infer_schema_length=0).with_columns(
-                                                    pl.lit(p).alias("_source_file")
-                                                )
+                                                pl.read_csv(p, infer_schema_length=0).with_columns(_file_cols(p))
                                                 for p in file_paths
                                             ],
                                             how=_concat_how,
@@ -2102,9 +2162,7 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
                                             [
-                                                pl.read_csv(p, **_csv_read_opts).with_columns(
-                                                    pl.lit(p).alias("_source_file")
-                                                )
+                                                pl.read_csv(p, **_csv_read_opts).with_columns(_file_cols(p))
                                                 for p in file_paths
                                             ],
                                             how=_concat_how,

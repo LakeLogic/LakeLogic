@@ -2997,6 +2997,183 @@ for _ec_name, _ec_profile in _EDGE_CASE_PROFILES.items():
                 _EDGE_CASE_INDEX.setdefault(_fld, []).extend(_vals)
 
 
+def _frame_columns(df: Any) -> List[str]:
+    """Column names of a polars or pandas frame."""
+    return list(df.columns)
+
+
+def _frame_col(df: Any, name: str) -> List[Any]:
+    if hasattr(df, "get_column"):  # polars
+        return df.get_column(name).to_list()
+    return df[name].tolist()  # pandas
+
+
+def _frame_with(df: Any, name: str, values: List[Any]) -> Any:
+    """Replace one column, keeping the frame type (and, for polars, the column dtype)."""
+    if hasattr(df, "get_column"):  # polars
+        import polars as pl
+
+        return df.with_columns(pl.Series(name, values).cast(df.schema[name], strict=False))
+    out = df.copy()
+    out[name] = values
+    return out
+
+
+#: How far up from a contract file to look for its ``_system.yaml``.
+_SYSTEM_YAML_SEARCH_DEPTH = 6
+
+
+def _find_system_yaml(contract_path: Any) -> Optional[Path]:
+    """The ``_system.yaml`` governing a contract FILE, searched upward from its folder."""
+    try:
+        path = Path(contract_path)
+    except TypeError:
+        return None
+    if not path.is_file():
+        return None  # inline YAML / schema input has no folder, so no system defaults
+    folder = path.parent
+    for _ in range(_SYSTEM_YAML_SEARCH_DEPTH):
+        candidate = folder / "_system.yaml"
+        if candidate.is_file():
+            return candidate
+        if folder.parent == folder:
+            break
+        folder = folder.parent
+    return None
+
+
+def _effective_partition_by(gen: "DataGenerator") -> List[str]:
+    """The partition columns the RUNTIME would use for this contract.
+
+    ``inherit_partition_columns`` read only the contract file, and the recommended way to
+    declare a mesh-wide partition key is ONCE, in ``_system.yaml`` — so the flag saw nothing and
+    inherited nothing: 203 of 380 generated trips disagreed with their rider's country.
+
+    Resolved with the registry's own precedence (``DomainRegistry``: contract >
+    ``materialization.<layer>`` > ``materialization._all``), so the generator and the pipeline
+    agree on which columns partition a table.
+    """
+    raw = getattr(gen, "_contract_raw", {}) or {}
+    own = ((raw.get("materialization") or {}).get("partition_by")) or []
+    if own:
+        return [str(c) for c in own]
+    system_yaml = _find_system_yaml(getattr(gen, "contract_path", None))
+    if system_yaml is None:
+        return []
+    try:
+        system = yaml.safe_load(system_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # a malformed system file must not stop generation
+        from loguru import logger as _gen_logger
+
+        _gen_logger.warning(f"Could not read {system_yaml} for partition defaults: {exc}")
+        return []
+    mat = system.get("materialization") or {}
+    if not isinstance(mat, dict):
+        return []
+    layer = str(((raw.get("info") or {}).get("target_layer")) or raw.get("layer") or "")
+    combined = {**(mat.get("_all") or {}), **(mat.get(layer) or {})}
+    return [str(c) for c in (combined.get("partition_by") or [])]
+
+
+def _fits_field_rules(value: Any, rules: Dict[str, Any]) -> bool:
+    """Whether a generated value satisfies the field rules the generator itself honours:
+    ``accepted_values``, ``regex_match``, ``min_length`` / ``max_length``, ``min`` / ``max``."""
+    accepted = rules.get("accepted_values")
+    if accepted and value not in accepted:
+        return False
+    pattern = rules.get("regex_match")
+    if pattern and isinstance(value, str):
+        try:
+            if not re.fullmatch(str(pattern), value):
+                return False
+        except re.error:
+            pass  # an unparseable pattern is the contract's problem, not grounds to refuse
+    if isinstance(value, str):
+        if rules.get("max_length") is not None and len(value) > int(rules["max_length"]):
+            return False
+        if rules.get("min_length") is not None and len(value) < int(rules["min_length"]):
+            return False
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            if rules.get("max") is not None and value > float(rules["max"]):
+                return False
+            if rules.get("min") is not None and value < float(rules["min"]):
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
+
+
+def _inherit_parent_attributes(
+    child: Any,
+    parent: Any,
+    *,
+    fk: str,
+    pk: str,
+    set_attrs: List[str],
+    redraw_on: List[str],
+    rng: random.Random,
+) -> Tuple[Any, int]:
+    """Make each child row agree with the parent row its foreign key names.
+
+    ``set_attrs`` are COPIED from the linked parent row (an order takes the country of its
+    customer). ``redraw_on`` are attributes the child already has fixed from an EARLIER
+    parent: for those, the foreign key itself is re-drawn from the parents that match, so a
+    trip whose rider made it GB gets a GB driver instead of any driver. Returns the new frame
+    and how many rows found no matching parent (their key is left as drawn, and counted, so
+    the disagreement is reported rather than hidden).
+    """
+    parent_pk = _frame_col(parent, pk)
+    parent_attrs = {a: _frame_col(parent, a) for a in set(set_attrs) | set(redraw_on)}
+    by_pk: Dict[Any, Dict[str, Any]] = {}
+    for i, key in enumerate(parent_pk):
+        if key is not None and key not in by_pk:
+            by_pk[key] = {a: parent_attrs[a][i] for a in parent_attrs}
+
+    child_fk = _frame_col(child, fk)
+    unmatched = 0
+    if redraw_on:
+        pool: Dict[Tuple[Any, ...], List[Any]] = {}
+        for key, attrs in by_pk.items():
+            pool.setdefault(tuple(attrs[a] for a in redraw_on), []).append(key)
+        fixed = [_frame_col(child, a) for a in redraw_on]
+        new_fk = []
+        fill_rows = []  # rows whose fixed value is UNKNOWN: this parent supplies it
+        for i, current in enumerate(child_fk):
+            if current is None:
+                new_fk.append(current)
+                continue
+            key = tuple(col[i] for col in fixed)
+            if any(v is None for v in key):
+                # An unknown value cannot disagree with anything, so it does not constrain
+                # the draw, and is not counted as unmatched; it is filled from this parent.
+                new_fk.append(current)
+                fill_rows.append(i)
+                continue
+            candidates = pool.get(key)
+            if candidates:
+                new_fk.append(current if current in candidates else rng.choice(candidates))
+            else:
+                unmatched += 1
+                new_fk.append(current)
+        child_fk = new_fk
+        child = _frame_with(child, fk, child_fk)
+        for col_idx, a in enumerate(redraw_on):
+            if not fill_rows:
+                break
+            values = list(fixed[col_idx])
+            for i in fill_rows:
+                if values[i] is None and child_fk[i] in by_pk:
+                    values[i] = by_pk[child_fk[i]][a]
+            child = _frame_with(child, a, values)
+
+    for a in set_attrs:
+        current = _frame_col(child, a)
+        values = [by_pk[key][a] if key in by_pk else current[i] for i, key in enumerate(child_fk)]
+        child = _frame_with(child, a, values)
+    return child, unmatched
+
+
 class DataGenerator:
     """
     Generate synthetic data from a LakeLogic contract YAML or schema definition.
@@ -3650,6 +3827,11 @@ class DataGenerator:
         for _ in range(n_valid):
             row, _ = self._make_row(invalid=False, fk_pools=fk_pools, sample_pools=auto_pools)
             valid_records.append(row)
+
+        # A declared primary key is a promise: no two valid rows share it.
+        redrawn = self._dedupe_primary_keys(valid_records, fk_pools=fk_pools, sample_pools=auto_pools)
+        if redrawn:
+            _gen_logger.info(f"   Primary key: {redrawn} colliding value(s) redrawn to keep it unique")
 
         for _ in range(n_invalid):
             row, test_cases = self._make_row(
@@ -4638,6 +4820,8 @@ class DataGenerator:
         window_start: Optional[datetime] = None,
         window_end: Optional[datetime] = None,
         unique_entity_seeds: bool = False,
+        inherit_columns: Optional[List[str]] = None,
+        inherit_partition_columns: bool = False,
     ) -> Dict[str, Any]:
         """
         Generate referentially consistent data for multiple related contracts.
@@ -4722,6 +4906,24 @@ class DataGenerator:
             which could otherwise let a child FK satisfy referential integrity against the
             wrong parent. Defaults to ``False`` (every entity shares ``seed`` verbatim) to
             preserve the existing byte-for-byte output for a given seed.
+        inherit_columns : list of str, optional
+            Columns a child row takes FROM THE PARENT ROW ITS FOREIGN KEY POINTS AT, wherever
+            both sides have the column, e.g. ``["country_code"]``. Without this a valid FK is
+            the only link: an order for a GB customer gets a random ``country_code``, so a
+            dataset partitioned by country puts the order under DE and its customer under GB.
+            With several parents sharing a column (a trip's rider AND driver), the first
+            relationship fixes the value and later foreign keys are drawn only from parents
+            that match it: a GB rider's trip gets a GB driver. Chains stay consistent
+            because parents are generated first (telemetry, then trip, then rider).
+        inherit_partition_columns : bool, default False
+            Also inherit every partition column declared anywhere in the batch — in a contract
+            or, for contract FILES, in its ``_system.yaml`` (``materialization._all`` /
+            ``materialization.<layer>``, resolved with the registry's precedence) — wherever the
+            parent and child both carry it. So the synthetic data lays out under the partition
+            strategy the way real data would, including tables that do not declare
+            ``partition_by`` themselves. Warns if nothing resolves. Opt-in, like
+            ``unique_entity_seeds``, to keep existing seeded output byte-for-byte unchanged.
+            A relationship may also declare ``"inherit": [...]`` for itself.
 
         Returns
         -------
@@ -4843,6 +5045,27 @@ class DataGenerator:
 
         entity_names = list(contracts.keys())
 
+        # ── 1b. Partition columns to inherit, across the WHOLE batch ──────
+        # The UNION of every contract's effective partition_by, not each child's own. The flag
+        # first used only the child's own declaration, so a table without one broke the chain:
+        # telemetry has no partition_by of its own, and 404 pings disagreed with their trip's
+        # country even with the flag on. A partition key is a property of the data layout, so
+        # wherever parent and child both carry the column, the child follows the parent.
+        batch_partition_cols: List[str] = []
+        if inherit_partition_columns:
+            for _gen in generators.values():
+                for _col in _effective_partition_by(_gen):
+                    if _col not in batch_partition_cols:
+                        batch_partition_cols.append(_col)
+            if not batch_partition_cols:
+                # Never a silent no-op: the caller asked for inheritance and would otherwise get
+                # uncorrelated keys with nothing to say so.
+                _rel_logger.warning(
+                    "inherit_partition_columns=True but no partition_by was found in these contracts "
+                    "or their _system.yaml — nothing inherited. Pass inherit_columns=[...] to name "
+                    "the columns explicitly."
+                )
+
         # ── 2. Detect FK relationships ────────────────────────────────────
         # relationships_map: child_entity → [{"fk_column", "ref_entity", "ref_column"}]
         all_relationships: Dict[str, List[Dict[str, str]]] = {}
@@ -4856,6 +5079,8 @@ class DataGenerator:
                     "ref_entity": rel["parent"],
                     "ref_column": rel["parent_column"],
                 }
+                if rel.get("inherit"):
+                    entry["inherit"] = list(rel["inherit"])
                 all_relationships.setdefault(child, []).append(entry)
                 _rel_logger.info(
                     f"🔗 Explicit FK: {child}.{rel['child_column']} → {rel['parent']}.{rel['parent_column']}"
@@ -4946,6 +5171,42 @@ class DataGenerator:
                 window_start=window_start,
                 window_end=window_end,
             )
+
+            # -- Keep linked rows consistent: inherit parent attributes --
+            partition_cols: List[str] = list(batch_partition_cols)
+            inherit_rng = random.Random(f"{seed}:{name}:inherit")
+            fixed_attrs: List[str] = []
+            for r in all_relationships.get(name, []):
+                parent_name = r["ref_entity"]
+                if parent_name not in results:
+                    continue
+                parent_df = results[parent_name]
+                both = set(_frame_columns(df)) & set(_frame_columns(parent_df))
+                wanted = list(
+                    dict.fromkeys(list(r.get("inherit") or []) + list(inherit_columns or []) + partition_cols)
+                )
+                attrs = [a for a in wanted if a in both and a not in (r["fk_column"], r["ref_column"])]
+                if not attrs:
+                    continue
+                redraw_on = [a for a in attrs if a in fixed_attrs]
+                set_attrs = [a for a in attrs if a not in fixed_attrs]
+                df, unmatched = _inherit_parent_attributes(
+                    df,
+                    parent_df,
+                    fk=r["fk_column"],
+                    pk=r["ref_column"],
+                    set_attrs=set_attrs,
+                    redraw_on=redraw_on,
+                    rng=inherit_rng,
+                )
+                fixed_attrs.extend(set_attrs)
+                _rel_logger.info(f"   {name} inherits {', '.join(attrs)} from {parent_name} via {r['fk_column']}")
+                if unmatched:
+                    _rel_logger.warning(
+                        f"   {unmatched} {name} row(s) found no {parent_name} matching "
+                        f"{', '.join(redraw_on)}: their {r['fk_column']} was left as drawn, "
+                        f"so those rows disagree on {', '.join(redraw_on)}."
+                    )
 
             # Intentionally introduce margin of error (orphan FKs) for invalid_ratio > 0
             if invalid_ratio > 0 and reference_data:
@@ -5245,6 +5506,117 @@ class DataGenerator:
                 cfg["end"]: end.isoformat() if end else None,
                 cfg["duration"]: duration,
             }
+
+    def _primary_key_columns(self) -> List[str]:
+        """Primary-key columns in field order: top-level ``primary_key`` + field-level flags."""
+        declared = [str(c) for c in (self._contract_raw.get("primary_key") or [])]
+        flagged = [f.get("name") for f in self._fields if f.get("primary_key")]
+        names = [f.get("name") for f in self._fields]
+        wanted = set(declared) | {n for n in flagged if n}
+        return [n for n in names if n in wanted]
+
+    def _dedupe_primary_keys(
+        self,
+        records: List[Dict[str, Any]],
+        *,
+        fk_pools: Optional[Dict[str, List[Any]]] = None,
+        sample_pools: Optional[Dict[str, List[Any]]] = None,
+    ) -> int:
+        """Make the declared primary key unique across ``records``; return how many were redrawn.
+
+        Values are generated one field at a time with no memory of what was used, so a declared
+        key could repeat: ``TRI-####`` ids collided twice in 300 rows. A repeated key is not a
+        unique key, and it makes "the parent row this foreign key names" ambiguous for every
+        child table built from it.
+
+        A SEPARATE, seeded random stream does the redraws, and only colliding rows are touched:
+        a dataset with no collision is byte-for-byte what it was, and its other rows never move.
+        A column drawn from a foreign-key pool is left alone — the pool is the only legal domain,
+        so inventing a value there would break referential integrity instead. After bounded
+        redraws a deterministic suffix (strings) or the next free integer guarantees uniqueness.
+        """
+        from loguru import logger as _gen_logger
+
+        pk_cols = [c for c in self._primary_key_columns() if not (fk_pools and c in fk_pools)]
+        if len(records) < 2:
+            return 0
+        if not pk_cols:
+            # Every key column is drawn from a parent's pool, so none can be redrawn without
+            # breaking referential integrity. That is the right call — but a repeated key is
+            # still a broken promise, and it used to return here without a word.
+            all_pk = self._primary_key_columns()
+            if all_pk:
+                keys = [tuple(r.get(c) for c in all_pk) for r in records]
+                repeats = len(keys) - len(set(keys))
+                if repeats:
+                    _gen_logger.warning(
+                        f"   Primary key ({', '.join(all_pk)}) repeats {repeats} time(s), and every "
+                        f"column in it comes from a parent's key pool, so it cannot be redrawn "
+                        f"without breaking the relationship. Generate fewer rows, or give the key "
+                        f"a column of its own."
+                    )
+            return 0
+
+        field_rules = self._build_field_rules(fk_pools=fk_pools)
+        ftypes = {f.get("name"): (f.get("type") or "string").lower() for f in self._fields}
+        all_pk = self._primary_key_columns()
+        seen = set()
+        redrawn = 0
+        unresolved = 0
+        main_rng = self._rng
+        self._rng = random.Random(f"{self.seed}:primary-key")
+        try:
+            for row in records:
+                key = tuple(row.get(c) for c in all_pk)
+                if any(v is None for v in key) or key not in seen:
+                    seen.add(key)
+                    continue
+                for _attempt in range(50):
+                    for c in pk_cols:
+                        row[c] = self._make_valid_value(
+                            c,
+                            ftypes.get(c, "string"),
+                            field_rules.get(c, {}),
+                            False,
+                            sample_pools=sample_pools,
+                        )
+                    key = tuple(row.get(c) for c in all_pk)
+                    if key not in seen:
+                        break
+                else:
+                    c = pk_cols[-1]
+                    base = row.get(c)
+                    if isinstance(base, int) and not isinstance(base, bool):
+                        taken = {k[all_pk.index(c)] for k in seen}
+                        candidate = max(v for v in taken if isinstance(v, int)) + 1
+                    else:
+                        n = 2
+                        while tuple(row.get(x) if x != c else f"{base}-{n}" for x in all_pk) in seen:
+                            n += 1
+                        candidate = f"{base}-{n}"
+                    # UNIQUE MUST NOT COST VALID. The suffix (`TRI-1234-2`) or the next integer
+                    # can fall outside the field's own domain — an accepted_values list, a
+                    # pattern, a length or a maximum — and a "valid" row that fails its contract
+                    # is worse than a duplicate that is reported. When it does not fit, the row
+                    # keeps its in-domain value and is counted instead.
+                    if _fits_field_rules(candidate, field_rules.get(c, {})):
+                        row[c] = candidate
+                    else:
+                        unresolved += 1
+                        seen.add(tuple(row.get(x) for x in all_pk))
+                        continue
+                    key = tuple(row.get(x) for x in all_pk)
+                seen.add(key)
+                redrawn += 1
+        finally:
+            self._rng = main_rng
+        if unresolved:
+            _gen_logger.warning(
+                f"   Primary key ({', '.join(all_pk)}): {unresolved} row(s) could not be given a unique "
+                f"value inside the field's allowed values / pattern / length, so they repeat. The key's "
+                f"domain is smaller than the rows requested — widen it or generate fewer rows."
+            )
+        return redrawn
 
     def _make_row(
         self,

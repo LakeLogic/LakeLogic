@@ -229,6 +229,9 @@ def test_trip_completion_generator_creates_completed_trip(tmp_path):
         initial_drivers=0,
     )
     simulator._driver_ids = ["DRV-001"]
+    # A LONDON driver: trips are matched to a driver from the request's own city, so a
+    # driver with no recorded home city can no longer serve this LON request.
+    simulator._register_driver("DRV-001", "LON")
     simulator._pending_requests = [
         {
             "request_id": "REQ-001",
@@ -264,6 +267,9 @@ def test_trip_cancellation_generator_uses_driver_branch(tmp_path):
         initial_drivers=0,
     )
     simulator._driver_ids = ["DRV-001"]
+    # A LONDON driver: trips are matched to a driver from the request's own city, so a
+    # driver with no recorded home city can no longer serve this LON request.
+    simulator._register_driver("DRV-001", "LON")
     simulator._pending_requests = [
         {
             "request_id": "REQ-001",

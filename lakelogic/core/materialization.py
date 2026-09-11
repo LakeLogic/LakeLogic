@@ -290,6 +290,110 @@ def _spark_save_as_table(  # pragma: no cover
         writer.option("delta.enableDeletionVectors", "false").mode(mode).saveAsTable(table_name)
 
 
+def _spark_partition_columns(  # pragma: no cover
+    spark, df: Any, target: str, partition_by: Optional[List[str]], output_format: str
+) -> List[str]:
+    """The ``partitionBy`` columns a Spark write should use for ``target``.
+
+    Two things went wrong without this:
+
+    * Columns the data lacks are pruned (``_system.yaml`` declares a superset shared across
+      contracts) — as the append/overwrite path always did.
+    * An EXISTING Delta table keeps the layout it was created with. Delta refuses a write whose
+      ``partitionBy`` differs from the table's (``Partition columns do not match``), for append
+      AND overwrite, so declaring ``partition_by`` on a live table used to fail every write
+      until someone dropped it. The table's own layout is used instead, with a warning naming
+      the rebuild that applies the new one.
+    """
+    wanted = [str(c) for c in (partition_by or []) if c]
+    if not wanted:
+        return []
+    columns = set(df.columns)
+    missing = [c for c in wanted if c not in columns]
+    if missing:
+        logger.warning(
+            f"Partition columns not present in data (pruned): {', '.join(missing)}. "
+            f"This is expected when _system.yaml defines a superset of partition columns "
+            f"shared across multiple contracts."
+        )
+        wanted = [c for c in wanted if c in columns]
+    if not wanted or str(output_format or "").lower() != "delta":
+        return wanted
+
+    is_table = target.startswith("table:")
+    ref = target[len("table:") :] if is_table else target
+    try:
+        if is_table:
+            if not spark.catalog.tableExists(ref):
+                return wanted
+            from lakelogic.core.clustering import _quote
+
+            rows = spark.sql(f"DESCRIBE DETAIL {_quote(ref)}").collect()
+        else:
+            rows = spark.sql(f"DESCRIBE DETAIL delta.`{ref}`").collect()
+    except Exception:
+        return wanted  # nothing there yet — the write creates it with the declared layout
+    detail = rows[0].asDict() if rows else {}
+    if str(detail.get("format") or "").lower() != "delta":
+        return wanted
+    existing = [str(c) for c in (detail.get("partitionColumns") or [])]
+    if existing == wanted or not all(c in columns for c in existing):
+        return wanted
+    logger.warning(
+        f"{ref} is partitioned by [{', '.join(existing) or 'nothing'}] but the contract declares "
+        f"partition_by [{', '.join(wanted)}]. Delta cannot change the partitioning of an existing "
+        f"table in place, so this write keeps the table's layout. To apply the new one, rebuild the "
+        f"table (drop it and reprocess) — or, on Databricks, prefer cluster_by, which is applied "
+        f"to existing tables."
+    )
+    return existing
+
+
+def _deltars_partition_columns(existing_dt: Any, partition_by: List[str], label: str) -> List[str]:
+    """The ``partition_by`` a delta-rs write should use for a table that may already exist.
+
+    delta-rs refuses a write whose partitioning differs from the table's ("Specified table
+    partitioning does not match table partitioning"), for append AND overwrite alike — the same
+    defect as Spark's, measured against deltalake 1.6.3. So declaring ``partition_by`` on a table
+    a pipeline had already created failed every later run. The table's own layout is used
+    instead, with a warning naming the rebuild that applies the new one.
+    """
+    wanted = [str(c) for c in (partition_by or []) if c]
+    if not wanted or existing_dt is None:
+        return wanted
+    try:
+        existing = [str(c) for c in (existing_dt.metadata().partition_columns or [])]
+    except Exception:  # pragma: no cover - an unreadable table is the write's problem, not ours
+        return wanted
+    if existing == wanted:
+        return wanted
+    logger.warning(
+        f"{label} is partitioned by [{', '.join(existing) or 'nothing'}] but the contract declares "
+        f"partition_by [{', '.join(wanted)}]. Delta cannot change the partitioning of an existing "
+        f"table in place, so this write keeps the table's layout. To apply the new one, rebuild the "
+        f"table (delete it and reprocess)."
+    )
+    return existing
+
+
+def _spark_cluster_path_table(spark, target: str, output_format: str, contract) -> None:  # pragma: no cover
+    """Reconcile ``cluster_by`` on a Delta table Spark just wrote BY PATH.
+
+    ``_spark_apply_table_metadata`` covers catalog (``table:``) targets only, so a Delta table
+    written to a storage path never got its declared clustering. Spark-written tables only: a
+    path table created by delta-rs (DDL mode, non-Spark engines) is left alone, because enabling
+    liquid clustering adds a writer feature older delta-rs writers cannot write through.
+    """
+    if str(output_format or "").lower() != "delta" or not contract:
+        return
+    mat = getattr(contract, "materialization", None)
+    cluster_by = list(getattr(mat, "cluster_by", None) or []) if mat else []
+    if cluster_by:
+        from lakelogic.core.clustering import reconcile_delta_clustering
+
+        reconcile_delta_clustering(spark, f"delta.`{target}`", cluster_by, table_label=target)
+
+
 def _spark_apply_table_metadata(spark, table_name: str, contract) -> None:  # pragma: no cover
     """
     Apply column comments and table properties to a Spark/Databricks table.
@@ -330,6 +434,17 @@ def _spark_apply_table_metadata(spark, table_name: str, contract) -> None:  # pr
             logger.info(f"Applied table properties to {table_name}: {list(table_props.keys())}")
         except Exception as exc:
             logger.debug(f"Could not set table properties on {table_name}: {exc}")
+
+    # ── Liquid clustering ───────────────────────────────────────────────────
+    # This runs after every Spark write to a catalog table, which is the only point a table is
+    # guaranteed to exist. `cluster_by` otherwise reached Databricks only through DDL mode's
+    # CREATE TABLE — a table created by its first write, or one that already existed, was never
+    # clustered. Reconciles and never raises; see lakelogic/core/clustering.py.
+    cluster_by = list(getattr(mat, "cluster_by", None) or []) if mat else []
+    if cluster_by:
+        from lakelogic.core.clustering import reconcile_delta_clustering
+
+        reconcile_delta_clustering(spark, table_name, cluster_by)
 
 
 def _sanitize_arrow_nulls(table):
@@ -2306,13 +2421,37 @@ def _scd2_frames(existing, incoming, primary_key: List[str], scd2_cfg: Dict[str,
     return merged
 
 
-def _partition_groups(df, partition_by: List[str]) -> Iterable[Tuple[Dict[str, Any], Any]]:
+def _date_partition_columns(contract, partition_by: List[str]) -> frozenset:
+    """Partition columns the contract declares as ``date``.
+
+    A polars ``Date`` column reaches this writer as a pandas midnight ``Timestamp`` (pandas has
+    no date dtype), so ``str()`` of the value is ``2026-09-10 00:00:00`` and the sanitised folder
+    was ``order_date=2026-09-10_00_00_00`` — while the Delta path, for the same contract, writes
+    ``order_date=2026-09-10``. The contract states the type; the folder should follow it.
+    """
+    if not partition_by or contract is None:
+        return frozenset()
+    model = getattr(contract, "model", None)
+    fields = getattr(model, "fields", None) or []
+    wanted = set(partition_by)
+    return frozenset(
+        getattr(f, "name", None)
+        for f in fields
+        if getattr(f, "name", None) in wanted and str(getattr(f, "type", "") or "").lower() == "date"
+    )
+
+
+def _partition_groups(
+    df, partition_by: List[str], date_columns: frozenset = frozenset()
+) -> Iterable[Tuple[Dict[str, Any], Any]]:
     """
     Yield dataframe groups for each partition.
 
     Args:
         df: pandas.DataFrame to partition.
         partition_by: Partition columns.
+        date_columns: Partition columns declared ``date``; their values are yielded as
+            ``datetime.date`` so the partition folder reads ``col=YYYY-MM-DD``.
 
     Yields:
         Tuple of partition values and group dataframe.
@@ -2326,6 +2465,13 @@ def _partition_groups(df, partition_by: List[str]) -> Iterable[Tuple[Dict[str, A
         if not isinstance(keys, tuple):
             keys = (keys,)
         values = dict(zip(partition_by, keys))
+        for col in date_columns:
+            val = values.get(col)
+            if val is not None and hasattr(val, "date") and callable(getattr(val, "date")):
+                try:
+                    values[col] = val.date()
+                except (TypeError, ValueError):  # NaT and friends keep their raw value
+                    pass
         yield values, group.reset_index(drop=True)
 
 
@@ -2345,6 +2491,7 @@ def _spark_merge_dataframe(  # pragma: no cover
     soft_delete_time_col: Optional[str] = None,
     soft_delete_reason_col: Optional[str] = None,
     merge_dedup_guard: bool = False,
+    partition_by: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Perform a native Spark merge (upsert) without collecting to pandas.
@@ -2488,6 +2635,9 @@ def _spark_merge_dataframe(  # pragma: no cover
                 cdc_timestamp_field,
             )
             writer = incoming_df.write.format(output_format)
+            _create_parts = _spark_partition_columns(spark, incoming_df, target, partition_by, output_format)
+            if _create_parts:
+                writer = writer.partitionBy(*_create_parts)
             if is_table:
                 _spark_save_as_table(writer, table_or_path, "overwrite", location)
             else:
@@ -2512,6 +2662,9 @@ def _spark_merge_dataframe(  # pragma: no cover
             cdc_timestamp_field,
         )
         writer = incoming_df.write.format(output_format)
+        _create_parts = _spark_partition_columns(spark, incoming_df, target, partition_by, output_format)
+        if _create_parts:
+            writer = writer.partitionBy(*_create_parts)
         if is_table:
             _spark_save_as_table(writer, table_or_path, "overwrite", location)
         else:
@@ -2762,6 +2915,7 @@ def _spark_scd2_dataframe(  # pragma: no cover
     output_format: str,
     location: Optional[str] = None,
     merge_dedup_guard: bool = False,
+    partition_by: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Perform native Spark SCD2 (Slowly Changing Dimension Type 2) without collecting to pandas.
@@ -2899,6 +3053,9 @@ def _spark_scd2_dataframe(  # pragma: no cover
 
         # No existing data, just write incoming
         writer = incoming_df.write.format(output_format)
+        _create_parts = _spark_partition_columns(spark, incoming_df, target, partition_by, output_format)
+        if _create_parts:
+            writer = writer.partitionBy(*_create_parts)
         if is_table:
             _spark_save_as_table(writer, table_or_path, "overwrite", location)
         else:
@@ -3339,6 +3496,7 @@ def _materialize_spark_dataframe(  # pragma: no cover
             soft_delete_time_col=soft_delete_time_col,
             soft_delete_reason_col=soft_delete_reason_col,
             merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
+            partition_by=partition_by,
         )
 
         # UNPERSIST: release the checkpoint's cached blocks now the merge has
@@ -3357,6 +3515,8 @@ def _materialize_spark_dataframe(  # pragma: no cover
                 tv = incremental_metadata.get("to_version")
                 if tv is not None:
                     _spark_update_incremental_version(spark, table_name, tv)
+        else:
+            _spark_cluster_path_table(spark, target_str, output_format, contract)
         return result
 
     # Handle SCD2 strategy natively
@@ -3372,6 +3532,7 @@ def _materialize_spark_dataframe(  # pragma: no cover
             output_format,
             location=location,
             merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
+            partition_by=partition_by,
         )
         if target_str.startswith("table:"):
             table_name = target_str[6:]
@@ -3380,22 +3541,14 @@ def _materialize_spark_dataframe(  # pragma: no cover
                 tv = incremental_metadata.get("to_version")
                 if tv is not None:
                     _spark_update_incremental_version(spark, table_name, tv)
+        else:
+            _spark_cluster_path_table(spark, target_str, output_format, contract)
         return result
 
     # Standard append/overwrite
     writer = df.write.format(output_format)
-    if partition_by:
-        # Prune partition columns not present in data — allows _system.yaml
-        # to define a superset shared across multiple contracts.
-        _spark_cols = set(df.columns)
-        _missing_parts = [c for c in partition_by if c not in _spark_cols]
-        if _missing_parts:
-            logger.warning(
-                f"Partition columns not present in data (pruned): {', '.join(_missing_parts)}. "
-                f"This is expected when _system.yaml defines a superset of partition columns "
-                f"shared across multiple contracts."
-            )
-            partition_by = [c for c in partition_by if c not in _missing_parts]
+    # Prunes columns the data lacks, and keeps an existing Delta table's own layout.
+    partition_by = _spark_partition_columns(spark, df, target_str, partition_by, output_format)
     if partition_by:
         writer = writer.partitionBy(*partition_by)
 
@@ -3453,6 +3606,7 @@ def _materialize_spark_dataframe(  # pragma: no cover
         }
 
     writer.mode(mode).save(target_str)
+    _spark_cluster_path_table(spark, target_str, output_format, contract)
     logger.info(f"Materialized Spark dataframe to {target_str} ({output_format})")
     return {"target": target_str, "rows_written": df.count(), "format": output_format}
 
@@ -3592,7 +3746,7 @@ def _partition_aware_merge(
         # then write in a single pass to minimise Delta log transactions.
         merged_parts: list = []
 
-        for part_values, group in _partition_groups(pdf, partition_by):
+        for part_values, group in _partition_groups(pdf, partition_by, _date_partition_columns(contract, partition_by)):
             if group.empty:
                 continue
 
@@ -3768,7 +3922,7 @@ def _partition_aware_merge(
         }
 
     # ── Non-delta formats: per-partition file approach (original behaviour) ───
-    for part_values, group in _partition_groups(pdf, partition_by):
+    for part_values, group in _partition_groups(pdf, partition_by, _date_partition_columns(contract, partition_by)):
         # Resolve the partition directory
         part_dir = base_dir
         for col, val in part_values.items():
@@ -4676,6 +4830,9 @@ def materialize_dataframe(
             _existing_dt = None
             table_exists = False
 
+        # An existing table keeps the partitioning it was created with — see the helper.
+        partition_by = _deltars_partition_columns(_existing_dt, partition_by, target_str)
+
         # Phase 1: Try to cast against existing Delta table schema (most accurate)
         if _existing_dt is not None:
             try:
@@ -4982,7 +5139,7 @@ def materialize_dataframe(
         base_dir.mkdir(parents=True, exist_ok=True)
         timestamp_tag = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
-        for part_values, group in _partition_groups(pdf, partition_by):
+        for part_values, group in _partition_groups(pdf, partition_by, _date_partition_columns(contract, partition_by)):
             part_dir = base_dir
             for col, val in part_values.items():
                 part_dir = part_dir / f"{col}={_safe_partition_value(val)}"

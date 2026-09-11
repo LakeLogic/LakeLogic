@@ -186,6 +186,37 @@ _CITY_COORDS = {
     "SYD": (-33.8688, 151.2093),
 }
 
+#: ISO 3166-1 alpha-2 country of every simulated city.
+#:
+#: Every entity the simulator emits carries `country_code` beside `city_code`, taken from
+#: this map, so one country follows a record through every relationship: a London rider,
+#: the London driver assigned to their trip, that trip, its telemetry, its cancellation —
+#: all GB. That makes `country_code` a safe partition key across the whole mesh.
+#:
+#: It must agree with the reference `city_master` the demo meshes seed (LON→GB, NYC→US,
+#: BER→DE, PAR→FR, TYO→JP, SYD→AU); a test pins that every city here has a country, so a
+#: city added to `_CITY_COORDS` without one fails loudly instead of emitting a blank key.
+_CITY_COUNTRY = {
+    "LON": "GB",
+    "NYC": "US",
+    "BER": "DE",
+    "PAR": "FR",
+    "TYO": "JP",
+    "SYD": "AU",
+}
+
+#: International dialling prefix per country. Every rider and driver used to get a `+44`
+#: number regardless of city, so a Tokyo driver carried a UK phone — the same kind of
+#: cross-field disagreement `country_code` exists to rule out.
+_COUNTRY_DIAL = {
+    "GB": "+44",
+    "US": "+1",
+    "DE": "+49",
+    "FR": "+33",
+    "JP": "+81",
+    "AU": "+61",
+}
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Streaming Simulator
@@ -246,6 +277,9 @@ class StreamingSimulator:
         self._driver_ids: List[str] = []
         self._rider_cities: Dict[str, str] = {}
         self._driver_cities: Dict[str, str] = {}
+        # Drivers by home city, so a trip can be matched to a driver who works there.
+        # Kept in step with `_driver_cities` at every write (creation and resume).
+        self._drivers_by_city: Dict[str, List[str]] = {}
         self._active_trip_ids: List[str] = []  # trips in-progress (chronological)
         # Per-trip metadata so telemetry rows can preserve FK integrity:
         # a single trip_id MUST always emit telemetry under the same
@@ -293,6 +327,35 @@ class StreamingSimulator:
         weights = list(self._city_weights.values())
         return self._rng.choices(cities, weights=weights, k=1)[0]
 
+    @staticmethod
+    def _country(city: str) -> str:
+        """The country a city belongs to. Blank only for a city outside the simulated set,
+        which `_CITY_COORDS` would already have refused."""
+        return _CITY_COUNTRY.get(city, "")
+
+    def _phone(self, city: str) -> str:
+        """A phone number with the dialling prefix of the city's country. One RNG draw, as
+        before, so the rest of a seeded run is unchanged by the prefix."""
+        prefix = _COUNTRY_DIAL.get(self._country(city), "+44")
+        return f"{prefix}{self._rng.randint(7000000000, 7999999999)}"
+
+    def _register_driver(self, driver_id: str, city: str) -> None:
+        """Record a driver's home city in both indexes."""
+        self._driver_cities[driver_id] = city
+        self._drivers_by_city.setdefault(city, []).append(driver_id)
+
+    def _local_driver(self, city: str) -> Optional[str]:
+        """A driver whose home city is `city`, or None when that city has none.
+
+        Trips used to take their city from the rider and their driver from the WHOLE pool,
+        so a London rider was routinely driven by a Tokyo driver: the trip said GB and its
+        driver said JP. Matching on city keeps one country across the relationship. There is
+        deliberately no global fallback here — a caller with no local driver leaves the
+        request unmatched rather than break the rule.
+        """
+        local = self._drivers_by_city.get(city)
+        return self._rng.choice(local) if local else None
+
     def _scale_rows(self, config: EntityStreamConfig, hour: int) -> int:
         """Scale row count by demand curve and peak multiplier."""
         base = config.rows_per_window
@@ -320,12 +383,13 @@ class StreamingSimulator:
                     "rider_id": rid,
                     "name": f"Rider {rid[-4:]}",
                     "email": f"rider.{rid[-6:].lower()}@example.com",
-                    "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
+                    "phone": self._phone(city),
                     "date_of_birth": (
                         f"{self._rng.randint(1970, 2003)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}"
                     ),
                     "home_address": f"{self._rng.randint(1, 200)} Example Street, {city}",
                     "city_code": city,
+                    "country_code": self._country(city),
                     "signup_date": _random_ts(ts, self._window_minutes),
                     "status": "active",
                     "preferred_payment_method": self._rng.choice(_PAYMENT_METHODS),
@@ -341,13 +405,13 @@ class StreamingSimulator:
             did = _generate_id("DRV")
             self._driver_ids.append(did)
             city = self._weighted_city()
-            self._driver_cities[did] = city
+            self._register_driver(did, city)
             rows.append(
                 {
                     "driver_id": did,
                     "name": f"Driver {did[-4:]}",
                     "email": f"driver.{did[-6:].lower()}@example.com",
-                    "phone": f"+44{self._rng.randint(7000000000, 7999999999)}",
+                    "phone": self._phone(city),
                     "date_of_birth": (
                         f"{self._rng.randint(1965, 1998)}-{self._rng.randint(1, 12):02d}-{self._rng.randint(1, 28):02d}"
                     ),
@@ -361,6 +425,7 @@ class StreamingSimulator:
                     "vehicle_type": self._rng.choice(_VEHICLE_TYPES),
                     "bank_account_last_four": f"{self._rng.randint(1000, 9999)}",
                     "city_code": city,
+                    "country_code": self._country(city),
                     "signup_date": _random_ts(ts, self._window_minutes),
                     "status": "active",
                     "rating": f"{self._rng.uniform(4.0, 5.0):.2f}",
@@ -393,6 +458,7 @@ class StreamingSimulator:
                 "dropoff_lat": _random_coordinate(lat, 0.08),
                 "dropoff_lng": _random_coordinate(lng, 0.08),
                 "city_code": city,
+                "country_code": self._country(city),
                 "requested_at": req_ts,
                 "estimated_fare": f"{self._rng.uniform(5.0, 85.0):.2f}",
                 "estimated_eta_minutes": str(self._rng.randint(2, 20)),
@@ -432,8 +498,15 @@ class StreamingSimulator:
 
         for idx in completed_indices:
             req = self._pending_requests.pop(idx)
+            driver_id = self._local_driver(req["city_code"])
+            if driver_id is None:
+                # No driver works in this city yet. Leave the request pending for a later
+                # window (new drivers arrive every window, weighted by city) rather than send
+                # a driver from another country. Re-appending is safe mid-loop: indices are
+                # visited in descending order, so every index still to come is lower.
+                self._pending_requests.append(req)
+                continue
             trip_id = _generate_id("TRP")
-            driver_id = self._rng.choice(self._driver_ids)
 
             # Generate realistic timing
             pickup_offset = self._rng.randint(3, 15)  # minutes after request
@@ -459,6 +532,7 @@ class StreamingSimulator:
                     "dropoff_lat": req["dropoff_lat"],
                     "dropoff_lng": req["dropoff_lng"],
                     "city_code": req["city_code"],
+                    "country_code": self._country(req["city_code"]),
                     "requested_at": req["requested_at"],
                     "pickup_at": pickup_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
                     "dropoff_at": dropoff_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
@@ -499,6 +573,14 @@ class StreamingSimulator:
             req = self._pending_requests.pop(idx)
             cancel_id = _generate_id("CXL")
             cancelled_by = self._rng.choice(_CANCELLED_BY)
+            cancelling_driver = ""
+            if cancelled_by == "driver":
+                # Same rule as a completed trip: the driver belongs to the request's city.
+                # With no driver there, nobody local could have cancelled, so it is recorded
+                # as the rider's cancellation rather than attributed to a foreign driver.
+                cancelling_driver = self._local_driver(req["city_code"]) or ""
+                if not cancelling_driver:
+                    cancelled_by = "rider"
             req_dt = datetime.fromisoformat(req["requested_at"].replace("Z", "+00:00"))
             cancel_dt = req_dt + timedelta(minutes=self._rng.randint(1, 10))
 
@@ -507,12 +589,11 @@ class StreamingSimulator:
                     "cancellation_id": cancel_id,
                     "trip_id": "",  # pre-match cancellation
                     "rider_id": req["rider_id"],
-                    "driver_id": self._rng.choice(self._driver_ids)
-                    if self._driver_ids and cancelled_by == "driver"
-                    else "",
+                    "driver_id": cancelling_driver,
                     "cancelled_by": cancelled_by,
                     "cancel_reason_code": self._rng.choice(_CANCEL_REASONS),
                     "city_code": req["city_code"],
+                    "country_code": self._country(req["city_code"]),
                     "requested_at": req["requested_at"],
                     "cancelled_at": cancel_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
                     "cancellation_fee": f"{self._rng.choice([0, 0, 0, 2.50, 5.00]):.2f}",
@@ -559,6 +640,7 @@ class StreamingSimulator:
                     "trip_id": trip_id,
                     "status": status,
                     "city_code": city,
+                    "country_code": self._country(city),
                     "timestamp": _random_ts(ts, self._window_minutes),
                 }
             )
@@ -589,6 +671,7 @@ class StreamingSimulator:
                     "app_version": self._rng.choice(_APP_VERSIONS),
                     "platform": self._rng.choice(_PLATFORMS),
                     "city_code": city,
+                    "country_code": self._country(city),
                     "event_properties_json": "{}",
                 }
             )
@@ -865,7 +948,7 @@ class StreamingSimulator:
                             if did and did not in self._driver_cities:
                                 self._driver_ids.append(did)
                                 if city:
-                                    self._driver_cities[did] = city
+                                    self._register_driver(did, city)
                 except Exception:
                     continue
 

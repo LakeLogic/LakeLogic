@@ -20,7 +20,7 @@ Usage (CLI):
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import types as _types
 
@@ -268,6 +268,149 @@ def _get_fields(contract: DataContract) -> List[FieldDefinition]:
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
+def _present_layout_columns(columns: List[str], available: set, *, kind: str, table: str) -> List[str]:
+    """The partition / cluster columns this table actually has, in declared order.
+
+    Registry defaults are deliberately a SUPERSET: ``_system.yaml`` / ``_domain.yaml`` can set
+    ``materialization.<layer>.partition_by: [country_code, event_date]`` for every table in the
+    layer, and a table that has only ``country_code`` — or neither — must still work. The writers
+    already honour that (``materialization.py`` prunes with a warning, and so does
+    ``_init_delta_table_from_contract``); this DDL generator did not, and emitted
+    ``PARTITIONED BY (country_code, event_date)`` for a table without those columns — DDL naming a
+    column the CREATE TABLE does not declare.
+
+    Pruning is against every column the DDL declares — model fields, lineage system columns and
+    soft-delete columns — so a partition on a runtime column (``_lakelogic_processed_at``) is kept.
+    """
+    kept = [c for c in columns if c in available]
+    missing = [c for c in columns if c not in available]
+    if missing:
+        logger.warning(
+            f"{kind} columns not present in data (pruned) for {table}: {', '.join(missing)}. "
+            f"This is expected when _system.yaml defines a superset of {kind.lower()} columns "
+            f"shared across multiple contracts."
+        )
+    return kept
+
+
+#: BigQuery limits clustering to four columns.
+_BIGQUERY_MAX_CLUSTER_COLUMNS = 4
+
+#: Logical types BigQuery can partition on directly (DATE) or by day (TIMESTAMP / DATETIME).
+_BQ_DATE_TYPES = {"date"}
+_BQ_TIMESTAMP_TYPES = {"timestamp", "timestamp_ntz", "timestamp_ltz", "timestamp_tz", "datetime"}
+
+
+def _logical_type(value: Optional[str]) -> str:
+    """Base logical type, lowercased, without precision: ``TIMESTAMP(6)`` -> ``timestamp``."""
+    return str(value or "string").split("(")[0].strip().lower()
+
+
+def _bigquery_layout(
+    partition_by: List[str], cluster_by: List[str], types: Dict[str, str], *, table: str
+) -> Tuple[Optional[str], List[str]]:
+    """``(partition expression, cluster columns)`` for a BigQuery CREATE TABLE.
+
+    BigQuery partitions on exactly ONE column, and only a DATE, a TIMESTAMP / DATETIME truncated
+    to a day, or an INTEGER range with explicit bounds. It was given
+    ``PARTITION BY <each declared column>`` verbatim, so ``partition_by: [country_code]`` — the
+    natural key for a country-partitioned mesh — produced DDL BigQuery rejects, with no warning.
+
+    * the first DATE column         -> ``PARTITION BY col``
+    * else the first TIMESTAMP-like -> ``PARTITION BY DATE(col)``
+    * every other partition column  -> moved to CLUSTER BY, with a warning. BigQuery clustering
+      prunes on any type and costs nothing to maintain, so it is the faithful equivalent.
+      (INTEGER is moved too: RANGE_BUCKET needs bounds the contract does not state.)
+    * clustering is capped at BigQuery's four columns; anything past that is dropped, loudly.
+    """
+    partition_expr: Optional[str] = None
+    moved: List[str] = []
+    for col in partition_by:
+        kind = _logical_type(types.get(col))
+        if partition_expr is None and kind in _BQ_DATE_TYPES:
+            partition_expr = col
+        elif partition_expr is None and kind in _BQ_TIMESTAMP_TYPES:
+            partition_expr = f"DATE({col})"
+        else:
+            moved.append(col)
+    if moved:
+        why = (
+            "BigQuery partitions on one DATE / TIMESTAMP (or bounded INTEGER range) column"
+            if partition_expr
+            else "BigQuery can only partition on a DATE / TIMESTAMP (or bounded INTEGER range) column"
+        )
+        logger.warning(
+            f"{why}; partition_by [{', '.join(moved)}] on {table} is clustered instead "
+            f"(CLUSTER BY prunes on any type and has no maintenance cost in BigQuery)."
+        )
+    clustered = list(dict.fromkeys(list(cluster_by) + moved))
+    if len(clustered) > _BIGQUERY_MAX_CLUSTER_COLUMNS:
+        dropped = clustered[_BIGQUERY_MAX_CLUSTER_COLUMNS:]
+        clustered = clustered[:_BIGQUERY_MAX_CLUSTER_COLUMNS]
+        logger.warning(
+            f"BigQuery clusters on at most {_BIGQUERY_MAX_CLUSTER_COLUMNS} columns; "
+            f"{', '.join(dropped)} dropped from {table}'s CLUSTER BY."
+        )
+    return partition_expr, clustered
+
+
+def _warn_unpartitionable(backend: str, partition_by: List[str], *, table: str) -> None:
+    """Say so when a backend has no user-defined partitioning, instead of dropping it silently.
+
+    ``partition_by`` on Snowflake (and any other backend outside ``_PARTITION_BACKENDS``)
+    produced no clause and no message: a contract declaring a country partition read as
+    partitioned on every platform and was on only some. Snowflake is NOT auto-converted to
+    clustering the way BigQuery is — Snowflake Automatic Clustering is billed compute, and a
+    cost should be opted into, not inherited from a partition key.
+    """
+    cols = ", ".join(partition_by)
+    if backend == "snowflake":
+        logger.warning(
+            f"Snowflake has no user-defined partitions — it micro-partitions automatically — so "
+            f"partition_by [{cols}] on {table} was not emitted. For the same pruning set "
+            f"cluster_by: [{cols}] (Snowflake Automatic Clustering is billed)."
+        )
+    else:
+        logger.warning(f"The {backend} backend has no PARTITION BY; partition_by [{cols}] on {table} was not emitted.")
+
+
+def _spark_cluster_clause(cluster_by: List[str], table_format: Optional[str], *, partitioned: bool, table: str) -> str:
+    """The clustering clause for a Spark / Databricks CREATE TABLE, by storage format.
+
+    It was always ``CLUSTERED BY (...) INTO 32 BUCKETS`` — Hive bucketing — and Spark and
+    Databricks default to DELTA, so every default table with ``cluster_by`` got bucketing on a
+    Delta table. Per the Delta / Databricks documentation Delta does not support bucketing;
+    clustering a Delta table is liquid clustering, ``CLUSTER BY (...)``.
+
+    * DELTA, not partitioned -> ``CLUSTER BY (cols)`` (liquid clustering).
+    * DELTA and partitioned  -> no clause, and a warning: liquid clustering cannot be combined
+      with ``PARTITIONED BY``. Partitioning wins because it is the physical layout (and may be a
+      separation requirement); ``OPTIMIZE ... ZORDER BY`` clusters within partitions instead.
+    * ICEBERG               -> no clause, and a warning: neither syntax applies; Iceberg uses a
+      write sort order or a ``bucket(n, col)`` partition transform.
+    * anything else (parquet / orc Hive tables) -> ``CLUSTERED BY (...) INTO 32 BUCKETS``, which
+      is valid bucketing for those tables.
+    """
+    cols = ", ".join(cluster_by)
+    fmt = (table_format or "").upper()
+    if fmt == "DELTA":
+        if partitioned:
+            logger.warning(
+                f"Liquid clustering cannot be combined with PARTITIONED BY on a Delta table "
+                f"({table}); cluster_by [{cols}] was not emitted. Partitioning is kept; cluster "
+                f"within partitions with OPTIMIZE {table} ZORDER BY ({cols})."
+            )
+            return ""
+        return f"\nCLUSTER BY ({cols})"
+    if fmt == "ICEBERG":
+        logger.warning(
+            f"cluster_by [{cols}] has no Iceberg CREATE TABLE clause ({table}); not emitted. "
+            f"Use a write sort order or a bucket() partition transform."
+        )
+        return ""
+    return f"\nCLUSTERED BY ({cols}) INTO 32 BUCKETS"
+
+
 def generate_ddl(
     contract: DataContract,
     backend: str,
@@ -351,6 +494,11 @@ def generate_ddl(
 
         col_defs.append(col_def)
 
+    # Every column this CREATE TABLE declares — what partition/cluster columns are checked against.
+    ddl_columns = {f.name for f in fields}
+    # ... and their logical types, for backends whose partitioning depends on type (BigQuery).
+    ddl_types: Dict[str, str] = {f.name: str(getattr(f, "type", None) or "string") for f in fields}
+
     # ── LakeLogic system columns (when lineage is enabled) ──────────────────
     lineage_cfg = getattr(contract, "lineage", None)
     if lineage_cfg and getattr(lineage_cfg, "enabled", False):
@@ -378,6 +526,8 @@ def generate_ddl(
             if col_name not in existing_names:
                 sql_type = _resolve_type(col_type, backend)
                 col_defs.append(f"  {col_name} {sql_type}")
+                ddl_columns.add(col_name)
+                ddl_types[col_name] = str(col_type)
 
     # ── Soft-delete system columns ──────────────────────────────────────────
     if mat:
@@ -396,6 +546,12 @@ def generate_ddl(
             if col_name not in existing_names:
                 sql_type = _resolve_type(col_type, backend)
                 col_defs.append(f"  {col_name} {sql_type}")
+                ddl_columns.add(col_name)
+                ddl_types[col_name] = str(col_type)
+
+    # Inherited layout defaults may name columns this table lacks — keep only the ones it has.
+    partition_by = _present_layout_columns(partition_by, ddl_columns, kind="Partition", table=resolved_table)
+    cluster_by = _present_layout_columns(cluster_by, ddl_columns, kind="Cluster", table=resolved_table)
 
     # Primary key constraint
     if primary_key:
@@ -427,16 +583,16 @@ def generate_ddl(
         ddl += f"\nUSING {table_format}"
 
     # PARTITIONED BY
-    if partition_by and backend in _PARTITION_BACKENDS:
+    if backend == "bigquery" and partition_by:
+        # Type-checked: BigQuery rejects PARTITION BY on anything but one date-like column.
+        _bq_partition, cluster_by = _bigquery_layout(partition_by, cluster_by, ddl_types, table=resolved_table)
+        if _bq_partition:
+            ddl += f"\nPARTITION BY {_bq_partition}"
+    elif partition_by and backend in _PARTITION_BACKENDS:
         part_cols = ", ".join(partition_by)
-        if backend == "bigquery":
-            # BigQuery uses PARTITION BY with expressions
-            if len(partition_by) == 1:
-                ddl += f"\nPARTITION BY {partition_by[0]}"
-            else:
-                ddl += f"\nPARTITION BY {part_cols}"
-        else:
-            ddl += f"\nPARTITIONED BY ({part_cols})"
+        ddl += f"\nPARTITIONED BY ({part_cols})"
+    elif partition_by:
+        _warn_unpartitionable(backend, partition_by, table=resolved_table)
 
     # CLUSTER BY / CLUSTERED BY
     if cluster_by and backend in _CLUSTER_BACKENDS:
@@ -444,7 +600,7 @@ def generate_ddl(
         if backend == "bigquery":
             ddl += f"\nCLUSTER BY {cluster_cols}"
         elif backend in ("spark", "databricks"):
-            ddl += f"\nCLUSTERED BY ({cluster_cols}) INTO 32 BUCKETS"
+            ddl += _spark_cluster_clause(cluster_by, table_format, partitioned=bool(partition_by), table=resolved_table)
         elif backend == "snowflake":
             ddl += f"\nCLUSTER BY ({cluster_cols})"
 
@@ -1088,6 +1244,15 @@ def create_table(
                     spark.sql(statement)
 
             logger.info(f"Created table via Spark: {ddl.splitlines()[0]}")
+
+            # An EXISTING table is skipped by `IF NOT EXISTS`, so the CLUSTER BY above never
+            # reaches it — declaring cluster_by on a live table did nothing in DDL mode. Reconcile
+            # now: a new table already matches (no-op), an existing one is altered.
+            _cluster_by = list(getattr(mat, "cluster_by", None) or []) if mat else []
+            if _cluster_by and _resolved:
+                from lakelogic.core.clustering import reconcile_delta_clustering
+
+                reconcile_delta_clustering(spark, _resolved, _cluster_by)
         except ImportError:
             raise ValueError("Spark backend requires pyspark installed.")
 

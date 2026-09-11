@@ -222,15 +222,99 @@ class TestGenerateDDL:
         assert "PARTITIONED BY (order_date)" in ddl
 
     def test_partition_by_bigquery(self):
+        # `order_date` is a TIMESTAMP in this fixture. BigQuery will not partition on a bare
+        # timestamp — it needs DATE(col) or TIMESTAMP_TRUNC — so the old expectation,
+        # `PARTITION BY order_date`, asserted DDL BigQuery rejects.
         contract = _make_contract(partition_by=["order_date"])
         ddl = generate_ddl(contract, "bigquery")
-        assert "PARTITION BY order_date" in ddl
+        assert "PARTITION BY DATE(order_date)" in ddl
 
     def test_partition_by_not_in_duckdb(self):
         """DuckDB doesn't support PARTITIONED BY in DDL."""
         contract = _make_contract(partition_by=["order_date"])
         ddl = generate_ddl(contract, "duckdb")
         assert "PARTITION" not in ddl
+
+    # ── Registry defaults are a SUPERSET across a layer ─────────────────────────────
+    # `_domain.yaml` may set `materialization.silver.partition_by: [country_code, event_date]`
+    # for every silver table. The writers prune columns a table lacks; the DDL generator did
+    # not, and emitted PARTITIONED BY naming columns the CREATE TABLE never declares.
+
+    def test_superset_partition_keeps_only_the_columns_the_table_has(self):
+        contract = _make_contract(partition_by=["status", "event_date"])  # no event_date field
+        ddl = generate_ddl(contract, "databricks")
+        assert "PARTITIONED BY (status)" in ddl
+        assert "event_date" not in ddl
+
+    def test_superset_partition_with_no_matching_column_emits_no_partition_clause(self):
+        contract = _make_contract(partition_by=["country_code", "event_date"])
+        for backend in ("spark", "databricks", "bigquery"):
+            ddl = generate_ddl(contract, backend)
+            assert "PARTITION" not in ddl, backend
+            assert "country_code" not in ddl, backend
+
+    def test_superset_partition_order_is_preserved(self):
+        contract = _make_contract(partition_by=["event_date", "status", "order_date"])
+        ddl = generate_ddl(contract, "spark")
+        assert "PARTITIONED BY (status, order_date)" in ddl
+
+    def test_superset_cluster_by_is_pruned_too(self):
+        contract = _make_contract(cluster_by=["customer_id", "region"])
+        bq = generate_ddl(contract, "bigquery")
+        assert "CLUSTER BY customer_id" in bq and "region" not in bq
+        assert "region" not in generate_ddl(contract, "snowflake")
+
+    def test_a_partition_on_a_lineage_system_column_is_kept(self):
+        # Pruning checks every column the DDL declares, not only model fields.
+        from lakelogic.core.models import LineageConfig
+
+        contract = _make_contract(partition_by=["_lakelogic_processed_at"])
+        contract.lineage = LineageConfig(enabled=True)
+        ddl = generate_ddl(contract, "spark")
+        assert "PARTITIONED BY (_lakelogic_processed_at)" in ddl
+
+    def test_pruning_is_logged_not_silent(self):
+        from loguru import logger
+
+        seen = []
+        sink = logger.add(lambda m: seen.append(str(m)), level="WARNING")
+        try:
+            generate_ddl(_make_contract(partition_by=["status", "event_date"]), "spark")
+        finally:
+            logger.remove(sink)
+        assert any("event_date" in m and "pruned" in m for m in seen)
+
+    # ── Clustering on Spark / Databricks follows the storage format ──────────────────
+    # It was always Hive bucketing (CLUSTERED BY ... INTO 32 BUCKETS), and both backends
+    # default to DELTA, so every default Delta table with cluster_by got bucketing.
+
+    def test_delta_cluster_by_is_liquid_clustering(self):
+        contract = _make_contract(cluster_by=["customer_id", "status"])
+        for backend in ("databricks", "spark"):  # both default to DELTA
+            ddl = generate_ddl(contract, backend)
+            assert "CLUSTER BY (customer_id, status)" in ddl, backend
+            assert "BUCKETS" not in ddl, backend
+
+    def test_delta_partitioned_table_keeps_partitioning_and_drops_liquid(self):
+        from loguru import logger
+
+        seen = []
+        sink = logger.add(lambda m: seen.append(str(m)), level="WARNING")
+        try:
+            ddl = generate_ddl(_make_contract(partition_by=["order_date"], cluster_by=["customer_id"]), "databricks")
+        finally:
+            logger.remove(sink)
+        assert "PARTITIONED BY (order_date)" in ddl
+        assert "CLUSTER BY" not in ddl and "BUCKETS" not in ddl
+        assert any("ZORDER BY (customer_id)" in m for m in seen)
+
+    def test_hive_format_tables_keep_bucketing(self):
+        ddl = generate_ddl(_make_contract(cluster_by=["customer_id"], fmt="parquet"), "spark")
+        assert "CLUSTERED BY (customer_id) INTO 32 BUCKETS" in ddl
+
+    def test_iceberg_gets_no_clustering_clause(self):
+        ddl = generate_ddl(_make_contract(cluster_by=["customer_id"], fmt="iceberg"), "spark")
+        assert "CLUSTER" not in ddl and "BUCKETS" not in ddl
 
     def test_cluster_by_bigquery(self):
         contract = _make_contract(cluster_by=["customer_id", "status"])
@@ -307,6 +391,10 @@ class TestGenerateDDL:
             FieldDefinition(name="id", type="int", required=True),
             FieldDefinition(name="_lakelogic_source", type="string"),
             FieldDefinition(name="email", type="string", pii=True),
+            # Declared: the partition clause may only name columns the table has (a
+            # superset registry default is pruned to these — see the superset tests).
+            FieldDefinition(name="event_date", type="date"),
+            FieldDefinition(name="region", type="string"),
         ]
         contract = _make_contract(
             fields=fields,
@@ -349,11 +437,17 @@ class TestGenerateDDL:
         assert "_deleted_at STRING" in spark_ddl
         assert "_delete_reason STRING" in spark_ddl
         assert "PARTITIONED BY (event_date, region)" in spark_ddl
-        assert "CLUSTERED BY (id) INTO 32 BUCKETS" in spark_ddl
+        # Spark defaults to DELTA and this table is partitioned: liquid clustering cannot be
+        # combined with PARTITIONED BY, and Delta has no bucketing — so no clustering clause.
+        assert "BUCKETS" not in spark_ddl and "CLUSTER BY" not in spark_ddl
         assert "'delta.enableChangeDataFeed' = true" in spark_ddl
 
         bq_ddl = generate_ddl(contract, "bigquery")
-        assert "PARTITION BY event_date, region" in bq_ddl
+        # BigQuery partitions on ONE column; `PARTITION BY event_date, region` was rejected
+        # outright. The date partitions, and `region` joins the declared clustering.
+        assert "PARTITION BY event_date" in bq_ddl
+        assert "PARTITION BY event_date, region" not in bq_ddl
+        assert "CLUSTER BY id, region" in bq_ddl
         assert "email STRING /* PII */" in bq_ddl
 
 
@@ -1097,3 +1191,99 @@ class TestSplitSqlStatements:
         assert len(creates) == 1
         assert "Surrogate key; new for each SCD2 version" in creates[0]
         assert creates[0].rstrip().endswith(")")
+
+
+# ── Partitioning a country key across backends ──────────────────────────────────
+# `partition_by: [country_code]` is the natural key for a country-partitioned mesh. It is valid
+# on Spark / Databricks. BigQuery was handed `PARTITION BY country_code` — a STRING column,
+# which it rejects — and Snowflake silently got nothing. Neither said anything.
+
+_COUNTRY_FIELDS = [
+    FieldDefinition(name="trip_id", type="string", required=True),
+    FieldDefinition(name="country_code", type="string"),
+    FieldDefinition(name="trip_date", type="date"),
+    FieldDefinition(name="requested_at", type="timestamp"),
+    FieldDefinition(name="rider_seq", type="integer"),
+]
+
+
+def _country_contract(partition_by, cluster_by=None):
+    return _make_contract(
+        fields=_COUNTRY_FIELDS, table_name="silver.trips", partition_by=partition_by, cluster_by=cluster_by
+    )
+
+
+@pytest.fixture()
+def warnings_log():
+    from loguru import logger
+
+    lines = []
+    sink = logger.add(lambda m: lines.append(str(m)), level="WARNING", format="{message}")
+    yield lines
+    logger.remove(sink)
+
+
+class TestCountryPartitionAcrossBackends:
+    def test_databricks_partitions_on_a_string_key(self):
+        """Spark / Delta partitions on any type — the country key is emitted as declared."""
+        ddl = generate_ddl(_country_contract(["country_code"]), "databricks")
+        assert "PARTITIONED BY (country_code)" in ddl
+
+    def test_bigquery_never_partitions_on_a_string(self, warnings_log):
+        """THE DEFECT: a STRING partition column is DDL BigQuery rejects."""
+        ddl = generate_ddl(_country_contract(["country_code"]), "bigquery")
+        assert "PARTITION BY" not in ddl
+        assert "CLUSTER BY country_code" in ddl, "the key should still prune, as a cluster column"
+        assert any("clustered instead" in w for w in warnings_log), "the move must be announced"
+
+    def test_bigquery_partitions_on_a_date_and_clusters_the_country(self):
+        """Both keys survive: the date partitions, the country clusters."""
+        ddl = generate_ddl(_country_contract(["country_code", "trip_date"]), "bigquery")
+        assert "PARTITION BY trip_date" in ddl
+        assert "CLUSTER BY country_code" in ddl
+
+    def test_bigquery_partitions_a_timestamp_by_day(self):
+        ddl = generate_ddl(_country_contract(["requested_at"]), "bigquery")
+        assert "PARTITION BY DATE(requested_at)" in ddl
+
+    def test_bigquery_uses_only_one_partition_column(self):
+        """Two date-like columns: the first partitions, the second clusters — never both."""
+        ddl = generate_ddl(_country_contract(["trip_date", "requested_at"]), "bigquery")
+        assert ddl.count("PARTITION BY") == 1
+        assert "PARTITION BY trip_date" in ddl
+        assert "CLUSTER BY requested_at" in ddl
+
+    def test_bigquery_does_not_guess_integer_range_bounds(self):
+        """RANGE_BUCKET needs bounds the contract does not state, so an integer clusters."""
+        ddl = generate_ddl(_country_contract(["rider_seq"]), "bigquery")
+        assert "RANGE_BUCKET" not in ddl and "PARTITION BY" not in ddl
+        assert "CLUSTER BY rider_seq" in ddl
+
+    def test_bigquery_caps_clustering_at_four_columns(self, warnings_log):
+        ddl = generate_ddl(
+            _country_contract(["country_code", "rider_seq"], cluster_by=["trip_id", "trip_date", "requested_at"]),
+            "bigquery",
+        )
+        cluster_line = next(line for line in ddl.splitlines() if line.startswith("CLUSTER BY"))
+        assert len(cluster_line.replace("CLUSTER BY", "").split(",")) == 4
+        assert any("at most 4" in w for w in warnings_log)
+
+    def test_snowflake_says_it_cannot_partition(self, warnings_log):
+        """Silently dropping the key read as 'partitioned' on every platform when it was not."""
+        ddl = generate_ddl(_country_contract(["country_code"]), "snowflake")
+        assert "PARTITION" not in ddl
+        assert any("Snowflake has no user-defined partitions" in w and "cluster_by" in w for w in warnings_log)
+
+    def test_snowflake_is_not_auto_clustered(self):
+        """Snowflake Automatic Clustering is billed; a cost is opted into, not inherited."""
+        ddl = generate_ddl(_country_contract(["country_code"]), "snowflake")
+        assert "CLUSTER BY" not in ddl
+
+    def test_snowflake_still_honours_an_explicit_cluster_by(self):
+        ddl = generate_ddl(_country_contract([], cluster_by=["country_code"]), "snowflake")
+        assert "CLUSTER BY (country_code)" in ddl
+
+    def test_other_backends_warn_rather_than_drop_silently(self, warnings_log):
+        ddl = generate_ddl(_country_contract(["country_code"]), "duckdb")
+        assert "PARTITION" not in ddl
+        assert any("duckdb" in w and "not emitted" in w for w in warnings_log)
