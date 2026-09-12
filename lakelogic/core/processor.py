@@ -2100,11 +2100,7 @@ class DataProcessor:
                                 """The literal columns carried by THIS file's own path."""
                                 cols = [pl.lit(_p).alias("_source_file")]
                                 _vals = self._path_key_values(_p)
-                                cols += [
-                                    pl.lit(_vals[k]).alias(k)
-                                    for k in self._path_key_fields
-                                    if k in _vals
-                                ]
+                                cols += [pl.lit(_vals[k]).alias(k) for k in self._path_key_fields if k in _vals]
                                 return cols
 
                             _read_opts = {"storage_options": _pl_sopts} if _pl_sopts else {}

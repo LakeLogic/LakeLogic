@@ -25,10 +25,12 @@ def _landing(tmp_path, fmt: str):
     for country, n in rows.items():
         d = root / f"country={country}"
         d.mkdir(parents=True)
-        frame = pl.DataFrame({
-            "order_id": [f"{country}-{i}" for i in range(n)],
-            "amount": [10.0] * n,
-        })
+        frame = pl.DataFrame(
+            {
+                "order_id": [f"{country}-{i}" for i in range(n)],
+                "amount": [10.0] * n,
+            }
+        )
         if fmt == "parquet":
             frame.write_parquet(d / "part.parquet")
         else:
@@ -57,10 +59,7 @@ def test_a_declared_path_key_arrives_as_a_column_with_the_right_value_per_row(tm
 
     assert "country" in good.columns
     # Per ROW, not per read: a single read across both folders cannot say which rows are which.
-    by_country = {
-        str(r["order_id"]): str(r["country"])
-        for r in good.select(["order_id", "country"]).to_dicts()
-    }
+    by_country = {str(r["order_id"]): str(r["country"]) for r in good.select(["order_id", "country"]).to_dicts()}
     assert by_country == {"GB-0": "GB", "GB-1": "GB", "DE-0": "DE"}
 
 
@@ -74,7 +73,8 @@ def test_a_contract_that_declares_nothing_about_its_folders_is_unchanged(tmp_pat
 
 def test_the_path_reader_takes_every_key_and_ignores_what_is_not_one():
     assert _DP._path_key_values("landing/orders/country=GB/dt=2026-09-11/part.parquet") == {
-        "country": "GB", "dt": "2026-09-11",
+        "country": "GB",
+        "dt": "2026-09-11",
     }
     # A bare folder is not a stated key, and neither is a file that happens to contain "=".
     assert _DP._path_key_values("landing/orders/2026/09/part.parquet") == {}

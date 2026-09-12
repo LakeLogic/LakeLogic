@@ -23,25 +23,33 @@ def _contract(target: str, fmt: str) -> dict:
         "version": "1.0.0",
         "info": {"title": "silver_orders", "target_layer": "silver"},
         "dataset": "silver_orders",
-        "model": {"fields": [
-            {"name": "order_id", "type": "string"},
-            {"name": "country_code", "type": "string"},
-            {"name": "order_ts", "type": "timestamp"},
-            {"name": "order_date", "type": "date"},
-        ]},
+        "model": {
+            "fields": [
+                {"name": "order_id", "type": "string"},
+                {"name": "country_code", "type": "string"},
+                {"name": "order_ts", "type": "timestamp"},
+                {"name": "order_date", "type": "date"},
+            ]
+        },
         "transformations": [
             {"phase": "pre", "derive": {"field": "order_date", "sql": "CAST(order_ts AS DATE)"}},
         ],
-        "materialization": {"strategy": "append", "format": fmt,
-                            "partition_by": ["country_code", "order_date"], "target_path": target},
+        "materialization": {
+            "strategy": "append",
+            "format": fmt,
+            "partition_by": ["country_code", "order_date"],
+            "target_path": target,
+        },
     }
 
 
-DATA = pl.DataFrame({
-    "order_id": ["1", "2", "3"],
-    "country_code": ["GB", "DE", "GB"],
-    "order_ts": [datetime(2026, 9, 10, 8, 0), datetime(2026, 9, 10, 9, 0), datetime(2026, 9, 11, 12, 0)],
-})
+DATA = pl.DataFrame(
+    {
+        "order_id": ["1", "2", "3"],
+        "country_code": ["GB", "DE", "GB"],
+        "order_ts": [datetime(2026, 9, 10, 8, 0), datetime(2026, 9, 10, 9, 0), datetime(2026, 9, 11, 12, 0)],
+    }
+)
 
 
 def _leaf_dirs(root: str) -> list:
@@ -64,9 +72,7 @@ EXPECTED = [
 @pytest.mark.parametrize("fmt", ["parquet", "delta"])
 def test_date_partition_folders_are_plain_dates(tmp_path, engine, fmt):
     target = str(tmp_path / f"{engine}_{fmt}")
-    DataProcessor(engine=engine, contract=_contract(target, fmt)).run(
-        DATA, materialize=True, materialize_target=target
-    )
+    DataProcessor(engine=engine, contract=_contract(target, fmt)).run(DATA, materialize=True, materialize_target=target)
     assert _leaf_dirs(target) == EXPECTED
 
 

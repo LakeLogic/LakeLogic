@@ -32,6 +32,15 @@ def spark(tmp_path_factory):
     from delta import configure_spark_with_delta_pip
     from pyspark.sql import SparkSession
 
+    # Reuse a Delta-enabled session another module already started. A JVM holds ONE
+    # SparkContext, so building a second one here only adds contention — and stopping it
+    # afterwards would pull the context out from under whoever else was using it. Under a
+    # loaded machine that shows up as "Python worker failed to connect back".
+    _active = SparkSession.getActiveSession()
+    if _active is not None and "DeltaSparkSessionExtension" in (_active.conf.get("spark.sql.extensions", "") or ""):
+        yield _active
+        return
+
     builder = (
         SparkSession.builder.appName("lakelogic-partition-layout-tests")
         .master("local[1]")
