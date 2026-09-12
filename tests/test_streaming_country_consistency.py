@@ -245,3 +245,15 @@ def test_resume_rebuilds_the_city_index(tmp_path):
         by_city[city].add(did)
     for city, ids in by_city.items():
         assert set(resumed._drivers_by_city.get(city, [])) >= ids, f"{city}: index missing resumed drivers"
+
+
+def test_country_for_city_is_public_and_is_the_one_the_simulator_stamps():
+    """The demo meshes generate landing data from CONTRACTS, not from this simulator, and still
+    have to stamp the same country on a row. They import `country_for_city`, so a city added to
+    the simulator reaches them — a second copy in each repo is what would drift."""
+    from lakelogic.core.streaming import country_for_city
+
+    for city in streaming._CITY_COORDS:
+        assert country_for_city(city) == streaming.StreamingSimulator._country(city)
+        assert len(country_for_city(city)) == 2, f"{city} has no ISO alpha-2 country"
+    assert country_for_city("XYZ") == "", "an unknown city yields blank, never a wrong country"

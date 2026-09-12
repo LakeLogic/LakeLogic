@@ -55,8 +55,11 @@ def spark(tmp_path_factory):
     except Exception as exc:  # no Java, no network for the Delta jars, …
         pytest.skip(f"Spark with Delta is unavailable here: {exc}")
     session.sparkContext.setLogLevel("ERROR")
+    # Deliberately NOT stopped. A JVM allows ONE SparkContext, and a stopped one cannot always be
+    # rebuilt in the same process — a later module then dies constructing JavaSparkContext. Leaving
+    # it up lets the modules after this one reuse it (the Delta config is a superset of a plain
+    # session); the JVM goes when pytest exits.
     yield session
-    session.stop()
 
 
 @pytest.fixture()

@@ -205,6 +205,18 @@ _CITY_COUNTRY = {
     "SYD": "AU",
 }
 
+
+def country_for_city(city_code: str) -> str:
+    """The ISO 3166-1 alpha-2 country of a simulated city, or ``""`` for an unknown one.
+
+    Public because the demo meshes generate their landing data from CONTRACTS
+    (``DataGenerator.generate_related``) rather than from this simulator, and still have to
+    stamp the same country on a row as the simulator would. Importing this keeps one map:
+    a city added here reaches every mesh, instead of each repo carrying a copy to drift.
+    """
+    return _CITY_COUNTRY.get(city_code, "")
+
+
 #: International dialling prefix per country. Every rider and driver used to get a `+44`
 #: number regardless of city, so a Tokyo driver carried a UK phone — the same kind of
 #: cross-field disagreement `country_code` exists to rule out.
@@ -331,7 +343,7 @@ class StreamingSimulator:
     def _country(city: str) -> str:
         """The country a city belongs to. Blank only for a city outside the simulated set,
         which `_CITY_COORDS` would already have refused."""
-        return _CITY_COUNTRY.get(city, "")
+        return country_for_city(city)
 
     def _phone(self, city: str) -> str:
         """A phone number with the dialling prefix of the city's country. One RNG draw, as
