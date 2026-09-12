@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.62.0] — 2026-09-12
+
+### Added
+
+- Add country_for_city function to map city codes to ISO country codes and enhance test coverage
+
+### Changed
+
+- Simplify list comprehensions and improve code readability in processor and test files
 ## [1.61.0] — 2026-09-11
 
 ### Added
@@ -767,6 +776,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.62.0]: https://github.com/lakelogic/LakeLogic/compare/v1.61.0...v1.62.0
 [1.61.0]: https://github.com/lakelogic/LakeLogic/compare/v1.60.0...v1.61.0
 [1.60.0]: https://github.com/lakelogic/LakeLogic/compare/v1.59.0...v1.60.0
 [1.59.0]: https://github.com/lakelogic/LakeLogic/compare/v1.58.0...v1.59.0
