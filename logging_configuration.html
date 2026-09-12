@@ -1,0 +1,3346 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source reference framework for Open Lakehouse Contracts. Validate and execute OLC contracts across Polars, DuckDB and Spark.">
+      
+      
+        <meta name="author" content="LakeLogic Team">
+      
+      
+        <link rel="canonical" href="https://LakeLogic.github.io/LakeLogic/logging_configuration.html">
+      
+      
+        <link rel="prev" href="streaming_api.html">
+      
+      
+        <link rel="next" href="validation_result.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Logging Configuration - LakeLogic</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="stylesheets/extra.css?v=3">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lakelogic-logging-configuration-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="index.html" title="LakeLogic" class="md-header__button md-logo" aria-label="LakeLogic" data-md-component="logo">
+      
+  <img src="assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LakeLogic
+            <span class="ll-docs-badge">Docs</span>
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Logging Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div><nav class="ll-metanav" aria-label="Documentation sections">
+      <a class="ll-metanav__link" href="installation.html">Get started</a>
+      <a class="ll-metanav__link" href="concepts.html">Guides</a>
+      <a class="ll-metanav__link" href="api.html">Developer</a>
+      <a class="ll-metanav__link" href="cli.html">Reference</a>
+      <a class="ll-metanav__link" href="examples.html">Tutorials</a>
+      <a class="ll-metanav__link" href="maintenance.html">Release notes</a>
+    </nav>
+
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    <div class="ll-header-extra">
+      <a class="ll-header-extra__link" href="https://lakelogic.org" target="_blank" rel="noopener">Website</a>
+    </div>
+
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lakelogic/LakeLogic" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakelogic/LakeLogic
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="index.html" title="LakeLogic" class="md-nav__button md-logo" aria-label="LakeLogic" data-md-component="logo">
+      
+  <img src="assets/logo.svg" alt="logo">
+
+    </a>
+    LakeLogic
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lakelogic/LakeLogic" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakelogic/LakeLogic
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="installation.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="architecture_diagram.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="odcs.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Open Data Contract Standard (ODCS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="organization.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contract Organization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="ingestion.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingestion & Cloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="streaming.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="llm_extraction.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unstructured Data (LLM Extraction)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reprocessing.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reprocessing & Partitioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="resilience.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline Resilience
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pipelines.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines & Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="deployment_patterns.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Observability
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="observability.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring & Lineage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="notifications.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications & Alerting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compliance & Governance
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Compliance & Governance
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/compliance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/slo.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Level Objectives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="contracts/index.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contracts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/domain_config.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain Config (_domain.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/system_config.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Config (_system.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/inheritance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Resolution & Inheritance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="contracts/data_product_contracts/index.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Product Contracts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8_5" id="__nav_8_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_8_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data Product Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/ingestion.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingestion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/watermark_strategies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Watermark Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/transformations.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/quality.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/materialization.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Materialization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/dimensional_modeling.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dimensional Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/schema_model.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schema & Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/schema_api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schema Validation API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/versioning.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contract_template.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Complete Contract Template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="return_values.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Return Values
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="automatic_credentials.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Automatic Credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="catalog_table_names.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog Table Names
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="delta_lake_support.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Delta Lake (Spark-Free)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="driver.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Driver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="bootstrap.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="capabilities.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capability Matrix
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="streaming_sources.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Streaming Sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="streaming_api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming API (StreamSink)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="logging_configuration.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#default-logging-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default Logging Behavior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multi-line-splitting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Line Splitting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-Line Splitting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-split-instead-of-truncate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Split Instead of Truncate?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#customizing-line-length" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customizing Line Length
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Customizing Line Length">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-1-edit-mainpy-permanent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 1: Edit main.py (Permanent)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-2-environment-variable-dynamic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 2: Environment Variable (Dynamic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-3-cli-flag-per-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 3: CLI Flag (Per-Run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logging-to-file-no-truncation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logging to File (No Truncation)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Logging to File (No Truncation)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-1-add-file-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 1: Add File Handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-2-json-logs-structured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 2: JSON Logs (Structured)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended Configurations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recommended Configurations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#development-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development (Local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#production-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production (Server)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cicd-github-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI/CD (GitHub Actions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#problem-messages-still-too-long" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem: Messages still too long
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#problem-need-full-messages-for-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem: Need full messages for debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#problem-logs-are-unreadable-in-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem: Logs are unreadable in production
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Best Practices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-different-configs-for-different-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Different Configs for Different Environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-separate-logs-by-severity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Separate Logs by Severity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-context-aware-truncation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Context-Aware Truncation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-full-production-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: Full Production Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="validation_result.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation Result
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="maintenance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release & Maintenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="comparison.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why LakeLogic?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#default-logging-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default Logging Behavior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multi-line-splitting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Line Splitting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-Line Splitting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-split-instead-of-truncate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Split Instead of Truncate?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#customizing-line-length" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customizing Line Length
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Customizing Line Length">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-1-edit-mainpy-permanent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 1: Edit main.py (Permanent)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-2-environment-variable-dynamic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 2: Environment Variable (Dynamic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-3-cli-flag-per-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 3: CLI Flag (Per-Run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logging-to-file-no-truncation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logging to File (No Truncation)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Logging to File (No Truncation)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-1-add-file-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 1: Add File Handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-2-json-logs-structured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 2: JSON Logs (Structured)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended Configurations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recommended Configurations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#development-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development (Local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#production-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production (Server)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cicd-github-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI/CD (GitHub Actions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#problem-messages-still-too-long" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem: Messages still too long
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#problem-need-full-messages-for-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem: Need full messages for debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#problem-logs-are-unreadable-in-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem: Logs are unreadable in production
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Best Practices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-different-configs-for-different-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Different Configs for Different Environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-separate-logs-by-severity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Separate Logs by Severity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-context-aware-truncation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Context-Aware Truncation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-full-production-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: Full Production Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="lakelogic-logging-configuration-guide">LakeLogic Logging Configuration Guide</h1>
+<p><strong>Date:</strong> February 2026<br />
+<strong>Purpose:</strong> Configure logging behavior, message truncation, and output formats</p>
+<hr />
+<h2 id="default-logging-behavior">Default Logging Behavior</h2>
+<p>LakeLogic uses <strong>Loguru</strong> for structured logging with the following defaults:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Default configuration (lakelogic/cli/main.py)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span>  <span class="c1"># or "DEBUG" with --verbose</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"&lt;green&gt;{time:HH:mm:ss}&lt;/green&gt; | &lt;level&gt;</span><span class="si">{level: &lt;8}</span><span class="s2">&lt;/level&gt; | &lt;cyan&gt;</span><span class="si">{message}</span><span class="s2">&lt;/cyan&gt;"</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="nb">filter</span><span class="o">=</span><span class="n">split_long_message</span><span class="p">,</span>  <span class="c1"># Splits long messages across multiple lines</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
+</code></pre></div>
+<p><strong>Default Settings:</strong>
+- <strong>Log Level:</strong> <code>INFO</code> (or <code>DEBUG</code> with <code>--verbose</code> flag)
+- <strong>Output:</strong> <code>stderr</code> (console)
+- <strong>Max Line Length:</strong> <code>120 characters</code> (split at word boundaries)
+- <strong>Format:</strong> <code>HH:mm:ss | LEVEL | message</code>
+- <strong>Multi-line:</strong> Continuation lines are indented with 2 spaces</p>
+<hr />
+<h2 id="multi-line-splitting">Multi-Line Splitting</h2>
+<h3 id="why-split-instead-of-truncate"><strong>Why Split Instead of Truncate?</strong></h3>
+<p>Multi-line splitting is superior to truncation because:
+- ✅ <strong>No data loss</strong> - Full message is preserved
+- ✅ <strong>Better readability</strong> - Natural word boundaries
+- ✅ <strong>Scannable</strong> - Easy to skim long messages
+- ✅ <strong>Professional</strong> - Looks cleaner than "... (truncated)"</p>
+<h3 id="how-it-works"><strong>How It Works</strong></h3>
+<p>Messages longer than <code>max_line_length</code> are automatically split at word boundaries:</p>
+<p><strong>Before (single long line):</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>12:18:48 | INFO     | lakelogic.core.processor.run() - Run complete. [domain=customers.parquet] Source: 1,000,000, Total (post-transform): 999,950, Good: 999,900, Quarantined: 50, Pre-Transform Dropped: 50, Ratio: 99.99%
+</code></pre></div></p>
+<p><strong>After (split across multiple lines):</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>12:18:48 | INFO     | lakelogic.core.processor.run() - Run complete. [domain=customers.parquet] Source: 1,000,000, Total
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  (post-transform): 999,950, Good: 999,900, Quarantined: 50, Pre-Transform Dropped: 50, Ratio: 99.99%
+</code></pre></div></p>
+<p><strong>Features:</strong>
+- ✅ Splits at <strong>word boundaries</strong> (never mid-word)
+- ✅ <strong>Indents continuation lines</strong> (2 spaces) for visual hierarchy
+- ✅ <strong>Preserves full message</strong> (no truncation)
+- ✅ <strong>Configurable line length</strong> (default: 120 characters)</p>
+<hr />
+<h2 id="customizing-line-length">Customizing Line Length</h2>
+<h3 id="option-1-edit-mainpy-permanent"><strong>Option 1: Edit main.py (Permanent)</strong></h3>
+<p>Edit <code>lakelogic/cli/main.py</code> line 125:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">max_line_length</span> <span class="o">=</span> <span class="mi">80</span>  <span class="c1"># Narrow terminals (80 chars)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># or</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">max_line_length</span> <span class="o">=</span> <span class="mi">160</span>  <span class="c1"># Wide terminals (160 chars)</span>
+</code></pre></div>
+<p><strong>Common Values:</strong>
+- <code>80</code> - Narrow terminals, mobile, strict formatting
+- <code>120</code> - <strong>Default</strong> (standard terminals, good balance)
+- <code>160</code> - Wide terminals, modern displays
+- <code>200</code> - Very wide terminals, minimal splitting
+- <code>999999</code> - Effectively no splitting (single-line logs)</p>
+<hr />
+<h3 id="option-2-environment-variable-dynamic"><strong>Option 2: Environment Variable (Dynamic)</strong></h3>
+<p>Add support for environment variable configuration:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># In lakelogic/cli/main.py</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">max_line_length</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"LAKELOGIC_MAX_LINE_LENGTH"</span><span class="p">,</span> <span class="s2">"120"</span><span class="p">))</span>
+</code></pre></div>
+<p><strong>Usage:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Windows</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nb">set</span><span class="w"> </span><span class="nv">LAKELOGIC_MAX_LINE_LENGTH</span><span class="o">=</span><span class="m">160</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--contract<span class="w"> </span>bronze_customers.yaml<span class="w"> </span>--source<span class="w"> </span>customers.csv
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># Linux/Mac</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LAKELOGIC_MAX_LINE_LENGTH</span><span class="o">=</span><span class="m">160</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--contract<span class="w"> </span>bronze_customers.yaml<span class="w"> </span>--source<span class="w"> </span>customers.csv
+</code></pre></div></p>
+<hr />
+<h3 id="option-3-cli-flag-per-run"><strong>Option 3: CLI Flag (Per-Run)</strong></h3>
+<p>Add a <code>--max-log-length</code> flag:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># In lakelogic/cli/main.py</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nd">@app</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="c1"># ... existing parameters ...</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">max_log_length</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">typer</span><span class="o">.</span><span class="n">Option</span><span class="p">(</span><span class="mi">500</span><span class="p">,</span> <span class="s2">"--max-log-length"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Maximum log message length (characters)."</span><span class="p">),</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="p">):</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="c1"># ... existing code ...</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="n">max_message_length</span> <span class="o">=</span> <span class="n">max_log_length</span>
+</code></pre></div>
+<p><strong>Usage:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--contract<span class="w"> </span>bronze_customers.yaml<span class="w"> </span>--source<span class="w"> </span>customers.csv<span class="w"> </span>--max-log-length<span class="w"> </span><span class="m">1000</span>
+</code></pre></div></p>
+<hr />
+<h2 id="logging-to-file-no-truncation">Logging to File (No Truncation)</h2>
+<p>For production environments, log to file without truncation:</p>
+<h3 id="option-1-add-file-handler"><strong>Option 1: Add File Handler</strong></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># In lakelogic/cli/main.py</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="s2">"logs/lakelogic_{time:YYYY-MM-DD}.log"</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"{time:YYYY-MM-DD HH:mm:ss} | </span><span class="si">{level: &lt;8}</span><span class="s2"> | </span><span class="si">{message}</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">rotation</span><span class="o">=</span><span class="s2">"1 day"</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">retention</span><span class="o">=</span><span class="s2">"30 days"</span><span class="p">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">compression</span><span class="o">=</span><span class="s2">"zip"</span><span class="p">,</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># No truncation for file logs</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">)</span>
+</code></pre></div>
+<p><strong>Features:</strong>
+- ✅ Daily log rotation
+- ✅ 30-day retention
+- ✅ Automatic compression
+- ✅ Full messages (no truncation)
+- ✅ Structured format for parsing</p>
+<hr />
+<h3 id="option-2-json-logs-structured"><strong>Option 2: JSON Logs (Structured)</strong></h3>
+<p>For log aggregation (Datadog, Splunk, ELK):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">json_formatter</span><span class="p">(</span><span class="n">record</span><span class="p">):</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="sd">"""Format log records as JSON."""</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="k">return</span> <span class="p">(</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>            <span class="p">{</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>                <span class="s2">"timestamp"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"time"</span><span class="p">]</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>                <span class="s2">"level"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"level"</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>                <span class="s2">"message"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"message"</span><span class="p">],</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>                <span class="s2">"file"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"file"</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>                <span class="s2">"function"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"function"</span><span class="p">],</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>                <span class="s2">"line"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"line"</span><span class="p">],</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>            <span class="p">}</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>        <span class="p">)</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>        <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>    <span class="p">)</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s2">"logs/lakelogic.jsonl"</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="n">json_formatter</span><span class="p">,</span> <span class="n">serialize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Output:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-02-09T12:18:48.123456"</span><span class="p">,</span><span class="w"> </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span><span class="w"> </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Run complete. Source: 1000000, Good: 999900, Quarantined: 50"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"processor.py"</span><span class="p">,</span><span class="w"> </span><span class="nt">"function"</span><span class="p">:</span><span class="w"> </span><span class="s2">"run_source"</span><span class="p">,</span><span class="w"> </span><span class="nt">"line"</span><span class="p">:</span><span class="w"> </span><span class="mi">234</span><span class="p">}</span>
+</code></pre></div></p>
+<hr />
+<h2 id="recommended-configurations">Recommended Configurations</h2>
+<h3 id="development-local"><strong>Development (Local)</strong></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Console: Truncated, colored</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"&lt;green&gt;{time:HH:mm:ss}&lt;/green&gt; | &lt;level&gt;</span><span class="si">{level: &lt;8}</span><span class="s2">&lt;/level&gt; | &lt;cyan&gt;</span><span class="si">{message}</span><span class="s2">&lt;/cyan&gt;"</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="nb">filter</span><span class="o">=</span><span class="n">truncate_message</span><span class="p">,</span>  <span class="c1"># 500 chars</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h3 id="production-server"><strong>Production (Server)</strong></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Console: Truncated, minimal</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"{time:HH:mm:ss} | </span><span class="si">{level: &lt;8}</span><span class="s2"> | </span><span class="si">{message}</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="nb">filter</span><span class="o">=</span><span class="n">truncate_message</span><span class="p">,</span>  <span class="c1"># 500 chars</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="p">)</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="c1"># File: Full messages, JSON</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="s2">"logs/lakelogic_{time:YYYY-MM-DD}.log"</span><span class="p">,</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"{time:YYYY-MM-DD HH:mm:ss.SSS} | </span><span class="si">{level: &lt;8}</span><span class="s2"> | </span><span class="si">{name}</span><span class="s2">:</span><span class="si">{function}</span><span class="s2">:</span><span class="si">{line}</span><span class="s2"> | </span><span class="si">{message}</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    <span class="n">rotation</span><span class="o">=</span><span class="s2">"1 day"</span><span class="p">,</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    <span class="n">retention</span><span class="o">=</span><span class="s2">"30 days"</span><span class="p">,</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>    <span class="n">compression</span><span class="o">=</span><span class="s2">"zip"</span><span class="p">,</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># No truncation</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h3 id="cicd-github-actions"><strong>CI/CD (GitHub Actions)</strong></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Console only, no colors, no truncation</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"{time:HH:mm:ss} | </span><span class="si">{level: &lt;8}</span><span class="s2"> | </span><span class="si">{message}</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    <span class="n">colorize</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>    <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># No truncation (CI logs are searchable)</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="problem-messages-still-too-long"><strong>Problem: Messages still too long</strong></h3>
+<p><strong>Solution:</strong> Reduce <code>max_message_length</code>:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">max_message_length</span> <span class="o">=</span> <span class="mi">200</span>  <span class="c1"># Very compact</span>
+</code></pre></div></p>
+<hr />
+<h3 id="problem-need-full-messages-for-debugging"><strong>Problem: Need full messages for debugging</strong></h3>
+<p><strong>Solution:</strong> Use <code>--verbose</code> and log to file:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--contract<span class="w"> </span>bronze_customers.yaml<span class="w"> </span>--source<span class="w"> </span>customers.csv<span class="w"> </span>--verbose<span class="w"> </span>&gt;<span class="w"> </span>debug.log<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</code></pre></div></p>
+<p>Or add file handler:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s2">"debug.log"</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div></p>
+<hr />
+<h3 id="problem-logs-are-unreadable-in-production"><strong>Problem: Logs are unreadable in production</strong></h3>
+<p><strong>Solution:</strong> Use JSON logs for structured parsing:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s2">"logs/lakelogic.jsonl"</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span> <span class="n">serialize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="n">json_formatter</span><span class="p">)</span>
+</code></pre></div></p>
+<p>Then parse with <code>jq</code>:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>cat<span class="w"> </span>logs/lakelogic.jsonl<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.message'</span>
+</code></pre></div></p>
+<hr />
+<h2 id="best-practices">Best Practices</h2>
+<h3 id="1-different-configs-for-different-environments"><strong>1. Different Configs for Different Environments</strong></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="n">env</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"ENVIRONMENT"</span><span class="p">,</span> <span class="s2">"development"</span><span class="p">)</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="k">if</span> <span class="n">env</span> <span class="o">==</span> <span class="s2">"production"</span><span class="p">:</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="c1"># Production: File logs, JSON, no truncation</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s2">"logs/lakelogic.jsonl"</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span> <span class="n">serialize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="k">elif</span> <span class="n">env</span> <span class="o">==</span> <span class="s2">"development"</span><span class="p">:</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>    <span class="c1"># Development: Console, colored, truncated</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="n">truncate_message</span><span class="p">)</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>    <span class="c1"># CI/CD: Console, plain, no truncation</span>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span> <span class="n">colorize</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h3 id="2-separate-logs-by-severity"><strong>2. Separate Logs by Severity</strong></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># INFO and above to console (truncated)</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"&lt;green&gt;{time:HH:mm:ss}&lt;/green&gt; | &lt;level&gt;</span><span class="si">{level: &lt;8}</span><span class="s2">&lt;/level&gt; | &lt;cyan&gt;</span><span class="si">{message}</span><span class="s2">&lt;/cyan&gt;"</span><span class="p">,</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>    <span class="nb">filter</span><span class="o">=</span><span class="n">truncate_message</span><span class="p">,</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="p">)</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="c1"># DEBUG and above to file (full)</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>    <span class="s2">"logs/debug.log"</span><span class="p">,</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"{time:YYYY-MM-DD HH:mm:ss.SSS} | </span><span class="si">{level: &lt;8}</span><span class="s2"> | </span><span class="si">{name}</span><span class="s2">:</span><span class="si">{function}</span><span class="s2">:</span><span class="si">{line}</span><span class="s2"> | </span><span class="si">{message}</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>    <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="p">)</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a><span class="c1"># ERROR and above to separate file (full)</span>
+<a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-20-19" name="__codelineno-20-19" href="#__codelineno-20-19"></a>    <span class="s2">"logs/errors.log"</span><span class="p">,</span>
+<a id="__codelineno-20-20" name="__codelineno-20-20" href="#__codelineno-20-20"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"ERROR"</span><span class="p">,</span>
+<a id="__codelineno-20-21" name="__codelineno-20-21" href="#__codelineno-20-21"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"{time:YYYY-MM-DD HH:mm:ss.SSS} | </span><span class="si">{level: &lt;8}</span><span class="s2"> | </span><span class="si">{name}</span><span class="s2">:</span><span class="si">{function}</span><span class="s2">:</span><span class="si">{line}</span><span class="s2"> | </span><span class="si">{message}</span><span class="se">\n</span><span class="si">{exception}</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-20-22" name="__codelineno-20-22" href="#__codelineno-20-22"></a>    <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-20-23" name="__codelineno-20-23" href="#__codelineno-20-23"></a><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h3 id="3-context-aware-truncation"><strong>3. Context-Aware Truncation</strong></h3>
+<p>Truncate only certain log levels:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">truncate_message</span><span class="p">(</span><span class="n">record</span><span class="p">):</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">    </span><span class="sd">"""Truncate only INFO and DEBUG messages."""</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>    <span class="k">if</span> <span class="n">record</span><span class="p">[</span><span class="s2">"level"</span><span class="p">]</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"INFO"</span><span class="p">,</span> <span class="s2">"DEBUG"</span><span class="p">]:</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>        <span class="n">message</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s2">"message"</span><span class="p">]</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">message</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">500</span><span class="p">:</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>            <span class="n">record</span><span class="p">[</span><span class="s2">"message"</span><span class="p">]</span> <span class="o">=</span> <span class="n">message</span><span class="p">[:</span><span class="mi">500</span><span class="p">]</span> <span class="o">+</span> <span class="sa">f</span><span class="s2">"... (truncated </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">message</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">500</span><span class="si">}</span><span class="s2"> chars)"</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>    <span class="k">return</span> <span class="kc">True</span>  <span class="c1"># Always log ERROR/WARNING in full</span>
+</code></pre></div>
+<hr />
+<h2 id="summary">Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Configuration</th>
+<th>Use Case</th>
+<th>Max Length</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Default</strong></td>
+<td>Local development</td>
+<td>500 chars</td>
+<td>Console (colored)</td>
+</tr>
+<tr>
+<td><strong>Verbose</strong></td>
+<td>Debugging</td>
+<td>500 chars</td>
+<td>Console (colored, DEBUG level)</td>
+</tr>
+<tr>
+<td><strong>Production</strong></td>
+<td>Server deployment</td>
+<td>500 chars (console), unlimited (file)</td>
+<td>Console + File (JSON)</td>
+</tr>
+<tr>
+<td><strong>CI/CD</strong></td>
+<td>GitHub Actions</td>
+<td>Unlimited</td>
+<td>Console (plain)</td>
+</tr>
+<tr>
+<td><strong>Custom</strong></td>
+<td>Specific needs</td>
+<td>User-defined</td>
+<td>Configurable</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="example-full-production-setup">Example: Full Production Setup</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">loguru</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="c1"># Remove default handler</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="n">logger</span><span class="o">.</span><span class="n">remove</span><span class="p">()</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="c1"># Environment</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="n">env</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"ENVIRONMENT"</span><span class="p">,</span> <span class="s2">"development"</span><span class="p">)</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="n">max_message_length</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"LAKELOGIC_MAX_LOG_LENGTH"</span><span class="p">,</span> <span class="s2">"500"</span><span class="p">))</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="c1"># Truncation filter</span>
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="k">def</span><span class="w"> </span><span class="nf">truncate_message</span><span class="p">(</span><span class="n">record</span><span class="p">):</span>
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="w">    </span><span class="sd">"""Truncate log messages to prevent console overflow."""</span>
+<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>    <span class="k">if</span> <span class="n">record</span><span class="p">[</span><span class="s2">"level"</span><span class="p">]</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">"INFO"</span><span class="p">,</span> <span class="s2">"DEBUG"</span><span class="p">]:</span>
+<a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>        <span class="n">message</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s2">"message"</span><span class="p">]</span>
+<a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">message</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">max_message_length</span><span class="p">:</span>
+<a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>            <span class="n">record</span><span class="p">[</span><span class="s2">"message"</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a>                <span class="n">message</span><span class="p">[:</span><span class="n">max_message_length</span><span class="p">]</span> <span class="o">+</span> <span class="sa">f</span><span class="s2">"... (truncated </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">message</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">max_message_length</span><span class="si">}</span><span class="s2"> chars)"</span>
+<a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>            <span class="p">)</span>
+<a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>    <span class="k">return</span> <span class="kc">True</span>
+<a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>
+<a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a>
+<a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a><span class="c1"># Console handler (always)</span>
+<a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a><span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a>    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+<a id="__codelineno-22-29" name="__codelineno-22-29" href="#__codelineno-22-29"></a>    <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span> <span class="k">if</span> <span class="n">env</span> <span class="o">==</span> <span class="s2">"production"</span> <span class="k">else</span> <span class="s2">"DEBUG"</span><span class="p">,</span>
+<a id="__codelineno-22-30" name="__codelineno-22-30" href="#__codelineno-22-30"></a>    <span class="nb">format</span><span class="o">=</span><span class="s2">"&lt;green&gt;{time:HH:mm:ss}&lt;/green&gt; | &lt;level&gt;</span><span class="si">{level: &lt;8}</span><span class="s2">&lt;/level&gt; | &lt;cyan&gt;</span><span class="si">{message}</span><span class="s2">&lt;/cyan&gt;"</span><span class="p">,</span>
+<a id="__codelineno-22-31" name="__codelineno-22-31" href="#__codelineno-22-31"></a>    <span class="nb">filter</span><span class="o">=</span><span class="n">truncate_message</span><span class="p">,</span>
+<a id="__codelineno-22-32" name="__codelineno-22-32" href="#__codelineno-22-32"></a>    <span class="n">colorize</span><span class="o">=</span><span class="p">(</span><span class="n">env</span> <span class="o">!=</span> <span class="s2">"ci"</span><span class="p">),</span>
+<a id="__codelineno-22-33" name="__codelineno-22-33" href="#__codelineno-22-33"></a><span class="p">)</span>
+<a id="__codelineno-22-34" name="__codelineno-22-34" href="#__codelineno-22-34"></a>
+<a id="__codelineno-22-35" name="__codelineno-22-35" href="#__codelineno-22-35"></a><span class="c1"># File handler (production only)</span>
+<a id="__codelineno-22-36" name="__codelineno-22-36" href="#__codelineno-22-36"></a><span class="k">if</span> <span class="n">env</span> <span class="o">==</span> <span class="s2">"production"</span><span class="p">:</span>
+<a id="__codelineno-22-37" name="__codelineno-22-37" href="#__codelineno-22-37"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-22-38" name="__codelineno-22-38" href="#__codelineno-22-38"></a>        <span class="s2">"logs/lakelogic_{time:YYYY-MM-DD}.log"</span><span class="p">,</span>
+<a id="__codelineno-22-39" name="__codelineno-22-39" href="#__codelineno-22-39"></a>        <span class="n">level</span><span class="o">=</span><span class="s2">"DEBUG"</span><span class="p">,</span>
+<a id="__codelineno-22-40" name="__codelineno-22-40" href="#__codelineno-22-40"></a>        <span class="nb">format</span><span class="o">=</span><span class="s2">"{time:YYYY-MM-DD HH:mm:ss.SSS} | </span><span class="si">{level: &lt;8}</span><span class="s2"> | </span><span class="si">{name}</span><span class="s2">:</span><span class="si">{function}</span><span class="s2">:</span><span class="si">{line}</span><span class="s2"> | </span><span class="si">{message}</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-22-41" name="__codelineno-22-41" href="#__codelineno-22-41"></a>        <span class="n">rotation</span><span class="o">=</span><span class="s2">"1 day"</span><span class="p">,</span>
+<a id="__codelineno-22-42" name="__codelineno-22-42" href="#__codelineno-22-42"></a>        <span class="n">retention</span><span class="o">=</span><span class="s2">"30 days"</span><span class="p">,</span>
+<a id="__codelineno-22-43" name="__codelineno-22-43" href="#__codelineno-22-43"></a>        <span class="n">compression</span><span class="o">=</span><span class="s2">"zip"</span><span class="p">,</span>
+<a id="__codelineno-22-44" name="__codelineno-22-44" href="#__codelineno-22-44"></a>        <span class="nb">filter</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># No truncation</span>
+<a id="__codelineno-22-45" name="__codelineno-22-45" href="#__codelineno-22-45"></a>    <span class="p">)</span>
+<a id="__codelineno-22-46" name="__codelineno-22-46" href="#__codelineno-22-46"></a>
+<a id="__codelineno-22-47" name="__codelineno-22-47" href="#__codelineno-22-47"></a>    <span class="c1"># JSON logs for aggregation</span>
+<a id="__codelineno-22-48" name="__codelineno-22-48" href="#__codelineno-22-48"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+<a id="__codelineno-22-49" name="__codelineno-22-49" href="#__codelineno-22-49"></a>        <span class="s2">"logs/lakelogic.jsonl"</span><span class="p">,</span>
+<a id="__codelineno-22-50" name="__codelineno-22-50" href="#__codelineno-22-50"></a>        <span class="n">level</span><span class="o">=</span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-22-51" name="__codelineno-22-51" href="#__codelineno-22-51"></a>        <span class="n">serialize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-22-52" name="__codelineno-22-52" href="#__codelineno-22-52"></a>        <span class="nb">format</span><span class="o">=</span><span class="k">lambda</span> <span class="n">record</span><span class="p">:</span> <span class="p">(</span>
+<a id="__codelineno-22-53" name="__codelineno-22-53" href="#__codelineno-22-53"></a>            <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span>
+<a id="__codelineno-22-54" name="__codelineno-22-54" href="#__codelineno-22-54"></a>                <span class="p">{</span>
+<a id="__codelineno-22-55" name="__codelineno-22-55" href="#__codelineno-22-55"></a>                    <span class="s2">"timestamp"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"time"</span><span class="p">]</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+<a id="__codelineno-22-56" name="__codelineno-22-56" href="#__codelineno-22-56"></a>                    <span class="s2">"level"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"level"</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+<a id="__codelineno-22-57" name="__codelineno-22-57" href="#__codelineno-22-57"></a>                    <span class="s2">"message"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"message"</span><span class="p">],</span>
+<a id="__codelineno-22-58" name="__codelineno-22-58" href="#__codelineno-22-58"></a>                    <span class="s2">"file"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"file"</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+<a id="__codelineno-22-59" name="__codelineno-22-59" href="#__codelineno-22-59"></a>                    <span class="s2">"function"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"function"</span><span class="p">],</span>
+<a id="__codelineno-22-60" name="__codelineno-22-60" href="#__codelineno-22-60"></a>                    <span class="s2">"line"</span><span class="p">:</span> <span class="n">record</span><span class="p">[</span><span class="s2">"line"</span><span class="p">],</span>
+<a id="__codelineno-22-61" name="__codelineno-22-61" href="#__codelineno-22-61"></a>                <span class="p">}</span>
+<a id="__codelineno-22-62" name="__codelineno-22-62" href="#__codelineno-22-62"></a>            <span class="p">)</span>
+<a id="__codelineno-22-63" name="__codelineno-22-63" href="#__codelineno-22-63"></a>            <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-22-64" name="__codelineno-22-64" href="#__codelineno-22-64"></a>        <span class="p">),</span>
+<a id="__codelineno-22-65" name="__codelineno-22-65" href="#__codelineno-22-65"></a>    <span class="p">)</span>
+</code></pre></div>
+<hr />
+<p><em>Last Updated: February 2026</em></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+
+
+<!-- Footer links grid -->
+<footer class="ll-footer">
+  <div class="ll-footer__grid md-grid">
+    <a href="https://lakelogic.org" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Visit LakeLogic
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic/discussions" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Join the conversation
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 22V18.13a3.07 3.07 0 0 0-.94-2.36c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.07 3.07 0 0 0 9 18.13V22"/></svg>
+      Develop with LakeLogic
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic/issues" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+      Share your feedback
+    </a>
+    <a href="https://pypi.org/project/lakelogic/" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      Get the package
+    </a>
+    <a href="https://lakelogic.org/blog" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Read the latest on our blog
+    </a>
+  </div>
+
+  <!-- Bottom bar -->
+  <div class="ll-footer__bottom md-grid">
+    <div class="ll-footer__meta">
+      <span>&copy; Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · Open core — Apache 2.0 · <a href="https://github.com/lakelogic/LakeLogic" target="_blank">GitHub</a>
+</span>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.tracking", "navigation.top", "navigation.footer", "navigation.indexes", "navigation.sections", "navigation.expand", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="javascripts/theme-switcher.js"></script>
+      
+    
+  </body>
+</html>

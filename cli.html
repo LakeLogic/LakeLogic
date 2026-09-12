@@ -1,0 +1,3785 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The open-source reference framework for Open Lakehouse Contracts. Validate and execute OLC contracts across Polars, DuckDB and Spark.">
+      
+      
+        <meta name="author" content="LakeLogic Team">
+      
+      
+        <link rel="canonical" href="https://LakeLogic.github.io/LakeLogic/cli.html">
+      
+      
+        <link rel="prev" href="delta_lake_support.html">
+      
+      
+        <link rel="next" href="driver.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>CLI - LakeLogic</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="stylesheets/extra.css?v=3">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="index.html" title="LakeLogic" class="md-header__button md-logo" aria-label="LakeLogic" data-md-component="logo">
+      
+  <img src="assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LakeLogic
+            <span class="ll-docs-badge">Docs</span>
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI
+            
+          </span>
+        </div>
+      </div>
+    </div><nav class="ll-metanav" aria-label="Documentation sections">
+      <a class="ll-metanav__link" href="installation.html">Get started</a>
+      <a class="ll-metanav__link" href="concepts.html">Guides</a>
+      <a class="ll-metanav__link" href="api.html">Developer</a>
+      <a class="ll-metanav__link" href="cli.html">Reference</a>
+      <a class="ll-metanav__link" href="examples.html">Tutorials</a>
+      <a class="ll-metanav__link" href="maintenance.html">Release notes</a>
+    </nav>
+
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    <div class="ll-header-extra">
+      <a class="ll-header-extra__link" href="https://lakelogic.org" target="_blank" rel="noopener">Website</a>
+    </div>
+
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lakelogic/LakeLogic" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakelogic/LakeLogic
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="index.html" title="LakeLogic" class="md-nav__button md-logo" aria-label="LakeLogic" data-md-component="logo">
+      
+  <img src="assets/logo.svg" alt="logo">
+
+    </a>
+    LakeLogic
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lakelogic/LakeLogic" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lakelogic/LakeLogic
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="installation.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="architecture_diagram.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="odcs.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Open Data Contract Standard (ODCS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="organization.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contract Organization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="ingestion.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingestion & Cloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="streaming.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="llm_extraction.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unstructured Data (LLM Extraction)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reprocessing.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reprocessing & Partitioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="resilience.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline Resilience
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pipelines.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines & Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="deployment_patterns.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Observability
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="observability.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring & Lineage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="notifications.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications & Alerting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compliance & Governance
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Compliance & Governance
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/compliance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/slo.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Level Objectives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="contracts/index.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contracts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/domain_config.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain Config (_domain.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/system_config.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Config (_system.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/inheritance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Resolution & Inheritance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="contracts/data_product_contracts/index.html" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Product Contracts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8_5" id="__nav_8_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_8_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data Product Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/ingestion.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingestion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/watermark_strategies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Watermark Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/transformations.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/quality.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/materialization.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Materialization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/data_product_contracts/dimensional_modeling.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dimensional Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/schema_model.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schema & Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/schema_api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schema Validation API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contracts/versioning.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="contract_template.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Complete Contract Template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="return_values.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Return Values
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="automatic_credentials.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Automatic Credentials
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="catalog_table_names.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog Table Names
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="delta_lake_support.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Delta Lake (Spark-Free)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="cli.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#strategic-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strategic Value
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invoking-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invoking the CLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Groups
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command Groups">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#contract-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contract Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Contract Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-bootstrap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic bootstrap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-tooling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Tooling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Tooling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-generate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic generate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-import-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic import-dbt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Governance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Governance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-registry-validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic registry validate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-registry-explain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic registry explain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-registry-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic registry schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-diagnose-double-hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic diagnose double-hash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-diagnose-scd2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic diagnose scd2
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-setup-oss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic setup-oss
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Help
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Help">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic help
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline Driver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#windows-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Windows Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#console-encoding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console Encoding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#making-lakelogic-available-on-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making lakelogic Available on PATH
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="driver.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Driver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="bootstrap.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bootstrap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="capabilities.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capability Matrix
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="streaming_sources.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public Streaming Sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="streaming_api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming API (StreamSink)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="logging_configuration.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="validation_result.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation Result
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="maintenance.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release & Maintenance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="comparison.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why LakeLogic?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#strategic-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strategic Value
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invoking-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invoking the CLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Groups
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command Groups">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#contract-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contract Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Contract Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-bootstrap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic bootstrap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-tooling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Tooling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Tooling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-generate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic generate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-import-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic import-dbt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Governance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Governance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-registry-validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic registry validate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-registry-explain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic registry explain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-registry-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic registry schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-diagnose-double-hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic diagnose double-hash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-diagnose-scd2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic diagnose scd2
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-setup-oss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic setup-oss
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Help
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Help">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lakelogic-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lakelogic help
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline Driver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#windows-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Windows Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#console-encoding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console Encoding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#making-lakelogic-available-on-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making lakelogic Available on PATH
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cli-reference">CLI Reference</h1>
+<p>The LakeLogic CLI is the high-efficiency entry point for enforcing your data contracts.
+It is designed for <strong>Speed-to-Production</strong> and <strong>Engine Portability</strong>.</p>
+<h2 id="strategic-value">Strategic Value</h2>
+<ul>
+<li><strong>Developer Productivity:</strong> Bootstrap production-ready contracts from raw data in seconds.</li>
+<li><strong>Infrastructure Optionality:</strong> Use the <code>--engine</code> flag to swap between Polars (local speed) and Spark (cluster scale) with zero code changes.</li>
+<li><strong>Audit Readiness:</strong> Every execution generates a run summary for instant reconciliation.</li>
+</ul>
+<hr />
+<h2 id="invoking-the-cli">Invoking the CLI</h2>
+<p>Run <code>lakelogic</code> with no arguments to display the full help page:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>lakelogic
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a> Usage: lakelogic [OPTIONS] COMMAND [ARGS]...
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a> LakeLogic — Consistent Data Contracts across engines.
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a> ...
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>┌─ Contract Execution ──────────────────────────────────────────────────────┐
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│ run        Run a data contract against a source file.                     │
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│ bootstrap  Bootstrap contracts and registry from a landing zone.          │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>└───────────────────────────────────────────────────────────────────────────┘
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>┌─ Data Tooling ────────────────────────────────────────────────────────────┐
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│ generate   Generate synthetic data from a contract definition.            │
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│ import-dbt Import dbt schema.yml / sources.yml -&gt; LakeLogic contract YAML.│
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>└───────────────────────────────────────────────────────────────────────────┘
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>┌─ Governance ──────────────────────────────────────────────────────────────┐
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│ registry   Validate &amp; inspect the mesh registry (_domain/_system.yaml).   │
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│ lint       Lint contracts for governance issues.                          │
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│ diagnose   Read-only diagnostics on already-written data.                 │
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>└───────────────────────────────────────────────────────────────────────────┘
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>┌─ Environment Setup ───────────────────────────────────────────────────────┐
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>│ setup-oss  Pre-install DuckDB extensions &amp; check OSS dependencies.        │
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>└───────────────────────────────────────────────────────────────────────────┘
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>┌─ Help ────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│ help       Show contextual help for LakeLogic commands.                   │
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>└───────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<p>Commands are grouped into logical sections matching the Databricks CLI convention.
+Use <code>lakelogic [COMMAND] --help</code> for full option detail on any command.</p>
+<hr />
+<h2 id="command-groups">Command Groups</h2>
+<h3 id="contract-execution">Contract Execution</h3>
+<h4 id="lakelogic-run"><code>lakelogic run</code></h4>
+<p>Validates a source dataset against a contract and (optionally) materializes clean output.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>lakelogic<span class="w"> </span>run<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--contract<span class="w"> </span>contract.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--source<span class="w"> </span>data.csv
+</code></pre></div>
+<p><strong>Key options:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Flag</th>
+<th style="text-align: left;">Short</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>--contract</code></td>
+<td style="text-align: left;"><code>-c</code></td>
+<td style="text-align: left;">Path to the YAML contract</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--source</code></td>
+<td style="text-align: left;"><code>-s</code></td>
+<td style="text-align: left;">Input file (CSV / Parquet) or table name for warehouse engines</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--engine</code></td>
+<td style="text-align: left;"><code>-e</code></td>
+<td style="text-align: left;">Engine: <code>polars</code>, <code>spark</code>, <code>snowflake</code>, <code>bigquery</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--stage</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Apply stage overrides from the contract's <code>stages</code> block (e.g., <code>bronze</code>, <code>silver</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--output-good</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Save good records to CSV / Parquet</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--output-bad</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Save quarantined records to CSV / Parquet</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--output-format</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;"><code>csv</code> or <code>parquet</code> (defaults to CSV or inferred from extension)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--materialize</code> / <code>--no-materialize</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Write good data to the contract materialization target</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--materialize-target</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Override the materialization target path</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--verbose</code></td>
+<td style="text-align: left;"><code>-v</code></td>
+<td style="text-align: left;">Enable debug logging</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--trace</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Display a step-by-step execution trace in the terminal</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Spark note:</strong> <code>--output-good/--output-bad</code> are written with the Spark writer and produce a directory of part files — standard Spark behaviour.</p>
+</blockquote>
+<p><strong>Examples:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Polars (default — fastest local)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--contract<span class="w"> </span>orders.yaml<span class="w"> </span>--source<span class="w"> </span>data/orders.csv
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># DuckDB with quarantine output</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--engine<span class="w"> </span>duckdb<span class="w"> </span>--contract<span class="w"> </span>orders.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>--source<span class="w"> </span>data/orders.parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span>--output-good<span class="w"> </span>good.parquet<span class="w"> </span>--output-bad<span class="w"> </span>quarantine.parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span>--output-format<span class="w"> </span>parquet
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="c1"># Snowflake (table-only)</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--engine<span class="w"> </span>snowflake<span class="w"> </span>--contract<span class="w"> </span>contract.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">  </span>--source<span class="w"> </span>table:ANALYTICS.SILVER.CUSTOMERS
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="c1"># Materialise clean records and print a full trace</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--contract<span class="w"> </span>orders.yaml<span class="w"> </span>--source<span class="w"> </span>data/orders.csv<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="w">  </span>--materialize<span class="w"> </span>--trace
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="c1"># Apply a stage override</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--contract<span class="w"> </span>pipeline.yaml<span class="w"> </span>--source<span class="w"> </span>data.csv<span class="w"> </span>--stage<span class="w"> </span>silver
+</code></pre></div>
+<hr />
+<h4 id="lakelogic-bootstrap"><code>lakelogic bootstrap</code></h4>
+<p>Scans a landing zone directory, infers schema from sample files, and generates:</p>
+<ul>
+<li>A ready-to-use <strong>contract YAML</strong> per entity</li>
+<li>A <strong><code>_registry.yaml</code></strong> that maps entities to their contracts</li>
+</ul>
+<p>This is the <strong>Governance Accelerator</strong> for Day 1 compliance.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>lakelogic<span class="w"> </span>bootstrap<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--landing<span class="w"> </span>data/landing<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--output-dir<span class="w"> </span>contracts/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--registry<span class="w"> </span>contracts/_registry.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>--format<span class="w"> </span>csv<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span>--pattern<span class="w"> </span><span class="s2">"*.csv"</span>
+</code></pre></div>
+<p><strong>Key options:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Flag</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>--landing</code></td>
+<td style="text-align: left;">Landing zone root path</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--output-dir</code></td>
+<td style="text-align: left;">Directory to write generated contracts</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--registry</code></td>
+<td style="text-align: left;">Output path for the registry YAML</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--format</code></td>
+<td style="text-align: left;">Input file format: <code>csv</code>, <code>parquet</code>, <code>json</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--pattern</code></td>
+<td style="text-align: left;">File glob pattern (default <code>*.csv</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--layer</code></td>
+<td style="text-align: left;">Layer prefix for dataset names (default <code>bronze</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--sample-rows</code></td>
+<td style="text-align: left;">Rows to sample for schema inference (default 1000)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--sync</code></td>
+<td style="text-align: left;">Sync an existing registry with new landing data</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--sync-update-schema</code></td>
+<td style="text-align: left;">Add new columns to existing contracts</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--sync-overwrite</code></td>
+<td style="text-align: left;">Overwrite existing contracts entirely</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--profile</code></td>
+<td style="text-align: left;">Generate a DataProfiler report per entity</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--detect-pii</code></td>
+<td style="text-align: left;">Detect PII using Presidio and tag fields</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--suggest-rules</code></td>
+<td style="text-align: left;">Auto-suggest quality rules from data profile</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--profile-output-dir</code></td>
+<td style="text-align: left;">Directory for profile JSON reports</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--pii-sample-size</code></td>
+<td style="text-align: left;">Sample values per column for PII detection (default 50)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sync mode</strong> — align an existing registry as new data arrives:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>lakelogic<span class="w"> </span>bootstrap<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>--landing<span class="w"> </span>data/landing<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--output-dir<span class="w"> </span>contracts/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>--registry<span class="w"> </span>contracts/_registry.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span>--sync<span class="w"> </span>--sync-update-schema
+</code></pre></div>
+<p><strong>PII + Profile + rule suggestion in one pass:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>lakelogic<span class="w"> </span>bootstrap<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--landing<span class="w"> </span>data/landing<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>--output-dir<span class="w"> </span>contracts/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span>--registry<span class="w"> </span>contracts/_registry.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span>--profile<span class="w"> </span>--detect-pii<span class="w"> </span>--suggest-rules<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span>--profile-output-dir<span class="w"> </span>reports/
+</code></pre></div>
+<blockquote>
+<p>Requires <code>lakelogic[profiling]</code> for <code>--profile</code> and <code>--detect-pii</code>.</p>
+</blockquote>
+<hr />
+<h3 id="data-tooling">Data Tooling</h3>
+<h4 id="lakelogic-generate"><code>lakelogic generate</code></h4>
+<p>Generates <strong>synthetic test data</strong> from a contract definition.
+Respects field types, nullability, <code>accepted_values</code>, and range constraints.
+Use <code>--invalid-ratio</code> to inject intentionally bad rows for validating your quarantine pipeline.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>lakelogic<span class="w"> </span>generate<span class="w"> </span>--contract<span class="w"> </span>orders.yaml<span class="w"> </span>--rows<span class="w"> </span><span class="m">1000</span><span class="w"> </span>--output<span class="w"> </span>sample.parquet
+</code></pre></div>
+<p><strong>Key options:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Flag</th>
+<th style="text-align: left;">Short</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>--contract</code></td>
+<td style="text-align: left;"><code>-c</code></td>
+<td style="text-align: left;">Path to the contract YAML file</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--rows</code></td>
+<td style="text-align: left;"><code>-n</code></td>
+<td style="text-align: left;">Number of rows to generate (default 100)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--output</code></td>
+<td style="text-align: left;"><code>-o</code></td>
+<td style="text-align: left;">Output file path (CSV / Parquet / JSON)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--format</code></td>
+<td style="text-align: left;"><code>-f</code></td>
+<td style="text-align: left;">Output format: <code>parquet</code>, <code>csv</code>, <code>json</code> (default <code>parquet</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--engine</code></td>
+<td style="text-align: left;"><code>-e</code></td>
+<td style="text-align: left;">DataFrame engine: <code>polars</code> (default <code>polars</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--invalid-ratio</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Fraction of rows that intentionally break rules (0.0–1.0)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--seed</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Random seed for reproducibility</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--preview</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Rows to print to console (default 5; <code>0</code> = silent)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Generate 1 000 clean rows as Parquet</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>lakelogic<span class="w"> </span>generate<span class="w"> </span>--contract<span class="w"> </span>orders.yaml<span class="w"> </span>--rows<span class="w"> </span><span class="m">1000</span><span class="w"> </span>--output<span class="w"> </span>sample.parquet
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Inject 10 % bad rows to test quarantine logic</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>lakelogic<span class="w"> </span>generate<span class="w"> </span>--contract<span class="w"> </span>orders.yaml<span class="w"> </span>--rows<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span>--invalid-ratio<span class="w"> </span><span class="m">0</span>.1<span class="w"> </span>--format<span class="w"> </span>csv<span class="w"> </span>--output<span class="w"> </span>orders_with_errors.csv
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># 200 rows with Polars, print 10 preview rows, reproducible</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>lakelogic<span class="w"> </span>generate<span class="w"> </span>--contract<span class="w"> </span>contracts/events.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">  </span>--rows<span class="w"> </span><span class="m">200</span><span class="w"> </span>--engine<span class="w"> </span>polars<span class="w"> </span>--seed<span class="w"> </span><span class="m">42</span><span class="w"> </span>--preview<span class="w"> </span><span class="m">10</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># Dry-run without saving — just print to console</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>lakelogic<span class="w"> </span>generate<span class="w"> </span>--contract<span class="w"> </span>orders.yaml<span class="w"> </span>--rows<span class="w"> </span><span class="m">50</span><span class="w"> </span>--preview<span class="w"> </span><span class="m">50</span>
+</code></pre></div>
+<hr />
+<h4 id="lakelogic-import-dbt"><code>lakelogic import-dbt</code></h4>
+<p>Imports a <strong>dbt <code>schema.yml</code> or <code>sources.yml</code></strong> file and converts its model definitions
+into LakeLogic contract YAMLs. Eliminates duplicate schema maintenance across dbt and LakeLogic.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>lakelogic<span class="w"> </span>import-dbt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--schema<span class="w"> </span>models/schema.yml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>--output<span class="w"> </span>contracts/
+</code></pre></div>
+<p><strong>Key options:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Flag</th>
+<th style="text-align: left;">Short</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>--schema</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Path to the dbt <code>schema.yml</code> or <code>sources.yml</code> file</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--model</code></td>
+<td style="text-align: left;"><code>-m</code></td>
+<td style="text-align: left;">Import a single model by name; omit to import all models</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--source-name</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">dbt source name (for <code>sources.yml</code> files)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--source-table</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">dbt source table name (for <code>sources.yml</code> files)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--output</code></td>
+<td style="text-align: left;"><code>-o</code></td>
+<td style="text-align: left;">Output path: a <code>.yaml</code> file for a single contract, or a directory for batch import</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--overwrite</code> / <code>--no-overwrite</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Overwrite existing contracts (default: skip)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--dry-run</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Print generated YAML to console without writing files</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--verbose</code></td>
+<td style="text-align: left;"><code>-v</code></td>
+<td style="text-align: left;">Verbose output</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Import a single dbt model</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>lakelogic<span class="w"> </span>import-dbt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--schema<span class="w"> </span>models/schema.yml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span>--model<span class="w"> </span>customers<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span>--output<span class="w"> </span>contracts/
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Import all models in a schema file</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>lakelogic<span class="w"> </span>import-dbt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">  </span>--schema<span class="w"> </span>models/schema.yml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">  </span>--output<span class="w"> </span>contracts/
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="c1"># Import a dbt source table</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>lakelogic<span class="w"> </span>import-dbt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">  </span>--schema<span class="w"> </span>models/sources.yml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">  </span>--source-name<span class="w"> </span>raw<span class="w"> </span>--source-table<span class="w"> </span>orders<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="w">  </span>--output<span class="w"> </span>contracts/
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="c1"># Dry-run — preview the generated YAML without writing</span>
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>lakelogic<span class="w"> </span>import-dbt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="w">  </span>--schema<span class="w"> </span>models/schema.yml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="w">  </span>--model<span class="w"> </span>customers<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="w">  </span>--dry-run
+</code></pre></div>
+<hr />
+<h3 id="governance">Governance</h3>
+<p>Validate and inspect the <strong>mesh registry</strong> — the <code>_domain.yaml</code> / <code>_system.yaml</code> files
+that sit <em>above</em> individual contracts and supply their shared defaults. See
+<a href="contracts/inheritance.html">Resolution &amp; Inheritance</a> for how those files combine.</p>
+<p><strong>Why it matters</strong></p>
+<ul>
+<li><strong>Catch drift before it ships.</strong> A typo (<code>server_defaults</code> instead of <code>server</code>), a
+  contract path that no longer exists, or a system whose <code>domain</code> disagrees with its
+  folder — all become a red line in CI instead of a silent production surprise.</li>
+<li><strong>Answer "where did this setting come from?"</strong> <code>explain</code> shows, per key, whether a
+  value is declared on the system, inherited from the domain, or locked by the domain —
+  so governance decisions are auditable, not archaeology.</li>
+<li><strong>One command in CI</strong> guards an entire estate of hundreds of contracts.</li>
+</ul>
+<h4 id="lakelogic-registry-validate"><code>lakelogic registry validate</code></h4>
+<p>Structurally and referentially validate a file or a whole tree. Exit code <code>0</code> = clean,
+non-zero = at least one error (or a warning under <code>--strict</code>) — drop it straight into CI.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Validate one domain's systems…</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>validate<span class="w"> </span>domains_rideflow/marketplace
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># …or the entire mesh, failing the build on warnings too</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>validate<span class="w"> </span>domains_rideflow<span class="w"> </span>--strict
+</code></pre></div>
+<p>Checks: unknown/misplaced keys, wrong types, missing identity, duplicate contract
+entities, every <code>contracts:</code> path resolves to a real file, and domain-identity agreement
+between a <code>_system.yaml</code> and its sibling <code>_domain.yaml</code>.</p>
+<h4 id="lakelogic-registry-explain"><code>lakelogic registry explain</code></h4>
+<p>Show where each governance/identity key on a system comes from — the resolved-origin
+view of the inheritance chain, backed by the real domain → system merge.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>explain<span class="w"> </span>domains_rideflow/marketplace/rideflow/_system.yaml
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>explain<span class="w"> </span>.../rideflow/_system.yaml<span class="w"> </span>--deep<span class="w">          </span><span class="c1"># per-leaf origins</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>explain<span class="w"> </span>.../rideflow/_system.yaml<span class="w"> </span>--key<span class="w"> </span>slo.freshness<span class="w">   </span><span class="c1"># trace one path</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>explain<span class="w"> </span>.../rideflow/_system.yaml<span class="w"> </span>--env<span class="w"> </span>dev<span class="w">       </span><span class="c1"># what varies per environment</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>  marketplace / rideflow
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>  KEY                  ORIGIN           WHY
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>  ──────────────────────────────────────────────
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>  slo                  domain           inherited
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>  cost                 system+domain    deep-merged
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>  domain               domain           domain-locked
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>  materialization      system           declared
+</code></pre></div>
+<p>With <code>--deep</code>, provenance drills into merged blocks — answering "why is
+<code>slo.freshness.bronze.max_delay_minutes</code> <strong>30</strong> here?" with <code>system / overridden</code> while its
+sibling <code>check_column</code> reads <code>domain / inherited</code>.</p>
+<h4 id="lakelogic-registry-schema"><code>lakelogic registry schema</code></h4>
+<p>Emit the JSON Schema for a manifest — wire it into your editor or a language-agnostic
+CI validator.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>schema<span class="w"> </span>domain
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>lakelogic<span class="w"> </span>registry<span class="w"> </span>schema<span class="w"> </span>system<span class="w"> </span>--output<span class="w"> </span>schemas/system-manifest.schema.json
+</code></pre></div>
+<p>The generated schemas are also checked into the repo under
+<a href="https://github.com/lakelogic/LakeLogic/tree/main/schemas/registry"><code>schemas/registry/</code></a> —
+so non-Python tooling can validate <code>_domain.yaml</code> / <code>_system.yaml</code> without installing
+LakeLogic.</p>
+<blockquote>
+<p>Validating an individual <strong>contract</strong> (not the registry)? Use <code>lakelogic validate
+--contract path.yaml</code> for structural + gate checks, or the portable <code>olc validate</code> from
+the <a href="https://lakelogic.github.io/open-lakehouse-contract/reference/cli/">Open Lakehouse Contract CLI</a>.</p>
+</blockquote>
+<hr />
+<h3 id="diagnostics">Diagnostics</h3>
+<p>Where <code>validate</code> and <code>lint</code> inspect <strong>contracts</strong>, <code>lakelogic diagnose</code> inspects <strong>data
+that was already written</strong> — to answer questions a contract cannot, such as "did this
+pipeline corrupt a column before the fix landed?" Every command in this group <strong>defaults
+to read-only</strong>. <code>double-hash</code> cannot repair at all — SHA-256 destroyed the information.
+<code>scd2</code> can, because nothing was destroyed there, but it writes only when you give it an
+explicit output path.</p>
+<h4 id="lakelogic-diagnose-double-hash"><code>lakelogic diagnose double-hash</code></h4>
+<p>Detect a masked column that was hashed <strong>again</strong> downstream.</p>
+<p>Masking is applied write-side, per contract run, and the silver/gold templates propagate
+the <code>masking:</code> strategy. A field hashed in bronze could therefore be hashed a second time
+in silver — <code>sha256(salt + sha256(salt + value))</code> — and a third time in gold. Nothing
+raised and nothing was logged; the only symptom was that the same person's key stopped
+matching across layers, so cross-layer joins on that key silently returned nothing.</p>
+<p><code>MaskingEngine</code>'s idempotence guard prevents <strong>new</strong> double-hashing. This command is for
+data written before that guard existed.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>lakelogic<span class="w"> </span>diagnose<span class="w"> </span>double-hash<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span>--upstream<span class="w">  </span>bronze/riders.parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span>--downstream<span class="w"> </span>silver/riders.parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span>--column<span class="w"> </span>rider_key<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span>--key<span class="w">    </span>rider_id
+</code></pre></div>
+<p><strong>The check.</strong> If upstream stores <code>B</code> and downstream stores <code>S</code> for the same entity, then
+downstream is double-hashed <strong>iff</strong> <code>H(salt + B) == S</code>. Three per-row outcomes, kept
+distinct:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Outcome</th>
+<th style="text-align: left;">Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>double_hashed</code></td>
+<td style="text-align: left;"><code>H(salt + B) == S</code> — downstream re-hashed an already-hashed value. Broken.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>consistent</code></td>
+<td style="text-align: left;"><code>B == S</code> — downstream carried the upstream value through. Correct, and salt-independent.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>indeterminate</code></td>
+<td style="text-align: left;">Neither matched. A different salt, a different transformation, or a re-sourced column. <strong>Unknown — not clean.</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The column-level <code>verdict</code> is <code>double_hashed</code>, <code>consistent</code>, <code>indeterminate</code>, <code>mixed</code>
+(more than one outcome present), <code>inconclusive</code>, or <code>no_overlap</code> — but the <strong>counts</strong> are
+the authority. A backfill that straddled the fix leaves a column part-damaged, so a
+single boolean per column would hide real damage. Rows that do not join, hold a null, or
+sit on an ambiguous upstream key are excluded from the verdict and reported separately.</p>
+<p><strong>Salt.</strong> Read from <code>$LAKELOGIC_PII_SALT</code> (the same variable the pipeline masks with), or
+<code>--salt</code>. Without it the salted form cannot be computed: the command falls back to the
+unsalted form, reports <strong>which</strong> form matched (<code>salt_match</code>), and — if any row comes back
+indeterminate — marks the whole result <code>inconclusive</code>. "No match under an unknown salt"
+is never reported as clean.</p>
+<div class="admonition danger">
+<p class="admonition-title">This does not repair data</p>
+<p>SHA-256 is one-way. A double-hashed column <strong>cannot</strong> be recovered from itself — not
+by this command, not by any other. There is no in-place fix and none is offered.</p>
+<p>What the command gives you is a <em>reason to reprocess</em>: the upstream value <code>B</code> is
+still intact, so re-running the downstream contract from its upstream — with the
+idempotence guard in place — rewrites the column correctly. That is an ordinary
+pipeline run, not a data migration.</p>
+</div>
+<p><strong>Key options:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Flag</th>
+<th style="text-align: left;">Short</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>--upstream</code></td>
+<td style="text-align: left;"><code>-u</code></td>
+<td style="text-align: left;">Upstream (e.g. bronze) file or directory — the layer that hashed first</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--downstream</code></td>
+<td style="text-align: left;"><code>-d</code></td>
+<td style="text-align: left;">Downstream (e.g. silver/gold) file or directory</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--column</code></td>
+<td style="text-align: left;"><code>-c</code></td>
+<td style="text-align: left;">The masked column to check</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--key</code></td>
+<td style="text-align: left;"><code>-k</code></td>
+<td style="text-align: left;">An <strong>unmasked</strong> column identifying the same entity in both layers</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--downstream-column</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Downstream name of the column, if it was renamed</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--salt</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Masking salt (defaults to <code>$LAKELOGIC_PII_SALT</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--format</code></td>
+<td style="text-align: left;"><code>-f</code></td>
+<td style="text-align: left;"><code>text</code> or <code>json</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--fail-on-damage</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Exit non-zero if any row is <em>proven</em> double-hashed (for CI)</td>
+</tr>
+</tbody>
+</table>
+<p>The same check is available in Python, engine-agnostically (Polars, pandas, Spark,
+DuckDB, or plain dicts):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">lakelogic.core.masking_diagnostics</span><span class="w"> </span><span class="kn">import</span> <span class="n">diagnose_double_hashing</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">result</span> <span class="o">=</span> <span class="n">diagnose_double_hashing</span><span class="p">(</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>    <span class="n">bronze_df</span><span class="p">,</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>    <span class="n">silver_df</span><span class="p">,</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>    <span class="n">column</span><span class="o">=</span><span class="s2">"rider_key"</span><span class="p">,</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>    <span class="n">join_key</span><span class="o">=</span><span class="s2">"rider_id"</span><span class="p">,</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="p">)</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">double_hashed_rows</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">consistent_rows</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">indeterminate_rows</span><span class="p">)</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">render</span><span class="p">())</span>
+</code></pre></div>
+<h4 id="lakelogic-diagnose-scd2"><code>lakelogic diagnose scd2</code></h4>
+<p>Find — and optionally repair — SCD2 intervals corrupted by a <strong>late-arriving</strong> row.</p>
+<p>Before the late-arrival fix, a change date landing inside an already-closed interval was
+appended to the end of history rather than slotted in. One late row produced three
+corruptions at once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>d1 equire   2024-01-01 → 2024-01-04  is_current=False
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>d1 notified 2024-01-03 → 9999-12-31  is_current=True    ← a 3 Jan fact became current
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>d1 serius   2024-01-04 → 2024-01-03  is_current=False   ← effective_to BEFORE effective_from
+</code></pre></div>
+<p>plus overlapping windows — <code>equire</code> and <code>notified</code> are both valid on 3 Jan.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>lakelogic<span class="w"> </span>diagnose<span class="w"> </span>scd2<span class="w"> </span>--table<span class="w"> </span>gold/dim_driver.parquet<span class="w"> </span>--key<span class="w"> </span>driver_id
+</code></pre></div>
+<p><strong>The defect taxonomy.</strong> Each is detected independently, per row, after ordering a key's
+versions by <code>effective_from</code>:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Defect</th>
+<th style="text-align: left;">Detected by</th>
+<th style="text-align: left;">Repair</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>inverted</code></td>
+<td style="text-align: left;"><code>effective_to &lt; effective_from</code></td>
+<td style="text-align: left;">ends at the next version's start (or reopens, if last)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>overlapping</code></td>
+<td style="text-align: left;"><code>effective_to</code> <strong>&gt;</strong> the next version's <code>effective_from</code></td>
+<td style="text-align: left;">ends at the next version's start</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>is_current_wrong</code></td>
+<td style="text-align: left;">flag on a non-latest row, on several rows, or on none while the latest is open</td>
+<td style="text-align: left;">flag moves to the single latest open version</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>unrepairable</code></td>
+<td style="text-align: left;">the key cannot be ordered</td>
+<td style="text-align: left;"><strong>nothing</strong> — reported with a reason</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Gaps are never closed</p>
+<p>A record deleted and later re-added legitimately leaves <code>effective_to</code> <strong>before</strong> the
+next version's <code>effective_from</code>. That hole is the fact being recorded. Only a
+<em>strictly greater</em> end date is an overlap; <code>to == next from</code> (contiguous) and
+<code>to &lt; next from</code> (a gap) are both left alone, and the report counts how many of each
+it preserved. A conservative repair that eats real history is worse than the bug.</p>
+</div>
+<div class="admonition info">
+<p class="admonition-title">Why this one is repairable, unlike <code>double-hash</code></p>
+<p>Nothing was destroyed. Every <code>effective_from</code> survived the bug, and the correct
+intervals follow from it: a version ends where the next begins, and the latest holds
+<code>is_current</code>.</p>
+<p><strong><code>effective_from</code> is therefore never modified</strong>, so the surrogate key
+<code>sha256(pk | effective_from)</code> is byte-identical afterwards and every fact row already
+holding an SK still resolves. <code>_version</code> is derived by ranking on <code>effective_from</code>,
+which the repair does not reorder, so it needs no rewrite either. Only <code>effective_to</code>
+and the current-flag column are ever written.</p>
+</div>
+<p><strong>Ambiguity is reported, never guessed.</strong> Two versions of one key sharing an
+<code>effective_from</code>, or a boundary that will not parse, make the key unorderable. Those keys
+are listed as <code>unrepairable</code> with the reason and are left completely untouched rather than
+given an invented order.</p>
+<p>To repair, name an output path — omitting it keeps the run read-only:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>lakelogic<span class="w"> </span>diagnose<span class="w"> </span>scd2<span class="w"> </span>-t<span class="w"> </span>gold/dim_driver.parquet<span class="w"> </span>-k<span class="w"> </span>driver_id<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span>--repair-out<span class="w"> </span>gold/dim_driver.repaired.parquet
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Option</th>
+<th style="text-align: left;">Short</th>
+<th style="text-align: left;">Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>--table</code></td>
+<td style="text-align: left;"><code>-t</code></td>
+<td style="text-align: left;">The SCD2 dimension file or directory</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--key</code></td>
+<td style="text-align: left;"><code>-k</code></td>
+<td style="text-align: left;">Business key column (repeat for a composite key)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--effective-from</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Version-start column (default <code>effective_from</code>) — never modified</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--effective-to</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Version-end column (default <code>effective_to</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--current-flag</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Live-row column (default <code>is_current</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--open-value</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Open-interval sentinel (default <code>9999-12-31</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--repair-out</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Explicit opt-in to writing: path for the repaired copy</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--allow-in-place</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Permit <code>--repair-out</code> to overwrite the source table</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--allow-spark-collect</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Consent to collecting a Spark dimension to the driver</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--format</code></td>
+<td style="text-align: left;"><code>-f</code></td>
+<td style="text-align: left;"><code>text</code> or <code>json</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--fail-on-defect</code></td>
+<td style="text-align: left;"></td>
+<td style="text-align: left;">Exit non-zero if any defect is found (for CI)</td>
+</tr>
+</tbody>
+</table>
+<p>Also available in Python, on Polars / pandas / DuckDB / plain dicts. Diagnosis and repair
+are separate: the default returns <code>repaired_frame is None</code>, and the input frame is never
+mutated.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">lakelogic.core.scd2_diagnostics</span><span class="w"> </span><span class="kn">import</span> <span class="n">diagnose_scd2</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="n">result</span> <span class="o">=</span> <span class="n">diagnose_scd2</span><span class="p">(</span><span class="n">dim_df</span><span class="p">,</span> <span class="n">primary_key</span><span class="o">=</span><span class="s2">"driver_id"</span><span class="p">)</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">defect_counts</span><span class="p">)</span>  <span class="c1"># {'inverted': 1, 'overlapping': 2, ...}</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">render</span><span class="p">())</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="n">fixed</span> <span class="o">=</span> <span class="n">diagnose_scd2</span><span class="p">(</span><span class="n">dim_df</span><span class="p">,</span> <span class="n">primary_key</span><span class="o">=</span><span class="s2">"driver_id"</span><span class="p">,</span> <span class="n">repair</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">repaired_frame</span>
+</code></pre></div>
+<p>Spark is deliberately <strong>not</strong> handled implicitly: ordering every version of every key
+requires a full collect to the driver, which can OOM on a large dimension. The call raises
+<code>Scd2SparkCollectRequired</code> explaining this until you pass <code>allow_collect=True</code>.</p>
+<hr />
+<h3 id="environment-setup">Environment Setup</h3>
+<h4 id="lakelogic-setup-oss"><code>lakelogic setup-oss</code></h4>
+<p>Pre-installs DuckDB extensions (Iceberg, Delta, cloud drivers) and checks all OSS
+dependencies so they are available <strong>offline and at job runtime</strong> — critical for
+air-gapped or ephemeral compute environments.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>lakelogic<span class="w"> </span>setup-oss
+</code></pre></div>
+<p>Run this once after installing <code>lakelogic[duckdb]</code> or <code>lakelogic[polars]</code>.
+It verifies <code>deltalake</code> is installed and warms DuckDB's extension cache.</p>
+<hr />
+<h3 id="help">Help</h3>
+<h4 id="lakelogic-help"><code>lakelogic help</code></h4>
+<p>Prints short usage guidance and examples in the terminal.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>lakelogic<span class="w"> </span><span class="nb">help</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>lakelogic<span class="w"> </span><span class="nb">help</span><span class="w"> </span>driver
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>lakelogic<span class="w"> </span><span class="nb">help</span><span class="w"> </span>bootstrap
+</code></pre></div>
+<p>For full option lists, use the <code>--help</code> flag on any command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>lakelogic<span class="w"> </span>run<span class="w"> </span>--help
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>lakelogic<span class="w"> </span>generate<span class="w"> </span>--help
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>lakelogic<span class="w"> </span>import-dbt<span class="w"> </span>--help
+</code></pre></div>
+<hr />
+<h2 id="pipeline-driver">Pipeline Driver</h2>
+<p>The registry-driven driver is exposed as the separate entry point <code>lakelogic-driver</code>.
+It orchestrates Bronze → Silver → Gold pipelines from a <code>_registry.yaml</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>lakelogic-driver<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span>--registry<span class="w"> </span>examples/insurance_elt/contracts/insurance/_registry.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span>--reference-registry<span class="w"> </span>examples/insurance_elt/contracts/shared/reference/_registry.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">  </span>--gold-registry<span class="w"> </span>examples/insurance_elt/contracts/insurance/warehouse/_registry.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">  </span>--layers<span class="w"> </span>reference,bronze,silver,gold<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">  </span>--window<span class="w"> </span>last_success
+</code></pre></div>
+<p>See <a href="driver.html">Driver Reference</a> for the full option list.</p>
+<hr />
+<h2 id="windows-notes">Windows Notes</h2>
+<h3 id="console-encoding">Console Encoding</h3>
+<p>LakeLogic automatically reconfigures <code>stdout</code> and <code>stderr</code> to <strong>UTF-8</strong> on Windows
+at startup. This means:</p>
+<ul>
+<li>No need to set <code>PYTHONIOENCODING=utf-8</code> manually</li>
+<li>Rich panel borders, Unicode arrows, and emoji in help text render correctly</li>
+<li>Works in <code>cmd.exe</code>, PowerShell, and Windows Terminal alike</li>
+</ul>
+<p>This is handled inside the package and requires no external wrapper scripts.</p>
+<h3 id="making-lakelogic-available-on-path">Making <code>lakelogic</code> Available on PATH</h3>
+<p>After <code>pip install lakelogic</code>, the <code>lakelogic.exe</code> script lands in Python's user scripts
+directory. If your shell cannot find it, add that directory to your <code>PATH</code> <strong>once</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>:: For Python 3.13 (adjust version as needed)
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>setx PATH "%USERPROFILE%\AppData\Roaming\Python\Python313\Scripts;%PATH%"
+</code></pre></div>
+<p>Open a <strong>new</strong> terminal and <code>lakelogic</code> will be available bare.</p>
+<blockquote>
+<p><strong>Developer installs:</strong> When working from a cloned repo with <code>pip install -e .</code>,
+the same scripts directory is used. To isolate dependencies in a virtual environment
+see the <a href="installation.html#developer-installation">Developer Installation</a> guide.</p>
+</blockquote>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+
+
+<!-- Footer links grid -->
+<footer class="ll-footer">
+  <div class="ll-footer__grid md-grid">
+    <a href="https://lakelogic.org" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Visit LakeLogic
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic/discussions" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Join the conversation
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 22V18.13a3.07 3.07 0 0 0-.94-2.36c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.07 3.07 0 0 0 9 18.13V22"/></svg>
+      Develop with LakeLogic
+    </a>
+    <a href="https://github.com/LakeLogic/LakeLogic/issues" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+      Share your feedback
+    </a>
+    <a href="https://pypi.org/project/lakelogic/" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      Get the package
+    </a>
+    <a href="https://lakelogic.org/blog" class="ll-footer__link">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Read the latest on our blog
+    </a>
+  </div>
+
+  <!-- Bottom bar -->
+  <div class="ll-footer__bottom md-grid">
+    <div class="ll-footer__meta">
+      <span>&copy; Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> · Open core — Apache 2.0 · <a href="https://github.com/lakelogic/LakeLogic" target="_blank">GitHub</a>
+</span>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.tracking", "navigation.top", "navigation.footer", "navigation.indexes", "navigation.sections", "navigation.expand", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="javascripts/theme-switcher.js"></script>
+      
+    
+  </body>
+</html>
