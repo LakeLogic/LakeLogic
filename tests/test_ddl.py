@@ -883,6 +883,13 @@ class TestDeltaInitialization:
         assert any("catalog table reference" in message for message in infos)
 
     def test_init_delta_table_handles_cloud_missing_creds_and_existing_table(self, monkeypatch):
+        # The code under test imports pyarrow + deltalake BEFORE it looks at the path; when they
+        # cannot load it warns "deltalake and pyarrow are required" and returns, and the cloud
+        # branch is never reached. Observed 2026-09-14: Windows Application Control blocked
+        # pyarrow's DLL after a dependency upgrade, and this test failed on the ENVIRONMENT, not
+        # on ddl.py. Skip like the other pyarrow-dependent tests in this suite.
+        pytest.importorskip("pyarrow", exc_type=ImportError)
+        pytest.importorskip("deltalake", exc_type=ImportError)
         warnings = []
         infos = []
         monkeypatch.setattr("lakelogic.core.ddl.logger.warning", lambda message: warnings.append(message))

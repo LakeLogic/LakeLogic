@@ -1381,9 +1381,17 @@ class LakehousePipeline:
         salt: str,
         dry_run: bool,
         partition_filter: Optional[Dict[str, str]] = None,
+        case_ref: Optional[str] = None,
     ):
-        """GDPR Right to be Forgotten target masking."""
+        """GDPR Right to be Forgotten target masking.
+
+        Every table acted on - or that FAILED to be acted on - yields one privacy-action
+        execution event (count + digest of the subjects, never the IDs), posted to the platform
+        at the end of the pass. ``case_ref`` is the request it belongs to (e.g. a ticket id).
+        """
         from lakelogic.core.gdpr import _get_pii_column_names, generate_erasure_report
+
+        privacy_events: List[Dict[str, Any]] = []
 
         partition_msg = ""
         if partition_filter:
@@ -1463,6 +1471,7 @@ class LakehousePipeline:
                     update_sql += f" AND `{pcol}` = '{pval}'"  # pragma: no cover
 
                 affected = 0
+                update_failed = False
                 if dry_run:
                     logger.info(f"DRY RUN GDPR SQL: {update_sql}")
                     affected = len(subject_ids)
@@ -1472,24 +1481,18 @@ class LakehousePipeline:
                         affected = res.collect()[0]["num_affected_rows"]  # pragma: no cover
                         logger.info(f"GDPR Update: {affected} rows in {table_name}")  # pragma: no cover
                     except Exception as e:  # pragma: no cover
+                        update_failed = True  # pragma: no cover
                         logger.error(f"GDPR Update failed on {table_name}: {e}")  # pragma: no cover
 
-                if affected > 0 or dry_run:
-                    report = generate_erasure_report(
-                        dc, subject_col, subject_ids, effective_strategy, affected, partition_filter=partition_filter
+                # A FAILED erasure is evidence too - of personal data still present.
+                if affected > 0 or dry_run or update_failed:
+                    self._record_gdpr_evidence(
+                        c, dc, generate_erasure_report, privacy_events,
+                        subject_col=subject_col, subject_ids=subject_ids, strategy=effective_strategy,
+                        affected=affected, dry_run=dry_run, partition_filter=partition_filter,
+                        pii_cols=pii_cols, case_ref=case_ref,
+                        status="failed" if update_failed else "completed",
                     )
-                    report["pipeline_run_id"] = self.run_id
-
-                    log_dir = "/Workspace/Shared/lakelogic_logs/gdpr_reports"
-                    os.makedirs(log_dir, exist_ok=True)
-                    log_path = f"{log_dir}/erasure_{c.entity}_{int(time.time())}.json"
-                    with open(log_path, "w") as f:
-                        json.dump(report, f, indent=2)
-
-                    try:
-                        RemoteObserver().report(report)
-                    except Exception:  # pragma: no cover
-                        pass  # Fail silently  # pragma: no cover
             else:
                 # Path-based Delta target (local lakehouse_polars/ or any
                 # filesystem URL). Read → transform PII columns → overwrite.
@@ -1511,30 +1514,73 @@ class LakehousePipeline:
                 )
 
                 if affected > 0 or dry_run:
-                    report = generate_erasure_report(
-                        dc, subject_col, subject_ids, effective_strategy, affected, partition_filter=partition_filter
+                    self._record_gdpr_evidence(
+                        c, dc, generate_erasure_report, privacy_events,
+                        subject_col=subject_col, subject_ids=subject_ids, strategy=effective_strategy,
+                        affected=affected, dry_run=dry_run, partition_filter=partition_filter,
+                        pii_cols=pii_cols, case_ref=case_ref, status="completed",
                     )
-                    report["pipeline_run_id"] = self.run_id
 
-                    # Write the audit JSON next to the run logs so it lands
-                    # somewhere predictable on local disks too — the legacy
-                    # /Workspace/... path only exists on Databricks.
-                    try:
-                        from pathlib import Path as _Path
+        # ONE DELIVERY, AFTER THE PASS. Best-effort: a platform that is down never fails or
+        # delays the erasure the events describe.
+        if privacy_events:
+            from lakelogic.core.privacy_evidence import emit_privacy_action_events
 
-                        log_dir = _Path("./logs/gdpr_reports")
-                        log_dir.mkdir(parents=True, exist_ok=True)
-                        log_path = log_dir / f"erasure_{c.entity}_{int(time.time())}.json"
-                        with open(log_path, "w", encoding="utf-8") as f:
-                            json.dump(report, f, indent=2, default=str)
-                        logger.info(f"GDPR audit report written: {log_path}")
-                    except Exception as exc:
-                        logger.warning(f"Could not write GDPR audit report: {exc}")
+            emit_privacy_action_events(self.registry, privacy_events)
 
-                    try:
-                        RemoteObserver().report(report)
-                    except Exception:
-                        pass
+    def _record_gdpr_evidence(
+        self, c, dc, generate_erasure_report, privacy_events: List[Dict[str, Any]], *,
+        subject_col: str, subject_ids: List[str], strategy: str, affected: int, dry_run: bool,
+        partition_filter: Optional[Dict[str, str]], pii_cols, case_ref: Optional[str], status: str,
+    ) -> None:
+        """Write the local audit report (where it can be written) and queue the platform event.
+
+        The report used to go to `/Workspace/Shared/lakelogic_logs`, which exists only on
+        Databricks - on Fabric the write raised OSError - and to `RemoteObserver`, which nothing
+        ingests. The local file is kept for operators; the EVENT is what reaches the platform.
+        """
+        from lakelogic.core.privacy_evidence import build_privacy_action_event
+
+        report = generate_erasure_report(
+            dc, subject_col, subject_ids, strategy, affected, partition_filter=partition_filter
+        )
+        report["pipeline_run_id"] = self.run_id
+        try:
+            from pathlib import Path as _Path
+
+            workspace_dir = _Path("/Workspace/Shared/lakelogic_logs/gdpr_reports")
+            log_dir = workspace_dir if _Path("/Workspace/Shared").is_dir() else _Path("./logs/gdpr_reports")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / f"erasure_{c.entity}_{int(time.time())}.json"
+            with open(log_path, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, default=str)
+            logger.info(f"GDPR audit report written: {log_path}")
+        except Exception as exc:
+            logger.warning(f"Could not write GDPR audit report: {exc}")
+
+        meta = (c.contract_dict or {}).get("metadata") or {}
+        try:
+            privacy_events.append(build_privacy_action_event(
+                framework="gdpr",
+                action=strategy if strategy in ("nullify", "hash", "redact", "tokenize", "delete") else "nullify",
+                dry_run=dry_run,
+                contract_name=str(c.entity),
+                subject_column=subject_col,
+                subject_ids=subject_ids,
+                columns=list(pii_cols or []),
+                rows_affected=affected,
+                case_ref=case_ref,
+                status=status,
+                tier=getattr(c, "layer", None),
+                domain=getattr(self.registry, "domain", None),
+                system=getattr(self.registry, "system", None),
+                environment=meta.get("environment"),
+                run_id=self.run_id,
+                engine=getattr(self, "engine", None),
+            ))
+        except ValueError as exc:
+            # Refused because it would disclose subject data - never send, never fail the erasure.
+            logger.error(f"Privacy evidence for {c.entity} not recorded: {exc}")
 
     def _infer_storage_path_from_registry(self, registry_contract, dc) -> str:
         """Compute a contract's storage path from `{layer_path}/{table_name}`.

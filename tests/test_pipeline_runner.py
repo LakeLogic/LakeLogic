@@ -856,11 +856,26 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
             "materialization": {"target_path": "table:catalog.gold.patients"},
         },
     )
-    pipeline._execute_gdpr_pass([contract], "patient_id", ["1", "2"], "nullify", "salt", dry_run=True)
+    # GDPR evidence no longer goes through RemoteObserver (nothing ingests it): it is a
+    # privacy-action execution event posted to the platform's ingest (2026-09-14).
+    import pathlib
+
+    import lakelogic.core.privacy_evidence as privacy_evidence
+
+    emitted = []
+    monkeypatch.setattr(privacy_evidence, "emit_privacy_action_events",
+                        lambda registry, events, **kw: emitted.extend(events) or len(events))
+    monkeypatch.setattr(pathlib.Path, "mkdir", lambda self, *a, **k: None)
+
+    pipeline._execute_gdpr_pass([contract], "patient_id", ["1", "2"], "nullify", "salt", dry_run=True,
+                                case_ref="DSR-7")
     pipeline._execute_hipaa_pass([contract], "patient_id", ["1"], "redact", "salt", dry_run=False)
 
     assert any(stmt.startswith("UPDATE catalog.gold.patients SET") for stmt in sql_statements)
-    assert {report["kind"] for report in reports} == {"gdpr", "hipaa"}
+    assert {report["kind"] for report in reports} == {"hipaa"}, "GDPR must not report via RemoteObserver"
+    (event,) = emitted
+    assert event["framework"] == "gdpr" and event["case_ref"] == "DSR-7" and event["mode"] == "dry_run"
+    assert event["subject_count"] == 2 and "1" not in event["columns"]
     assert len(opened) == 2
 
 

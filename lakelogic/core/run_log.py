@@ -1838,8 +1838,15 @@ def emit_slo_report(
     pipeline_run_id: Optional[str] = None,
     timeout: float = 15.0,
     check_run_id: Optional[str] = None,
+    record_type: str = "slo_check",
+    engine: str = "slo",
 ) -> int:
     """Send SLO results to the Observatory through the SAME path the pipeline uses.
+
+    `record_type` / `engine` name WHICH check this is. The Retention Check sends its results
+    as `record_type="retention_check", engine="retention"`: retention is a compliance control,
+    not a service level, and the platform reads `slo_json.retention` off those rows for the
+    Retention page while counting neither kind as a pipeline run.
 
     WHY NOT `RemoteObserver`
     The standalone SLO notebook reported via `RemoteObserver`, which is a different
@@ -2050,7 +2057,7 @@ def emit_slo_report(
             # An SLO check reads tables; it writes none. Counts stay 0 and the status
             # describes the CHECK, so this row is never mistaken for a data load.
             "status": "success" if all_passed else "failed",
-            "engine": "slo",
+            "engine": engine,
             "tier": layer,
             "pipeline_run_id": pipeline_run_id or None,
             "metadata": {
@@ -2066,7 +2073,7 @@ def emit_slo_report(
                 "environment": environment,
                 "domain": getattr(registry, "domain", None),
                 "system": getattr(registry, "system", None),
-                "record_type": "slo_check",
+                "record_type": record_type,
                 # The invocation these rows belong to, so the platform can group them
                 # back together — one notification per check run rather than per entity.
                 "check_run_id": check_run_id,
