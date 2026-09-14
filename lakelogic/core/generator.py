@@ -93,6 +93,7 @@ import random
 import re
 import string
 from dataclasses import dataclass
+from functools import lru_cache
 
 # Module-level alias used in _build_field_rules SQL parsing helpers
 _re = re
@@ -3193,6 +3194,135 @@ def _fits_field_rules(value: Any, rules: Dict[str, Any]) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# SQL row rules → generator constraints
+# ---------------------------------------------------------------------------
+# Contracts write most row rules as SQL (`surge IS NULL OR (surge >= 1 AND surge <= 10)`), and the
+# generator only read a bare `col IN (...)`. Every other form was ignored, so a float with no
+# declared range came out anywhere in 0.01..1000 and a nullable column got nulls a rule rejects —
+# the data then failed the very contract it was generated from.
+
+_SQL_IDENT = r"`?([A-Za-z_][A-Za-z0-9_]*)`?"
+_SQL_NUM = r"(-?\d+(?:\.\d+)?)"
+_SQL_FLIP = {">=": "<=", ">": "<", "<=": ">=", "<": ">"}
+_SQL_BOUND = {">=": "min", ">": "min_exclusive", "<=": "max", "<": "max_exclusive"}
+
+
+def _split_top_level(expr: str, keyword: str) -> List[str]:
+    """Split ``expr`` on a boolean keyword (``OR`` / ``AND``) outside parentheses and quotes."""
+    parts: List[str] = []
+    depth, quoted, start, i = 0, False, 0, 0
+    token, upper = f" {keyword} ", expr.upper()
+    while i < len(expr):
+        ch = expr[i]
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif depth == 0 and upper.startswith(token, i):
+                parts.append(expr[start:i])
+                i += len(token)
+                start = i
+                continue
+        i += 1
+    parts.append(expr[start:])
+    return [p.strip() for p in parts]
+
+
+def _strip_outer_parens(expr: str) -> str:
+    """``((a AND b))`` → ``a AND b``; ``(a) OR (b)`` is left alone."""
+    expr = expr.strip()
+    while expr.startswith("(") and expr.endswith(")"):
+        depth = 0
+        for i, ch in enumerate(expr):
+            depth += ch == "("
+            depth -= ch == ")"
+            if depth == 0 and i < len(expr) - 1:
+                return expr
+        expr = expr[1:-1].strip()
+    return expr
+
+
+def _sql_number(text: str) -> Any:
+    return float(text) if "." in text else int(text)
+
+
+@lru_cache(maxsize=2048)
+def _sql_rule_constraints(
+    sql: str,
+) -> Tuple[Tuple[Tuple[str, str, Any], ...], Tuple[Tuple[str, str, str], ...]]:
+    """What a SQL row rule requires of a generated row, in the forms contracts actually write.
+
+    Returns ``(constraints, comparisons)``:
+
+    * ``constraints`` — ``(column, key, value)`` with key ``accepted_values``, ``min``, ``max``,
+      ``min_exclusive``, ``max_exclusive`` or ``not_null``.
+    * ``comparisons`` — ``(smaller, op, larger)`` with op ``<=`` or ``<``, for two-column rules
+      such as ``cancelled_at >= requested_at``.
+
+    Understood: ``col IS NULL OR <condition>`` guards; ``AND`` of ``col IN (literals)``,
+    ``col BETWEEN a AND b``, ``col <op> number`` (either side), ``col <op> col``,
+    ``col IS NOT NULL`` and ``col LIKE '...'``. A column the condition names but no ``IS NULL``
+    guard covers is ``not_null``: SQL evaluates the rule to NULL on a null and the row fails.
+    Anything else yields nothing — an unrecognised rule is never guessed at, and a top-level
+    ``OR`` of two real conditions is skipped because neither side alone is required.
+    """
+    text = " ".join(str(sql or "").split())
+    text = re.sub(
+        rf"{_SQL_IDENT} BETWEEN {_SQL_NUM} AND {_SQL_NUM}", r"\1 >= \2 AND \1 <= \3", text, flags=re.IGNORECASE
+    )
+    guarded: set = set()
+    conditions: List[str] = []
+    for term in _split_top_level(_strip_outer_parens(text), "OR"):
+        term = _strip_outer_parens(term)
+        guard = re.fullmatch(rf"{_SQL_IDENT} IS NULL", term, re.IGNORECASE)
+        if guard:
+            guarded.add(guard.group(1).lower())
+        else:
+            conditions.append(term)
+    if len(conditions) != 1:
+        return (), ()
+
+    constraints: List[Tuple[str, str, Any]] = []
+    comparisons: List[Tuple[str, str, str]] = []
+    referenced: List[str] = []
+    for atom in _split_top_level(_strip_outer_parens(conditions[0]), "AND"):
+        atom = _strip_outer_parens(atom)
+        if m := re.fullmatch(rf"{_SQL_IDENT} IN ?\((.+)\)", atom, re.IGNORECASE):
+            if re.search(r"\bSELECT\b", m.group(2), re.IGNORECASE):
+                continue
+            values = tuple(s or n for s, n in re.findall(r"'([^']*)'|(-?\d+(?:\.\d+)?)", m.group(2)))
+            if values:
+                constraints.append((m.group(1), "accepted_values", values))
+                referenced.append(m.group(1))
+        elif m := re.fullmatch(rf"{_SQL_IDENT} IS NOT NULL", atom, re.IGNORECASE):
+            referenced.append(m.group(1))
+        elif m := re.fullmatch(rf"{_SQL_IDENT} (?:NOT )?I?LIKE '.*'", atom, re.IGNORECASE):
+            referenced.append(m.group(1))
+        elif m := re.fullmatch(rf"{_SQL_IDENT} ?(>=|>|<=|<) ?{_SQL_NUM}", atom):
+            constraints.append((m.group(1), _SQL_BOUND[m.group(2)], _sql_number(m.group(3))))
+            referenced.append(m.group(1))
+        elif m := re.fullmatch(rf"{_SQL_NUM} ?(>=|>|<=|<) ?{_SQL_IDENT}", atom):
+            constraints.append((m.group(3), _SQL_BOUND[_SQL_FLIP[m.group(2)]], _sql_number(m.group(1))))
+            referenced.append(m.group(3))
+        elif m := re.fullmatch(rf"{_SQL_IDENT} ?(>=|>|<=|<) ?{_SQL_IDENT}", atom):
+            left, op, right = m.group(1), m.group(2), m.group(3)
+            if op in (">=", ">"):
+                left, op, right = right, _SQL_FLIP[op], left
+            comparisons.append((left, op, right))
+            referenced.extend((left, right))
+    for column in referenced:
+        if column.lower() not in guarded:
+            constraints.append((column, "not_null", True))
+    return tuple(constraints), tuple(comparisons)
+
+
+_INTEGER_FIELD_TYPES = ("integer", "int", "int32", "int64", "long", "short", "bigint", "smallint")
+
+
 def _inherit_parent_attributes(
     child: Any,
     parent: Any,
@@ -5770,10 +5900,10 @@ class DataGenerator:
                 continue  # Skip if already generated (e.g., by triplet logic)
 
             ftype: str = (field.get("type") or "string").lower()
-            required: bool = field.get("required", False)
-            nullable: bool = not required
-
             rules = field_rules.get(name, {})
+            # A SQL rule without an `IS NULL OR` guard rejects nulls exactly like `required`.
+            required: bool = bool(field.get("required", False) or rules.get("not_null"))
+            nullable: bool = not required
 
             if invalid and self._rng.random() < 0.4:
                 # 40% chance each field is broken in an invalid row
@@ -5796,6 +5926,7 @@ class DataGenerator:
         if not invalid:
             self._apply_correlations(row)
             self._apply_temporal_ordering(row)
+            self._apply_column_comparisons(row, field_rules)
             self._apply_field_consistency(row)
             # Before geo alignment, so coordinates snap to the city this pass settles on.
             self._apply_city_coherence(row, field_rules)
@@ -5938,6 +6069,59 @@ class DataGenerator:
                     row[later_field] = new_later_dt.date().isoformat()
                 else:
                     row[later_field] = new_later_dt.isoformat()
+
+    def _apply_column_comparisons(self, row: Dict[str, Any], field_rules: Dict[str, Dict[str, Any]]) -> None:
+        """Enforce two-column rules the contract declares in SQL (``cancelled_at >= requested_at``,
+        ``clicks <= impressions``).
+
+        ``_apply_temporal_ordering`` only knows a fixed list of column names; these come from the
+        contract itself. Timestamps move the later column forward by a realistic gap; numbers
+        redraw the smaller column inside ``[its own min, larger]``. Nulls are left alone — the
+        rule's own ``IS NULL`` guards decide whether a null is allowed.
+        """
+        by_lower = {str(k).lower(): k for k in row}
+        for rule in self._quality.get("row_rules") or []:
+            sql = rule.get("sql") if isinstance(rule, dict) else None
+            if not sql:
+                continue
+            for smaller, op, larger in _sql_rule_constraints(sql)[1]:
+                smaller, larger = by_lower.get(smaller.lower()), by_lower.get(larger.lower())
+                if smaller is None or larger is None:
+                    continue
+                low, high = row[smaller], row[larger]
+                if low is None or high is None:
+                    continue
+                low_dt, high_dt = self._parse_temporal(low), self._parse_temporal(high)
+                if low_dt is not None and high_dt is not None:
+                    if high_dt > low_dt or (op == "<=" and high_dt == low_dt):
+                        continue
+                    min_mins, max_mins = _TEMPORAL_GAPS.get((smaller, larger), (0, 10080))
+                    date_only = (isinstance(high, str) and len(high) == 10) or (
+                        isinstance(high, date) and not isinstance(high, datetime)
+                    )
+                    floor = 1440 if (date_only and op == "<") else (1 if op == "<" else 0)
+                    gap = self._rng.randint(max(min_mins, floor), max(max_mins, floor))
+                    moved = low_dt + timedelta(minutes=gap)
+                    if isinstance(high, str):
+                        row[larger] = moved.date().isoformat() if date_only else moved.isoformat()
+                    elif isinstance(high, datetime):
+                        row[larger] = moved
+                    else:
+                        row[larger] = moved.date()
+                    continue
+                numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (low, high))
+                if not numbers or low < high or (op == "<=" and low == high):
+                    continue
+                own_min = field_rules.get(smaller, {}).get("min")
+                lo = float(own_min) if own_min is not None and float(own_min) <= high else min(0, high)
+                if isinstance(low, int) and isinstance(high, int):
+                    top = high - (1 if op == "<" else 0)
+                    row[smaller] = self._rng.randint(min(int(lo), top), top)
+                else:
+                    value = round(self._rng.uniform(min(lo, high), high), 4)
+                    if op == "<" and value >= high:
+                        value = round(high - 0.001, 4)
+                    row[smaller] = value
 
     @staticmethod
     def _parse_temporal(val: Any) -> Optional[datetime]:
@@ -6391,7 +6575,8 @@ class DataGenerator:
         dist = _match_distribution(name.lower())
         if dist:
             result = self._sample_distribution(dist)
-            if result is not None:
+            # A name-based profile does not know the contract's range; a declared min/max wins.
+            if result is not None and _fits_field_rules(result, rules):
                 return result
 
         min_val = rules.get("min")
@@ -7268,6 +7453,8 @@ class DataGenerator:
 
         # ── 2. Overlay structured quality row_rules ───────────────────────────
         quality = self._quality
+        field_names = {str(f.get("name")).lower(): f.get("name") for f in self._fields if f.get("name")}
+        field_types = {f.get("name"): str(f.get("type") or "string").lower() for f in self._fields if f.get("name")}
 
         for rule_item in quality.get("row_rules", []):
             if not isinstance(rule_item, dict):
@@ -7353,6 +7540,23 @@ class DataGenerator:
             rule_category = rule_item.get("category", "")
 
             if sql_str:
+                # Ranges, nullable IN, IS NOT NULL, LIKE — see _sql_rule_constraints. Field-level
+                # and structured values keep priority (setdefault); not_null always applies.
+                constraints, _comparisons = _sql_rule_constraints(sql_str)
+                for col, key, value in constraints:
+                    col = field_names.get(col.lower(), col)
+                    entry = result.setdefault(col, {})
+                    if key == "accepted_values":
+                        entry.setdefault("accepted_values", list(value))
+                    elif key == "not_null":
+                        entry["not_null"] = True
+                    else:
+                        bound = key.split("_", 1)[0]
+                        if key.endswith("_exclusive"):
+                            step = 1 if field_types.get(col) in _INTEGER_FIELD_TYPES else 0.001
+                            value = value + step if bound == "min" else value - step
+                        entry.setdefault(bound, value)
+
                 # Sub-case (a): col IN (literal, values) — no subquery
                 m_lit = _re.match(r"^\s*(\w+)\s+IN\s*\(([^)]+)\)\s*$", sql_str, _re.IGNORECASE)
                 if m_lit:
