@@ -3476,9 +3476,22 @@ def _materialize_spark_dataframe(  # pragma: no cover
                 logger.debug("incoming_df checkpointed before merge (lineage truncated)")
             except Exception as _ck_err:  # pragma: no cover - no local checkpoint dirs
                 logger.debug(f"localCheckpoint unavailable; using persist()+count(): {_ck_err}")
-                df = df.persist()
-                df.count()
-                _merge_ckpt = df
+                try:
+                    df = df.persist()
+                    df.count()
+                    _merge_ckpt = df
+                except Exception as _persist_err:
+                    # Databricks SERVERLESS rejects BOTH: localCheckpoint needs an RDD, and
+                    # persist raises "[NOT_SUPPORTED_WITH_SERVERLESS] PERSIST TABLE is not
+                    # supported on serverless compute". This is an optimisation against plan
+                    # explosion, not a requirement, so the merge proceeds without it rather
+                    # than failing the contract — which is what it used to do, killing every
+                    # silver/gold merge on serverless.
+                    logger.debug(
+                        f"Neither localCheckpoint nor persist is available ({_persist_err}); "
+                        f"merging without truncating the plan."
+                    )
+                    _merge_ckpt = None
 
         result = _spark_merge_dataframe(
             spark,

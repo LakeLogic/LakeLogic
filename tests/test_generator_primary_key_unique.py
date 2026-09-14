@@ -111,16 +111,22 @@ def _warnings(fn):
 
 
 def test_a_key_smaller_than_the_rows_stays_inside_its_allowed_values():
-    """Five allowed values, twenty rows: uniqueness is impossible. The last-resort suffix used
-    to produce `A-2`, `A-3`… — out-of-domain values in rows labelled valid. They now keep an
-    allowed value, repeat, and the repeat is reported."""
+    """Five allowed values, twenty rows: twenty unique keys are impossible. The last-resort
+    suffix used to produce `A-2`, `A-3`… — out-of-domain values in rows labelled valid.
+
+    The table is now capped at the key's domain (2026-09-14): five rows, each allowed value
+    once, and the cap is reported. Before the cap the rows kept an allowed value and REPEATED
+    it, which kept the domain but broke the key; a keyed table with one row per real value keeps
+    both."""
     contract = _contract(
         "primary_key: [code]\n",
         "    - {name: code, type: string, accepted_values: [A, B, C, D, E]}\n    - {name: fare, type: double}\n",
     )
     df, lines = _warnings(lambda: DataGenerator(contract, seed=3).generate(rows=20))
-    assert set(_ids(df, "code")) <= {"A", "B", "C", "D", "E"}, "a value outside accepted_values was invented"
-    assert any("could not be given a unique value" in line for line in lines)
+    codes = _ids(df, "code")
+    assert set(codes) <= {"A", "B", "C", "D", "E"}, "a value outside accepted_values was invented"
+    assert sorted(codes) == ["A", "B", "C", "D", "E"], "the key is not one row per allowed value"
+    assert any("Rows capped" in line for line in lines), "a table smaller than requested was not reported"
 
 
 def test_a_pattern_is_not_broken_by_the_fallback():

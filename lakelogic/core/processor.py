@@ -209,6 +209,11 @@ def _compact_entity(name: str, layer: Optional[str], system: Optional[str]) -> s
     return compact or str(name)
 
 
+#: What every engine writes for a row whose partition column is NULL. Hive's sentinel,
+#: used verbatim by Spark and delta-rs; `__NULL__` appears in a few older writers.
+_HIVE_NULL_PARTITION_VALUES = frozenset({"__HIVE_DEFAULT_PARTITION__", "__NULL__"})
+
+
 class DataProcessor:
     """
     The main entry point for running LakeLogic contracts.
@@ -1645,8 +1650,20 @@ class DataProcessor:
                 continue
             key, _, value = segment.partition("=")
             key, value = key.strip(), value.strip()
-            if key and value and key.replace("_", "").isalnum():
-                out[key] = value
+            if not (key and value and key.replace("_", "").isalnum()):
+                continue
+            # HIVE'S NULL IS A NULL, NOT A VALUE CALLED "__HIVE_DEFAULT_PARTITION__".
+            #
+            # A row whose partition column is null has no folder to live in, so every engine
+            # here files it under `<col>=__HIVE_DEFAULT_PARTITION__`. Read back as a plain
+            # string that becomes the column's VALUE — and the fact that it was missing is
+            # destroyed: a `not_null` rule downstream can never catch it, because the column
+            # is now populated with something that looks real. Mapped back to None so a
+            # missing value stays missing and the rule that exists to catch it can.
+            if value in _HIVE_NULL_PARTITION_VALUES:
+                out[key] = None  # type: ignore[assignment]
+                continue
+            out[key] = value
         return out
 
     def _declared_path_keys(self, file_paths: Sequence[str]) -> Tuple[str, ...]:

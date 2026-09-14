@@ -79,3 +79,34 @@ def test_the_path_reader_takes_every_key_and_ignores_what_is_not_one():
     # A bare folder is not a stated key, and neither is a file that happens to contain "=".
     assert _DP._path_key_values("landing/orders/2026/09/part.parquet") == {}
     assert _DP._path_key_values("landing/orders/country=/part.parquet") == {}
+
+
+def test_a_hive_null_partition_reads_back_as_null_not_as_a_value():
+    """A row whose partition column was NULL must stay missing.
+
+    Every engine files such a row under `<col>=__HIVE_DEFAULT_PARTITION__`. Read back as a
+    plain string, that sentinel BECOMES the column's value — and the fact that it was missing
+    is destroyed: a `not_null` rule downstream can never catch it, because the column is now
+    populated with something that looks real. The row survives and its meaning does not.
+    """
+    from lakelogic.core.processor import DataProcessor
+
+    values = DataProcessor._path_key_values(
+        "landing/orders/country=__HIVE_DEFAULT_PARTITION__/dt=2026-09-13/part.parquet"
+    )
+    assert values["country"] is None, "Hive's null sentinel became a real-looking value"
+    # The genuine key beside it is untouched.
+    assert values["dt"] == "2026-09-13"
+
+
+def test_the_older_null_sentinel_is_handled_too():
+    from lakelogic.core.processor import DataProcessor
+
+    assert DataProcessor._path_key_values("landing/x/country=__NULL__/f.parquet")["country"] is None
+
+
+def test_a_real_value_is_never_mistaken_for_a_null():
+    from lakelogic.core.processor import DataProcessor
+
+    values = DataProcessor._path_key_values("landing/x/country=GB/f.parquet")
+    assert values["country"] == "GB"

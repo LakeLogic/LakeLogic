@@ -248,6 +248,12 @@ _GEO_DATA = [
     ("NZ", "NZL", "554", "New Zealand", "NZD"),
     ("CN", "CHN", "156", "China", "CNY"),
     ("KR", "KOR", "410", "South Korea", "KRW"),
+    # The countries of the cities in `_CITY_RECORDS` that were missing, so every city's
+    # currency and alpha-3 code resolve through this one table.
+    ("AE", "ARE", "784", "United Arab Emirates", "AED"),
+    ("HK", "HKG", "344", "Hong Kong", "HKD"),
+    ("TH", "THA", "764", "Thailand", "THB"),
+    ("TR", "TUR", "792", "Turkey", "TRY"),
 ]
 
 _GEO_LOOKUP_BY_NAME = {}
@@ -372,6 +378,77 @@ _CITY_GEO_COORDS: Dict[str, Tuple[float, float]] = {
     "dub": (53.3498, -6.2603),
     "lis": (38.7223, -9.1393),
     "zrh": (47.3769, 8.5417),
+}
+
+# ── One real city per row ──────────────────────────────────────────────────
+# code → (name, ISO 3166-1 alpha-2 country, IANA timezone). The codes are exactly the
+# `city_code` pool below, so a generated code always has a record.
+#
+# THE LIVE FAILURE (Fabric, 2026-09-13): a city master came out as
+#   `TYO | NULL | ES | TIM-3689` and `MEX-2 | David Gonzalez | ZA | TIM-6358`
+# — each column filled on its own, so the code, name, country and timezone of one "city"
+# named four different places, and none of it joined to anything real. Picking ONE record per
+# row and filling every city-shaped column from it is what a real city master looks like.
+_CITY_RECORDS: Dict[str, Tuple[str, str, str]] = {
+    "LON": ("London", "GB", "Europe/London"),
+    "NYC": ("New York", "US", "America/New_York"),
+    "BER": ("Berlin", "DE", "Europe/Berlin"),
+    "PAR": ("Paris", "FR", "Europe/Paris"),
+    "TYO": ("Tokyo", "JP", "Asia/Tokyo"),
+    "SYD": ("Sydney", "AU", "Australia/Sydney"),
+    "LAX": ("Los Angeles", "US", "America/Los_Angeles"),
+    "CHI": ("Chicago", "US", "America/Chicago"),
+    "SFO": ("San Francisco", "US", "America/Los_Angeles"),
+    "TOR": ("Toronto", "CA", "America/Toronto"),
+    "MEX": ("Mexico City", "MX", "America/Mexico_City"),
+    "BOM": ("Mumbai", "IN", "Asia/Kolkata"),
+    "SIN": ("Singapore", "SG", "Asia/Singapore"),
+    "DXB": ("Dubai", "AE", "Asia/Dubai"),
+    "AMS": ("Amsterdam", "NL", "Europe/Amsterdam"),
+    "MAD": ("Madrid", "ES", "Europe/Madrid"),
+    "ROM": ("Rome", "IT", "Europe/Rome"),
+    "SEL": ("Seoul", "KR", "Asia/Seoul"),
+    "PEK": ("Beijing", "CN", "Asia/Shanghai"),
+    "SHA": ("Shanghai", "CN", "Asia/Shanghai"),
+    "HKG": ("Hong Kong", "HK", "Asia/Hong_Kong"),
+    "BKK": ("Bangkok", "TH", "Asia/Bangkok"),
+    "IST": ("Istanbul", "TR", "Europe/Istanbul"),
+}
+
+
+def _city_columns(code: str, name: str, country: str, tz: str) -> Dict[str, str]:
+    """Every column name a row may carry for one city, filled from its record."""
+    geo = next((g for g in _GEO_DATA if g[0] == country), None)
+    cols = {
+        "city_code": code,
+        "city": name,
+        "city_name": name,
+        "country_code": country,
+        "country_code_alpha2": country,
+        "timezone": tz,
+        "time_zone": tz,
+        "tz": tz,
+    }
+    if geo:
+        _a2, a3, num, country_name, currency = geo
+        cols.update({
+            "country_code_alpha3": a3,
+            "country_code_numeric": num,
+            "country": country_name,
+            "country_name": country_name,
+            "currency": currency,
+            "currency_code": currency,
+            "default_currency": currency,
+            "primary_currency_code": currency,
+        })
+    return cols
+
+
+_CITY_LOOKUP_BY_CODE: Dict[str, Dict[str, str]] = {
+    code: _city_columns(code, *record) for code, record in _CITY_RECORDS.items()
+}
+_CITY_LOOKUP_BY_NAME: Dict[str, Dict[str, str]] = {
+    cols["city_name"].lower(): cols for cols in _CITY_LOOKUP_BY_CODE.values()
 }
 
 # Field name patterns for geo-alignment detection
@@ -1154,6 +1231,10 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
     "country": [_name for _, _, _, _name, _ in _GEO_DATA],
     "country_name": [_name for _, _, _, _name, _ in _GEO_DATA],
     "country_code": [_a2 for _a2, _, _, _, _ in _GEO_DATA],
+    # Real IANA zones. Without Faker, `timezone` fell through to the type generator and came
+    # out as `TIM-4398` - a placeholder no timezone-aware conversion can use.
+    "timezone": sorted({_tz for _, _, _tz in _CITY_RECORDS.values()}),
+    "time_zone": sorted({_tz for _, _, _tz in _CITY_RECORDS.values()}),
     "device_type": ["mobile", "tablet", "desktop", "smart_tv", "console"],
     "browser": ["Chrome", "Safari", "Firefox", "Edge", "Samsung Browser"],
     "os": ["iOS", "Android", "Windows", "macOS", "Linux"],
@@ -2509,6 +2590,8 @@ _NULL_PROBABILITY_HINTS: Dict[str, float] = {
     "name": 0.0,
     # Almost never null (1-2%)
     "updated_at": 0.01,
+    # Most things are still live: a sunset date is the exception, not the rule.
+    "sunset_at": 0.85,
     "type": 0.02,
     # Sometimes null — common optional fields
     "phone": 0.15,
@@ -2578,6 +2661,9 @@ _TEMPORAL_ORDERING_RULES: List[Tuple[str, str, str]] = [
     ("started_at", "ended_at", "lte"),
     ("first_seen_at", "last_seen_at", "lte"),
     ("first_order_at", "last_order_at", "lte"),
+    # A city (or product, or site) is retired after it launched - generated independently,
+    # `sunset_at` came before `launched_at` in a third of the rows.
+    ("launched_at", "sunset_at", "lte"),
     # ── Telecom ───────────────────────────────────────────────────────────
     ("call_start_time", "call_end_time", "lte"),
     ("data_session_start", "data_session_end", "lte"),
@@ -2597,6 +2683,7 @@ _TEMPORAL_GAPS: Dict[Tuple[str, str], Tuple[int, int]] = {
     ("created_at", "updated_at"): (0, 525600),  # 0 to 1 year
     ("submitted_at", "approved_at"): (60, 10080),  # 1 hr to 1 week
     ("started_at", "ended_at"): (5, 480),  # 5 mins to 8 hrs
+    ("launched_at", "sunset_at"): (43200, 2102400),  # 1 month to 4 years
     ("issued_at", "expires_at"): (43800, 525600),  # 1 month to 1 year
     ("hired_at", "terminated_at"): (43800, 3153600),  # 1 month to 6 years
     ("opened_at", "closed_at"): (30, 43200),  # 30 mins to 30 days
@@ -3724,6 +3811,21 @@ class DataGenerator:
         n_invalid = int(rows * invalid_ratio)
         n_valid = rows - n_invalid
 
+        # A KEY WITH A FIXED DOMAIN BOUNDS THE TABLE. A city master keyed on `city_code` has as
+        # many rows as there are cities; asking for 200 of 23 real codes produced `PAR-3`,
+        # `PAR-5` - codes no city has, and a "unique" key that is only unique by suffix.
+        domain = self._finite_primary_key_domain(fk_pools)
+        if domain is not None and n_valid > domain:
+            from loguru import logger as _cap_logger
+
+            # A warning, not info: a table smaller than asked for is a deviation the caller
+            # must see, as visible as the repeated keys it replaces.
+            _cap_logger.warning(
+                f"   Rows capped: {n_valid:,} valid rows requested, but the primary key "
+                f"({', '.join(self._primary_key_columns())}) has only {domain} real value(s)"
+            )
+            n_valid = domain
+
         # AI edge-case generation (opt-in)
         edge_pools: Optional[Dict[str, List[Any]]] = ai_edge_cases
 
@@ -3832,6 +3934,13 @@ class DataGenerator:
         redrawn = self._dedupe_primary_keys(valid_records, fk_pools=fk_pools, sample_pools=auto_pools)
         if redrawn:
             _gen_logger.info(f"   Primary key: {redrawn} colliding value(s) redrawn to keep it unique")
+            # A REDRAWN KEY CAN BE A DIFFERENT CITY. The redraw runs after each row settled its
+            # city, so `TYO` redrawn from `MEX` kept Mexico's country and timezone. Re-settle;
+            # the pass is idempotent, so rows whose key did not move are unchanged.
+            _rules = self._build_field_rules(fk_pools=fk_pools)
+            for _row in valid_records:
+                self._apply_city_coherence(_row, _rules)
+                self._apply_geo_alignment(_row)
 
         for _ in range(n_invalid):
             row, test_cases = self._make_row(
@@ -5515,6 +5624,23 @@ class DataGenerator:
         wanted = set(declared) | {n for n in flagged if n}
         return [n for n in names if n in wanted]
 
+    def _finite_primary_key_domain(self, fk_pools: Optional[Dict[str, List[Any]]] = None) -> Optional[int]:
+        """How many distinct values a single-column primary key can take, when that is fixed.
+
+        Fixed means the contract lists them (`accepted_values`) or the column is one of the
+        realistic pools matched by its exact name (`city_code`, `country_code`, …). A key drawn
+        from a parent's foreign-key pool, a composite key, or an open-ended key returns None.
+        """
+        pk = self._primary_key_columns()
+        if len(pk) != 1 or (fk_pools and pk[0] in fk_pools):
+            return None
+        column = pk[0]
+        accepted = self._build_field_rules(fk_pools=fk_pools).get(column, {}).get("accepted_values")
+        if isinstance(accepted, (list, tuple, set)) and accepted:
+            return len(set(accepted))
+        pool = _REALISTIC_POOLS.get(str(column).lower())
+        return len(set(pool)) if pool else None
+
     def _dedupe_primary_keys(
         self,
         records: List[Dict[str, Any]],
@@ -5669,6 +5795,8 @@ class DataGenerator:
             self._apply_correlations(row)
             self._apply_temporal_ordering(row)
             self._apply_field_consistency(row)
+            # Before geo alignment, so coordinates snap to the city this pass settles on.
+            self._apply_city_coherence(row, field_rules)
             self._apply_geo_alignment(row)
 
         # Flag the row for frontend debugging / filtering
@@ -6023,6 +6151,38 @@ class DataGenerator:
                 pass
 
         return alignments
+
+    def _apply_city_coherence(self, row: Dict[str, Any], field_rules: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+        """Make every city-shaped column in a row describe ONE real city.
+
+        The driver is the row's `city_code` (a `-2` style uniqueness suffix is ignored for the
+        lookup), else its `city` / `city_name`. Every other city column the row carries - name,
+        code, country codes and name, timezone, currency - is filled from that city's record.
+
+        A column the contract or a foreign-key pool constrains (`accepted_values`) is left
+        alone: that domain is the contract's promise, and a matching city is not worth
+        breaking it. Rows whose driver names no known city are left exactly as generated.
+        """
+        rules = field_rules or {}
+        record = None
+        code = row.get("city_code")
+        if isinstance(code, str) and code.strip():
+            record = _CITY_LOOKUP_BY_CODE.get(code.strip().upper().split("-")[0])
+        if record is None:
+            for name_col in ("city_name", "city"):
+                name = row.get(name_col)
+                if isinstance(name, str) and name.strip():
+                    record = _CITY_LOOKUP_BY_NAME.get(name.strip().lower())
+                    if record:
+                        break
+        if record is None:
+            return
+        for column, value in record.items():
+            if column == "city_code" or column not in row:
+                continue
+            if "accepted_values" in rules.get(column, {}):
+                continue
+            row[column] = value
 
     def _apply_geo_alignment(self, row: Dict[str, Any]) -> None:
         """Snap lat/lng fields to match the city field's coordinates.
