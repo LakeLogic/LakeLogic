@@ -33,7 +33,7 @@ import random
 import re
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -81,7 +81,11 @@ def _as_text(value: Any, ftype: str) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, (datetime, date)):
-        return value.isoformat()[:10] if ftype == "date" or isinstance(value, date) and not isinstance(value, datetime) else value.isoformat()
+        return (
+            value.isoformat()[:10]
+            if ftype == "date" or isinstance(value, date) and not isinstance(value, datetime)
+            else value.isoformat()
+        )
     text = str(value)
     if ftype == "date" and len(text) >= 10:
         return text[:10]
@@ -135,26 +139,34 @@ def generate_documents(
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
     except ImportError as exc:  # pragma: no cover - environment dependent
-        raise ImportError("reportlab is required to write synthetic documents: pip install lakelogic[synthetic]") from exc
+        raise ImportError(
+            "reportlab is required to write synthetic documents: pip install lakelogic[synthetic]"
+        ) from exc
 
     from lakelogic.core.generator import DataGenerator
 
     # The fields a document carries: those extracted by a pattern. Values are generated from the
     # contract's own names and types, with the extraction block removed (the generator refuses it).
     fields = [
-        f for f in (doc.get("model") or {}).get("fields") or []
-        if isinstance(f, dict) and f.get("name") and (f.get("extraction_examples") or [])
+        f
+        for f in (doc.get("model") or {}).get("fields") or []
+        if isinstance(f, dict)
+        and f.get("name")
+        and (f.get("extraction_examples") or [])
         and str(f.get("extraction_task") or "").lower() == "metadata"
     ]
     if not fields:
-        raise ValueError("the contract declares no `extraction_task: metadata` field with an extraction_examples pattern")
+        raise ValueError(
+            "the contract declares no `extraction_task: metadata` field with an extraction_examples pattern"
+        )
     value_contract = {
         "version": doc.get("version", "1.0.0"),
         "info": {"title": ((doc.get("info") or {}).get("title") or doc.get("dataset") or "documents")},
-        "model": {"fields": [
-            {k: v for k, v in f.items() if k not in ("extraction_task", "extraction_examples")}
-            for f in fields
-        ]},
+        "model": {
+            "fields": [
+                {k: v for k, v in f.items() if k not in ("extraction_task", "extraction_examples")} for f in fields
+            ]
+        },
     }
     frame = DataGenerator(yaml.safe_dump(value_contract), seed=seed).generate(rows=max(1, int(rows)), invalid_ratio=0.0)
     records = frame.to_dicts()

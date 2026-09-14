@@ -17,9 +17,19 @@ IDS = ["RDR-0001", "RDR-0002", "RDR-0002"]
 
 
 def _event(**overrides):
-    kwargs = dict(framework="gdpr", action="nullify", dry_run=False, contract_name="silver_riders",
-                  subject_column="rider_id", subject_ids=IDS, columns=["email", "full_name"],
-                  rows_affected=2, case_ref="DSR-1042", run_id="run-1", engine="spark")
+    kwargs = dict(
+        framework="gdpr",
+        action="nullify",
+        dry_run=False,
+        contract_name="silver_riders",
+        subject_column="rider_id",
+        subject_ids=IDS,
+        columns=["email", "full_name"],
+        rows_affected=2,
+        case_ref="DSR-1042",
+        run_id="run-1",
+        engine="spark",
+    )
     kwargs.update(overrides)
     return pe.build_privacy_action_event(**kwargs)
 
@@ -39,10 +49,13 @@ def test_a_dry_run_is_a_plan_with_a_generated_case_ref_and_no_verification():
     assert event["verification"] == {**event["verification"], "method": "none", "verified": False}
 
 
-@pytest.mark.parametrize("bad", [
-    {"subject_ids": ["RDR-0001"]},
-    {"asset": {"identifier_values": ["RDR-0001"]}},
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"subject_ids": ["RDR-0001"]},
+        {"asset": {"identifier_values": ["RDR-0001"]}},
+    ],
+)
 def test_a_prohibited_field_anywhere_is_rejected(bad):
     event = {**_event(), **bad}
     with pytest.raises(ValueError, match="must not carry"):
@@ -54,13 +67,20 @@ def test_a_subject_value_that_leaks_into_any_field_is_rejected():
         _event(columns=["RDR-0001"])
 
 
-@pytest.mark.parametrize("endpoint, expected", [
-    ("https://api.lakelogic.io/api/v1/operations/run-logs/ingest",
-     "https://api.lakelogic.io/api/v1/compliance/privacy-actions/ingest"),
-    ("https://x.ngrok-free.dev/api/v1/operations/run-logs/ingest",
-     "https://x.ngrok-free.dev/api/v1/compliance/privacy-actions/ingest"),
-    (None, None),
-])
+@pytest.mark.parametrize(
+    "endpoint, expected",
+    [
+        (
+            "https://api.lakelogic.io/api/v1/operations/run-logs/ingest",
+            "https://api.lakelogic.io/api/v1/compliance/privacy-actions/ingest",
+        ),
+        (
+            "https://x.ngrok-free.dev/api/v1/operations/run-logs/ingest",
+            "https://x.ngrok-free.dev/api/v1/compliance/privacy-actions/ingest",
+        ),
+        (None, None),
+    ],
+)
 def test_the_ingest_endpoint_derives_from_the_run_log_endpoint(monkeypatch, endpoint, expected):
     monkeypatch.delenv(pe.ENV_PRIVACY_ENDPOINT, raising=False)
     assert pe.privacy_ingest_endpoint(endpoint) == expected
@@ -79,8 +99,11 @@ def test_events_are_posted_with_the_observatory_key(monkeypatch):
     import requests
 
     sent = []
-    monkeypatch.setattr(requests, "post", lambda url, json=None, headers=None, timeout=None:
-                        sent.append((url, json, headers)) or _Resp())
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda url, json=None, headers=None, timeout=None: sent.append((url, json, headers)) or _Resp(),
+    )
     accepted = pe.emit_privacy_action_events(None, [_event(), _event()], observatory=OBSERVATORY)
     assert accepted == 2
     assert all(url.endswith("/compliance/privacy-actions/ingest") for url, _, _ in sent)
@@ -112,10 +135,10 @@ def test_the_retention_check_reports_as_its_own_record_type(monkeypatch):
     import requests
 
     sent = []
-    monkeypatch.setattr(requests, "post", lambda url, json=None, headers=None, timeout=None:
-                        sent.append(json) or _Resp())
-    emit_slo_report(_Registry(), [_Result()], environment="dev",
-                    record_type="retention_check", engine="retention")
+    monkeypatch.setattr(
+        requests, "post", lambda url, json=None, headers=None, timeout=None: sent.append(json) or _Resp()
+    )
+    emit_slo_report(_Registry(), [_Result()], environment="dev", record_type="retention_check", engine="retention")
     (payload,) = sent
     assert payload["engine"] == "retention" and payload["metadata"]["record_type"] == "retention_check"
     assert payload["metadata"]["slo_json"]["retention"]["period"] == "P90D"

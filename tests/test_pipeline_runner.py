@@ -863,12 +863,14 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
     import lakelogic.core.privacy_evidence as privacy_evidence
 
     emitted = []
-    monkeypatch.setattr(privacy_evidence, "emit_privacy_action_events",
-                        lambda registry, events, **kw: emitted.extend(events) or len(events))
+    monkeypatch.setattr(
+        privacy_evidence,
+        "emit_privacy_action_events",
+        lambda registry, events, **kw: emitted.extend(events) or len(events),
+    )
     monkeypatch.setattr(pathlib.Path, "mkdir", lambda self, *a, **k: None)
 
-    pipeline._execute_gdpr_pass([contract], "patient_id", ["1", "2"], "nullify", "salt", dry_run=True,
-                                case_ref="DSR-7")
+    pipeline._execute_gdpr_pass([contract], "patient_id", ["1", "2"], "nullify", "salt", dry_run=True, case_ref="DSR-7")
     pipeline._execute_hipaa_pass([contract], "patient_id", ["1"], "redact", "salt", dry_run=False)
 
     assert any(stmt.startswith("UPDATE catalog.gold.patients SET") for stmt in sql_statements)

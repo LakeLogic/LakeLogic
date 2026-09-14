@@ -23,7 +23,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -39,8 +38,17 @@ ENV_PRIVACY_ENDPOINT = "LAKELOGIC_PRIVACY_EVIDENCE_ENDPOINT"
 _ACTIONS = {"nullify", "hash", "tokenize", "delete", "redact"}
 #: Keys that could carry a subject identifier or a personal value. Rejected ANYWHERE in an event.
 _PROHIBITED_KEYS = {
-    "subject_ids", "subject_id", "identifier_values", "patient_ids", "patient_id",
-    "subjects", "values", "raw_values", "pii_values", "emails", "email",
+    "subject_ids",
+    "subject_id",
+    "identifier_values",
+    "patient_ids",
+    "patient_id",
+    "subjects",
+    "values",
+    "raw_values",
+    "pii_values",
+    "emails",
+    "email",
 }
 
 
@@ -126,23 +134,44 @@ def build_privacy_action_event(
         "action": action,
         "mode": mode,
         "status": status,
-        "asset": {"contract_name": contract_name, "tier": tier, "domain": domain,
-                  "system": system, "environment": environment},
+        "asset": {
+            "contract_name": contract_name,
+            "tier": tier,
+            "domain": domain,
+            "system": system,
+            "environment": environment,
+        },
         "subject_column": subject_column,
         "columns": sorted({str(c) for c in columns}),
         "rows_affected": max(0, int(rows_affected or 0)),
         "subject_count": len(ids),
         "subjects_sha256": _sha256("\n".join(ids)) if ids else None,
-        "pipeline_run": {"run_id": run_id, "engine": engine,
-                         "started_at": started_at.isoformat() if started_at else None,
-                         "finished_at": now.isoformat()},
+        "pipeline_run": {
+            "run_id": run_id,
+            "engine": engine,
+            "started_at": started_at.isoformat() if started_at else None,
+            "finished_at": now.isoformat(),
+        },
     }
     if notes:
         event["notes"] = notes[:500]
     # TAMPER-EVIDENCE: a digest over what the event asserts, so a stored copy can be checked.
-    asserted = {k: event[k] for k in ("framework", "case_ref", "action", "mode", "status", "asset",
-                                      "subject_column", "columns", "rows_affected", "subject_count",
-                                      "subjects_sha256")}
+    asserted = {
+        k: event[k]
+        for k in (
+            "framework",
+            "case_ref",
+            "action",
+            "mode",
+            "status",
+            "asset",
+            "subject_column",
+            "columns",
+            "rows_affected",
+            "subject_count",
+            "subjects_sha256",
+        )
+    }
     event["verification"] = {
         "method": "row_count" if mode == "executed" else "none",
         "verified": mode == "executed" and status == "completed",

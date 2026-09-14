@@ -1487,10 +1487,18 @@ class LakehousePipeline:
                 # A FAILED erasure is evidence too - of personal data still present.
                 if affected > 0 or dry_run or update_failed:
                     self._record_gdpr_evidence(
-                        c, dc, generate_erasure_report, privacy_events,
-                        subject_col=subject_col, subject_ids=subject_ids, strategy=effective_strategy,
-                        affected=affected, dry_run=dry_run, partition_filter=partition_filter,
-                        pii_cols=pii_cols, case_ref=case_ref,
+                        c,
+                        dc,
+                        generate_erasure_report,
+                        privacy_events,
+                        subject_col=subject_col,
+                        subject_ids=subject_ids,
+                        strategy=effective_strategy,
+                        affected=affected,
+                        dry_run=dry_run,
+                        partition_filter=partition_filter,
+                        pii_cols=pii_cols,
+                        case_ref=case_ref,
                         status="failed" if update_failed else "completed",
                     )
             else:
@@ -1515,10 +1523,19 @@ class LakehousePipeline:
 
                 if affected > 0 or dry_run:
                     self._record_gdpr_evidence(
-                        c, dc, generate_erasure_report, privacy_events,
-                        subject_col=subject_col, subject_ids=subject_ids, strategy=effective_strategy,
-                        affected=affected, dry_run=dry_run, partition_filter=partition_filter,
-                        pii_cols=pii_cols, case_ref=case_ref, status="completed",
+                        c,
+                        dc,
+                        generate_erasure_report,
+                        privacy_events,
+                        subject_col=subject_col,
+                        subject_ids=subject_ids,
+                        strategy=effective_strategy,
+                        affected=affected,
+                        dry_run=dry_run,
+                        partition_filter=partition_filter,
+                        pii_cols=pii_cols,
+                        case_ref=case_ref,
+                        status="completed",
                     )
 
         # ONE DELIVERY, AFTER THE PASS. Best-effort: a platform that is down never fails or
@@ -1529,9 +1546,21 @@ class LakehousePipeline:
             emit_privacy_action_events(self.registry, privacy_events)
 
     def _record_gdpr_evidence(
-        self, c, dc, generate_erasure_report, privacy_events: List[Dict[str, Any]], *,
-        subject_col: str, subject_ids: List[str], strategy: str, affected: int, dry_run: bool,
-        partition_filter: Optional[Dict[str, str]], pii_cols, case_ref: Optional[str], status: str,
+        self,
+        c,
+        dc,
+        generate_erasure_report,
+        privacy_events: List[Dict[str, Any]],
+        *,
+        subject_col: str,
+        subject_ids: List[str],
+        strategy: str,
+        affected: int,
+        dry_run: bool,
+        partition_filter: Optional[Dict[str, str]],
+        pii_cols,
+        case_ref: Optional[str],
+        status: str,
     ) -> None:
         """Write the local audit report (where it can be written) and queue the platform event.
 
@@ -1560,24 +1589,26 @@ class LakehousePipeline:
 
         meta = (c.contract_dict or {}).get("metadata") or {}
         try:
-            privacy_events.append(build_privacy_action_event(
-                framework="gdpr",
-                action=strategy if strategy in ("nullify", "hash", "redact", "tokenize", "delete") else "nullify",
-                dry_run=dry_run,
-                contract_name=str(c.entity),
-                subject_column=subject_col,
-                subject_ids=subject_ids,
-                columns=list(pii_cols or []),
-                rows_affected=affected,
-                case_ref=case_ref,
-                status=status,
-                tier=getattr(c, "layer", None),
-                domain=getattr(self.registry, "domain", None),
-                system=getattr(self.registry, "system", None),
-                environment=meta.get("environment"),
-                run_id=self.run_id,
-                engine=getattr(self, "engine", None),
-            ))
+            privacy_events.append(
+                build_privacy_action_event(
+                    framework="gdpr",
+                    action=strategy if strategy in ("nullify", "hash", "redact", "tokenize", "delete") else "nullify",
+                    dry_run=dry_run,
+                    contract_name=str(c.entity),
+                    subject_column=subject_col,
+                    subject_ids=subject_ids,
+                    columns=list(pii_cols or []),
+                    rows_affected=affected,
+                    case_ref=case_ref,
+                    status=status,
+                    tier=getattr(c, "layer", None),
+                    domain=getattr(self.registry, "domain", None),
+                    system=getattr(self.registry, "system", None),
+                    environment=meta.get("environment"),
+                    run_id=self.run_id,
+                    engine=getattr(self, "engine", None),
+                )
+            )
         except ValueError as exc:
             # Refused because it would disclose subject data - never send, never fail the erasure.
             logger.error(f"Privacy evidence for {c.entity} not recorded: {exc}")

@@ -21,22 +21,48 @@ LICENCES = {
     "dataset": "bronze_checkr_driver_licences",
     "version": "1.0.0",
     "info": {"title": "Bronze - Checkr Driver Licences"},
-    "source": {"type": "landing", "path": "/lakehouse/default/{landing_root}/driver_licences/**/*.pdf",
-               "format": "pdf", "load_mode": "full"},
+    "source": {
+        "type": "landing",
+        "path": "/lakehouse/default/{landing_root}/driver_licences/**/*.pdf",
+        "format": "pdf",
+        "load_mode": "full",
+    },
     "extraction": {"provider": "pdfplumber"},
-    "model": {"fields": [
-        {"name": "file_path", "type": "string"},
-        {"name": "full_name", "type": "string", "extraction_task": "metadata",
-         "extraction_examples": [r"Name:\s+(.+)"]},
-        {"name": "licence_number", "type": "string", "extraction_task": "metadata",
-         "extraction_examples": [r"Licence No:\s+(\S+)"]},
-        {"name": "date_of_birth", "type": "date", "extraction_task": "metadata",
-         "extraction_examples": [r"DOB:\s+(\d{4}-\d{2}-\d{2})"]},
-        {"name": "expiry_date", "type": "date", "extraction_task": "metadata",
-         "extraction_examples": [r"EXP:\s+(\d{4}-\d{2}-\d{2})"]},
-        {"name": "vehicle_classes", "type": "string", "extraction_task": "metadata",
-         "extraction_examples": [r"Classes:\s+(.+)"]},
-    ]},
+    "model": {
+        "fields": [
+            {"name": "file_path", "type": "string"},
+            {
+                "name": "full_name",
+                "type": "string",
+                "extraction_task": "metadata",
+                "extraction_examples": [r"Name:\s+(.+)"],
+            },
+            {
+                "name": "licence_number",
+                "type": "string",
+                "extraction_task": "metadata",
+                "extraction_examples": [r"Licence No:\s+(\S+)"],
+            },
+            {
+                "name": "date_of_birth",
+                "type": "date",
+                "extraction_task": "metadata",
+                "extraction_examples": [r"DOB:\s+(\d{4}-\d{2}-\d{2})"],
+            },
+            {
+                "name": "expiry_date",
+                "type": "date",
+                "extraction_task": "metadata",
+                "extraction_examples": [r"EXP:\s+(\d{4}-\d{2}-\d{2})"],
+            },
+            {
+                "name": "vehicle_classes",
+                "type": "string",
+                "extraction_task": "metadata",
+                "extraction_examples": [r"Classes:\s+(.+)"],
+            },
+        ]
+    },
     "quality": {"row_rules": [{"not_null": "licence_number"}]},
 }
 

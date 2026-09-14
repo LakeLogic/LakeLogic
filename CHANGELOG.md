@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.63.0] — 2026-09-14
+
+### Added
+
+- Implement privacy-action execution evidence and update GDPR reporting mechanism
+- Enhance city data handling and document generation
 ## [1.62.0] — 2026-09-12
 
 ### Added
@@ -776,6 +782,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.63.0]: https://github.com/lakelogic/LakeLogic/compare/v1.62.0...v1.63.0
 [1.62.0]: https://github.com/lakelogic/LakeLogic/compare/v1.61.0...v1.62.0
 [1.61.0]: https://github.com/lakelogic/LakeLogic/compare/v1.60.0...v1.61.0
 [1.60.0]: https://github.com/lakelogic/LakeLogic/compare/v1.59.0...v1.60.0

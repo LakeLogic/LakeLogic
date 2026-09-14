@@ -431,16 +431,18 @@ def _city_columns(code: str, name: str, country: str, tz: str) -> Dict[str, str]
     }
     if geo:
         _a2, a3, num, country_name, currency = geo
-        cols.update({
-            "country_code_alpha3": a3,
-            "country_code_numeric": num,
-            "country": country_name,
-            "country_name": country_name,
-            "currency": currency,
-            "currency_code": currency,
-            "default_currency": currency,
-            "primary_currency_code": currency,
-        })
+        cols.update(
+            {
+                "country_code_alpha3": a3,
+                "country_code_numeric": num,
+                "country": country_name,
+                "country_name": country_name,
+                "currency": currency,
+                "currency_code": currency,
+                "default_currency": currency,
+                "primary_currency_code": currency,
+            }
+        )
     return cols
 
 
@@ -6152,7 +6154,9 @@ class DataGenerator:
 
         return alignments
 
-    def _apply_city_coherence(self, row: Dict[str, Any], field_rules: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    def _apply_city_coherence(
+        self, row: Dict[str, Any], field_rules: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> None:
         """Make every city-shaped column in a row describe ONE real city.
 
         The driver is the row's `city_code` (a `-2` style uniqueness suffix is ignored for the

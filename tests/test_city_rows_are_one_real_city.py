@@ -67,8 +67,10 @@ def test_a_city_is_retired_after_it_launched(tmp_path, use_faker):
     rows = _rows(tmp_path, use_faker=use_faker)
     for row in rows:
         if row["sunset_at"] is not None and row["launched_at"] is not None:
-            launched, sunset = (v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
-                                for v in (row["launched_at"], row["sunset_at"]))
+            launched, sunset = (
+                v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
+                for v in (row["launched_at"], row["sunset_at"])
+            )
             assert sunset >= launched
     assert sum(row["sunset_at"] is None for row in rows) > len(rows) / 2, "most cities are still live"
 
