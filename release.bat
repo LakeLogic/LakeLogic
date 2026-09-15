@@ -94,19 +94,31 @@ git add uv.lock
 REM Step 0b: Compatibility check — abort release if upgraded deps break tests
 echo.
 echo [0b/6] Running compatibility tests...
-"%PY%" -m pytest tests/ -x -q --tb=short
+REM No -x, and one retry of the failures in a FRESH process. On Windows the local Spark
+REM JVM can drop its py4j connection late in a long run ("connection forcibly closed"),
+REM which fails whichever Spark test is running and every Spark test after it. That is
+REM not hypothetical: it blocked a release at test 1215 of ~2450 while the same test
+REM passed alone in 10s. A real failure fails twice and still stops the release.
+"%PY%" -m pytest tests/ -q --tb=short
 if errorlevel 1 (
     echo.
-    echo ERROR: Tests failed after dependency upgrade. Review uv.lock changes.
-    echo   To revert: git checkout uv.lock
-    exit /b 1
+    echo Retrying the failed tests once in a fresh process...
+    "%PY%" -m pytest tests/ --lf -q --tb=short
+    if errorlevel 1 (
+        echo.
+        echo ERROR: Tests failed twice after dependency upgrade. Review uv.lock changes.
+        echo   To revert: git checkout uv.lock
+        exit /b 1
+    )
 )
 
 REM Step 0c: Lint and format (auto-fix safe issues)
 echo.
 echo [0c/6] Running ruff lint and format...
-ruff check . --exclude _ref --fix --quiet
-ruff format . --exclude _ref --quiet
+REM Through this repo's venv for the same reason as %PY%: bare `ruff` resolved to the
+REM SaaS venv's 0.16, outside this repo's pin (<0.14), and would reformat to its rules.
+"%PY%" -m ruff check . --exclude _ref --fix --quiet
+"%PY%" -m ruff format . --exclude _ref --quiet
 git add -u
 
 REM Step 1: Bump version (creates tag + bump commit)

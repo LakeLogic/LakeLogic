@@ -1169,9 +1169,7 @@ def to_odcs(contract: "DataContract") -> Dict[str, Any]:
     # info.data_product is canonical; the metadata keys are where older imports
     # (dataProduct) and Build Centre (data_product) put it before OLC 0.14.
     data_product = (
-        (getattr(info, "data_product", None) if info else None)
-        or meta.get("data_product")
-        or meta.get("dataProduct")
+        (getattr(info, "data_product", None) if info else None) or meta.get("data_product") or meta.get("dataProduct")
     )
     if data_product:
         odcs["dataProduct"] = data_product
