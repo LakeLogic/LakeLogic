@@ -333,3 +333,27 @@ def test_odcs_roundtrip_export_and_reimport():
     assert reimported_by_name["email"].pii is True
     # module-level to_odcs() matches the method
     assert to_odcs(original)["name"] == doc["name"]
+
+
+def test_odcs_data_product_maps_to_info():
+    """ODCS `dataProduct` is OLC's `info.data_product`, kept verbatim and not duplicated in metadata."""
+    contract = DataContract(**REAL_ODCS_V3)
+    assert contract.info.data_product == "customer-360"
+    assert "dataProduct" not in contract.metadata
+
+    doc = contract.to_odcs()
+    assert doc["dataProduct"] == "customer-360"
+    assert DataContract(**doc).info.data_product == "customer-360"
+
+
+def test_odcs_export_reads_pre_olc_014_data_product_keys():
+    """Contracts written before info.data_product existed still export their product."""
+    base = {"version": "1.0", "info": {"title": "orders"}}
+    build_centre = DataContract(**base, metadata={"data_product": "sales_orders"})
+    assert to_odcs(build_centre)["dataProduct"] == "sales_orders"
+    old_import = DataContract(**base, metadata={"dataProduct": "customer-360"})
+    assert to_odcs(old_import)["dataProduct"] == "customer-360"
+    # info wins over metadata
+    both = DataContract(version="1.0", info={"title": "o", "data_product": "p_new"}, metadata={"data_product": "p_old"})
+    assert to_odcs(both)["dataProduct"] == "p_new"
+    assert "dataProduct" not in to_odcs(DataContract(**base))

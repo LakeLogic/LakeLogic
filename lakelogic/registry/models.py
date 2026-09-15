@@ -36,7 +36,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from olc.models.registry_v1 import DataProductEntry
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lakelogic.core.registry import (
     CloudReporting,
@@ -108,6 +109,33 @@ class DomainManifestV1(_StrictManifest):
     lineage: Dict[str, Any] = Field(default_factory=dict)
     materialization: Dict[str, Any] = Field(default_factory=dict)
     server: Dict[str, Any] = Field(default_factory=dict)
+
+    # ── data products (domain-only, not inherited) ───────────────────────────────
+    # The shape is OLC's (one definition); contracts reference an entry by
+    # `info.data_product`. Cross-document checks (unknown ids, unimplemented outputs)
+    # need the whole registry and are not this manifest's job.
+    products: List[DataProductEntry] = Field(default_factory=list)
+
+    @field_validator("products")
+    @classmethod
+    def _products_are_well_formed(cls, products: List[DataProductEntry]) -> List[DataProductEntry]:
+        # The OLC entry models tolerate extra keys (OLC enforces strictness in its loader),
+        # so a misspelt `expected_ouputs` would silently drop every output here. Refuse any
+        # undeclared key that is not an `x-` extension, as the top level does.
+        def _unknown(entry, where: str) -> None:
+            unknown = sorted(str(k) for k in (entry.model_extra or {}) if not str(k).startswith("x-"))
+            if unknown:
+                raise ValueError(f"unknown key(s) in {where}: {', '.join(unknown)}")
+
+        seen: set = set()
+        for product in products:
+            _unknown(product, f"data product '{product.id}'")
+            for output in product.expected_outputs:
+                _unknown(output, f"expected output '{output.id}' of data product '{product.id}'")
+            if product.id in seen:
+                raise ValueError(f"data product id declared more than once: {product.id}")
+            seen.add(product.id)
+        return products
 
     @model_validator(mode="after")
     def validate_ownership_roles(self):

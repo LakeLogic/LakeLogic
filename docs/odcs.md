@@ -34,7 +34,8 @@ The converter understands the **full ODCS v3.x document shape**, while staying *
 | `name` | `info.title` | Fallback order: `name` → `id` → legacy `dataset`. |
 | `status` | `info.status` | |
 | `domain` | `info.domain` | |
-| `tenant` / `dataProduct` / `tags` | `metadata.*` | Carried so nothing is dropped. |
+| `dataProduct` | `info.data_product` | The product that publishes this dataset. Kept verbatim; the OLC id format is enforced only on strict OLC validation. Export also reads `metadata.data_product` / `metadata.dataProduct` from contracts written before OLC 0.14. |
+| `tenant` / `tags` | `metadata.*` | Carried so nothing is dropped. |
 | `description` (object: `purpose`, `usage`, `limitations`) | `info.description` | Non-empty parts joined. A plain string is also accepted. |
 | `customProperties` (non-`lakelogic`) | `metadata.odcs_custom_properties` | |
 

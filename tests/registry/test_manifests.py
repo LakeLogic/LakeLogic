@@ -104,6 +104,50 @@ def test_domain_manifest_requires_domain():
         DomainManifestV1.model_validate({"ownership": {"team": "x"}})
 
 
+# ── Behavioural: data products on _domain.yaml ───────────────────────────────
+
+
+def test_domain_manifest_accepts_products():
+    m = DomainManifestV1.model_validate(
+        {
+            "domain": "real_estate",
+            "products": [
+                {
+                    "id": "property_performance",
+                    "name": "Property Performance",
+                    "lifecycle": "active",
+                    "expected_outputs": [{"id": "monthly_property_income", "name": "Monthly Property Income"}],
+                }
+            ],
+        }
+    )
+    assert m.products[0].id == "property_performance"
+    assert m.products[0].expected_outputs[0].kind == "table"
+
+
+def test_domain_manifest_without_products_is_empty():
+    assert DomainManifestV1.model_validate({"domain": "d"}).products == []
+    assert DomainManifestV1.model_validate({"domain": "d", "products": None}).products == []
+
+
+def test_domain_manifest_refuses_wrong_products():
+    with pytest.raises(ValueError, match="more than once"):
+        DomainManifestV1.model_validate(
+            {"domain": "d", "products": [{"id": "p_one", "name": "A"}, {"id": "p_one", "name": "B"}]}
+        )
+    with pytest.raises(ValueError, match="id"):
+        DomainManifestV1.model_validate({"domain": "d", "products": [{"id": "Property Performance", "name": "A"}]})
+    with pytest.raises(ValueError, match="expected_ouputs"):
+        DomainManifestV1.model_validate(
+            {"domain": "d", "products": [{"id": "p_one", "name": "A", "expected_ouputs": []}]}
+        )
+
+
+def test_products_do_not_belong_on_a_system_manifest():
+    with pytest.raises(ValueError, match="products"):
+        SystemManifestV1.model_validate({"system": "s", "products": []})
+
+
 def test_inheritable_keys_allowed_on_both_manifests():
     """An inheritable governance key (e.g. `slo`, `notifications`) is legal on a system
     manifest, not only a domain one — matching the resolution spec."""

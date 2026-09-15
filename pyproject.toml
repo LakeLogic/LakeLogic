@@ -76,7 +76,8 @@ dependencies = [
     # RideFlow mesh broke — from a release we never chose to adopt, because the
     # requirement was an open `>=`. Raise this deliberately, with the conformance
     # harness green, rather than inheriting the next spec change by accident.
-    "open-lakehouse-contract[models]>=0.1.0,<0.12.0",
+    # 0.14.0: `info.data_product` and `_domain.yaml` `products:` (DomainManifestV1 reuses the OLC entry model).
+    "open-lakehouse-contract[models]>=0.14.0,<0.15.0",
     # A CONSTRAINT, not a feature: `rich` is transitive (via typer), and rich 15
     # is incompatible with pyiceberg (<15), which lakelogic itself imports for
     # Iceberg catalogs in core/materialization, core/quarantine and core/run_log.

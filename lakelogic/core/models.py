@@ -904,7 +904,12 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
         info["domain"] = data["domain"]
     if data.get("status"):
         info["status"] = data["status"]
-    consumed.update({"domain", "status"})
+    # ODCS `dataProduct` is the product that publishes this dataset — OLC's
+    # `info.data_product`. Kept verbatim: ODCS allows any string, the id format
+    # is enforced only on the strict OLC path.
+    if data.get("dataProduct"):
+        info["data_product"] = str(data["dataProduct"])
+    consumed.update({"domain", "status", "dataProduct"})
 
     # metadata carries everything that has no first-class LakeLogic home so
     # nothing is silently dropped, plus the ODCS round-trip anchors.
@@ -913,10 +918,10 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
         metadata["odcs_id"] = data["id"]
     if data.get("name"):
         metadata["odcs_name"] = data["name"]
-    for k in ("tenant", "dataProduct", "tags"):
+    for k in ("tenant", "tags"):
         if data.get(k) is not None:
             metadata[k] = data[k]
-    consumed.update({"tenant", "dataProduct", "tags"})
+    consumed.update({"tenant", "tags"})
 
     # ── Ownership: team[] (v3) / stakeholders[] (v2) / roles[] ───────────────
     owner = None
@@ -1161,8 +1166,15 @@ def to_odcs(contract: "DataContract") -> Dict[str, Any]:
         odcs["domain"] = info.domain
     if meta.get("tenant"):
         odcs["tenant"] = meta["tenant"]
-    if meta.get("dataProduct"):
-        odcs["dataProduct"] = meta["dataProduct"]
+    # info.data_product is canonical; the metadata keys are where older imports
+    # (dataProduct) and Build Centre (data_product) put it before OLC 0.14.
+    data_product = (
+        (getattr(info, "data_product", None) if info else None)
+        or meta.get("data_product")
+        or meta.get("dataProduct")
+    )
+    if data_product:
+        odcs["dataProduct"] = data_product
     if meta.get("tags"):
         odcs["tags"] = meta["tags"]
     if info and info.description:

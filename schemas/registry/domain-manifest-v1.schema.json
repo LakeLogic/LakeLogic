@@ -1,5 +1,117 @@
 {
   "$defs": {
+    "DataProductEntry": {
+      "additionalProperties": true,
+      "description": "One data product the domain is accountable for.\n\nA product groups contracted outputs around a shared business purpose. It is defined once,\nhere; contracts reference it by ``id`` from ``info.data_product``. Shared dependencies are\nlineage, not membership: a table belongs to the product that publishes it, or to none.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "expected_outputs": {
+          "items": {
+            "$ref": "#/$defs/ExpectedOutputEntry"
+          },
+          "title": "Expected Outputs",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{1,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "lifecycle": {
+          "default": "proposed",
+          "enum": [
+            "proposed",
+            "active",
+            "deprecated",
+            "retired"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "DataProductEntry",
+      "type": "object"
+    },
+    "ExpectedOutputEntry": {
+      "additionalProperties": true,
+      "description": "An output a data product promises: a table, view, API or semantic model.\n\nDeclared on the product, not derived from contracts, so an output that has been promised\nbut never contracted is visible. A contract implements one by setting\n``info.data_product_output`` to this ``id``.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{1,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "default": "table",
+          "enum": [
+            "table",
+            "view",
+            "api",
+            "semantic_model"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ExpectedOutputEntry",
+      "type": "object"
+    },
     "RegistrySLO": {
       "properties": {
         "alerting": {
@@ -458,6 +570,13 @@
       "additionalProperties": true,
       "title": "Ownership",
       "type": "object"
+    },
+    "products": {
+      "items": {
+        "$ref": "#/$defs/DataProductEntry"
+      },
+      "title": "Products",
+      "type": "array"
     },
     "quarantine": {
       "additionalProperties": true,
