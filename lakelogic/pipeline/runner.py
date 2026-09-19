@@ -237,6 +237,33 @@ def _ownership_for_contract(contract_dict: Dict[str, Any], registry: Any) -> Dic
     return getattr(registry, "ownership", {}) or {}
 
 
+def _frame_is_empty(df) -> bool:
+    """True when *df* holds no rows, for any engine's frame.
+
+    Every check asks the CLASS, not the instance. `hasattr(df, "is_empty")` runs the
+    instance `__getattr__`, and a Spark Connect DataFrame with no columns -- what an
+    incremental read returns for an empty slice, `DataFrame[]` -- resolves any name to
+    an unresolved Column instead of raising. The probe then answers True and the call
+    raises `'Column' object is not callable`, three frames from anything that explains
+    it. Asking the class cannot be fooled that way.
+
+    Spark is asked first only because it is the common case here; correctness comes from
+    asking the class, not from the order.
+    """
+    if df is None:
+        return True
+    if isinstance(df, list):
+        return len(df) == 0
+    cls = type(df)
+    if hasattr(cls, "isEmpty"):
+        return bool(df.isEmpty())
+    if hasattr(cls, "is_empty"):
+        return bool(df.is_empty())
+    if hasattr(cls, "__len__"):
+        return len(df) == 0
+    return False
+
+
 class LakehousePipeline:
     """
     Executes a DomainRegistry through a pipeline run.
@@ -2776,21 +2803,9 @@ class LakehousePipeline:
             df_good = result.good
             df_bad = getattr(result, "bad", None)
 
-            is_good_empty = (
-                df_good is None
-                or (isinstance(df_good, list) and len(df_good) == 0)
-                or (hasattr(df_good, "is_empty") and df_good.is_empty())
-                or (hasattr(df_good, "__len__") and len(df_good) == 0)
-                or (hasattr(df_good, "isEmpty") and df_good.isEmpty())
-            )
+            is_good_empty = _frame_is_empty(df_good)
 
-            is_bad_empty = (
-                df_bad is None
-                or (isinstance(df_bad, list) and len(df_bad) == 0)
-                or (hasattr(df_bad, "is_empty") and df_bad.is_empty())
-                or (hasattr(df_bad, "__len__") and len(df_bad) == 0)
-                or (hasattr(df_bad, "isEmpty") and df_bad.isEmpty())
-            )
+            is_bad_empty = _frame_is_empty(df_bad)
 
             _status = "success"
             if is_good_empty and is_bad_empty:

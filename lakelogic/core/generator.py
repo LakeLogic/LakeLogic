@@ -727,6 +727,14 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     "referrer": "url",
     "utm_campaign": "bothify(text='camp_????_##')",
     "conversion_rate": "pyfloat(min_value=0, max_value=1, right_digits=4)",
+    # A monetary amount, not an identifier. Without this the name falls through to the
+    # code-like fallback and a STRING column gets "CON-9592", which any downstream cast
+    # to DOUBLE then rejects.
+    "conversion_value": "pyfloat(min_value=0, max_value=10000, right_digits=2)",
+    # Ad spend. Same reasoning as conversion_value: a money column that the generic
+    # fallback would otherwise turn into "SPE-1207".
+    "spend": "pyfloat(min_value=0, max_value=10000, right_digits=2)",
+    "ad_spend": "pyfloat(min_value=0, max_value=10000, right_digits=2)",
     "bounce_rate": "pyfloat(min_value=0, max_value=1, right_digits=4)",
     "click_through_rate": "pyfloat(min_value=0, max_value=1, right_digits=4)",
     # ── IoT / Technical ───────────────────────────────────────────────────
@@ -6678,6 +6686,15 @@ class DataGenerator:
                 hi = int(float(max_val)) if max_val is not None else 1000
                 return self._rng.randint(lo, hi)
 
+            # A numeric name hint (rating, price, amount) gives a realistic range. Without it a
+            # float `rating` came out as 629.56. A declared min/max still wins.
+            if self._faker and min_val is None and max_val is None:
+                hint = _match_semantic_hint(name_lower)
+                if hint and hint.startswith(("pyfloat(", "pyint(")):
+                    value = self._call_faker(hint)
+                    if isinstance(value, (int, float)) and _fits_field_rules(value, rules):
+                        return float(value)
+
             lo = float(min_val) if min_val is not None else 0.01
             hi = float(max_val) if max_val is not None else 1_000.0
             return round(self._rng.uniform(lo, hi), 4)
@@ -6992,7 +7009,12 @@ class DataGenerator:
             except (ValueError, SyntaxError):
                 kwargs[key.strip()] = val_str.strip()
 
-        return fn(**kwargs)
+        value = fn(**kwargs)
+        # Faker's pyfloat can ignore right_digits when a value is nudged into min/max
+        # (4.415903208264697 for right_digits=1), so round it here.
+        if method_name == "pyfloat" and isinstance(value, float) and "right_digits" in kwargs:
+            value = round(value, int(kwargs["right_digits"]))
+        return value
 
     @staticmethod
     def _split_kwargs(s: str) -> List[str]:
