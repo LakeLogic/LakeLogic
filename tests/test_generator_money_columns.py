@@ -12,6 +12,7 @@ The generic fallback is right for genuine identifiers, so the fix is to name the
 columns rather than to guess from a suffix -- `attribute_value` and `enum_value` are
 legitimately text.
 """
+
 import tempfile
 from pathlib import Path
 

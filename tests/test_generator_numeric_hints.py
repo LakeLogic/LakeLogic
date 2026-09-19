@@ -33,10 +33,12 @@ def test_a_declared_range_still_wins(tmp_path):
     doc = {
         "version": "1.0.0",
         "info": {"title": "drivers", "table_name": "drivers"},
-        "model": {"fields": [
-            {"name": "driver_id", "type": "string", "required": True},
-            {"name": "rating", "type": "double"},
-        ]},
+        "model": {
+            "fields": [
+                {"name": "driver_id", "type": "string", "required": True},
+                {"name": "rating", "type": "double"},
+            ]
+        },
         "quality": {"row_rules": [{"name": "rating_range", "sql": "rating BETWEEN 1 AND 2"}]},
     }
     path = tmp_path / "drivers.yaml"

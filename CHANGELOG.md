@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.66.0] — 2026-09-19
+
+### Added
+
+- Update version to 1.65.1.dev2 and enhance DataGenerator with monetary column handling and frame empty checks
 ## [1.65.0] — 2026-09-15
 
 ### Added
@@ -792,6 +797,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.66.0]: https://github.com/lakelogic/LakeLogic/compare/v1.65.0...v1.66.0
 [1.65.0]: https://github.com/lakelogic/LakeLogic/compare/v1.64.0...v1.65.0
 [1.64.0]: https://github.com/lakelogic/LakeLogic/compare/v1.63.0...v1.64.0
 [1.63.0]: https://github.com/lakelogic/LakeLogic/compare/v1.62.0...v1.63.0

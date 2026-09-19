@@ -15,6 +15,7 @@ The requirement is that the probe asks the CLASS. Check order is then not load-b
 a class that does not define `is_empty` cannot be asked for it however the checks are
 ordered -- so no test here pins the order, only the class-probing.
 """
+
 import pytest
 
 from lakelogic.pipeline.runner import _frame_is_empty
