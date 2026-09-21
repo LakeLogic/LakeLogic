@@ -77,7 +77,10 @@ dependencies = [
     # requirement was an open `>=`. Raise this deliberately, with the conformance
     # harness green, rather than inheriting the next spec change by accident.
     # 0.14.0: `info.data_product` and `_domain.yaml` `products:` (DomainManifestV1 reuses the OLC entry model).
-    "open-lakehouse-contract[models]>=0.14.0,<0.15.0",
+    # <0.16.0 (2026-09-21): 0.15.0 adds `materialization.scd1` — the key 1.66.1's unknown-member
+    # fix reads. Leaving the cap at <0.15 made this release uninstallable beside lakelogic-saas,
+    # which needs 0.15 to validate the scd1 blocks it generates. Suite green against 0.15.0.
+    "open-lakehouse-contract[models]>=0.14.0,<0.16.0",
     # A CONSTRAINT, not a feature: `rich` is transitive (via typer), and rich 15
     # is incompatible with pyiceberg (<15), which lakelogic itself imports for
     # Iceberg catalogs in core/materialization, core/quarantine and core/run_log.
