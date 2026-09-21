@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.66.2] — 2026-09-21
+
+### Documentation
+
+- Update changelog for v1.66.1
+
+### Fixed
+
+- **dependencies**: Adjust open-lakehouse-contract version constraint to maintain compatibility with lakelogic-saas
+
+### Testing
+
+- **spark**: Share one Delta-enabled session on loopback; stop tearing it down
 ## [1.66.1] — 2026-09-21
 
 ### Documentation
@@ -730,6 +743,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.66.2]: https://github.com/lakelogic/LakeLogic/compare/v1.66.1...v1.66.2
 [1.66.1]: https://github.com/lakelogic/LakeLogic/compare/v1.66.0...v1.66.1
 [1.66.0]: https://github.com/lakelogic/LakeLogic/compare/v1.65.0...v1.66.0
 [1.65.0]: https://github.com/lakelogic/LakeLogic/compare/v1.64.0...v1.65.0
