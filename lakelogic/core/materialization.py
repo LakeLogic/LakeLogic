@@ -1530,7 +1530,21 @@ def _merge_frames(
                 return uuid.uuid4().hex[:16]
             return hashlib.sha256(pk_val.encode("utf-8")).hexdigest()[:16]
 
+        # THE UNKNOWN MEMBER KEEPS ITS KEY. Recomputing every row's key re-hashed the
+        # existing `-1` row into sha256(<its placeholder pk>), so the injector — idempotent
+        # by SK value — no longer found it and added another. Every run then grew the
+        # dimension by one row, and from the second run the surrogate key was not unique.
+        unknown_sk = str(
+            (scd1_cfg.get("unknown_member") or {}).get("surrogate_key_value", "-1")
+        )
+        is_unknown = (
+            merged[sk_column].astype(str) == unknown_sk
+            if sk_column in merged.columns
+            else None
+        )
         merged[sk_column] = merged.apply(_compute_sk, axis=1)
+        if is_unknown is not None and bool(is_unknown.any()):
+            merged.loc[is_unknown, sk_column] = unknown_sk
 
     # NOTE: SCD1 Unknown member injection is NOT done here because _merge_frames
     # can be called per-partition. The caller injects it once on the combined result.
@@ -2719,9 +2733,20 @@ def _spark_merge_dataframe(  # pragma: no cover
         sk_strategy = scd1_cfg.get("surrogate_key_strategy", "hash")
         pk_concat = F.concat_ws("|", *[F.col(c).cast("string") for c in primary_key])
         if sk_strategy == "uuid":
-            merged = merged.withColumn(sk_column, F.expr("substring(uuid(), 1, 16)"))
+            new_sk = F.expr("substring(uuid(), 1, 16)")
         else:
-            merged = merged.withColumn(sk_column, F.substring(F.sha2(pk_concat, 256), 1, 16))
+            new_sk = F.substring(F.sha2(pk_concat, 256), 1, 16)
+        # The unknown member keeps its key — see the same note in `_merge_frames`. Without
+        # this the `-1` row is re-hashed, `_inject_unknown_member_spark` (idempotent by SK
+        # value) no longer finds it, and every run adds another.
+        unknown_sk = str(
+            (scd1_cfg.get("unknown_member") or {}).get("surrogate_key_value", "-1")
+        )
+        if sk_column in merged.columns:
+            new_sk = F.when(
+                F.col(sk_column).cast("string") == F.lit(unknown_sk), F.lit(unknown_sk)
+            ).otherwise(new_sk)
+        merged = merged.withColumn(sk_column, new_sk)
 
     # ── SCD1 Unknown Member Injection ────────────────────────────
     if scd1_cfg:
