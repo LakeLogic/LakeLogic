@@ -408,8 +408,8 @@ def spark_session():
         .config("spark.driver.bindAddress", "127.0.0.1")
         .getOrCreate()
     )
+    # NOT stopped: the session is the process's one SparkContext (see tests/conftest.py).
     yield spark
-    spark.stop()
 
 
 import sys as _sys

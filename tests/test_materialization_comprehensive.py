@@ -303,14 +303,12 @@ class TestSeedSoftDeleteColumnsSpark:
         from pyspark.sql import SparkSession
 
         spark = SparkSession.builder.appName("test").master("local").getOrCreate()
-        try:
-            df = spark.createDataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])
+        # NOT stopped: this is the process's one SparkContext (tests/conftest.py).
+        df = spark.createDataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])
 
-            result = mat._seed_soft_delete_columns_spark(df, soft_delete_col="is_deleted")
+        result = mat._seed_soft_delete_columns_spark(df, soft_delete_col="is_deleted")
 
-            assert "is_deleted" in result.columns
-        finally:
-            spark.stop()
+        assert "is_deleted" in result.columns
 
     @pytest.mark.skipif(
         os.getenv("CI") is not None or os.getenv("SKIP_SPARK_TESTS") is not None,
@@ -322,24 +320,22 @@ class TestSeedSoftDeleteColumnsSpark:
         from pyspark.sql import SparkSession
 
         spark = SparkSession.builder.appName("test").master("local").getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [
-                    {"id": 1, "name": "Alice", "cdc_op": "I"},
-                    {"id": 2, "name": "Bob", "cdc_op": "D"},
-                ]
-            )
+        # NOT stopped: this is the process's one SparkContext (tests/conftest.py).
+        df = spark.createDataFrame(
+            [
+                {"id": 1, "name": "Alice", "cdc_op": "I"},
+                {"id": 2, "name": "Bob", "cdc_op": "D"},
+            ]
+        )
 
-            result = mat._seed_soft_delete_columns_spark(
-                df,
-                soft_delete_col="is_deleted",
-                cdc_op_field="cdc_op",
-                cdc_delete_values=["D"],
-            )
+        result = mat._seed_soft_delete_columns_spark(
+            df,
+            soft_delete_col="is_deleted",
+            cdc_op_field="cdc_op",
+            cdc_delete_values=["D"],
+        )
 
-            assert "is_deleted" in result.columns
-        finally:
-            spark.stop()
+        assert "is_deleted" in result.columns
 
 
 class TestMergeFrames:

@@ -420,19 +420,17 @@ class TestSparkLateArrival:
             .config("spark.ui.enabled", "false")
             .getOrCreate()
         )
-        try:
-            pdf = self._run(
-                spark,
-                tmp_path,
-                [
-                    ("d1", "equire", "2024-01-01", "2024-01-04", False),
-                    ("d1", "serius", "2024-01-04", "2099-12-31", True),
-                ],
-                [("d1", "notified", "2024-01-03")],
-                monkeypatch,
-            )
-        finally:
-            spark.stop()
+        # NOT stopped: this is the process's one SparkContext (tests/conftest.py).
+        pdf = self._run(
+            spark,
+            tmp_path,
+            [
+                ("d1", "equire", "2024-01-01", "2024-01-04", False),
+                ("d1", "serius", "2024-01-04", "2099-12-31", True),
+            ],
+            [("d1", "notified", "2024-01-03")],
+            monkeypatch,
+        )
 
         rows = [
             (
