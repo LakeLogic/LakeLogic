@@ -16,6 +16,7 @@ These tests drive a REAL parsed `DataContract` through `materialize_dataframe`, 
 config: the bug lived in how the pieces combine across runs, which a unit test of any one of them
 would not see.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,25 +33,29 @@ SK = "city_sk"
 
 
 def _contract(**unknown_member):
-    return DataContract.model_validate({
-        "version": "1.0.0",
-        "info": {"title": "dim_city", "target_layer": "gold"},
-        "model": {"fields": [
-            {"name": SK, "type": "string"},
-            {"name": "city_code", "type": "string"},
-            {"name": "city_name", "type": "string"},
-        ]},
-        "primary_key": ["city_code"],
-        "natural_key": ["city_code"],
-        "materialization": {
-            "strategy": "merge",
-            "scd1": {
-                "surrogate_key": SK,
-                "surrogate_key_strategy": "hash",
-                "unknown_member": {"enabled": True, "surrogate_key_value": "-1", **unknown_member},
+    return DataContract.model_validate(
+        {
+            "version": "1.0.0",
+            "info": {"title": "dim_city", "target_layer": "gold"},
+            "model": {
+                "fields": [
+                    {"name": SK, "type": "string"},
+                    {"name": "city_code", "type": "string"},
+                    {"name": "city_name", "type": "string"},
+                ]
             },
-        },
-    })
+            "primary_key": ["city_code"],
+            "natural_key": ["city_code"],
+            "materialization": {
+                "strategy": "merge",
+                "scd1": {
+                    "surrogate_key": SK,
+                    "surrogate_key_strategy": "hash",
+                    "unknown_member": {"enabled": True, "surrogate_key_value": "-1", **unknown_member},
+                },
+            },
+        }
+    )
 
 
 def _frame(*rows):
@@ -59,7 +64,11 @@ def _frame(*rows):
 
 def _run(contract, target, *rows):
     materialize_dataframe(
-        _frame(*rows), contract, target, output_format="parquet", engine_name="pandas",
+        _frame(*rows),
+        contract,
+        target,
+        output_format="parquet",
+        engine_name="pandas",
     )
     return pd.read_parquet(target)
 
@@ -169,7 +178,7 @@ def test_the_spark_path_preserves_the_unknown_member_too():
     from lakelogic.core import materialization
 
     src = inspect.getsource(materialization._spark_merge_dataframe)
-    assert "F.col(sk_column).cast(\"string\") == F.lit(unknown_sk)" in src
+    assert 'F.col(sk_column).cast("string") == F.lit(unknown_sk)' in src
 
 
 def test_the_spark_path_keeps_one_unknown_member_across_runs(tmp_path):
