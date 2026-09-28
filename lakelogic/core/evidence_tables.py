@@ -221,8 +221,13 @@ def _write_delta(target: str, records, cols) -> str:
         mode = "append"
     except Exception:
         mode = "overwrite"
-    write_deltalake(target, _arrow_table(records, cols), mode=mode, storage_options=storage_options,
-                    schema_mode="merge" if mode == "append" else None)
+    write_deltalake(
+        target,
+        _arrow_table(records, cols),
+        mode=mode,
+        storage_options=storage_options,
+        schema_mode="merge" if mode == "append" else None,
+    )
     return target
 
 
@@ -253,14 +258,20 @@ def _write_spark(target: str, records, cols) -> str:
         except Exception as exc:
             if attempt == _SPARK_APPEND_ATTEMPTS - 1 or not _is_concurrency_conflict(exc):
                 raise
-            time.sleep(0.5 * (2 ** attempt))
+            time.sleep(0.5 * (2**attempt))
     return target
 
 
 _SPARK_APPEND_ATTEMPTS = 5
 _CONFLICT_MARKERS = (
-    "already exists", "ALREADY_EXISTS", "ConcurrentAppend", "ConcurrentTransaction",
-    "ConcurrentModification", "MetadataChanged", "ProtocolChanged", "DELTA_CONCURRENT",
+    "already exists",
+    "ALREADY_EXISTS",
+    "ConcurrentAppend",
+    "ConcurrentTransaction",
+    "ConcurrentModification",
+    "MetadataChanged",
+    "ProtocolChanged",
+    "DELTA_CONCURRENT",
 )
 
 

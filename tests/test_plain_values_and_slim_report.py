@@ -81,34 +81,90 @@ def test_plain_value_cleans_serialised_json_and_nested_structures():
 
 # Every key the flattened row stores as its own column.
 _COLUMN_KEYS = {
-    "pipeline_run_id", "run_id", "timestamp", "start_time", "end_time", "run_duration_seconds",
-    "engine", "contract", "contract_version", "stage", "dataset", "domain", "system",
-    "environment", "data_layer", "status", "error_message", "error_traceback",
-    "lakelogic_version", "source_path", "estimated_cost", "cost_currency", "cost_confidence",
-    "max_source_mtime", "max_watermark_value", "dlt_state_json", "slos",
+    "pipeline_run_id",
+    "run_id",
+    "timestamp",
+    "start_time",
+    "end_time",
+    "run_duration_seconds",
+    "engine",
+    "contract",
+    "contract_version",
+    "stage",
+    "dataset",
+    "domain",
+    "system",
+    "environment",
+    "data_layer",
+    "status",
+    "error_message",
+    "error_traceback",
+    "lakelogic_version",
+    "source_path",
+    "estimated_cost",
+    "cost_currency",
+    "cost_confidence",
+    "max_source_mtime",
+    "max_watermark_value",
+    "dlt_state_json",
+    "slos",
 }
 
 
 def _full_report():
     return {
-        "run_id": "r1", "pipeline_run_id": "p1", "engine": "spark", "contract": "Orders",
-        "contract_file_name": "orders.yaml", "contract_version": "1.0.0", "stage": "default",
-        "dataset": "orders", "domain": "sales", "system": "erp", "environment": "dev",
-        "data_layer": "silver", "source_path": "s3://x/a.csv", "source_files": [{"path": "s3://x/a.csv", "mtime": None}],
-        "max_source_mtime": 1.0, "timestamp": "2026-09-27T00:00:00+00:00",
-        "counts": {"source": 10, "total": 10, "good": 9, "quarantined": 1, "quarantine_ratio": 0.1,
-                   "pre_transform_dropped": 0, "pre_transform_added": None},
-        "dataset_rules": [], "slos": {"freshness": {"delay_seconds": 12.0, "passed": True}},
+        "run_id": "r1",
+        "pipeline_run_id": "p1",
+        "engine": "spark",
+        "contract": "Orders",
+        "contract_file_name": "orders.yaml",
+        "contract_version": "1.0.0",
+        "stage": "default",
+        "dataset": "orders",
+        "domain": "sales",
+        "system": "erp",
+        "environment": "dev",
+        "data_layer": "silver",
+        "source_path": "s3://x/a.csv",
+        "source_files": [{"path": "s3://x/a.csv", "mtime": None}],
+        "max_source_mtime": 1.0,
+        "timestamp": "2026-09-27T00:00:00+00:00",
+        "counts": {
+            "source": 10,
+            "total": 10,
+            "good": 9,
+            "quarantined": 1,
+            "quarantine_ratio": 0.1,
+            "pre_transform_dropped": 0,
+            "pre_transform_added": None,
+        },
+        "dataset_rules": [],
+        "slos": {"freshness": {"delay_seconds": 12.0, "passed": True}},
         "row_rule_failures": [{"name": "r", "message": "Rule failed: r (x > 0)", "count": 1}],
-        "schema_drift": {}, "incremental_metadata": {"to_version": 7},
-        "execution_context": {"engine": "spark", "engine_version": "3.5", "python_version": "3.11",
-                              "wall_clock_seconds": 3.0, "peak_memory_mb": None,
-                              "polars": {"predicate_pushdown": True}},
-        "start_time": "a", "end_time": "b", "run_duration_seconds": 3.0,
-        "estimated_cost": 0.0, "cost_currency": "USD", "cost_confidence": "none",
-        "status": "failed", "error_message": "boom", "error_traceback": "T" * 5000,
-        "lakelogic_version": "1.0", "max_watermark_value": "w", "dlt_state_json": "{}",
-        "slo_row_count_min": 1, "slo_quality_pass": True,
+        "schema_drift": {},
+        "incremental_metadata": {"to_version": 7},
+        "execution_context": {
+            "engine": "spark",
+            "engine_version": "3.5",
+            "python_version": "3.11",
+            "wall_clock_seconds": 3.0,
+            "peak_memory_mb": None,
+            "polars": {"predicate_pushdown": True},
+        },
+        "start_time": "a",
+        "end_time": "b",
+        "run_duration_seconds": 3.0,
+        "estimated_cost": 0.0,
+        "cost_currency": "USD",
+        "cost_confidence": "none",
+        "status": "failed",
+        "error_message": "boom",
+        "error_traceback": "T" * 5000,
+        "lakelogic_version": "1.0",
+        "max_watermark_value": "w",
+        "dlt_state_json": "{}",
+        "slo_row_count_min": 1,
+        "slo_quality_pass": True,
     }
 
 
@@ -151,7 +207,10 @@ def test_unmeasured_cost_is_null_not_zero():
 
 
 def test_error_message_is_one_capped_line_and_traceback_is_capped_tail():
-    report = _full_report() | {"error_message": "x" * 900 + "\nsecond line", "error_traceback": "H" + "T" * 5000 + "END"}
+    report = _full_report() | {
+        "error_message": "x" * 900 + "\nsecond line",
+        "error_traceback": "H" + "T" * 5000 + "END",
+    }
     row = _flatten_report(report)
     assert row["error_message"] == "x" * 500
     assert len(row["error_traceback"]) == 2000 and row["error_traceback"].endswith("END")
@@ -182,10 +241,20 @@ def test_representative_run_persists_no_icons_and_a_small_report(tmp_path, engin
         "version": "1.0.0",
         "dataset": "orders",
         "info": {"title": "Orders ✅", "version": "1.2.0"},
-        "metadata": {"run_log_table": "run_logs", "run_log_backend": "duckdb", "run_log_database": str(db),
-                     "domain": "sales", "system": "erp", "data_layer": "silver", "environment": "dev"},
+        "metadata": {
+            "run_log_table": "run_logs",
+            "run_log_backend": "duckdb",
+            "run_log_database": str(db),
+            "domain": "sales",
+            "system": "erp",
+            "data_layer": "silver",
+            "environment": "dev",
+        },
         "quality": {
-            "row_rules": [{"name": "amount_positive ✅", "sql": "amount > 0"}, {"name": "id_not_null", "sql": "id IS NOT NULL"}],
+            "row_rules": [
+                {"name": "amount_positive ✅", "sql": "amount > 0"},
+                {"name": "id_not_null", "sql": "id IS NOT NULL"},
+            ],
             "dataset_rules": [{"name": "min_rows 📦", "sql": "SELECT COUNT(*) FROM source", "must_be_greater_than": 1}],
         },
     }
@@ -227,12 +296,14 @@ def test_slo_checks_and_evidence_rows_are_plain(tmp_path):
 
     from lakelogic.core.evidence_tables import _coerce
 
-    result = SLOCheckResult(layer="silver", entity="orders", check_type="freshness", status="✅ OK",
-                            passed=True, severity="pass")
+    result = SLOCheckResult(
+        layer="silver", entity="orders", check_type="freshness", status="✅ OK", passed=True, severity="pass"
+    )
     result.message = "⚠️ within target"
     db = tmp_path / "slo.duckdb"
     registry = types.SimpleNamespace(
-        domain="sales", system="erp",
+        domain="sales",
+        system="erp",
         storage=types.SimpleNamespace(slo_checks_table="slo_checks"),
         metadata={"slo_checks_backend": "duckdb", "slo_checks_database": str(db)},
     )

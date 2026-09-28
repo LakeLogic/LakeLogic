@@ -437,7 +437,6 @@ def _cap_traceback(value: Any) -> Optional[str]:
     return text if len(text) <= _TRACEBACK_LIMIT else text[-_TRACEBACK_LIMIT:]
 
 
-
 def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
     """
     Flatten a run report into a row-oriented structure for table logging.
@@ -1384,9 +1383,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         def _dest():
             return (
-                _dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
-                if dest_kwargs
-                else destination
+                _dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination
             )
 
         def _has_dataset(name: str) -> bool:
@@ -1929,8 +1926,7 @@ def write_slo_checks(
     system = getattr(registry, "system", "")
 
     records = [
-        plain_record(_flatten_slo_check(r, check_run_id, pipeline_run_id, checked_at, domain, system))
-        for r in results
+        plain_record(_flatten_slo_check(r, check_run_id, pipeline_run_id, checked_at, domain, system)) for r in results
     ]
     return _write_slo_checks_table(registry, records)
 

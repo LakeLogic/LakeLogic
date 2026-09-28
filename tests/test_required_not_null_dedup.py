@@ -4,6 +4,7 @@ The engine turns every required field into `<field>_required` (IS NOT NULL). A c
 also writes `rider_id IS NOT NULL` (or `not_null: rider_id`) used to scan each row twice and
 report a null against both rules. The written rule wins; the automatic one is skipped.
 """
+
 import pytest
 
 from lakelogic.core.models import DataContract
@@ -25,17 +26,20 @@ def _names(contract):
     return [r.name for r in PolarsAdapter(contract).get_row_rules()]
 
 
-@pytest.mark.parametrize("rule", [
-    {"name": "rider_id_not_null", "sql": "rider_id IS NOT NULL"},
-    {"name": "rider_id_not_null", "sql": '"rider_id" is not null'},
-    {"name": "rider_id_not_null", "sql": "(RIDER_ID IS NOT NULL)"},
-    {"not_null": "rider_id"},
-])
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"name": "rider_id_not_null", "sql": "rider_id IS NOT NULL"},
+        {"name": "rider_id_not_null", "sql": '"rider_id" is not null'},
+        {"name": "rider_id_not_null", "sql": "(RIDER_ID IS NOT NULL)"},
+        {"not_null": "rider_id"},
+    ],
+)
 def test_a_written_not_null_replaces_the_automatic_required_check(rule):
     names = _names(_contract([rule]))
     assert "rider_id_required" not in names
     assert sum("rider_id" in n for n in names) == 1
-    assert "email_required" in names          # other required fields still get theirs
+    assert "email_required" in names  # other required fields still get theirs
 
 
 def test_a_field_level_not_null_rule_also_counts():

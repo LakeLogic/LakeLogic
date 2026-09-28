@@ -1,4 +1,5 @@
 """The run summary records and prints how long each contract took (2026-09-27)."""
+
 from lakelogic.pipeline.runner import PipelineRunSummary, format_duration
 
 

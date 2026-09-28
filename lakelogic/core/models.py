@@ -75,9 +75,7 @@ _QUALITY_CATEGORIES = set(QUALITY_CATEGORIES)
 
 #: Values older contracts carry. They still load, but are NOT remapped to a recognised category:
 #: a silent remap would make an unclassified rule look classified.
-LEGACY_QUALITY_CATEGORIES = frozenset(
-    {"correctness", "timeliness", "integrity", "rule", "llm_quality", "data_quality"}
-)
+LEGACY_QUALITY_CATEGORIES = frozenset({"correctness", "timeliness", "integrity", "rule", "llm_quality", "data_quality"})
 
 #: What a run records for a rule with no category. Runtime-only: the error and category lists
 #: are parallel and nulls are dropped from both, so a None here would misalign every failure

@@ -226,7 +226,9 @@ def test_contract_interceptors_and_load_mode_validation(monkeypatch):
         DataContract(version="1.0", source={"type": "landing", "load_mode": "incremental"}, metadata={})
 
     monkeypatch.setenv("LAKELOGIC_SKIP_INCREMENTAL_CHECK", "1")
-    skipped_incremental = DataContract(version="1.0", source={"type": "landing", "load_mode": "incremental"}, metadata={})
+    skipped_incremental = DataContract(
+        version="1.0", source={"type": "landing", "load_mode": "incremental"}, metadata={}
+    )
     assert skipped_incremental.source.load_mode == "incremental"
     monkeypatch.delenv("LAKELOGIC_SKIP_INCREMENTAL_CHECK", raising=False)
 

@@ -15,6 +15,7 @@ code: before the first test in a file that uses ``SparkSession``, make sure the 
 session is the Delta one. A Delta session is a superset of a plain one, so every other Spark
 test still gets what it asked for. Files that never touch Spark pay nothing.
 """
+
 from __future__ import annotations
 
 import functools

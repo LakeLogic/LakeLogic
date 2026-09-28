@@ -3,6 +3,7 @@
 A rule with no category used to become ``correctness``, so an unclassified rule could not be told
 apart from a classified one. The model now keeps ``None``; a run records ``unclassified``.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -61,10 +62,14 @@ def test_errors_and_categories_stay_aligned_when_a_rule_has_no_category(engine):
     else:
         from lakelogic.engines.polars import PolarsAdapter as Adapter
 
-    adapter = Adapter(_contract([
-        {"name": "unclassified_rule", "sql": "amount > 100"},
-        {"name": "positive", "sql": "amount > 0", "category": "validity"},
-    ]))
+    adapter = Adapter(
+        _contract(
+            [
+                {"name": "unclassified_rule", "sql": "amount > 100"},
+                {"name": "positive", "sql": "amount > 0", "category": "validity"},
+            ]
+        )
+    )
     _, bad = adapter.execute(pl.DataFrame({"id": [1], "amount": [-1.0]}))
 
     errors = bad["_lakelogic_errors"][0].to_list()

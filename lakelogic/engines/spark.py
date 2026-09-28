@@ -3,9 +3,9 @@ from typing import Any, List, Tuple
 
 from loguru import logger
 
-from lakelogic.engines.base import EngineAdapter
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
+from lakelogic.engines.base import EngineAdapter
 
 from ..core import types as _types
 

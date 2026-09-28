@@ -1,5 +1,6 @@
 """dlt run log: an existing `run_logs` dataset keeps receiving rows; a new estate gets
 `lakelogic_run_log` (2026-09-26, owner decision (a): nothing moves, history is not split)."""
+
 import pytest
 
 dlt = pytest.importorskip("dlt")
@@ -10,10 +11,16 @@ from lakelogic.core.run_log import _write_run_log_table
 
 
 def _contract(db):
-    return DataContract(version="1.0.0", dataset="trips", metadata={
-        "run_log_backend": "dlt", "run_log_table": "trips_log",
-        "dlt_destination": "duckdb", "dlt_credentials": str(db),
-    })
+    return DataContract(
+        version="1.0.0",
+        dataset="trips",
+        metadata={
+            "run_log_backend": "dlt",
+            "run_log_table": "trips_log",
+            "dlt_destination": "duckdb",
+            "dlt_credentials": str(db),
+        },
+    )
 
 
 def _report():

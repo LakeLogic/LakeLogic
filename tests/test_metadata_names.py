@@ -290,14 +290,29 @@ def test_retention_evidence_has_status_and_detail_and_old_tables_gain_them(tmp_p
     db = tmp_path / "rl.duckdb"
     con = duckdb.connect(str(db))
     # A table made before the columns existed.
-    con.execute("CREATE TABLE _lakelogic_retention_evidence (run_id VARCHAR, timestamp TIMESTAMPTZ, "
-                "table_name VARCHAR, policy VARCHAR, cutoff TIMESTAMPTZ, rows_expired BIGINT)")
+    con.execute(
+        "CREATE TABLE _lakelogic_retention_evidence (run_id VARCHAR, timestamp TIMESTAMPTZ, "
+        "table_name VARCHAR, policy VARCHAR, cutoff TIMESTAMPTZ, rows_expired BIGINT)"
+    )
     con.close()
     meta = {"run_log_table": "_lakelogic_run_log", "run_log_backend": "duckdb", "run_log_database": str(db)}
-    out = write_evidence_rows("retention_evidence", [{
-        "run_id": "r", "timestamp": "2026-09-27T00:00:00+00:00", "table_name": "d.bronze.t",
-        "policy": "P7D", "status": "passed", "detail": "ok (oldest 47 min)",
-    }], meta, engine_name="duckdb")
+    out = write_evidence_rows(
+        "retention_evidence",
+        [
+            {
+                "run_id": "r",
+                "timestamp": "2026-09-27T00:00:00+00:00",
+                "table_name": "d.bronze.t",
+                "policy": "P7D",
+                "status": "passed",
+                "detail": "ok (oldest 47 min)",
+            }
+        ],
+        meta,
+        engine_name="duckdb",
+    )
     assert out
     con = duckdb.connect(str(db))
-    assert con.execute("SELECT policy, status, detail FROM _lakelogic_retention_evidence").fetchall() == [("P7D", "passed", "ok (oldest 47 min)")]
+    assert con.execute("SELECT policy, status, detail FROM _lakelogic_retention_evidence").fetchall() == [
+        ("P7D", "passed", "ok (oldest 47 min)")
+    ]

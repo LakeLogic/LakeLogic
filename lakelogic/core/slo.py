@@ -80,7 +80,6 @@ def _named(row: Any, names: tuple) -> Dict[str, Any]:
     return {n: values[i] for i, n in enumerate(names) if i < len(values)}
 
 
-
 # ── Stored status vocabulary ────────────────────────────────────────────────
 # `SLOCheckResult.status` is PERSISTED (`_slo_checks.status`, `details_json`,
 # retention evidence), so it is one plain uppercase token: no icons, no counts,

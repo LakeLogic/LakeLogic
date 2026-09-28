@@ -79,7 +79,6 @@ def run_log_status(pipeline_status: str) -> str:
     return _RUN_LOG_STATUS.get(pipeline_status, "succeeded")
 
 
-
 def quarantine_table_name(storage, info, table_name: str) -> str:
     """A contract's quarantine table name from ``storage.quarantine_table_name``.
 
@@ -104,6 +103,7 @@ def format_duration(seconds: Optional[float]) -> str:
     if total < 3600:
         return f"{total // 60}m {total % 60:02d}s"
     return f"{total // 3600}h {(total % 3600) // 60:02d}m"
+
 
 class PipelineRunSummary:
     """Standardized summary of a pipeline execution."""
@@ -216,7 +216,8 @@ class PipelineRunSummary:
             else:
                 dq_str = "-"
 
-            line = f"  {t_name:<38} {layer:<8} {status:<10} {rows:<8} {dq_str:<12} {format_duration(r.get('duration_seconds')):>9}"
+            duration = format_duration(r.get("duration_seconds"))
+            line = f"  {t_name:<38} {layer:<8} {status:<10} {rows:<8} {dq_str:<12} {duration:>9}"
             lines.append(line)
 
             err = r.get("error")
@@ -3086,7 +3087,11 @@ class LakehousePipeline:
                     )
             logger.error(f"❌ Failed to process {c.entity}: {e}{_identity_hint}")
             summary.append(
-                c.entity, layer, "failed", error=str(e), table_name=_table_name,
+                c.entity,
+                layer,
+                "failed",
+                error=str(e),
+                table_name=_table_name,
                 duration_seconds=round(time.monotonic() - _started, 1),
             )
 
