@@ -335,6 +335,34 @@ artifacts = [
     "lakelogic/templates/domain/*.j2",
 ]
 
+# Reference docs an agent reads from the installed package, at
+# lakelogic/_bundled/docs/<path under docs/>. Only settled docs: never docs/specs/.
+# The root docs/ingestion.md is a duplicate and is deliberately NOT bundled;
+# docs/contracts/data_product_contracts/ingestion.md is the one shipped.
+# tests/test_bundled_docs.py pins this list against docs/.
+[tool.hatch.build.targets.wheel.force-include]
+"docs/patterns/bronze_quality_gate.md" = "lakelogic/_bundled/docs/patterns/bronze_quality_gate.md"
+"docs/patterns/dedup_survivorship.md" = "lakelogic/_bundled/docs/patterns/dedup_survivorship.md"
+"docs/patterns/external_python_logic.md" = "lakelogic/_bundled/docs/patterns/external_python_logic.md"
+"docs/patterns/late_arriving_reprocess.md" = "lakelogic/_bundled/docs/patterns/late_arriving_reprocess.md"
+"docs/patterns/scd2_dimension.md" = "lakelogic/_bundled/docs/patterns/scd2_dimension.md"
+"docs/contracts/data_product_contracts/dimensional_modeling.md" = "lakelogic/_bundled/docs/contracts/data_product_contracts/dimensional_modeling.md"
+"docs/contracts/data_product_contracts/index.md" = "lakelogic/_bundled/docs/contracts/data_product_contracts/index.md"
+"docs/contracts/data_product_contracts/ingestion.md" = "lakelogic/_bundled/docs/contracts/data_product_contracts/ingestion.md"
+"docs/contracts/data_product_contracts/materialization.md" = "lakelogic/_bundled/docs/contracts/data_product_contracts/materialization.md"
+"docs/contracts/data_product_contracts/quality.md" = "lakelogic/_bundled/docs/contracts/data_product_contracts/quality.md"
+"docs/contracts/data_product_contracts/transformations.md" = "lakelogic/_bundled/docs/contracts/data_product_contracts/transformations.md"
+"docs/contracts/data_product_contracts/watermark_strategies.md" = "lakelogic/_bundled/docs/contracts/data_product_contracts/watermark_strategies.md"
+"docs/contracts/schema_model.md" = "lakelogic/_bundled/docs/contracts/schema_model.md"
+"docs/contracts/system_config.md" = "lakelogic/_bundled/docs/contracts/system_config.md"
+"docs/contracts/slo.md" = "lakelogic/_bundled/docs/contracts/slo.md"
+"docs/contracts/inheritance.md" = "lakelogic/_bundled/docs/contracts/inheritance.md"
+"docs/contracts/versioning.md" = "lakelogic/_bundled/docs/contracts/versioning.md"
+"docs/streaming_sources.md" = "lakelogic/_bundled/docs/streaming_sources.md"
+"docs/reprocessing.md" = "lakelogic/_bundled/docs/reprocessing.md"
+"docs/reconciliation.md" = "lakelogic/_bundled/docs/reconciliation.md"
+"docs/delta_lake_support.md" = "lakelogic/_bundled/docs/delta_lake_support.md"
+
 [tool.uv]
 managed = true
 

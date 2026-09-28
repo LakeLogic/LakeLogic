@@ -176,7 +176,7 @@ customProperties:
   lakelogic:
     tier: silver
     source:
-      type: file
+      type: landing
       path: abfss://bronze/customers
       format: parquet
     materialization:

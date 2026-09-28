@@ -149,17 +149,6 @@
           },
           "title": "Row Count",
           "type": "object"
-        },
-        "schedule": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SLOScheduleConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "title": "RegistrySLO",
@@ -430,77 +419,6 @@
         }
       },
       "title": "SLORowCountConfig",
-      "type": "object"
-    },
-    "SLOScheduleConfig": {
-      "properties": {
-        "environments": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Environments",
-          "type": "array"
-        },
-        "expected_completion_utc": {
-          "default": "06:00",
-          "title": "Expected Completion Utc",
-          "type": "string"
-        },
-        "expected_duration_minutes": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Expected Duration Minutes"
-        },
-        "expected_start_utc": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Expected Start Utc"
-        },
-        "pipeline_cron": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Pipeline Cron"
-        },
-        "timezone": {
-          "default": "UTC",
-          "title": "Timezone",
-          "type": "string"
-        },
-        "warn_if_duration_exceeds_minutes": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Warn If Duration Exceeds Minutes"
-        }
-      },
-      "title": "SLOScheduleConfig",
       "type": "object"
     }
   },

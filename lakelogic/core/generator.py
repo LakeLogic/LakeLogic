@@ -109,6 +109,62 @@ import yaml
 # ---------------------------------------------------------------------------
 
 
+_PARAM_DECIMAL = re.compile(r"^(?:decimal|numeric)\s*\(.*\)$")
+
+
+def _base_numeric_type(ftype: str) -> str:
+    """``decimal(10,2)`` -> ``decimal``: the value generators match bare type names.
+
+    A parameterised decimal matched none of them and fell through to the STRING path,
+    so a ``cancellation_fee decimal(10,2)`` was generated as ``"CAN-3538"`` -- every row
+    then failed the cast to its declared type.
+    """
+    t = (ftype or "").strip().lower()
+    return "decimal" if _PARAM_DECIMAL.match(t) else ftype
+
+
+_DECIMAL_PS = re.compile(r"^(?:decimal|numeric)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)$")
+
+
+def _fit_declared_width(value: Any, ftype: str, rules: Dict[str, Any]) -> Any:
+    """Keep a generated VALID value inside the type the contract declares.
+
+    ``decimal(10,2)`` holds at most 99,999,999.99; the numeric heuristics knew nothing of
+    precision, so an ``estimated_fare`` of 11 digits failed the cast and a *valid* row was
+    reported as bad. Values beyond the width are folded back into range (respecting the
+    field's own ``max`` when it is tighter) and rounded to the scale.
+    """
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    t = (ftype or "").strip().lower()
+    m = _DECIMAL_PS.match(t)
+    if m:
+        precision, scale = int(m.group(1)), int(m.group(2) or 0)
+        limit = 10 ** (precision - scale) - 10 ** (-scale) if precision > scale else 10 ** (-scale) * 9
+        hi = rules.get("max")
+        if isinstance(hi, (int, float)) and not isinstance(hi, bool):
+            limit = min(limit, abs(float(hi))) or limit
+        v = float(value)
+        if abs(v) > limit:
+            v = abs(v) % limit if limit else 0.0
+            lo = rules.get("min")
+            if isinstance(lo, (int, float)) and not isinstance(lo, bool) and v < lo:
+                v = float(lo)
+            v = v if value >= 0 else -v
+        return round(v, scale)
+    # Integer widths from the one type registry (tinyint/smallint and friends).
+    from . import types as _types
+
+    if isinstance(value, int) and _types.is_known(t):
+        bits = _types.width_bits(t)
+        # Only the narrow widths: `integer` deliberately carries epoch values past 32 bits.
+        if bits and bits < 32 and _types.kind_of(t) == _types.kind_of("integer"):
+            bound = 2 ** (bits - 1) - 1
+            if abs(value) > bound:
+                return value % bound
+    return value
+
+
 def _polars_dtype(ftype: str):
     """Return the polars DataType for a contract field type string."""
     try:
@@ -2675,6 +2731,17 @@ _TEMPORAL_ORDERING_RULES: List[Tuple[str, str, str]] = [
     # A city (or product, or site) is retired after it launched - generated independently,
     # `sunset_at` came before `launched_at` in a third of the rows.
     ("launched_at", "sunset_at", "lte"),
+    # Message and trip milestones. Generated independently, a notification was opened before
+    # it was delivered in most rows, and a gold fact's milestone rules quarantined 163 of 190.
+    ("sent_at", "delivered_at", "lte"),
+    ("delivered_at", "opened_at", "lte"),
+    ("sent_at", "opened_at", "lte"),
+    ("opened_at", "clicked_at", "lte"),
+    ("requested_at", "pickup_at", "lte"),
+    ("pickup_at", "dropoff_at", "lte"),
+    ("requested_at", "dropoff_at", "lte"),
+    ("requested_at", "accepted_at", "lte"),
+    ("requested_at", "cancelled_at", "lte"),
     # ── Telecom ───────────────────────────────────────────────────────────
     ("call_start_time", "call_end_time", "lte"),
     ("data_session_start", "data_session_end", "lte"),
@@ -6512,6 +6579,19 @@ class DataGenerator:
         nullable: bool,
         sample_pools: Optional[Dict[str, List[Any]]] = None,
     ) -> Any:
+        """A valid value that also FITS the declared width (``decimal(p,s)``, small ints)."""
+        value = self._make_unbounded_value(name, ftype, rules, nullable, sample_pools)
+        return _fit_declared_width(value, ftype, rules)
+
+    def _make_unbounded_value(
+        self,
+        name: str,
+        ftype: str,
+        rules: Dict[str, Any],
+        nullable: bool,
+        sample_pools: Optional[Dict[str, List[Any]]] = None,
+    ) -> Any:
+        ftype = _base_numeric_type(ftype)
         # Null injection for nullable fields — use field-aware probability
         if nullable:
             null_prob = _match_null_probability(name.lower())
@@ -6741,6 +6821,7 @@ class DataGenerator:
         Every invalidation strategy now produces structured metadata so the
         generation report can document exactly what was injected and why.
         """
+        ftype = _base_numeric_type(ftype)
         # AI edge cases get priority — 60% of the time when available
         if edge_case_pools and name in edge_case_pools:
             pool = edge_case_pools[name]

@@ -123,7 +123,7 @@ metadata:
   # run_log_table_partition_by: ["domain", "data_layer"]
   # Partition the run log table for faster queries (Spark + delta backends)
   
-  # run_log_database: "logs/lakelogic_run_logs.duckdb"
+  # run_log_database: "logs/lakelogic_run_log.duckdb"  (default; an existing lakelogic_run_logs.duckdb is kept)
   # Only for duckdb/sqlite backends: path to embedded database file
 
 # ============================================================
@@ -205,7 +205,7 @@ source:
   #  Strategy        Best For                 Source Type     State Stored In          Requires Spark?
   #  ──────────────  ───────────────────────  ──────────────  ───────────────────────  ───────────────
   #  max_target      Most batch pipelines     Table only      Target table (self-heal) Yes
-  #  pipeline_log    File-based incremental   File only ⚠️    _run_logs table          No
+  #  pipeline_log    File-based incremental   File only ⚠️    run log table            No
   #  lookback        Simple rolling windows   File or Table   None (stateless)         No
   #  date_range      Backfills & widgets      File or Table   None (explicit dates)    No
   #  manifest        Non-Spark pipelines      File only       JSON manifest file       No
@@ -233,7 +233,7 @@ source:
   #   # Uses watermark_field: YES — to query MAX and to filter source
   #
   # ── Strategy 2: pipeline_log ──────────────────────────────────────
-  # Queries the _run_logs table (written by LakeLogic after each run)
+  # Queries the run log table (metadata.run_log_table, written by LakeLogic after each run)
   # for the last successful max_source_mtime of this dataset.
   # Compares file modification times against the watermark.
   #
@@ -248,7 +248,7 @@ source:
   #     path: "abfss://landing@acct.dfs.core.windows.net/events/"
   #     load_mode: incremental
   #     watermark_strategy: pipeline_log
-  #   # State: _run_logs table (configured via metadata.run_log_table)
+  #   # State: run log table (configured via metadata.run_log_table)
   #   # Filters by: dataset (target table name), data_layer, domain, system
   #   # Excludes: failed runs, no_new_data runs, reprocess runs
   #   # Fallback: if no prior runs, scans all files (initial load)
@@ -330,7 +330,7 @@ source:
   #     watermark_strategy: delta_version
   #     target_path: "table:catalog.silver.sessions"
   #   # State: target table TBLPROPERTIES('lakelogic.last_source_version')
-  #   # Also captured in _run_logs for full audit trail
+  #   # Also captured in the run log for full audit trail
   #   # Uses watermark_field: NO — versions replace timestamps entirely
   #   # Safeguards:
   #   #   - Detects source rollback (from_v > to_v) and auto-resets
@@ -1501,7 +1501,6 @@ lineage:
 # - Row count:             slo_row_count_min / slo_row_count_max
 # - Row count anomaly:     slo_row_count_anomaly_pass / _ratio
 # - Quality:               slo_quality_pass / _ratio / _severity
-# - Schedule:              slo_schedule_pass / slo_duration_seconds
 #
 # SLO breaches emit "slo_breach" notification events that route
 # through the existing notifications system (Apprise/webhook/email).

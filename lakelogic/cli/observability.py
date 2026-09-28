@@ -6,6 +6,7 @@ orchestration logic.  These are implemented as standalone functions that
 receive the driver's state as explicit arguments, to keep coupling loose.
 """
 
+from lakelogic.core.metadata_names import default_local_db_path as _mn_db
 import json
 import os
 from datetime import datetime, timezone
@@ -23,6 +24,10 @@ from loguru import logger
 
 def flatten_summary(summary: Dict[str, Any]) -> Dict[str, object]:
     """Flatten summary data into a table-oriented record."""
+    from lakelogic.core.plain_values import plain_value
+
+    # The pipeline-runs row is data: no icons in any persisted value.
+    summary = plain_value(summary)
     metrics = summary.get("metrics", {})
     return {
         "run_id": summary.get("run_id"),
@@ -177,7 +182,7 @@ def _write_summary_duckdb(record: Dict[str, object], table_name: str, database: 
         logger.warning(f"Summary table backend 'duckdb' unavailable: {exc}")  # pragma: no cover
         return  # pragma: no cover
 
-    db_path = Path(database or "logs/lakelogic_pipeline_runs.duckdb")
+    db_path = Path(database or _mn_db("pipeline_runs", "duckdb"))
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(database=str(db_path))
     try:
@@ -206,7 +211,7 @@ def _write_summary_duckdb(record: Dict[str, object], table_name: str, database: 
 def _write_summary_sqlite(record: Dict[str, object], table_name: str, database: Optional[str]) -> None:
     import sqlite3
 
-    db_path = Path(database or "logs/lakelogic_pipeline_runs.sqlite")
+    db_path = Path(database or _mn_db("pipeline_runs", "sqlite"))
     db_path.parent.mkdir(parents=True, exist_ok=True)
     sanitised_table = table_name.replace(".", "_")
     if sanitised_table != table_name:

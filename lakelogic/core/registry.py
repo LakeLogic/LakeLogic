@@ -196,16 +196,6 @@ class SLOQualityConfig(BaseModel):
     by_severity: Dict[str, SLOQualitySeverityThreshold] = Field(default_factory=dict)
 
 
-class SLOScheduleConfig(BaseModel):
-    expected_completion_utc: str = "06:00"
-    expected_start_utc: Optional[str] = None
-    expected_duration_minutes: Optional[int] = None
-    warn_if_duration_exceeds_minutes: Optional[int] = None
-    timezone: str = "UTC"
-    environments: List[str] = Field(default_factory=list)  # empty = all environments
-    pipeline_cron: Optional[str] = None
-
-
 class SLOAlertingConfig(BaseModel):
     """SLO alerting — emits events through the existing notifications system."""
 
@@ -219,14 +209,29 @@ class RegistrySLO(BaseModel):
     freshness: Dict[str, SLOFreshnessConfig] = Field(default_factory=dict)
     row_count: Dict[str, SLORowCountConfig] = Field(default_factory=dict)
     quality: Optional[SLOQualityConfig] = None
-    schedule: Optional[SLOScheduleConfig] = None
     alerting: Optional[SLOAlertingConfig] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_schedule(cls, data: Any) -> Any:
+        # `slo.schedule` (an expected run window) was retired: hard to capture and harder to
+        # keep true. An old file still loads; the block is dropped, and said so, rather than
+        # silently evaluated or silently ignored.
+        if isinstance(data, dict) and "schedule" in data:
+            logger.warning("slo.schedule is no longer supported and is ignored — remove it from the domain file.")
+            data = {k: v for k, v in data.items() if k != "schedule"}
+        return data
 
 
 class RegistryStorage(BaseModel):
     # Unity Catalog table config — pipeline derives targets from info.table_name
     domain_catalog: Optional[str] = None  # e.g. "`catalog`.domain"
     quarantine_root: Optional[str] = None  # e.g. "`catalog`.quarantine"
+    # Name of a contract's quarantine table under quarantine_root / quarantine_path.
+    # Placeholders: {domain}, {system}, {table}. The default is the historical name, so existing
+    # estates keep their tables; a domain-centric estate sets quarantine_root to the domain's own
+    # schema and this to "quarantine_{table}" (rejects sort together, apart from the data tables).
+    quarantine_table_name: str = "{domain}_{table}"
     run_log_table: Optional[str] = None  # e.g. "`catalog`.domain._run_logs"
     external_location_root: Optional[str] = None  # e.g. "abfss://domain@acct.dfs.core.windows.net"
     # Databricks Volume / operational roots

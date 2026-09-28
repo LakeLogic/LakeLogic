@@ -405,7 +405,7 @@ def test_scanner_validator_runs_all_check_branches(monkeypatch: pytest.MonkeyPat
 
     first_seen = ScannerValidator(cfg, connector, MemoryBaselineStore())
     drift = first_seen._check_schema_drift(table, meta)
-    assert drift is not None and "BASELINE SET" in drift.status
+    assert drift is not None and "BASELINE_SET" in drift.status
 
     cfg.slo_defaults.volume.anomaly_enabled = False
     assert validator._check_volume(table, meta).passed is True
@@ -649,15 +649,13 @@ def test_scanner_validator_warning_success_and_write_failure_paths(monkeypatch: 
             HistoryEntry(dt.datetime.now(dt.timezone.utc), "WRITE", 9),
         ],
     )
-    assert "building baseline" in validator._check_volume(table, short_history).status
+    assert "building baseline" in validator._check_volume(table, short_history).message
 
     unchanged = TableMetadata(table=table, schema_fields=[])
     assert validator._check_schema_drift(table, unchanged) is None
     same_schema = [{"name": "id", "type": "int", "nullable": True}]
     validator.baseline_store = MemoryBaselineStore({table.full_name: same_schema})
-    assert validator._check_schema_drift(table, TableMetadata(table=table, schema_fields=same_schema)).status.endswith(
-        "NO DRIFT"
-    )
+    assert validator._check_schema_drift(table, TableMetadata(table=table, schema_fields=same_schema)).status == "OK"
 
     added_only = [{"name": "id", "type": "int", "nullable": True}, {"name": "x", "type": "string"}]
     cfg.slo_defaults.schema_drift.on_column_added = "ignore"

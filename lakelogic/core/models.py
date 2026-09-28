@@ -65,18 +65,30 @@ def _warn_unknown_extra_keys(
             )
 
 
-_QUALITY_CATEGORIES = {
-    "correctness",
-    "completeness",
-    "consistency",
-    "validity",
-    "accuracy",
-    "timeliness",
-    "uniqueness",
-    "integrity",
-    "schema",
-    "rule",
-}
+#: The recognised quality-rule categories — one closed list (docs: quality rule categories).
+#: Completeness: required values present · Uniqueness: no duplicates at the grain · Validity:
+#: formats, types, ranges · Consistency: related values agree, incl. referential integrity ·
+#: Accuracy: values match reality or a trusted reference. Timeliness is deliberately absent —
+#: freshness is a service-level objective, not a rule on the data.
+QUALITY_CATEGORIES = ("completeness", "uniqueness", "validity", "consistency", "accuracy")
+_QUALITY_CATEGORIES = set(QUALITY_CATEGORIES)
+
+#: Values older contracts carry. They still load, but are NOT remapped to a recognised category:
+#: a silent remap would make an unclassified rule look classified.
+LEGACY_QUALITY_CATEGORIES = frozenset(
+    {"correctness", "timeliness", "integrity", "rule", "llm_quality", "data_quality"}
+)
+
+#: What a run records for a rule with no category. Runtime-only: the error and category lists
+#: are parallel and nulls are dropped from both, so a None here would misalign every failure
+#: after it. The contract model keeps None, which is how a missing category stays visible.
+UNCLASSIFIED = "unclassified"
+
+
+def runtime_category(rule: Any) -> str:
+    """The category a run records for ``rule`` — its own, or ``unclassified``."""
+    return str(getattr(rule, "category", None) or UNCLASSIFIED)
+
 
 _QUALITY_CATEGORY_SYNONYMS = {
     "complete": "completeness",
@@ -86,8 +98,9 @@ _QUALITY_CATEGORY_SYNONYMS = {
     "accurate": "accuracy",
     "timely": "timeliness",
     "unique": "uniqueness",
-    "referential_integrity": "integrity",
-    "referential": "integrity",
+    "referential_integrity": "consistency",
+    "referential": "consistency",
+    "integrity": "consistency",
 }
 
 # ── Tier normalization ──────────────────────────────────────────────────────
@@ -243,7 +256,7 @@ class DltSourceConfig(_olcn.DltSourceConfig):
 
 
 class SourceConfig(_olcn.SourceConfig):
-    """Source acquisition settings for landing/stream/table/dlt inputs."""
+    """Source acquisition settings. ``type`` is OLC's closed ``SourceType`` set."""
 
     model_config = ConfigDict(extra="allow")
     dlt: Optional[DltSourceConfig] = None
@@ -379,16 +392,22 @@ class Transformation(_olcn.Transformation):
 class QualityRule(_olcn.QualityRule):
     """Row-level or dataset-level quality rule."""
 
+    #: Re-declared so a missing category stays None on every OLC release this runtime accepts
+    #: (OLC < 0.16 declares `str = "correctness"`).
+    category: Optional[str] = None
+
     @field_validator("category", mode="before")
     @classmethod
-    def _normalize_category(cls, value: Any) -> str:
+    def _normalize_category(cls, value: Any) -> Optional[str]:
+        # NO DEFAULT. A missing category stays None so a gate can see it was never chosen;
+        # defaulting it to "correctness" made an unclassified rule indistinguishable from one.
         if value is None:
-            return "correctness"
+            return None
         text = str(value).strip().lower()
         if not text:
-            return "correctness"
+            return None
         text = _QUALITY_CATEGORY_SYNONYMS.get(text, text)
-        if text not in _QUALITY_CATEGORIES:
+        if text not in _QUALITY_CATEGORIES and text not in LEGACY_QUALITY_CATEGORIES:
             logger.warning(
                 f"Unknown quality rule category '{value}'. Expected one of: {', '.join(sorted(_QUALITY_CATEGORIES))}."
             )
@@ -2110,7 +2129,9 @@ class DataContract(BaseModel):
             elif not log_dir_val and not log_path_val:
                 # Default DuckDB path used when run_log_table is configured
                 # but run_log_database is not explicit
-                default_db = _base_p / "logs" / "lakelogic_run_logs.duckdb"
+                from lakelogic.core.metadata_names import resolve_local_file as _mn_rlf
+
+                default_db = _mn_rlf("run_log", _base_p / "logs", "duckdb")
                 if default_db.exists():
                     run_log_targets.append(("file", default_db))
 

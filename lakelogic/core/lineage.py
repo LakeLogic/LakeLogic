@@ -59,10 +59,23 @@ def inject_lineage(
 
         run_id_value = str(uuid4())
     contract_name_value = None
+    info = getattr(contract, "info", None)
+
+    def _info(key):
+        v = getattr(info, key, None) if info is not None else None
+        if v is None and isinstance(info, dict):
+            v = info.get(key)
+        return v
+
     try:
         contract_path = getattr(contract, "_contract_path", None)
         if contract_path:
             contract_name_value = Path(contract_path).name
+        # A contract loaded through a registry (the Databricks/Fabric pipelines) carries no
+        # file path, and the column was written null (2026-09-26). Fall back to what the
+        # contract itself states: its dataset, then its title.
+        if not contract_name_value:
+            contract_name_value = getattr(contract, "dataset", None) or _info("title")
         # Append version from info block if available
         info = getattr(contract, "info", None)
         if info:
@@ -85,8 +98,10 @@ def inject_lineage(
     created_at_value = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     metadata = getattr(contract, "metadata", {}) or {}
-    domain_value = metadata.get("domain")
-    system_value = metadata.get("system")
+    # OLC contracts state domain/system in `info`; `metadata` is the older place. Reading only
+    # `metadata` left `_lakelogic_domain` / `_lakelogic_system` null on every OLC contract.
+    domain_value = metadata.get("domain") or _info("domain")
+    system_value = metadata.get("system") or _info("system")
     columns: Dict[str, Any] = {}
     if getattr(lineage, "capture_source_path", True):
         columns[lineage.source_column_name] = source_value

@@ -21,7 +21,7 @@ Watermark strategies control **how LakeLogic tracks incremental progress** — w
 | Strategy | Best For | Source Type | State Stored In | Requires Spark? |
 | --- | --- | --- | --- | --- |
 | `max_target` | Most batch pipelines | Table only | Target table (self-heal) | No |
-| `pipeline_log` | Cross-layer increments (Bronze → Silver) | File or Delta | `_run_logs` table | No |
+| `pipeline_log` | Cross-layer increments (Bronze → Silver) | File or Delta | run log table | No |
 | `lookback` | Simple rolling windows | File or Table | None (stateless) | No |
 | `date_range` | Backfills & widgets | File or Table | None (explicit dates) | No |
 | `manifest` | Non-Spark pipelines | File only | JSON manifest file | No |
@@ -53,11 +53,11 @@ source:
 
 ## Strategy 2: `pipeline_log`
 
-Queries the `_run_logs` table for the last successful processing boundary. Works with **both file-based and Delta table sources** — making it the recommended strategy for cross-layer reads (Bronze → Silver, Silver → Gold).
+Queries the run log table (`metadata.run_log_table`) for the last successful processing boundary. Works with **both file-based and Delta table sources** — making it the recommended strategy for cross-layer reads (Bronze → Silver, Silver → Gold).
 
 ### How It Works
 
-The engine queries `_run_logs` filtering by `dataset`, `data_layer`, `domain`, and `system`, then resolves the boundary using a **priority cascade**:
+The engine queries the run log filtering by `dataset`, `data_layer`, `domain`, and `system`, then resolves the boundary using a **priority cascade**:
 
 | Priority | Column | Description |
 | --- | --- | --- |
@@ -95,7 +95,7 @@ source:
 
 ### State
 
-State is stored in the `_run_logs` table (configured via `metadata.run_log_table`).
+State is stored in the run log table (configured via `metadata.run_log_table`).
 
 - **Filters by:** `dataset`, `data_layer`, `domain`, `system`
 - **Excludes:** failed runs, `no_new_data` runs, reprocess runs

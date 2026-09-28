@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from lakelogic.core.models import DataContract
+from olc.models._nested import SOURCE_TYPES
 from lakelogic.engines.base import EngineAdapter
 from lakelogic.notifications.base import (
     get_notification_adapter,
@@ -19,6 +20,19 @@ from lakelogic.core.materialization import (
     write_run_log,
 )
 from loguru import logger
+
+# ``source.type`` dispatch. The set of kinds is OLC's ``SOURCE_TYPES`` (one definition);
+# these two tables say how the engine reads each one, and tests/test_source_type_dispatch.py
+# pins that together they cover that set exactly.
+#: Kinds with a dedicated reader: ``run_source`` hands off to the named method.
+SOURCE_READERS: Dict[str, str] = {
+    "dlt": "_run_dlt_source",
+    "database": "_run_database_source",
+    "sftp": "_run_sftp_source",
+}
+#: Kinds read from ``source.path`` by the file/table reader.
+PATH_READ_SOURCE_TYPES = frozenset({"landing", "stream", "table", "delta", "iceberg"})
+assert set(SOURCE_READERS) | PATH_READ_SOURCE_TYPES == set(SOURCE_TYPES), "source.type dispatch drifted from OLC"
 
 
 class ValidationResult:
@@ -641,9 +655,13 @@ class DataProcessor:
                         0,  # Insert at the front so they run first!
                         QualityRule(
                             name=rule_name,
-                            sql=f"({end_col} IS NULL) OR ({end_col} >= {start_col})",
+                            # Either milestone missing means there is no ORDER to check:
+                            # `opened_at >= NULL` is NULL, which failed every notification
+                            # opened without a recorded delivery. Completeness is a
+                            # separate rule's claim, not this one's.
+                            sql=f"({end_col} IS NULL) OR ({start_col} IS NULL) OR ({end_col} >= {start_col})",
                             severity="error",
-                            category="correctness",
+                            category="consistency",
                             description=(
                                 f"Auto-generated Fact milestone constraint: {end_col} must occur after {start_col}"
                             ),
@@ -1550,9 +1568,12 @@ class DataProcessor:
                 system=metadata.get("system", ""),
                 layer=metadata.get("data_layer", ""),
             )
-            self.last_report["estimated_cost"] = cost_estimate.estimated_cost
-            self.last_report["cost_currency"] = cost_estimate.currency
-            self.last_report["cost_confidence"] = cost_estimate.confidence
+            # No provider → 0.0 at confidence "none": that is "not measured", not
+            # "free". Record NULL so no reader shows a confident 0.00 USD.
+            _measured = (cost_estimate.confidence or "none") != "none"
+            self.last_report["estimated_cost"] = cost_estimate.estimated_cost if _measured else None
+            self.last_report["cost_currency"] = cost_estimate.currency if _measured else None
+            self.last_report["cost_confidence"] = cost_estimate.confidence or "none"
         except Exception as _cost_exc:
             logger.debug(f"Cost estimation skipped: {_cost_exc}")
             self.last_report["estimated_cost"] = None
@@ -1749,17 +1770,10 @@ class DataProcessor:
 
         self._is_reprocess = bool(reprocess_from or reprocess_to or (resolved_reprocess_column and reprocess_values))
 
-        # ── dlt source: contract-driven API ingestion ─────────────────────────
-        if self.contract.source and self.contract.source.type == "dlt":
-            return self._run_dlt_source()
-
-        # ── database source: native SQL ingestion ─────────────────────────────
-        if self.contract.source and self.contract.source.type == "database":
-            return self._run_database_source()
-
-        # ── sftp source: contract-driven remote-file ingestion ────────────────
-        if self.contract.source and self.contract.source.type == "sftp":
-            return self._run_sftp_source()
+        # ── dedicated readers: dlt (API), database (SQL), sftp (remote files) ──
+        _reader = SOURCE_READERS.get(self.contract.source.type) if self.contract.source else None
+        if _reader:
+            return getattr(self, _reader)()
 
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:

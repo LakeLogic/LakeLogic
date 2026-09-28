@@ -429,7 +429,7 @@ def test_the_current_value_is_not_part_of_its_own_baseline():
     assert r is not None
     assert r.anomaly_baseline == 1000.0, "the 300 must not drag its own baseline down"
     assert r.anomaly_ratio == 0.3
-    assert r.passed is False and "VOLUME DROP" in r.status
+    assert r.passed is False and r.status == "VOLUME_DROP"
 
 
 def test_a_steady_series_still_reads_as_normal():

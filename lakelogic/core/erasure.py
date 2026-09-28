@@ -627,8 +627,73 @@ def erase(
             write_run_log(_audit_report, contract, engine_name=_audit_engine)
         except Exception as e:
             logger.warning(f"Failed to record {profile.name.upper()} erasure to run_log: {e}")
+        _write_erasure_evidence(
+            _audit_report, contract, profile, df, subject_column, subject_ids, delete_reason, _audit_engine
+        )
 
     return result
+
+
+def _count_matching_rows(df: Any, subject_column: str, subject_ids: List[str]) -> Optional[int]:
+    """Rows the erasure targeted, for polars/pandas frames. None ("not measured") otherwise —
+    counting a Spark or DuckDB relation would run a second full scan just for evidence."""
+    try:
+        import polars as pl
+
+        if isinstance(df, pl.DataFrame):
+            return int(df.filter(pl.col(subject_column).is_in(list(subject_ids))).height)
+    except Exception:
+        pass
+    try:
+        import pandas as pd
+
+        if isinstance(df, pd.DataFrame):
+            return int(df[subject_column].isin(list(subject_ids)).sum())
+    except Exception:
+        pass
+    return None
+
+
+def _write_erasure_evidence(
+    audit_report: Dict[str, Any],
+    contract: DataContract,
+    profile: "ErasureProfile",
+    df: Any,
+    subject_column: str,
+    subject_ids: List[str],
+    delete_reason: Optional[str],
+    engine_name: Optional[str],
+) -> None:
+    """One ``_lakelogic_erasure_evidence`` row per erasure run x profile x table.
+
+    Same opt-in as the run log: nothing is written unless ``run_log_table`` is configured.
+    Carries counts only — never a subject identifier.
+    """
+    metadata = getattr(contract, "metadata", {}) or {}
+    if not metadata.get("run_log_table"):
+        return
+    try:
+        from lakelogic.core.evidence_tables import write_evidence_rows
+
+        info = getattr(contract, "info", None)
+        row = {
+            "run_id": audit_report.get("run_id"),
+            "timestamp": audit_report.get("end_time") or audit_report.get("timestamp"),
+            "profile": profile.name,
+            "dataset": getattr(contract, "dataset", None),
+            "table_name": metadata.get("table_name") or getattr(info, "table_name", None),
+            "subject_count": len(subject_ids),
+            "rows_affected": _count_matching_rows(df, subject_column, subject_ids),
+            "reason": delete_reason,
+            "status": audit_report.get("status"),
+            "contract": getattr(info, "title", None),
+            "contract_version": getattr(info, "version", None),
+            "domain": metadata.get("domain") or None,
+            "system": metadata.get("system") or None,
+        }
+        write_evidence_rows("erasure_evidence", [row], metadata, engine_name=engine_name)
+    except Exception as exc:
+        logger.warning(f"Failed to write {profile.name.upper()} erasure evidence: {exc}")
 
 
 def mask(

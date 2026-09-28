@@ -964,11 +964,11 @@ def bootstrap(
         "storage": {
             "domain_catalog": "`{catalog}`.{domain}",
             "quarantine_root": "`{catalog}`.quarantine",
-            "run_log_table": "`{catalog}`.{domain}._run_logs",
+            "run_log_table": "`{catalog}`.{domain}._lakelogic_run_log",
             "external_location_root": "abfss://{domain}@{storage_account}.dfs.core.windows.net",
             "contract_root": "/Workspace/Shared/data_platform/domains_retail/{domain}/{system}",
             "landing_root": "/Volumes/{catalog}/nondelta/landing_{domain}/{system}",
-            "log_root": "/Volumes/{catalog}/nondelta/_logs",
+            "log_root": "/Volumes/{catalog}/nondelta/lakelogic_logs",
             "landing_path": "abfss://nondelta@{storage_account}.dfs.core.windows.net/_data/{domain}/{system}",
             "contract_path": "abfss://nondelta@{storage_account}.dfs.core.windows.net/_contracts/{domain}/{system}",
         },
@@ -1708,6 +1708,7 @@ def scan(
         typer.echo(typer.style("🔍 LakeLogic Scanner", bold=True))
 
         report = scanner.run()
+        from lakelogic.core.slo import format_status
 
         # ── Summary output ──
         typer.echo("")
@@ -1724,7 +1725,7 @@ def scan(
         if report.failures:
             typer.secho("  Failures:", fg=typer.colors.RED, bold=True)
             for r in report.failures:
-                typer.secho(f"    • [{r.check_type}] {r.entity}: {r.status}", fg=typer.colors.RED)
+                typer.secho(f"    • [{r.check_type}] {r.entity}: {format_status(r)}", fg=typer.colors.RED)
             typer.echo("")
 
         # Summary line

@@ -1,3 +1,4 @@
+import re
 import time
 
 from pathlib import Path
@@ -7,6 +8,8 @@ import polars as pl
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter, struct_drift_errors
+from lakelogic.core.models import runtime_category
+from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
 
 
@@ -559,6 +562,13 @@ class PolarsAdapter(EngineAdapter):
             Polars dtype or None.
         """
         type_name = (type_name or "").lower().strip()
+        # Parameterised `decimal(p,s)` is not a registry key (the DDL resolves it to a
+        # true DECIMAL(p,s) separately). Returning None here left the column UNCAST — a
+        # string "24.56" stayed a string in silver, and every gold `SUM(cost)` over it
+        # failed with sum(VARCHAR). Cast to the same DECIMAL(p,s) the table is created with.
+        _dec = re.match(r"^(?:decimal|numeric)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)$", type_name)
+        if _dec:
+            return pl.Decimal(int(_dec.group(1)), int(_dec.group(2) or 0))
         # One registry, shared with the DDL. This map said Float64 for `float`
         # while the column was created FLOAT — the same disagreement that broke
         # the Spark write, just silent here because Polars does not check.
@@ -675,10 +685,22 @@ class PolarsAdapter(EngineAdapter):
                     )
                     exprs.append(cast_expr.alias(field.name))
                 else:
-                    cast_expr = pl.col(field.name).cast(dtype, strict=False)
+                    is_decimal = isinstance(dtype, pl.Decimal) or dtype == pl.Decimal
+                    if is_decimal and current_dtype != pl.Utf8 and not isinstance(current_dtype, pl.Decimal):
+                        # A number -> Decimal cast RAISES on overflow even with strict=False
+                        # ("decimal precision 10 can't fit values with 11 digits"), crashing
+                        # the whole contract. Via text, an overflow is a null — quarantined on
+                        # that row, the same as DuckDB's TRY_CAST and Spark's try_cast.
+                        cast_expr = pl.col(field.name).cast(pl.Utf8).cast(dtype, strict=False)
+                    else:
+                        cast_expr = pl.col(field.name).cast(dtype, strict=False)
                     err_col = f"__type_err_{field.name}"
                     self._type_err_cols.append(err_col)
-                    msg = f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    msg = (
+                        f"Type Mismatch: {field.name} exceeds {field.type} or is not a number"
+                        if is_decimal
+                        else f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    )
                     exprs.append(
                         pl.when(pl.col(field.name).is_not_null() & cast_expr.is_null())
                         .then(pl.lit(msg))
@@ -896,11 +918,11 @@ class PolarsAdapter(EngineAdapter):
 
             for i, rule in enumerate(row_rules):
                 col_name = f"_rule_{i}"
-                error_msg = f"Rule failed: {rule.name} ({rule.sql})"
+                error_msg = f"Rule failed: {plain_text(rule.name)} ({rule.sql})"
                 condition = pl.col(col_name).is_null() | pl.col(col_name).not_()
 
                 error_tracking_exprs.append(pl.when(condition).then(pl.lit(error_msg)).otherwise(None))
-                category_tracking_exprs.append(pl.when(condition).then(pl.lit(rule.category)).otherwise(None))
+                category_tracking_exprs.append(pl.when(condition).then(pl.lit(runtime_category(rule))).otherwise(None))
 
             lf_with_errors = lf_eval.with_columns(
                 [

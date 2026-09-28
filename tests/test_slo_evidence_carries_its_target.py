@@ -155,29 +155,6 @@ def test_the_quality_section_reaches_the_wire_with_both_numbers(posted):
     assert section["pass"] is False
 
 
-def test_the_schedule_section_carries_the_deadline(posted):
-    """`seconds` with no deadline is a number and no promise."""
-    emit_slo_report(
-        _Registry(),
-        [
-            SLOCheckResult(
-                layer="schedule",
-                entity="pipeline",
-                check_type="schedule",
-                status="late",
-                passed=False,
-                delay_minutes=39.6,
-                schedule_deadline_utc="06:00",
-            )
-        ],
-        environment="dev",
-    )
-
-    section = _section(posted, "schedule")
-    assert section["deadline_utc"] == "06:00"
-    assert section["seconds"] == 39.6 * 60.0
-
-
 def test_a_check_with_no_declared_target_adds_no_keys(posted):
     """A domain that declared nothing must not gain an invented floor of None — the
     platform reads a present key as a reported measurement."""

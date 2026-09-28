@@ -57,13 +57,6 @@ slo:
       low:
         min_good_ratio: 0.95
 
-  schedule:
-    environments: ["dev", "prod", "staging"]
-    expected_start_utc: "05:00"
-    expected_completion_utc: "06:00"
-    expected_duration_minutes: 20
-    warn_if_duration_exceeds_minutes: 45
-    timezone: "UTC"
 
 # ── Cost Governance ──────────────────────────────────────────────────────────
 cost:

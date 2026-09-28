@@ -112,7 +112,7 @@ class TestCheckRowCounts:
         assert len(bronze_results) == 2
         for r in bronze_results:
             assert r.passed is False
-            assert "TOO FEW" in r.status
+            assert r.status == "TOO_FEW_ROWS"
             assert r.row_count == 5
             assert r.slo_min_rows == 20
 
@@ -128,7 +128,7 @@ class TestCheckRowCounts:
         bronze_results = [r for r in results if r.layer == "bronze"]
         for r in bronze_results:
             assert r.passed is False
-            assert "TOO MANY" in r.status
+            assert r.status == "TOO_MANY_ROWS"
 
     def test_no_data_in_run_log(self):
         """No run log entry should report NO DATA failure."""
@@ -143,7 +143,7 @@ class TestCheckRowCounts:
         assert len(bronze_results) == 2
         for r in bronze_results:
             assert r.passed is False
-            assert "NO DATA" in r.status
+            assert r.status == "NO_DATA"
 
     def test_excluded_entity(self):
         """Entities in exclude_tables should be skipped."""
@@ -192,7 +192,7 @@ class TestCheckRowCounts:
         assert isinstance(report, SLOReport)
         assert report.passed is False
         assert len(report.failures) >= 2  # at least the 2 bronze entities
-        row_count_failures = [f for f in report.failures if "TOO FEW" in f.status]
+        row_count_failures = [f for f in report.failures if f.status == "TOO_FEW_ROWS"]
         assert len(row_count_failures) == 2
 
     def test_spark_error_handled_gracefully(self):
@@ -210,38 +210,13 @@ class TestCheckRowCounts:
             assert "ERROR" in r.status
 
 
-def test_check_schedule_on_time_late_and_environment_filter(monkeypatch):
-    class FakeDateTime(datetime.datetime):
-        current = datetime.datetime(2026, 3, 26, 5, 30, tzinfo=datetime.timezone.utc)
+def test_a_retired_schedule_block_is_dropped_with_a_warning():
+    """`slo.schedule` was retired: an old file still loads, and the window is not evaluated."""
+    from lakelogic.core.registry import RegistrySLO
 
-        @classmethod
-        def now(cls, tz=None):
-            return cls.current
-
-    monkeypatch.setattr(slo.datetime, "datetime", FakeDateTime)
-
-    schedule = SimpleNamespace(
-        expected_completion_utc="06:00",
-        expected_start_utc="05:00",
-        expected_duration_minutes=None,
-        warn_if_duration_exceeds_minutes=None,
-        timezone="UTC",
-        environments=["prod"],
-        pipeline_cron=None,
-    )
-    registry = SimpleNamespace(slo=SimpleNamespace(schedule=schedule))
-    validator = SLOValidator(registry)
-
-    assert validator.check_schedule(environment="dev") == []
-
-    on_time = validator.check_schedule(environment="prod")
-    assert [result.status for result in on_time] == ["✅ ON TIME", "⚠️ Check if pipeline has started"]
-    assert all(result.passed is True for result in on_time)
-
-    FakeDateTime.current = datetime.datetime(2026, 3, 26, 6, 45, tzinfo=datetime.timezone.utc)
-    late = validator.check_schedule(environment="prod")
-    assert late[0].status == "❌ LATE by 45 min"
-    assert late[0].passed is False
+    slo_cfg = RegistrySLO.model_validate({"schedule": {"expected_completion_utc": "06:00"}})
+    assert not hasattr(slo_cfg, "schedule") or getattr(slo_cfg, "schedule", None) is None
+    assert not hasattr(SLOValidator, "check_schedule")
 
 
 def test_check_quality_and_severity_breaches():
@@ -299,7 +274,7 @@ def test_check_row_count_anomaly_for_median_and_spike():
 
     spike_result = validator.check_row_count_anomaly("orders", "bronze", 200, anomaly)
     assert spike_result.passed is False
-    assert "VOLUME SPIKE" in spike_result.status
+    assert "VOLUME_SPIKE" == spike_result.status
 
 
 def test_check_row_count_anomaly_skips_without_enough_history():
@@ -390,9 +365,9 @@ def test_check_freshness_spark_success_stale_and_missing_column(monkeypatch):
 
     by_entity = {result.entity: result for result in results}
     assert by_entity["events"].passed is True
-    assert by_entity["events"].status == "✅ OK"
+    assert by_entity["events"].status == "OK"
     assert by_entity["sessions"].passed is False
-    assert by_entity["sessions"].status == "❌ STALE"
+    assert by_entity["sessions"].status == "STALE"
     assert by_entity["missing"].passed is False
     assert "ERROR" in by_entity["missing"].status
     assert "skip_me" not in by_entity
@@ -468,7 +443,7 @@ def test_check_freshness_source_columns_pass_fail_and_skip(monkeypatch):
 
     # fresh_src: resolves the FIRST candidate (updated_at, 5 min < 30) → OK
     assert by_entity["fresh_src"].passed is True
-    assert by_entity["fresh_src"].status == "✅ OK"
+    assert by_entity["fresh_src"].status == "OK"
     assert by_entity["fresh_src"].source_column_used == "updated_at"
     assert by_entity["fresh_src"].source_delay_minutes == 5.0
 
@@ -476,7 +451,7 @@ def test_check_freshness_source_columns_pass_fail_and_skip(monkeypatch):
     # which is the point of ordering it ahead of the audit column: `loaded_at` is
     # 10 min old on every table here and would have masked this.
     assert by_entity["stale_src"].passed is False
-    assert by_entity["stale_src"].status == "❌ STALE"
+    assert by_entity["stale_src"].status == "STALE"
     assert by_entity["stale_src"].source_delay_minutes == 120.0
 
     # no_src_col: updated_at all-NULL, last_modified absent → falls back to the
@@ -537,7 +512,7 @@ def test_check_freshness_duckdb_fallback_and_no_data(monkeypatch):
     by_entity = {result.entity: result for result in results}
     assert by_entity["orders"].passed is True
     assert by_entity["empty"].passed is False
-    assert by_entity["empty"].status == "⚠️ NO DATA"
+    assert by_entity["empty"].status == "NO_DATA"
     assert any("delta_scan('/warehouse/orders')" in query for query in calls)
     assert any("parquet_scan('/warehouse/orders')" in query for query in calls)
 
@@ -639,7 +614,7 @@ def test_notify_breaches_uses_registered_targets_and_smtp_env(monkeypatch):
     validator = SLOValidator(registry)
 
     validator.notify_breaches(
-        [SLOCheckResult(layer="bronze", entity="orders", status="❌ STALE", passed=False, check_type="freshness")]
+        [SLOCheckResult(layer="bronze", entity="orders", status="STALE", passed=False, check_type="freshness")]
     )
 
     assert "slack://team" in added
@@ -703,8 +678,8 @@ def test_check_row_counts_duckdb_polars_and_configuration_edges(monkeypatch):
 
     duck_results = SLOValidator(registry, duckdb_con=DuckCon()).check_row_counts()
     assert {r.entity: r.status for r in duck_results} == {
-        "orders": "❌ TOO MANY ROWS (150 > 100)",
-        "empty": "⚠️ NO DATA",
+        "orders": "TOO_MANY_ROWS",
+        "empty": "NO_DATA",
     }
 
     log_df = pl.DataFrame(
@@ -722,7 +697,7 @@ def test_check_row_counts_duckdb_polars_and_configuration_edges(monkeypatch):
     by_entity = {r.entity: r for r in polars_results}
     assert by_entity["orders"].passed is True
     assert by_entity["orders"].row_count == 25
-    assert by_entity["empty"].status == "⚠️ NO DATA"
+    assert by_entity["empty"].status == "NO_DATA"
 
     missing_run_log = SimpleNamespace(
         slo=SimpleNamespace(row_count=row_count),
@@ -760,7 +735,7 @@ def test_row_count_anomaly_duckdb_polars_and_disabled_edges(monkeypatch):
     drop = duck_validator.check_row_count_anomaly("orders", "bronze", 10, anomaly)
     assert drop is not None
     assert drop.passed is False
-    assert "VOLUME DROP" in drop.status
+    assert drop.status == "VOLUME_DROP"
 
     zero_validator = SLOValidator(
         registry,
@@ -860,7 +835,7 @@ def test_check_retention_duckdb_and_polars_paths(monkeypatch):
     by_entity = {r.entity: r for r in duck_results}
     assert by_entity["fresh"].passed is True
     assert by_entity["old"].passed is False
-    assert "RETENTION BREACH" in by_entity["old"].status
+    assert by_entity["old"].status == "BREACHED"
     assert "none" not in by_entity
     assert "no_source_columns" not in by_entity
     assert "bad_period" not in by_entity
@@ -935,7 +910,7 @@ def test_run_checks_includes_retention_and_tolerates_write_failure(monkeypatch):
                 layer="bronze",
                 entity="orders",
                 check_type="retention",
-                status="❌ RETENTION BREACH",
+                status="BREACHED",
                 passed=False,
             )
         ],
@@ -1123,7 +1098,7 @@ class TestQualityGate:
         assert r.passed is True  # non-blocking
         assert r.severity == "warn"
         assert r.quality_ratio == 0.0
-        assert "ALL ROWS QUARANTINED" in r.status
+        assert r.status == "ALL_QUARANTINED"
 
     def test_all_quarantined_fails_with_quality_config(self):
         # With a quality SLO configured (opted in) → hard FAIL.
@@ -1161,7 +1136,7 @@ class TestQualityGate:
             "dim_rider", {"total": 100, "good": 50, "quarantined": 50}, self._quality()
         )
         assert len(res) == 1 and res[0].passed is False
-        assert "ALL ROWS QUARANTINED" not in res[0].status
+        assert res[0].status != "ALL_QUARANTINED"
 
     def test_partial_quarantine_without_config_is_not_flagged(self):
         # good>0 and no quality SLO configured → gate is silent (only good==0 is

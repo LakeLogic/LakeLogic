@@ -185,7 +185,7 @@ def row_count_verdict(actual: float, baseline: RowCountBaseline, cfg: Any) -> Ro
 
 
 def describe(actual: float, baseline: RowCountBaseline, verdict: RowCountVerdict, cfg: Any) -> str:
-    """The status line: what was seen, against what, in which environment."""
+    """The message (no icons): what was seen, against what, in which environment."""
     basis = {
         "seasonal_median": "same-weekday median" if baseline.seasonal else "trailing median",
         "median": "median",
@@ -194,13 +194,20 @@ def describe(actual: float, baseline: RowCountBaseline, verdict: RowCountVerdict
     where = f", {baseline.environment}" if baseline.environment else ""
     against = f"{basis} {baseline.expected:,.0f} over {baseline.samples} runs{where}"
     if verdict.passed:
-        return f"✅ OK (ratio={verdict.ratio:.2f}x vs {against})"
-    label = "VOLUME DROP" if verdict.direction == "drop" else "VOLUME SPIKE"
+        return f"ratio={verdict.ratio:.2f}x vs {against}"
+    label = "volume drop" if verdict.direction == "drop" else "volume spike"
     if verdict.severity == "critical":
-        label += " — CRITICAL"
+        label += ", critical"
     bound = _cfg(cfg, "min_ratio", 0.5) if verdict.direction == "drop" else _cfg(cfg, "max_ratio", 2.0)
     op = "<" if verdict.direction == "drop" else ">"
-    return f"❌ {label} ({verdict.ratio:.2f}x {op} {bound}x {against})"
+    return f"{label}: {verdict.ratio:.2f}x {op} {bound}x {against}"
+
+
+def verdict_status(verdict: RowCountVerdict) -> str:
+    """The stored status token for a drift verdict (see slo.SLO_STATUSES)."""
+    if verdict.passed:
+        return "OK"
+    return "VOLUME_DROP" if verdict.direction == "drop" else "VOLUME_SPIKE"
 
 
 def stamp(baseline: RowCountBaseline, verdict: RowCountVerdict) -> Dict[str, Any]:

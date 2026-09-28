@@ -432,6 +432,21 @@ def _parse_lookback(lookback: str) -> timedelta:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_log_table(spark: Any, log_table: Optional[str]) -> str:
+    """A configured ``log_table`` is used verbatim. Unset: the standard
+    ``_lakelogic_pipeline_runs``, unless a legacy table (``pipeline_runs``) already
+    exists — existing estates keep reading their history."""
+    if log_table:
+        return log_table
+    from lakelogic.core.metadata_names import legacy_table_names, metadata_table_name, resolve_existing
+
+    return resolve_existing(
+        "pipeline_runs",
+        [metadata_table_name("pipeline_runs"), *legacy_table_names("pipeline_runs")],
+        lambda t: spark.catalog.tableExists(t),
+    )
+
+
 class IncrementalBoundary:
     """
     Factory class that resolves incremental processing windows.
@@ -544,7 +559,7 @@ class IncrementalBoundary:
         data_layer: Optional[str] = None,
         domain: Optional[str] = None,
         system: Optional[str] = None,
-        log_table: str = "pipeline_runs",
+        log_table: Optional[str] = None,
     ) -> Boundary:
         """
         Strategy: query processing window based on Delta table versions.
@@ -600,7 +615,7 @@ class IncrementalBoundary:
                         filt = filt & (F.col("system") == system)
 
                     row = (
-                        spark.table(log_table)
+                        spark.table(log_table := _resolve_log_table(spark, log_table))
                         .filter(filt)
                         .agg(
                             F.max("max_watermark_value").alias("last_watermark"),
@@ -697,7 +712,7 @@ class IncrementalBoundary:
         cls,
         pipeline_name: str,
         *,
-        log_table: str = "pipeline_runs",
+        log_table: Optional[str] = None,
         dataset: Optional[str] = None,
         data_layer: Optional[str] = None,
         domain: Optional[str] = None,
@@ -774,7 +789,7 @@ class IncrementalBoundary:
                     filt = filt & (F.col("system") == system)
 
                 row = (
-                    spark.table(log_table)
+                    spark.table(log_table := _resolve_log_table(spark, log_table))
                     .filter(filt)
                     .agg(
                         F.max("max_source_mtime").alias("last_source_mtime"),
@@ -820,7 +835,7 @@ class IncrementalBoundary:
             else:
                 # â”€â”€ Legacy path: query pipeline_runs by pipeline_name â”€â”€â”€â”€â”€
                 row = (
-                    spark.table(log_table)
+                    spark.table(log_table := _resolve_log_table(spark, log_table))
                     .filter((F.col("pipeline_name") == pipeline_name) & (F.col("status") == "success"))
                     .agg(F.max("processed_through").alias("last_success"))
                     .collect()[0]
@@ -1183,7 +1198,7 @@ class IncrementalBoundary:
             return cls.from_lookback(lb, partition_filters=merged_pf or None)
 
         if strategy == "pipeline_log":
-            log_table = src.get("pipeline_log_table", "pipeline_runs")
+            log_table = src.get("pipeline_log_table")
             p_name = pipeline_name or src.get("pipeline_name", Path(contract_path).stem)
             b = cls.from_pipeline_log(
                 p_name,
@@ -1217,7 +1232,7 @@ class IncrementalBoundary:
                 data_layer=src.get("data_layer"),
                 domain=src.get("domain"),
                 system=src.get("system"),
-                log_table=src.get("pipeline_log_table", "pipeline_runs"),
+                log_table=src.get("pipeline_log_table"),
             )
 
         tp = target_path or src.get("target_path", "")
@@ -1280,7 +1295,7 @@ class IncrementalBoundary:
         if strategy == "pipeline_log":
             b = cls.from_pipeline_log(
                 cfg.get("pipeline_name", "unknown"),
-                log_table=cfg.get("pipeline_log_table", "pipeline_runs"),
+                log_table=cfg.get("pipeline_log_table"),
                 dataset=cfg.get("dataset"),
                 data_layer=cfg.get("data_layer"),
                 domain=cfg.get("domain"),
@@ -1306,7 +1321,7 @@ class IncrementalBoundary:
                 data_layer=cfg.get("data_layer"),
                 domain=cfg.get("domain"),
                 system=cfg.get("system"),
-                log_table=cfg.get("pipeline_log_table", "pipeline_runs"),
+                log_table=cfg.get("pipeline_log_table"),
             )
         b = cls.from_max_target(cfg.get("target_path", ""), watermark_field=wm_field)
         b.partition_filters = merged_pf

@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from lakelogic.core.metadata_names import resolve_local_file as _mn_file
 from lakelogic.core.models import DataContract
 
 
@@ -120,8 +121,10 @@ class RunLogReader:
             return None, "duckdb_unavailable"
 
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
-        db_path = self._resolve_path(db_path, base_path)
+        if metadata.get("run_log_database"):
+            db_path = self._resolve_path(metadata["run_log_database"], base_path)
+        else:
+            db_path = _mn_file("run_log", self._resolve_path("logs", base_path), "duckdb")
         if not db_path.exists():
             return None, "run_log_db_missing"
 
@@ -158,8 +161,10 @@ class RunLogReader:
         import sqlite3
 
         base_path = getattr(contract, "_base_path", None)
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
-        db_path = self._resolve_path(db_path, base_path)
+        if metadata.get("run_log_database"):
+            db_path = self._resolve_path(metadata["run_log_database"], base_path)
+        else:
+            db_path = _mn_file("run_log", self._resolve_path("logs", base_path), "sqlite")
         if not db_path.exists():
             return None, "run_log_db_missing"
 

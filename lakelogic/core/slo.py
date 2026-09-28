@@ -80,12 +80,137 @@ def _named(row: Any, names: tuple) -> Dict[str, Any]:
     return {n: values[i] for i, n in enumerate(names) if i < len(values)}
 
 
+
+# ── Stored status vocabulary ────────────────────────────────────────────────
+# `SLOCheckResult.status` is PERSISTED (`_slo_checks.status`, `details_json`,
+# retention evidence), so it is one plain uppercase token: no icons, no counts,
+# no prose. Icons broke queries and encodings and duplicated `passed`; the
+# numbers belong in their own columns and the sentence in `message`.
+# Icons exist ONLY at display time — see `status_icon` / `format_status`.
+STATUS_OK = "OK"
+STATUS_STALE = "STALE"  # freshness: data older than the limit
+STATUS_NO_DATA = "NO_DATA"  # nothing to measure (empty table / no run-log row)
+STATUS_ERROR = "ERROR"  # the check itself could not run
+STATUS_NOT_SET = "NOT_SET"  # no target declared — unmeasured, NOT a pass
+STATUS_TOO_FEW_ROWS = "TOO_FEW_ROWS"
+STATUS_TOO_MANY_ROWS = "TOO_MANY_ROWS"
+STATUS_VOLUME_DROP = "VOLUME_DROP"
+STATUS_VOLUME_SPIKE = "VOLUME_SPIKE"
+STATUS_QUALITY_BREACH = "QUALITY_BREACH"
+STATUS_ALL_QUARANTINED = "ALL_QUARANTINED"
+STATUS_BREACHED = "BREACHED"  # retention: records older than the period
+# Scanner (lakelogic/scanner/validator.py) verdicts share the model and the rule.
+STATUS_WARN = "WARN"  # within the limit but past the warn threshold
+STATUS_SKIPPED = "SKIPPED"  # nothing the check could read (no timestamp / metadata)
+STATUS_BASELINE_SET = "BASELINE_SET"  # first scan: schema baseline recorded
+STATUS_SCHEMA_DRIFT = "SCHEMA_DRIFT"
+
+SLO_STATUSES = frozenset(
+    {
+        STATUS_OK,
+        STATUS_STALE,
+        STATUS_NO_DATA,
+        STATUS_ERROR,
+        STATUS_NOT_SET,
+        STATUS_TOO_FEW_ROWS,
+        STATUS_TOO_MANY_ROWS,
+        STATUS_VOLUME_DROP,
+        STATUS_VOLUME_SPIKE,
+        STATUS_QUALITY_BREACH,
+        STATUS_ALL_QUARANTINED,
+        STATUS_BREACHED,
+        STATUS_WARN,
+        STATUS_SKIPPED,
+        STATUS_BASELINE_SET,
+        STATUS_SCHEMA_DRIFT,
+    }
+)
+
+# Old stored strings (pre-token rows) -> token. Ordered: first match wins.
+_LEGACY_STATUS_PATTERNS = (
+    ("RETENTION BREACH", STATUS_BREACHED),
+    ("ALL ROWS QUARANTINED", STATUS_ALL_QUARANTINED),
+    ("NO DATA", STATUS_NO_DATA),
+    ("NOT SET", STATUS_NOT_SET),
+    ("ERROR", STATUS_ERROR),
+    ("STALE", STATUS_STALE),
+    ("TOO FEW ROWS", STATUS_TOO_FEW_ROWS),
+    ("TOO MANY ROWS", STATUS_TOO_MANY_ROWS),
+    ("VOLUME DROP", STATUS_VOLUME_DROP),
+    ("VOLUME SPIKE", STATUS_VOLUME_SPIKE),
+    ("QUALITY", STATUS_QUALITY_BREACH),
+    ("SKIPPED", STATUS_SKIPPED),
+    ("BASELINE SET", STATUS_BASELINE_SET),
+    ("NO DRIFT", STATUS_OK),
+    ("DRIFT", STATUS_SCHEMA_DRIFT),
+    ("WARN", STATUS_WARN),
+    ("OK", STATUS_OK),
+)
+
+
+def normalize_status(status: Any) -> Optional[str]:
+    """Map a stored status — new token OR a pre-token icon string — to a token.
+
+    Rows written before the vocabulary change hold "✅ OK (8194 rows)", "⚠️ NO DATA",
+    "❌ RETENTION BREACH: ...". Every reader of stored statuses goes through this one
+    function so old and new rows compare equal. Unknown text returns None.
+    """
+    if status is None:
+        return None
+    text = str(status).strip()
+    if text in SLO_STATUSES:
+        return text
+    upper = text.upper()
+    for needle, token in _LEGACY_STATUS_PATTERNS:
+        if needle in upper:
+            return token
+    return None
+
+
+_STATUS_ICONS = {
+    STATUS_OK: "✅",
+    STATUS_NOT_SET: "➖",
+    STATUS_NO_DATA: "⚠️",
+    STATUS_ERROR: "⚠️",
+    STATUS_WARN: "⚠️",
+    STATUS_SKIPPED: "⏭",
+    STATUS_BASELINE_SET: "✅",
+}
+
+
+def status_icon(status: Any, passed: Optional[bool] = None, severity: Optional[str] = None) -> str:
+    """The display icon for a status. Display only — never stored."""
+    token = normalize_status(status) or ""
+    if token in _STATUS_ICONS:
+        return _STATUS_ICONS[token]
+    if passed is False:
+        return "❌"
+    if passed is None:
+        return "➖"
+    # A failing-shaped token that did not fail (warn_only, ALL_QUARANTINED with no
+    # quality SLO, a drift the config ignores) — a pass only if severity says so.
+    return "✅" if severity == "pass" else "⚠️"
+
+
+def format_status(result: Any) -> str:
+    """Human line for a result: icon + token + message. Display only."""
+    status = getattr(result, "status", result)
+    passed = getattr(result, "passed", None) if hasattr(result, "status") else False
+    message = getattr(result, "message", None)
+    token = normalize_status(status) or str(status)
+    line = f"{status_icon(status, passed, getattr(result, 'severity', None))} {token}"
+    return f"{line} ({message})" if message else line
+
+
 class SLOCheckResult(BaseModel):
     layer: str
     entity: str
-    check_type: str = "freshness"  # freshness | row_count | quality | schedule | retention
-    status: str
-    passed: bool
+    check_type: str = "freshness"  # freshness | row_count | quality | retention
+    status: str  # one token from SLO_STATUSES — no icons, no counts
+    # None = NOT MEASURED (status NOT_SET: no target declared). Unmeasured is not a pass.
+    passed: Optional[bool]
+    # The human sentence, without icons: "8194 rows", the error text, the retention age.
+    message: Optional[str] = None
     severity: str = "fail"  # "pass" | "warn" | "fail"
     latest_ts: Optional[str] = None
     delay_minutes: Optional[float] = None
@@ -141,13 +266,8 @@ class SLOCheckResult(BaseModel):
     quality_max_quarantine_ratio: Optional[float] = None  # the declared ceiling
     quality_quarantine_ratio: Optional[float] = None  # what was observed
     quality_severity: Optional[str] = None  # highest failing severity
-    # ── Duration / schedule ──────────────────────────────────────────────────
-    # `schedule_deadline_utc` is the promise ("06:00"); `delay_minutes` carries the
-    # observed distance from it. The deadline was computed, used to decide
-    # pass/fail, and then discarded, so a late pipeline reported "breached" with
-    # nothing to say how late against what.
+    # ── Duration ─────────────────────────────────────────────────────────────
     duration_seconds: Optional[float] = None
-    schedule_deadline_utc: Optional[str] = None
     # ── WHICH RUN PRODUCED THE DATA THIS VERDICT IS ABOUT ────────────────────
     # Distinct from the check's own `pipeline_run_id`, which records the pipeline
     # execution that TRIGGERED the check and is legitimately null for the hourly
@@ -202,7 +322,7 @@ class SLOValidator:
     This operates continuously out-of-band from ingestion pipelines, evaluating:
     1. Freshness: By physically scanning Delta/Parquet file timestamps on storage.
     2. Data Volume: By checking row count min/max bounds and anomaly detection against run log baselines.
-    3. Pipeline Health: By validating execution schedules and dataset quality quarantine ratios.
+    3. Pipeline Health: By validating dataset quality quarantine ratios.
     """
 
     def __init__(
@@ -421,7 +541,10 @@ class SLOValidator:
             if layer_slo and not _slo_covers(layer_slo, entity):
                 continue
 
-            max_delay = layer_slo.max_delay_minutes if layer_slo else 999999
+            # NO TARGET IS NOT A HUGE TARGET. This used to fall back to 999999 minutes
+            # and then report OK against it — a pass nobody promised. With no layer SLO
+            # (or one declaring no max_delay_minutes) the verdict is NOT_SET.
+            max_delay = getattr(layer_slo, "max_delay_minutes", None) if layer_slo else None
 
             # One ordered candidate list, first present wins. The previous code
             # appended "_lakelogic_loaded_at" unconditionally as "the standard audit
@@ -531,7 +654,8 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status=f"⚠️ ERROR: {str(last_error)[:200]}",
+                        status=STATUS_ERROR,
+                        message=str(last_error)[:200],
                         passed=False,
                         slo_max_minutes=max_delay,
                     )
@@ -543,7 +667,8 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status="⚠️ NO DATA",
+                        status=STATUS_NO_DATA,
+                        message=f"no timestamp in '{found_col}'",
                         passed=False,
                         slo_max_minutes=max_delay,
                     )
@@ -556,7 +681,7 @@ class SLOValidator:
                 latest_utc = _coerce_utc(latest_ts)
 
                 delay = (now - latest_utc).total_seconds() / 60
-                passed = delay <= max_delay
+                passed = None if max_delay is None else delay <= max_delay
 
                 # ── Source freshness ─────────────────────────────────────
                 # Formerly a second check with its own column list and its own
@@ -572,14 +697,21 @@ class SLOValidator:
 
                 overall_passed = passed
 
-                status = "✅ OK" if overall_passed else "❌ STALE"
+                if overall_passed is None:
+                    status = STATUS_NOT_SET
+                    message = f"latest {round(delay, 1)} min via '{found_col}'; no freshness target set"
+                else:
+                    status = STATUS_OK if overall_passed else STATUS_STALE
+                    message = f"latest {round(delay, 1)} min, limit {max_delay} min via '{found_col}'"
 
                 results.append(
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
                         status=status,
+                        message=message,
                         passed=overall_passed,
+                        severity="pass" if overall_passed else ("fail" if overall_passed is False else "warn"),
                         latest_ts=str(latest_ts),
                         delay_minutes=round(delay, 1),
                         slo_max_minutes=max_delay,
@@ -596,19 +728,21 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status=f"⚠️ ERROR: {str(e)[:200]}",
+                        status=STATUS_ERROR,
+                        message=str(e)[:200],
                         passed=False,
                         slo_max_minutes=max_delay,
                     )
                 )
 
         # ── Summary logging ──────────────────────────────────────────────
-        n_pass = sum(1 for r in results if r.passed)
-        n_fail = sum(1 for r in results if not r.passed and "ERROR" not in r.status)
-        n_err = sum(1 for r in results if "ERROR" in r.status)
+        n_pass = sum(1 for r in results if r.passed is True)
+        n_err = sum(1 for r in results if r.status == STATUS_ERROR)
+        n_fail = sum(1 for r in results if r.passed is False) - n_err
+        n_unset = sum(1 for r in results if r.passed is None)
         logger.info(
             f"📊 SLO Freshness Summary: {len(results)} checks | "
-            f"✅ {n_pass} passed | ❌ {n_fail} failed | ⚠️ {n_err} errors"
+            f"✅ {n_pass} passed | ❌ {n_fail} failed | ⚠️ {n_err} errors | ➖ {n_unset} no target"
         )
         for r in results:
             source_info = ""
@@ -617,13 +751,13 @@ class SLOValidator:
                     f", source: {r.source_delay_minutes}min via "
                     f"'{r.source_column_used}' (SLO: {r.source_slo_max_minutes}min)"
                 )
-            if r.passed:
+            if r.passed is not False:
                 logger.info(
-                    f"   ✅ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min{source_info})"  # noqa: E501
+                    f"   [{r.layer}] {r.entity}: {format_status(r)} (delay: {r.delay_minutes}min, SLO: {r.slo_max_minutes}min{source_info})"  # noqa: E501
                 )
             else:
                 logger.warning(
-                    f"   ❌ [{r.layer}] {r.entity}: {r.status} (delay: {r.delay_minutes}min{source_info})"  # noqa: E501
+                    f"   [{r.layer}] {r.entity}: {format_status(r)} (delay: {r.delay_minutes}min{source_info})"  # noqa: E501
                 )
 
         return results
@@ -814,7 +948,8 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status=f"⚠️ ERROR: {str(e)[:200]}",
+                        status=STATUS_ERROR,
+                        message=str(e)[:200],
                         passed=False,
                         slo_min_rows=min_rows,
                         slo_max_rows=max_rows,
@@ -827,7 +962,8 @@ class SLOValidator:
                     SLOCheckResult(
                         layer=layer,
                         entity=entity,
-                        status="⚠️ NO DATA",
+                        status=STATUS_NO_DATA,
+                        message=f"no run-log row with {check_field}",
                         passed=False,
                         slo_min_rows=min_rows,
                         slo_max_rows=max_rows,
@@ -837,20 +973,17 @@ class SLOValidator:
 
             actual_count = int(row[check_field])
             passed = True
-            status_parts = []
+            status = STATUS_OK
+            message = f"{actual_count} rows"
 
             if min_rows is not None and actual_count < min_rows:
                 passed = False
-                status_parts.append(f"❌ TOO FEW ROWS ({actual_count} < {min_rows})")
-
-            if max_rows is not None and actual_count > max_rows:
+                status = STATUS_TOO_FEW_ROWS
+                message = f"{actual_count} rows < min {min_rows}"
+            elif max_rows is not None and actual_count > max_rows:
                 passed = False
-                status_parts.append(f"❌ TOO MANY ROWS ({actual_count} > {max_rows})")
-
-            if passed:
-                status = f"✅ OK ({actual_count} rows)"
-            else:
-                status = "; ".join(status_parts)
+                status = STATUS_TOO_MANY_ROWS
+                message = f"{actual_count} rows > max {max_rows}"
 
             if min_rows is not None or max_rows is not None:
                 results.append(
@@ -867,6 +1000,7 @@ class SLOValidator:
                         # _slo_checks table were mislabelled this way.
                         check_type="row_count",
                         status=status,
+                        message=message,
                         passed=passed,
                         row_count=actual_count,
                         slo_min_rows=min_rows,
@@ -913,83 +1047,6 @@ class SLOValidator:
 
         return results
 
-    def check_schedule(self, environment: Optional[str] = None) -> List[SLOCheckResult]:
-        """
-        Check schedule SLOs: completion deadline, start-time, and duration.
-
-        Respects ``schedule.environments`` — if the current environment is not
-        in the list, checks are skipped.
-        """
-        results = []
-        now = datetime.datetime.now(datetime.timezone.utc)
-        schedule = self.registry.slo.schedule
-
-        if not schedule:
-            return results
-
-        # Environment filter
-        if schedule.environments and environment:
-            if environment not in schedule.environments:
-                return results
-
-        # Completion deadline
-        if schedule.expected_completion_utc:
-            try:
-                expected_hour, expected_min = map(int, schedule.expected_completion_utc.split(":"))
-                deadline = now.replace(hour=expected_hour, minute=expected_min, second=0, microsecond=0)
-
-                if now <= deadline:
-                    results.append(
-                        SLOCheckResult(
-                            layer="schedule",
-                            entity="pipeline",
-                            check_type="schedule",
-                            status="✅ ON TIME",
-                            passed=True,
-                            severity="pass",
-                            delay_minutes=round((now - deadline).total_seconds() / 60, 1),
-                            schedule_deadline_utc=schedule.expected_completion_utc,
-                        )
-                    )
-                else:
-                    results.append(
-                        SLOCheckResult(
-                            layer="schedule",
-                            entity="pipeline",
-                            check_type="schedule",
-                            status=f"❌ LATE by {(now - deadline).total_seconds() / 60:.0f} min",
-                            passed=False,
-                            severity="fail",
-                            delay_minutes=round((now - deadline).total_seconds() / 60, 1),
-                            schedule_deadline_utc=schedule.expected_completion_utc,
-                        )
-                    )
-            except Exception as e:
-                logger.error(f"Failed to parse schedule SLO: {e}")
-
-        # Start-time check
-        if schedule.expected_start_utc:
-            try:
-                sh, sm = map(int, schedule.expected_start_utc.split(":"))
-                start_deadline = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
-                if now > start_deadline:
-                    # Pipeline should have started by now — check via run log
-                    results.append(
-                        SLOCheckResult(
-                            layer="schedule",
-                            entity="pipeline_start",
-                            check_type="schedule",
-                            status="⚠️ Check if pipeline has started",
-                            passed=True,
-                            severity="warn",
-                            schedule_deadline_utc=schedule.expected_start_utc,
-                        )
-                    )
-            except Exception:
-                pass
-
-        return results
-
     def check_quality(self, report: Optional[Dict[str, Any]] = None) -> List[SLOCheckResult]:
         """
         Evaluate quality SLOs using quarantine ratios and severity-weighted thresholds.
@@ -1024,10 +1081,8 @@ class SLOValidator:
                                 layer="quality",
                                 entity=f"severity_{sev}",
                                 check_type="quality",
-                                status=(
-                                    f"❌ {sev.upper()} quality breach "
-                                    f"({sev_good_ratio:.1%} < {threshold.min_good_ratio:.1%})"
-                                ),
+                                status=STATUS_QUALITY_BREACH,
+                                message=f"{sev} severity: {sev_good_ratio:.1%} good < {threshold.min_good_ratio:.1%}",
                                 passed=False,
                                 severity="fail" if sev in ("critical", "high") else "warn",
                                 quality_ratio=round(sev_good_ratio, 4),
@@ -1078,7 +1133,8 @@ class SLOValidator:
                         layer="quality",
                         entity=entity,
                         check_type="quality",
-                        status=f"❌ ALL ROWS QUARANTINED ({quarantined} of {total} blocked, 0 materialized)",
+                        status=STATUS_ALL_QUARANTINED,
+                        message=f"{quarantined} of {total} rows blocked, 0 materialized",
                         passed=False,
                         severity="fail",
                         quality_ratio=0.0,
@@ -1093,10 +1149,8 @@ class SLOValidator:
                         layer="quality",
                         entity=entity,
                         check_type="quality",
-                        status=(
-                            f"⚠️ ALL ROWS QUARANTINED ({quarantined} of {total} blocked, "
-                            f"0 materialized) — no quality SLO set"
-                        ),
+                        status=STATUS_ALL_QUARANTINED,
+                        message=f"{quarantined} of {total} rows blocked, 0 materialized; no quality SLO set",
                         passed=True,
                         severity="warn",
                         quality_ratio=0.0,
@@ -1106,17 +1160,15 @@ class SLOValidator:
 
         if quality:
             passed = good_ratio >= quality.min_good_ratio and quarantine_ratio <= quality.max_quarantine_ratio
-            status = (
-                f"✅ OK (good={good_ratio:.1%})"
-                if passed
-                else f"❌ QUALITY ({good_ratio:.1%} good, {quarantine_ratio:.1%} quarantined)"
-            )
+            status = STATUS_OK if passed else STATUS_QUALITY_BREACH
+            message = f"{good_ratio:.1%} good, {quarantine_ratio:.1%} quarantined"
             results.append(
                 SLOCheckResult(
                     layer="quality",
                     entity=entity,
                     check_type="quality",
                     status=status,
+                    message=message,
                     passed=passed,
                     severity="pass" if passed else "fail",
                     quality_ratio=round(good_ratio, 4),
@@ -1273,7 +1325,7 @@ class SLOValidator:
         if not run_log_table:
             return None
 
-        from .volume_baseline import describe, row_count_baseline, row_count_verdict, stamp
+        from .volume_baseline import describe, row_count_baseline, row_count_verdict, stamp, verdict_status
 
         # ENOUGH HISTORY TO SCOPE. The baseline is filtered to the judged run's environment
         # and, for `seasonal_median`, to a window of days — both in Python, after the fetch,
@@ -1395,7 +1447,8 @@ class SLOValidator:
             layer=layer,
             entity=entity,
             check_type="row_count",
-            status=describe(actual_count, baseline, verdict, anomaly_cfg),
+            status=verdict_status(verdict),
+            message=describe(actual_count, baseline, verdict, anomaly_cfg),
             passed=verdict.passed,
             severity="pass" if verdict.passed else "warn",
             row_count=actual_count,
@@ -1572,15 +1625,13 @@ class SLOValidator:
 
             _age = _humanise_minutes(age_minutes)
             _limit = _humanise_minutes(retention_minutes)
-            status = (
-                f"✅ OK (oldest record {_age}, limit {iso_period} = {_limit} via '{col_used}')"
+            status = STATUS_OK if passed else STATUS_BREACHED
+            message = (
+                f"oldest record {_age}, limit {iso_period} = {_limit} via '{col_used}'"
                 if passed
-                # The breach string began with a literal "?" — a mojibaked emoji, so
-                # the one verdict here that signals legal exposure was the only one
-                # without a marker, while every pass showed a tick.
-                else (f"❌ RETENTION BREACH: oldest record {_age} exceeds {iso_period} = {_limit} via '{col_used}'")
+                else f"oldest record {_age} exceeds {iso_period} = {_limit} via '{col_used}'"
             )
-            logger.debug(f"   🗄 Retention [{layer}] {entity}: {status}")
+            logger.debug(f"   🗄 Retention [{layer}] {entity}: {status_icon(status, passed)} {status} ({message})")
 
             results.append(
                 SLOCheckResult(
@@ -1588,6 +1639,7 @@ class SLOValidator:
                     entity=entity,
                     check_type="retention",
                     status=status,
+                    message=message,
                     passed=passed,
                     severity="pass" if passed else "fail",
                     retention_period=iso_period,
@@ -1634,13 +1686,11 @@ class SLOValidator:
         if self.registry.retention:
             results.extend(self.check_retention())
 
-        schedule_results = self.check_schedule(environment=environment)
-        results.extend(schedule_results)
-
         quality_results = self.check_quality(report=report)
         results.extend(quality_results)
 
-        failures = [r for r in results if not r.passed]
+        # `passed is None` is NOT_SET — unmeasured, never a breach.
+        failures = [r for r in results if r.passed is False]
 
         # Write results to _slo_checks table — non-blocking, never raises
         try:
@@ -1667,7 +1717,7 @@ class SLOValidator:
         Extracts webhooks from the global notifications block in the Domain Registry
         that have explicitly subscribed to the 'slo_breach' event.
         """
-        failures = [b for b in breaches if not b.passed]
+        failures = [b for b in breaches if b.passed is False]
         if not failures:
             return
 
@@ -1734,7 +1784,7 @@ class SLOValidator:
 
         msg = f"LakeLogic SLO Alert: {len(failures)} SLA breaches detected in the '{self.registry.domain}' domain.\n\n"
         for f in failures:
-            msg += f"- {f.layer}.{f.entity}: {f.status} (Type: {f.check_type})\n"
+            msg += f"- {f.layer}.{f.entity}: {format_status(f)} (Type: {f.check_type})\n"
 
         apobj.notify(body=msg, title=f"LakeLogic Domain SLO Breach ({self.registry.domain})")
         logger.info(f"Dispatched SLO alerts to {channel_count} channels via Apprise.")

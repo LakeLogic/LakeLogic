@@ -94,14 +94,6 @@ domains_retail/
           low:
             min_good_ratio: 0.90
 
-      schedule:
-        environments: ["prod", "staging"]
-        expected_start_utc: "04:30"
-        expected_completion_utc: "06:00"
-        expected_duration_minutes: 45
-        warn_if_duration_exceeds_minutes: 90
-        timezone: "UTC"
-
     # ── Notifications ──────────────────────────────────────────
     # Domain-wide notification channels. All systems inherit these.
     # Systems can add their own channels (lists are concatenated).
@@ -261,19 +253,9 @@ Data quality thresholds applied after validation rules run.
 
 Each severity level (`critical`, `high`, `medium`, `low`) can define its own `min_good_ratio`.
 
-#### `slo.schedule`
+#### `slo.schedule` (retired)
 
-Pipeline scheduling expectations for SLA monitoring.
-
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `environments` | `list` | `[]` | Only enforce in these environments (empty = all) |
-| `expected_start_utc` | `string` | `null` | Expected pipeline start time |
-| `expected_completion_utc` | `string` | `"06:00"` | Expected pipeline completion time |
-| `expected_duration_minutes` | `int` | `null` | Expected total pipeline duration |
-| `warn_if_duration_exceeds_minutes` | `int` | `null` | Warn if pipeline takes longer than this |
-| `timezone` | `string` | `"UTC"` | Timezone for schedule calculations |
-| `pipeline_cron` | `string` | `null` | Cron expression for expected run frequency |
+No longer supported: an existing block loads and is ignored with a warning. Use `slo.freshness`.
 
 ---
 

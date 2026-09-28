@@ -130,6 +130,23 @@ def struct_drift_errors(contract_fields: Any, actual_members: Any) -> List[str]:
     return errors
 
 
+# `col IS NOT NULL`, the column bare or quoted ("", ``, []), optionally wrapped in parentheses.
+_NOT_NULL_SQL = re.compile(
+    r'^\s*\(?\s*(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))\s+IS\s+NOT\s+NULL\s*\)?\s*$',
+    re.IGNORECASE,
+)
+
+
+def _not_null_columns(rules: List[Any]) -> set:
+    """Lower-cased columns that one of ``rules`` checks with exactly ``<col> IS NOT NULL``."""
+    cols = set()
+    for rule in rules:
+        m = _NOT_NULL_SQL.match(getattr(rule, "sql", None) or "")
+        if m:
+            cols.add(next(g for g in m.groups() if g).lower())
+    return cols
+
+
 class EngineAdapter(ABC):
     """
     Abstract Base Class for all execution engines.
@@ -300,9 +317,33 @@ class EngineAdapter(ABC):
         # `_required` (IS NOT NULL) rules on them would always fail. Skip them.
         scd2_injected = self._scd2_injected_columns()
 
-        if enforce_required and self.contract.model and self.contract.model.fields:
+        declared: List[QualityRule] = []
+        if self.contract.quality and self.contract.quality.row_rules:
+            for spec in self.contract.quality.row_rules:
+                expanded = self._expand_row_rule(spec)
+                if not expanded:
+                    continue
+                if isinstance(expanded, list):
+                    declared.extend(expanded)
+                else:
+                    declared.append(expanded)
+
+        if self.contract.model and self.contract.model.fields:
+            field_rules = [r for f in self.contract.model.fields for r in (f.rules or [])]
+            # A written `<field> IS NOT NULL` (or `not_null: <field>`) already checks what
+            # `required: true` would add. Keep the author's named rule and skip the automatic
+            # one, so each row is not scanned twice for the same thing and a null is not
+            # reported against two rules.
+            already_not_null = _not_null_columns(declared + field_rules)
             for field in self.contract.model.fields:
-                if field.required and field.name not in scd2_injected:
+                # `enforce_required: false` turns off the automatic required checks ONLY. It
+                # used to skip every field-level rule too, because both sat under this flag.
+                if (
+                    enforce_required
+                    and field.required
+                    and field.name not in scd2_injected
+                    and field.name.lower() not in already_not_null
+                ):
                     rules.append(
                         QualityRule(
                             name=f"{field.name}_required",
@@ -314,16 +355,7 @@ class EngineAdapter(ABC):
                 if field.rules:
                     rules.extend(field.rules)
 
-        if self.contract.quality and self.contract.quality.row_rules:
-            for spec in self.contract.quality.row_rules:
-                expanded = self._expand_row_rule(spec)
-                if not expanded:
-                    continue
-                if isinstance(expanded, list):
-                    rules.extend(expanded)
-                else:
-                    rules.append(expanded)
-
+        rules.extend(declared)
         return rules
 
     def get_dataset_rules(self) -> List[QualityRule]:
@@ -915,7 +947,7 @@ class EngineAdapter(ABC):
             return QualityRule(
                 name=name,
                 sql=f"{qfield} IN ({value_sql})",
-                category=cfg.get("category", "consistency"),
+                category=cfg.get("category", "validity"),
                 description=cfg.get("description"),
                 severity=cfg.get("severity", "error"),
             )
@@ -930,7 +962,7 @@ class EngineAdapter(ABC):
             return QualityRule(
                 name=name,
                 sql=self._regex_sql(field, pattern),
-                category=cfg.get("category", "correctness"),
+                category=cfg.get("category", "validity"),
                 description=cfg.get("description"),
                 severity=cfg.get("severity", "error"),
             )
@@ -958,7 +990,7 @@ class EngineAdapter(ABC):
             return QualityRule(
                 name=name,
                 sql=sql,
-                category=cfg.get("category", "correctness"),
+                category=cfg.get("category", "validity"),
                 description=cfg.get("description"),
                 severity=cfg.get("severity", "error"),
             )
@@ -1149,7 +1181,7 @@ class EngineAdapter(ABC):
             return QualityRule(
                 name=name,
                 sql=f"SELECT COUNT(*) - COUNT(DISTINCT {distinct_expr}) FROM {dataset}",
-                category=cfg.get("category", "consistency"),
+                category=cfg.get("category", "uniqueness"),
                 description=cfg.get("description"),
                 severity=cfg.get("severity", "error"),
                 must_be_less_than=1,

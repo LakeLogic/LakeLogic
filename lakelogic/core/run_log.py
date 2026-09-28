@@ -9,6 +9,12 @@ Supports cloud storage paths (ADLS, S3, GCS) via fsspec for JSON run logs.
 Extracted from materialization.py to keep concerns focused.
 """
 
+from lakelogic.core.metadata_names import default_local_db_path as _mn_db
+from lakelogic.core.metadata_names import (
+    is_legacy_name as _mn_is_legacy,
+    metadata_table_name as _mn_table,
+    resolve_local_file as _mn_resolve_local_file,
+)
 import datetime
 import json
 import os
@@ -17,6 +23,8 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from loguru import logger
+
+from lakelogic.core.plain_values import plain_record, plain_text, plain_value
 
 
 # ── Cloud path helpers ────────────────────────────────────────────────────────
@@ -307,6 +315,128 @@ def _prepare_table_name(name: str, backend: str) -> str:
 
 # ── Report flattening ──
 
+#: The documented shape of ``report_json``. Only keys that are NOT already a
+#: run-log column and that a reader needs (or that are genuinely diagnostic).
+#: Everything else in the in-memory run report — identity, status, counts,
+#: cost, timestamps, watermark, errors, SLO values — has its own column and is
+#: deliberately NOT repeated here. Readers:
+#:
+#: * ``incremental_metadata``  — engine: ``core/incremental.py`` heals the Delta
+#:   version from ``$.incremental_metadata.to_version``.
+#: * ``row_rule_failures``, ``dataset_rules``, ``schema_drift``, ``source_files``
+#:   — SaaS CSV ingest (``csv_run_log_ingest.py``), rule-failure rollups
+#:   (``operations.py``, ``telemetry/domain/rollups.py``).
+#: * ``partition_presence``    — SaaS partition-completeness monitor.
+#: * ``counts``                — only count keys with no column (e.g.
+#:   ``pre_transform_added``); the column-backed counts are omitted.
+#: * ``execution_context``     — diagnostic runtime facts (engine_version,
+#:   python_version, os_platform, peak_memory_mb, error_type/stage, engine
+#:   sub-block); ``engine`` and ``wall_clock_seconds`` duplicate columns.
+#: * ``contract_file_name``, ``pre_transform_filter``, ``all_rows_quarantined``,
+#:   ``no_source_rows`` — diagnostic, no column.
+#:
+#: Stack traces never go here: ``error_traceback`` is its own column, capped.
+#: Null values and empty containers are dropped.
+#: ``source_files`` keeps at most this many entries; ``source_file_count`` carries the total
+#: when the list was cut (absent when it was not).
+SOURCE_FILES_KEPT = 20
+
+REPORT_JSON_KEYS: tuple = (
+    "contract_file_name",
+    "counts",
+    "source_files",
+    "dataset_rules",
+    "row_rule_failures",
+    "schema_drift",
+    "partition_presence",
+    "incremental_metadata",
+    "execution_context",
+    "pre_transform_filter",
+    "all_rows_quarantined",
+    "no_source_rows",
+)
+
+# Count keys that already have a run-log column (see ``_flatten_report``).
+_COUNT_KEYS_WITH_COLUMNS = frozenset(
+    {
+        "source",
+        "total",
+        "good",
+        "quarantined",
+        "quarantine_ratio",
+        "aggregated_rows",
+        "pre_transform_dropped",
+        "deduplicated",
+        "filtered",
+    }
+)
+# execution_context keys that duplicate a column or never vary.
+_EXEC_CONTEXT_DROP = frozenset({"engine", "wall_clock_seconds", "predicate_pushdown", "projection_pushdown"})
+
+
+def _prune(value: Any) -> Any:
+    """Drop None values and empty dicts/lists, recursively."""
+    if isinstance(value, dict):
+        out = {k: _prune(v) for k, v in value.items()}
+        return {k: v for k, v in out.items() if v is not None and v != {} and v != []}
+    if isinstance(value, list):
+        return [_prune(v) for v in value if v is not None]
+    return value
+
+
+def report_json_payload(report: Dict[str, Any]) -> Dict[str, Any]:
+    """The slim ``report_json`` payload for a run report (see :data:`REPORT_JSON_KEYS`)."""
+    payload: Dict[str, Any] = {}
+    for key in REPORT_JSON_KEYS:
+        value = report.get(key)
+        if key == "counts" and isinstance(value, dict):
+            value = {k: v for k, v in value.items() if k not in _COUNT_KEYS_WITH_COLUMNS}
+        elif key == "execution_context" and isinstance(value, dict):
+            value = {
+                k: ({ik: iv for ik, iv in v.items() if ik not in _EXEC_CONTEXT_DROP} if isinstance(v, dict) else v)
+                for k, v in value.items()
+                if k not in _EXEC_CONTEXT_DROP
+            }
+        elif key in ("all_rows_quarantined", "no_source_rows") and not value:
+            value = None
+        elif key == "source_files" and isinstance(value, list) and len(value) > SOURCE_FILES_KEPT:
+            # A partitioned bronze read lists every landing file: 720 files made report_json
+            # 120 KB on the RideFlow demo (2026-09-27). Keep a sample and the total.
+            payload["source_file_count"] = len(value)
+            value = value[:SOURCE_FILES_KEPT]
+        payload[key] = value
+    return plain_value(_prune(payload))
+
+
+def _cost_is_measured(report: Dict[str, Any]) -> bool:
+    """True when the run carries a real cost measurement.
+
+    ``NoneCostProvider`` returns ``0.0`` at confidence ``"none"``; that is
+    "not measured", and must persist as NULL — never a confident 0.0 USD.
+    """
+    if report.get("estimated_cost") is None:
+        return False
+    confidence = str(report.get("cost_confidence") or "none").strip().lower()
+    return confidence != "none"
+
+
+def _cap_error_message(value: Any) -> Optional[str]:
+    """One concise line: the first line of the message, capped."""
+    if value is None:
+        return None
+    lines = str(value).strip().splitlines()
+    first = lines[0].strip() if lines else ""
+    return first[:_MESSAGE_LIMIT] or None
+
+
+def _cap_traceback(value: Any) -> Optional[str]:
+    """At most the last ``_TRACEBACK_LIMIT`` characters — the raising frames."""
+    if value is None:
+        return None
+    text = str(value)
+    return text if len(text) <= _TRACEBACK_LIMIT else text[-_TRACEBACK_LIMIT:]
+
+
 
 def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -345,10 +475,19 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             return None
 
+    _cost_measured = _cost_is_measured(report)
+
     # ── SLO metrics → single JSON column ──────────────────────────────
     slo_obj = {
         "freshness": {
-            "seconds": _num(freshness.get("age_seconds")),
+            # compute_slos() reports `delay_seconds`; older reports `age_seconds`.
+            # With `slos` no longer copied into report_json, this column is the
+            # only place the measured delay lands, so read both.
+            "seconds": _num(
+                freshness.get("age_seconds")
+                if freshness.get("age_seconds") is not None
+                else freshness.get("delay_seconds")
+            ),
             "pass": freshness.get("passed"),
             "threshold_seconds": _num(freshness.get("threshold_seconds")),
             "source_seconds": _num(freshness.get("source_age_seconds")),
@@ -370,13 +509,9 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
             "ratio": _num(report.get("slo_quality_ratio")),
             "severity": report.get("slo_quality_severity"),
         },
-        "schedule": {
-            "pass": report.get("slo_schedule_pass"),
-            "duration_seconds": _num(report.get("slo_duration_seconds")),
-        },
     }
 
-    return {
+    row = {
         # ── Identity ──────────────────────────────────────────────────
         "pipeline_run_id": report.get("pipeline_run_id"),
         "run_id": report.get("run_id"),
@@ -395,8 +530,8 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "environment": report.get("environment"),
         "data_layer": report.get("data_layer"),
         "status": report.get("status"),
-        "error_message": report.get("error_message"),
-        "error_traceback": report.get("error_traceback"),
+        "error_message": _cap_error_message(report.get("error_message")),
+        "error_traceback": _cap_traceback(report.get("error_traceback")),
         # Stamped on EVERY run, not just failures. It was previously set only by
         # capture_failure(), so the column was null for every successful run —
         # exactly backwards: "which build is actually running in production" is a
@@ -420,17 +555,20 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "counts_filtered": _int(counts.get("filtered")),
         "quarantine_ratio": _num(counts.get("quarantine_ratio")),
         # ── Cost observability ────────────────────────────────────────
-        "estimated_cost": _num(report.get("estimated_cost")),
-        "cost_currency": report.get("cost_currency"),
-        "cost_confidence": report.get("cost_confidence"),
+        # Unmeasured is not zero: with no cost provider the estimate is 0.0 at
+        # confidence "none", and a 0.0 USD column reads as "this run was free".
+        "estimated_cost": _num(report.get("estimated_cost")) if _cost_measured else None,
+        "cost_currency": report.get("cost_currency") if _cost_measured else None,
+        "cost_confidence": report.get("cost_confidence") or "none",
         # ── Watermark (critical for incremental loads) ────────────────
         "max_source_mtime": report.get("max_source_mtime"),
         "max_watermark_value": report.get("max_watermark_value"),
         # ── Consolidated JSON columns ─────────────────────────────────
         "dlt_state_json": report.get("dlt_state_json"),
         "slo_json": json.dumps(slo_obj, default=str),
-        "report_json": json.dumps(report, default=str),
+        "report_json": json.dumps(report_json_payload(report), default=str),
     }
+    return plain_record(row)
 
 
 # ── Table write ──
@@ -665,11 +803,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         if _looks_like_path:
             dir_path = _resolve_path(str(table_name), base_path)
             dir_path.mkdir(parents=True, exist_ok=True)
-            db_path = dir_path / "lakelogic_run_logs.duckdb"
+            db_path = _mn_resolve_local_file("run_log", dir_path, "duckdb")
             schema_name = None
-            table_only = "run_logs"
+            # Legacy file keeps its legacy table so history is not split.
+            table_only = "run_logs" if _mn_is_legacy("run_log", db_path) else _mn_table("run_log")
         else:
-            db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
+            db_path = metadata.get("run_log_database") or _mn_db("run_log", "duckdb")
             db_path = _resolve_path(str(db_path), base_path)
             db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -808,7 +947,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         # Storage path — resolved by registry placeholders, not by the contract YAML dir.
 
         base_path = None  # see materialization.py and quarantine.py for rationale
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
+        db_path = metadata.get("run_log_database") or _mn_db("run_log", "sqlite")
         db_path = _resolve_path(str(db_path), base_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1232,7 +1371,6 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         # Build dlt config from metadata
         dlt_config = {k: v for k, v in metadata.items() if k.startswith("dlt_")}
         destination = dlt_config.get("dlt_destination", "duckdb")
-        dataset_name = dlt_config.get("dlt_dataset_name", "run_logs")
         credentials = dlt_config.get("dlt_credentials")
 
         dest_kwargs = {}
@@ -1244,6 +1382,26 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         rl_table_name = table_name
 
+        def _dest():
+            return (
+                _dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
+                if dest_kwargs
+                else destination
+            )
+
+        def _has_dataset(name: str) -> bool:
+            probe = _dlt.pipeline(
+                pipeline_name=f"lakelogic_{rl_table_name}_run_log_probe", destination=_dest(), dataset_name=name
+            )
+            with probe.sql_client() as client:
+                return bool(client.has_dataset())
+
+        # A configured dataset is used verbatim; otherwise keep an existing `run_logs`
+        # (metadata_names.resolve_dlt_run_log_dataset) so history is not split.
+        from lakelogic.core.metadata_names import resolve_dlt_run_log_dataset
+
+        dataset_name = dlt_config.get("dlt_dataset_name") or resolve_dlt_run_log_dataset(_has_dataset)
+
         @_dlt.resource(
             name=rl_table_name,
             write_disposition="append",
@@ -1253,9 +1411,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         pipeline = _dlt.pipeline(
             pipeline_name=f"lakelogic_{rl_table_name}_run_log",
-            destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
-            if dest_kwargs
-            else destination,
+            destination=_dest(),
             dataset_name=dataset_name,
         )
 
@@ -1343,6 +1499,7 @@ _SLO_CHECKS_COLUMNS = [
     "passed",
     "severity",
     "status",
+    "message",
     "delay_minutes",
     "slo_max_minutes",
     "source_delay_minutes",
@@ -1380,7 +1537,9 @@ def _flatten_slo_check(
         "check_type": result.check_type,
         "passed": result.passed,
         "severity": result.severity,
+        # One plain token (slo.SLO_STATUSES) — no icons; the sentence is `message`.
         "status": result.status,
+        "message": getattr(result, "message", None),
         "delay_minutes": result.delay_minutes,
         "slo_max_minutes": result.slo_max_minutes,
         "source_delay_minutes": result.source_delay_minutes,
@@ -1462,6 +1621,7 @@ def _write_slo_checks_table(
                 StructField("passed", BooleanType(), True),
                 StructField("severity", StringType(), True),
                 StructField("status", StringType(), True),
+                StructField("message", StringType(), True),
                 StructField("delay_minutes", DoubleType(), True),
                 StructField("slo_max_minutes", LongType(), True),
                 StructField("source_delay_minutes", DoubleType(), True),
@@ -1514,14 +1674,14 @@ def _write_slo_checks_table(
         if _looks_like_path:
             dir_path = Path(str(table_name))
             dir_path.mkdir(parents=True, exist_ok=True)
-            db_path = dir_path / "lakelogic_slo_checks.duckdb"
+            db_path = _mn_resolve_local_file("slo_checks", dir_path, "duckdb")
             schema_name = None
-            table_only = "slo_checks"
+            table_only = "slo_checks" if _mn_is_legacy("slo_checks", db_path) else _mn_table("slo_checks")
         else:
             db_path = (
                 metadata.get("slo_checks_database")
                 or metadata.get("run_log_database")
-                or "logs/lakelogic_slo_checks.duckdb"
+                or _mn_db("slo_checks", "duckdb")
             )
             db_path = Path(db_path)
             db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1541,6 +1701,7 @@ def _write_slo_checks_table(
                 check_run_id VARCHAR, pipeline_run_id VARCHAR, checked_at VARCHAR,
                 domain VARCHAR, system VARCHAR, layer VARCHAR, entity VARCHAR,
                 check_type VARCHAR, passed BOOLEAN, severity VARCHAR, status VARCHAR,
+                message VARCHAR,
                 delay_minutes DOUBLE, slo_max_minutes BIGINT,
                 source_delay_minutes DOUBLE, source_slo_max_minutes BIGINT,
                 source_column_used VARCHAR, row_count BIGINT,
@@ -1550,6 +1711,9 @@ def _write_slo_checks_table(
                 duration_seconds DOUBLE, details_json VARCHAR
             )
         """)
+        # A table created before `message` existed is the normal case (append-only,
+        # long-lived); widen it rather than fail every insert.
+        con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS message VARCHAR")
         placeholders = ", ".join(["?"] * len(_SLO_CHECKS_COLUMNS))
         for rec in records:
             values = [rec.get(c) for c in _SLO_CHECKS_COLUMNS]
@@ -1565,7 +1729,7 @@ def _write_slo_checks_table(
     if backend == "sqlite":
         import sqlite3
 
-        db_path = metadata.get("slo_checks_database") or "logs/lakelogic_slo_checks.sqlite"
+        db_path = metadata.get("slo_checks_database") or _mn_db("slo_checks", "sqlite")
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1576,6 +1740,7 @@ def _write_slo_checks_table(
                 check_run_id TEXT, pipeline_run_id TEXT, checked_at TEXT,
                 domain TEXT, system TEXT, layer TEXT, entity TEXT,
                 check_type TEXT, passed INTEGER, severity TEXT, status TEXT,
+                message TEXT,
                 delay_minutes REAL, slo_max_minutes INTEGER,
                 source_delay_minutes REAL, source_slo_max_minutes INTEGER,
                 source_column_used TEXT, row_count INTEGER,
@@ -1585,6 +1750,10 @@ def _write_slo_checks_table(
                 duration_seconds REAL, details_json TEXT
             )
         """)
+        # SQLite has no ADD COLUMN IF NOT EXISTS: widen an older table explicitly.
+        _existing = {row[1] for row in con.execute(f"PRAGMA table_info({tbl})").fetchall()}
+        if "message" not in _existing:
+            con.execute(f"ALTER TABLE {tbl} ADD COLUMN message TEXT")
         placeholders = ", ".join(["?"] * len(_SLO_CHECKS_COLUMNS))
         for rec in records:
             values = [
@@ -1632,6 +1801,7 @@ def _write_slo_checks_table(
                 ("passed", pa.bool_()),
                 ("severity", pa.string()),
                 ("status", pa.string()),
+                ("message", pa.string()),
                 ("delay_minutes", pa.float64()),
                 ("slo_max_minutes", pa.int64()),
                 ("source_delay_minutes", pa.float64()),
@@ -1671,7 +1841,9 @@ def _write_slo_checks_table(
                     arrow_table,
                     mode="append" if exists else "overwrite",
                     storage_options=storage_options,
-                    schema_mode="overwrite" if not exists else None,
+                    # merge on append: a table written before `message` existed must
+                    # widen, not reject the batch.
+                    schema_mode="overwrite" if not exists else "merge",
                 )
                 logger.info(f"Wrote {len(records)} SLO check rows to Delta {table_name}")
                 return table_name
@@ -1698,6 +1870,7 @@ def _write_slo_checks_table(
             ("passed", "BOOLEAN"),
             ("severity", "VARCHAR"),
             ("status", "VARCHAR"),
+            ("message", "VARCHAR"),
             ("delay_minutes", "FLOAT"),
             ("slo_max_minutes", "NUMBER"),
             ("source_delay_minutes", "FLOAT"),
@@ -1755,7 +1928,10 @@ def write_slo_checks(
     domain = getattr(registry, "domain", "")
     system = getattr(registry, "system", "")
 
-    records = [_flatten_slo_check(r, check_run_id, pipeline_run_id, checked_at, domain, system) for r in results]
+    records = [
+        plain_record(_flatten_slo_check(r, check_run_id, pipeline_run_id, checked_at, domain, system))
+        for r in results
+    ]
     return _write_slo_checks_table(registry, records)
 
 
@@ -1812,7 +1988,10 @@ def capture_failure(exc: BaseException) -> Dict[str, Any]:
         frames.append(f"{_sanitise_frame_path(frame.filename)}:{frame.lineno} in {frame.name}")
     # Keep the DEEPEST frames: the raising site identifies the bug, while the outer
     # ones are the same pipeline scaffolding on every failure.
-    rendered = f"{exc.__class__.__name__}: {first_line}\n" + "\n".join(frames[-12:])
+    # The message line is capped so a multi-kilobyte JVM first line cannot push
+    # the frames out of the capped traceback. Icons are display, not data.
+    first_line = plain_text(first_line) or exc.__class__.__name__
+    rendered = f"{exc.__class__.__name__}: {first_line[:_MESSAGE_LIMIT]}\n" + "\n".join(frames[-12:])
 
     return {
         "error_message": first_line[:_MESSAGE_LIMIT],
@@ -1905,7 +2084,8 @@ def emit_slo_report(
     # entity. Computed, never guessed — an unmeasured denominator is worse than none.
     _all = list(results or [])
     _total_objectives = len(_all)
-    _breached_objectives = sum(1 for r in _all if not bool(getattr(r, "passed", False)))
+    # `passed is None` is NOT_SET (no target declared): unmeasured, never a breach.
+    _breached_objectives = sum(1 for r in _all if getattr(r, "passed", False) is False)
 
     observatory_cfg = resolve_observatory_config(getattr(registry, "observatory", None))
     if not (observatory_cfg and observatory_cfg.get("enabled")):
@@ -1962,6 +2142,10 @@ def emit_slo_report(
         slo_obj: Dict[str, Any] = {}
         for r in entity_results:
             kind = getattr(r, "check_type", "freshness") or "freshness"
+            if getattr(r, "passed", False) is None:
+                # NOT_SET: no target, so no configured section. Sending `pass: false`
+                # would count as a breach; `pass: true` as a met promise nobody made.
+                continue
             section: Dict[str, Any] = {"pass": bool(getattr(r, "passed", False))}
             delay = getattr(r, "delay_minutes", None)
             threshold_min = getattr(r, "slo_max_minutes", None)
@@ -2024,10 +2208,6 @@ def emit_slo_report(
                     section["max_quarantine_ratio"] = getattr(r, "quality_max_quarantine_ratio", None)
                 if getattr(r, "quality_severity", None):
                     section["severity_band"] = r.quality_severity
-            # Schedule wrote `seconds` (from delay_minutes) with nothing to compare it
-            # against, so a late pipeline reported a number and no promise.
-            if getattr(r, "schedule_deadline_utc", None):
-                section["deadline_utc"] = r.schedule_deadline_utc
             if getattr(r, "duration_seconds", None) is not None:
                 section["duration_seconds"] = r.duration_seconds
 
@@ -2049,7 +2229,7 @@ def emit_slo_report(
                 slo_obj[kind] = merged
 
         layer = next((getattr(r, "layer", None) for r in entity_results), None)
-        all_passed = all(bool(getattr(r, "passed", False)) for r in entity_results)
+        all_passed = all(getattr(r, "passed", False) is not False for r in entity_results)
 
         payload = {
             "contract_name": entity,
@@ -2186,7 +2366,7 @@ def write_run_log(
                 run_id = report.get("run_id", "unknown")
                 cloud_target = raw.rstrip("/") + f"/run_{run_id}.json"
             try:
-                _cloud_write_json(cloud_target, report)
+                _cloud_write_json(cloud_target, plain_value(report))
                 logger.info(f"Wrote run log to {cloud_target}")
                 log_path = cloud_target  # type: ignore[assignment]
             except ImportError:
@@ -2210,7 +2390,7 @@ def write_run_log(
 
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(log_path, "w", encoding="utf-8") as handle:
-                json.dump(report, handle, indent=2, default=str)
+                json.dump(plain_value(report), handle, indent=2, default=str)
 
             logger.info(f"Wrote run log to {log_path}")
 
@@ -2273,7 +2453,7 @@ def write_run_log(
             write_to_secondary_targets(
                 sec_targets,
                 arrow_tbl,
-                "_run_logs",
+                _mn_table("run_log"),
                 strategy="append",
             )
     except Exception as _sec_exc:
@@ -2593,7 +2773,7 @@ def get_last_run_watermark(
         # Storage path — resolved by registry placeholders, not by the contract YAML dir.
 
         base_path = None  # see materialization.py and quarantine.py for rationale
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
+        db_path = metadata.get("run_log_database") or _mn_db("run_log", "duckdb")
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
             return None
@@ -2644,7 +2824,7 @@ def get_last_run_watermark(
         # Storage path — resolved by registry placeholders, not by the contract YAML dir.
 
         base_path = None  # see materialization.py and quarantine.py for rationale
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
+        db_path = metadata.get("run_log_database") or _mn_db("run_log", "sqlite")
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
             return None
@@ -2852,7 +3032,7 @@ def get_last_run_dlt_state(
         # Storage path — resolved by registry placeholders, not by the contract YAML dir.
 
         base_path = None  # see materialization.py and quarantine.py for rationale
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.duckdb"
+        db_path = metadata.get("run_log_database") or _mn_db("run_log", "duckdb")
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
             return None
@@ -2901,7 +3081,7 @@ def get_last_run_dlt_state(
         # Storage path — resolved by registry placeholders, not by the contract YAML dir.
 
         base_path = None  # see materialization.py and quarantine.py for rationale
-        db_path = metadata.get("run_log_database") or "logs/lakelogic_run_logs.sqlite"
+        db_path = metadata.get("run_log_database") or _mn_db("run_log", "sqlite")
         db_path = _resolve_path(str(db_path), base_path)
         if not Path(db_path).exists():
             return None

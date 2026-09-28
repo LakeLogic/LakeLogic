@@ -79,6 +79,32 @@ def run_log_status(pipeline_status: str) -> str:
     return _RUN_LOG_STATUS.get(pipeline_status, "succeeded")
 
 
+
+def quarantine_table_name(storage, info, table_name: str) -> str:
+    """A contract's quarantine table name from ``storage.quarantine_table_name``.
+
+    ``{domain}`` / ``{system}`` / ``{table}``. With no domain, the historical default falls back
+    to the bare table name, as it always did.
+    """
+    template = getattr(storage, "quarantine_table_name", None) or "{domain}_{table}"
+    domain = (info or {}).get("domain", "") or ""
+    system = (info or {}).get("system", "") or ""
+    if template == "{domain}_{table}" and not domain:
+        return table_name
+    return template.format(domain=domain, system=system, table=table_name)
+
+
+def format_duration(seconds: Optional[float]) -> str:
+    """``42.3s`` / ``3m 05s`` / ``1h 02m``; ``-`` when the contract never ran."""
+    if seconds is None:
+        return "-"
+    total = int(round(seconds))
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    if total < 3600:
+        return f"{total // 60}m {total % 60:02d}s"
+    return f"{total // 3600}h {(total % 3600) // 60:02d}m"
+
 class PipelineRunSummary:
     """Standardized summary of a pipeline execution."""
 
@@ -102,6 +128,7 @@ class PipelineRunSummary:
         rows_good: Any = None,
         rows_bad: Any = None,
         table_name: str = "",
+        duration_seconds: Optional[float] = None,
     ):
         # Remove any existing entry for this contract+layer (e.g., from failed earlier retry attempts)
         self.results = [r for r in self.results if not (r.get("contract") == contract and r.get("layer") == layer)]
@@ -117,6 +144,9 @@ class PipelineRunSummary:
                 "rows_good": rows_good,
                 "rows_bad": rows_bad,
                 "error": error,
+                # Wall-clock seconds this contract+layer took; None when it never ran
+                # (skipped, dry run, DDL-only).
+                "duration_seconds": duration_seconds,
             }
         )
 
@@ -169,7 +199,7 @@ class PipelineRunSummary:
             lines.append("=" * 80)
             return "\n".join(lines)
 
-        header = f"  {'Table Name':<38} {'Layer':<8} {'Status':<10} {'Rows':<8} {'Good/Qrtn':<12}"
+        header = f"  {'Table Name':<38} {'Layer':<8} {'Status':<10} {'Rows':<8} {'Good/Qrtn':<12} {'Duration':>9}"
         lines.append(header)
         lines.append("  " + "-" * 78)
 
@@ -186,7 +216,7 @@ class PipelineRunSummary:
             else:
                 dq_str = "-"
 
-            line = f"  {t_name:<38} {layer:<8} {status:<10} {rows:<8} {dq_str:<12}"
+            line = f"  {t_name:<38} {layer:<8} {status:<10} {rows:<8} {dq_str:<12} {format_duration(r.get('duration_seconds')):>9}"
             lines.append(line)
 
             err = r.get("error")
@@ -502,13 +532,13 @@ class LakehousePipeline:
                 merged_q = {**self.registry.quarantine, **existing_quar}
                 contract_dict["quarantine"] = merged_q
 
-            # Quarantine — prefix table name with domain so tables from
-            # different domains don't collide in the shared quarantine schema.
+            # Quarantine — the table name comes from `storage.quarantine_table_name`
+            # (default "{domain}_{table}", so tables from different domains don't collide in a
+            # shared quarantine schema; "quarantine_{table}" for a domain's own schema).
             quar = contract_dict.get("quarantine") or {}
             if _is_direct:
                 if quar.get("enabled") and not quar.get("target"):
-                    _domain = info.get("domain", "")
-                    _q_table = f"{_domain}_{table_name}" if _domain else table_name
+                    _q_table = quarantine_table_name(storage, info, table_name)
                     _q_path = getattr(storage, "quarantine_path", None)
                     if _q_path:
                         quar["target"] = f"{_q_path}/{_q_table}"
@@ -517,8 +547,7 @@ class LakehousePipeline:
                     contract_dict["quarantine"] = quar
             else:
                 if quar.get("enabled") and not quar.get("target") and storage.quarantine_root:
-                    _domain = info.get("domain", "")
-                    _q_table = f"{_domain}_{table_name}" if _domain else table_name
+                    _q_table = quarantine_table_name(storage, info, table_name)
                     quar["target"] = f"{storage.quarantine_root}.{_q_table}"
 
                     # Ensure it creates an EXTERNAL table if quarantine_path is set
@@ -2110,8 +2139,21 @@ class LakehousePipeline:
             # Only bootstrap _quarantine when there is NO quarantine_root.
             has_quarantine_root = bool(getattr(self.registry.storage, "quarantine_root", None))
 
+            from lakelogic.core.metadata_names import metadata_table_name, resolve_existing
+
+            def _sys_table_name(kind: str, legacy: str) -> str:
+                # Existing estates keep their legacy table so history is not split.
+                return resolve_existing(
+                    kind,
+                    [metadata_table_name(kind), legacy],
+                    lambda t: self.spark.catalog.tableExists(f"{catalog_schema}.{t}"),
+                )
+
             sys_tables = {
-                "_logs": (getattr(self.registry.storage, "log_path", None), SYSTEM_TABLE_SCHEMA_LOGS),
+                _sys_table_name("logs", "_logs"): (
+                    getattr(self.registry.storage, "log_path", None),
+                    SYSTEM_TABLE_SCHEMA_LOGS,
+                ),
             }
             if not has_quarantine_root:
                 sys_tables["_quarantine"] = (
@@ -2741,6 +2783,7 @@ class LakehousePipeline:
         layers_with_new_data: set,
     ) -> None:
         """Process a single contract: resolve UC paths, run source, materialize."""
+        _started = time.monotonic()
         # Log contract + target for observability
         _title = (c.contract_dict or {}).get("info", {}).get("title", c.entity)
         _version = (c.contract_dict or {}).get("version", "")
@@ -2969,6 +3012,7 @@ class LakehousePipeline:
                 rows_good=rows_good,
                 rows_bad=rows_bad,
                 table_name=_table_name,
+                duration_seconds=round(time.monotonic() - _started, 1),
             )
 
             # Write run log with final succeeded status.
@@ -3041,7 +3085,10 @@ class LakehousePipeline:
                         " | identity: DefaultAzureCredential (az login / managed identity)"  # pragma: no cover
                     )
             logger.error(f"❌ Failed to process {c.entity}: {e}{_identity_hint}")
-            summary.append(c.entity, layer, "failed", error=str(e), table_name=_table_name)
+            summary.append(
+                c.entity, layer, "failed", error=str(e), table_name=_table_name,
+                duration_seconds=round(time.monotonic() - _started, 1),
+            )
 
             # Write run log with failed status so the failure is auditable
             try:

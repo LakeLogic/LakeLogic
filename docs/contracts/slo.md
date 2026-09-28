@@ -116,39 +116,18 @@ How the baseline is built:
 
 ---
 
-## Schedule
+## Schedule (retired)
 
-**Business value:** Catches pipelines that start late or run too long — before they miss the hard deadline. If the finance team needs their data by 6am for the morning report, a schedule SLO ensures you get an early warning at 4:30am when the pipeline hasn't started yet, not a panicked call at 6:15am.
-
-> **Analogy:** Like a train timetable with two alerts. The first alert fires when the train hasn't left the station on time. The second fires if the journey is taking longer than expected — giving you time to arrange a taxi before you miss your meeting.
-
-!!! example "Example: Pipeline must start by 04:30 and finish by 06:00 UTC"
-
-    ```yaml
-      schedule:
-        environments: ["prod", "staging"]     # Only enforced in these environments
-        expected_start_utc: "04:30"           # Alert if pipeline hasn't started
-        expected_completion_utc: "06:00"      # Hard deadline
-        expected_duration_minutes: 45         # Baseline for anomaly comparison
-        warn_if_duration_exceeds_minutes: 90  # Soft warning before deadline
-        timezone: "UTC"
-    ```
-
-**Why `environments`?** Schedule SLOs are only enforced in `prod` and `staging` — local dev runs and notebooks are excluded so developers can test freely without triggering false alerts.
-
-**Three levels of protection:**
-
-| Check | When It Fires | Severity |
-| --- | --- | --- |
-| `expected_start_utc` | Pipeline hasn't started by this time | Warning |
-| `warn_if_duration_exceeds_minutes` | Pipeline running longer than soft limit | Warning |
-| `expected_completion_utc` | Pipeline hasn't finished by deadline | Error |
+`slo.schedule` — an expected run window — is no longer supported. It was hard to capture and
+harder to keep true, and a window that is not yours raises false alerts or hides real lateness.
+**Freshness** answers the question that matters to a consumer (is the data recent enough?), so
+use it instead. An existing `schedule:` block still loads; it is ignored with a warning.
 
 ---
 
 ## Run Log Capture
 
-Every SLO result is automatically recorded in the `_run_logs` table — giving you a full audit trail of data reliability over time.
+Every SLO result is automatically recorded in the run log table (`metadata.run_log_table`) — giving you a full audit trail of data reliability over time.
 
 | Field | Description |
 | --- | --- |
@@ -157,7 +136,6 @@ Every SLO result is automatically recorded in the `_run_logs` table — giving y
 | `slo_row_count_min` / `max` | Configured thresholds |
 | `slo_row_count_anomaly_pass` | Whether anomaly check passed |
 | `slo_quality_pass` | Whether quality ratio met threshold |
-| `slo_schedule_pass` | Whether pipeline ran on schedule |
 
 > **Business value:** This run log data is what powers your **data reliability dashboard**. Instead of asking "is our data trustworthy?", your team can show stakeholders a chart of SLO compliance over the last 90 days — just like an uptime SLA for a web service.
 

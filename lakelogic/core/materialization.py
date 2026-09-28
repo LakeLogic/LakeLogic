@@ -5112,7 +5112,7 @@ def materialize_dataframe(
             if "DeletionVectors" in err_msg or "reader features required" in err_msg:
                 raise RuntimeError(
                     f"\n{'=' * 80}\n"
-                    f"❌ ENGINE INCOMPATIBILITY ERROR: DELTA PROTOCOL v3\n"
+                    f"ENGINE INCOMPATIBILITY ERROR: DELTA PROTOCOL v3\n"
                     f"{'=' * 80}\n"
                     f"LakeLogic (Polars/Delta-RS) failed to write to the Delta table at:\n"
                     f"  {resolved_target}\n\n"

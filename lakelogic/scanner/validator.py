@@ -19,7 +19,20 @@ from uuid import uuid4
 from loguru import logger
 
 from lakelogic.core.registry import _iso_period_to_minutes
-from lakelogic.core.slo import SLOCheckResult, SLOReport
+from lakelogic.core.slo import (
+    STATUS_BASELINE_SET,
+    STATUS_BREACHED,
+    STATUS_ERROR,
+    STATUS_OK,
+    STATUS_SCHEMA_DRIFT,
+    STATUS_SKIPPED,
+    STATUS_STALE,
+    STATUS_VOLUME_DROP,
+    STATUS_VOLUME_SPIKE,
+    STATUS_WARN,
+    SLOCheckResult,
+    SLOReport,
+)
 from lakelogic.scanner.config import ScannerConfig
 from lakelogic.scanner.connector import BaseConnector, ScannedTable, TableMetadata
 from lakelogic.scanner.schema_drift import BaselineStore, LocalBaselineStore, compare_schemas
@@ -63,7 +76,8 @@ class ScannerValidator:
                 layer=table.layer,
                 entity=table.full_name,
                 check_type="freshness",
-                status="⏭ SKIPPED — no last_modified available",
+                status=STATUS_SKIPPED,
+                message="no last_modified available",
                 passed=True,
                 severity="pass",
             )
@@ -77,13 +91,13 @@ class ScannerValidator:
         warn = fd.warn_at_minutes and delay > fd.warn_at_minutes and passed
 
         if passed and not warn:
-            status = f"✅ OK ({delay:.0f}min delay, limit {fd.max_delay_minutes}min)"
+            status, message = STATUS_OK, f"{delay:.0f}min delay, limit {fd.max_delay_minutes}min"
             severity = "pass"
         elif warn:
-            status = f"⚠ WARN ({delay:.0f}min delay approaching limit {fd.max_delay_minutes}min)"
+            status, message = STATUS_WARN, f"{delay:.0f}min delay approaching limit {fd.max_delay_minutes}min"
             severity = "warn"
         else:
-            status = f"❌ STALE ({delay:.0f}min delay exceeds {fd.max_delay_minutes}min)"
+            status, message = STATUS_STALE, f"{delay:.0f}min delay exceeds {fd.max_delay_minutes}min"
             severity = "fail"
 
         return SLOCheckResult(
@@ -91,6 +105,7 @@ class ScannerValidator:
             entity=table.full_name,
             check_type="freshness",
             status=status,
+            message=message,
             passed=passed,
             severity=severity,
             delay_minutes=delay,
@@ -107,7 +122,8 @@ class ScannerValidator:
                 layer=table.layer,
                 entity=table.full_name,
                 check_type="row_count",
-                status=f"✅ OK ({meta.num_rows:,} rows — no anomaly baseline yet)",
+                status=STATUS_OK,
+                message=f"{meta.num_rows:,} rows; no anomaly baseline yet",
                 passed=True,
                 severity="pass",
                 row_count=meta.num_rows,
@@ -124,7 +140,8 @@ class ScannerValidator:
                 layer=table.layer,
                 entity=table.full_name,
                 check_type="row_count",
-                status=f"✅ OK ({meta.num_rows:,} rows — building baseline, {len(historical)}/{vd.lookback_runs} runs)",
+                status=STATUS_OK,
+                message=f"{meta.num_rows:,} rows; building baseline, {len(historical)}/{vd.lookback_runs} runs",
                 passed=True,
                 severity="pass",
                 row_count=meta.num_rows,
@@ -145,21 +162,19 @@ class ScannerValidator:
         ratio = recent / baseline
 
         passed = vd.min_ratio <= ratio <= vd.max_ratio
-        status = (
-            f"✅ OK (ratio={ratio:.2f}x vs median {baseline:,.0f})"
-            if passed
-            else (
-                f"❌ VOLUME DROP ({ratio:.2f}x < {vd.min_ratio}x baseline)"
-                if ratio < vd.min_ratio
-                else f"❌ VOLUME SPIKE ({ratio:.2f}x > {vd.max_ratio}x baseline)"
-            )
-        )
+        if passed:
+            status, message = STATUS_OK, f"ratio={ratio:.2f}x vs median {baseline:,.0f}"
+        elif ratio < vd.min_ratio:
+            status, message = STATUS_VOLUME_DROP, f"{ratio:.2f}x < {vd.min_ratio}x baseline"
+        else:
+            status, message = STATUS_VOLUME_SPIKE, f"{ratio:.2f}x > {vd.max_ratio}x baseline"
 
         return SLOCheckResult(
             layer=table.layer,
             entity=table.full_name,
             check_type="row_count",
             status=status,
+            message=message,
             passed=passed,
             severity="pass" if passed else "warn",
             row_count=recent,
@@ -180,7 +195,8 @@ class ScannerValidator:
                 layer=table.layer,
                 entity=table.full_name,
                 check_type="schema_drift",
-                status=f"✅ BASELINE SET ({len(meta.schema_fields)} columns recorded)",
+                status=STATUS_BASELINE_SET,
+                message=f"{len(meta.schema_fields)} columns recorded",
                 passed=True,
                 severity="pass",
             )
@@ -192,7 +208,8 @@ class ScannerValidator:
                 layer=table.layer,
                 entity=table.full_name,
                 check_type="schema_drift",
-                status="✅ NO DRIFT",
+                status=STATUS_OK,
+                message="no drift",
                 passed=True,
                 severity="pass",
             )
@@ -212,13 +229,13 @@ class ScannerValidator:
             action = "warn"
 
         passed = action != "fail"
-        icon = "✅" if action == "ignore" else ("⚠" if action == "warn" else "❌")
 
         return SLOCheckResult(
             layer=table.layer,
             entity=table.full_name,
             check_type="schema_drift",
-            status=f"{icon} {severity_level.upper()} DRIFT — {diff.summary()}",
+            status=STATUS_SCHEMA_DRIFT,
+            message=f"{severity_level} drift: {diff.summary()}",
             passed=passed,
             severity="fail" if not passed else ("warn" if action == "warn" else "pass"),
             details={"diff": diff.to_dict()},
@@ -241,7 +258,8 @@ class ScannerValidator:
                 layer=table.layer,
                 entity=table.full_name,
                 check_type="retention",
-                status=f"⏭ SKIPPED — no timestamp column found in {ts_cols}",
+                status=STATUS_SKIPPED,
+                message=f"no timestamp column found in {ts_cols}",
                 passed=True,
                 severity="pass",
             )
@@ -253,10 +271,11 @@ class ScannerValidator:
         age_minutes = round((now - min_ts).total_seconds() / 60, 1)
         passed = age_minutes <= retention_minutes
 
-        status = (
-            f"✅ OK (oldest record {age_minutes:.0f}min, limit {retention_minutes}min [{iso_period}])"
+        status = STATUS_OK if passed else STATUS_BREACHED
+        message = (
+            f"oldest record {age_minutes:.0f}min, limit {retention_minutes}min [{iso_period}]"
             if passed
-            else (f"RETENTION BREACH: oldest record {age_minutes:.0f}min exceeds {iso_period} ({retention_minutes}min)")
+            else f"oldest record {age_minutes:.0f}min exceeds {iso_period} ({retention_minutes}min)"
         )
 
         return SLOCheckResult(
@@ -264,6 +283,7 @@ class ScannerValidator:
             entity=table.full_name,
             check_type="retention",
             status=status,
+            message=message,
             passed=passed,
             severity="pass" if passed else "fail",
             source_delay_minutes=age_minutes,
@@ -283,7 +303,8 @@ class ScannerValidator:
                     layer=table.layer,
                     entity=table.full_name,
                     check_type="freshness",
-                    status=f"❌ ERROR — {exc}",
+                    status=STATUS_ERROR,
+                    message=str(exc)[:200],
                     passed=False,
                     severity="fail",
                 )
@@ -344,7 +365,7 @@ class ScannerValidator:
             results = self.scan_table(table)
             all_results.extend(results)
 
-        failures = [r for r in all_results if not r.passed]
+        failures = [r for r in all_results if r.passed is False]
         passed = len(failures) == 0
 
         logger.info(

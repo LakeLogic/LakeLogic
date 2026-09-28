@@ -47,7 +47,7 @@ class PreflightError(RuntimeError):
     def __init__(self, contract: str, findings: List[ContractFinding]):
         self.contract = contract
         self.findings = findings
-        detail = "\n".join(f"  ✖ {f.check_id}: {f.message}" for f in findings)
+        detail = "\n".join(f"  - {f.check_id}: {f.message}" for f in findings)
         super().__init__(f"Contract '{contract}' cannot materialize correctly (pre-flight):\n{detail}")
 
 

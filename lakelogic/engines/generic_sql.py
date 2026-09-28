@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
-from lakelogic.core.models import DataContract
+from lakelogic.core.models import DataContract, runtime_category
 from lakelogic.engines.base import ENGINE_DIALECT_MAP, EngineAdapter
 
 from ..core import types as _types
@@ -730,7 +730,7 @@ class GenericSQLAdapter(EngineAdapter):
         for rule in row_rules:
             rule_sql = self._transpile(rule.sql)
             name = rule.name.replace("'", "''")
-            category = (rule.category or "unknown").replace("'", "''")
+            category = runtime_category(rule).replace("'", "''")
             error_parts.append(f"CASE WHEN NOT ({rule_sql}) THEN '{name}' END")
             category_parts.append(f"CASE WHEN NOT ({rule_sql}) THEN '{category}' END")
 

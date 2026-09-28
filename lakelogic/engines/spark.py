@@ -4,6 +4,8 @@ from typing import Any, List, Tuple
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter
+from lakelogic.core.models import runtime_category
+from lakelogic.core.plain_values import plain_text
 
 from ..core import types as _types
 
@@ -125,10 +127,10 @@ class SparkAdapter(EngineAdapter):
 
             for i, rule in enumerate(pre_rules):
                 col_name = f"_rule_{i}"
-                error_msg = f"[pre] Rule failed: {rule.name} ({rule.sql})"
+                error_msg = f"[pre] Rule failed: {plain_text(rule.name)} ({rule.sql})"
                 cond = F.col(col_name).isNull() | ~F.col(col_name)
                 error_exprs.append(F.when(cond, F.lit(error_msg)).otherwise(None))
-                category_exprs.append(F.when(cond, F.lit(rule.category)).otherwise(None))
+                category_exprs.append(F.when(cond, F.lit(runtime_category(rule))).otherwise(None))
 
         error_array = F.array(*error_exprs) if error_exprs else F.array().cast("array<string>")
         category_array = F.array(*category_exprs) if category_exprs else F.array().cast("array<string>")
@@ -182,10 +184,10 @@ class SparkAdapter(EngineAdapter):
             post_cat_exprs = []
             for i, rule in enumerate(post_rules):
                 col_id = f"_post_rule_{i}"
-                error_msg = f"[post] Rule failed: {rule.name} ({rule.sql})"
+                error_msg = f"[post] Rule failed: {plain_text(rule.name)} ({rule.sql})"
                 cond = F.col(col_id).isNull() | ~F.col(col_id)
                 post_error_exprs.append(F.when(cond, F.lit(error_msg)).otherwise(None))
-                post_cat_exprs.append(F.when(cond, F.lit(rule.category)).otherwise(None))
+                post_cat_exprs.append(F.when(cond, F.lit(runtime_category(rule))).otherwise(None))
 
             post_err_array = F.array(*post_error_exprs)
             post_cat_array = F.array(*post_cat_exprs)
@@ -919,6 +921,13 @@ class SparkAdapter(EngineAdapter):
         # unknown type, which callers already handle by falling back to the raw
         # name; the registry itself raises for unknown types, so swallow that here
         # rather than change this helper's contract.
+        # `decimal(p,s)` casts to its own width (try_cast -> NULL -> row quarantine on
+        # overflow), as the Polars and DuckDB engines do; it used to be left uncast.
+        import re as _re
+
+        _dec = _re.match(r"^(?:decimal|numeric)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)$", type_name)
+        if _dec:
+            return f"decimal({int(_dec.group(1))},{int(_dec.group(2) or 0)})"
         if not _types.is_known(type_name):
             return None
         return _types.cast_type(type_name, "spark").lower()
@@ -987,7 +996,12 @@ class SparkAdapter(EngineAdapter):
                 if field.name in existing and not cast_to_string:
                     err_col = f"__type_err_{field.name}"
                     self._type_err_cols.append(err_col)
-                    msg = f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    # Same words as the Polars and DuckDB engines for a decimal that overflows.
+                    msg = (
+                        f"Type Mismatch: {field.name} exceeds {field.type} or is not a number"
+                        if str(field.type or "").strip().lower().startswith(("decimal(", "numeric("))
+                        else f"Type Mismatch: {field.name} cannot be cast to {field.type}"
+                    )
                     # Use try_cast to return NULL on failure instead of crashing under ANSI strict mode
                     cast_expr = F.expr(f"try_cast(`{field.name}` as {spark_type})")
                     select_exprs.append(

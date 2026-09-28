@@ -266,7 +266,7 @@ This is the **actual sequence** the LakeLogic engine follows for every contract 
 | 8 | **PII masking** | Apply field-level masking strategies |
 | 9 | **Lineage injection** | Stamp `_lakelogic_*` columns |
 | 10 | **Materialization** | Write to Delta (append/merge/scd2/overwrite) |
-| 11 | **Run logging** | Write metadata to `_run_logs` |
+| 11 | **Run logging** | Write metadata to the run log table (`metadata.run_log_table`) |
 | 12 | **Notifications** | Alert on failures, SLO breaches, quarantine |
 
 ---

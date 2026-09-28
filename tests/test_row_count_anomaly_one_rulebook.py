@@ -218,7 +218,7 @@ def test_a_shared_run_log_is_judged_per_environment_end_to_end():
     assert result.anomaly_environment == "dev"
     assert result.anomaly_severity == "critical"
     assert result.passed is False
-    assert "VOLUME DROP" in result.status
+    assert result.status == "VOLUME_DROP"
 
 
 def test_the_check_runs_on_snowflake():

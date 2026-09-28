@@ -573,7 +573,7 @@ class TestPolarsStreaming:
             "version": "1.0",
             "info": {"title": "Streaming Test", "version": "1.0"},
             "server": {"type": "file", "path": str(data_path), "format": "parquet"},
-            "source": {"type": "file", "path": str(data_path)},
+            "source": {"type": "landing", "path": str(data_path)},
         }
         contract_file = tmp_path / "contract.yaml"
         with open(contract_file, "w") as f:
@@ -606,7 +606,7 @@ class TestPolarsStreaming:
             "version": "1.0",
             "info": {"title": "Sink Test", "version": "1.0"},
             "server": {"type": "file", "path": str(data_path), "format": "parquet"},
-            "source": {"type": "file", "path": str(data_path)},
+            "source": {"type": "landing", "path": str(data_path)},
         }
         contract_file = tmp_path / "contract.yaml"
         with open(contract_file, "w") as f:
@@ -641,7 +641,7 @@ class TestPolarsStreaming:
             "version": "1.0",
             "info": {"title": "CSV Stream", "version": "1.0"},
             "server": {"type": "file", "path": str(data_path), "format": "csv"},
-            "source": {"type": "file", "path": str(data_path)},
+            "source": {"type": "landing", "path": str(data_path)},
         }
         contract_file = tmp_path / "contract.yaml"
         with open(contract_file, "w") as f:

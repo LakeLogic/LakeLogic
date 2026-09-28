@@ -109,7 +109,7 @@ REAL_ODCS_V3 = {
     "customProperties": {
         "lakelogic": {
             "tier": "silver",
-            "source": {"type": "file", "path": "abfss://bronze/customers", "format": "parquet"},
+            "source": {"type": "landing", "path": "abfss://bronze/customers", "format": "parquet"},
             "materialization": {"strategy": "merge"},
         }
     },
@@ -200,7 +200,7 @@ def test_odcs_parser_intercepts_and_converts():
         "customProperties": {
             "lakelogic": {
                 "tier": "silver",
-                "source": {"type": "file", "path": "s3://bronze/customers", "format": "parquet"},
+                "source": {"type": "landing", "path": "s3://bronze/customers", "format": "parquet"},
                 "materialization": {"strategy": "merge"},
             }
         },
@@ -271,7 +271,7 @@ def test_odcs_legacy_docs_example_still_parses():
         "customProperties": {
             "lakelogic": {
                 "tier": "silver",
-                "source": {"type": "file", "path": "s3://landing/customers/", "format": "parquet"},
+                "source": {"type": "landing", "path": "s3://landing/customers/", "format": "parquet"},
                 "materialization": {
                     "strategy": "merge",
                     "primary_key": ["id"],

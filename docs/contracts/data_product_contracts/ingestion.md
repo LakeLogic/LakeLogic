@@ -16,14 +16,18 @@ The `source:` block defines **what to read, from where, and how**.
 
 ## Source Types
 
-Three ways to bring data into your lakehouse:
+`source.type` is one of eight values (the set is defined by the Open Lakehouse Contract; any other value fails on load):
 
 ```yaml
 source:
   type: "landing"     # File-based (local, S3, ADLS, GCS)
-  # type: "table"     # Catalog table (Unity Catalog, Hive)
+  # type: "stream"    # A file/table location read in micro-batches by watermark
+  # type: "table"     # Catalog table (Unity Catalog, Hive) or table: reference
+  # type: "delta"     # Delta table directory, by path
+  # type: "iceberg"   # Iceberg table directory, by path
   # type: "database"  # Operational DB via JDBC/SQL (Postgres, MySQL, SQL Server, Oracle, SQLite)
-  # type: "stream"    # Kafka / streaming
+  # type: "dlt"       # HTTP API or dlt verified source (the `dlt:` block)
+  # type: "sftp"      # Files on an SFTP server
 ```
 
 ---
@@ -218,7 +222,7 @@ The simplest setup — declare `post_ingestion` directly on the `source:` block:
 
     ```yaml
     source:
-      type: local
+      type: landing
       path: "/landing/crm/customers"
       format: parquet
       post_ingestion:

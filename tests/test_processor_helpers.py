@@ -242,7 +242,7 @@ def test_processor_cdc_defaults_and_accumulating_snapshot_rules():
     cdc_contract = DataContract(
         version="1.0.0",
         info={"title": "Orders"},
-        source={"type": "file", "load_mode": "cdc", "cdc_op_field": "op"},
+        source={"type": "landing", "load_mode": "cdc", "cdc_op_field": "op"},
     )
     cdc_contract.materialization = None
     updated = processor._apply_cdc_defaults(cdc_contract)
@@ -1408,7 +1408,7 @@ dataset: inline
 metadata:
   mode: on
 source:
-  type: file
+  type: landing
   path: input.csv
   options:
     flag: true

@@ -23,7 +23,7 @@ storage:
   # ── Operational Paths (UC mode — Databricks Volumes) ──────────────────────
   contract_root: "/Workspace/Shared/data_platform/domains/{domain}/{system}"
   landing_root: "/Volumes/{catalog}/nondelta/landing_{domain}/{system}"
-  log_root: "/Volumes/{catalog}/nondelta/_logs"
+  log_root: "/Volumes/{catalog}/nondelta/lakelogic_logs"
 
   # ── Storage Paths (direct mode — cloud/local) ────────────────────────────
   landing_path: "{storage_root}/_data/landing_{domain}/{system}"
@@ -31,7 +31,7 @@ storage:
   bronze_path: "{data_root}/{bronze_layer}"
   silver_path: "{data_root}/{silver_layer}"
   gold_path: "{data_root}/{gold_layer}"
-  log_path: "{data_root}/_logs"
+  log_path: "{data_root}/lakelogic_logs"
   quarantine_path: "{data_root}/_quarantine"
 
 # ── External Sources (for lineage visualization) ────────────────────────────

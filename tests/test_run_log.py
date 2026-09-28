@@ -81,8 +81,6 @@ def _sample_report(run_id: str = "run-1", *, stage: str = "silver", dataset: str
         "slo_quality_pass": True,
         "slo_quality_ratio": 0.01,
         "slo_quality_severity": "info",
-        "slo_schedule_pass": True,
-        "slo_duration_seconds": 60.0,
     }
 
 
@@ -94,7 +92,8 @@ def test_flatten_report_consolidates_json_fields():
     slo_json = json.loads(flattened["slo_json"])
     assert slo_json["freshness"]["seconds"] == 45.0
     assert slo_json["quality"]["severity"] == "info"
-    assert json.loads(flattened["report_json"])["dataset"] == "orders"
+    # dataset is a column; report_json no longer repeats it
+    assert "dataset" not in json.loads(flattened["report_json"])
 
 
 def test_path_helpers_cover_relative_sqlite_and_cloud_env(monkeypatch, tmp_path: Path):
@@ -253,7 +252,7 @@ def test_write_run_log_secondary_targets_and_observatory_push(monkeypatch, tmp_p
 
     assert Path(path).name == "run_obs-1.json"
     assert secondary_calls[0][0] == [{"path": "secondary"}]
-    assert secondary_calls[0][1:3] == ("_run_logs", "append")
+    assert secondary_calls[0][1:3] == ("_lakelogic_run_log", "append")
     assert posts[0][0][0] == "https://obs.example/ingest"
     payload = posts[0][1]["json"]
     assert payload["status"] == "success"

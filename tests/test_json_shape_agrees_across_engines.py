@@ -36,7 +36,7 @@ ROWS = [{"driver_id": f"d{i}", "lat": 51.5 + i / 1000, "city_code": "LON"} for i
 
 
 def _contract(tmp_path: Path, *, options=None) -> dict:
-    source = {"type": "file", "path": f"{tmp_path}/*.json", "format": "json"}
+    source = {"type": "landing", "path": f"{tmp_path}/*.json", "format": "json"}
     if options is not None:
         source["options"] = options
     return {

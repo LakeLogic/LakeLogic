@@ -10,6 +10,7 @@ makes it a standalone engine suitable for lightweight pipelines, Colab
 demos, and SQL-heavy contracts.
 """
 
+import re
 import os
 
 import time
@@ -19,6 +20,8 @@ from typing import Any, List, Tuple
 from loguru import logger
 
 from lakelogic.engines.base import EngineAdapter, struct_drift_errors
+from lakelogic.core.models import runtime_category
+from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
 
 
@@ -353,6 +356,15 @@ class DuckDBAdapter(EngineAdapter):
                 if matched_field:
                     field_type = (matched_field.type or "").lower().split("(")[0].strip()
                     duckdb_type = _TYPE_MAP.get(field_type)
+                    # `decimal(p,s)` keeps its width, as the Polars engine does: a value that
+                    # does not fit is a row-level type mismatch, not silently a DOUBLE.
+                    _dec = re.match(
+                        r"^(?:decimal|numeric)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)$",
+                        (matched_field.type or "").strip().lower(),
+                    )
+                    if _dec:
+                        duckdb_type = f"DECIMAL({int(_dec.group(1))},{int(_dec.group(2) or 0)})"
+                        field_type = (matched_field.type or "").strip().lower()
                     # STRUCT/LIST -> VARCHAR must serialise to JSON, not to DuckDB's
                     # display form. A plain CAST renders a struct literal
                     # ("{'a': 1, 'b': x}") with single-quoted keys and unquoted string
@@ -365,7 +377,11 @@ class DuckDBAdapter(EngineAdapter):
                     if duckdb_type:
                         err_col = f"__type_err_{col}"
                         self._type_err_cols.append(err_col)
-                        err_msg = f"Type Mismatch: {col} cannot be cast to {field_type}".replace("'", "''")
+                        err_msg = (
+                            f"Type Mismatch: {col} exceeds {field_type} or is not a number"
+                            if _dec
+                            else f"Type Mismatch: {col} cannot be cast to {field_type}"
+                        ).replace("'", "''")
                         casts.append(f'TRY_CAST("{col}" AS {duckdb_type}) AS "{col}"')
                         casts.append(
                             f'CASE WHEN "{col}" IS NOT NULL AND TRY_CAST("{col}" AS {duckdb_type}) IS NULL '
@@ -1160,7 +1176,9 @@ class DuckDBAdapter(EngineAdapter):
         # 4. Row-level quality rules
         row_rules = self.get_row_rules()
 
-        if row_rules or schema_errors:
+        # Type mismatches are row errors too: without a quality rule on the contract, a
+        # value that did not fit its type was nulled and WRITTEN, never quarantined.
+        if row_rules or schema_errors or getattr(self, "_type_err_cols", None):
             step_start = time.perf_counter()
 
             # Build rule evaluation expressions
@@ -1182,9 +1200,9 @@ class DuckDBAdapter(EngineAdapter):
                 category_parts.append("'schema'")
 
             for i, rule in enumerate(row_rules):
-                err_msg = f"Rule failed: {rule.name} ({rule.sql})".replace("'", "''")
+                err_msg = f"Rule failed: {plain_text(rule.name)} ({rule.sql})".replace("'", "''")
                 error_parts.append(f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{err_msg}' ELSE NULL END")
-                cat_msg = getattr(rule, "category", "data_quality").replace("'", "''")
+                cat_msg = runtime_category(rule).replace("'", "''")
                 category_parts.append(f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{cat_msg}' ELSE NULL END")
 
             for err_col in getattr(self, "_type_err_cols", []):

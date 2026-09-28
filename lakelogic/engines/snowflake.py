@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from lakelogic.core.models import runtime_category
+from lakelogic.core.plain_values import plain_text
 from lakelogic.engines.base import EngineAdapter
 from ..core import types as _types
 
@@ -802,10 +804,10 @@ class SnowflakeAdapter(EngineAdapter):
             category_exprs.append("IFF(TRUE, 'schema', NULL)")
 
         for rule in row_rules:
-            err = f"Rule failed: {rule.name} ({rule.sql})".replace("'", "''")
+            err = f"Rule failed: {plain_text(rule.name)} ({rule.sql})".replace("'", "''")
             cond = f"NOT COALESCE(({rule.sql}), FALSE)"
             error_exprs.append(f"IFF({cond}, '{err}', NULL)")
-            cat = (rule.category or "rule").replace("'", "''")
+            cat = runtime_category(rule).replace("'", "''")
             category_exprs.append(f"IFF({cond}, '{cat}', NULL)")
 
         error_expr = "ARRAY_CONSTRUCT_COMPACT(" + ", ".join(error_exprs) + ")" if error_exprs else "ARRAY_CONSTRUCT()"

@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
+from olc.models._nested import SOURCE_TYPES
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -130,18 +131,9 @@ _KNOWN_EVOLUTION = {"strict", "append", "merge", "overwrite", "compatible", "all
 _KNOWN_STRATEGIES = {"append", "merge", "scd2", "overwrite"}
 _KNOWN_LOAD_MODES = {"full", "incremental", "cdc"}
 _KNOWN_SEVERITY = {"error", "warning", "info"}
-_KNOWN_CATEGORIES = {
-    "correctness",
-    "completeness",
-    "consistency",
-    "validity",
-    "accuracy",
-    "timeliness",
-    "uniqueness",
-    "integrity",
-    "schema",
-    "rule",
-}
+from lakelogic.core.models import QUALITY_CATEGORIES as _RECOGNISED  # noqa: E402
+
+_KNOWN_CATEGORIES = set(_RECOGNISED)
 
 
 # ── Result types ──────────────────────────────────────────────────────────────
@@ -423,7 +415,12 @@ class _ContractValidator:
             self._err(path, "'source' must be a mapping")
             return
         if "type" not in source:
-            self._err(f"{path}.type", "'source.type' is required (landing | stream | table)")
+            self._err(f"{path}.type", f"'source.type' is required ({' | '.join(SOURCE_TYPES)})")
+        elif source["type"] not in SOURCE_TYPES:
+            self._err(
+                f"{path}.type",
+                f"Unknown source.type '{source['type']}'. Allowed: {', '.join(SOURCE_TYPES)}",
+            )
         lm = source.get("load_mode", "full")
         if lm not in _KNOWN_LOAD_MODES:
             self._err(
@@ -540,9 +537,17 @@ class _ContractValidator:
                     f"{rp}.severity",
                     f"Unknown severity '{sev}'. Expected: {sorted(_KNOWN_SEVERITY)}",
                 )
-            cat = rule.get("category", "correctness")
-            if cat not in _KNOWN_CATEGORIES:
-                self._warn(f"{rp}.category", f"Unknown category '{cat}'")
+            cat = rule.get("category")
+            if not cat:
+                self._warn(
+                    f"{rp}.category",
+                    f"Rule '{rule.get('name', i)}' has no category. Expected one of: {sorted(_KNOWN_CATEGORIES)}",
+                )
+            elif cat not in _KNOWN_CATEGORIES:
+                self._warn(
+                    f"{rp}.category",
+                    f"Unrecognised category '{cat}'. Expected one of: {sorted(_KNOWN_CATEGORIES)}",
+                )
 
     # ── Transformations ───────────────────────────────────────────────────────
 

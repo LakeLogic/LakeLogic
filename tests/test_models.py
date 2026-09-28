@@ -223,10 +223,10 @@ def test_contract_interceptors_and_load_mode_validation(monkeypatch):
     assert migrated_contract.server.schema_policy.unknown_fields == "quarantine"
 
     with pytest.raises(ValueError, match="no run-log backend"):
-        DataContract(version="1.0", source={"type": "file", "load_mode": "incremental"}, metadata={})
+        DataContract(version="1.0", source={"type": "landing", "load_mode": "incremental"}, metadata={})
 
     monkeypatch.setenv("LAKELOGIC_SKIP_INCREMENTAL_CHECK", "1")
-    skipped_incremental = DataContract(version="1.0", source={"type": "file", "load_mode": "incremental"}, metadata={})
+    skipped_incremental = DataContract(version="1.0", source={"type": "landing", "load_mode": "incremental"}, metadata={})
     assert skipped_incremental.source.load_mode == "incremental"
     monkeypatch.delenv("LAKELOGIC_SKIP_INCREMENTAL_CHECK", raising=False)
 
@@ -234,14 +234,14 @@ def test_contract_interceptors_and_load_mode_validation(monkeypatch):
     monkeypatch.setattr("lakelogic.core.models.logger.warning", lambda message: warnings.append(message))
     incremental_warn = DataContract(
         version="1.0",
-        source={"type": "file", "load_mode": "incremental", "watermark_strategy": "lookback"},
+        source={"type": "landing", "load_mode": "incremental", "watermark_strategy": "lookback"},
         metadata={"run_log_path": "logs/run_log.json"},
     )
     assert incremental_warn.source.load_mode == "incremental"
     assert any("lookback duration is not set" in message for message in warnings)
 
     with pytest.raises(ValueError, match="cdc_op_field nor cdc_timestamp_field"):
-        DataContract(version="1.0", source={"type": "file", "load_mode": "cdc"})
+        DataContract(version="1.0", source={"type": "landing", "load_mode": "cdc"})
 
 
 def test_contract_from_yaml_reset_and_effective_server(monkeypatch, tmp_path):

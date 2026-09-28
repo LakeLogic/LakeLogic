@@ -125,14 +125,14 @@ Every `_system.yaml` follows this pattern. Customise the values to match your en
       # Only used when storage_mode="uc". Direct mode ignores them.
       contract_root: "/Workspace/Shared/data_platform/domains/{domain}/{system}"
       landing_root: "/Volumes/{catalog}/nondelta/landing_{domain}/{system}"
-      log_root: "/Volumes/{catalog}/nondelta/_logs"
+      log_root: "/Volumes/{catalog}/nondelta/lakelogic_logs"
 
       # ── Storage Paths (direct mode — cloud/local) ─────────────
       # Driven by {storage_root}, {data_root}, {quarantine_root}
       # which are defined per-environment below.
       landing_path: "{storage_root}/_data/{domain}/{system}"
       contract_path: "{storage_root}/_contracts/{domain}/{system}"
-      log_path: "{storage_root}/_logs/{domain}"
+      log_path: "{storage_root}/lakelogic_logs/{domain}"
       quarantine_path: "{quarantine_root}/{domain}/{system}"
 
     # ── Cloud Storage Anchors (DRY) ─────────────────────────────
@@ -450,14 +450,14 @@ Use YAML anchors to define storage patterns once and reference them across envir
         storage_root: "abfss://lakehouse@youraccount.dfs.core.windows.net"
         data_root: "{storage_root}/{domain}"
         quarantine_root: "{storage_root}/_quarantine"
-        log_path: "{data_root}/_run_logs"
+        log_path: "{data_root}/lakelogic_run_log"
 
       aws: &aws_storage
         bucket: "your-data-lake"
         storage_root: "s3://your-data-lake"
         data_root: "{storage_root}/{domain}"
         quarantine_root: "{storage_root}/_quarantine"
-        log_path: "{data_root}/_run_logs"
+        log_path: "{data_root}/lakelogic_run_log"
 
       gcp: &gcp_storage
         bucket: "your-data-lake"
@@ -468,7 +468,7 @@ Use YAML anchors to define storage patterns once and reference them across envir
         storage_root: "./lakehouse"
         data_root: "{storage_root}/{domain}"
         quarantine_root: "{storage_root}/_quarantine"
-        log_path: "{data_root}/_run_logs"
+        log_path: "{data_root}/lakelogic_run_log"
 
     # ── Environments ─────────────────────────────────────────────
     # Use ${ENV_VAR} syntax to keep secrets out of source control.
@@ -517,7 +517,20 @@ Contracts use `{placeholder}` syntax that resolves from the system registry. Thi
 | `{domain_catalog}` | Environment-specific `catalog:` | `retail_marketing` |
 | `{storage_root}` | Environment-specific | `abfss://...` |
 | `{data_root}` | Computed | `{storage_root}/{domain}` |
-| `{log_path}` | Computed | `{data_root}/_run_logs` |
+| `{log_path}` | Computed | `{data_root}/lakelogic_run_log` |
+
+!!! info "Names LakeLogic gives its own tables and files"
+    Every table LakeLogic creates for its own use is named `_lakelogic_<kind>`
+    (`_lakelogic_run_log`, `_lakelogic_slo_checks`, `_lakelogic_logs`,
+    `_lakelogic_pipeline_runs`, `_lakelogic_erasure_evidence`, `_lakelogic_retention_evidence`).
+    Paths and Fabric use the same name without the leading underscore (`lakelogic_<kind>`),
+    because Spark/Hadoop treat `_`-prefixed paths as hidden. Local database files are
+    `lakelogic_<kind>.duckdb` / `.sqlite`. A name you configure is always used verbatim, and an
+    estate that already has a legacy table (`_run_logs`, `_logs`, `pipeline_runs`,
+    `run_logs`) keeps writing to it so history is not split.
+    Quarantine is not included: it holds your own rejected rows, so it keeps its
+    original names (`_quarantine`, `quarantine_rows`). Defined once in
+    `lakelogic/core/metadata_names.py`.
 
 ### Usage in Contracts
 

@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from lakelogic.core.models import runtime_category
+from lakelogic.core.plain_values import plain_text
 from lakelogic.engines.base import EngineAdapter
 from ..core import types as _types
 
@@ -928,10 +930,10 @@ class BigQueryAdapter(EngineAdapter):
             category_exprs.append("IF(TRUE, 'schema', NULL)")
 
         for rule in row_rules:
-            err = self._escape_str(f"Rule failed: {rule.name} ({rule.sql})")
+            err = self._escape_str(f"Rule failed: {plain_text(rule.name)} ({rule.sql})")
             cond = f"NOT COALESCE(({rule.sql}), FALSE)"
             error_exprs.append(f"IF({cond}, '{err}', NULL)")
-            cat = self._escape_str(rule.category or "rule")
+            cat = self._escape_str(runtime_category(rule))
             category_exprs.append(f"IF({cond}, '{cat}', NULL)")
 
         error_array = (
