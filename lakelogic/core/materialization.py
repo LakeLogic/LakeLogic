@@ -2529,7 +2529,9 @@ def _with_scd1_surrogate_key_spark(df, primary_key: List[str], scd1_cfg: Optiona
     return df.select(sk_column, *[c for c in df.columns if c != sk_column])
 
 
-def _inject_scd1_unknown_member_after_write(spark, table_name: str, primary_key: List[str], scd1_cfg) -> None:  # pragma: no cover
+def _inject_scd1_unknown_member_after_write(
+    spark, table_name: str, primary_key: List[str], scd1_cfg
+) -> None:  # pragma: no cover
     """The SCD1 dim's unknown member, added to the written table once (idempotent by key)."""
     if not scd1_cfg:
         return

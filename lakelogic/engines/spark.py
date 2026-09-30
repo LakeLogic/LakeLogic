@@ -399,9 +399,7 @@ class SparkAdapter(EngineAdapter):
                 continue
 
             if trans.unpivot and trans_phase == "pre":
-                unpivot_sql = self._build_unpivot_sql(
-                    trans.unpivot, source_table=self._step_view(current_df)
-                )
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self._step_view(current_df))
                 if unpivot_sql:
                     logger.debug(f"Pre-Transform [Unpivot]: {unpivot_sql}")
                     current_df.createOrReplaceTempView(self._temp_src)
@@ -655,9 +653,7 @@ class SparkAdapter(EngineAdapter):
                 continue
 
             if trans.unpivot and trans_phase != "pre":
-                unpivot_sql = self._build_unpivot_sql(
-                    trans.unpivot, source_table=self._step_view(current_df)
-                )
+                unpivot_sql = self._build_unpivot_sql(trans.unpivot, source_table=self._step_view(current_df))
                 if unpivot_sql:
                     logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
                     current_df.createOrReplaceTempView(self._temp_src)

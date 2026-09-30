@@ -6,6 +6,7 @@ table never reaches — the first write and the Delta MERGE both returned before
 unknown member (`_inject_unknown_member_spark_table`) was defined but never called.
 No local Spark: these pin the code paths.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -33,10 +34,10 @@ def test_the_unknown_member_is_added_after_every_delta_write():
 
 def test_the_key_expression_matches_the_dataframe_fallback():
     helper = inspect.getsource(m._with_scd1_surrogate_key_spark)
-    assert 'F.substring(F.sha2(pk_concat, 256), 1, 16)' in helper
+    assert "F.substring(F.sha2(pk_concat, 256), 1, 16)" in helper
     assert 'F.concat_ws("|"' in helper
     assert "F.lit(unknown_sk)" in helper  # the unknown member keeps its key
-    assert 'F.substring(F.sha2(pk_concat, 256), 1, 16)' in _merge_src()  # the fallback's own
+    assert "F.substring(F.sha2(pk_concat, 256), 1, 16)" in _merge_src()  # the fallback's own
 
 
 def test_no_scd1_config_leaves_the_frame_alone():

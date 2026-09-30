@@ -1,4 +1,5 @@
 """A run with no good/quarantined counts gets no quality verdict - not "total data loss"."""
+
 from types import SimpleNamespace
 
 from lakelogic.core.slo import SLOValidator

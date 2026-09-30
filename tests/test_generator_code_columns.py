@@ -4,6 +4,7 @@ Live (2026-09-29): `platform` came out as `PLA-3906`, `event_name` as `EVE-8304`
 dimensions built from them had ~5,500 rows. Domain-specific columns (`cancelled_by`) are NOT
 guessed here: their values come from the contract's accepted_values.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -18,10 +19,13 @@ def _values(col: str, n: int = 400) -> set:
     return set(gen.generate(rows=n)[col].drop_nulls().to_list())
 
 
-@pytest.mark.parametrize("col, expected", [
-    ("platform", {"ios", "android", "web"}),
-    ("level", {"low", "medium", "high"}),
-])
+@pytest.mark.parametrize(
+    "col, expected",
+    [
+        ("platform", {"ios", "android", "web"}),
+        ("level", {"low", "medium", "high"}),
+    ],
+)
 def test_conventional_codes_come_from_a_small_realistic_set(col, expected):
     assert _values(col) <= expected
 

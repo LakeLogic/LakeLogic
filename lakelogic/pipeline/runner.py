@@ -9,7 +9,6 @@ and HIPAA masking automatically.
 from __future__ import annotations
 
 import copy
-import json
 import os
 import time
 import uuid
@@ -1626,7 +1625,9 @@ class LakehousePipeline:
 
         metadata = getattr(dc, "metadata", None) or {}
         if not metadata.get("run_log_table"):
-            logger.warning(f"{profile.upper()} erasure evidence for {c.entity} not recorded: no run_log_table configured.")
+            logger.warning(
+                f"{profile.upper()} erasure evidence for {c.entity} not recorded: no run_log_table configured."
+            )
             return
         try:
             info = getattr(dc, "info", None)
@@ -1676,8 +1677,14 @@ class LakehousePipeline:
         from lakelogic.core.privacy_evidence import build_privacy_action_event
 
         self._write_erasure_evidence_row(
-            c, dc, "gdpr", subject_ids=subject_ids, affected=affected, dry_run=dry_run,
-            status=status, reason=case_ref,
+            c,
+            dc,
+            "gdpr",
+            subject_ids=subject_ids,
+            affected=affected,
+            dry_run=dry_run,
+            status=status,
+            reason=case_ref,
         )
 
         meta = (c.contract_dict or {}).get("metadata") or {}
@@ -2010,8 +2017,14 @@ class LakehousePipeline:
                     report["pipeline_run_id"] = self.run_id
 
                     self._write_erasure_evidence_row(
-                        c, dc, "hipaa", subject_ids=patient_ids, affected=affected, dry_run=dry_run,
-                        status="failed" if update_failed else "completed", reason=case_ref,
+                        c,
+                        dc,
+                        "hipaa",
+                        subject_ids=patient_ids,
+                        affected=affected,
+                        dry_run=dry_run,
+                        status="failed" if update_failed else "completed",
+                        reason=case_ref,
                     )
 
                     try:
@@ -2044,8 +2057,14 @@ class LakehousePipeline:
                     )
                     report["pipeline_run_id"] = self.run_id
                     self._write_erasure_evidence_row(
-                        c, dc, "hipaa", subject_ids=patient_ids, affected=affected, dry_run=dry_run,
-                        status="completed", reason=case_ref,
+                        c,
+                        dc,
+                        "hipaa",
+                        subject_ids=patient_ids,
+                        affected=affected,
+                        dry_run=dry_run,
+                        status="completed",
+                        reason=case_ref,
                     )
                     try:
                         RemoteObserver().report(report)
@@ -2107,13 +2126,23 @@ class LakehousePipeline:
             try:
                 if framework == "gdpr":
                     result = self._execute_gdpr_pass(
-                        active, req["subject_column"], [str(req["subject_id"])], gdpr_strategy, gdpr_salt,
-                        dry_run, case_ref=rid,
+                        active,
+                        req["subject_column"],
+                        [str(req["subject_id"])],
+                        gdpr_strategy,
+                        gdpr_salt,
+                        dry_run,
+                        case_ref=rid,
                     )
                 else:
                     result = self._execute_hipaa_pass(
-                        active, req["subject_column"], [str(req["subject_id"])], hipaa_strategy, hipaa_salt,
-                        dry_run, case_ref=rid,
+                        active,
+                        req["subject_column"],
+                        [str(req["subject_id"])],
+                        hipaa_strategy,
+                        hipaa_salt,
+                        dry_run,
+                        case_ref=rid,
                     )
                 failed = bool((result or {}).get("failed"))
             except Exception as exc:

@@ -7,6 +7,7 @@
    file branch and be skipped, so a query joining it hit TABLE_OR_VIEW_NOT_FOUND.
 No local Spark: the view helper is exercised with a stub frame; the rest pins the code.
 """
+
 from __future__ import annotations
 
 import inspect

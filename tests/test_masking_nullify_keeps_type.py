@@ -20,22 +20,27 @@ pd = pytest.importorskip("pandas")
 
 
 def _engine() -> MaskingEngine:
-    return MaskingEngine(DataContract(
-        version="1.0.0",
-        dataset="trips",
-        model={"fields": [
-            {"name": "trip_id", "type": "string"},
-            {"name": "gps_lat", "type": "float", "pii": True, "masking": "nullify"},
-            {"name": "seen_at", "type": "timestamp", "pii": True, "masking": "nullify"},
-        ]},
-    ))
+    return MaskingEngine(
+        DataContract(
+            version="1.0.0",
+            dataset="trips",
+            model={
+                "fields": [
+                    {"name": "trip_id", "type": "string"},
+                    {"name": "gps_lat", "type": "float", "pii": True, "masking": "nullify"},
+                    {"name": "seen_at", "type": "timestamp", "pii": True, "masking": "nullify"},
+                ]
+            },
+        )
+    )
 
 
 def test_polars_nullify_keeps_float_and_timestamp_types():
     from datetime import datetime
 
-    df = pl.DataFrame({"trip_id": ["a", "b"], "gps_lat": [51.5, None],
-                       "seen_at": [datetime(2026, 1, 1), datetime(2026, 1, 2)]})
+    df = pl.DataFrame(
+        {"trip_id": ["a", "b"], "gps_lat": [51.5, None], "seen_at": [datetime(2026, 1, 1), datetime(2026, 1, 2)]}
+    )
     out = _engine().apply(df, user_groups=[])
     assert out.schema["gps_lat"] == pl.Float64
     assert out.schema["seen_at"] == df.schema["seen_at"]
@@ -52,7 +57,7 @@ def test_pandas_nullify_keeps_float_type():
 def test_spark_nullify_casts_to_the_columns_own_type():
     # No local Spark here: pin the expression. Casting to "string" is the bug this file is about.
     src = inspect.getsource(MaskingEngine._apply_spark)
-    assert 'F.lit(None).cast(df.schema[col_name].dataType)' in src
+    assert "F.lit(None).cast(df.schema[col_name].dataType)" in src
     assert 'F.lit(None).cast("string")' not in src
 
 

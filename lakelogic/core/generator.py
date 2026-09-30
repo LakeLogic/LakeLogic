@@ -1250,7 +1250,17 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
     "platform": ["ios", "android", "web"],
     "app_platform": ["ios", "android", "web"],
     "level": ["low", "medium", "high"],
-    "event_name": ["app_open", "sign_up", "login", "search", "view_item", "add_to_cart", "checkout", "purchase", "logout"],
+    "event_name": [
+        "app_open",
+        "sign_up",
+        "login",
+        "search",
+        "view_item",
+        "add_to_cart",
+        "checkout",
+        "purchase",
+        "logout",
+    ],
     # A CODE, NOT A NAME. `city_code` resolved through its head noun (`city`) and was filled
     # with "Manchester", "Bristol" — city names in a column the contract types as a short
     # code, which anyone reading the grid spots at once and nothing downstream can join on.

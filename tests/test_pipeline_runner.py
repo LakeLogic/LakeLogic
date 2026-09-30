@@ -1350,13 +1350,19 @@ def test_a_run_resets_only_the_layers_it_processes(monkeypatch):
     silver = types.SimpleNamespace(entity="trips", layer="silver", depends_on=[], contract_dict={"info": {}})
     gold = types.SimpleNamespace(entity="fact_trips", layer="gold", depends_on=[], contract_dict={"info": {}})
     registry = types.SimpleNamespace(
-        domain="d", system="s", storage_mode="uc", storage=None, get_active_contracts=lambda: [silver, gold],
+        domain="d",
+        system="s",
+        storage_mode="uc",
+        storage=None,
+        get_active_contracts=lambda: [silver, gold],
     )
     pipeline = runner.LakehousePipeline(registry, engine="polars")
     resets = []
     monkeypatch.setattr(pipeline, "_resolve_uc_paths", lambda d: d)
     monkeypatch.setattr(
-        pipeline, "_execute_resets", lambda active, r, rl, dry: resets.append((set(r), set(rl))),
+        pipeline,
+        "_execute_resets",
+        lambda active, r, rl, dry: resets.append((set(r), set(rl))),
     )
     monkeypatch.setattr(pipeline, "generate_ddl_only", lambda contracts, dry_run: "ok")
 

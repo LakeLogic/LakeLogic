@@ -87,15 +87,18 @@ def test_ensure_is_idempotent_and_has_the_owned_schema(tmp_path, backend):
 @pytest.mark.parametrize("backend", ["duckdb", "sqlite"])
 def test_only_open_requests_in_scope_are_read(tmp_path, backend):
     md = _md(tmp_path, backend)
-    _insert(md, [
-        {"request_id": "R1", "subject_id": "c1"},
-        {"request_id": "R2", "subject_id": "c2", "status": "completed"},
-        {"request_id": "R3", "subject_id": "c3", "status": "dry_run"},
-        {"request_id": "R4", "subject_id": "c4", "framework": "hipaa", "subject_column": "patient_id"},
-        {"request_id": "R5", "subject_id": "c5", "system": "other"},
-        {"request_id": "R6", "subject_id": "c6", "system": "stripe"},
-        {"request_id": "R7", "subject_id": "c7", "status": "failed"},
-    ])
+    _insert(
+        md,
+        [
+            {"request_id": "R1", "subject_id": "c1"},
+            {"request_id": "R2", "subject_id": "c2", "status": "completed"},
+            {"request_id": "R3", "subject_id": "c3", "status": "dry_run"},
+            {"request_id": "R4", "subject_id": "c4", "framework": "hipaa", "subject_column": "patient_id"},
+            {"request_id": "R5", "subject_id": "c5", "system": "other"},
+            {"request_id": "R6", "subject_id": "c6", "system": "stripe"},
+            {"request_id": "R7", "subject_id": "c7", "status": "failed"},
+        ],
+    )
     got = [r["request_id"] for r in er.read_open_requests(md, frameworks=["gdpr"], system="stripe")]
     assert got == ["R1", "R3", "R6"]
     both = {r["request_id"] for r in er.read_open_requests(md, system="stripe")}
@@ -105,10 +108,13 @@ def test_only_open_requests_in_scope_are_read(tmp_path, backend):
 @pytest.mark.parametrize("backend", ["duckdb", "sqlite"])
 def test_marking_moves_only_open_requests(tmp_path, backend):
     md = _md(tmp_path, backend)
-    _insert(md, [
-        {"request_id": "R1", "subject_id": "c1"},
-        {"request_id": "R2", "subject_id": "c2", "status": "completed", "run_id": "old"},
-    ])
+    _insert(
+        md,
+        [
+            {"request_id": "R1", "subject_id": "c1"},
+            {"request_id": "R2", "subject_id": "c2", "status": "completed", "run_id": "old"},
+        ],
+    )
     er.mark_requests(md, {"R1": "completed", "R2": "failed"}, run_id="run-9")
     assert _statuses(md) == {"R1": ("completed", "run-9"), "R2": ("completed", "old")}
     with pytest.raises(ValueError):
@@ -143,12 +149,15 @@ def _pipeline(md, *, fail_on=None, raise_on=None):
 
 def test_each_request_runs_its_own_pass_and_is_closed(tmp_path):
     md = _md(tmp_path)
-    _insert(md, [
-        {"request_id": "R1", "subject_id": "c1"},
-        {"request_id": "R2", "subject_id": "p2", "framework": "hipaa", "subject_column": "patient_id"},
-        {"request_id": "R3", "subject_id": "c3"},
-        {"request_id": "R4", "subject_id": "c4"},
-    ])
+    _insert(
+        md,
+        [
+            {"request_id": "R1", "subject_id": "c1"},
+            {"request_id": "R2", "subject_id": "p2", "framework": "hipaa", "subject_column": "patient_id"},
+            {"request_id": "R3", "subject_id": "c3"},
+            {"request_id": "R4", "subject_id": "c4"},
+        ],
+    )
     p = _pipeline(md, fail_on="R3", raise_on="R4")
     out = p.process_erasure_requests(dry_run=False)
     assert out == {"R1": "completed", "R2": "completed", "R3": "failed", "R4": "failed"}
@@ -172,10 +181,13 @@ def test_a_dry_run_never_consumes_a_request(tmp_path):
 
 def test_frameworks_filter_leaves_other_requests_pending(tmp_path):
     md = _md(tmp_path)
-    _insert(md, [
-        {"request_id": "R1", "subject_id": "c1"},
-        {"request_id": "R2", "subject_id": "p2", "framework": "hipaa", "subject_column": "patient_id"},
-    ])
+    _insert(
+        md,
+        [
+            {"request_id": "R1", "subject_id": "c1"},
+            {"request_id": "R2", "subject_id": "p2", "framework": "hipaa", "subject_column": "patient_id"},
+        ],
+    )
     assert _pipeline(md).process_erasure_requests(dry_run=False, frameworks=["hipaa"]) == {"R2": "completed"}
     assert _statuses(md)["R1"][0] == "pending"
 
@@ -217,8 +229,9 @@ def test_hipaa_evidence_reason_carries_the_request_id(monkeypatch):
     monkeypatch.setattr(hipaa, "generate_hipaa_erasure_report", lambda *a, **k: {})
     monkeypatch.setattr(runner, "RemoteObserver", lambda: SimpleNamespace(report=lambda r: None), raising=False)
 
-    c = SimpleNamespace(entity="silver_patients", layer="silver",
-                        contract_dict={"materialization": {"target_path": "/tmp/x"}})
+    c = SimpleNamespace(
+        entity="silver_patients", layer="silver", contract_dict={"materialization": {"target_path": "/tmp/x"}}
+    )
     out = p._execute_hipaa_pass([c], "patient_id", ["p1"], "nullify", "", False, case_ref="REQ-7")
     assert written and written[0]["reason"] == "REQ-7"
     assert out == {"tables": 1, "failed": 0}
@@ -232,13 +245,25 @@ def test_gdpr_evidence_reason_carries_the_request_id(monkeypatch):
     p.engine = "spark"
     p.registry = SimpleNamespace(domain="payments", system="stripe")
     rows = []
-    monkeypatch.setattr(evidence_tables, "write_evidence_rows",
-                        lambda kind, r, md, engine_name=None: rows.extend(r))
-    dc = SimpleNamespace(metadata={"run_log_table": "`cat`.payments._pipeline_run_log"}, dataset="d",
-                         info=SimpleNamespace(title="t", version="1", table_name=None))
+    monkeypatch.setattr(evidence_tables, "write_evidence_rows", lambda kind, r, md, engine_name=None: rows.extend(r))
+    dc = SimpleNamespace(
+        metadata={"run_log_table": "`cat`.payments._pipeline_run_log"},
+        dataset="d",
+        info=SimpleNamespace(title="t", version="1", table_name=None),
+    )
     p._record_gdpr_evidence(
-        SimpleNamespace(entity="e", layer="silver", contract_dict={}), dc, None, [],
-        subject_col="customer_id", subject_ids=["c1"], strategy="nullify", affected=1, dry_run=False,
-        partition_filter=None, pii_cols=["email"], case_ref="REQ-8", status="completed",
+        SimpleNamespace(entity="e", layer="silver", contract_dict={}),
+        dc,
+        None,
+        [],
+        subject_col="customer_id",
+        subject_ids=["c1"],
+        strategy="nullify",
+        affected=1,
+        dry_run=False,
+        partition_filter=None,
+        pii_cols=["email"],
+        case_ref="REQ-8",
+        status="completed",
     )
     assert rows[0]["reason"] == "REQ-8"

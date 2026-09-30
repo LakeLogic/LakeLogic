@@ -5,13 +5,16 @@ mechanics columns. Only SCD2 was exempt, so every row of Build Centre's code dim
 (gold_rideflow_dim_trip_type, ...) quarantined with "Missing fields: trip_type_sk"
 under `evolution: strict` (2026-09-30).
 """
+
 from types import SimpleNamespace
 
 from lakelogic.engines.base import EngineAdapter
 
 
 def _injected(materialization):
-    return EngineAdapter._scd2_injected_columns(SimpleNamespace(contract=SimpleNamespace(materialization=materialization)))
+    return EngineAdapter._scd2_injected_columns(
+        SimpleNamespace(contract=SimpleNamespace(materialization=materialization))
+    )
 
 
 def test_scd1_surrogate_key_is_injected_not_missing():
@@ -42,4 +45,4 @@ def test_every_engine_subtracts_injected_columns_before_flagging_missing():
     for name in ("spark", "snowflake", "bigquery", "polars", "duckdb"):
         src = (engines / f"{name}.py").read_text(encoding="utf-8")
         flag = src.index('if evolution == "strict" and missing and not _has_post_sql:')
-        assert "_scd2_injected_columns()" in src[max(0, flag - 6000):flag], name
+        assert "_scd2_injected_columns()" in src[max(0, flag - 6000) : flag], name

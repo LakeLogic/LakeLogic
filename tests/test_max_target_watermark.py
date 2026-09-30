@@ -7,6 +7,7 @@ Live on Databricks (2026-09-30) every "incremental" silver re-read ALL of bronze
   2. once the lookup works, `_lakelogic_processed_at` is stored as ISO TEXT, and a string
      watermark was stepped by a whole DAY - skipping up to 24h of new rows.
 """
+
 import sys
 import types
 from datetime import datetime, timedelta, timezone

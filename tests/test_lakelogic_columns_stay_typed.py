@@ -5,6 +5,7 @@ contract had no model), so `_lakelogic_processed_at` became text - and it is the
 the run-log timestamp and the SLO freshness column. Owner rule (2026-09-30): LakeLogic's
 own columns are always typed, even where every source field is text.
 """
+
 from datetime import datetime, timezone
 
 import polars as pl
