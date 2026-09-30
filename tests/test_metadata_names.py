@@ -52,6 +52,7 @@ def test_the_required_kinds_exist():
         "pipeline_runs",
         "erasure_evidence",
         "retention_evidence",
+        "erasure_requests",
     }
 
 

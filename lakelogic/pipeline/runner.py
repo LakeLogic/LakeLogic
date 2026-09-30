@@ -1445,10 +1445,13 @@ class LakehousePipeline:
         Every table acted on - or that FAILED to be acted on - yields one privacy-action
         execution event (count + digest of the subjects, never the IDs), posted to the platform
         at the end of the pass. ``case_ref`` is the request it belongs to (e.g. a ticket id).
+
+        Returns ``{"tables": n, "failed": n}``: tables acted on, and those whose erasure failed.
         """
         from lakelogic.core.gdpr import _get_pii_column_names, generate_erasure_report
 
         privacy_events: List[Dict[str, Any]] = []
+        outcome = {"tables": 0, "failed": 0}
 
         partition_msg = ""
         if partition_filter:
@@ -1530,7 +1533,8 @@ class LakehousePipeline:
                 affected = 0
                 update_failed = False
                 if dry_run:
-                    logger.info(f"DRY RUN GDPR SQL: {update_sql}")
+                    # Never the subject ids in a log line.
+                    logger.info(f"DRY RUN GDPR SQL: {update_sql.replace(sql_vals, f'<{len(subject_ids)} ids>')}")
                     affected = len(subject_ids)
                 else:
                     try:  # pragma: no cover
@@ -1543,6 +1547,8 @@ class LakehousePipeline:
 
                 # A FAILED erasure is evidence too - of personal data still present.
                 if affected > 0 or dry_run or update_failed:
+                    outcome["tables"] += 1
+                    outcome["failed"] += int(update_failed)
                     self._record_gdpr_evidence(
                         c,
                         dc,
@@ -1579,6 +1585,7 @@ class LakehousePipeline:
                 )
 
                 if affected > 0 or dry_run:
+                    outcome["tables"] += 1
                     self._record_gdpr_evidence(
                         c,
                         dc,
@@ -1601,6 +1608,52 @@ class LakehousePipeline:
             from lakelogic.core.privacy_evidence import emit_privacy_action_events
 
             emit_privacy_action_events(self.registry, privacy_events)
+        return outcome
+
+    def _write_erasure_evidence_row(
+        self, c, dc, profile: str, *, subject_ids, affected: int, dry_run: bool, status: str, reason=None
+    ) -> None:
+        """One ``_lakelogic_erasure_evidence`` row, beside the run log in the domain's schema.
+
+        Evidence lives in TABLES only (owner decision 2026-09-30). The GDPR and HIPAA passes
+        used to write JSON files to `/Workspace/Shared/lakelogic_logs/{gdpr,hipaa}_reports` - a
+        hardcoded, Databricks-only folder outside the domain (on Fabric it raised OSError) -
+        while the profile erasure path already wrote this table. Counts only, never an ID.
+        """
+        from datetime import datetime, timezone
+
+        from lakelogic.core.evidence_tables import write_evidence_rows
+
+        metadata = getattr(dc, "metadata", None) or {}
+        if not metadata.get("run_log_table"):
+            logger.warning(f"{profile.upper()} erasure evidence for {c.entity} not recorded: no run_log_table configured.")
+            return
+        try:
+            info = getattr(dc, "info", None)
+            write_evidence_rows(
+                "erasure_evidence",
+                [
+                    {
+                        "run_id": self.run_id,
+                        "timestamp": datetime.now(timezone.utc),
+                        "profile": profile,
+                        "dataset": getattr(dc, "dataset", None) or str(c.entity),
+                        "table_name": metadata.get("table_name") or getattr(info, "table_name", None),
+                        "subject_count": len(subject_ids),
+                        "rows_affected": affected,
+                        "reason": reason,
+                        "status": "dry_run" if dry_run else status,
+                        "contract": getattr(info, "title", None) or str(c.entity),
+                        "contract_version": getattr(info, "version", None),
+                        "domain": metadata.get("domain") or getattr(self.registry, "domain", None),
+                        "system": metadata.get("system") or getattr(self.registry, "system", None),
+                    }
+                ],
+                metadata,
+                engine_name=getattr(self, "engine", None),
+            )
+        except Exception as exc:
+            logger.warning(f"Could not write {profile.upper()} erasure evidence for {c.entity}: {exc}")
 
     def _record_gdpr_evidence(
         self,
@@ -1619,30 +1672,13 @@ class LakehousePipeline:
         case_ref: Optional[str],
         status: str,
     ) -> None:
-        """Write the local audit report (where it can be written) and queue the platform event.
-
-        The report used to go to `/Workspace/Shared/lakelogic_logs`, which exists only on
-        Databricks - on Fabric the write raised OSError - and to `RemoteObserver`, which nothing
-        ingests. The local file is kept for operators; the EVENT is what reaches the platform.
-        """
+        """Write the ``_lakelogic_erasure_evidence`` row and queue the platform event."""
         from lakelogic.core.privacy_evidence import build_privacy_action_event
 
-        report = generate_erasure_report(
-            dc, subject_col, subject_ids, strategy, affected, partition_filter=partition_filter
+        self._write_erasure_evidence_row(
+            c, dc, "gdpr", subject_ids=subject_ids, affected=affected, dry_run=dry_run,
+            status=status, reason=case_ref,
         )
-        report["pipeline_run_id"] = self.run_id
-        try:
-            from pathlib import Path as _Path
-
-            workspace_dir = _Path("/Workspace/Shared/lakelogic_logs/gdpr_reports")
-            log_dir = workspace_dir if _Path("/Workspace/Shared").is_dir() else _Path("./logs/gdpr_reports")
-            log_dir.mkdir(parents=True, exist_ok=True)
-            log_path = log_dir / f"erasure_{c.entity}_{int(time.time())}.json"
-            with open(log_path, "w", encoding="utf-8") as f:
-                json.dump(report, f, indent=2, default=str)
-            logger.info(f"GDPR audit report written: {log_path}")
-        except Exception as exc:
-            logger.warning(f"Could not write GDPR audit report: {exc}")
 
         meta = (c.contract_dict or {}).get("metadata") or {}
         try:
@@ -1869,8 +1905,13 @@ class LakehousePipeline:
         salt: str,
         dry_run: bool,
         partition_filter: Optional[Dict[str, str]] = None,
+        case_ref: Optional[str] = None,
     ):
-        """HIPAA Safe Harbor PHI masking."""
+        """HIPAA Safe Harbor PHI masking.
+
+        ``case_ref`` becomes ``reason`` on each evidence row. Returns ``{"tables": n, "failed": n}``.
+        """
+        outcome = {"tables": 0, "failed": 0}
         from lakelogic.core.hipaa import _get_phi_column_names, generate_hipaa_erasure_report
 
         partition_msg = ""
@@ -1945,8 +1986,11 @@ class LakehousePipeline:
                     update_sql += f" AND `{pcol}` = '{pval}'"  # pragma: no cover
 
                 affected = 0
+                update_failed = False
                 if dry_run:
-                    logger.info(f"DRY RUN HIPAA SQL: {update_sql}")  # pragma: no cover
+                    logger.info(
+                        f"DRY RUN HIPAA SQL: {update_sql.replace(sql_vals, f'<{len(patient_ids)} ids>')}"
+                    )  # pragma: no cover
                     affected = len(patient_ids)  # pragma: no cover
                 else:
                     try:
@@ -1955,18 +1999,20 @@ class LakehousePipeline:
                         logger.info(f"HIPAA Update: {affected} rows in {table_name}")
                     except Exception as e:  # pragma: no cover
                         logger.error(f"HIPAA Update failed on {table_name}: {e}")  # pragma: no cover
+                        update_failed = True  # pragma: no cover
 
-                if affected > 0 or dry_run:
+                if affected > 0 or dry_run or update_failed:
+                    outcome["tables"] += 1
+                    outcome["failed"] += int(update_failed)
                     report = generate_hipaa_erasure_report(
                         dc, patient_col, patient_ids, effective_strategy, affected, partition_filter=partition_filter
                     )
                     report["pipeline_run_id"] = self.run_id
 
-                    log_dir = "/Workspace/Shared/lakelogic_logs/hipaa_reports"
-                    os.makedirs(log_dir, exist_ok=True)
-                    log_path = f"{log_dir}/erasure_{c.entity}_{int(time.time())}.json"
-                    with open(log_path, "w") as f:
-                        json.dump(report, f, indent=2)
+                    self._write_erasure_evidence_row(
+                        c, dc, "hipaa", subject_ids=patient_ids, affected=affected, dry_run=dry_run,
+                        status="failed" if update_failed else "completed", reason=case_ref,
+                    )
 
                     try:
                         RemoteObserver().report(report)
@@ -1992,25 +2038,92 @@ class LakehousePipeline:
                 )
 
                 if affected > 0 or dry_run:
+                    outcome["tables"] += 1
                     report = generate_hipaa_erasure_report(
                         dc, patient_col, patient_ids, effective_strategy, affected, partition_filter=partition_filter
                     )
                     report["pipeline_run_id"] = self.run_id
-                    try:
-                        from pathlib import Path as _Path
-
-                        log_dir = _Path("./logs/hipaa_reports")
-                        log_dir.mkdir(parents=True, exist_ok=True)
-                        log_path = log_dir / f"erasure_{c.entity}_{int(time.time())}.json"
-                        with open(log_path, "w", encoding="utf-8") as f:
-                            json.dump(report, f, indent=2, default=str)
-                        logger.info(f"HIPAA audit report written: {log_path}")
-                    except Exception as exc:
-                        logger.warning(f"Could not write HIPAA audit report: {exc}")
+                    self._write_erasure_evidence_row(
+                        c, dc, "hipaa", subject_ids=patient_ids, affected=affected, dry_run=dry_run,
+                        status="completed", reason=case_ref,
+                    )
                     try:
                         RemoteObserver().report(report)
                     except Exception:
                         pass
+        return outcome
+
+    def process_erasure_requests(
+        self,
+        *,
+        dry_run: bool = True,
+        frameworks: Optional[List[str]] = None,
+        entity_filter: str = "",
+        gdpr_strategy: str = "nullify",
+        gdpr_salt: str = "",
+        hipaa_strategy: str = "nullify",
+        hipaa_salt: str = "",
+    ) -> Dict[str, str]:
+        """Erase every open request in ``_lakelogic_erasure_requests`` for this domain/system.
+
+        One pass per request, with ``case_ref = request_id``, so each evidence row's ``reason``
+        names exactly one request. Each request is then marked ``completed`` or ``failed``
+        (a pass that raises, or any table whose erasure failed). A DRY RUN marks requests
+        ``dry_run``, which stays in the open set: a rehearsal never consumes a request.
+        See :mod:`lakelogic.core.erasure_requests`. Returns ``{request_id: status}``.
+        Subject ids are never logged.
+        """
+        from lakelogic.core.erasure_requests import FRAMEWORKS, mark_requests, read_open_requests
+
+        frameworks = [f.lower() for f in (frameworks or FRAMEWORKS)]
+        active = self.registry.get_active_contracts()
+        entities = {e.strip().lower() for e in entity_filter.split(",") if e.strip()}
+        if entities:
+            active = [c for c in active if c.entity.lower() in entities]
+
+        # The queue sits beside the run log, like the evidence it produces.
+        metadata = next(
+            (
+                md
+                for md in (((c.contract_dict or {}).get("metadata") or {}) for c in active)
+                if md.get("run_log_table") and "{" not in str(md.get("run_log_table"))
+            ),
+            None,
+        )
+        if metadata is None:
+            logger.warning("Erasure requests not read: no contract in scope has a resolved run_log_table.")
+            return {}
+
+        engine = getattr(self, "engine", None)
+        spark = getattr(self, "spark", None)
+        system = metadata.get("system") or getattr(self.registry, "system", None)
+        requests = read_open_requests(metadata, frameworks=frameworks, system=system, engine_name=engine, spark=spark)
+        logger.info(f"Erasure requests: {len(requests)} open ({', '.join(frameworks)}), dry_run={dry_run}")
+
+        outcomes: Dict[str, str] = {}
+        for req in requests:
+            rid = str(req["request_id"])
+            framework = str(req.get("framework") or "").lower()
+            try:
+                if framework == "gdpr":
+                    result = self._execute_gdpr_pass(
+                        active, req["subject_column"], [str(req["subject_id"])], gdpr_strategy, gdpr_salt,
+                        dry_run, case_ref=rid,
+                    )
+                else:
+                    result = self._execute_hipaa_pass(
+                        active, req["subject_column"], [str(req["subject_id"])], hipaa_strategy, hipaa_salt,
+                        dry_run, case_ref=rid,
+                    )
+                failed = bool((result or {}).get("failed"))
+            except Exception as exc:
+                logger.error(f"Erasure request {rid} ({framework}) failed: {type(exc).__name__}")
+                failed = True
+            outcomes[rid] = "dry_run" if dry_run else ("failed" if failed else "completed")
+            logger.info(f"Erasure request {rid} ({framework}): {outcomes[rid]}")
+
+        mark_requests(metadata, outcomes, run_id=self.run_id, engine_name=engine, spark=spark)
+        return outcomes
 
     # ── Phase 4: Main Medallion Loop ─────────────────────────────────────────
 
@@ -2183,8 +2296,12 @@ class LakehousePipeline:
                         except Exception as e:
                             logger.warning(f"Could not bootstrap system table {tbl}: {e}")
 
-        resets = {layer.strip().lower() for layer in reset_layers.split(",") if layer.strip()}
-        reloads = {layer.strip().lower() for layer in reload_layers.split(",") if layer.strip()}
+        # Only the layers THIS run processes. A job runs one task per layer and passes the same
+        # `reload_layers` to each; without this the gold task truncated silver again after the
+        # silver task had reloaded it, so gold read an empty silver and silver was left empty
+        # (Databricks, 2026-09-29: reload_layers=silver,gold → every silver/gold table 0 rows).
+        resets = {layer.strip().lower() for layer in reset_layers.split(",") if layer.strip()} & target_set
+        reloads = {layer.strip().lower() for layer in reload_layers.split(",") if layer.strip()} & target_set
         entities = {entity.strip().lower() for entity in entity_filter.split(",") if entity.strip()}
 
         # Filter active contracts

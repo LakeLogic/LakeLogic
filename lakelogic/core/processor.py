@@ -2697,7 +2697,12 @@ class DataProcessor:
                                 _tbl = getattr(_info, "table_name", None) if _info else None
                                 if _tbl:
                                     _src_path = getattr(_src_cfg, "path", "") or ""
-                                    _catalog = _src_path.split(".")[0] if "." in _src_path else ""
+                                    # The target sits beside the source: same catalog AND schema.
+                                    # `split(".")[0]` kept only the catalog, so
+                                    # `table:cat.marketplace.bronze_x` gave `cat.silver_x` - a table
+                                    # that does not exist - and max_target silently fell back to a
+                                    # 90-day window: every "incremental" silver re-read all of bronze.
+                                    _catalog = _src_path.rsplit(".", 1)[0] if "." in _src_path else ""
                                     _target = f"{_catalog}.{_tbl}" if _catalog else _tbl
                             if _target:
                                 _src_overrides["target_path"] = (
@@ -2813,8 +2818,13 @@ class DataProcessor:
                                         logger.debug(f"Failed to capture table source mtime: {_mtime_err}")
 
                             except Exception as _wm_err:
-                                logger.debug(
-                                    f"Incremental boundary resolution failed (falling back to full): {_wm_err}"
+                                # WARNING, not debug: a silent fallback to a FULL read made every
+                                # append-strategy gold fact re-append all of silver each run
+                                # (9,556 rows for 2,558 trips on Databricks, 2026-09-30).
+                                logger.warning(
+                                    f"Incremental boundary resolution failed for "
+                                    f"{getattr(getattr(self.contract, 'info', None), 'title', '?')} "
+                                    f"(falling back to a FULL read): {type(_wm_err).__name__}: {_wm_err}"
                                 )
 
                     else:

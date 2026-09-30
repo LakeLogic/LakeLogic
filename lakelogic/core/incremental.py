@@ -511,7 +511,11 @@ class IncrementalBoundary:
             from pyspark.sql import SparkSession
             import pyspark.sql.functions as F
 
-            spark = SparkSession.getActiveSession()
+            # getActiveSession() is THREAD-LOCAL: the pipeline runs entities on worker
+            # threads, where it returns None although the driver has a session - so every
+            # watermark lookup failed and silver re-read all of bronze. The builder returns the
+            # existing session from any thread.
+            spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
             if spark is None:
                 raise RuntimeError("No active Spark session")
 
@@ -530,7 +534,15 @@ class IncrementalBoundary:
             elif isinstance(max_val, date):
                 from_dt = datetime(max_val.year, max_val.month, max_val.day) + timedelta(days=1)
             else:
-                from_dt = datetime.fromisoformat(str(max_val)) + timedelta(days=1)
+                # A string watermark (e.g. `_lakelogic_processed_at` stored as ISO text) that
+                # carries a time is a TIMESTAMP: step one second, as for datetime above. Only a
+                # bare date steps a day - stepping a day on a timestamp skipped up to 24h of data.
+                _txt = str(max_val).strip()
+                _parsed = datetime.fromisoformat(_txt.replace("Z", "+00:00"))
+                if "T" in _txt or " " in _txt or ":" in _txt:
+                    from_dt = _parsed + timedelta(seconds=1)
+                else:
+                    from_dt = datetime(_parsed.year, _parsed.month, _parsed.day) + timedelta(days=1)
 
             meta = {"watermark_value": str(max_val), "target_path": target_path}
 
@@ -540,6 +552,12 @@ class IncrementalBoundary:
                 from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
                 from_dt = datetime.now(timezone.utc) - timedelta(days=90)
+            # Loud, not silent: a wrong target path looked exactly like a first run and
+            # turned every incremental read into a 90-day re-read.
+            logger.warning(
+                f"max_target: could not read the watermark from {target_path!r} ({exc}); "
+                f"reading from {from_dt.isoformat()} instead"
+            )
             meta = {"fallback_reason": str(exc), "target_path": target_path}
 
         _to = to_dt or datetime.now(timezone.utc)
@@ -581,7 +599,11 @@ class IncrementalBoundary:
         try:
             from pyspark.sql import SparkSession
 
-            spark = SparkSession.getActiveSession()
+            # getActiveSession() is THREAD-LOCAL: the pipeline runs entities on worker
+            # threads, where it returns None although the driver has a session - so every
+            # watermark lookup failed and silver re-read all of bronze. The builder returns the
+            # existing session from any thread.
+            spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
             if spark is None:
                 raise RuntimeError("No active Spark session")
 
@@ -772,7 +794,11 @@ class IncrementalBoundary:
             from pyspark.sql import SparkSession
             import pyspark.sql.functions as F
 
-            spark = SparkSession.getActiveSession()
+            # getActiveSession() is THREAD-LOCAL: the pipeline runs entities on worker
+            # threads, where it returns None although the driver has a session - so every
+            # watermark lookup failed and silver re-read all of bronze. The builder returns the
+            # existing session from any thread.
+            spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
             if spark is None:
                 raise RuntimeError("No active Spark session")
 

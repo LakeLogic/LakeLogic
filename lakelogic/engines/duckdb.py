@@ -331,7 +331,9 @@ class DuckDBAdapter(EngineAdapter):
 
         if cast_to_string:
             cols = [row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()]
-            cast_exprs = ", ".join(f'CAST("{c}" AS VARCHAR) AS "{c}"' for c in cols)
+            cast_exprs = ", ".join(
+                f'"{c}"' if self._keeps_its_type(c) else f'CAST("{c}" AS VARCHAR) AS "{c}"' for c in cols
+            )
             self.con.sql(f"CREATE OR REPLACE VIEW _typed AS SELECT {cast_exprs} FROM {table_name}")
             table_name = "_typed"
         else:

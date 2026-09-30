@@ -768,6 +768,8 @@ class SnowflakeAdapter(EngineAdapter):
                     break
 
         schema_errors = []
+        # Materializer-injected columns (SCD2 mechanics, SCD1 surrogate key) are not missing.
+        missing = set(missing) - self._scd2_injected_columns()
         if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
         if policy == "quarantine" and unknown and not _has_post_sql:

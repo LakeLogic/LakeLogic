@@ -1243,6 +1243,14 @@ _TRIPLET_INVALID_PATTERNS = {
 # ---------------------------------------------------------------------------
 
 _REALISTIC_POOLS: Dict[str, List[str]] = {
+    # Conventional low-cardinality names that fell through to random `PLA-4821` / `EVE-7310`
+    # codes, so a code dimension built from them had thousands of rows (2026-09-29). Kept to
+    # names whose values are the same in most systems; domain-specific ones (who `cancelled_by`)
+    # come from the contract's accepted_values, never from a guess here.
+    "platform": ["ios", "android", "web"],
+    "app_platform": ["ios", "android", "web"],
+    "level": ["low", "medium", "high"],
+    "event_name": ["app_open", "sign_up", "login", "search", "view_item", "add_to_cart", "checkout", "purchase", "logout"],
     # A CODE, NOT A NAME. `city_code` resolved through its head noun (`city`) and was filled
     # with "Manchester", "Bristol" — city names in a column the contract types as a short
     # code, which anyone reading the grid spots at once and nothing downstream can join on.
@@ -7411,6 +7419,7 @@ class DataGenerator:
                     "distributor": "company_name",
                     "partner": "company_name",
                     "merchant": "company_name",
+                    "event": "event_name",
                 }
                 pool_key = _DOMAIN_POOL_MAP.get(matched_keyword)
                 if pool_key and pool_key in _REALISTIC_POOLS:

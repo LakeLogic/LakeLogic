@@ -253,7 +253,18 @@ class EngineAdapter(ABC):
         mat = getattr(self.contract, "materialization", None)
         strategy = getattr(mat, "strategy", None) if mat else None
         if strategy != "scd2":
-            return set()
+            # SCD1 (merge) dimensions: the materializer injects the surrogate key too, so
+            # strict "missing fields" rejected every row of a type-1 code dimension.
+            scd1_cfg = getattr(mat, "scd1", None) if mat else None
+            if scd1_cfg is None:
+                return set()
+            cfg1 = (
+                scd1_cfg
+                if isinstance(scd1_cfg, dict)
+                else (scd1_cfg.model_dump() if hasattr(scd1_cfg, "model_dump") else {})
+            )
+            sk = cfg1.get("surrogate_key")
+            return {sk} if sk else set()
         scd2_cfg = getattr(mat, "scd2", None)
         if scd2_cfg is None:
             return set()
@@ -538,6 +549,13 @@ class EngineAdapter(ABC):
             return text
         escaped = text.replace('"', '""')
         return f'"{escaped}"'
+
+    def _keeps_its_type(self, column: str) -> bool:
+        """LakeLogic's own columns stay TYPED even when `cast_to_string` makes a bronze
+        table all-text: `_lakelogic_*` and the configured lineage columns carry timestamps,
+        run ids and flags the engine reads back (watermarks, run log, SLO freshness). Cast
+        to text, `_lakelogic_processed_at` stops being a timestamp."""
+        return column.startswith("_lakelogic_") or column in self._lineage_columns()
 
     def _lineage_columns(self) -> set[str]:
         """

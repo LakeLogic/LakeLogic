@@ -878,7 +878,8 @@ def test_gdpr_and_hipaa_passes_emit_reports(monkeypatch):
     (event,) = emitted
     assert event["framework"] == "gdpr" and event["case_ref"] == "DSR-7" and event["mode"] == "dry_run"
     assert event["subject_count"] == 2 and "1" not in event["columns"]
-    assert len(opened) == 2
+    # Evidence lives in tables only (2026-09-30): neither pass writes a report file.
+    assert opened == []
 
 
 def test_load_checkpoint_for_spark_and_polars(monkeypatch):
@@ -1340,3 +1341,28 @@ def test_visualize_dag_includes_filters_external_and_downstream():
     assert "CRM" in html
     assert "🔒 1 PII" in html
     assert "DOWNSTREAM" in html
+
+
+def test_a_run_resets_only_the_layers_it_processes(monkeypatch):
+    """A job passes the same `reload_layers` to every layer task. The gold task truncated
+    silver again after the silver task had reloaded it — silver and gold ended empty
+    (Databricks, 2026-09-29). A run resets only the layers in its own `target_layers`."""
+    silver = types.SimpleNamespace(entity="trips", layer="silver", depends_on=[], contract_dict={"info": {}})
+    gold = types.SimpleNamespace(entity="fact_trips", layer="gold", depends_on=[], contract_dict={"info": {}})
+    registry = types.SimpleNamespace(
+        domain="d", system="s", storage_mode="uc", storage=None, get_active_contracts=lambda: [silver, gold],
+    )
+    pipeline = runner.LakehousePipeline(registry, engine="polars")
+    resets = []
+    monkeypatch.setattr(pipeline, "_resolve_uc_paths", lambda d: d)
+    monkeypatch.setattr(
+        pipeline, "_execute_resets", lambda active, r, rl, dry: resets.append((set(r), set(rl))),
+    )
+    monkeypatch.setattr(pipeline, "generate_ddl_only", lambda contracts, dry_run: "ok")
+
+    pipeline.run(target_layers="gold", reload_layers="silver,gold", ddl_only=True)
+    assert resets == [(set(), {"gold"})]
+
+    resets.clear()
+    pipeline.run(target_layers="silver", reset_layers="gold", ddl_only=True)
+    assert resets == []  # nothing this run processes was asked to reset

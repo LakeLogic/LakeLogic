@@ -334,6 +334,20 @@ class SparkAdapter(EngineAdapter):
 
         return current_df.withColumn(cfg.field, extracted)
 
+    def _step_view(self, df: Any) -> str:
+        """A view name for ``df`` that NO later step overwrites.
+
+        Spark Connect (Databricks serverless) resolves a view by NAME when the plan is analysed,
+        which is after the loop has re-registered ``source`` as the step's own OUTPUT. A step that
+        read ``lakelogic_src_<id>`` therefore read itself: a gold fact's `FROM source r` saw its
+        own result columns (`r.driver_sk`, `r.cancellation_fee_amount`) and failed (live,
+        2026-09-29). Each step reads a name used once.
+        """
+        self._step_n = getattr(self, "_step_n", 0) + 1
+        name = f"{self._temp_src}_s{self._step_n}"
+        df.createOrReplaceTempView(name)
+        return name
+
     def _apply_pre_transformations(self, df: Any) -> Any:
         """
         Apply pre-processing transformations (rename, filter, deduplicate, and cleanup helpers).
@@ -359,7 +373,7 @@ class SparkAdapter(EngineAdapter):
                 current_df.createOrReplaceTempView(self._temp_src)
                 import re
 
-                sql_str = re.sub(r"\bsource\b", self._temp_src, trans.sql, flags=re.IGNORECASE)
+                sql_str = re.sub(r"\bsource\b", self._step_view(current_df), trans.sql, flags=re.IGNORECASE)
                 for link in self.contract.links:
                     sql_str = re.sub(
                         rf"\b{re.escape(link.name)}\b", f"{link.name}_{id(self)}", sql_str, flags=re.IGNORECASE
@@ -374,7 +388,7 @@ class SparkAdapter(EngineAdapter):
                 existing = set(current_df.columns)
 
             elif trans.pivot and trans_phase == "pre":
-                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or self._temp_src)
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self._step_view(current_df))
                 if pivot_sql:
                     logger.debug(f"Pre-Transform [Pivot]: {pivot_sql}")
                     current_df.createOrReplaceTempView(self._temp_src)
@@ -386,7 +400,7 @@ class SparkAdapter(EngineAdapter):
 
             if trans.unpivot and trans_phase == "pre":
                 unpivot_sql = self._build_unpivot_sql(
-                    trans.unpivot, source_table=self.contract.dataset or self._temp_src
+                    trans.unpivot, source_table=self._step_view(current_df)
                 )
                 if unpivot_sql:
                     logger.debug(f"Pre-Transform [Unpivot]: {unpivot_sql}")
@@ -614,7 +628,7 @@ class SparkAdapter(EngineAdapter):
                     current_df.createOrReplaceTempView(self.contract.dataset)
                 import re
 
-                sql_str = re.sub(r"\bsource\b", self._temp_src, trans.sql, flags=re.IGNORECASE)
+                sql_str = re.sub(r"\bsource\b", self._step_view(current_df), trans.sql, flags=re.IGNORECASE)
                 for link in self.contract.links:
                     sql_str = re.sub(
                         rf"\b{re.escape(link.name)}\b", f"{link.name}_{id(self)}", sql_str, flags=re.IGNORECASE
@@ -622,7 +636,7 @@ class SparkAdapter(EngineAdapter):
                 current_df = current_df.sparkSession.sql(sql_str)
                 continue
             if trans.rollup and trans_phase != "pre":
-                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self.contract.dataset or self._temp_src)
+                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self._step_view(current_df))
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
                 current_df.createOrReplaceTempView(self._temp_src)
                 if self.contract.dataset:
@@ -631,7 +645,7 @@ class SparkAdapter(EngineAdapter):
                 continue
 
             if trans.pivot and trans_phase != "pre":
-                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or self._temp_src)
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self._step_view(current_df))
                 if pivot_sql:
                     logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
                     current_df.createOrReplaceTempView(self._temp_src)
@@ -642,7 +656,7 @@ class SparkAdapter(EngineAdapter):
 
             if trans.unpivot and trans_phase != "pre":
                 unpivot_sql = self._build_unpivot_sql(
-                    trans.unpivot, source_table=self.contract.dataset or self._temp_src
+                    trans.unpivot, source_table=self._step_view(current_df)
                 )
                 if unpivot_sql:
                     logger.debug(f"Post-Transform [Unpivot]: {unpivot_sql}")
@@ -805,7 +819,15 @@ class SparkAdapter(EngineAdapter):
         """
         for link in self.contract.links:
             try:
-                if link.table or (link.type and link.type.lower() == "table"):
+                # A `table:` path IS a table link. Without this a link written as
+                # `path: table:{catalog}.silver_x` (no `type`) went down the FILE branch, found no
+                # file named `table:...`, and was skipped with a warning — its view never existed
+                # and the query joining it failed with TABLE_OR_VIEW_NOT_FOUND (live, 2026-09-29).
+                if (
+                    link.table
+                    or (link.type and link.type.lower() == "table")
+                    or (link.path and str(link.path).startswith("table:"))
+                ):
                     table_name = link.table or (
                         link.path[6:] if link.path and link.path.startswith("table:") else link.path
                     )
@@ -947,7 +969,8 @@ class SparkAdapter(EngineAdapter):
         if not self.contract.model or not self.contract.model.fields:
             if self.contract.server and self.contract.server.cast_to_string:
                 for col in df.columns:
-                    df = df.withColumn(col, F.col(col).cast("string"))
+                    if not self._keeps_its_type(col):
+                        df = df.withColumn(col, F.col(col).cast("string"))
             return df, []
 
         expected_fields = [f.name for f in self.contract.model.fields]
@@ -1054,6 +1077,8 @@ class SparkAdapter(EngineAdapter):
                 _has_post_sql = True
 
         schema_errors = []
+        # Materializer-injected columns (SCD2 mechanics, SCD1 surrogate key) are not missing.
+        missing = set(missing) - self._scd2_injected_columns()
         if evolution == "strict" and missing and not _has_post_sql:
             schema_errors.append(f"Missing fields: {', '.join(sorted(missing))}")
         if policy == "quarantine" and unknown and not _has_post_sql:

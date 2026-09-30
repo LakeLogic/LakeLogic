@@ -588,7 +588,7 @@ class PolarsAdapter(EngineAdapter):
         """
         if not self.contract.model or not self.contract.model.fields:
             if self.contract.server and self.contract.server.mode == "ingest" and self.contract.server.cast_to_string:
-                columns = lf.collect_schema().names()
+                columns = [c for c in lf.collect_schema().names() if not self._keeps_its_type(c)]
                 lf = lf.with_columns([pl.col(col).cast(pl.Utf8, strict=False) for col in columns])
             return lf, []
 
@@ -625,7 +625,7 @@ class PolarsAdapter(EngineAdapter):
         self._type_err_cols = []
 
         if cast_to_string:
-            columns = lf.collect_schema().names()
+            columns = [c for c in lf.collect_schema().names() if not self._keeps_its_type(c)]
             lf = lf.with_columns([pl.col(col).cast(pl.Utf8, strict=False) for col in columns])
         else:
             current_schema = lf.collect_schema()

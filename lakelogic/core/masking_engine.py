@@ -536,7 +536,8 @@ class MaskingEngine:
                 continue
 
             if strategy == "nullify":
-                df = df.with_columns(pl.lit(None).alias(col_name))
+                # NULL in the column's OWN type: a typed table (e.g. a float column) must still accept it.
+                df = df.with_columns(pl.lit(None, dtype=df.schema[col_name]).alias(col_name))
             elif strategy == "redact":
                 df = df.with_columns(
                     pl.when(pl.col(col_name).is_not_null())
@@ -586,7 +587,8 @@ class MaskingEngine:
                 continue
 
             if strategy == "nullify":
-                df[col_name] = None
+                # NULL in the column's own type where it can hold one (float stays float).
+                df[col_name] = df[col_name].where(df[col_name].isna() & df[col_name].notna())
             elif strategy == "redact":
                 df.loc[df[col_name].notna(), col_name] = "***REDACTED***"
             elif strategy == "hash":
@@ -618,7 +620,8 @@ class MaskingEngine:
                 continue
 
             if strategy == "nullify":
-                df = df.withColumn(col_name, F.lit(None).cast("string"))
+                # NULL in the column's OWN type: a string NULL cannot merge into a float Delta column.
+                df = df.withColumn(col_name, F.lit(None).cast(df.schema[col_name].dataType))
 
             elif strategy == "redact":
                 df = df.withColumn(

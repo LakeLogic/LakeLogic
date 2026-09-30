@@ -3,7 +3,8 @@
 The rule
 --------
 A table or file whose contents are 100% created by LakeLogic core — run log,
-SLO checks, system logs, pipeline runs, erasure and retention evidence — is named
+SLO checks, system logs, pipeline runs, erasure and retention evidence, the erasure
+request queue (people insert its rows; LakeLogic owns its schema and status) — is named
 ``_lakelogic_<kind>`` (for example ``_lakelogic_run_log``). The prefix groups
 LakeLogic's tables together, sorts them away from user tables, and makes it
 obvious which objects the framework owns.
@@ -53,6 +54,7 @@ METADATA_KINDS: Tuple[str, ...] = (
     "pipeline_runs",
     "erasure_evidence",
     "retention_evidence",
+    "erasure_requests",
 )
 
 # Backends where an ``_``-prefixed table name is not safe.
@@ -71,6 +73,7 @@ LEGACY_NAMES: Dict[str, Tuple[str, ...]] = {
     "pipeline_runs": ("pipeline_runs",),
     "erasure_evidence": (),
     "retention_evidence": (),
+    "erasure_requests": (),
 }
 
 

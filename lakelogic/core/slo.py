@@ -1111,6 +1111,12 @@ class SLOValidator:
         * otherwise → threshold gate, but only when a quality SLO is configured.
         """
         results: List[SLOCheckResult] = []
+        # Unmeasured is not zero: a run that reported no good/quarantined counts (a
+        # generated dimension, e.g. gold_dim_date) gives no quality verdict. Falling back
+        # to `source` for the total while `good` defaulted to 0 read it as total data loss
+        # - "0 of 4018 rows blocked, 0 materialized" on a table holding all 4018 rows.
+        if counts.get("good") is None and counts.get("quarantined") is None:
+            return results
         total = counts.get("total") or counts.get("source") or 0
         good = counts.get("good") or 0
         quarantined = counts.get("quarantined") or 0

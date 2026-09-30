@@ -1616,6 +1616,14 @@ def _inject_unknown_member_pandas(
         for lc in _lineage_cols:
             if lc in df.columns:
                 _lineage_values[lc] = first_row[lc]
+    # No row to copy (every row of the first load was rejected): stamp NOW, not the
+    # 1900 default - a 1900 _lakelogic_processed_at reads as a 126-year-old record to the
+    # freshness and retention checks, and the unknown member is never rebuilt.
+    if _lineage_values.get("_lakelogic_processed_at") is None:
+        from datetime import datetime as _dt, timezone as _tz
+
+        _lineage_values["_lakelogic_processed_at"] = _dt.now(_tz.utc)
+        _lineage_values.setdefault("_lakelogic_created_at", _lineage_values["_lakelogic_processed_at"])
 
     # Build the unknown row from column defaults
     unknown_row = {}
@@ -1723,6 +1731,14 @@ def _inject_unknown_member_spark(  # pragma: no cover
         for lc in _lineage_cols:
             if lc in result.columns:
                 _lineage_values[lc] = first_row[lc]
+    # No row to copy (every row of the first load was rejected): stamp NOW, not the
+    # 1900 default - a 1900 _lakelogic_processed_at reads as a 126-year-old record to the
+    # freshness and retention checks, and the unknown member is never rebuilt.
+    if _lineage_values.get("_lakelogic_processed_at") is None:
+        from datetime import datetime as _dt, timezone as _tz
+
+        _lineage_values["_lakelogic_processed_at"] = _dt.now(_tz.utc)
+        _lineage_values.setdefault("_lakelogic_created_at", _lineage_values["_lakelogic_processed_at"])
 
     # Build the unknown row dict
     spark = result.sparkSession
@@ -1845,6 +1861,14 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
         for lc in _lineage_cols:
             if lc in existing.columns:
                 _lineage_values[lc] = first_row[lc]
+    # No row to copy (every row of the first load was rejected): stamp NOW, not the
+    # 1900 default - a 1900 _lakelogic_processed_at reads as a 126-year-old record to the
+    # freshness and retention checks, and the unknown member is never rebuilt.
+    if _lineage_values.get("_lakelogic_processed_at") is None:
+        from datetime import datetime as _dt, timezone as _tz
+
+        _lineage_values["_lakelogic_processed_at"] = _dt.now(_tz.utc)
+        _lineage_values.setdefault("_lakelogic_created_at", _lineage_values["_lakelogic_processed_at"])
 
     # Build the unknown row
     unknown_row = {}
@@ -2483,6 +2507,38 @@ def _partition_groups(
         yield values, group.reset_index(drop=True)
 
 
+def _with_scd1_surrogate_key_spark(df, primary_key: List[str], scd1_cfg: Optional[Dict[str, Any]]):  # pragma: no cover
+    """``df`` with its SCD1 surrogate key: the first 16 hex of sha256 over the key, "|"-joined.
+
+    The unknown member keeps its configured key rather than being re-hashed.
+    """
+    if not scd1_cfg or not scd1_cfg.get("surrogate_key") or not primary_key:
+        return df
+    from pyspark.sql import functions as F
+
+    sk_column = scd1_cfg["surrogate_key"]
+    if scd1_cfg.get("surrogate_key_strategy", "hash") == "uuid":
+        new_sk = F.expr("substring(uuid(), 1, 16)")
+    else:
+        pk_concat = F.concat_ws("|", *[F.col(c).cast("string") for c in primary_key])
+        new_sk = F.substring(F.sha2(pk_concat, 256), 1, 16)
+    unknown_sk = str((scd1_cfg.get("unknown_member") or {}).get("surrogate_key_value", "-1"))
+    if sk_column in df.columns:
+        new_sk = F.when(F.col(sk_column).cast("string") == F.lit(unknown_sk), F.lit(unknown_sk)).otherwise(new_sk)
+    df = df.withColumn(sk_column, new_sk)
+    return df.select(sk_column, *[c for c in df.columns if c != sk_column])
+
+
+def _inject_scd1_unknown_member_after_write(spark, table_name: str, primary_key: List[str], scd1_cfg) -> None:  # pragma: no cover
+    """The SCD1 dim's unknown member, added to the written table once (idempotent by key)."""
+    if not scd1_cfg:
+        return
+    unknown_cfg = scd1_cfg.get("unknown_member") or {}
+    if not unknown_cfg:
+        return
+    _inject_unknown_member_spark_table(spark, table_name, primary_key, scd1_cfg, unknown_cfg)
+
+
 def _spark_merge_dataframe(  # pragma: no cover
     spark,
     incoming_df: Any,
@@ -2560,6 +2616,12 @@ def _spark_merge_dataframe(  # pragma: no cover
                     ).otherwise(F.col(soft_delete_reason_col)),
                 )
 
+        # SCD1 SURROGATE KEY on the INCOMING rows, before either Delta path. The key was only
+        # computed by the DataFrame fallback below, which Databricks never reaches: the first
+        # write and the Delta MERGE both wrote it as NULL (live, 2026-09-29), so every fact's
+        # key lookup against the dim resolved to nothing. Same expression as the fallback.
+        incoming_df = _with_scd1_surrogate_key_spark(incoming_df, primary_key, scd1_cfg)
+
         try:
             from delta.tables import DeltaTable
 
@@ -2610,6 +2672,7 @@ def _spark_merge_dataframe(  # pragma: no cover
                     )
 
                 merge_builder.execute()
+                _inject_scd1_unknown_member_after_write(spark, table_or_path, primary_key, scd1_cfg)
 
                 rows_written = incoming_df.count()
                 logger.info(f"Merged {rows_written} rows into Delta table {table_or_path}")
@@ -2650,6 +2713,8 @@ def _spark_merge_dataframe(  # pragma: no cover
                 _spark_save_as_table(writer, table_or_path, "overwrite", location)
             else:
                 writer.mode("overwrite").save(table_or_path)
+            if is_table:
+                _inject_scd1_unknown_member_after_write(spark, table_or_path, primary_key, scd1_cfg)
             rows_written = incoming_df.count()
             logger.info(f"Wrote {rows_written} rows to {table_or_path} (no existing data)")
             return {
@@ -2677,6 +2742,8 @@ def _spark_merge_dataframe(  # pragma: no cover
             _spark_save_as_table(writer, table_or_path, "overwrite", location)
         else:
             writer.mode("overwrite").save(table_or_path)
+        if is_table:
+            _inject_scd1_unknown_member_after_write(spark, table_or_path, primary_key, scd1_cfg)
         rows_written = incoming_df.count()
         logger.info(f"Wrote {rows_written} rows to {table_or_path} (new target)")
         return {
