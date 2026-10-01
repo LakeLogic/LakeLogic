@@ -447,6 +447,55 @@ def _spark_apply_table_metadata(spark, table_name: str, contract) -> None:  # pr
         reconcile_delta_clustering(spark, table_name, cluster_by)
 
 
+def _coerce_declared_temporal(table, contract, existing_schema=None):
+    """Text columns the contract declares ``timestamp`` / ``date`` become that type.
+
+    The pandas/polars SCD2 path builds ``effective_from`` / ``effective_to`` as text
+    ("1900-01-01", "9999-12-31", an ISO "now" with a ``+00:00`` offset) and the partitioned
+    write converted the frame straight to Arrow, so the dimension landed with STRING dates
+    where the contract — and the Spark path — have timestamps. A fact joining it on
+    ``dropoff_at >= effective_from`` then failed on every row.
+
+    Per column, and only when every non-null value parses: a column that will not parse is
+    left as it was rather than nulled. A column the EXISTING table holds as text is left as
+    text, so a table an older version wrote keeps accepting writes.
+    """
+    import pyarrow as pa
+
+    if contract is None:
+        return table
+    try:
+        from lakelogic.core.ddl import _get_fields, _resolve_arrow_type
+
+        declared = {f.name: _resolve_arrow_type(f.type) for f in (_get_fields(contract) or []) if f.type}
+    except Exception:  # noqa: BLE001 - no usable field list: nothing to coerce
+        return table
+    existing = {f.name: f.type for f in existing_schema} if existing_schema is not None else {}
+    for i, field in enumerate(table.schema):
+        target = declared.get(field.name)
+        if target is None or not (pa.types.is_timestamp(target) or pa.types.is_date32(target)):
+            continue
+        if not (pa.types.is_string(field.type) or pa.types.is_large_string(field.type)):
+            continue
+        if field.name in existing and (pa.types.is_string(existing[field.name])
+                                       or pa.types.is_large_string(existing[field.name])):
+            continue
+        import pandas as pd
+
+        raw = table.column(i).to_pandas()
+        parsed = pd.to_datetime(raw, utc=True, errors="coerce", format="mixed")
+        if int(parsed.isna().sum()) != int(raw.isna().sum()):
+            logger.warning(f"Column '{field.name}' is declared {target} but holds values that do not parse; left as text")
+            continue
+        parsed = parsed.dt.tz_localize(None)
+        if pa.types.is_date32(target):
+            col = pa.array(parsed.dt.date, type=pa.date32())
+        else:
+            col = pa.array(parsed, type=target)
+        table = table.set_column(i, pa.field(field.name, col.type), col)
+    return table
+
+
 def _sanitize_arrow_nulls(table):
     """
     Replace any Arrow ``null``-typed columns with ``utf8`` (string) nulls.
@@ -3948,6 +3997,14 @@ def _partition_aware_merge(
 
         arrow_table = pa.Table.from_pandas(combined, preserve_index=False)
         arrow_table = _sanitize_arrow_nulls(arrow_table)  # Delta rejects Arrow Null type
+        _existing_schema = None
+        if table_exists:
+            try:
+                # deltalake 1.x hands back an arro3 schema; pa.schema() reads it over the C interface.
+                _existing_schema = pa.schema(DeltaTable(target_str, storage_options=_part_opts).schema().to_arrow())
+            except Exception:  # noqa: BLE001 - unknown existing types: assume text, change nothing
+                _existing_schema = pa.schema([pa.field(c, pa.string()) for c in arrow_table.column_names])
+        arrow_table = _coerce_declared_temporal(arrow_table, contract, _existing_schema)
         total_rows = len(combined)
 
         if not table_exists:
@@ -5011,7 +5068,20 @@ def materialize_dataframe(
                                     msg_lines.append(f"{a.name:<35} | {str(a.type):<15} | {str(b.type):<15}")
 
                             logger.info("\n" + "\n".join(msg_lines))
-                            arrow_data = arrow_data.cast(target_schema)
+                            # Column by column: one value that will not cast must not cost
+                            # every other column its declared type (an ISO "now" with a
+                            # +00:00 offset used to abandon the whole cast).
+                            arrow_data = _coerce_declared_temporal(arrow_data, contract)
+                            for i, want in enumerate(target_schema):
+                                have = arrow_data.schema.field(i)
+                                if have.type == want.type:
+                                    continue
+                                try:
+                                    arrow_data = arrow_data.set_column(
+                                        i, want, arrow_data.column(i).cast(want.type))
+                                except Exception as col_err:  # noqa: BLE001
+                                    logger.warning(
+                                        f"Could not cast column '{want.name}' from {have.type} to {want.type}: {col_err}")
                 except Exception as e:
                     logger.warning(f"Could not cast arrow schema to contract types: {e}")
 
@@ -5047,6 +5117,7 @@ def materialize_dataframe(
                     # everything being int64 by accident.
                     try:
                         _existing_schema = dt.schema().to_pyarrow()
+                        arrow_data = _coerce_declared_temporal(arrow_data, contract, _existing_schema)
                         _fields = [
                             _existing_schema.field(name)
                             if name in _existing_schema.names
@@ -5111,6 +5182,7 @@ def materialize_dataframe(
                         merged = _inject_unknown_member_pandas(merged, primary_key, scd2_cfg_local, _um_cfg)
                     arrow_data = pa.Table.from_pandas(merged, preserve_index=False)
                     arrow_data = _sanitize_arrow_nulls(arrow_data)
+                    arrow_data = _coerce_declared_temporal(arrow_data, contract)
                     rows_written = len(merged)
                 else:
                     rows_written = len(arrow_data)

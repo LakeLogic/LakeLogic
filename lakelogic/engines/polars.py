@@ -359,7 +359,24 @@ class PolarsAdapter(EngineAdapter):
                         con.execute(link_sql)
                 except Exception:
                     continue
-            rel = con.query(sql)
+            try:
+                rel = con.query(sql)
+            except Exception as duck_exc:
+                # Contracts are authored in Spark SQL. Spark-only functions (`to_date`,
+                # `date_format`, ...) fail on both Polars and DuckDB, so a gold transform
+                # written for Databricks quarantined every row here. Translate and retry —
+                # only after the SQL as written has failed, so SQL that already runs is
+                # never rewritten.
+                import sqlglot
+
+                try:
+                    translated = sqlglot.transpile(sql, read="spark", write="duckdb")[0]
+                except Exception:  # noqa: BLE001 - not translatable: report the original error
+                    raise duck_exc
+                if translated == sql:
+                    raise
+                logger.info("SQL transform: retrying as DuckDB SQL translated from Spark SQL")
+                rel = con.query(translated)
             out = rel.pl().lazy()
             con.close()
             return out

@@ -294,6 +294,21 @@ def _frame_is_empty(df) -> bool:
     return False
 
 
+_DAG_HOVER_IN = (
+    "var r=this.closest('.dag-root');if(!r)return;var id=this.getAttribute('data-id');"
+    "var nb=(this.getAttribute('data-nbrs')||'').split(' ');r.classList.add('dag-hl');"
+    "this.classList.add('dag-on');"
+    "r.querySelectorAll('.dag-node').forEach(function(e){if(nb.indexOf(e.getAttribute('data-id'))>=0)"
+    "e.classList.add('dag-on');});"
+    "r.querySelectorAll('path[data-src]').forEach(function(e){if(e.getAttribute('data-src')==id||"
+    "e.getAttribute('data-dst')==id)e.classList.add('dag-on');});"
+)
+_DAG_HOVER_OUT = (
+    "var r=this.closest('.dag-root');if(!r)return;r.classList.remove('dag-hl');"
+    "r.querySelectorAll('.dag-on').forEach(function(e){e.classList.remove('dag-on');});"
+)
+
+
 class LakehousePipeline:
     """
     Executes a DomainRegistry through a pipeline run.
@@ -3363,6 +3378,40 @@ class LakehousePipeline:
 
     # ── DAG Visualization ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _dag_source_location(source: Any, landing_root: Optional[str] = None) -> Optional[tuple]:
+        """``(location, kind)`` a bronze contract's ``source`` block reads, for the DAG.
+
+        A file source is shown by its CONTAINER - the folder above the entity
+        (``…/landing_marketplace/rideflow/driver_profiles`` → ``landing_marketplace/rideflow``)
+        so one landing zone is one node, not one per file set. A table source is shown by the
+        table it reads. Unresolved ``{placeholders}`` are kept: they are what the contract
+        declares. ``None`` when nothing is declared.
+        """
+        blocks = source if isinstance(source, list) else [source]
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            paths = block.get("path")
+            path = (paths[0] if isinstance(paths, list) and paths else paths) or ""
+            path = str(path).strip()
+            if not path:
+                continue
+            if landing_root:
+                path = path.replace("{landing_root}", str(landing_root).rstrip("/"))
+            kind = str(block.get("type") or "").strip().lower()
+            if path.lower().startswith("table:"):
+                return path[len("table:"):].strip().replace("`", ""), (kind or "table")
+            parts = [p for p in path.replace("\\", "/").rstrip("/").split("/") if p]
+            # Drop wildcard / partition / file-name tail, then the entity folder itself.
+            while parts and ("*" in parts[-1] or "=" in parts[-1] or "." in parts[-1]):
+                parts.pop()
+            container = parts[-3:-1] if len(parts) >= 3 else parts[:-1] or parts
+            label = "/".join(container) or path
+            fmt = str(block.get("format") or "").strip().lower()
+            return label, (f"{kind} · {fmt}" if kind and fmt else kind or fmt or "files")
+        return None
+
     def visualize_dag(
         self, *, title: str = None, entity_filter: str = "", layer_filter: str = "", theme: str = "dark"
     ) -> str:
@@ -3387,9 +3436,10 @@ class LakehousePipeline:
         """
 
         contracts = self.registry.get_active_contracts()
-        layer_order = ["external", "bronze", "silver", "gold", "downstream"]
+        layer_order = ["external", "source", "bronze", "silver", "gold", "downstream"]
         layer_colors = {
             "external": ("#0d9488", "#2dd4bf"),
+            "source": ("#0891b2", "#67e8f9"),
             "bronze": ("#b8860b", "#daa520"),
             "silver": ("#6b7b8d", "#8fa4b8"),
             "gold": ("#daa520", "#ffd700"),
@@ -3450,6 +3500,51 @@ class LakehousePipeline:
                     "external": True,
                     "source_domain": ext.get("source_domain", ""),
                     "catalog_path": ext.get("catalog_path", ""),
+                }
+            )
+
+        # ── Source nodes from the bronze contracts' own `source:` declarations ───
+        # External sources used to come ONLY from `external_sources` hand-written in
+        # _system.yaml, so a DAG showed whatever someone remembered to declare there - one
+        # "RideFlow Platform API" box - while every bronze contract already states what it
+        # reads. Each distinct source LOCATION becomes one node; bronze contracts reading the
+        # same location share it, in a SOURCE column between External and Bronze. A declared
+        # external system (an API) is the hop BEFORE it: API -> landing zone -> bronze.
+        _auto_sources: dict = {}
+        for c in contracts:
+            if c.layer != "bronze":
+                continue
+            node_id = f"{c.layer}_{c.entity}"
+            _storage = getattr(self.registry, "storage", None)
+            src_label = self._dag_source_location(
+                (c.contract_dict or {}).get("source"),
+                landing_root=getattr(_storage, "landing_root", None) or getattr(_storage, "landing_path", None),
+            )
+            if not src_label:
+                continue
+            location, kind = src_label
+            # ONE node per location: a landing zone holding CSV and JSON feeds is one place.
+            slot = _auto_sources.setdefault(location, {"kinds": [], "feeds": []})
+            if kind not in slot["kinds"]:
+                slot["kinds"].append(kind)
+            slot["feeds"].append(node_id)
+        for location, slot in _auto_sources.items():
+            consumers = slot["feeds"]
+            kind = ", ".join(slot["kinds"])
+            ext_id = f"src_{abs(hash(location)) % 10**10}"
+            nodes.append(
+                {
+                    "id": ext_id,
+                    "entity": location,
+                    "layer": "source",
+                    "title": location,
+                    "version": "",
+                    "pii": 0,
+                    "depends_on": [],
+                    "external": True,
+                    "source_domain": kind,
+                    "catalog_path": location,
+                    "_feeds": consumers,
                 }
             )
 
@@ -3541,7 +3636,17 @@ class LakehousePipeline:
                         continue
                     # Match explicitly by ID (e.g., 'silver_events') OR generically by entity (only for Bronze target)
                     if n["id"] == consumer or (n["entity"] == consumer and n["layer"] == "bronze"):
-                        edges.append((ext_id, n["id"], "external"))
+                        # The declared system feeds the landing zone the contract reads, which
+                        # feeds bronze: route through the inferred source node when there is one.
+                        via = next((s for s in nodes if n["id"] in (s.get("_feeds") or [])), None)
+                        edge = (ext_id, via["id"] if via else n["id"], "external")
+                        if edge not in edges:
+                            edges.append(edge)
+
+        # Inferred source → the bronze contracts that declared it.
+        for n in nodes:
+            for consumer in n.get("_feeds", []) or []:
+                edges.append((n["id"], consumer, "external"))
 
         # ── Downstream consumer nodes (from contract YAML) ─────────
         ds_icon_map = {
@@ -3647,23 +3752,33 @@ class LakehousePipeline:
         header_html = ""
         layer_labels = {
             "external": "EXTERNAL",
+            "source": "SOURCE",
             "bronze": "BRONZE",
             "silver": "SILVER",
             "gold": "GOLD",
             "downstream": "DOWNSTREAM",
         }
         for layer in layer_order:
-            if layer in layer_entities and layer in used_layers:
+            if layer in used_layers:
                 x = x_positions[layer]
                 bg, fg = layer_colors.get(layer, ("#444", "#888"))
                 hdr_style = (
-                    f"position:absolute;left:{x}px;top:4px;"
-                    f"font-size:0.65rem;font-weight:700;color:{fg};"
-                    f"letter-spacing:0.1em;opacity:0.6;"
+                    f"position:absolute;left:{x}px;top:4px;width:{node_width}px;"
+                    f"font-size:0.72rem;font-weight:700;color:{fg};"
+                    f"letter-spacing:0.12em;padding-bottom:6px;border-bottom:1px solid {fg}55;"
                 )
-                header_html += f'<div style="{hdr_style}">{layer_labels[layer]}</div>'
+                header_html += f'<div class="dag-col-hdr" style="{hdr_style}">{layer_labels[layer]}</div>'
 
         # Generate node HTML
+        import html as _html
+        import re as _re_title
+
+        _layer_prefix = _re_title.compile(r"^\s*(bronze|silver|gold)\s*[\u2014\u2013:-]\s*", _re_title.IGNORECASE)
+        # Neighbours per node, so hovering a card lights up its own edges and peers.
+        _adj: dict = {}
+        for _s, _d, _ in edges:
+            _adj.setdefault(_s, set()).add(_d)
+            _adj.setdefault(_d, set()).add(_s)
         node_html = ""
         for n in nodes:
             x, y = node_positions[n["id"]]
@@ -3705,32 +3820,40 @@ class LakehousePipeline:
                 ver_badge = ""
             else:
                 node_icon = "📋"
-                subtitle = self.registry.system.upper()
-                ver_badge = f'<span class="dag-badge dag-badge-ver">📄 V{n["version"]}</span>'
+                # Every contract card belongs to this registry's one system; the DAG title
+                # already names it, so repeating it on each card is noise.
+                subtitle = ""
+                _ver = str(n.get("version") or "").strip()
+                ver_badge = (
+                    f'<span class="dag-badge dag-badge-ver">V{_html.escape(_ver)}</span>'
+                    if _ver and _ver != "1.0.0"
+                    else ""
+                )
 
             freq_badge = (
                 f'<span class="dag-badge dag-badge-freq">⏱ {n["frequency"]}</span>' if n.get("frequency") else ""
             )
 
-            hover_in = (
-                f"this.style.borderColor='{bg}cc';this.style.boxShadow='0 8px 32px {bg}33';this.style.opacity='1.0'"
-            )
-            hover_out = f"this.style.borderColor='{bg}55';this.style.boxShadow='none';this.style.opacity='{opacity}'"
+            full_title = str(n["title"])
+            short_title = full_title
+            if not is_external and not n.get("downstream"):
+                short_title = _layer_prefix.sub("", full_title) or full_title
+            nbrs = " ".join(sorted(_adj.get(n["id"], set())))
             node_html += f"""
-            <div class="dag-node"
-                 style="left:{x}px;top:{y}px;{border_style}opacity:{opacity};"
-                 onmouseover="{hover_in}"
-                 onmouseout="{hover_out}">
+            <div class="dag-node" data-id="{_html.escape(n["id"])}" data-nbrs="{_html.escape(nbrs)}"
+                 title="{_html.escape(full_title)}"
+                 style="left:{x}px;top:{y}px;{border_style}opacity:{opacity};--dag-acc:{bg};"
+                 onmouseenter="{_DAG_HOVER_IN}"
+                 onmouseleave="{_DAG_HOVER_OUT}">
               <div class="dag-dot"
                    style="background:{dot_color};box-shadow:0 0 6px {dot_color};"
                    ></div>
               <div class="dag-hdr">
                 <div class="dag-icon" style="background:{bg}22;color:{fg};">{node_icon}</div>
-                <div class="dag-ttl">{n["title"]}</div>
+                <div class="dag-ttl">{_html.escape(short_title)}</div>
               </div>
-              <div class="dag-sys">{subtitle}</div>
+              {f'<div class="dag-sys">{_html.escape(subtitle)}</div>' if subtitle else ""}
               <div class="dag-badges">
-                <span class="dag-badge" style="background:{bg}33;color:{fg};">{n["layer"].upper()}</span>
                 {ver_badge}
                 {freq_badge}
                 {pii_badge}
@@ -3762,7 +3885,8 @@ class LakehousePipeline:
                     f"C {mid_x},{src_exit_y + 40} "
                     f"{mid_x},{dst_enter_y - 40} "
                     f'{dx + node_width // 2},{dst_enter_y}" '
-                    f'class="{cls}" style="{edge_opacity}" marker-end="url(#{marker})"/>\n'
+                    f'class="{cls}" data-src="{src_id}" data-dst="{dst_id}" '
+                    f'style="{edge_opacity}" marker-end="url(#{marker})"/>\n'
                 )
             else:
                 # Cross-layer: exit right, enter left
@@ -3776,7 +3900,8 @@ class LakehousePipeline:
                     f'<path d="M {exit_x},{exit_y} '
                     f"C {cpx1},{exit_y} {cpx2},{enter_y} "
                     f'{enter_x},{enter_y}" '
-                    f'class="{cls}" style="{edge_opacity}" marker-end="url(#{marker})"/>\n'
+                    f'class="{cls}" data-src="{src_id}" data-dst="{dst_id}" '
+                    f'style="{edge_opacity}" marker-end="url(#{marker})"/>\n'
                 )
 
         # Subtitle metrics — only count standard data layers
@@ -3802,18 +3927,28 @@ class LakehousePipeline:
             text_main, text_sub = "#111827", "#4b5563"
             node_bg, node_border = "#ffffff", "#e5e7eb"
             node_text, node_sys = "#1f2937", "#6b7280"
-            path_fill, flow_stroke = "#9ca3af", "#d1d5db"
+            path_fill, flow_stroke = "#6b7280", "#6b7280"
             badge_bg = "#f3f4f6"
         else:
             bg_color, bg_dot = "#121212", "#222222"
-            text_main, text_sub = "#ffffff", "#666666"
+            text_main, text_sub = "#ffffff", "#a3a3a3"
             node_bg, node_border = "#1a1a1a", "#2a2a30"
-            node_text, node_sys = "#f0f0f0", "#555555"
-            path_fill, flow_stroke = "#555555", "#444444"
+            node_text, node_sys = "#f0f0f0", "#8a8a8a"
+            path_fill, flow_stroke = "#8a8a8a", "#8a8a8a"
             badge_bg = "#1e3a5f44"
 
+        # The dot colours a card by filter focus, not by run outcome - label it as such.
+        if _has_filter:
+            legend_dots = (
+                '<span><span class="dag-ldot" style="background:#22c55e"></span>In filter</span>'
+                '<span><span class="dag-ldot" style="background:#22c55e88"></span>Connected</span>'
+                '<span><span class="dag-ldot" style="background:#555"></span>Outside filter</span>'
+            )
+        else:
+            legend_dots = '<span><span class="dag-ldot" style="background:#22c55e"></span>Active contract</span>'
+
         html = f"""
-        <div style="font-family:'Inter','Segoe UI',sans-serif;background:{bg_color};
+        <div class="dag-root" style="font-family:'Inter','Segoe UI',sans-serif;background:{bg_color};
              background-image:radial-gradient(circle at 1px 1px,{bg_dot} 1px,transparent 0);
              background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;overflow-x:auto;">
           <h2 style="color:{text_main};font-size:1.2rem;margin:0 0 4px;"
@@ -3840,23 +3975,36 @@ class LakehousePipeline:
             </svg>
             {node_html}
           </div>
-          <div style="display:flex;gap:24px;font-size:0.7rem;color:{text_sub};margin-top:16px;">
+          <div style="display:flex;flex-wrap:wrap;gap:8px 24px;font-size:0.8rem;font-weight:500;color:{text_main};margin-top:16px;">
             <span>◼ <span style="color:#2dd4bf">External</span></span>
+            <span>◼ <span style="color:#67e8f9">Source</span></span>
             <span>◼ <span style="color:#daa520">Bronze</span></span>
             <span>◼ <span style="color:#8fa4b8">Silver</span></span>
             <span>◼ <span style="color:#ffd700">Gold</span></span>
             <span>◼ <span style="color:#a78bfa">Downstream</span></span>
-            <span style="color:#4a9eff">━━ Dependency</span>
-            <span style="color:{path_fill}">╌╌ Data Flow</span>
+            <span style="color:#4a9eff">━━ Depends on</span>
+            <span style="color:{text_main}">╌╌ Reads from</span>
+            {legend_dots}
           </div>
         </div>
         <style>
+          /* Databricks dark mode inverts HTML output (filter: invert + hue-rotate), which
+             turned the dark DAG white. Counter-invert when the notebook reports dark, so the
+             two cancel and the DAG renders on black in either notebook theme. */
+          @media (prefers-color-scheme: dark){{.dag-root{{filter:invert(1) hue-rotate(180deg);}}}}
           .dag-node{{position:absolute;background:{node_bg};border:2px solid {node_border};border-radius:12px;
                      padding:14px 18px;width:{node_width}px;height:{node_height}px;box-sizing:border-box;
-                     transition:all 0.2s ease;cursor:default;}}
+                     transition:opacity 0.15s ease,box-shadow 0.15s ease;cursor:default;}}
+          .dag-node:hover{{box-shadow:0 8px 32px rgba(0,0,0,0.25);border-color:var(--dag-acc) !important;}}
+          .dag-ldot{{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle;}}
+          .dag-root.dag-hl .dag-node{{opacity:0.25 !important;}}
+          .dag-root.dag-hl .dag-node.dag-on{{opacity:1 !important;}}
+          .dag-root.dag-hl svg path[data-src]{{stroke-opacity:0.06 !important;opacity:1 !important;}}
+          .dag-root.dag-hl svg path[data-src].dag-on{{stroke-opacity:1 !important;stroke-width:2.5;}}
           .dag-hdr{{display:flex;align-items:center;gap:10px;margin-bottom:6px;}}
           .dag-icon{{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;}}
-          .dag-ttl{{font-size:0.82rem;font-weight:600;color:{node_text};line-height:1.25;}}
+          .dag-ttl{{font-size:0.82rem;font-weight:600;color:{node_text};line-height:1.25;min-width:0;
+                   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
           .dag-sys{{font-size:0.62rem;color:{node_sys};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;}}
           .dag-badges{{display:flex;gap:5px;flex-wrap:wrap;}}
           .dag-badge{{font-size:0.55rem;font-weight:600;padding:2px 7px;
@@ -3866,8 +4014,8 @@ class LakehousePipeline:
           .dag-badge-freq{{background:#2dd4bf22;color:#2dd4bf;}}
           .dag-badge-pii{{background:#dc262633;color:#f87171;}}
           .dag-dot{{width:7px;height:7px;border-radius:50%;position:absolute;top:10px;right:12px;}}
-          svg .dag-flow{{fill:none;stroke:{flow_stroke};stroke-width:2;stroke-dasharray:8 4;opacity:0.5;}}
-          svg .dag-dep{{fill:none;stroke:#4a9eff;stroke-width:2.5;opacity:0.85;stroke-dasharray:none;}}
+          svg .dag-flow{{fill:none;stroke:{flow_stroke};stroke-width:1.5;stroke-dasharray:8 4;stroke-opacity:0.35;}}
+          svg .dag-dep{{fill:none;stroke:#4a9eff;stroke-width:2;stroke-opacity:0.45;stroke-dasharray:none;}}
         </style>
         """
         return html
