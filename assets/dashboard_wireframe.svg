@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .card { fill: #ffffff; stroke: #e2e8f0; stroke-width: 2; }
+      .title { font: 700 18px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+      .label { font: 600 14px "Segoe UI", Arial, sans-serif; fill: #334155; }
+      .muted { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #64748b; }
+      .accent { fill: #0ea5e9; }
+      .accent2 { fill: #22c55e; }
+      .accent3 { fill: #f59e0b; }
+      .accent4 { fill: #ef4444; }
+      .grid { stroke: #e2e8f0; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="700" />
+
+  <text class="title" x="40" y="40">LakeLogic Observability Dashboard (Wireframe)</text>
+  <text class="muted" x="40" y="62">KPI summary, quality trends, and top issues in one view</text>
+
+  <!-- KPI Cards -->
+  <rect class="card" x="40" y="90" width="260" height="90" rx="10" />
+  <rect class="card" x="320" y="90" width="260" height="90" rx="10" />
+  <rect class="card" x="600" y="90" width="260" height="90" rx="10" />
+  <rect class="card" x="880" y="90" width="260" height="90" rx="10" />
+
+  <text class="label" x="60" y="125">Total Runs</text>
+  <text class="title" x="60" y="155">1,240</text>
+  <rect class="accent" x="240" y="115" width="40" height="6" />
+
+  <text class="label" x="340" y="125">Avg Quarantine Ratio</text>
+  <text class="title" x="340" y="155">2.8%</text>
+  <rect class="accent2" x="520" y="115" width="40" height="6" />
+
+  <text class="label" x="620" y="125">Freshness Pass Rate</text>
+  <text class="title" x="620" y="155">98.6%</text>
+  <rect class="accent3" x="800" y="115" width="40" height="6" />
+
+  <text class="label" x="900" y="125">Availability Pass Rate</text>
+  <text class="title" x="900" y="155">99.1%</text>
+  <rect class="accent2" x="1080" y="115" width="40" height="6" />
+
+  <!-- Trend Chart -->
+  <rect class="card" x="40" y="200" width="1100" height="220" rx="12" />
+  <text class="label" x="60" y="235">Quarantine Ratio Trend (Last 30 Runs)</text>
+
+  <line class="grid" x1="60" y1="260" x2="1120" y2="260" />
+  <line class="grid" x1="60" y1="290" x2="1120" y2="290" />
+  <line class="grid" x1="60" y1="320" x2="1120" y2="320" />
+  <line class="grid" x1="60" y1="350" x2="1120" y2="350" />
+  <line class="grid" x1="60" y1="380" x2="1120" y2="380" />
+
+  <polyline fill="none" stroke="#0ea5e9" stroke-width="3"
+    points="70,360 140,340 210,345 280,320 350,330 420,310 490,300 560,285 630,295 700,275 770,290 840,265 910,280 980,255 1050,270 1120,250" />
+
+  <!-- Bottom Panels -->
+  <rect class="card" x="40" y="440" width="540" height="220" rx="12" />
+  <rect class="card" x="600" y="440" width="540" height="220" rx="12" />
+
+  <text class="label" x="60" y="475">Top Failing Rules</text>
+  <rect class="accent4" x="60" y="495" width="340" height="12" />
+  <rect class="accent3" x="60" y="520" width="280" height="12" />
+  <rect class="accent" x="60" y="545" width="240" height="12" />
+  <rect class="accent2" x="60" y="570" width="180" height="12" />
+
+  <text class="label" x="620" y="475">SLO Failures (Last 7 Days)</text>
+  <rect class="grid" x="620" y="495" width="500" height="140" fill="none" />
+  <text class="muted" x="640" y="525">run_id</text>
+  <text class="muted" x="820" y="525">freshness_pass</text>
+  <text class="muted" x="1000" y="525">availability_pass</text>
+  <line class="grid" x1="620" y1="540" x2="1120" y2="540" />
+  <text class="muted" x="640" y="565">...c7b2a</text>
+  <text class="muted" x="860" y="565">false</text>
+  <text class="muted" x="1030" y="565">true</text>
+  <line class="grid" x1="620" y1="585" x2="1120" y2="585" />
+  <text class="muted" x="640" y="610">...a1f9d</text>
+  <text class="muted" x="860" y="610">true</text>
+  <text class="muted" x="1030" y="610">false</text>
+</svg>
