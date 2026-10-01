@@ -1,5 +1,6 @@
 """DAG card format: column headers instead of per-card layer badges, no repeated system line,
 version chip only when it says something (not the 1.0.0 default)."""
+
 from types import SimpleNamespace
 
 from lakelogic.pipeline.runner import LakehousePipeline

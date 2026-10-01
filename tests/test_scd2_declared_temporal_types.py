@@ -58,12 +58,14 @@ def _contract(target, partition_by):
 def _rows():
     from datetime import datetime
 
-    return pl.DataFrame({
-        "driver_id": ["d1", "d2", "d3"],
-        "city_code": ["LON", "LON", "MAN"],
-        "rating": [4.8, 4.5, 4.9],
-        "updated_at": [datetime(2026, 9, 1), datetime(2026, 9, 2), datetime(2026, 9, 3)],
-    })
+    return pl.DataFrame(
+        {
+            "driver_id": ["d1", "d2", "d3"],
+            "city_code": ["LON", "LON", "MAN"],
+            "rating": [4.8, 4.5, 4.9],
+            "updated_at": [datetime(2026, 9, 1), datetime(2026, 9, 2), datetime(2026, 9, 3)],
+        }
+    )
 
 
 @pytest.mark.parametrize("partition_by", [["city_code"], None])
@@ -88,11 +90,13 @@ def test_a_fact_can_join_the_dimension_on_its_effective_dates(tmp_path):
 
     target = tmp_path / "dim_driver"
     DataProcessor(_contract(target, ["city_code"]), engine="polars").run(
-        _rows(), materialize=True, materialize_target=str(target))
+        _rows(), materialize=True, materialize_target=str(target)
+    )
     dim = deltalake.DeltaTable(str(target)).to_pyarrow_table()  # noqa: F841 - read by duckdb
     hit = duckdb.sql(
         "SELECT count(*) FROM dim WHERE TIMESTAMP '2026-09-15 10:00:00' >= effective_from "
-        "AND TIMESTAMP '2026-09-15 10:00:00' < effective_to").fetchone()[0]
+        "AND TIMESTAMP '2026-09-15 10:00:00' < effective_to"
+    ).fetchone()[0]
     assert hit == 3
 
 

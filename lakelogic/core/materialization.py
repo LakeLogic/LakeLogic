@@ -477,15 +477,18 @@ def _coerce_declared_temporal(table, contract, existing_schema=None):
             continue
         if not (pa.types.is_string(field.type) or pa.types.is_large_string(field.type)):
             continue
-        if field.name in existing and (pa.types.is_string(existing[field.name])
-                                       or pa.types.is_large_string(existing[field.name])):
+        if field.name in existing and (
+            pa.types.is_string(existing[field.name]) or pa.types.is_large_string(existing[field.name])
+        ):
             continue
         import pandas as pd
 
         raw = table.column(i).to_pandas()
         parsed = pd.to_datetime(raw, utc=True, errors="coerce", format="mixed")
         if int(parsed.isna().sum()) != int(raw.isna().sum()):
-            logger.warning(f"Column '{field.name}' is declared {target} but holds values that do not parse; left as text")
+            logger.warning(
+                f"Column '{field.name}' is declared {target} but holds values that do not parse; left as text"
+            )
             continue
         parsed = parsed.dt.tz_localize(None)
         if pa.types.is_date32(target):
@@ -5077,11 +5080,11 @@ def materialize_dataframe(
                                 if have.type == want.type:
                                     continue
                                 try:
-                                    arrow_data = arrow_data.set_column(
-                                        i, want, arrow_data.column(i).cast(want.type))
+                                    arrow_data = arrow_data.set_column(i, want, arrow_data.column(i).cast(want.type))
                                 except Exception as col_err:  # noqa: BLE001
                                     logger.warning(
-                                        f"Could not cast column '{want.name}' from {have.type} to {want.type}: {col_err}")
+                                        f"Could not cast column '{want.name}' from {have.type} to {want.type}: {col_err}"
+                                    )
                 except Exception as e:
                     logger.warning(f"Could not cast arrow schema to contract types: {e}")
 

@@ -3401,7 +3401,7 @@ class LakehousePipeline:
                 path = path.replace("{landing_root}", str(landing_root).rstrip("/"))
             kind = str(block.get("type") or "").strip().lower()
             if path.lower().startswith("table:"):
-                return path[len("table:"):].strip().replace("`", ""), (kind or "table")
+                return path[len("table:") :].strip().replace("`", ""), (kind or "table")
             parts = [p for p in path.replace("\\", "/").rstrip("/").split("/") if p]
             # Drop wildcard / partition / file-name tail, then the entity folder itself.
             while parts and ("*" in parts[-1] or "=" in parts[-1] or "." in parts[-1]):

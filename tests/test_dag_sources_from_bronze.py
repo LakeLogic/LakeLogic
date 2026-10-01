@@ -4,6 +4,7 @@ It came only from `external_sources` hand-written in _system.yaml, so the RideFl
 one "RideFlow Platform API" box while seven bronze contracts each declared a landing folder
 (2026-10-01). One node per source LOCATION; bronze contracts sharing it share the node.
 """
+
 from lakelogic.pipeline.runner import LakehousePipeline
 
 loc = LakehousePipeline._dag_source_location
@@ -41,9 +42,14 @@ def test_one_landing_zone_is_one_node_whatever_its_formats():
     import re
     from pathlib import Path
 
-    sysf = Path(r"C:\_Personal\_SaaS\lakelogic-databricks-data-mesh-lakehouse\domains_rideflow\marketplace\rideflow\_system.yaml")
+    sysf = Path(
+        r"C:\_Personal\_SaaS\lakelogic-databricks-data-mesh-lakehouse\domains_rideflow\marketplace\rideflow\_system.yaml"
+    )
     if not sysf.exists():
         import pytest
+
         pytest.skip("demo repo not present")
-    html = LakehousePipeline(DomainRegistry.from_yaml(path=str(sysf), environment="dev"), engine="polars").visualize_dag()
+    html = LakehousePipeline(
+        DomainRegistry.from_yaml(path=str(sysf), environment="dev"), engine="polars"
+    ).visualize_dag()
     assert html.count(">landing_marketplace/rideflow<") == 1

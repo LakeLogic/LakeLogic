@@ -18,20 +18,24 @@ def _contract(sql):
     return {
         "version": "1.0",
         "info": {"title": "revenue daily", "target_layer": "gold"},
-        "model": {"fields": [
-            {"name": "kpi_date", "type": "date", "required": True},
-            {"name": "amount", "type": "double"},
-        ]},
+        "model": {
+            "fields": [
+                {"name": "kpi_date", "type": "date", "required": True},
+                {"name": "amount", "type": "double"},
+            ]
+        },
         "transformations": [{"phase": "pre", "sql": sql}],
         "quality": {"row_rules": [{"name": "kpi_date_required", "sql": '"kpi_date" IS NOT NULL'}]},
     }
 
 
 def _rows():
-    return pl.DataFrame({
-        "created_at": [datetime(2026, 9, 30, 8, 15), datetime(2026, 10, 1, 23, 59)],
-        "amount": [12.5, 7.0],
-    })
+    return pl.DataFrame(
+        {
+            "created_at": [datetime(2026, 9, 30, 8, 15), datetime(2026, 10, 1, 23, 59)],
+            "amount": [12.5, 7.0],
+        }
+    )
 
 
 def test_spark_to_date_runs_on_polars():
