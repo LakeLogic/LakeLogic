@@ -572,6 +572,7 @@ class DuckDBAdapter(EngineAdapter):
     def _apply_pre_transformations(self, table_name: str) -> str:
         """Apply filters, renames, and derived columns before schema enforcement."""
         current = table_name
+        self.dedup_blank_keys = None
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
 
@@ -756,10 +757,21 @@ class DuckDBAdapter(EngineAdapter):
                 else:
                     order_by = "(SELECT 1)"
                 view_name = f"_pre_dedup_{id(dedupe_cfg) & 0xFFFFFF:06x}"
+                # A blank key (any key column null) is never a duplicate of another blank
+                # key: those rows skip the window and pass through. `blank_keys` decides
+                # their fate as a row rule (base._blank_dedup_key_rules).
+                blank = self._blank_key_predicate_sql(list(dedupe_cfg.on), quote=lambda c: f'"{c}"')
+                try:
+                    n_blank = self.con.sql(f"SELECT COUNT(*) FROM {current} WHERE {blank}").fetchone()[0]
+                except Exception:
+                    n_blank = None
+                self._record_blank_dedup_keys(n_blank, dedupe_cfg)
                 try:
                     self.con.sql(
-                        f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current} "
-                        f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {on_cols} ORDER BY {order_by}) = 1"
+                        f"CREATE OR REPLACE VIEW {view_name} AS "
+                        f"(SELECT * FROM {current} WHERE NOT {blank} "
+                        f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {on_cols} ORDER BY {order_by}) = 1) "
+                        f"UNION ALL BY NAME (SELECT * FROM {current} WHERE {blank})"
                     )
                     current = view_name
                 except Exception as e:

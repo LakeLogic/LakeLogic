@@ -2652,6 +2652,10 @@ def write_run_log(
                         "rows_dropped": _counts.get("pre_transform_dropped"),
                         "rows_deduplicated": _counts.get("deduplicated"),
                         "rows_filtered": _counts.get("filtered"),
+                        # Rows whose dedup key was blank (any key column null). They are
+                        # never collapsed: kept or quarantined per `blank_keys`, and
+                        # already counted there. None = no dedup ran / not measured.
+                        "rows_blank_dedup_key": _counts.get("dedup_blank_keys"),
                         # Attribution under its own name — what the SaaS's per-rule
                         # strategy actually looks for. Same list as `quarantined_rows`.
                         "row_rule_failures": _rule_failures,

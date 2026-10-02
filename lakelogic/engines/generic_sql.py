@@ -675,7 +675,14 @@ class GenericSQLAdapter(EngineAdapter):
             direction = "DESC" if str(getattr(cfg, "order", "desc")).lower() == "desc" else "ASC"
             part = ", ".join(self._quote(c) for c in on)
             order = ", ".join(f"{self._quote(c)} {direction}" for c in sort_by)
-            inner = f"SELECT *, ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {order}) AS lakelogic_rn FROM {source}"
+            # A blank key (any key column null) is never a duplicate of another blank
+            # key: rank 1 for every such row, so none is collapsed. `blank_keys`
+            # decides their fate as a row rule (base._blank_dedup_key_rules).
+            blank = "(" + " OR ".join(f"{self._quote(c)} IS NULL" for c in on) + ")"
+            inner = (
+                f"SELECT *, CASE WHEN {blank} THEN 1 ELSE "
+                f"ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {order}) END AS lakelogic_rn FROM {source}"
+            )
             keep = ", ".join(self._quote(c) for c in cols) if cols else "*"
             return f"SELECT {keep} FROM ({inner}) AS lakelogic_d WHERE lakelogic_rn = 1"
 

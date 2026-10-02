@@ -364,6 +364,7 @@ class SparkAdapter(EngineAdapter):
 
         current_df = df
         existing = set(current_df.columns)
+        self.dedup_blank_keys = None
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
 
@@ -535,15 +536,32 @@ class SparkAdapter(EngineAdapter):
                     except AttributeError:
                         _sortable = list(getattr(current_df, "columns", []) or [])
                     sort_by, order = self._dedup_order(dd, _sortable)
+                    # A blank key (any key column null) is never a duplicate of another
+                    # blank key: those rows skip the grouping and pass through.
+                    # `blank_keys` decides their fate as a row rule
+                    # (base._blank_dedup_key_rules). One extra count() so the run
+                    # report can say how many there were.
+                    _blank = None
+                    for _k in dd.on:
+                        _c = F.col(_k).isNull()
+                        _blank = _c if _blank is None else (_blank | _c)
+                    _blank_df = current_df.filter(_blank)
+                    _keyed_df = current_df.filter(~_blank)
+                    try:
+                        _n_blank = _blank_df.count()
+                    except Exception:
+                        _n_blank = None
+                    self._record_blank_dedup_keys(_n_blank, dd)
                     if sort_by:
                         w = Window.partitionBy(*dd.on)
                         order_cols = [F.col(col).desc() if order == "desc" else F.col(col).asc() for col in sort_by]
                         w = w.orderBy(*order_cols)
-                        current_df = (
-                            current_df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
+                        _keyed_df = (
+                            _keyed_df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
                         )
                     else:
-                        current_df = current_df.dropDuplicates(dd.on)
+                        _keyed_df = _keyed_df.dropDuplicates(dd.on)
+                    current_df = _keyed_df.unionByName(_blank_df)
 
             # ── Post-Step Sync ──────────────────────────────────────────────
             # Re-register the updated DataFrame as 'source' so that the NEXT

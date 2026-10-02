@@ -727,13 +727,18 @@ class BigQueryAdapter(EngineAdapter):
 
         if trans.deduplicate:
             on_cols = ", ".join(self._quote_ident(col) for col in trans.deduplicate.on)
+            # A blank key (any key column null) is never a duplicate of another blank
+            # key: rank 1 for every such row, so none is collapsed. `blank_keys`
+            # decides their fate as a row rule (base._blank_dedup_key_rules).
+            blank = self._blank_key_predicate_sql(list(trans.deduplicate.on))
             order_clause = ""
             if trans.deduplicate.sort_by:
                 cols = ", ".join(self._quote_ident(col) for col in trans.deduplicate.sort_by)
                 order_clause = f"ORDER BY {cols} {trans.deduplicate.order}"
             return f"""
             SELECT * FROM (
-              SELECT *, ROW_NUMBER() OVER(PARTITION BY {on_cols} {order_clause}) AS _rn
+              SELECT *, CASE WHEN {blank} THEN 1
+                ELSE ROW_NUMBER() OVER(PARTITION BY {on_cols} {order_clause}) END AS _rn
               FROM source
             ) WHERE _rn = 1
             """

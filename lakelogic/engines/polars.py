@@ -1111,6 +1111,7 @@ class PolarsAdapter(EngineAdapter):
         """
         current_lf = lf
         existing = set(current_lf.collect_schema().names())
+        self.dedup_blank_keys = None
         for trans in self.contract.transformations:
             trans_phase = (trans.phase or "post").lower()
             if trans.sql and (trans.phase or "post").lower() == "pre":
@@ -1341,7 +1342,22 @@ class PolarsAdapter(EngineAdapter):
                             # Nested/unorderable columns (list, struct) can't be sorted;
                             # keep the dedup rather than failing the run.
                             logger.warning(f"Pre-Transform [Deduplicate] tie-break sort skipped: {_sort_err}")
-                    current_lf = current_lf.unique(subset=dedupe_cfg.on, maintain_order=True)
+                    # A blank key (any key column null) is never a duplicate of another
+                    # blank key: keep those rows out of the grouping and pass them through.
+                    # `blank_keys` decides their fate as a row rule (base._blank_dedup_key_rules).
+                    _blank = pl.any_horizontal([pl.col(k).is_null() for k in dedupe_cfg.on])
+                    try:
+                        _n_blank = int(current_lf.filter(_blank).select(pl.len()).collect().item())
+                    except Exception:
+                        _n_blank = None
+                    self._record_blank_dedup_keys(_n_blank, dedupe_cfg)
+                    current_lf = pl.concat(
+                        [
+                            current_lf.filter(~_blank).unique(subset=dedupe_cfg.on, maintain_order=True),
+                            current_lf.filter(_blank),
+                        ],
+                        how="vertical",
+                    )
         return current_lf
 
     def _apply_post_transformations(self, lf: pl.LazyFrame, ctx: pl.SQLContext) -> pl.LazyFrame:

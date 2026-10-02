@@ -94,8 +94,19 @@ This is the **actual sequence** the engine follows for transformations:
     "on": ["customer_id"]
     sort_by: ["updated_at"]
     order: "desc"               # Keep most recent
+    blank_keys: quarantine      # default; or `keep`
   phase: "pre"
 ```
+
+A row whose key is **blank** (any key column null) is never a duplicate of another
+blank row, so it is never collapsed. With `blank_keys: quarantine` (the default) it is
+quarantined by the automatic rule `<key>_required_for_dedup` (composite keys joined
+with `__`, e.g. `trip_id__trip_date_required_for_dedup`) — unless every key column
+already has a `<col> IS NOT NULL` rule such as `trip_id_required`, in which case that
+rule quarantines it and nothing is reported twice. With `blank_keys: keep` it passes
+through. The run report records the count as `counts.dedup_blank_keys` ("N rows had a
+blank dedup key"); these rows are never counted as dropped. An empty string is a
+value, not a blank key.
 
 ### Select / Drop Columns
 

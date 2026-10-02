@@ -166,6 +166,8 @@ class EngineAdapter(ABC):
         self.contract = contract
         self.dataset_rule_results: List[Dict[str, Any]] = []
         self.schema_drift: Dict[str, List[str]] = {}
+        # Rows whose dedup key was blank in the last run (None = not measured / no dedup).
+        self.dedup_blank_keys: Optional[int] = None
         self.engine_name: str = ""
         self.engine_dialect: str = ""  # set by subclass or _resolve_dialect()
         self.trace: List[Any] = []  # Avoid circular import of TraceStep here if needed, or import at runtime
@@ -367,7 +369,93 @@ class EngineAdapter(ABC):
                     rules.extend(field.rules)
 
         rules.extend(declared)
+        rules.extend(self._blank_dedup_key_rules(rules))
         return rules
+
+    # ── Blank dedup keys ─────────────────────────────────────────────────────
+    # A row whose dedup key is blank (ANY key column null) is never a duplicate of
+    # another blank-key row. Every engine used to PARTITION BY / unique() over the
+    # key, which groups NULLs together: 5 keyless trips became 1 and the other 4
+    # vanished before a quality rule could see them. Engines now leave blank-key
+    # rows out of the grouping and pass them through; `blank_keys` then decides
+    # their fate here, as an ordinary named row rule:
+    #
+    #   * `quarantine` (default) — `<k1>__<k2>_required_for_dedup` quarantines them.
+    #     If EVERY key column already has an exact `<col> IS NOT NULL` rule (the
+    #     automatic `<field>_required`, or one the author wrote), no rule is added:
+    #     that rule already quarantines the row, and a second one would report the
+    #     same null twice. One row, one attribution.
+    #   * `keep` — no rule; the rows are kept.
+    #
+    # An empty string is a value, not a blank: Core's `_required` checks are
+    # `IS NOT NULL` and nothing in the engines coerces '' to NULL.
+
+    BLANK_KEY_RULE_SUFFIX = "_required_for_dedup"
+
+    def _dedup_configs(self) -> List[Any]:
+        """Every deduplicate in the contract, without the deprecation warning side effect."""
+        out = []
+        for trans in getattr(self.contract, "transformations", None) or []:
+            dd = getattr(trans, "deduplicate", None)
+            if dd and getattr(dd, "on", None):
+                out.append(dd)
+                continue
+            dbl = getattr(trans, "deduplicate_by_latest", None)
+            if dbl and getattr(dbl, "key_columns", None):
+                out.append(dbl)
+        return out
+
+    @staticmethod
+    def _dedup_keys(cfg: Any) -> List[str]:
+        return list(getattr(cfg, "on", None) or getattr(cfg, "key_columns", None) or [])
+
+    @staticmethod
+    def _blank_keys_mode(cfg: Any) -> str:
+        mode = (getattr(cfg, "blank_keys", None) or "quarantine").lower()
+        return mode if mode in ("quarantine", "keep") else "quarantine"
+
+    def _blank_dedup_key_rules(self, existing: List[QualityRule]) -> List[QualityRule]:
+        """The automatic `<key>_required_for_dedup` rules (see the block comment above)."""
+        added: List[QualityRule] = []
+        names = {getattr(r, "name", None) for r in existing}
+        for cfg in self._dedup_configs():
+            keys = self._dedup_keys(cfg)
+            if not keys or self._blank_keys_mode(cfg) != "quarantine":
+                continue
+            covered = _not_null_columns(list(existing) + added)
+            if all(k.lower() in covered for k in keys):
+                continue  # an existing not-null rule already quarantines these rows
+            name = "__".join(keys) + self.BLANK_KEY_RULE_SUFFIX
+            if name in names:
+                continue
+            names.add(name)
+            added.append(
+                QualityRule(
+                    name=name,
+                    sql=" AND ".join(f"{self._quote_ident(k)} IS NOT NULL" for k in keys),
+                    category="completeness",
+                    description="dedup key must not be blank",
+                )
+            )
+        return added
+
+    def _blank_key_predicate_sql(self, keys: List[str], quote=None) -> str:
+        """SQL that is TRUE when ANY key column is null."""
+        q = quote or self._quote_ident
+        return "(" + " OR ".join(f"{q(k)} IS NULL" for k in keys) + ")"
+
+    def _record_blank_dedup_keys(self, count: Optional[int], cfg: Any) -> None:
+        """Accumulate the blank-key count for the run report and log it once per dedup."""
+        if count is None:
+            return
+        prev = getattr(self, "dedup_blank_keys", None) or 0
+        self.dedup_blank_keys = prev + int(count)
+        if count:
+            mode = self._blank_keys_mode(cfg)
+            logger.info(
+                f"Deduplicate on {self._dedup_keys(cfg)}: {count} rows had a blank dedup key "
+                f"({'quarantined' if mode == 'quarantine' else 'kept'}, not deduplicated)"
+            )
 
     def get_dataset_rules(self) -> List[QualityRule]:
         """

@@ -1065,6 +1065,12 @@ class DataProcessor:
 
         # Summary logging
         counts = self._compute_counts(df, good_df, bad_df)
+        # Rows whose dedup key was blank: never grouped, so never "deduplicated" —
+        # they land in good (blank_keys: keep) or quarantine (blank_keys: quarantine)
+        # and are already inside good + quarantined. Reported, not re-subtracted.
+        _blank_keys = getattr(getattr(self, "adapter", None), "dedup_blank_keys", None)
+        if _blank_keys is not None:
+            counts["dedup_blank_keys"] = int(_blank_keys)
         source_total = counts.get("source")
         total = counts.get("total")
         bad = counts.get("quarantined")
