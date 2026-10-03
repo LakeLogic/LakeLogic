@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.68.0] — 2026-10-03
+
+### Added
+
+- **generator**: Enhance licence number realism and add vehicle class handling; introduce future and issue date logic
+
+### Fixed
+
+- **dedup**: Never collapse blank keys; quarantine them by default (blank_keys)
 ## [1.67.0] — 2026-10-01
 
 ### Added
@@ -837,6 +846,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.68.0]: https://github.com/lakelogic/LakeLogic/compare/v1.67.0...v1.68.0
 [1.67.0]: https://github.com/lakelogic/LakeLogic/compare/v1.66.3...v1.67.0
 [1.66.3]: https://github.com/lakelogic/LakeLogic/compare/v1.66.2...v1.66.3
 [1.66.2]: https://github.com/lakelogic/LakeLogic/compare/v1.66.1...v1.66.2

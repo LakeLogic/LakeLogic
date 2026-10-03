@@ -64,8 +64,13 @@ def test_pruned_partition_merge_writes_the_surrogate_key(tmp_path, fmt, runs):
     target = tmp_path / "dim_reason"
     contract = _contract(["country_code"])  # not in the data: pruned to no partitions
     for _ in range(runs):
-        materialize_dataframe(pd.DataFrame({SK: [None, None], "reason": ["A", "B"]}), contract, target,
-                              output_format=fmt, engine_name="pandas")
+        materialize_dataframe(
+            pd.DataFrame({SK: [None, None], "reason": ["A", "B"]}),
+            contract,
+            target,
+            output_format=fmt,
+            engine_name="pandas",
+        )
     out = _read(target, fmt)
     assert out[SK].notna().all()
     keyed = dict(zip(out["reason"], out[SK]))
