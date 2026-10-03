@@ -77,6 +77,11 @@ _QUALITY_CATEGORIES = set(QUALITY_CATEGORIES)
 #: a silent remap would make an unclassified rule look classified.
 LEGACY_QUALITY_CATEGORIES = frozenset({"correctness", "timeliness", "integrity", "rule", "llm_quality", "data_quality"})
 
+#: Shorthand rules are NOT unclassified: the shorthand names the check, and the check implies
+#: its category (engines/base.py) — not_null/required → completeness, accepted_values/range/
+#: regex → validity, foreign key → consistency, unique → uniqueness. A category declared on the
+#: shorthand wins. Only a free-form SQL rule with no category is left unclassified.
+#:
 #: What a run records for a rule with no category. Runtime-only: the error and category lists
 #: are parallel and nulls are dropped from both, so a None here would misalign every failure
 #: after it. The contract model keeps None, which is how a missing category stays visible.

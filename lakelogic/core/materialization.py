@@ -3760,6 +3760,17 @@ def _materialize_spark_dataframe(  # pragma: no cover
     return {"target": target_str, "rows_written": df.count(), "format": output_format}
 
 
+def _scd1_config(mat) -> Dict[str, Any]:
+    """The contract's ``materialization.scd1`` block as a dict, with a top-level
+    ``materialization.unknown_member`` folded in when ``scd1`` declares none."""
+    cfg = getattr(mat, "scd1", None)
+    cfg = dict(cfg) if isinstance(cfg, dict) else {}
+    unknown_member = getattr(mat, "unknown_member", None)
+    if unknown_member and "unknown_member" not in cfg:
+        cfg["unknown_member"] = dict(unknown_member) if isinstance(unknown_member, dict) else {}
+    return cfg
+
+
 def _partition_aware_merge(
     df: Any,
     contract,
@@ -3860,6 +3871,11 @@ def _partition_aware_merge(
     soft_delete_val = getattr(mat, "soft_delete_value", True)
     soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
     soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
+    # A merge dimension's surrogate key and unknown member (materialization.scd1). This
+    # path once ignored them, so any merge contract whose _system.yaml declared a
+    # partition_by — even one pruned to nothing — wrote its surrogate key as null.
+    scd1_cfg = _scd1_config(mat) if strategy == "merge" else {}
+    scd1_sk = bool(scd1_cfg.get("surrogate_key"))
 
     # ── Delta format: single root-level Delta table ───────────────────────────
     # write_deltalake writes Hive-style partition dirs under a single _delta_log
@@ -3923,6 +3939,7 @@ def _partition_aware_merge(
                         cdc_op_field=cdc_op_field,
                         cdc_delete_values=cdc_delete_values,
                         cdc_timestamp_field=cdc_timestamp_field,
+                        scd1_cfg=scd1_cfg,
                         merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
                     )
                 else:
@@ -3934,6 +3951,22 @@ def _partition_aware_merge(
                     # surrogate key, _version) are populated on initial load.
                     empty_existing = pd.DataFrame(columns=group.columns)
                     merged = _scd2_frames(empty_existing, group, primary_key, scd2_cfg)
+                elif scd1_sk:
+                    # First write of a merge dimension: the surrogate key is computed
+                    # in _merge_frames, as the unpartitioned path does.
+                    merged = _merge_frames(
+                        pd.DataFrame(columns=group.columns),
+                        group,
+                        primary_key,
+                        soft_delete_col=soft_delete_col,
+                        soft_delete_val=soft_delete_val,
+                        soft_delete_time_col=soft_delete_time_col,
+                        soft_delete_reason_col=soft_delete_reason_col,
+                        cdc_op_field=cdc_op_field,
+                        cdc_delete_values=cdc_delete_values,
+                        cdc_timestamp_field=cdc_timestamp_field,
+                        scd1_cfg=scd1_cfg,
+                    )
                 else:
                     # First write or plain append — seed soft-delete columns
                     # so the schema includes them from table creation.
@@ -3966,6 +3999,10 @@ def _partition_aware_merge(
             unknown_cfg = scd2_cfg.get("unknown_member")
             if unknown_cfg is not None and unknown_cfg.get("enabled", True):
                 combined = _inject_unknown_member_pandas(combined, primary_key, scd2_cfg, unknown_cfg)
+        if scd1_sk:
+            unknown_cfg = scd1_cfg.get("unknown_member") or {}
+            if unknown_cfg and unknown_cfg.get("enabled", True):
+                combined = _inject_unknown_member_pandas(combined, primary_key, scd1_cfg, unknown_cfg)
 
         # Spark / Kimball convention: surrogate key → natural keys →
         # dimension attributes → SCD2 control columns → internal metadata.
@@ -4106,8 +4143,12 @@ def _partition_aware_merge(
                 soft_delete_reason_col=soft_delete_reason_col,
                 cdc_op_field=cdc_op_field,
                 cdc_delete_values=cdc_delete_values,
+                scd1_cfg=scd1_cfg,
                 merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
             )
+            unknown_cfg = scd1_cfg.get("unknown_member") or {}
+            if scd1_sk and not partition_by and unknown_cfg and unknown_cfg.get("enabled", True):
+                merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
         elif strategy == "scd2":
             merged = _scd2_frames(existing, group, primary_key, scd2_cfg)
             # Inject unknown member once (non-delta partition loop)

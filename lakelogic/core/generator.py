@@ -819,6 +819,15 @@ _SEMANTIC_HINTS: Dict[str, str] = {
     # ── Files ─────────────────────────────────────────────────────────────
     "file_name": "file_name",
     "file_path": "file_path",
+    # A licence number has a fixed issuer format, not `LIC-9909` from the generic fallback.
+    # Shape of a UK DVLA number (5 surname letters, 6 digits, 2 initials, 3 check chars).
+    "licence_number": "bothify(text='?????######??#??', letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ')",
+    "license_number": "bothify(text='?#######', letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ')",
+    # Masked card / account tails are four digits, not `CAR-1034`.
+    "last_four": "bothify(text='####')",
+    "last4": "bothify(text='####')",
+    "licence_plate": "license_plate",
+    "license_plate": "license_plate",
     "mime_type": "mime_type",
     "content_type": "mime_type",
     # NOTE: 'country' intentionally omitted — Faker returns full names ('United Kingdom')
@@ -1248,6 +1257,26 @@ _REALISTIC_POOLS: Dict[str, List[str]] = {
     # names whose values are the same in most systems; domain-specific ones (who `cancelled_by`)
     # come from the contract's accepted_values, never from a guess here.
     "platform": ["ios", "android", "web"],
+    # Driving-licence entitlements (UK/EU categories). A `vehicle_classes` column fell through
+    # to the `VEH-4486` code fallback — a licence holds categories, not a reference number.
+    "vehicle_classes": [
+        "B",
+        "B",
+        "B",
+        "B, BE",
+        "AM, B",
+        "A2, B",
+        "A, B",
+        "B, C1",
+        "B, C1, D1",
+        "B, C, CE",
+        "A, B, C1, D1",
+    ],
+    "vehicle_class": ["AM", "A1", "A2", "A", "B", "BE", "C1", "C", "CE", "D1", "D"],
+    "licence_classes": ["B", "B, BE", "AM, B", "A2, B", "A, B", "B, C1", "B, C, CE"],
+    "license_classes": ["B", "B, BE", "AM, B", "A2, B", "A, B", "B, C1", "B, C, CE"],
+    "licence_categories": ["B", "B, BE", "AM, B", "A2, B", "A, B", "B, C1", "B, C, CE"],
+    "license_categories": ["B", "B, BE", "AM, B", "A2, B", "A, B", "B, C1", "B, C, CE"],
     "app_platform": ["ios", "android", "web"],
     "level": ["low", "medium", "high"],
     "event_name": [
@@ -2798,6 +2827,89 @@ _AGE_CONSTRAINTS: Dict[str, Dict[str, int]] = {
     "dob": {"min_age_years": 18, "max_age_years": 85},
     "incorporation_date": {"min_age_years": 0, "max_age_years": 50},
 }
+
+#: Name tokens of a date that lies AHEAD of today: an expiry is in the future on a live record.
+#: Without this `expiry_date` came out in the last 90 days, so every licence had lapsed.
+_FUTURE_DATE_TOKENS: Tuple[str, ...] = ("expiry", "expiration", "expires", "expire", "valid_until", "valid_thru")
+#: Name tokens of an issue date: in the past, within a document's lifetime (10 years).
+_ISSUE_DATE_TOKENS: Tuple[str, ...] = ("issue_date", "issued_date", "issued_on", "date_issued", "issued_at")
+
+
+def _not_null_columns(spec: Any) -> List[str]:
+    """Column names of a ``not_null`` shorthand rule (string, list, or ``{field|fields}``)."""
+    if isinstance(spec, str):
+        return [spec]
+    if isinstance(spec, list):
+        return [c for c in spec if isinstance(c, str)]
+    if isinstance(spec, dict):
+        cols = spec.get("fields") or spec.get("field") or spec.get("columns") or spec.get("column")
+        return _not_null_columns(cols) if cols else []
+    return []
+
+
+def _is_future_date_name(name_lower: str) -> bool:
+    return any(tok in name_lower for tok in _FUTURE_DATE_TOKENS)
+
+
+def _is_issue_date_name(name_lower: str) -> bool:
+    return any(tok in name_lower for tok in _ISSUE_DATE_TOKENS)
+
+
+#: Columns that carry the path or name of the file a row was read from. For a file source the
+#: engine fills them from the matched file, so a generated value must look like one of those
+#: files: under the declared source path, with the declared format's extension.
+_FILE_PATH_FIELDS = frozenset({"file_path", "source_file", "source_path", "source_file_path", "input_file", "file_uri"})
+_FILE_NAME_FIELDS = frozenset({"file_name", "filename", "source_file_name"})
+_FORMAT_EXTENSIONS = {
+    "pdf": "pdf",
+    "csv": "csv",
+    "json": "json",
+    "jsonl": "jsonl",
+    "ndjson": "json",
+    "parquet": "parquet",
+    "delta": "parquet",
+    "avro": "avro",
+    "orc": "orc",
+    "xml": "xml",
+    "text": "txt",
+    "txt": "txt",
+    "excel": "xlsx",
+    "xlsx": "xlsx",
+    "docx": "docx",
+    "image": "png",
+    "png": "png",
+    "jpg": "jpg",
+    "jpeg": "jpg",
+}
+
+
+def _render_source_path(pattern: str, fmt: str, stem: str, rng: "random.Random", when: datetime) -> str:
+    """One concrete file path the declared source ``pattern`` (a path or glob) would match.
+
+    ``**`` becomes a date partition (``y_2026/m_10/d_03/h_05``, the landing convention), each
+    ``*`` / ``?`` in a segment a token, and a directory path gets ``<stem>.<ext>`` appended.
+    ``{placeholders}`` (``{landing_root}``) are left as declared — they resolve per environment,
+    exactly as the run's ``_lakelogic_source`` shows them."""
+    ext = _FORMAT_EXTENSIONS.get((fmt or "").lower(), (fmt or "").lower())
+    token = f"{stem}_{rng.randint(0, 0xFFFFFF):06x}"
+    partition = f"y_{when:%Y}/m_{when:%m}/d_{when:%d}/h_{when:%H}"
+    segments = [s for s in str(pattern).replace("\\", "/").split("/")]
+    out = []
+    for i, seg in enumerate(segments):
+        if seg == "**":
+            out.append(partition)
+            continue
+        last = i == len(segments) - 1
+        seg = seg.replace("?", str(rng.randint(0, 9)))
+        if "*" in seg:
+            seg = seg.replace("*", token if last else f"{when:%Y%m%d}", 1).replace("*", "")
+        out.append(seg)
+    path = "/".join(out)
+    tail = out[-1] if out else ""
+    if ext and "." not in tail:
+        path = f"{path.rstrip('/')}/{token}.{ext}"
+    return path
+
 
 # Business-hours awareness: True = cluster 08:00-18:00, False = any time.
 _BUSINESS_HOURS_FIELDS: Dict[str, bool] = {
@@ -5987,6 +6099,14 @@ class DataGenerator:
                 t_data = self._generate_temporal_triplet(triplet_cfg, not invalid)
                 row.update(t_data)
 
+        # A ROW BUILT TO BREAK A RULE BREAKS A DECLARED ONE. When the contract declares rules,
+        # an invalid row is a valid row with ONE ruled field broken against its own rule —
+        # every other field (names, file paths, dates) stays realistic. Breaking 40% of ALL
+        # fields put "/song.bmp" paths, future birth dates and unicode names into rows whose
+        # only declared rule was `not_null: licence_number` (2026-10-03).
+        ruled = self._declared_rule_fields(field_rules) if invalid else []
+        target = self._rng.choice(ruled) if ruled else None
+
         for field in self._fields:
             name: str = field.get("name", "col")
             if name in row:
@@ -5997,6 +6117,15 @@ class DataGenerator:
             # A SQL rule without an `IS NULL OR` guard rejects nulls exactly like `required`.
             required: bool = bool(field.get("required", False) or rules.get("not_null"))
             nullable: bool = not required
+
+            if target is not None:
+                if name == target:
+                    val, tc_info = self._break_declared_rule(name, ftype, rules, required)
+                    row[name] = val
+                    test_cases.append(tc_info)
+                else:
+                    row[name] = self._make_valid_value(name, ftype, rules, nullable, sample_pools=sample_pools)
+                continue
 
             if invalid and self._rng.random() < 0.4:
                 # 40% chance each field is broken in an invalid row
@@ -6016,7 +6145,17 @@ class DataGenerator:
         # After all fields are generated, patch dependent fields whose value
         # should match the driver field. Only for valid rows — invalid rows
         # keep their deliberately broken values.
-        if not invalid:
+        if target is not None:
+            # Coherence passes for the realistic fields; the broken value is put back after.
+            broken = row.get(target)
+            self._apply_correlations(row)
+            self._apply_temporal_ordering(row)
+            self._apply_field_consistency(row)
+            self._apply_city_coherence(row, field_rules)
+            self._apply_geo_alignment(row)
+            if target in row:
+                row[target] = broken
+        elif not invalid:
             self._apply_correlations(row)
             self._apply_temporal_ordering(row)
             self._apply_column_comparisons(row, field_rules)
@@ -6052,6 +6191,13 @@ class DataGenerator:
                 days_range = 1
             return (min_birth + timedelta(days=self._rng.randint(0, days_range))).isoformat()
 
+        # An expiry lies ahead (30 days to 10 years) and an issue date behind (up to 10 years),
+        # whatever the generation window: a window bounds when rows ARRIVE, not what they say.
+        if _is_future_date_name(name_lower):
+            return (date.today() + timedelta(days=self._rng.randint(30, 3650))).isoformat()
+        if _is_issue_date_name(name_lower):
+            return (date.today() - timedelta(days=self._rng.randint(0, 3650))).isoformat()
+
         # ── Window-constrained generation ───────────────────────────────────
         if getattr(self, "_window_start", None) is not None:
             ws = self._window_start.date()
@@ -6073,6 +6219,9 @@ class DataGenerator:
     def _generate_timestamp(self, name: str) -> str:
         """Generate a timestamp string with business-hours, weekday awareness, and time window."""
         name_lower = name.lower()
+
+        if _is_future_date_name(name_lower):
+            return (datetime.now() + timedelta(seconds=self._rng.randint(30 * 86400, 3650 * 86400))).isoformat()
 
         # ── Window-constrained generation ───────────────────────────────────
         if getattr(self, "_window_start", None) is not None:
@@ -6610,6 +6759,9 @@ class DataGenerator:
         sample_pools: Optional[Dict[str, List[Any]]] = None,
     ) -> Any:
         ftype = _base_numeric_type(ftype)
+        # The engine fills a file source's provenance column from the file it read: never null.
+        if nullable and self._source_file_value(name.lower()) is not None:
+            nullable = False
         # Null injection for nullable fields — use field-aware probability
         if nullable:
             null_prob = _match_null_probability(name.lower())
@@ -6825,6 +6977,102 @@ class DataGenerator:
             while len(val) < min_len:
                 val += self._rng.choice(string.ascii_lowercase)
         return val
+
+    def _declared_rule_fields(self, field_rules: Dict[str, Dict[str, Any]]) -> List[str]:
+        """Fields the contract declares a breakable rule on: required / not_null, accepted
+        values, a range, a length or a pattern. Only these are broken in a rule-breaking row.
+        A surrogate FK pool or a caller's reference pool alone is not a declared rule."""
+        out = []
+        for field in self._fields:
+            name = field.get("name")
+            if not name:
+                continue
+            rules = field_rules.get(name, {})
+            declared_av = (
+                rules.get("accepted_values") is not None
+                and not rules.get("_fk_surrogate")
+                and not rules.get("_fk_catch_all")
+            )
+            if (
+                field.get("required")
+                or rules.get("not_null")
+                or rules.get("min") is not None
+                or rules.get("max") is not None
+                or rules.get("min_length") is not None
+                or rules.get("max_length") is not None
+                or rules.get("regex_match")
+                or declared_av
+            ):
+                out.append(name)
+        return out
+
+    def _break_declared_rule(
+        self, name: str, ftype: str, rules: Dict[str, Any], required: bool
+    ) -> Tuple[Any, TestCaseInfo]:
+        """A value that breaks one of ``name``'s own declared rules (chosen at random)."""
+        ftype = _base_numeric_type(ftype)
+        is_int = ftype in _INTEGER_FIELD_TYPES
+        numeric = is_int or ftype in ("double", "float", "float32", "float64", "decimal", "number")
+        options: List[Tuple[str, str, str, Any]] = []
+        if required or rules.get("not_null"):
+            options.append(("NOT_NULL_VIOLATION", f"{name} set to null", "quality.not_null", lambda: None))
+        if rules.get("accepted_values") and ftype not in ("boolean", "bool"):
+            if numeric:
+                av_nums = [v for v in rules["accepted_values"] if isinstance(v, (int, float))]
+
+                def factory():
+                    return (max(av_nums) if av_nums else 0) + 1
+            else:
+
+                def factory():
+                    return "UNKNOWN_" + "".join(self._rng.choices(string.ascii_uppercase, k=3))
+
+            options.append(
+                ("ACCEPTED_VALUE_VIOLATION", f"{name} outside its accepted values", "quality.accepted_values", factory)
+            )
+        if rules.get("min") is not None and numeric:
+            lo = rules["min"]
+            options.append(
+                (
+                    "RANGE_VIOLATION",
+                    f"{name} below minimum ({lo})",
+                    "quality.range",
+                    lambda: (int(lo) - self._rng.randint(1, 100))
+                    if is_int
+                    else float(lo) - self._rng.uniform(0.01, 10.0),
+                )
+            )
+        if rules.get("max") is not None and numeric:
+            hi = rules["max"]
+            options.append(
+                (
+                    "RANGE_VIOLATION",
+                    f"{name} above maximum ({hi})",
+                    "quality.range",
+                    lambda: (int(hi) + self._rng.randint(1, 100))
+                    if is_int
+                    else float(hi) + self._rng.uniform(0.01, 10.0),
+                )
+            )
+        if rules.get("min_length") and int(rules["min_length"]) > 1:
+            n = int(rules["min_length"])
+            options.append(
+                ("LENGTH_VIOLATION", f"{name} shorter than {n}", "quality.min_length", lambda: "x" * (n - 1))
+            )
+        if rules.get("max_length") is not None:
+            m = int(rules["max_length"])
+            options.append(("LENGTH_VIOLATION", f"{name} longer than {m}", "quality.max_length", lambda: "x" * (m + 1)))
+        if rules.get("regex_match"):
+            options.append(
+                ("REGEX_VIOLATION", f"{name} not matching its pattern", "quality.regex_match", lambda: "INVALID-FORMAT")
+            )
+        if not options:  # a ruled field whose rule this cannot break: null is the honest fallback
+            options.append(("NOT_NULL_VIOLATION", f"{name} set to null", "quality.not_null", lambda: None))
+        tc_type, description, contract_rule, factory = self._rng.choice(options)
+        val = factory()
+        return val, TestCaseInfo(
+            type=tc_type, field=name, value=val, description=description, contract_rule=contract_rule
+        )
 
     def _make_invalid_value(
         self,
@@ -7318,8 +7566,31 @@ class DataGenerator:
                 return _ENTITY_ID_INDEX[suffix]
         return None
 
+    def _source_file_value(self, name_lower: str) -> Optional[str]:
+        """A file path / file name consistent with the contract's declared file source, or None
+        when the field is not a file-provenance column or the contract declares no file path."""
+        if name_lower not in _FILE_PATH_FIELDS and name_lower not in _FILE_NAME_FIELDS:
+            return None
+        source = self._contract_raw.get("source")
+        if not isinstance(source, dict) or not source.get("path"):
+            return None
+        src_path = source.get("path")
+        if isinstance(src_path, list):
+            src_path = src_path[0] if src_path else None
+        if not isinstance(src_path, str) or src_path.startswith("table:"):
+            return None
+        stem = re.sub(r"[^A-Za-z0-9]+", "_", str(self._contract_raw.get("dataset") or "file")).strip("_").lower()
+        when = datetime.now() - timedelta(seconds=self._rng.randint(0, 7 * 86400))
+        path = _render_source_path(src_path, str(source.get("format") or ""), stem or "file", self._rng, when)
+        return path.rsplit("/", 1)[-1] if name_lower in _FILE_NAME_FIELDS else path
+
     def _string_value(self, name: str) -> str:
         name_lower = name.lower()
+
+        # A file-provenance column of a file source: a file the declared path would match.
+        source_file = self._source_file_value(name_lower)
+        if source_file is not None:
+            return source_file
 
         # ── Date/timestamp detection by field NAME (highest priority) ──────────
         # Must run BEFORE Faker semantic hints to prevent false matches
@@ -7343,15 +7614,13 @@ class DataGenerator:
             base = now - timedelta(days=90)
             return (base + timedelta(seconds=self._rng.randint(0, 60 * 60 * 24 * 90))).isoformat()
         if is_date_name:
-            # ── Window-constrained generation ──────────────────────────
-            if getattr(self, "_window_start", None) is not None:
-                ws = self._window_start.date()
-                we = self._window_end.date()
-                days_range = max((we - ws).days, 0)
-                return (ws + timedelta(days=self._rng.randint(0, days_range))).isoformat()
-            today = date.today()
-            base = today - timedelta(days=90)
-            return (base + timedelta(days=self._rng.randint(0, 90))).isoformat()
+            # The same generator as a `type: date` field: a string-typed `date_of_birth` is still
+            # a birth date (an adult's), and a string `expiry_date` still lies ahead.
+            return self._generate_date(name)
+
+        # A `*_json` text column holds a JSON document, not a `MET-4268` code.
+        if name_lower.endswith("_json"):
+            return "{}" if self._rng.random() < 0.5 else '{"source": "synthetic"}'
 
         # ── Entity ID patterns (before Faker, so string-typed IDs get formatted) ──
         entity_fmt = self._match_entity_id(name_lower)
@@ -7572,6 +7841,7 @@ class DataGenerator:
             #    conventions and field descriptions alone.  ─────────────────
             if fk_pools and fname in fk_pools and "accepted_values" not in entry:
                 entry["accepted_values"] = fk_pools[fname]
+                entry["_fk_catch_all"] = True  # a pool by naming convention, not a declared rule
 
         # ── 2. Overlay structured quality row_rules ───────────────────────────
         quality = self._quality
@@ -7581,6 +7851,12 @@ class DataGenerator:
         for rule_item in quality.get("row_rules", []):
             if not isinstance(rule_item, dict):
                 continue
+
+            # not_null shorthand: `not_null: col`, `not_null: [a, b]`, `not_null: {field|fields}`.
+            # Unparsed, `- not_null: licence_number` left the column nullable in VALID rows.
+            if "not_null" in rule_item:
+                for col in _not_null_columns(rule_item["not_null"]):
+                    result.setdefault(field_names.get(col.lower(), col), {})["not_null"] = True
 
             # accepted_values structured rule
             if "accepted_values" in rule_item:

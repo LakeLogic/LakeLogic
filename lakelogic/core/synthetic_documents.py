@@ -164,7 +164,13 @@ def generate_documents(
         "info": {"title": ((doc.get("info") or {}).get("title") or doc.get("dataset") or "documents")},
         "model": {
             "fields": [
-                {k: v for k, v in f.items() if k not in ("extraction_task", "extraction_examples")} for f in fields
+                # Every document carries every line (required): a missing value is made ONLY by
+                # leaving a line out on purpose below, never by the generator's null share.
+                {
+                    **{k: v for k, v in f.items() if k not in ("extraction_task", "extraction_examples")},
+                    "required": True,
+                }
+                for f in fields
             ]
         },
     }
