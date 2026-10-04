@@ -1097,7 +1097,17 @@ class PolarsAdapter(EngineAdapter):
                     }
                 )
             except Exception as e:
-                logger.error(f"Error executing dataset rule '{rule.name}': {e}")
+                # Recorded as a FAILED result, not only logged (a rule that could not run read as passed).
+                first_line = str(e).splitlines()[0] if str(e) else type(e).__name__
+                logger.error(f"Error executing dataset rule '{rule.name}': {first_line}")
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": f"error: {first_line}",
+                        "passed": False,
+                        "description": rule.description,
+                    }
+                )
 
     def _apply_pre_transformations(self, lf: pl.LazyFrame) -> pl.LazyFrame:
         """

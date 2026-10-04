@@ -520,12 +520,48 @@ def test_spark_helper_run_dataset_rules(monkeypatch):
     )
     adapter._run_dataset_rules(FakeRuleDataFrame(spark))
 
-    assert len(adapter.dataset_rule_results) == 4
+    # A rule that could not run is now RECORDED as failed, not only logged.
+    assert len(adapter.dataset_rule_results) == 5
     assert adapter.dataset_rule_results[0]["passed"] is True
     assert adapter.dataset_rule_results[2]["passed"] is False
     assert adapter.dataset_rule_results[3]["passed"] is False
+    broken = adapter.dataset_rule_results[4]
+    assert broken["name"] == "broken" and broken["passed"] is False and broken["value"].startswith("error:")
     assert any("Quality Check (Spark): between" in message for message in infos)
     assert any("broken" in message for message in errors)
+
+
+def test_spark_dataset_rules_fill_the_dataset_placeholder(monkeypatch):
+    """`{dataset}` / `{source}` are substituted like the Polars and DuckDB engines do -
+    Spark received `FROM {dataset}` verbatim and failed with PARSE_SYNTAX_ERROR."""
+    contract = DataContract(
+        version="1.0.0",
+        dataset="gold_dim_rider",
+        quality={"dataset_rules": [
+            {"name": "unknown_rows", "sql": "SELECT COUNT(*) FROM {dataset} WHERE rider_sk = '-1'", "must_be_less_than": 2},
+            {"name": "src", "sql": "SELECT COUNT(*) FROM {source}", "must_be_greater_than": 0},
+        ]},
+    )
+    adapter = SparkAdapter(contract)
+    seen = []
+
+    class _Spark:
+        def sql(self, q):
+            seen.append(q)
+            if "{" in q:
+                raise RuntimeError("PARSE_SYNTAX_ERROR at '{'")
+            return types.SimpleNamespace(collect=lambda: [[1]])
+
+    class _DF:
+        sparkSession = _Spark()
+
+        def createOrReplaceTempView(self, name):
+            pass
+
+    monkeypatch.setattr("lakelogic.engines.spark.logger.info", lambda *_: None)
+    adapter._run_dataset_rules(_DF())
+    assert seen == ["SELECT COUNT(*) FROM gold_dim_rider WHERE rider_sk = '-1'", "SELECT COUNT(*) FROM gold_dim_rider"]
+    assert [r["passed"] for r in adapter.dataset_rule_results] == [True, True]
 
 
 def test_spark_helper_register_links_and_apply_schema(monkeypatch, tmp_path):

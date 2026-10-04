@@ -271,10 +271,13 @@ def test_polars_helper_run_dataset_rules_evaluates_thresholds_and_errors(monkeyp
     adapter._run_dataset_rules(pl.DataFrame({"id": [1]}).lazy(), ctx)
 
     assert ctx.register_calls[0][0] == "orders"
-    assert len(adapter.dataset_rule_results) == 4
+    # A rule that could not run is recorded as failed (5th), not only logged.
+    assert len(adapter.dataset_rule_results) == 5
     assert adapter.dataset_rule_results[0]["passed"] is True
     assert adapter.dataset_rule_results[2]["passed"] is False
     assert adapter.dataset_rule_results[3]["passed"] is False
+    assert adapter.dataset_rule_results[4]["passed"] is False
+    assert adapter.dataset_rule_results[4]["value"].startswith("error:")
     assert any("Quality Check: between" in message for message in infos)
     assert any("broken" in message for message in errors)
 

@@ -249,7 +249,10 @@ class SparkAdapter(EngineAdapter):
 
         for rule in rules:
             try:
-                sql_str = re.sub(r"\bsource\b", tbl_name, rule.sql, flags=re.IGNORECASE)
+                # Same placeholders as the Polars and DuckDB engines: `{dataset}` / `{source}`
+                # were sent to Spark verbatim (PARSE_SYNTAX_ERROR at '{'), then bare `source`.
+                sql_str = rule.sql.replace("{dataset}", tbl_name).replace("{source}", tbl_name)
+                sql_str = re.sub(r"\bsource\b", tbl_name, sql_str, flags=re.IGNORECASE)
                 res = spark.sql(sql_str).collect()
                 val = res[0][0]
 
@@ -278,7 +281,18 @@ class SparkAdapter(EngineAdapter):
                     }
                 )
             except Exception as e:
-                logger.error(f"Error executing dataset rule '{rule.name}': {e}")
+                # Recorded as a FAILED result, not only logged: a rule that could not run was
+                # missing from the results and read as "passed" downstream.
+                first_line = str(e).splitlines()[0] if str(e) else type(e).__name__
+                logger.error(f"Error executing dataset rule '{rule.name}': {first_line}")
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": f"error: {first_line}",
+                        "passed": False,
+                        "description": rule.description,
+                    }
+                )
 
     # OLC cast name -> Spark SQL type. Previously inline and missing decimal, date,
     # timestamp and datetime — and an unmapped cast silently fell back to "string",
