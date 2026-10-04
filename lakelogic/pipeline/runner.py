@@ -3975,7 +3975,8 @@ class LakehousePipeline:
             </svg>
             {node_html}
           </div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px 24px;font-size:0.8rem;font-weight:500;color:{text_main};margin-top:16px;">
+          <div style="display:flex;flex-wrap:wrap;gap:8px 24px;font-size:0.8rem;
+                      font-weight:500;color:{text_main};margin-top:16px;">
             <span>◼ <span style="color:#2dd4bf">External</span></span>
             <span>◼ <span style="color:#67e8f9">Source</span></span>
             <span>◼ <span style="color:#daa520">Bronze</span></span>

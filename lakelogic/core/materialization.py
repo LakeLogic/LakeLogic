@@ -5124,7 +5124,8 @@ def materialize_dataframe(
                                     arrow_data = arrow_data.set_column(i, want, arrow_data.column(i).cast(want.type))
                                 except Exception as col_err:  # noqa: BLE001
                                     logger.warning(
-                                        f"Could not cast column '{want.name}' from {have.type} to {want.type}: {col_err}"
+                                        f"Could not cast column '{want.name}' from {have.type} "
+                                        f"to {want.type}: {col_err}"
                                     )
                 except Exception as e:
                     logger.warning(f"Could not cast arrow schema to contract types: {e}")
