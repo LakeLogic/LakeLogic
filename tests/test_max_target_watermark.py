@@ -38,13 +38,21 @@ def fake_spark(monkeypatch):
         def table(self, name):
             seen["table"] = name
             if name.startswith(("missing", "broken")):
-                raise RuntimeError("PERMISSION_DENIED: no SELECT on table" + chr(10) * 2 + "JVM stacktrace:" + chr(10) + " at org.apache.spark...")
+                raise RuntimeError(
+                    "PERMISSION_DENIED: no SELECT on table"
+                    + chr(10) * 2
+                    + "JVM stacktrace:"
+                    + chr(10)
+                    + " at org.apache.spark..."
+                )
             return _DF(self.value)
 
     spark = _Spark()
     # tableExists is what the watermark read now asks first; "missing*" do not exist,
     # "broken*" exist but fail on read (a real read error, which must still warn).
-    spark.catalog = types.SimpleNamespace(tableExists=lambda n: (seen.setdefault("exists", []).append(n) or not n.startswith("missing")))
+    spark.catalog = types.SimpleNamespace(
+        tableExists=lambda n: (seen.setdefault("exists", []).append(n) or not n.startswith("missing"))
+    )
     sql = types.ModuleType("pyspark.sql")
     sql.SparkSession = types.SimpleNamespace(
         getActiveSession=lambda: spark if seen.get("active", True) else None,
@@ -77,11 +85,12 @@ def test_a_missing_target_is_checked_first_and_logged_as_one_info_line(fake_spar
     one INFO line, no warning, no stack trace."""
     _, seen = fake_spark
     import logging
+
     caplog.set_level(logging.INFO)
     b = IncrementalBoundary.from_max_target("table:missing.silver_x", watermark_field="w")
     assert "fallback_reason" in b.metadata
     assert datetime.now(timezone.utc) - b.from_dt > timedelta(days=89)
-    assert seen["exists"] == ["missing.silver_x"] and "table" not in seen   # never read
+    assert seen["exists"] == ["missing.silver_x"] and "table" not in seen  # never read
     msgs = [r for r in caplog.records if "max_target" in r.getMessage()]
     assert msgs and all(r.levelno == logging.INFO for r in msgs)
     assert "no target table yet" in msgs[0].getMessage()

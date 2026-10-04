@@ -559,9 +559,7 @@ class IncrementalBoundary:
                 from_dt = datetime.now(timezone.utc) - timedelta(days=90)
             if isinstance(exc, _TargetNotReady):
                 # Expected (first run / after a reset): one plain line, no stack trace.
-                logger.info(
-                    f"max_target: {exc} at {target_path!r}; reading from {from_dt.isoformat()}"
-                )
+                logger.info(f"max_target: {exc} at {target_path!r}; reading from {from_dt.isoformat()}")
             else:
                 # Loud, not silent: a wrong target path looked exactly like a first run and
                 # turned every incremental read into a 90-day re-read. First line of the
