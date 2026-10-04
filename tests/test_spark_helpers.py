@@ -537,10 +537,16 @@ def test_spark_dataset_rules_fill_the_dataset_placeholder(monkeypatch):
     contract = DataContract(
         version="1.0.0",
         dataset="gold_dim_rider",
-        quality={"dataset_rules": [
-            {"name": "unknown_rows", "sql": "SELECT COUNT(*) FROM {dataset} WHERE rider_sk = '-1'", "must_be_less_than": 2},
-            {"name": "src", "sql": "SELECT COUNT(*) FROM {source}", "must_be_greater_than": 0},
-        ]},
+        quality={
+            "dataset_rules": [
+                {
+                    "name": "unknown_rows",
+                    "sql": "SELECT COUNT(*) FROM {dataset} WHERE rider_sk = '-1'",
+                    "must_be_less_than": 2,
+                },
+                {"name": "src", "sql": "SELECT COUNT(*) FROM {source}", "must_be_greater_than": 0},
+            ]
+        },
     )
     adapter = SparkAdapter(contract)
     seen = []
