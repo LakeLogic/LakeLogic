@@ -1,0 +1,243 @@
+{
+    "ETag": "E1F83G8C2ARO7P",
+    "DistributionConfig": {
+        "CallerReference": "terraform-20260809234132805200000021",
+        "Aliases": {
+            "Quantity": 2,
+            "Items": [
+                "www.lakelogic.io",
+                "app.lakelogic.io"
+            ]
+        },
+        "DefaultRootObject": "index.html",
+        "Origins": {
+            "Quantity": 2,
+            "Items": [
+                {
+                    "Id": "spa",
+                    "DomainName": "lakelogic-prod-target-spa-206193621776.s3.eu-central-1.amazonaws.com",
+                    "OriginPath": "",
+                    "CustomHeaders": {
+                        "Quantity": 0
+                    },
+                    "S3OriginConfig": {
+                        "OriginAccessIdentity": "",
+                        "OriginReadTimeout": 30
+                    },
+                    "ConnectionAttempts": 3,
+                    "ConnectionTimeout": 10,
+                    "OriginShield": {
+                        "Enabled": false
+                    },
+                    "OriginAccessControlId": "E23JTHB3YOEQAS"
+                },
+                {
+                    "Id": "api",
+                    "DomainName": "lakelogic-prod-tgt-alb-799295321.eu-central-1.elb.amazonaws.com",
+                    "OriginPath": "",
+                    "CustomHeaders": {
+                        "Quantity": 1,
+                        "Items": [
+                            {
+                                "HeaderName": "X-Origin-Verify",
+                                "HeaderValue": "zlkSmK7Q71cak9xJP1sPA2o65DblLCS9"
+                            }
+                        ]
+                    },
+                    "CustomOriginConfig": {
+                        "HTTPPort": 80,
+                        "HTTPSPort": 443,
+                        "OriginProtocolPolicy": "http-only",
+                        "OriginSslProtocols": {
+                            "Quantity": 1,
+                            "Items": [
+                                "TLSv1.2"
+                            ]
+                        },
+                        "OriginReadTimeout": 30,
+                        "OriginKeepaliveTimeout": 5
+                    },
+                    "ConnectionAttempts": 3,
+                    "ConnectionTimeout": 10,
+                    "OriginShield": {
+                        "Enabled": false
+                    },
+                    "OriginAccessControlId": ""
+                }
+            ]
+        },
+        "OriginGroups": {
+            "Quantity": 0
+        },
+        "DefaultCacheBehavior": {
+            "TargetOriginId": "spa",
+            "TrustedSigners": {
+                "Enabled": false,
+                "Quantity": 0
+            },
+            "TrustedKeyGroups": {
+                "Enabled": false,
+                "Quantity": 0
+            },
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": {
+                "Quantity": 3,
+                "Items": [
+                    "HEAD",
+                    "GET",
+                    "OPTIONS"
+                ],
+                "CachedMethods": {
+                    "Quantity": 2,
+                    "Items": [
+                        "HEAD",
+                        "GET"
+                    ]
+                }
+            },
+            "SmoothStreaming": false,
+            "Compress": false,
+            "LambdaFunctionAssociations": {
+                "Quantity": 0
+            },
+            "FunctionAssociations": {
+                "Quantity": 1,
+                "Items": [
+                    {
+                        "FunctionARN": "arn:aws:cloudfront::206193621776:function/lakelogic-prod-spa-rewrite",
+                        "EventType": "viewer-request"
+                    }
+                ]
+            },
+            "FieldLevelEncryptionId": "",
+            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "GrpcConfig": {
+                "Enabled": false
+            }
+        },
+        "CacheBehaviors": {
+            "Quantity": 2,
+            "Items": [
+                {
+                    "PathPattern": "/api/*",
+                    "TargetOriginId": "api",
+                    "TrustedSigners": {
+                        "Enabled": false,
+                        "Quantity": 0
+                    },
+                    "TrustedKeyGroups": {
+                        "Enabled": false,
+                        "Quantity": 0
+                    },
+                    "ViewerProtocolPolicy": "https-only",
+                    "AllowedMethods": {
+                        "Quantity": 7,
+                        "Items": [
+                            "HEAD",
+                            "DELETE",
+                            "POST",
+                            "GET",
+                            "OPTIONS",
+                            "PUT",
+                            "PATCH"
+                        ],
+                        "CachedMethods": {
+                            "Quantity": 2,
+                            "Items": [
+                                "HEAD",
+                                "GET"
+                            ]
+                        }
+                    },
+                    "SmoothStreaming": false,
+                    "Compress": false,
+                    "LambdaFunctionAssociations": {
+                        "Quantity": 0
+                    },
+                    "FunctionAssociations": {
+                        "Quantity": 0
+                    },
+                    "FieldLevelEncryptionId": "",
+                    "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+                    "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+                    "GrpcConfig": {
+                        "Enabled": false
+                    }
+                },
+                {
+                    "PathPattern": "/health*",
+                    "TargetOriginId": "api",
+                    "TrustedSigners": {
+                        "Enabled": false,
+                        "Quantity": 0
+                    },
+                    "TrustedKeyGroups": {
+                        "Enabled": false,
+                        "Quantity": 0
+                    },
+                    "ViewerProtocolPolicy": "https-only",
+                    "AllowedMethods": {
+                        "Quantity": 3,
+                        "Items": [
+                            "HEAD",
+                            "GET",
+                            "OPTIONS"
+                        ],
+                        "CachedMethods": {
+                            "Quantity": 2,
+                            "Items": [
+                                "HEAD",
+                                "GET"
+                            ]
+                        }
+                    },
+                    "SmoothStreaming": false,
+                    "Compress": false,
+                    "LambdaFunctionAssociations": {
+                        "Quantity": 0
+                    },
+                    "FunctionAssociations": {
+                        "Quantity": 0
+                    },
+                    "FieldLevelEncryptionId": "",
+                    "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+                    "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+                    "GrpcConfig": {
+                        "Enabled": false
+                    }
+                }
+            ]
+        },
+        "CustomErrorResponses": {
+            "Quantity": 0
+        },
+        "Comment": "lakelogic-prod target edge",
+        "Logging": {
+            "Enabled": false,
+            "IncludeCookies": false,
+            "Bucket": "",
+            "Prefix": ""
+        },
+        "PriceClass": "PriceClass_All",
+        "Enabled": true,
+        "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": false,
+            "ACMCertificateArn": "arn:aws:acm:us-east-1:206193621776:certificate/ca990b69-e6b2-43e0-8f91-913fd129add8",
+            "SSLSupportMethod": "sni-only",
+            "MinimumProtocolVersion": "TLSv1.2_2021",
+            "Certificate": "arn:aws:acm:us-east-1:206193621776:certificate/ca990b69-e6b2-43e0-8f91-913fd129add8",
+            "CertificateSource": "acm"
+        },
+        "Restrictions": {
+            "GeoRestriction": {
+                "RestrictionType": "none",
+                "Quantity": 0
+            }
+        },
+        "WebACLId": "arn:aws:wafv2:us-east-1:206193621776:global/webacl/lakelogic-prod-target-cf-waf/40276a7d-4cb8-4072-a078-7f28e966ee72",
+        "HttpVersion": "http2",
+        "IsIPV6Enabled": false,
+        "ContinuousDeploymentPolicyId": "",
+        "Staging": false
+    }
+}

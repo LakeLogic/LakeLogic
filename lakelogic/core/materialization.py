@@ -1731,7 +1731,6 @@ def _inject_unknown_member_spark(  # pragma: no cover
     Idempotent: skips if the row already exists (matched by SK value).
     """
     from pyspark.sql import functions as F
-    from pyspark.sql import Row
 
     if unknown_cfg.get("enabled", True) is False:
         return result
@@ -1834,15 +1833,11 @@ def _inject_unknown_member_spark(  # pragma: no cover
                     val = effective_from_default
             unknown_row[col] = val
 
-    unknown_df = spark.createDataFrame([Row(**unknown_row)])
-
-    # Align schema: cast columns to match result schema
-    for field in result.schema:
-        if field.name in unknown_df.columns:
-            unknown_df = unknown_df.withColumn(field.name, F.col(field.name).cast(field.dataType))
-        else:
-            unknown_df = unknown_df.withColumn(field.name, F.lit(None).cast(field.dataType))
-    unknown_df = unknown_df.select(*[c.name for c in result.schema])
+    # One typed literal per column of the result schema - no type inference, so a None
+    # attribute can't raise CANNOT_DETERMINE_TYPE (see _inject_unknown_member_spark_table).
+    unknown_df = spark.range(1).select(
+        *[F.lit(unknown_row.get(field.name)).cast(field.dataType).alias(field.name) for field in result.schema]
+    )
 
     result = result.union(unknown_df)
     logger.info(f"Injected unknown member row (SK={sk_value}) into dimension")
@@ -1863,7 +1858,6 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
     function is called. Reads the existing table schema to build the row.
     """
     from pyspark.sql import functions as F
-    from pyspark.sql import Row
 
     # `enabled` defaults to True here, as it does at every other one of the eleven
     # read sites. This path alone read it as `if not unknown_cfg.get("enabled")`, so a
@@ -1935,13 +1929,13 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
         else:
             unknown_row[col] = None
 
-    unknown_df = spark.createDataFrame([Row(**unknown_row)])
-    for field in existing.schema:
-        if field.name in unknown_df.columns:
-            unknown_df = unknown_df.withColumn(field.name, F.col(field.name).cast(field.dataType))
-        else:
-            unknown_df = unknown_df.withColumn(field.name, F.lit(None).cast(field.dataType))
-    unknown_df = unknown_df.select(*[c.name for c in existing.schema])
+    # Built from the target's own types, one literal per column: createDataFrame([Row(...)])
+    # had to INFER each type, and a column that is None in the unknown row (most attributes)
+    # has none to infer - CANNOT_DETERMINE_TYPE, failing the gold run whenever enough
+    # columns were None (intermittent: it depended on the generated row).
+    unknown_df = spark.range(1).select(
+        *[F.lit(unknown_row.get(field.name)).cast(field.dataType).alias(field.name) for field in existing.schema]
+    )
 
     # Append the unknown member row
     unknown_df.write.format("delta").mode("append").saveAsTable(table_name)

@@ -519,6 +519,11 @@ class IncrementalBoundary:
             if spark is None:
                 raise RuntimeError("No active Spark session")
 
+            # Check the target exists before reading it: a first run, or a run after
+            # reset_layers dropped the table, is expected - not an error worth a JVM trace.
+            if not _target_exists(spark, str(target_path)):
+                raise _TargetNotReady("no target table yet (first run or reset)")
+
             if str(target_path).startswith("table:"):
                 df = spark.table(target_path[6:])
             else:
@@ -526,7 +531,7 @@ class IncrementalBoundary:
             max_val = df.agg(F.max(watermark_field)).collect()[0][0]
 
             if max_val is None:
-                raise ValueError("Target table is empty")
+                raise _TargetNotReady("target table is empty")
 
             # Convert to datetime
             if isinstance(max_val, datetime):
@@ -552,12 +557,20 @@ class IncrementalBoundary:
                 from_dt = datetime.fromisoformat(default_from) if isinstance(default_from, str) else default_from
             else:
                 from_dt = datetime.now(timezone.utc) - timedelta(days=90)
-            # Loud, not silent: a wrong target path looked exactly like a first run and
-            # turned every incremental read into a 90-day re-read.
-            logger.warning(
-                f"max_target: could not read the watermark from {target_path!r} ({exc}); "
-                f"reading from {from_dt.isoformat()} instead"
-            )
+            if isinstance(exc, _TargetNotReady):
+                # Expected (first run / after a reset): one plain line, no stack trace.
+                logger.info(
+                    f"max_target: {exc} at {target_path!r}; reading from {from_dt.isoformat()}"
+                )
+            else:
+                # Loud, not silent: a wrong target path looked exactly like a first run and
+                # turned every incremental read into a 90-day re-read. First line of the
+                # error only - the JVM trace buried the message.
+                logger.warning(
+                    f"max_target: could not read the watermark from {target_path!r} "
+                    f"({str(exc).splitlines()[0] if str(exc) else type(exc).__name__}); "
+                    f"reading from {from_dt.isoformat()} instead"
+                )
             meta = {"fallback_reason": str(exc), "target_path": target_path}
 
         _to = to_dt or datetime.now(timezone.utc)
@@ -1352,3 +1365,20 @@ class IncrementalBoundary:
         b = cls.from_max_target(cfg.get("target_path", ""), watermark_field=wm_field)
         b.partition_filters = merged_pf
         return b
+
+
+class _TargetNotReady(Exception):
+    """The max_target watermark target does not exist yet, or holds no rows."""
+
+
+def _target_exists(spark, target_path: str) -> bool:
+    """True when the watermark target exists: a `table:` name via the catalog, a path via
+    Delta. An error while checking returns True, so the read runs and reports it."""
+    try:
+        if target_path.startswith("table:"):
+            return bool(spark.catalog.tableExists(target_path[6:]))
+        from delta.tables import DeltaTable
+
+        return bool(DeltaTable.isDeltaTable(spark, target_path))
+    except Exception:  # noqa: BLE001 - unknown: let the read decide
+        return True

@@ -1162,6 +1162,10 @@ def test_inject_unknown_member_spark_and_table_paths(monkeypatch):
         def cast(self, dtype):
             return self
 
+        def alias(self, name):
+            self.name = name
+            return self
+
         def __eq__(self, other):
             return ("eq", self.value, other)
 
@@ -1226,6 +1230,19 @@ def test_inject_unknown_member_spark_and_table_paths(monkeypatch):
             created_rows.append(rows[0])
             self.last_created = FakeUnknownDF(rows, self.schema)
             return self.last_created
+
+        def range(self, n):
+            # The unknown row is now one typed literal per column on a one-row frame.
+            spark = self
+
+            class _One:
+                def select(self, *exprs):
+                    row = {e.name: e.value for e in exprs}
+                    created_rows.append(row)
+                    spark.last_created = FakeUnknownDF([row], spark.schema)
+                    return spark.last_created
+
+            return _One()
 
         def table(self, table_name):
             return existing
