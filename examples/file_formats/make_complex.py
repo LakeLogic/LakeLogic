@@ -1,7 +1,12 @@
 """Writes the complex samples into data/: nested JSON, nested XML, a multi-tab Excel."""
 
+import gzip
 import json
+import zipfile
 from pathlib import Path
+
+import openpyxl
+import polars as pl
 
 D = Path(__file__).parent / "data"
 D.mkdir(exist_ok=True)
@@ -50,7 +55,6 @@ orders = [
 </export>
 """)
 
-import openpyxl
 
 wb = openpyxl.Workbook()
 ws = wb.active
@@ -82,8 +86,6 @@ print("wrote", sorted(p.name for p in D.iterdir()))
 )
 
 # ── Compressed: .gz (one file) and .zip (several, plus a file to ignore) ─────────
-import gzip
-import zipfile
 
 csv_text = "order_id,customer,amount\n8001,Ada,10.5\n8002,Bo,n/a\n8003,Cy,7\n"  # 8002: bad amount
 with gzip.open(D / "orders.csv.gz", "wt", encoding="utf-8") as fh:
@@ -105,7 +107,6 @@ with zipfile.ZipFile(D / "orders_bundle.zip", "w", zipfile.ZIP_DEFLATED) as zf:
 )
 
 # ── Avro (Kafka / Debezium style): typed, with a nested record and an array ─────
-import polars as pl
 
 pl.DataFrame(
     {

@@ -4080,7 +4080,8 @@ class DataProcessor:
                                     logger.warning("⚠ Contract model.fields found but produced 0 Spark fields")
                             elif _fields_list:
                                 logger.info(
-                                    f"✅ Contract schema exists but bypassed for native '{fmt}' format schema inference."
+                                    f"✅ Contract schema exists but bypassed for native '{fmt}' "
+                                    "format schema inference."
                                 )
                             else:
                                 logger.warning("⚠ No contract model.fields found — Spark will infer schema")

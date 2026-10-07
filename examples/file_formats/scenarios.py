@@ -136,7 +136,10 @@ def summary() -> pl.DataFrame:
 
 
 def src(fmt: str, extra: str = "", path: str = "{path}") -> str:
-    return f'version: "1.0"\ninfo: {{title: scenario}}\nsource:\n  type: landing\n  path: "{path}"\n  format: {fmt}\n{extra}'
+    return (
+        f'version: "1.0"\ninfo: {{title: scenario}}\n'
+        f'source:\n  type: landing\n  path: "{path}"\n  format: {fmt}\n{extra}'
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -286,7 +289,8 @@ model:
         "xml",
         "records buried at different depths: row_tag",
         {
-            "o.xml": '<feed><meta><order id="9"><customer>Meta</customer></order></meta><batch><order id="1"><customer>Ada</customer>'
+            "o.xml": '<feed><meta><order id="9"><customer>Meta</customer></order></meta>'
+            '<batch><order id="1"><customer>Ada</customer>'
             "<items><item><sku>A</sku><qty>1</qty></item></items></order></batch></feed>"
         },
         contract.replace("  flatten_nested: true", "  flatten_nested: true\n  options: {row_tag: order}"),
@@ -572,7 +576,10 @@ model:
     - {name: sort_code, range: [1, 7], type: string, required: true}
     - {name: amount_pence, range: [7, 15], type: long, required: true}
 """
-    fw = lambda extra="": src("fixed_width", "  record_length: 15\n" + extra) + layout
+
+    def fw(extra=""):
+        return src("fixed_width", "  record_length: 15\n" + extra) + layout
+
     scenario(
         "fixed_width",
         "a record cut short",
