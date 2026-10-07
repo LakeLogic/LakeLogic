@@ -323,7 +323,9 @@ def _xls_rows(path: str, sheet: Optional[str]) -> List[tuple]:
     try:
         import xlrd
     except ImportError as exc:
-        raise ImportError("Reading .xls files needs xlrd: pip install 'lakelogic[polars]' (or pip install xlrd)") from exc
+        raise ImportError(
+            "Reading .xls files needs xlrd: pip install 'lakelogic[polars]' (or pip install xlrd)"
+        ) from exc
 
     book = xlrd.open_workbook(path)
     names = book.sheet_names()
@@ -384,7 +386,7 @@ def _read_excel_polars(path: str, options: Optional[Dict[str, Any]] = None) -> A
     if len(rows) < header_row:
         return pl.DataFrame()
     header = [str(h).strip() if h is not None else f"column_{i + 1}" for i, h in enumerate(rows[header_row - 1])]
-    body = rows[header_row:len(rows) - skip_footer if skip_footer else None]
+    body = rows[header_row : len(rows) - skip_footer if skip_footer else None]
     body = [r for r in body if any(v is not None and str(v).strip() != "" for v in r)]
 
     def _text(v: Any) -> Optional[str]:
@@ -494,11 +496,11 @@ def _read_fixed_width(
             data = fh.read()
     text = data.decode(encoding)
     if record_length and "\n" not in text and "\r" not in text:
-        records = [text[i:i + record_length] for i in range(0, len(text), record_length)]
+        records = [text[i : i + record_length] for i in range(0, len(text), record_length)]
     else:
         records = text.splitlines()
     skip_rows, skip_footer = int(opts.get("skip_rows") or 0), int(opts.get("skip_footer") or 0)
-    records = records[skip_rows:len(records) - skip_footer if skip_footer else None]
+    records = records[skip_rows : len(records) - skip_footer if skip_footer else None]
     records = [r for r in records if r.strip()]
 
     rec = pl.col("_record")
@@ -602,7 +604,8 @@ def _apply_decimal_comma(df: Any, contract: Any) -> Any:
     numeric = {
         getattr(f, "name", None)
         for f in fields
-        if str(getattr(f, "type", "")).lower().split("(")[0] in {"float", "double", "decimal", "number", "numeric", "real"}
+        if str(getattr(f, "type", "")).lower().split("(")[0]
+        in {"float", "double", "decimal", "number", "numeric", "real"}
     }
     cols = [c for c in df.columns if c in numeric and df.schema[c] == pl.Utf8]
     if not cols:
@@ -613,10 +616,23 @@ def _apply_decimal_comma(df: Any, contract: Any) -> Any:
 
 
 _JAVA_CHARSETS = {
-    "utf-8": "UTF-8", "utf-16": "UTF-16", "ascii": "US-ASCII", "iso8859-1": "ISO-8859-1",
-    "iso8859-15": "ISO-8859-15", "cp1252": "windows-1252", "cp1250": "windows-1250", "cp037": "IBM037",
-    "cp500": "IBM500", "cp437": "IBM437", "cp850": "IBM850", "shift_jis": "Shift_JIS", "euc_jp": "EUC-JP",
-    "gbk": "GBK", "gb2312": "GB2312", "big5": "Big5", "koi8-r": "KOI8-R",
+    "utf-8": "UTF-8",
+    "utf-16": "UTF-16",
+    "ascii": "US-ASCII",
+    "iso8859-1": "ISO-8859-1",
+    "iso8859-15": "ISO-8859-15",
+    "cp1252": "windows-1252",
+    "cp1250": "windows-1250",
+    "cp037": "IBM037",
+    "cp500": "IBM500",
+    "cp437": "IBM437",
+    "cp850": "IBM850",
+    "shift_jis": "Shift_JIS",
+    "euc_jp": "EUC-JP",
+    "gbk": "GBK",
+    "gb2312": "GB2312",
+    "big5": "Big5",
+    "koi8-r": "KOI8-R",
 }
 
 
@@ -641,12 +657,12 @@ def _first_bytes_are_text(path: str, encoding: str, opener: Any = None, size: in
     import codecs
 
     try:
-        with (opener(path) if opener else open(path, "rb")) as fh:
+        with opener(path) if opener else open(path, "rb") as fh:
             head = fh.read(size)
         codecs.getincrementaldecoder(encoding)(errors="strict").decode(head, final=len(head) < size)
     except UnicodeDecodeError as exc:
         return (
-            f"{path} is not valid {encoding} (byte {exc.start}: {head[exc.start:exc.start + 4]!r}). "
+            f"{path} is not valid {encoding} (byte {exc.start}: {head[exc.start : exc.start + 4]!r}). "
             "Declare the file's encoding: source.options.encoding (e.g. latin-1, cp1252)."
         )
     except Exception:
@@ -685,8 +701,16 @@ def _spark_csv_options(options: Dict[str, Any]) -> Dict[str, str]:
 def _java_to_strftime(fmt: str) -> str:
     """A Spark/Java date pattern (``yyyyMMdd``) as strftime (``%Y%m%d``) — the form contracts use."""
     out = str(fmt)
-    for java, py in (("yyyy", "%Y"), ("yy", "%y"), ("MM", "%m"), ("dd", "%d"), ("HH", "%H"), ("mm", "%M"),
-                     ("ss", "%S"), ("SSS", "%3f")):
+    for java, py in (
+        ("yyyy", "%Y"),
+        ("yy", "%y"),
+        ("MM", "%m"),
+        ("dd", "%d"),
+        ("HH", "%H"),
+        ("mm", "%M"),
+        ("ss", "%S"),
+        ("SSS", "%3f"),
+    ):
         out = out.replace(java, py)
     return out
 
@@ -713,7 +737,8 @@ def _apply_landing_text_options(df: Any, contract: Any, engine: str) -> Any:
         numeric = {
             getattr(f, "name", None)
             for f in (getattr(getattr(contract, "model", None), "fields", None) or [])
-            if str(getattr(f, "type", "")).lower().split("(")[0] in {"float", "double", "decimal", "number", "numeric", "real"}
+            if str(getattr(f, "type", "")).lower().split("(")[0]
+            in {"float", "double", "decimal", "number", "numeric", "real"}
         }
     if not (implied or dates or numeric) or df is None:
         return df
@@ -728,12 +753,14 @@ def _apply_landing_text_options(df: Any, contract: Any, engine: str) -> Any:
         for c, n in implied.items():
             if c in string_cols:
                 t = F.trim(F.col(c))
-                scaled = (F.expr(f"CAST(TRIM(`{c}`) AS DECIMAL(38,0))") / F.lit(10 ** n)).cast(f"decimal(38,{n})")
+                scaled = (F.expr(f"CAST(TRIM(`{c}`) AS DECIMAL(38,0))") / F.lit(10**n)).cast(f"decimal(38,{n})")
                 df = df.withColumn(c, F.when(t.rlike(r"^[+-]?[0-9]+$"), scaled.cast("string")).otherwise(F.col(c)))
         for c, fmt in dates.items():
             if c in cols:
                 parsed = F.to_date(F.trim(F.col(c).cast("string")), str(fmt))
-                df = df.withColumn(c, F.when(parsed.isNotNull(), F.date_format(parsed, "yyyy-MM-dd")).otherwise(F.col(c)))
+                df = df.withColumn(
+                    c, F.when(parsed.isNotNull(), F.date_format(parsed, "yyyy-MM-dd")).otherwise(F.col(c))
+                )
         return df
 
     import polars as pl
@@ -813,7 +840,9 @@ def _decompress_local(
                 ]
                 if pattern:
                     members = [
-                        m for m in members if fnmatch.fnmatch(m, pattern) or fnmatch.fnmatch(os.path.basename(m), pattern)
+                        m
+                        for m in members
+                        if fnmatch.fnmatch(m, pattern) or fnmatch.fnmatch(os.path.basename(m), pattern)
                     ]
                 else:
                     # No pattern: take the files of the contract's format, so a README or a
@@ -822,7 +851,9 @@ def _decompress_local(
                     if exts:
                         members = [m for m in members if m.lower().endswith(exts)]
                 if not members:
-                    raise ValueError(f"No files in {p} match archive_member={pattern!r}; it holds: {zf.namelist()[:20]}")
+                    raise ValueError(
+                        f"No files in {p} match archive_member={pattern!r}; it holds: {zf.namelist()[:20]}"
+                    )
                 for m in sorted(members):
                     target = _target(m)
                     with zf.open(m) as src, open(target, "wb") as dst:
@@ -834,8 +865,9 @@ def _decompress_local(
     return out, origin
 
 
-def _archive_structure_check(paths: List[str], origin: Dict[str, str], fmt: Optional[str],
-                             options: Optional[Dict[str, Any]] = None) -> Optional[str]:
+def _archive_structure_check(
+    paths: List[str], origin: Dict[str, str], fmt: Optional[str], options: Optional[Dict[str, Any]] = None
+) -> Optional[str]:
     """A warning when the files unpacked from one archive do not share one set of columns.
 
     Several files are combined BY COLUMN NAME, so a file missing a column contributes nulls
@@ -975,9 +1007,15 @@ def _polars_to_spark(spark: Any, df: Any) -> Any:
     from pyspark.sql import types as T
 
     mapping = {
-        pl.Utf8: T.StringType(), pl.Int64: T.LongType(), pl.Int32: T.IntegerType(), pl.Int16: T.ShortType(),
-        pl.Int8: T.ByteType(), pl.Float64: T.DoubleType(), pl.Float32: T.FloatType(),
-        pl.Boolean: T.BooleanType(), pl.Date: T.DateType(),
+        pl.Utf8: T.StringType(),
+        pl.Int64: T.LongType(),
+        pl.Int32: T.IntegerType(),
+        pl.Int16: T.ShortType(),
+        pl.Int8: T.ByteType(),
+        pl.Float64: T.DoubleType(),
+        pl.Float32: T.FloatType(),
+        pl.Boolean: T.BooleanType(),
+        pl.Date: T.DateType(),
     }
     fields, casts = [], []
     for c, t in df.schema.items():
@@ -2788,9 +2826,13 @@ class DataProcessor:
             _cands = file_paths or (
                 [str(path)] if isinstance(path, str) and not self._is_uri_path(path) and os.path.isfile(path) else []
             )
-            if not _cands and file_paths is None and isinstance(path, str) and self._is_uri_path(path) and str(
-                path
-            ).lower().endswith((".gz", ".zip")):
+            if (
+                not _cands
+                and file_paths is None
+                and isinstance(path, str)
+                and self._is_uri_path(path)
+                and str(path).lower().endswith((".gz", ".zip"))
+            ):
                 _cands = [str(path)]
             if any(str(c).lower().endswith((".gz", ".zip")) for c in _cands):
                 # Cloud archives are copied to a temp folder first (removed after the load).
@@ -2801,7 +2843,10 @@ class DataProcessor:
                     getattr(getattr(self.contract, "source", None), "format", None),
                 )
                 self._unpacked_origin = {
-                    k: (_fetched.get(v.split("!", 1)[0], v.split("!", 1)[0]) + ("!" + v.split("!", 1)[1] if "!" in v else ""))
+                    k: (
+                        _fetched.get(v.split("!", 1)[0], v.split("!", 1)[0])
+                        + ("!" + v.split("!", 1)[1] if "!" in v else "")
+                    )
                     for k, v in self._unpacked_origin.items()
                 }
                 self._fetched_copies = list(_fetched)
@@ -2813,10 +2858,9 @@ class DataProcessor:
                 )
                 if _structure:
                     logger.warning(_structure)
-                _folders = sorted({
-                    os.path.dirname(v.split("!", 1)[1]) or "."
-                    for v in self._unpacked_origin.values() if "!" in v
-                })
+                _folders = sorted(
+                    {os.path.dirname(v.split("!", 1)[1]) or "." for v in self._unpacked_origin.values() if "!" in v}
+                )
                 if len(_folders) > 1:
                     logger.info(f"Archive members come from {len(_folders)} folders: {_folders}")
                 # Downstream format detection looks at the path's extension: point it at
@@ -3023,8 +3067,20 @@ class DataProcessor:
                                 # cast downstream, instead of aborting the whole
                                 # ingest with a Polars parse error. infer_schema_length=0
                                 # makes Polars default all columns to Utf8.
-                                _csv_read_opts = {**_read_opts, "infer_schema_length": 0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))}
-                                _csv_scan_kw = {**_scan_kw, "infer_schema_length": 0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None), lazy=True)}
+                                _csv_read_opts = {
+                                    **_read_opts,
+                                    "infer_schema_length": 0,
+                                    **_csv_read_kwargs(
+                                        getattr(getattr(self.contract, "source", None), "options", None)
+                                    ),
+                                }
+                                _csv_scan_kw = {
+                                    **_scan_kw,
+                                    "infer_schema_length": 0,
+                                    **_csv_read_kwargs(
+                                        getattr(getattr(self.contract, "source", None), "options", None), lazy=True
+                                    ),
+                                }
                                 if _is_local:
                                     # Eager read — bypasses Polars' internal
                                     # path canonicalisation which breaks on
@@ -3032,13 +3088,25 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
                                             [
-                                                pl.read_csv(p, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))).with_columns(_file_cols(p))
+                                                pl.read_csv(
+                                                    p,
+                                                    infer_schema_length=0,
+                                                    **_csv_read_kwargs(
+                                                        getattr(getattr(self.contract, "source", None), "options", None)
+                                                    ),
+                                                ).with_columns(_file_cols(p))
                                                 for p in file_paths
                                             ],
                                             how=_concat_how,
                                         )
                                     else:
-                                        df = pl.read_csv(file_paths[0], infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
+                                        df = pl.read_csv(
+                                            file_paths[0],
+                                            infer_schema_length=0,
+                                            **_csv_read_kwargs(
+                                                getattr(getattr(self.contract, "source", None), "options", None)
+                                            ),
+                                        )
                                 else:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
@@ -3118,34 +3186,76 @@ class DataProcessor:
 
                             if len(file_paths) == 1:
                                 fp = file_paths[0]
-                                if (fp.endswith('.avro') or str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'avro'):
+                                if (
+                                    fp.endswith(".avro")
+                                    or str(getattr(getattr(self.contract, "source", None), "format", "") or "").lower()
+                                    == "avro"
+                                ):
                                     df = _read_avro_records(fp)
-                                elif str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'fixed_width':
+                                elif (
+                                    str(getattr(getattr(self.contract, "source", None), "format", "") or "").lower()
+                                    == "fixed_width"
+                                ):
                                     df = self._read_fixed_width_source(fp)
                                 elif fp.endswith(".xml"):
-                                    df = _read_xml_records(fp, getattr(getattr(self.contract, 'source', None), 'options', None))
+                                    df = _read_xml_records(
+                                        fp, getattr(getattr(self.contract, "source", None), "options", None)
+                                    )
                                 elif fp.endswith((".xlsx", ".xls")):
-                                    df = _read_excel_polars(fp, getattr(getattr(self.contract, 'source', None), 'options', None))
+                                    df = _read_excel_polars(
+                                        fp, getattr(getattr(self.contract, "source", None), "options", None)
+                                    )
                                 elif fp.endswith(".json"):
                                     df = _read_json_flat(fp)
                                 else:
                                     # raw landing CSV → read all-string (see note above)
-                                    df = pl.read_csv(fp, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
+                                    df = pl.read_csv(
+                                        fp,
+                                        infer_schema_length=0,
+                                        **_csv_read_kwargs(
+                                            getattr(getattr(self.contract, "source", None), "options", None)
+                                        ),
+                                    )
                             else:
                                 frames = []
                                 for fp in file_paths:
-                                    if (fp.endswith('.avro') or str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'avro'):
+                                    if (
+                                        fp.endswith(".avro")
+                                        or str(
+                                            getattr(getattr(self.contract, "source", None), "format", "") or ""
+                                        ).lower()
+                                        == "avro"
+                                    ):
                                         frames.append(_read_avro_records(fp))
-                                    elif str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'fixed_width':
+                                    elif (
+                                        str(getattr(getattr(self.contract, "source", None), "format", "") or "").lower()
+                                        == "fixed_width"
+                                    ):
                                         frames.append(self._read_fixed_width_source(fp))
                                     elif fp.endswith(".xml"):
-                                        frames.append(_read_xml_records(fp, getattr(getattr(self.contract, 'source', None), 'options', None)))
+                                        frames.append(
+                                            _read_xml_records(
+                                                fp, getattr(getattr(self.contract, "source", None), "options", None)
+                                            )
+                                        )
                                     elif fp.endswith((".xlsx", ".xls")):
-                                        frames.append(_read_excel_polars(fp, getattr(getattr(self.contract, 'source', None), 'options', None)))
+                                        frames.append(
+                                            _read_excel_polars(
+                                                fp, getattr(getattr(self.contract, "source", None), "options", None)
+                                            )
+                                        )
                                     elif fp.endswith(".json"):
                                         frames.append(_read_json_flat(fp))
                                     else:
-                                        frames.append(pl.read_csv(fp, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))))
+                                        frames.append(
+                                            pl.read_csv(
+                                                fp,
+                                                infer_schema_length=0,
+                                                **_csv_read_kwargs(
+                                                    getattr(getattr(self.contract, "source", None), "options", None)
+                                                ),
+                                            )
+                                        )
                                 df = pl.concat(frames, how="diagonal_relaxed")  # coerce type conflicts across files
 
                     else:
@@ -3371,12 +3481,36 @@ class DataProcessor:
                                         # that breaks on Windows drive letters.
                                         if not self._is_uri_path(path):
                                             df = pl.concat(
-                                                [pl.read_csv(p, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))) for p in _resolved],
+                                                [
+                                                    pl.read_csv(
+                                                        p,
+                                                        infer_schema_length=0,
+                                                        **_csv_read_kwargs(
+                                                            getattr(
+                                                                getattr(self.contract, "source", None), "options", None
+                                                            )
+                                                        ),
+                                                    )
+                                                    for p in _resolved
+                                                ],
                                                 how="diagonal_relaxed",
                                             )
                                         else:
                                             lf = pl.concat(
-                                                [pl.scan_csv(p, glob=False, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None), lazy=True)) for p in _resolved],
+                                                [
+                                                    pl.scan_csv(
+                                                        p,
+                                                        glob=False,
+                                                        infer_schema_length=0,
+                                                        **_csv_read_kwargs(
+                                                            getattr(
+                                                                getattr(self.contract, "source", None), "options", None
+                                                            ),
+                                                            lazy=True,
+                                                        ),
+                                                    )
+                                                    for p in _resolved
+                                                ],
                                                 how="diagonal_relaxed",
                                             )
                                             df = lf.collect()
@@ -3401,9 +3535,23 @@ class DataProcessor:
                                         df = lf.collect()
                                     else:
                                         if not self._is_uri_path(path):
-                                            df = pl.read_csv(path, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
+                                            df = pl.read_csv(
+                                                path,
+                                                infer_schema_length=0,
+                                                **_csv_read_kwargs(
+                                                    getattr(getattr(self.contract, "source", None), "options", None)
+                                                ),
+                                            )
                                         else:
-                                            lf = pl.scan_csv(path, glob=False, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None), lazy=True))
+                                            lf = pl.scan_csv(
+                                                path,
+                                                glob=False,
+                                                infer_schema_length=0,
+                                                **_csv_read_kwargs(
+                                                    getattr(getattr(self.contract, "source", None), "options", None),
+                                                    lazy=True,
+                                                ),
+                                            )
                                             df = lf.collect()
                                 except Exception as e:
                                     if (
@@ -3462,20 +3610,37 @@ class DataProcessor:
                                         for r in rows
                                     ]
                                     df = pl.DataFrame(flat)
-                            elif (path.endswith('.avro') or str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'avro'):
+                            elif (
+                                path.endswith(".avro")
+                                or str(getattr(getattr(self.contract, "source", None), "format", "") or "").lower()
+                                == "avro"
+                            ):
                                 df = _read_avro_records(path)
-                            elif str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'fixed_width':
+                            elif (
+                                str(getattr(getattr(self.contract, "source", None), "format", "") or "").lower()
+                                == "fixed_width"
+                            ):
                                 df = self._read_fixed_width_source(path)
                             elif path.endswith(".xml"):
-                                df = _read_xml_records(path, getattr(getattr(self.contract, 'source', None), 'options', None))
+                                df = _read_xml_records(
+                                    path, getattr(getattr(self.contract, "source", None), "options", None)
+                                )
                             elif path.endswith((".xlsx", ".xls")):
-                                df = _read_excel_polars(path, getattr(getattr(self.contract, 'source', None), 'options', None))
+                                df = _read_excel_polars(
+                                    path, getattr(getattr(self.contract, "source", None), "options", None)
+                                )
                             else:
                                 # Raw landing CSV → all Utf8 (infer_schema_length=0),
                                 # consistent with the primary CSV path above: malformed
                                 # values pass through and are quarantined at the typed
                                 # cast downstream instead of aborting the read.
-                                df = pl.read_csv(path, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
+                                df = pl.read_csv(
+                                    path,
+                                    infer_schema_length=0,
+                                    **_csv_read_kwargs(
+                                        getattr(getattr(self.contract, "source", None), "options", None)
+                                    ),
+                                )
 
             elif self.engine_name == "spark":  # pragma: no cover
                 from pyspark.sql import SparkSession
@@ -3794,7 +3959,9 @@ class DataProcessor:
                             reader = spark.read.format(fmt)
                             if fmt == "csv":
                                 _csv_o = getattr(self.contract.source, "options", None) or {}
-                                reader = reader.option("header", "false" if _csv_o.get("has_header") is False else "true")
+                                reader = reader.option(
+                                    "header", "false" if _csv_o.get("has_header") is False else "true"
+                                )
                                 for _k, _v in _spark_csv_options(_csv_o).items():
                                     reader = reader.option(_k, _v)
                             elif fmt == "json":
@@ -3884,7 +4051,9 @@ class DataProcessor:
                                 spark_fields = []
                                 for f in _fields_list:
                                     fname = f.get("name") if isinstance(f, dict) else getattr(f, "name", None)
-                                    ftype = f.get("type", "string") if isinstance(f, dict) else getattr(f, "type", "string")
+                                    ftype = (
+                                        f.get("type", "string") if isinstance(f, dict) else getattr(f, "type", "string")
+                                    )
                                     if isinstance(f, dict):
                                         freq = f.get("required", False)
                                     else:
@@ -3904,7 +4073,9 @@ class DataProcessor:
                                 if spark_fields:
                                     schema = StructType(spark_fields)
                                     reader = reader.schema(schema)
-                                    logger.info(f"✅ Applied contract schema ({len(spark_fields)} fields) to Spark reader")
+                                    logger.info(
+                                        f"✅ Applied contract schema ({len(spark_fields)} fields) to Spark reader"
+                                    )
                                 else:
                                     logger.warning("⚠ Contract model.fields found but produced 0 Spark fields")
                             elif _fields_list:
@@ -4043,7 +4214,9 @@ class DataProcessor:
                     pass
             import shutil as _shutil
 
-            for _tmp_dir in {os.path.dirname(t) for t in list(self._unpacked_origin) + getattr(self, "_fetched_copies", [])}:
+            for _tmp_dir in {
+                os.path.dirname(t) for t in list(self._unpacked_origin) + getattr(self, "_fetched_copies", [])
+            }:
                 _shutil.rmtree(_tmp_dir, ignore_errors=True)
         result = self.run(df, source_path=path, reset_trace=False)
 
@@ -4238,7 +4411,6 @@ class DataProcessor:
         is not projected. That is bounded and reported, unlike the previous behaviour
         of dropping the whole operation without a word.
         """
-        import json as _json
 
         from pyspark.sql import functions as F
 
@@ -4487,9 +4659,7 @@ class DataProcessor:
             # under its own name, as JSON text — `explode` turns it into rows. (Arrays
             # used to become `<col>_values` and, re-detected each pass, were re-wrapped
             # until `items_values_values_values_values_values`: found 2026-10-07.)
-            to_explode = [
-                col for col in list(rows[0].keys()) if any(isinstance(row.get(col), dict) for row in rows)
-            ]
+            to_explode = [col for col in list(rows[0].keys()) if any(isinstance(row.get(col), dict) for row in rows)]
             for col in to_explode:
                 rows = _explode(rows, col)
                 changed = True
@@ -5255,13 +5425,18 @@ class DataProcessor:
         if rl:
             length = F.length(F.col("value"))
             cols.append(
-                F.when(length != int(rl), F.concat(F.lit(f"Line length mismatch: expected {int(rl)}, got "),
-                                                   length.cast("string")))
-                .otherwise(F.lit(None)).alias(RECORD_ERROR_COLUMN)
+                F.when(
+                    length != int(rl),
+                    F.concat(F.lit(f"Line length mismatch: expected {int(rl)}, got "), length.cast("string")),
+                )
+                .otherwise(F.lit(None))
+                .alias(RECORD_ERROR_COLUMN)
             )
         return df.select(*cols, "_source_file")
 
-    def _spark_read_on_driver(self, spark: Any, fmt: str, paths: List[str], opts: Dict[str, Any], fields: List[Any]) -> Any:
+    def _spark_read_on_driver(
+        self, spark: Any, fmt: str, paths: List[str], opts: Dict[str, Any], fields: List[Any]
+    ) -> Any:
         """Read on the driver with the shared Polars readers; return a Spark DataFrame."""
         import shutil as _shutil
 

@@ -5,6 +5,7 @@ read as comma/UTF-8/header-on-line-1, `.avro` had no reader, and `.xls` failed w
 not a zip file" (openpyxl reads only .xlsx). Excel date cells also landed as
 "2026-10-01 00:00:00", which a `date` field cannot cast.
 """
+
 import datetime as dt
 import glob
 import gzip
@@ -20,16 +21,25 @@ from lakelogic import DataProcessor
 
 pl = pytest.importorskip("polars")
 
-ORDERS = {"fields": [{"name": "order_id", "type": "long", "required": True},
-                     {"name": "customer", "type": "string", "required": True},
-                     {"name": "amount", "type": "double"}]}
+ORDERS = {
+    "fields": [
+        {"name": "order_id", "type": "long", "required": True},
+        {"name": "customer", "type": "string", "required": True},
+        {"name": "amount", "type": "double"},
+    ]
+}
 POSITIVE = {"row_rules": [{"name": "amount_not_negative", "sql": "amount >= 0"}]}
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "file_formats" / "data"
 
 
 def _run(path, model=ORDERS, quality=POSITIVE, **source):
-    contract = {"version": "1.0", "info": {"title": "t"},
-                "source": {"type": "landing", "path": str(path), **source}, "model": model, "quality": quality}
+    contract = {
+        "version": "1.0",
+        "info": {"title": "t"},
+        "source": {"type": "landing", "path": str(path), **source},
+        "model": model,
+        "quality": quality,
+    }
     return DataProcessor(engine="polars", contract=contract).run_source()
 
 
@@ -38,6 +48,7 @@ def _unpack_dirs():
 
 
 # ── .gz / .zip ────────────────────────────────────────────────────────────────
+
 
 def test_gzipped_csv_reads_with_or_without_a_declared_format(tmp_path):
     p = tmp_path / "orders.csv.gz"
@@ -98,6 +109,7 @@ def test_zip_member_cannot_escape_the_temp_folder(tmp_path):
 
 # ── CSV dialects ──────────────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("sep", ["\\t", "|", ";"])
 def test_csv_delimiters(tmp_path, sep):
     real = "\t" if sep == "\\t" else sep
@@ -109,16 +121,22 @@ def test_csv_delimiters(tmp_path, sep):
 
 def test_european_csv_latin1_title_line_decimal_comma_and_multiline_quotes(tmp_path):
     p = tmp_path / "eu.csv"
-    p.write_bytes((
-        "Export - Octobre\n"
-        "order_id;customer;amount;note\n"
-        '1;François;1.234,50;"a, b"\n'
-        '2;Zoë;7,25;"line one\nline two"\n'
-        "3;Jürgen;-2,00;\n"
-    ).encode("latin-1"))
+    p.write_bytes(
+        (
+            "Export - Octobre\n"
+            "order_id;customer;amount;note\n"
+            '1;François;1.234,50;"a, b"\n'
+            '2;Zoë;7,25;"line one\nline two"\n'
+            "3;Jürgen;-2,00;\n"
+        ).encode("latin-1")
+    )
     model = {"fields": ORDERS["fields"] + [{"name": "note", "type": "string"}]}
-    good, bad = _run(p, model=model, format="csv",
-                     options={"delimiter": ";", "encoding": "latin-1", "skip_rows": 1, "decimal_comma": True})
+    good, bad = _run(
+        p,
+        model=model,
+        format="csv",
+        options={"delimiter": ";", "encoding": "latin-1", "skip_rows": 1, "decimal_comma": True},
+    )
     assert good.select(["customer", "amount", "note"]).rows() == [
         ("François", 1234.5, "a, b"),  # the comma in a text field is left alone
         ("Zoë", 7.25, "line one\nline two"),
@@ -137,20 +155,32 @@ def test_a_non_utf8_encoding_cannot_be_streamed():
 
 # ── Avro ──────────────────────────────────────────────────────────────────────
 
+
 def test_avro_keeps_types_and_nested_fields_flatten_like_json(tmp_path):
     p = tmp_path / "events.avro"
-    pl.DataFrame({
-        "order_id": [1, 2],
-        "customer": [{"name": "Ada", "tier": "gold"}, {"name": None, "tier": "silver"}],
-        "items": [[{"sku": "A", "qty": 2}, {"sku": "B", "qty": 1}], [{"sku": "C", "qty": 1}]],
-    }).write_avro(p)
-    contract = {"version": "1.0", "info": {"title": "a"},
-                "source": {"type": "landing", "path": str(p), "format": "avro", "flatten_nested": True},
-                "transformations": [{"explode": {"field": "items", "output": "item"}},
-                                    {"json_extract": {"field": "sku", "source": "item", "path": "$.sku"}}],
-                "model": {"fields": [{"name": "order_id", "type": "long", "required": True},
-                                     {"name": "customer_name", "type": "string", "required": True},
-                                     {"name": "sku", "type": "string", "required": True}]}}
+    pl.DataFrame(
+        {
+            "order_id": [1, 2],
+            "customer": [{"name": "Ada", "tier": "gold"}, {"name": None, "tier": "silver"}],
+            "items": [[{"sku": "A", "qty": 2}, {"sku": "B", "qty": 1}], [{"sku": "C", "qty": 1}]],
+        }
+    ).write_avro(p)
+    contract = {
+        "version": "1.0",
+        "info": {"title": "a"},
+        "source": {"type": "landing", "path": str(p), "format": "avro", "flatten_nested": True},
+        "transformations": [
+            {"explode": {"field": "items", "output": "item"}},
+            {"json_extract": {"field": "sku", "source": "item", "path": "$.sku"}},
+        ],
+        "model": {
+            "fields": [
+                {"name": "order_id", "type": "long", "required": True},
+                {"name": "customer_name", "type": "string", "required": True},
+                {"name": "sku", "type": "string", "required": True},
+            ]
+        },
+    }
     good, bad = DataProcessor(engine="polars", contract=contract).run_source()
     assert good.select(["order_id", "customer_name", "sku"]).rows() == [(1, "Ada", "A"), (1, "Ada", "B")]
     # Order 2 fails a PRE check (no customer name), so it is quarantined before the post `explode`,
@@ -160,15 +190,20 @@ def test_avro_keeps_types_and_nested_fields_flatten_like_json(tmp_path):
 
 # ── Excel: .xls and dates ─────────────────────────────────────────────────────
 
-DATED = {"fields": [{"name": "order_id", "type": "long", "required": True},
-                    {"name": "booked_on", "type": "date", "required": True},
-                    {"name": "amount", "type": "double"}]}
+DATED = {
+    "fields": [
+        {"name": "order_id", "type": "long", "required": True},
+        {"name": "booked_on", "type": "date", "required": True},
+        {"name": "amount", "type": "double"},
+    ]
+}
 
 
 def test_xls_reads_a_named_sheet_with_header_on_row_2_and_real_dates():
     pytest.importorskip("xlrd")
-    good, bad = _run(EXAMPLES / "orders_legacy.xls", model=DATED, format="xls",
-                     options={"sheet_name": "Ledger", "header_row": 2})
+    good, bad = _run(
+        EXAMPLES / "orders_legacy.xls", model=DATED, format="xls", options={"sheet_name": "Ledger", "header_row": 2}
+    )
     assert good.select(["order_id", "booked_on", "amount"]).rows() == [(12001, dt.date(2026, 10, 1), 15.0)]
     assert bad["order_id"].to_list() == [12002]
 
@@ -187,6 +222,7 @@ def test_xlsx_date_cells_cast_to_a_date_field(tmp_path):
 
 # ── Bugs the scenario suite found (2026-10-07) ────────────────────────────────
 
+
 def test_a_csv_file_not_named_dot_csv_is_read_not_treated_as_a_folder(tmp_path):
     p = tmp_path / "orders.tsv"
     p.write_text("order_id\tcustomer\tamount\n1\tAda\t5\n")
@@ -195,45 +231,61 @@ def test_a_csv_file_not_named_dot_csv_is_read_not_treated_as_a_folder(tmp_path):
 
 
 XML_ITEMS = {
-    "transformations": [{"explode": {"field": "items", "output": "item"}},
-                        {"json_extract": {"field": "sku", "source": "item", "path": "$.sku"}}],
-    "model": {"fields": [{"name": "id", "type": "long", "required": True},
-                         {"name": "sku", "type": "string", "required": True}]},
+    "transformations": [
+        {"explode": {"field": "items", "output": "item"}},
+        {"json_extract": {"field": "sku", "source": "item", "path": "$.sku"}},
+    ],
+    "model": {
+        "fields": [
+            {"name": "id", "type": "long", "required": True},
+            {"name": "sku", "type": "string", "required": True},
+        ]
+    },
 }
 
 
 def _xml(p, **source):
-    contract = {"version": "1.0", "info": {"title": "x"},
-                "source": {"type": "landing", "path": str(p), "format": "xml", "flatten_nested": True, **source},
-                **XML_ITEMS}
+    contract = {
+        "version": "1.0",
+        "info": {"title": "x"},
+        "source": {"type": "landing", "path": str(p), "format": "xml", "flatten_nested": True, **source},
+        **XML_ITEMS,
+    }
     return DataProcessor(engine="polars", contract=contract).run_source()
 
 
 def test_xml_file_with_a_single_record_is_one_row(tmp_path):
     p = tmp_path / "o.xml"
-    p.write_text('<ns:orders xmlns:ns="urn:x"><ns:order id="1"><ns:items><ns:item><ns:sku>A</ns:sku>'
-                 '</ns:item></ns:items></ns:order></ns:orders>')
+    p.write_text(
+        '<ns:orders xmlns:ns="urn:x"><ns:order id="1"><ns:items><ns:item><ns:sku>A</ns:sku>'
+        "</ns:item></ns:items></ns:order></ns:orders>"
+    )
     good, bad = _xml(p)
     assert good.select(["id", "sku"]).rows() == [(1, "A")] and len(bad) == 0
 
 
 def test_xml_one_item_in_every_record_is_still_a_list(tmp_path):
     p = tmp_path / "o.xml"
-    p.write_text('<orders><order id="1"><items><item><sku>A</sku></item></items></order>'
-                 '<order id="2"><items><item><sku>B</sku></item></items></order></orders>')
+    p.write_text(
+        '<orders><order id="1"><items><item><sku>A</sku></item></items></order>'
+        '<order id="2"><items><item><sku>B</sku></item></items></order></orders>'
+    )
     good, _ = _xml(p)
     assert good.select(["id", "sku"]).rows() == [(1, "A"), (2, "B")]
 
 
 def test_xml_row_tag_picks_records_at_any_depth(tmp_path):
     p = tmp_path / "o.xml"
-    p.write_text('<feed><meta><x>1</x></meta><batch><order id="1"><items><item><sku>A</sku></item></items></order>'
-                 '</batch><batch><order id="2"><items><item><sku>B</sku></item></items></order></batch></feed>')
+    p.write_text(
+        '<feed><meta><x>1</x></meta><batch><order id="1"><items><item><sku>A</sku></item></items></order>'
+        '</batch><batch><order id="2"><items><item><sku>B</sku></item></items></order></batch></feed>'
+    )
     good, _ = _xml(p, options={"row_tag": "order"})
     assert sorted(good["sku"].to_list()) == ["A", "B"]
 
 
 # ── Warnings: only the real ones (2026-10-07) ─────────────────────────────────
+
 
 @pytest.fixture
 def warnings_seen():
@@ -251,10 +303,20 @@ def test_nested_steps_and_fixed_width_settings_raise_no_false_warnings(tmp_path,
     _xml(p)
     f = tmp_path / "s.dat"
     f.write_text("D20157500001050\n")
-    contract = {"version": "1.0", "info": {"title": "bacs"},
-                "source": {"type": "landing", "path": str(f), "format": "fixed_width", "record_length": 15,
-                           "encoding": "ascii", "skip_rows": 0, "skip_footer": 0},
-                "model": {"fields": [{"name": "sort_code", "type": "string"}]}}
+    contract = {
+        "version": "1.0",
+        "info": {"title": "bacs"},
+        "source": {
+            "type": "landing",
+            "path": str(f),
+            "format": "fixed_width",
+            "record_length": 15,
+            "encoding": "ascii",
+            "skip_rows": 0,
+            "skip_footer": 0,
+        },
+        "model": {"fields": [{"name": "sort_code", "type": "string"}]},
+    }
     contract["model"]["fields"][0]["range"] = [1, 7]
     DataProcessor(engine="polars", contract=contract).run_source()
     assert not [w for w in warnings_seen if "Schema drift" in w or "Unknown key" in w], warnings_seen
@@ -296,15 +358,27 @@ def test_running_a_contract_keeps_the_host_applications_log_handlers(tmp_path, w
 
 # ── Every engine, one answer (2026-10-07) ─────────────────────────────────────
 
+
 @pytest.mark.parametrize("engine", ["polars", "duckdb"])
 def test_implied_decimals_and_date_formats_flag_what_does_not_fit(tmp_path, engine):
     p = tmp_path / "s.dat"
     p.write_text("00001050 20261007\n-0000250 20261399\n0000X050 20261008\n")
-    contract = {"version": "1.0", "info": {"title": "fw"},
-                "source": {"type": "landing", "path": str(p), "format": "fixed_width",
-                           "options": {"implied_decimals": {"amount": 2}, "date_formats": {"booked": "yyyyMMdd"}}},
-                "model": {"fields": [{"name": "amount", "range": [0, 8], "type": "double", "required": True},
-                                     {"name": "booked", "range": [9, 17], "type": "date", "required": True}]}}
+    contract = {
+        "version": "1.0",
+        "info": {"title": "fw"},
+        "source": {
+            "type": "landing",
+            "path": str(p),
+            "format": "fixed_width",
+            "options": {"implied_decimals": {"amount": 2}, "date_formats": {"booked": "yyyyMMdd"}},
+        },
+        "model": {
+            "fields": [
+                {"name": "amount", "range": [0, 8], "type": "double", "required": True},
+                {"name": "booked", "range": [9, 17], "type": "date", "required": True},
+            ]
+        },
+    }
     good, bad = DataProcessor(engine=engine, contract=contract).run_source()
     good = good if isinstance(good, pl.DataFrame) else good.pl()
     bad = bad if isinstance(bad, pl.DataFrame) else bad.pl()
@@ -318,12 +392,21 @@ def test_implied_decimals_and_date_formats_flag_what_does_not_fit(tmp_path, engi
 def test_explode_keeps_a_row_whose_list_is_empty(tmp_path, engine):
     p = tmp_path / "o.json"
     p.write_text('[{"order_id": 1, "items": [{"sku": "A"}]}, {"order_id": 2, "items": []}]')
-    contract = {"version": "1.0", "info": {"title": "x"},
-                "source": {"type": "landing", "path": str(p), "format": "json", "flatten_nested": True},
-                "transformations": [{"explode": {"field": "items", "output": "item"}},
-                                    {"json_extract": {"field": "sku", "source": "item", "path": "$.sku"}}],
-                "model": {"fields": [{"name": "order_id", "type": "long", "required": True},
-                                     {"name": "sku", "type": "string", "required": True}]}}
+    contract = {
+        "version": "1.0",
+        "info": {"title": "x"},
+        "source": {"type": "landing", "path": str(p), "format": "json", "flatten_nested": True},
+        "transformations": [
+            {"explode": {"field": "items", "output": "item"}},
+            {"json_extract": {"field": "sku", "source": "item", "path": "$.sku"}},
+        ],
+        "model": {
+            "fields": [
+                {"name": "order_id", "type": "long", "required": True},
+                {"name": "sku", "type": "string", "required": True},
+            ]
+        },
+    }
     good, bad = DataProcessor(engine=engine, contract=contract).run_source()
     assert len(good) == 1 and len(bad) == 1  # order 2 is quarantined, not silently dropped
 
@@ -335,9 +418,15 @@ def test_a_cloud_zip_is_fetched_then_read(tmp_path, monkeypatch):
         zf.writestr("a.csv", "order_id,customer,amount\n1,Ada,5\n")
     with fsspec.open("memory://landing/orders.zip", "wb") as fh:
         fh.write(buf.getvalue())
-    proc = DataProcessor(engine="polars", contract={
-        "version": "1.0", "info": {"title": "z"},
-        "source": {"type": "landing", "path": "memory://landing/orders.zip", "format": "csv"}, "model": ORDERS})
+    proc = DataProcessor(
+        engine="polars",
+        contract={
+            "version": "1.0",
+            "info": {"title": "z"},
+            "source": {"type": "landing", "path": "memory://landing/orders.zip", "format": "csv"},
+            "model": ORDERS,
+        },
+    )
     monkeypatch.setattr(proc, "_is_uri_path", lambda p: str(p).startswith("memory://"))
     monkeypatch.setattr(proc, "_get_cloud_storage_options", lambda p: {})
     monkeypatch.setattr(proc, "_expand_source_files", lambda p: [{"path": "memory://landing/orders.zip", "mtime": 1.0}])

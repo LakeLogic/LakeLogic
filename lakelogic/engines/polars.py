@@ -13,7 +13,6 @@ from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
 
 
-
 def _json_array_items(value):
     """A JSON-text array as a list of text items (objects re-serialised); a non-array is one item."""
     import json as _json
@@ -30,6 +29,7 @@ def _json_array_items(value):
         None if v is None else (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v))
         for v in parsed
     ]
+
 
 class PolarsAdapter(EngineAdapter):
     """
@@ -897,7 +897,9 @@ class PolarsAdapter(EngineAdapter):
         if post_rules:
             post_with_errors, post_internal, _ = self._evaluate_row_rules(good_lf, post_rules, [], [], "_post_rule_")
             has_post_errors = pl.col(self.ERROR_COLUMN).list.len() > 0
-            bad_lf = pl.concat([bad_lf, post_with_errors.filter(has_post_errors).drop(post_internal)], how="diagonal_relaxed")
+            bad_lf = pl.concat(
+                [bad_lf, post_with_errors.filter(has_post_errors).drop(post_internal)], how="diagonal_relaxed"
+            )
             good_lf = post_with_errors.filter(~has_post_errors).drop(
                 post_internal + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
             )

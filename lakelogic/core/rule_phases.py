@@ -31,10 +31,50 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 
 #: Names in SQL text that are keywords or functions, never columns (for ``referenced_columns``).
 _SQL_WORDS = {
-    "and", "or", "not", "is", "null", "in", "like", "ilike", "between", "case", "when", "then", "else",
-    "end", "true", "false", "as", "cast", "coalesce", "length", "len", "lower", "upper", "trim", "regexp",
-    "rlike", "abs", "round", "date", "timestamp", "string", "int", "integer", "bigint", "double", "float",
-    "decimal", "varchar", "boolean", "current_date", "current_timestamp", "now", "exists", "distinct",
+    "and",
+    "or",
+    "not",
+    "is",
+    "null",
+    "in",
+    "like",
+    "ilike",
+    "between",
+    "case",
+    "when",
+    "then",
+    "else",
+    "end",
+    "true",
+    "false",
+    "as",
+    "cast",
+    "coalesce",
+    "length",
+    "len",
+    "lower",
+    "upper",
+    "trim",
+    "regexp",
+    "rlike",
+    "abs",
+    "round",
+    "date",
+    "timestamp",
+    "string",
+    "int",
+    "integer",
+    "bigint",
+    "double",
+    "float",
+    "decimal",
+    "varchar",
+    "boolean",
+    "current_date",
+    "current_timestamp",
+    "now",
+    "exists",
+    "distinct",
 }
 
 
@@ -99,7 +139,7 @@ def post_created_columns(contract: Any) -> Dict[str, str]:
         for f in jn.get("fields") or []:
             add(f"{jn.get('prefix') or ''}{f}", "join")
         ru = _as_dict(td.get("rollup"))
-        for name in (ru.get("aggregations") or {}):
+        for name in ru.get("aggregations") or {}:
             add(name, "rollup")
         up = _as_dict(td.get("unpivot"))
         if up:

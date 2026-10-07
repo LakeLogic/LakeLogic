@@ -646,7 +646,9 @@ class DuckDBAdapter(EngineAdapter):
                 col_type = next(
                     (
                         str(t).upper()
-                        for n, t in self.con.sql(f"SELECT column_name, column_type FROM (DESCRIBE {current})").fetchall()
+                        for n, t in self.con.sql(
+                            f"SELECT column_name, column_type FROM (DESCRIBE {current})"
+                        ).fetchall()
                         if n == ex.field
                     ),
                     "",
@@ -1200,8 +1202,13 @@ class DuckDBAdapter(EngineAdapter):
         pre_rules = [r for r in row_rules if str(getattr(r, "phase", "pre") or "pre").lower() != "post"]
         post_rules = [r for r in row_rules if str(getattr(r, "phase", "pre") or "pre").lower() == "post"]
         self._evaluate_and_split(
-            current_table, pre_rules, schema_errors, list(getattr(self, "_type_err_cols", [])), "_rule_",
-            "_good_pre", "_bad_pre",
+            current_table,
+            pre_rules,
+            schema_errors,
+            list(getattr(self, "_type_err_cols", [])),
+            "_rule_",
+            "_good_pre",
+            "_bad_pre",
         )
 
         # Post transforms: GOOD rows only (a quarantined row keeps the shape it failed in).
@@ -1291,7 +1298,9 @@ class DuckDBAdapter(EngineAdapter):
                 err_msg = f"Rule failed: {plain_text(rule.name)} ({rule.sql})".replace("'", "''")
                 error_parts.append(f"CASE WHEN {prefix}{i} IS NULL OR NOT {prefix}{i} THEN '{err_msg}' ELSE NULL END")
                 cat_msg = runtime_category(rule).replace("'", "''")
-                category_parts.append(f"CASE WHEN {prefix}{i} IS NULL OR NOT {prefix}{i} THEN '{cat_msg}' ELSE NULL END")
+                category_parts.append(
+                    f"CASE WHEN {prefix}{i} IS NULL OR NOT {prefix}{i} THEN '{cat_msg}' ELSE NULL END"
+                )
 
             for err_col in type_err_cols:
                 error_parts.append(f'"{err_col}"')

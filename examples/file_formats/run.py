@@ -10,6 +10,7 @@ with the reason. Every file contains a few deliberately bad rows:
   * a non-numeric amount     -> fails the cast to double
 The Excel file is created by this script (data/orders.xlsx), so you can open it too.
 """
+
 from pathlib import Path
 
 from lakelogic import DataProcessor

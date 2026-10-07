@@ -69,7 +69,6 @@ class ProbedSchema:
     row_count: Optional[int] = None
 
 
-
 def _excel_schema(pl, source):
     """An Excel sheet's schema from one row. ``calamine`` (via ``fastexcel``) when installed;
     else ``openpyxl``, which LakeLogic installs — fastexcel is not a dependency (2026-10-07)."""
@@ -78,6 +77,7 @@ def _excel_schema(pl, source):
     if importlib.util.find_spec("fastexcel") is not None:
         return pl.read_excel(source, read_options={"n_rows": 1}).schema
     return pl.read_excel(source, engine="openpyxl").head(1).schema
+
 
 def format_of(path: str) -> Optional[str]:
     """Which format a path is, or None when this module cannot read it."""
