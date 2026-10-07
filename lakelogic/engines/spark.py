@@ -339,12 +339,18 @@ class SparkAdapter(EngineAdapter):
                     "than storing the raw string under a column declared as "
                     f"'{cfg.cast}'."
                 )
-            try:
-                extracted = extracted.try_cast(spark_type)
-            except AttributeError:  # pragma: no cover - Spark < 4.0
-                extracted = F.expr(
-                    f"try_cast(get_json_object({cfg.source}, '{self._json_path_for_spark(cfg.path)}') as {spark_type})"
-                )
+            # The SQL try_cast (Spark >= 3.2), not Column.try_cast (Spark >= 4.0 only). On Spark 3
+            # `extracted.try_cast` does not raise AttributeError — Column.__getattr__ returns a
+            # struct-field Column — so the old try/except called a Column and every json_extract
+            # with a cast failed with "'Column' object is not callable" (found 2026-10-07).
+            # The path stays in the column API (never inside SQL text: a quoted key such as
+            # `$."my key"` broke the SQL string); only a temporary column name is cast in SQL.
+            tmp = "__lakelogic_json_extract"
+            return (
+                current_df.withColumn(tmp, extracted)
+                .withColumn(cfg.field, F.expr(f"try_cast(`{tmp}` as {spark_type})"))
+                .drop(tmp)
+            )
 
         return current_df.withColumn(cfg.field, extracted)
 
@@ -515,7 +521,15 @@ class SparkAdapter(EngineAdapter):
                 output = trans.explode.output or trans.explode.field
                 if trans.explode.field in current_df.columns:
                     logger.debug(f"Pre-Transform [Explode]: {trans.explode.field} -> {output}")
-                    current_df = current_df.withColumn(output, F.explode(F.col(trans.explode.field)))
+                    src = F.col(trans.explode.field)
+                    if dict(getattr(current_df, "dtypes", None) or []).get(trans.explode.field) == "string":
+                        # A JSON-text array (nested JSON/XML/Avro after flatten_nested, or `split`
+                        # output): one row per element — objects stay JSON text, as on Polars/DuckDB.
+                        src = F.from_json(src, "array<string>")
+                    # explode_OUTER: an empty or null list keeps its row (one null element), as on
+                    # Polars and DuckDB. Plain explode dropped it — an order with no items vanished
+                    # instead of being quarantined (found 2026-10-07).
+                    current_df = current_df.withColumn(output, F.explode_outer(src))
                     existing = set(current_df.columns)
             elif trans.map_values:
                 field = trans.map_values.field
@@ -1005,7 +1019,7 @@ class SparkAdapter(EngineAdapter):
         existing = set(df.columns)
         expected = set(expected_fields)
         missing = expected - existing
-        unknown = existing - expected
+        unknown = existing - expected - {"__type_err__record"}  # reader scratch, see below
         system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
         unknown = unknown - system_cols - self._lineage_columns()
 
@@ -1025,6 +1039,10 @@ class SparkAdapter(EngineAdapter):
 
         select_exprs = []
         self._type_err_cols = []
+        # A record the READER rejected (fixed-width record length) quarantines like a failed cast.
+        if "__type_err__record" in existing:
+            self._type_err_cols.append("__type_err__record")
+            select_exprs.append(F.col("__type_err__record"))
         for field in self.contract.model.fields:
             if field.name in existing:
                 col_expr = F.col(field.name)

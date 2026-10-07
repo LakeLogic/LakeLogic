@@ -123,3 +123,24 @@ def _delta_spark_session_first(request, tmp_path_factory):
     if RUN_SPARK and _uses_spark(str(request.node.path)):
         _ensure_delta_session(tmp_path_factory)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _drop_log_handlers_a_test_added():
+    """Remove loguru handlers a test (or the CLI code it ran) added and left behind.
+
+    CLI commands call ``logger.add(sys.stderr)``; under a test runner that stream is the test's
+    capture, closed when the test ends. A handler left pointing at it fails on the NEXT test's
+    log line ("Record was: {...}" in place of the message). DataProcessor used to hide this by
+    removing every handler on each run — which also deleted host applications' handlers, and was
+    fixed on 2026-10-07. Tests now clean up after themselves instead.
+    """
+    from loguru import logger
+
+    before = set(getattr(logger._core, "handlers", {}))  # noqa: SLF001 - loguru has no public list
+    yield
+    for handler_id in set(getattr(logger._core, "handlers", {})) - before:  # noqa: SLF001
+        try:
+            logger.remove(handler_id)
+        except ValueError:
+            pass

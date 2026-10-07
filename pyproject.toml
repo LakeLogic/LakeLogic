@@ -52,7 +52,7 @@ dependencies = [
     "httpx>=0.27.0,<1",
     "Jinja2>=3.1.0",
     "sqlglot>=20.0.0",
-    "polars>=0.20.0",
+    "polars>=0.20.0,<2",
     "duckdb>=0.9.0",
     "typer>=0.9.0",
     # >=1.0.0, not >=0.15.0. Three reasons, all observed rather than assumed:
@@ -80,7 +80,7 @@ dependencies = [
     # <0.16.0 (2026-09-21): 0.15.0 adds `materialization.scd1` — the key 1.66.1's unknown-member
     # fix reads. Leaving the cap at <0.15 made this release uninstallable beside lakelogic-saas,
     # which needs 0.15 to validate the scd1 blocks it generates. Suite green against 0.15.0.
-    "open-lakehouse-contract[models]>=0.19.0,<0.20.0",  # SOURCE_TYPES (core/processor.py); 0.19 adds deduplicate.blank_keys — an older OLC silently drops it (keep → quarantine)
+    "open-lakehouse-contract[models]>=0.20.0,<0.21.0",  # SOURCE_TYPES (core/processor.py); 0.20 adds FieldDefinition.range (fixed-width) — an older OLC silently drops it
     # A CONSTRAINT, not a feature: `rich` is transitive (via typer), and rich 15
     # is incompatible with pyiceberg (<15), which lakelogic itself imports for
     # Iceberg catalogs in core/materialization, core/quarantine and core/run_log.
@@ -97,13 +97,14 @@ cli = [
 ]
 # Engine extras — install what you need: pip install lakelogic[engines]
 engines = [
-    "polars>=0.20.0",
+    "polars>=0.20.0,<2",
     "duckdb>=0.9.0",
     "pyarrow>=23.0.1",
     "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
     "lxml>=4.9.0",
     "openpyxl>=3.1.0",
+    "xlrd>=2.0.1",
 ]
 # Azure — for Azure Functions, Key Vault, Blob Storage
 azure = [
@@ -132,8 +133,8 @@ delta = [
     # GCP (Unity Catalog on GCP, GCS)
     "google-cloud-storage>=2.10.0",  # GCP GCS access
 ]
-polars = ["polars>=0.20.0", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
-duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0"]
+polars = ["polars>=0.20.0,<2", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
+duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
 spark = ["pyspark>=3.3.0"]
 # SQLAlchemy alone — every `source.type: database` contract needs it, whatever the
 # driver, because the batched (`fetch_size`) path builds an SQLAlchemy engine and hands
@@ -221,13 +222,14 @@ dev = [
 ]
 all = [
     "typer>=0.9.0",
-    "polars>=0.20.0",
+    "polars>=0.20.0,<2",
     "duckdb>=0.9.0",
     "pyarrow>=23.0.1",
     "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
     "lxml>=4.9.0",
     "openpyxl>=3.1.0",
+    "xlrd>=2.0.1",
 ]
 # Heavy extras — opt-in only (may have numpy/platform conflicts)
 cloud = [

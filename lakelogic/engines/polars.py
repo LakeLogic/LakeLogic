@@ -13,6 +13,24 @@ from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
 
 
+
+def _json_array_items(value):
+    """A JSON-text array as a list of text items (objects re-serialised); a non-array is one item."""
+    import json as _json
+
+    if value is None:
+        return None
+    try:
+        parsed = _json.loads(value)
+    except (TypeError, ValueError):
+        return [value]
+    if not isinstance(parsed, list):
+        parsed = [parsed]
+    return [
+        None if v is None else (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v))
+        for v in parsed
+    ]
+
 class PolarsAdapter(EngineAdapter):
     """
     Polars execution engine for LakeLogic.
@@ -640,6 +658,10 @@ class PolarsAdapter(EngineAdapter):
                 policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
 
         self._type_err_cols = []
+        # A record the READER rejected (fixed-width: wrong record length) carries its reason in
+        # this column; it quarantines the row exactly like a failed cast.
+        if "__type_err__record" in lf.collect_schema().names():
+            self._type_err_cols.append("__type_err__record")
 
         if cast_to_string:
             columns = [c for c in lf.collect_schema().names() if not self._keeps_its_type(c)]
@@ -842,37 +864,75 @@ class PolarsAdapter(EngineAdapter):
             details={"errors": schema_errors},
         )
 
-        # 0.75 Apply Post-Transformations BEFORE quality rules so that derived
-        # columns (snapshot_year, gold_processed_at, postcode_area, etc.) are
-        # populated when the row-level NOT-NULL / validity rules run.
-        # The good/bad split still happens below — post-transforms just run on
-        # all rows so the enriched values are ready for validation.
-        ctx = self._get_context(lf)
-        post_output_count = self._get_row_count(lf)  # default if no transforms
+        # Execution order (OLC; one definition in lakelogic.core.rule_phases):
+        #   type checks + PRE rules -> good/bad split -> post transforms on GOOD rows -> POST rules.
+        # Until 2026-10-07 Polars applied post transforms to every row and then ran every rule,
+        # whatever its phase, while Spark followed the spec: one contract, two results.
+        row_rules = self.get_row_rules()
+        pre_rules = [r for r in row_rules if str(getattr(r, "phase", "pre") or "pre").lower() != "post"]
+        post_rules = [r for r in row_rules if str(getattr(r, "phase", "pre") or "pre").lower() == "post"]
+
+        lf_with_errors, internal_cols, _aux_to_drop = self._evaluate_row_rules(
+            lf, pre_rules, schema_errors, list(getattr(self, "_type_err_cols", [])), "_rule_"
+        )
+        has_errors = pl.col(self.ERROR_COLUMN).list.len() > 0
+        bad_lf = lf_with_errors.filter(has_errors).drop(_aux_to_drop)
+        good_lf = lf_with_errors.filter(~has_errors).drop(
+            internal_cols + _aux_to_drop + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
+        )
+
+        # Post transforms: GOOD rows only (a quarantined row keeps the shape it failed in).
+        ctx = self._get_context(good_lf)
         if self.contract.transformations:
             step_start = time.perf_counter()
-            post_input_count = self._get_row_count(lf)
-            lf = self._apply_post_transformations(lf, ctx)
-            post_output_count = self._get_row_count(lf)
+            post_input_count = self._get_row_count(good_lf)
+            good_lf = self._apply_post_transformations(good_lf, ctx)
             self._add_trace(
                 "Post-Transformations",
                 input_rows=post_input_count,
-                output_rows=post_output_count,
+                output_rows=self._get_row_count(good_lf),
                 duration_ms=(time.perf_counter() - step_start) * 1000,
             )
-            if getattr(self, "_type_err_cols", None):
-                surviving = set(lf.collect_schema().names())
-                self._type_err_cols = [c for c in self._type_err_cols if c in surviving]
 
-        # 1. Evaluate Row-Level Rules
-        row_rules = self.get_row_rules()
+        if post_rules:
+            post_with_errors, post_internal, _ = self._evaluate_row_rules(good_lf, post_rules, [], [], "_post_rule_")
+            has_post_errors = pl.col(self.ERROR_COLUMN).list.len() > 0
+            bad_lf = pl.concat([bad_lf, post_with_errors.filter(has_post_errors).drop(post_internal)], how="diagonal_relaxed")
+            good_lf = post_with_errors.filter(~has_post_errors).drop(
+                post_internal + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
+            )
+
+        bad_lf = bad_lf.with_columns(
+            [pl.lit("active").alias("quarantine_state"), pl.lit(False).alias("quarantine_reprocessed")]
+        )
+
+        # 3. Apply Dataset-Level (Aggregate) Checks — on the final good rows, as before.
+        ctx = self._get_context(good_lf)
+        self._run_dataset_rules(good_lf, ctx)
+
+        include_errors = True
+        if self.contract.quarantine:
+            include_errors = self.contract.quarantine.include_error_reason
+
+        if not include_errors:
+            bad_lf = bad_lf.drop([self.ERROR_COLUMN, self.CATEGORY_COLUMN])
+
+        return good_lf.collect(), bad_lf.drop(internal_cols, strict=False).collect()
+
+    def _evaluate_row_rules(self, lf, row_rules, schema_errors, type_err_cols, prefix):
+        """Attach ERROR/CATEGORY columns for ``row_rules`` (+ schema and type errors) to ``lf``.
+
+        Returns ``(lf_with_errors, internal_cols, aux_cols)``. Run once for the pre-phase checks
+        and once, after post transforms, for the post-phase ones.
+        """
+        post_output_count = None
         ctx = self._get_context(lf)
 
         if row_rules:
             step_start = time.perf_counter()
             rule_exprs = []
             for i, rule in enumerate(row_rules):
-                rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as _rule_{i}")
+                rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as {prefix}{i}")
 
             dataset_name = self.contract.dataset or "source"
 
@@ -927,14 +987,14 @@ class PolarsAdapter(EngineAdapter):
                 error_tracking_exprs.extend([pl.col(c) for c in schema_err_col_names])
                 category_tracking_exprs.extend([pl.col(schema_cat_col_name) for _ in schema_errors])
 
-            for type_err_col in getattr(self, "_type_err_cols", []):
+            for type_err_col in type_err_cols:
                 error_tracking_exprs.append(pl.col(type_err_col))
                 category_tracking_exprs.append(
                     pl.when(pl.col(type_err_col).is_not_null()).then(pl.lit("schema")).otherwise(None)
                 )
 
             for i, rule in enumerate(row_rules):
-                col_name = f"_rule_{i}"
+                col_name = f"{prefix}{i}"
                 error_msg = f"Rule failed: {plain_text(rule.name)} ({rule.sql})"
                 condition = pl.col(col_name).is_null() | pl.col(col_name).not_()
 
@@ -954,7 +1014,7 @@ class PolarsAdapter(EngineAdapter):
                 schema_error_exprs.extend([pl.lit(err) for err in schema_errors])
                 schema_category_exprs.extend([pl.lit("schema") for _ in schema_errors])
 
-            for type_err_col in getattr(self, "_type_err_cols", []):
+            for type_err_col in type_err_cols:
                 schema_error_exprs.append(pl.col(type_err_col))
                 schema_category_exprs.append(
                     pl.when(pl.col(type_err_col).is_not_null()).then(pl.lit("schema")).otherwise(None)
@@ -971,44 +1031,8 @@ class PolarsAdapter(EngineAdapter):
                 ]
             )
 
-        # 2. Split Good and Bad
-        has_errors = pl.col(self.ERROR_COLUMN).list.len() > 0
-
-        # Drop the scratch __schema_err_* columns from BOTH frames — they were
-        # only there to feed the public ERROR_COLUMN / CATEGORY_COLUMN above and
-        # were leaking into the quarantine table as double-underscored columns.
-        _aux_to_drop = locals().get("_schema_aux_cols", []) or []
-
-        bad_lf = (
-            lf_with_errors.filter(has_errors)
-            .drop(_aux_to_drop)
-            .with_columns(
-                [
-                    pl.lit("active").alias("quarantine_state"),
-                    pl.lit(False).alias("quarantine_reprocessed"),
-                ]
-            )
-        )
-
-        # Clean up internal columns
-        internal_cols = [f"_rule_{i}" for i in range(len(row_rules))] + getattr(self, "_type_err_cols", [])
-        good_lf = lf_with_errors.filter(~has_errors).drop(
-            internal_cols + _aux_to_drop + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
-        )
-
-        # 3. Apply Dataset-Level (Aggregate) Checks
-        self._run_dataset_rules(good_lf, ctx)
-
-        # (Post-Transformations already applied at step 0.75 above)
-
-        include_errors = True
-        if self.contract.quarantine:
-            include_errors = self.contract.quarantine.include_error_reason
-
-        if not include_errors:
-            bad_lf = bad_lf.drop([self.ERROR_COLUMN, self.CATEGORY_COLUMN])
-
-        return good_lf.collect(), bad_lf.drop(internal_cols).collect()
+        internal_cols = [f"{prefix}{i}" for i in range(len(row_rules))] + list(type_err_cols)
+        return lf_with_errors, internal_cols, locals().get("_schema_aux_cols", []) or []
 
     def _run_dataset_rules(self, lf: pl.LazyFrame, ctx: pl.SQLContext):
         """
@@ -1307,8 +1331,13 @@ class PolarsAdapter(EngineAdapter):
                 output = trans.explode.output or trans.explode.field
                 if trans.explode.field in existing:
                     logger.debug(f"Pre-Transform [Explode]: {trans.explode.field} -> {output}")
-                    if output != trans.explode.field:
-                        current_lf = current_lf.with_columns(pl.col(trans.explode.field).alias(output))
+                    src = pl.col(trans.explode.field)
+                    if current_lf.collect_schema()[trans.explode.field] == pl.Utf8:
+                        # A JSON-text array (nested JSON/XML after flatten_nested): one row per
+                        # element, each element as text — objects stay JSON for json_extract.
+                        src = src.map_elements(_json_array_items, return_dtype=pl.List(pl.Utf8))
+                    if output != trans.explode.field or not isinstance(src, type(pl.col("x"))):
+                        current_lf = current_lf.with_columns(src.alias(output))
                     current_lf = current_lf.explode(output)
                     existing = set(current_lf.collect_schema().names())
             elif trans.map_values:
@@ -1473,7 +1502,16 @@ class PolarsAdapter(EngineAdapter):
                         if tbl_name not in ("_step", "source"):
                             _fresh.register(tbl_name, current_lf)
                         self._register_links(_fresh)
-                        current_lf = _fresh.execute(_step_query)
+                        # Evaluate the expression ALONE and attach it natively. Polars SQL's
+                        # `SELECT * EXCLUDE (x), <expr> AS x` silently DROPS x, so a derive that
+                        # rewrites a column (amount = ABS(amount)) lost the column (2026-10-07).
+                        # A projection with no filter keeps row order, so horizontal concat is exact.
+                        _derived = _fresh.execute(f"SELECT ({derive_sql}) AS __lakelogic_derived FROM _step")
+                        current_lf = (
+                            pl.concat([current_lf, _derived], how="horizontal")
+                            .with_columns(pl.col("__lakelogic_derived").alias(field_name))
+                            .drop("__lakelogic_derived")
+                        )
                         _ctx_refs.append(_fresh)  # prevent GC
                         # Validate schema is readable (forces plan check without full eval)
                         existing_cols = set(current_lf.collect_schema().names())

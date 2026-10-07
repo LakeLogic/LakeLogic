@@ -1139,11 +1139,13 @@ def test_processor_run_source_polars_ndjson_json_and_multi_file_eager_fallback(m
     ]
     processor._is_uri_path = lambda path: False
 
+    # Patch the readers Core really calls. (This used to patch pl.read_xml, which Polars does
+    # not have, so the test passed while every real XML source failed — found 2026-10-07.)
     monkeypatch.setattr(
-        pl, "read_xml", lambda path, **kwargs: pl.DataFrame({"id": [1], "source": ["xml"]}), raising=False
+        proc_mod, "_read_xml_records", lambda path, options=None: pl.DataFrame({"id": [1], "source": ["xml"]})
     )
     monkeypatch.setattr(
-        pl, "read_excel", lambda path, **kwargs: pl.DataFrame({"id": [2], "source": ["xlsx"]}), raising=False
+        proc_mod, "_read_excel_polars", lambda path, options=None: pl.DataFrame({"id": [2], "source": ["xlsx"]})
     )
     monkeypatch.setattr(
         pl, "read_csv", lambda path, **kwargs: pl.DataFrame({"id": [4], "source": ["csv"]}), raising=False
@@ -1632,14 +1634,27 @@ def test_processor_trace_error_and_logging_branches(monkeypatch):
 
     removed = []
     added = []
-    monkeypatch.setattr(proc_mod.logger, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(proc_mod.logger, "remove", lambda *a: removed.append(a))
     monkeypatch.setattr(proc_mod.logger, "add", lambda *args, **kwargs: added.append((args, kwargs)))
+    monkeypatch.setattr(proc_mod, "_LOGGING_CONFIGURED", False)
+    monkeypatch.setattr(proc_mod, "_LOGGING_HANDLER", None)
     monkeypatch.setenv("LAKELOGIC_DEBUG", "false")
     processor._configure_logging()
-    assert removed and added
+    # Only loguru's default handler (id 0) is replaced — never the host application's handlers.
+    assert removed == [(0,)] and len(added) == 1
 
-    monkeypatch.setenv("LAKELOGIC_DEBUG", "true")
     removed.clear()
+    processor._configure_logging()  # once per process, not once per DataProcessor
+    assert removed == []
+
+    # sys.stderr swapped (a notebook, a test runner): only LakeLogic's OWN handler is re-pointed.
+    monkeypatch.setattr(proc_mod, "_LOGGING_HANDLER", (42, object()))
+    processor._configure_logging()
+    assert removed == [(42,)] and len(added) == 2
+    removed.clear()
+
+    monkeypatch.setattr(proc_mod, "_LOGGING_CONFIGURED", False)
+    monkeypatch.setenv("LAKELOGIC_DEBUG", "true")
     processor._configure_logging()
     assert removed == []
 

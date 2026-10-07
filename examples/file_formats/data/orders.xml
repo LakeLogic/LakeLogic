@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export>
+  <orders>
+    <order>
+      <order_id>3001</order_id><customer>Gil Moreau</customer><country>FR</country><amount>99.99</amount>
+    </order>
+    <order>
+      <order_id>3002</order_id><customer>Hana Sato</customer><country>JP</country><amount>45.00</amount>
+    </order>
+    <order>
+      <order_id>3003</order_id><customer>Ivo Petrov</customer><country>BG</country><amount>abc</amount>
+    </order>
+  </orders>
+</export>

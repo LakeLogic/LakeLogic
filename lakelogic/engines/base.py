@@ -331,6 +331,7 @@ class EngineAdapter(ABC):
         scd2_injected = self._scd2_injected_columns()
 
         declared: List[QualityRule] = []
+        owner: Dict[int, str] = {}  # id(rule) -> the model field it checks (required / field rules)
         if self.contract.quality and self.contract.quality.row_rules:
             for spec in self.contract.quality.row_rules:
                 expanded = self._expand_row_rule(spec)
@@ -365,12 +366,34 @@ class EngineAdapter(ABC):
                             description=f"{field.name} is required",
                         )
                     )
+                    owner[id(rules[-1])] = field.name
                 if field.rules:
+                    for r in field.rules:
+                        owner[id(r)] = field.name
                     rules.extend(field.rules)
 
         rules.extend(declared)
         rules.extend(self._blank_dedup_key_rules(rules))
-        return rules
+        return self._place_in_phase(rules, owner)
+
+    def _place_in_phase(self, rules: List[QualityRule], owner: Dict[int, str]) -> List[QualityRule]:
+        """Set each rule's phase per ``lakelogic.core.rule_phases`` (one definition, every engine).
+
+        A rule whose phase the contract did not write runs where its columns exist: post when it
+        reads — or belongs to a field — that only a post transformation creates.
+        """
+        from lakelogic.core.rule_phases import effective_phase, post_created_columns
+
+        created = post_created_columns(self.contract)
+        if not created:
+            return rules
+        placed = []
+        for r in rules:
+            phase = effective_phase(r, created, owner.get(id(r)))
+            if str(getattr(r, "phase", "pre") or "pre").lower() != phase:
+                r = r.model_copy(update={"phase": phase})
+            placed.append(r)
+        return placed
 
     # ── Blank dedup keys ─────────────────────────────────────────────────────
     # A row whose dedup key is blank (ANY key column null) is never a duplicate of

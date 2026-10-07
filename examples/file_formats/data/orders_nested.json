@@ -1,0 +1,64 @@
+[
+  {
+    "order_id": 5001,
+    "placed_at": "2026-10-01",
+    "customer": {
+      "id": "C1",
+      "name": "Ada",
+      "address": {
+        "city": "London",
+        "country": "GB"
+      }
+    },
+    "items": [
+      {
+        "sku": "A1",
+        "qty": 2,
+        "price": 9.5
+      },
+      {
+        "sku": "B2",
+        "qty": 1,
+        "price": 20.0
+      }
+    ]
+  },
+  {
+    "order_id": 5002,
+    "placed_at": "2026-10-02",
+    "customer": {
+      "id": "C2",
+      "name": "Bo",
+      "address": {
+        "city": "Paris",
+        "country": "FR"
+      }
+    },
+    "items": [
+      {
+        "sku": "C3",
+        "qty": 5,
+        "price": 1.0
+      }
+    ]
+  },
+  {
+    "order_id": 5003,
+    "placed_at": "not-a-date",
+    "customer": {
+      "id": "C3",
+      "name": "Cy",
+      "address": {
+        "city": "Rome",
+        "country": "IT"
+      }
+    },
+    "items": [
+      {
+        "sku": "A1",
+        "qty": -1,
+        "price": 9.5
+      }
+    ]
+  }
+]

@@ -1,0 +1,6 @@
+[
+  {"order_id": "1001", "customer": "Ada Lovelace", "country": "GB", "amount": 120.50},
+  {"order_id": "1002", "customer": "Bo Diaz", "country": "ES", "amount": 75},
+  {"order_id": "1003", "customer": null, "country": "FR", "amount": 33.10},
+  {"order_id": "1004", "customer": "Chen Wei", "country": "CN", "amount": -5}
+]

@@ -589,6 +589,34 @@ def check_append_on_resumable_stream(raw, name, ctx):  # STREAM-001
     return []
 
 
+def check_pre_rule_reads_post_column(raw, name, ctx):  # PHS-001
+    """A rule written ``phase: pre`` that reads a column only a POST transformation creates.
+
+    Pre checks run before post transforms (OLC execution order), so the column does not exist
+    yet and every row fails. Uses ``lakelogic.core.rule_phases`` — the definition every engine
+    imports — so the linter cannot disagree with the runtime.
+    """
+    from lakelogic.core.rule_phases import phase_conflicts
+
+    out = []
+    for c in phase_conflicts(raw):
+        out.append(
+            _c(
+                name,
+                "PHS-001",
+                "critical",
+                "quality",
+                f"rule '{c['rule']}' is `phase: pre` but reads `{c['column']}`, which only the post "
+                f"{c['created_by']} creates — the column does not exist when pre checks run, so "
+                "every row would fail.",
+                field=c["column"],
+                suggestion=f"Set rule '{c['rule']}' to `phase: post` (or remove `phase` to let it run "
+                f"where its columns exist), or make the {c['created_by']} transformation `phase: pre`.",
+            )
+        )
+    return out
+
+
 def check_continuous_trigger(raw, name, ctx):  # STREAM-002
     # A continuous trigger implies an always-on cluster (cost); most freshness SLOs
     # are met by available_now on scheduled/serverless compute.
@@ -694,6 +722,7 @@ _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[
     check_no_volume_freshness_slo,
     check_append_on_resumable_stream,
     check_continuous_trigger,
+    check_pre_rule_reads_post_column,
     check_ownership_single_point,
     check_ownership_unroutable_blocking,
 ]

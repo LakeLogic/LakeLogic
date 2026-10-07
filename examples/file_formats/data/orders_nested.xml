@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<export xmlns="urn:shop">
+  <orders>
+    <order id="6001" currency="GBP">
+      <placed_at>2026-10-01</placed_at>
+      <customer><id>C1</id><name>Ada</name><address><city>London</city><country>GB</country></address></customer>
+      <items><item><sku>A1</sku><qty>2</qty><price>9.5</price></item><item><sku>B2</sku><qty>1</qty><price>20</price></item></items>
+    </order>
+    <order id="6002" currency="EUR">
+      <placed_at>2026-10-02</placed_at>
+      <customer><id>C2</id><name>Bo</name><address><city>Paris</city><country>FR</country></address></customer>
+      <items><item><sku>C3</sku><qty>5</qty><price>1</price></item><item><sku>D4</sku><qty>1</qty><price>3</price></item></items>
+    </order>
+    <order id="6003" currency="EUR">
+      <placed_at>2026-10-03</placed_at>
+      <customer><id>C3</id><name>Cy</name><address><city>Rome</city><country>IT</country></address></customer>
+      <items><item><sku>E5</sku><qty>two</qty><price>4</price></item><item><sku>F6</sku><qty>1</qty><price>2</price></item></items>
+    </order>
+  </orders>
+</export>

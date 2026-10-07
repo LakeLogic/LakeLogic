@@ -289,6 +289,12 @@ class SourceConfig(_olcn.SourceConfig):
         "flatten_nested",
         "dlt",
         "post_ingestion",
+        # Fixed-width settings (also accepted under source.options) — 2026-10-07.
+        "record_length",
+        "encoding",
+        "skip_rows",
+        "skip_footer",
+        "strip",
     }
 
     @model_validator(mode="after")

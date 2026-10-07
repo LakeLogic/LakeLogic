@@ -353,6 +353,9 @@ class DuckDBAdapter(EngineAdapter):
             }
             casts = []
             self._type_err_cols = []
+            # Reader-rejected records (fixed-width record length): see the Polars engine.
+            if "__type_err__record" in cols:
+                self._type_err_cols.append("__type_err__record")
             for col in cols:
                 matched_field = next((f for f in self.contract.model.fields if f.name == col), None)
                 if matched_field:
@@ -640,10 +643,30 @@ class DuckDBAdapter(EngineAdapter):
                 ex = trans.explode
                 output = ex.output or ex.field
                 cols = self._get_current_columns(current)
+                col_type = next(
+                    (
+                        str(t).upper()
+                        for n, t in self.con.sql(f"SELECT column_name, column_type FROM (DESCRIBE {current})").fetchall()
+                        if n == ex.field
+                    ),
+                    "",
+                )
+                lst = f'"{ex.field}"'
+                if col_type == "VARCHAR":
+                    # A JSON-text array (nested JSON/XML/Avro after flatten_nested): one row per
+                    # element, scalars as plain text and objects as JSON text — as the Polars engine.
+                    lst = (
+                        f"list_transform(from_json({lst}, '[\"JSON\"]'), x -> CASE WHEN json_type(x) = 'VARCHAR' "
+                        f"THEN json_extract_string(x, '$') ELSE CAST(x AS VARCHAR) END)"
+                    )
+                # An empty or null list keeps its row (one null element), as Polars does. Bare
+                # UNNEST dropped the row: an order with no items vanished on DuckDB instead of
+                # being quarantined — unaccounted row loss (found 2026-10-07).
+                lst = f"UNNEST(CASE WHEN {lst} IS NULL OR len({lst}) = 0 THEN [NULL] ELSE {lst} END)"
                 if output == ex.field and ex.field in cols:
-                    sql = f'SELECT * EXCLUDE ("{ex.field}"), UNNEST("{ex.field}") AS "{output}" FROM {current}'
+                    sql = f'SELECT * EXCLUDE ("{ex.field}"), {lst} AS "{output}" FROM {current}'
                 else:
-                    sql = f'SELECT *, UNNEST("{ex.field}") AS "{output}" FROM {current}'
+                    sql = f'SELECT *, {lst} AS "{output}" FROM {current}'
                 view_name = f"_pre_explode_{id(ex) & 0xFFFFFF:06x}"
                 self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS {sql}")
                 current = view_name
@@ -1169,120 +1192,41 @@ class DuckDBAdapter(EngineAdapter):
             details={"errors": schema_errors},
         )
 
-        # 3. Post-transformations
+        # Execution order (OLC; one definition in lakelogic.core.rule_phases):
+        #   type checks + PRE rules -> good/bad split -> post transforms on GOOD rows -> POST rules.
+        # Until 2026-10-07 DuckDB applied post transforms to every row and then ran every rule,
+        # whatever its phase, while Spark followed the spec: one contract, two results.
+        row_rules = self.get_row_rules()
+        pre_rules = [r for r in row_rules if str(getattr(r, "phase", "pre") or "pre").lower() != "post"]
+        post_rules = [r for r in row_rules if str(getattr(r, "phase", "pre") or "pre").lower() == "post"]
+        self._evaluate_and_split(
+            current_table, pre_rules, schema_errors, list(getattr(self, "_type_err_cols", [])), "_rule_",
+            "_good_pre", "_bad_pre",
+        )
+
+        # Post transforms: GOOD rows only (a quarantined row keeps the shape it failed in).
+        good_table = "_good_pre"
         if self.contract.transformations:
             step_start = time.perf_counter()
-            post_input = self.con.sql(f"SELECT COUNT(*) FROM {current_table}").fetchone()[0]
-            current_table = self._apply_post_transformations(current_table)
-            post_output = self.con.sql(f"SELECT COUNT(*) FROM {current_table}").fetchone()[0]
+            post_input = self.con.sql(f"SELECT COUNT(*) FROM {good_table}").fetchone()[0]
+            good_table = self._apply_post_transformations(good_table)
+            post_output = self.con.sql(f"SELECT COUNT(*) FROM {good_table}").fetchone()[0]
             self._add_trace(
                 "Post-Transformations",
                 input_rows=post_input,
                 output_rows=post_output,
                 duration_ms=(time.perf_counter() - step_start) * 1000,
             )
-            # Prune type-error columns that no longer exist after
-            # transformations (e.g. GROUP BY replaces entire column set)
-            if getattr(self, "_type_err_cols", None):
-                surviving = set(self._get_current_columns(current_table))
-                self._type_err_cols = [c for c in self._type_err_cols if c in surviving]
 
-        # 4. Row-level quality rules
-        row_rules = self.get_row_rules()
-
-        # Type mismatches are row errors too: without a quality rule on the contract, a
-        # value that did not fit its type was nulled and WRITTEN, never quarantined.
-        if row_rules or schema_errors or getattr(self, "_type_err_cols", None):
-            step_start = time.perf_counter()
-
-            # Build rule evaluation expressions
-            rule_cols = []
-            for i, rule in enumerate(row_rules):
-                rule_cols.append(f"CAST(({rule.sql}) AS BOOLEAN) AS _rule_{i}")
-
-            if rule_cols:
-                eval_sql = f"SELECT *, {', '.join(rule_cols)} FROM {current_table}"
-                self.con.sql(f"CREATE OR REPLACE VIEW _evaluated AS {eval_sql}")
-            else:
-                self.con.sql(f"CREATE OR REPLACE VIEW _evaluated AS SELECT * FROM {current_table}")
-
-            # Build error tracking
-            error_parts = []
-            category_parts = []
-            for err in schema_errors:
-                error_parts.append(f"'{err.replace(chr(39), chr(39) * 2)}'")
-                category_parts.append("'schema'")
-
-            for i, rule in enumerate(row_rules):
-                err_msg = f"Rule failed: {plain_text(rule.name)} ({rule.sql})".replace("'", "''")
-                error_parts.append(f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{err_msg}' ELSE NULL END")
-                cat_msg = runtime_category(rule).replace("'", "''")
-                category_parts.append(f"CASE WHEN _rule_{i} IS NULL OR NOT _rule_{i} THEN '{cat_msg}' ELSE NULL END")
-
-            for err_col in getattr(self, "_type_err_cols", []):
-                error_parts.append(f'"{err_col}"')
-                category_parts.append(f"CASE WHEN \"{err_col}\" IS NOT NULL THEN 'schema' ELSE NULL END")
-
-            if error_parts:
-                error_array = f"list_value({', '.join(error_parts)})"
-                category_array = f"list_value({', '.join(category_parts)})"
-                # Filter out NULLs from the array
-                self.con.sql(
-                    f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
-                    f"SELECT *, "
-                    f"list_filter({error_array}, x -> x IS NOT NULL) AS {self.ERROR_COLUMN}, "
-                    f"list_filter({category_array}, x -> x IS NOT NULL) AS {self.CATEGORY_COLUMN} "
-                    f"FROM _evaluated"
-                )
-            else:
-                self.con.sql(
-                    f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
-                    f"SELECT *, "
-                    f"CAST(list_value() AS VARCHAR[]) AS {self.ERROR_COLUMN}, "
-                    f"CAST(list_value() AS VARCHAR[]) AS {self.CATEGORY_COLUMN} "
-                    f"FROM _evaluated"
-                )
-
-            eval_count = self.con.sql("SELECT COUNT(*) FROM _with_errors").fetchone()[0]
-            self._add_trace(
-                "Row Rules Evaluation",
-                input_rows=eval_count,
-                output_rows=eval_count,
-                duration_ms=(time.perf_counter() - step_start) * 1000,
-                details={"rules_count": len(row_rules)},
-            )
+        bad_parts = ["SELECT * FROM _bad_pre"]
+        if post_rules:
+            self._evaluate_and_split(good_table, post_rules, [], [], "_post_rule_", "_good", "_bad_post")
+            bad_parts.append("SELECT * FROM _bad_post")
         else:
-            self.con.sql(
-                f"CREATE OR REPLACE TEMP TABLE _with_errors AS "
-                f"SELECT *, "
-                f"CAST(list_value() AS VARCHAR[]) AS {self.ERROR_COLUMN}, "
-                f"CAST(list_value() AS VARCHAR[]) AS {self.CATEGORY_COLUMN} "
-                f"FROM {current_table}"
-            )
-
-        # 5. Split good/bad
-        internal_cols = [f"_rule_{i}" for i in range(len(row_rules))] + getattr(self, "_type_err_cols", [])
-        drop_list = internal_cols + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
-        drop_clause = ", ".join(f'"{c}"' for c in drop_list) if drop_list else ""
-
-        # Good rows: no errors
-        exclude_clause = f" EXCLUDE ({drop_clause})" if drop_clause else ""
+            self.con.sql(f"CREATE OR REPLACE VIEW _good AS SELECT * FROM {good_table}")
         self.con.sql(
-            f"CREATE OR REPLACE VIEW _good AS "
-            f"SELECT *{exclude_clause} FROM _with_errors "
-            f"WHERE len({self.ERROR_COLUMN}) = 0"
-        )
-
-        # Bad rows: have errors
-        internal_drop = ", ".join(f'"{c}"' for c in internal_cols) if internal_cols else ""
-        bad_exclude = f" EXCLUDE ({internal_drop})" if internal_drop else ""
-        self.con.sql(
-            f"CREATE OR REPLACE VIEW _bad AS "
-            f"SELECT *{bad_exclude}, "
-            f"'active' AS quarantine_state, "
-            f"false AS quarantine_reprocessed "
-            f"FROM _with_errors "
-            f"WHERE len({self.ERROR_COLUMN}) > 0"
+            "CREATE OR REPLACE VIEW _bad AS SELECT *, 'active' AS quarantine_state, false AS quarantine_reprocessed "
+            f"FROM ({' UNION ALL BY NAME '.join(bad_parts)})"
         )
 
         # 6. Dataset rules on good data — evaluate the POST-transform good snapshot.
@@ -1314,6 +1258,95 @@ class DuckDBAdapter(EngineAdapter):
             bad_df = self._to_output_df(self.con.sql("SELECT * FROM _bad"))
 
         return good_df, bad_df
+
+    def _evaluate_and_split(self, current_table, row_rules, schema_errors, type_err_cols, prefix, good_view, bad_view):
+        """Evaluate ``row_rules`` (+ schema/type errors) on ``current_table``; create the good and
+        bad views. Run for the pre-phase checks, then again after post transforms for the post ones.
+        """
+
+        # Type mismatches are row errors too: without a quality rule on the contract, a
+        # value that did not fit its type was nulled and WRITTEN, never quarantined.
+        if row_rules or schema_errors or type_err_cols:
+            step_start = time.perf_counter()
+
+            # Build rule evaluation expressions
+            rule_cols = []
+            for i, rule in enumerate(row_rules):
+                rule_cols.append(f"CAST(({rule.sql}) AS BOOLEAN) AS {prefix}{i}")
+
+            if rule_cols:
+                eval_sql = f"SELECT *, {', '.join(rule_cols)} FROM {current_table}"
+                self.con.sql(f"CREATE OR REPLACE VIEW _evaluated{prefix} AS {eval_sql}")
+            else:
+                self.con.sql(f"CREATE OR REPLACE VIEW _evaluated{prefix} AS SELECT * FROM {current_table}")
+
+            # Build error tracking
+            error_parts = []
+            category_parts = []
+            for err in schema_errors:
+                error_parts.append(f"'{err.replace(chr(39), chr(39) * 2)}'")
+                category_parts.append("'schema'")
+
+            for i, rule in enumerate(row_rules):
+                err_msg = f"Rule failed: {plain_text(rule.name)} ({rule.sql})".replace("'", "''")
+                error_parts.append(f"CASE WHEN {prefix}{i} IS NULL OR NOT {prefix}{i} THEN '{err_msg}' ELSE NULL END")
+                cat_msg = runtime_category(rule).replace("'", "''")
+                category_parts.append(f"CASE WHEN {prefix}{i} IS NULL OR NOT {prefix}{i} THEN '{cat_msg}' ELSE NULL END")
+
+            for err_col in type_err_cols:
+                error_parts.append(f'"{err_col}"')
+                category_parts.append(f"CASE WHEN \"{err_col}\" IS NOT NULL THEN 'schema' ELSE NULL END")
+
+            if error_parts:
+                error_array = f"list_value({', '.join(error_parts)})"
+                category_array = f"list_value({', '.join(category_parts)})"
+                # Filter out NULLs from the array
+                self.con.sql(
+                    f"CREATE OR REPLACE TEMP TABLE _with_errors{prefix} AS "
+                    f"SELECT *, "
+                    f"list_filter({error_array}, x -> x IS NOT NULL) AS {self.ERROR_COLUMN}, "
+                    f"list_filter({category_array}, x -> x IS NOT NULL) AS {self.CATEGORY_COLUMN} "
+                    f"FROM _evaluated{prefix}"
+                )
+            else:
+                self.con.sql(
+                    f"CREATE OR REPLACE TEMP TABLE _with_errors{prefix} AS "
+                    f"SELECT *, "
+                    f"CAST(list_value() AS VARCHAR[]) AS {self.ERROR_COLUMN}, "
+                    f"CAST(list_value() AS VARCHAR[]) AS {self.CATEGORY_COLUMN} "
+                    f"FROM _evaluated{prefix}"
+                )
+
+            eval_count = self.con.sql(f"SELECT COUNT(*) FROM _with_errors{prefix}").fetchone()[0]
+            self._add_trace(
+                "Row Rules Evaluation",
+                input_rows=eval_count,
+                output_rows=eval_count,
+                duration_ms=(time.perf_counter() - step_start) * 1000,
+                details={"rules_count": len(row_rules)},
+            )
+        else:
+            self.con.sql(
+                f"CREATE OR REPLACE TEMP TABLE _with_errors{prefix} AS "
+                f"SELECT *, "
+                f"CAST(list_value() AS VARCHAR[]) AS {self.ERROR_COLUMN}, "
+                f"CAST(list_value() AS VARCHAR[]) AS {self.CATEGORY_COLUMN} "
+                f"FROM {current_table}"
+            )
+
+        internal_cols = [f"{prefix}{i}" for i in range(len(row_rules))] + list(type_err_cols)
+        drop_list = internal_cols + [self.ERROR_COLUMN, self.CATEGORY_COLUMN]
+        drop_clause = ", ".join(f'"{c}"' for c in drop_list)
+        self.con.sql(
+            f"CREATE OR REPLACE VIEW {good_view} AS SELECT * EXCLUDE ({drop_clause}) FROM _with_errors{prefix} "
+            f"WHERE len({self.ERROR_COLUMN}) = 0"
+        )
+        internal_drop = ", ".join(f'"{c}"' for c in internal_cols)
+        bad_exclude = f" EXCLUDE ({internal_drop})" if internal_drop else ""
+        self.con.sql(
+            f"CREATE OR REPLACE VIEW {bad_view} AS SELECT *{bad_exclude} FROM _with_errors{prefix} "
+            f"WHERE len({self.ERROR_COLUMN}) > 0"
+        )
 
     def _run_dataset_rules(self, table_name: str) -> None:
         """Execute dataset-level quality rules."""

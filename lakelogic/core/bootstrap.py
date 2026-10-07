@@ -1111,9 +1111,6 @@ class ContractInferrer:
                 val = row.get(col)
                 if isinstance(val, dict):
                     all_keys.update({k: v for k, v in val.items() if k not in all_keys})
-                elif isinstance(val, list) and val and isinstance(val[0], dict):
-                    # List-of-dicts: explode first element's keys
-                    all_keys.update({k: v for k, v in val[0].items() if k not in all_keys})
 
             if not all_keys:
                 return rows  # nothing to explode — leave as is
@@ -1129,8 +1126,7 @@ class ContractInferrer:
                             _json.dumps(child, ensure_ascii=False) if isinstance(child, (dict, list)) else child
                         )
                 elif isinstance(val, list):
-                    # Represent list as JSON string for the column itself
-                    new_row[f"{prefix}_values"] = _json.dumps(val, ensure_ascii=False)
+                    new_row[col] = _json.dumps(val, ensure_ascii=False)  # arrays kept whole, for `explode`
                 else:
                     # null / scalar — fill all child cols with None
                     for key in all_keys:
@@ -1172,7 +1168,7 @@ class ContractInferrer:
                     continue
                 for row in rows:
                     val = row.get(col)
-                    if isinstance(val, (dict, list)):
+                    if isinstance(val, dict):  # arrays stay whole (JSON text) for `explode`
                         cols_to_explode.append(col)
                         break
             for col in cols_to_explode:
@@ -1182,6 +1178,10 @@ class ContractInferrer:
         # Rebuild polars DataFrame from flattened rows
         if not rows:
             return df
+        rows = [
+            {k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in r.items()}
+            for r in rows
+        ]
         try:
             return pl.from_dicts(rows)
         except Exception:

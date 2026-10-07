@@ -353,3 +353,6 @@ playwright-mcp/
 .playwright-mcp/
 # Exclusive-resource locks (scripts/with-lock.sh). Runtime state, never shared.
 .locks/
+
+# Scenario suite inputs (examples/file_formats/scenarios.py writes them on every run)
+examples/file_formats/data/scenarios/

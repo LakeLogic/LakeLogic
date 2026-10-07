@@ -69,6 +69,16 @@ class ProbedSchema:
     row_count: Optional[int] = None
 
 
+
+def _excel_schema(pl, source):
+    """An Excel sheet's schema from one row. ``calamine`` (via ``fastexcel``) when installed;
+    else ``openpyxl``, which LakeLogic installs — fastexcel is not a dependency (2026-10-07)."""
+    import importlib.util
+
+    if importlib.util.find_spec("fastexcel") is not None:
+        return pl.read_excel(source, read_options={"n_rows": 1}).schema
+    return pl.read_excel(source, engine="openpyxl").head(1).schema
+
 def format_of(path: str) -> Optional[str]:
     """Which format a path is, or None when this module cannot read it."""
     lower = str(path).lower()
@@ -166,7 +176,7 @@ def probe_schema(
                 )
                 return None
             # One row, because a workbook has no declared schema: its types come from cells.
-            schema = pl.read_excel(p, read_options={"n_rows": 1}).schema
+            schema = _excel_schema(pl, p)
     except Exception as exc:  # noqa: BLE001 — every reader raises its own shapes
         logger.warning("probe_schema: cannot read {} ({}) — skipping ({}).", p, fmt, exc)
         return None
@@ -221,7 +231,7 @@ def probe_schema_bytes(
         elif fmt == "json":
             schema = _json_schema_bytes(pl, data)
         else:  # excel
-            schema = pl.read_excel(buf, read_options={"n_rows": 1}).schema
+            schema = _excel_schema(pl, buf)
     except Exception as exc:  # noqa: BLE001 — every reader raises its own shapes
         logger.warning("probe_schema_bytes: cannot read {} ({}) — skipping ({}).", file_name, fmt, exc)
         return None

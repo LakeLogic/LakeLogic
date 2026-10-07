@@ -205,6 +205,793 @@ def _sqlalchemy_uri_to_jdbc(uri: str) -> dict:
     )
 
 
+def _xml_tag(tag: str) -> str:
+    """``{namespace}name`` -> ``name``."""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _xml_is_list_of(parent: str, child: str) -> bool:
+    """``<items>`` holding ``<item>``: the plural/list naming that marks a list wrapper.
+
+    XML cannot say "a list of one", so ``<items><item/></items>`` would otherwise read as an
+    object. Matches ``item``→``items``/``itemes``, ``entry``→``entries``, and ``…List`` /
+    ``…_list`` / ``…Collection`` wrappers, case-insensitively.
+    """
+    p, c = parent.lower(), child.lower()
+    return p in (c + "s", c + "es", c + "list", c + "_list", c + "collection") or (
+        c.endswith("y") and p == c[:-1] + "ies"
+    )
+
+
+def _xml_value(el: Any) -> Any:
+    """An element as a plain value: text for a leaf, a dict for one with children.
+
+    Children that repeat (``<items><item/><item/></items>``) become a list; attributes are
+    kept as ``@name`` keys only where the element also has content, so a leaf with no
+    attributes stays a plain string.
+    """
+    children = list(el)
+    if not children:
+        text = (el.text or "").strip() or None
+        if el.attrib:
+            out = {f"@{_xml_tag(k)}": v for k, v in el.attrib.items()}
+            if text is not None:
+                out["#text"] = text
+            return out
+        return text
+    out: Dict[str, Any] = {_xml_tag(k): v for k, v in el.attrib.items()}
+    counts: Dict[str, int] = {}
+    for ch in children:
+        counts[_xml_tag(ch.tag)] = counts.get(_xml_tag(ch.tag), 0) + 1
+    only = next(iter(counts)) if len(counts) == 1 else None
+    if only and (len(children) > 1 or _xml_is_list_of(_xml_tag(el.tag), only)):
+        return [_xml_value(ch) for ch in children]  # a list wrapper: <items><item/>…</items>
+    for ch in children:
+        name, val = _xml_tag(ch.tag), _xml_value(ch)
+        if counts[name] > 1:
+            out.setdefault(name, []).append(val)
+        else:
+            out[name] = val
+    return out
+
+
+def _read_xml_records(path: str, options: Optional[Dict[str, Any]] = None) -> Any:
+    """An XML file as a Polars frame: one row per repeated record element.
+
+    Polars has no ``read_xml`` (the old calls raised AttributeError on every XML source,
+    found 2026-10-07). Standard library only. The records are the children of the first
+    element that has more than one child — so ``<orders><order>…</order>…</orders>`` and
+    ``<export><orders><order>…`` both work. A record's attributes and leaf children are text
+    columns; a NESTED child (an object, or a repeated element) is a JSON-text column — the
+    same shape a nested JSON source lands in, so ``source.flatten_nested``, ``json_extract``
+    and ``explode`` treat XML and JSON alike. Namespaces are stripped. Every leaf is text, like
+    a raw landing CSV: the typed cast downstream quarantines what does not fit.
+
+    A file holding ONE record (``<orders><order>…</order></orders>``) is still one row: the
+    walk stops at a plural wrapper (see ``_xml_is_list_of``). When the layout is unusual, name
+    the record element: ``source.options.row_tag: order`` (every ``<order>``, at any depth).
+    """
+    import json as _json
+    import xml.etree.ElementTree as ET
+
+    import polars as pl
+
+    root = ET.parse(path).getroot()
+    row_tag = (options or {}).get("row_tag")
+    if row_tag:
+        elements = [el for el in root.iter() if _xml_tag(el.tag) == row_tag]
+    else:
+        node = root
+        while len(node) == 1 and len(node[0]) > 0 and not _xml_is_list_of(_xml_tag(node.tag), _xml_tag(node[0].tag)):
+            node = node[0]
+        elements = list(node)
+    records = []
+    for rec in elements:
+        val = _xml_value(rec)
+        records.append(val if isinstance(val, dict) else {_xml_tag(rec.tag): val})
+    # XML cannot tell a one-element list from an object: <items><item/></items> reads as
+    # {"item": {...}} while two items read as a list. A column that is a list in ANY record
+    # is a list in every record, so explode sees the same shape for one item or many.
+    list_cols = {k for r in records for k, v in r.items() if isinstance(v, list)}
+    for r in records:
+        for k in list_cols:
+            v = r.get(k)
+            if v is None or isinstance(v, list):
+                continue
+            if isinstance(v, dict) and len(v) == 1 and isinstance(next(iter(v.values())), dict):
+                v = next(iter(v.values()))  # the wrapper's lone child
+            r[k] = [v]
+    rows = [
+        {k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in r.items()}
+        for r in records
+    ]
+    cols: List[str] = []
+    for r in rows:
+        for k in r:
+            if k not in cols:
+                cols.append(k)
+    return pl.DataFrame({c: [r.get(c) for r in rows] for c in cols}, schema={c: pl.Utf8 for c in cols})
+
+
+def _xls_rows(path: str, sheet: Optional[str]) -> List[tuple]:
+    """Rows of an old-format ``.xls`` (Excel 97-2003) sheet, via ``xlrd``.
+
+    ``openpyxl`` reads only ``.xlsx``; an ``.xls`` used to fail with "File is not a zip file"
+    (found 2026-10-07). Finance and ops systems still export ``.xls``. Empty cells are None
+    and date cells become ``datetime`` (xlrd stores them as day-count floats).
+    """
+    try:
+        import xlrd
+    except ImportError as exc:
+        raise ImportError("Reading .xls files needs xlrd: pip install 'lakelogic[polars]' (or pip install xlrd)") from exc
+
+    book = xlrd.open_workbook(path)
+    names = book.sheet_names()
+    if sheet is not None and sheet not in names:
+        raise ValueError(f"Excel sheet {sheet!r} not found in {path}; sheets: {names}")
+    ws = book.sheet_by_name(sheet) if sheet is not None else book.sheet_by_index(0)
+    rows = []
+    for r in range(ws.nrows):
+        row = []
+        for c in range(ws.ncols):
+            cell = ws.cell(r, c)
+            if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+                row.append(None)
+            elif cell.ctype == xlrd.XL_CELL_DATE:
+                row.append(xlrd.xldate_as_datetime(cell.value, book.datemode))
+            else:
+                row.append(cell.value)
+        rows.append(tuple(row))
+    return rows
+
+
+def _read_excel_polars(path: str, options: Optional[Dict[str, Any]] = None) -> Any:
+    """An Excel sheet as a Polars frame, with a reader Core actually installs.
+
+    ``pl.read_excel`` defaults to the ``calamine`` engine, which needs ``fastexcel`` — not a
+    LakeLogic dependency — so every Excel source failed with "required package 'fastexcel'
+    not found" (found 2026-10-07). Read with ``openpyxl`` (installed by the polars and duckdb
+    extras), so the result is the same whichever extras are present.
+
+    ``source.options``:
+      * ``sheet_name`` — the tab to read (default: the first sheet);
+      * ``header_row`` — the 1-based row holding the column names (default 1); rows above it
+        (a title, a logo, notes) are skipped;
+      * ``skip_footer`` — rows to drop from the bottom (totals, notes).
+    Every value is read as text, like a raw landing CSV; empty rows are dropped.
+    """
+    import datetime as _dt
+
+    import polars as pl
+
+    opts = options or {}
+    if not str(path).lower().endswith(".xls"):
+        import openpyxl
+    header_row = int(opts.get("header_row") or 1)
+    skip_footer = int(opts.get("skip_footer") or 0)
+    sheet = opts.get("sheet_name")
+    if str(path).lower().endswith(".xls"):
+        rows = _xls_rows(path, sheet)
+    else:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            if sheet is not None and sheet not in wb.sheetnames:
+                raise ValueError(f"Excel sheet {sheet!r} not found in {path}; sheets: {wb.sheetnames}")
+            ws = wb[sheet] if sheet is not None else wb.worksheets[0]
+            rows = list(ws.iter_rows(values_only=True))
+        finally:
+            wb.close()
+    if len(rows) < header_row:
+        return pl.DataFrame()
+    header = [str(h).strip() if h is not None else f"column_{i + 1}" for i, h in enumerate(rows[header_row - 1])]
+    body = rows[header_row:len(rows) - skip_footer if skip_footer else None]
+    body = [r for r in body if any(v is not None and str(v).strip() != "" for v in r)]
+
+    def _text(v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, float) and v.is_integer():
+            return str(int(v))
+        if isinstance(v, _dt.datetime):
+            # A date-only cell comes back as midnight; "2026-10-01 00:00:00" does not cast
+            # to a `date` field, so give the date alone (found 2026-10-07).
+            return v.date().isoformat() if v.time() == _dt.time(0) else v.isoformat(sep=" ")
+        if isinstance(v, (_dt.date, _dt.time)):
+            return v.isoformat()
+        return str(v)
+
+    data = {h: [_text(r[i]) if i < len(r) else None for r in body] for i, h in enumerate(header)}
+    return pl.DataFrame(data, schema={h: pl.Utf8 for h in header})
+
+
+RECORD_ERROR_COLUMN = "__type_err__record"
+_LOGGING_CONFIGURED = False  # see DataProcessor._configure_logging
+_LOGGING_HANDLER: Optional[Tuple[int, Any]] = None  # (loguru id, stream) of LakeLogic's own handler
+_GZIP_MAGIC = bytes([0x1F, 0x8B])
+
+
+def _fixed_width_layout(options: Dict[str, Any], fields: Optional[List[Any]]) -> List[Tuple[str, int, int]]:
+    """``[(name, start0, width)]`` from either way a contract can declare a fixed-width layout.
+
+    * ``source.options.columns: [{name, start, width}]`` — ``start`` 1-based, as bank and
+      mainframe layout documents print it;
+    * ``model.fields[].range: [start, end]`` — 0-based, end-exclusive (``[0, 1]`` is the first
+      character), so each field carries its own position.
+
+    The options list wins when both are present. Overlapping ranges are allowed (a layout may
+    expose a sub-field), but a range must be non-empty.
+    """
+    layout: List[Tuple[str, int, int]] = []
+    columns = options.get("columns") or []
+    for c in columns:
+        try:
+            name, start, width = str(c["name"]), int(c["start"]), int(c["width"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"fixed_width column needs name, start and width: {c!r}") from exc
+        if start < 1 or width < 1:
+            raise ValueError(f"fixed_width column {name!r}: start and width must be >= 1")
+        layout.append((name, start - 1, width))
+    if layout:
+        return layout
+    for f in fields or []:
+        rng = getattr(f, "range", None) if not isinstance(f, dict) else f.get("range")
+        if rng is None:
+            continue
+        name = getattr(f, "name", None) if not isinstance(f, dict) else f.get("name")
+        try:
+            lo, hi = int(rng[0]), int(rng[1])
+        except (TypeError, ValueError, IndexError) as exc:
+            raise ValueError(f"fixed_width field {name!r}: range must be [start, end], got {rng!r}") from exc
+        if lo < 0 or hi <= lo:
+            raise ValueError(f"fixed_width field {name!r}: range [{lo}, {hi}] must have 0 <= start < end")
+        layout.append((str(name), lo, hi - lo))
+    if not layout:
+        raise ValueError(
+            "source.format 'fixed_width' needs a layout: model.fields[].range: [start, end] "
+            "(0-based, end-exclusive) or source.options.columns: [{name, start, width}] (1-based)"
+        )
+    return layout
+
+
+def _read_fixed_width(
+    path: str,
+    options: Optional[Dict[str, Any]] = None,
+    *,
+    fields: Optional[List[Any]] = None,
+    data: Optional[bytes] = None,
+) -> Any:
+    """A fixed-width file (mainframe, BACS/bank, payroll feeds) as a Polars frame.
+
+    There are no separators: each field sits at fixed character positions. The layout comes
+    from the contract (see ``_fixed_width_layout``). Settings, on ``source`` or
+    ``source.options``:
+
+      * ``record_length`` — every record's length. Records that differ are QUARANTINED with
+        "Line length mismatch: expected 100, got 84" — the value is still sliced, so the bad
+        row is readable. A file with no line breaks at all is split every ``record_length``
+        characters (mainframe-style fixed-length records).
+      * ``encoding`` — default ``utf-8``; ``ascii``, ``latin-1``, ``cp1252``, ``cp037`` (EBCDIC);
+      * ``skip_rows`` / ``skip_footer`` — header and trailer records to drop;
+      * ``strip`` — trim the padding spaces (default true).
+
+    Slicing is vectorised (Polars ``str.slice`` over one column of records, no per-row Python).
+    Every value is text, like a raw landing CSV: padded numbers (``00001050``) and dates are
+    cast — and quarantined if they do not fit — by the typed model downstream. Blank lines are
+    dropped. ``data`` lets the caller pass bytes it already read (a cloud object).
+    """
+    import polars as pl
+
+    opts = dict(options or {})
+    layout = _fixed_width_layout(opts, fields)
+    encoding = opts.get("encoding") or "utf-8"
+    record_length = opts.get("record_length")
+    record_length = int(record_length) if record_length not in (None, "") else None
+    if record_length is not None and record_length < 1:
+        raise ValueError(f"record_length must be >= 1, got {record_length}")
+
+    if data is None:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    text = data.decode(encoding)
+    if record_length and "\n" not in text and "\r" not in text:
+        records = [text[i:i + record_length] for i in range(0, len(text), record_length)]
+    else:
+        records = text.splitlines()
+    skip_rows, skip_footer = int(opts.get("skip_rows") or 0), int(opts.get("skip_footer") or 0)
+    records = records[skip_rows:len(records) - skip_footer if skip_footer else None]
+    records = [r for r in records if r.strip()]
+
+    rec = pl.col("_record")
+    exprs = []
+    for name, start, width in layout:
+        e = rec.str.slice(start, width)
+        if opts.get("strip", True):
+            e = e.str.strip_chars()
+        exprs.append(pl.when(e.str.len_chars() == 0).then(None).otherwise(e).alias(name))
+    if record_length:
+        length = rec.str.len_chars()
+        exprs.append(
+            pl.when(length != record_length)
+            .then(pl.lit(f"Line length mismatch: expected {record_length}, got ") + length.cast(pl.Utf8))
+            .otherwise(None)
+            .alias(RECORD_ERROR_COLUMN)
+        )
+    frame = pl.DataFrame({"_record": pl.Series(records, dtype=pl.Utf8)})
+    return frame.select(exprs)
+
+
+_FORMAT_EXTENSIONS = {
+    "csv": (".csv", ".tsv"),  # not .txt: a README.txt in an archive is not data; use archive_member
+    "json": (".json",),
+    "ndjson": (".ndjson", ".jsonl"),
+    "jsonl": (".ndjson", ".jsonl"),
+    "xml": (".xml",),
+    "xlsx": (".xlsx",),
+    "xls": (".xls",),
+    "excel": (".xlsx", ".xls"),
+    "parquet": (".parquet",),
+    "avro": (".avro",),
+    "fixed_width": (".txt", ".dat", ".fwf"),
+}
+
+_CSV_OPTION_KEYS = {
+    "delimiter": "separator",
+    "separator": "separator",
+    "sep": "separator",
+    "encoding": "encoding",
+    "skip_rows": "skip_rows",
+    "quote_char": "quote_char",
+    "has_header": "has_header",
+    "null_values": "null_values",
+    "comment_prefix": "comment_prefix",
+}
+# Applied after the read, not by Polars: landing CSV is read all-text, and Polars only
+# honours decimal_comma when it parses the number itself. See _apply_decimal_comma.
+
+
+def _csv_read_kwargs(options: Optional[Dict[str, Any]], lazy: bool = False) -> Dict[str, Any]:
+    """CSV dialect from ``source.options`` as Polars ``read_csv``/``scan_csv`` keywords.
+
+    Before 2026-10-07 every landing CSV was read with Polars defaults (comma, UTF-8, header on
+    line 1), so a tab/pipe/semicolon file landed as ONE column and a Latin-1 export failed.
+
+      * ``delimiter`` (or ``separator``/``sep``) — ``","`` default; ``"\t"``, ``"|"``, ``";"``;
+      * ``encoding`` — ``utf-8`` default; ``latin-1``/``cp1252`` etc. are decoded in memory;
+      * ``skip_rows`` — lines above the header (a title, export notes);
+      * ``quote_char``, ``has_header``, ``null_values``, ``comment_prefix``;
+      * ``decimal_comma`` — ``10,50`` means 10.5 (see ``_apply_decimal_comma``).
+
+    Quoted fields containing line breaks are read correctly by default. A non-UTF-8 encoding
+    cannot be streamed (``lazy=True``): that raises rather than silently mis-decoding.
+    """
+    out: Dict[str, Any] = {}
+    for key, value in (options or {}).items():
+        target = _CSV_OPTION_KEYS.get(key)
+        if target and value is not None:
+            out[target] = value
+    if out.get("separator") in ("\\t", "tab", "TAB"):
+        out["separator"] = "\t"
+    enc = out.get("encoding")
+    if enc is not None:
+        norm = str(enc).lower().replace("-", "").replace("_", "")
+        if norm == "utf8":
+            out.pop("encoding")
+        elif norm == "utf8lossy":
+            out["encoding"] = "utf8-lossy"
+        elif lazy:
+            raise ValueError(
+                f"source.options.encoding={enc!r} needs an in-memory read; it is supported for "
+                "local CSV files, not for this streamed (cloud) read."
+            )
+    return out
+
+
+def _apply_decimal_comma(df: Any, contract: Any) -> Any:
+    """``source.options.decimal_comma: true`` — ``1.234,50`` means 1234.5 in the numeric fields.
+
+    European exports write decimals with a comma and group thousands with a dot. Only the
+    fields the model declares as numbers (float/double/decimal) are rewritten — a comma in a
+    name or a note is left alone. Runs on the all-text landing frame, before the typed cast.
+    """
+    import polars as pl
+
+    opts = getattr(getattr(contract, "source", None), "options", None) or {}
+    if not opts.get("decimal_comma") or not isinstance(df, pl.DataFrame):
+        return df
+    fields = getattr(getattr(contract, "model", None), "fields", None) or []
+    numeric = {
+        getattr(f, "name", None)
+        for f in fields
+        if str(getattr(f, "type", "")).lower().split("(")[0] in {"float", "double", "decimal", "number", "numeric", "real"}
+    }
+    cols = [c for c in df.columns if c in numeric and df.schema[c] == pl.Utf8]
+    if not cols:
+        return df
+    return df.with_columns(
+        [pl.col(c).str.replace_all(".", "", literal=True).str.replace(",", ".", literal=True) for c in cols]
+    )
+
+
+_JAVA_CHARSETS = {
+    "utf-8": "UTF-8", "utf-16": "UTF-16", "ascii": "US-ASCII", "iso8859-1": "ISO-8859-1",
+    "iso8859-15": "ISO-8859-15", "cp1252": "windows-1252", "cp1250": "windows-1250", "cp037": "IBM037",
+    "cp500": "IBM500", "cp437": "IBM437", "cp850": "IBM850", "shift_jis": "Shift_JIS", "euc_jp": "EUC-JP",
+    "gbk": "GBK", "gb2312": "GB2312", "big5": "Big5", "koi8-r": "KOI8-R",
+}
+
+
+def _java_charset(encoding: str) -> str:
+    """A Python encoding name (``latin-1``, ``cp1252``) as the name Spark's Java reader knows."""
+    import codecs
+
+    try:
+        name = codecs.lookup(encoding).name
+    except LookupError:
+        return encoding
+    return _JAVA_CHARSETS.get(name, name.upper())
+
+
+def _first_bytes_are_text(path: str, encoding: str, opener: Any = None, size: int = 1 << 20) -> Optional[str]:
+    """An error message when a file's first MB does not decode with ``encoding``, else None.
+
+    Spark replaces undecodable bytes with U+FFFD and calls the row good — "Zoë" in a Latin-1
+    file read as UTF-8 lands as "Zo�". Polars and DuckDB refuse the file. This check
+    gives Spark the same answer (found 2026-10-07).
+    """
+    import codecs
+
+    try:
+        with (opener(path) if opener else open(path, "rb")) as fh:
+            head = fh.read(size)
+        codecs.getincrementaldecoder(encoding)(errors="strict").decode(head, final=len(head) < size)
+    except UnicodeDecodeError as exc:
+        return (
+            f"{path} is not valid {encoding} (byte {exc.start}: {head[exc.start:exc.start + 4]!r}). "
+            "Declare the file's encoding: source.options.encoding (e.g. latin-1, cp1252)."
+        )
+    except Exception:
+        return None
+    return None
+
+
+def _spark_csv_options(options: Dict[str, Any]) -> Dict[str, str]:
+    """The CSV dialect settings Spark's CSV reader can express, as Spark option names.
+
+    ``skip_rows`` and several ``null_values`` have no Spark option; those files are read on the
+    driver instead (see ``DataProcessor._spark_read_file_source``). ``decimal_comma``,
+    ``implied_decimals`` and ``date_formats`` are applied after the read on every engine.
+    """
+    out: Dict[str, str] = {}
+    sep = options.get("delimiter") or options.get("separator") or options.get("sep")
+    if sep:
+        out["sep"] = "\t" if sep in ("\\t", "tab", "TAB") else str(sep)
+    if options.get("encoding"):
+        out["encoding"] = _java_charset(str(options["encoding"]))
+    if options.get("quote_char"):
+        out["quote"] = str(options["quote_char"])
+    if options.get("comment_prefix"):
+        out["comment"] = str(options["comment_prefix"])
+    nulls = options.get("null_values") or []
+    if isinstance(nulls, str):
+        nulls = [nulls]
+    if len(nulls) == 1:
+        out["nullValue"] = str(nulls[0])
+    enc = str(options.get("encoding") or "utf-8").lower().replace("-", "")
+    if enc in ("utf8", "ascii"):
+        out["multiLine"] = "true"  # a quoted value may hold a line break, as Polars reads it
+    return out
+
+
+def _java_to_strftime(fmt: str) -> str:
+    """A Spark/Java date pattern (``yyyyMMdd``) as strftime (``%Y%m%d``) — the form contracts use."""
+    out = str(fmt)
+    for java, py in (("yyyy", "%Y"), ("yy", "%y"), ("MM", "%m"), ("dd", "%d"), ("HH", "%H"), ("mm", "%M"),
+                     ("ss", "%S"), ("SSS", "%3f")):
+        out = out.replace(java, py)
+    return out
+
+
+def _apply_landing_text_options(df: Any, contract: Any, engine: str) -> Any:
+    """Per-field text conventions from ``source.options``, applied right after the read.
+
+    Raw landing values are text; these turn a source's conventions into values the typed model
+    can cast. A value that does not fit is left AS IT IS, so the typed cast QUARANTINES it with
+    a reason — never a silent null. Same result on Polars, DuckDB and Spark.
+
+      * ``decimal_comma: true`` — ``1.234,50`` → ``1234.50`` in fields declared as numbers;
+      * ``implied_decimals: {amount_pence: 2}`` — ``00001050`` → ``10.50`` (mainframe and bank
+        files store money without the point);
+      * ``date_formats: {signup_date: "yyyyMMdd"}`` — parse with that pattern (Spark/Java style,
+        as ``try_to_date`` uses). ``20261399`` (month 13) stays as it is and is quarantined
+        by the ``date`` cast; ``try_to_date`` would have turned it into null.
+    """
+    opts = getattr(getattr(contract, "source", None), "options", None) or {}
+    implied = {k: int(v) for k, v in (opts.get("implied_decimals") or {}).items() if int(v) > 0}
+    dates = dict(opts.get("date_formats") or {})
+    numeric: set = set()
+    if opts.get("decimal_comma"):
+        numeric = {
+            getattr(f, "name", None)
+            for f in (getattr(getattr(contract, "model", None), "fields", None) or [])
+            if str(getattr(f, "type", "")).lower().split("(")[0] in {"float", "double", "decimal", "number", "numeric", "real"}
+        }
+    if not (implied or dates or numeric) or df is None:
+        return df
+
+    if engine == "spark":
+        from pyspark.sql import functions as F
+
+        cols = set(df.columns)
+        string_cols = {c for c, t in df.dtypes if t == "string"}
+        for c in numeric & string_cols:
+            df = df.withColumn(c, F.regexp_replace(F.regexp_replace(F.col(c), r"\.", ""), ",", "."))
+        for c, n in implied.items():
+            if c in string_cols:
+                t = F.trim(F.col(c))
+                scaled = (F.expr(f"CAST(TRIM(`{c}`) AS DECIMAL(38,0))") / F.lit(10 ** n)).cast(f"decimal(38,{n})")
+                df = df.withColumn(c, F.when(t.rlike(r"^[+-]?[0-9]+$"), scaled.cast("string")).otherwise(F.col(c)))
+        for c, fmt in dates.items():
+            if c in cols:
+                parsed = F.to_date(F.trim(F.col(c).cast("string")), str(fmt))
+                df = df.withColumn(c, F.when(parsed.isNotNull(), F.date_format(parsed, "yyyy-MM-dd")).otherwise(F.col(c)))
+        return df
+
+    import polars as pl
+
+    if not isinstance(df, pl.DataFrame):
+        return df
+    exprs = []
+    for c in df.columns:
+        if df.schema[c] != pl.Utf8:
+            continue
+        e = pl.col(c)
+        if c in numeric:
+            e = e.str.replace_all(".", "", literal=True).str.replace(",", ".", literal=True)
+        if c in implied:
+            n = implied[c]
+            t = e.str.strip_chars()
+            neg = t.str.starts_with("-")
+            digits = t.str.replace(r"^[+-]", "").str.zfill(n + 1)
+            whole = digits.str.slice(0, digits.str.len_chars() - n)
+            frac = digits.str.slice(-n)
+            scaled = pl.when(neg).then(pl.lit("-")).otherwise(pl.lit("")) + whole + pl.lit(".") + frac
+            e = pl.when(t.str.contains(r"^[+-]?\d+$")).then(scaled).otherwise(e)
+        if c in dates:
+            fmt = _java_to_strftime(dates[c])
+            parsed = e.str.strip_chars().str.strptime(pl.Date, fmt, strict=False)
+            e = pl.when(parsed.is_not_null()).then(parsed.dt.strftime("%Y-%m-%d")).otherwise(e)
+        if c in numeric or c in implied or c in dates:
+            exprs.append(e.alias(c))
+    return df.with_columns(exprs) if exprs else df
+
+
+def _decompress_local(
+    paths: List[str], options: Optional[Dict[str, Any]] = None, fmt: Optional[str] = None
+) -> Tuple[List[str], Dict[str, str]]:
+    """Local ``.gz`` and ``.zip`` files unpacked to a temp folder, ready for the normal readers.
+
+    Export pipelines and SFTP drops compress almost everything; before 2026-10-07 an
+    ``orders.csv.gz`` was handed to the CSV reader as-is. ``.gz`` holds one file — its format
+    comes from the inner name (``.csv.gz`` → CSV, ``.json.gz`` → JSON, ``.xml.gz`` → XML).
+    A ``.zip`` may hold many: every file is read (macOS ``__MACOSX`` and dot-files skipped),
+    or only those matching ``source.options.archive_member`` (a glob such as ``"*.csv"``); with
+    no pattern, only the files of the contract's ``source.format`` (a README is not data).
+    Members are written by BASE NAME only, so a hostile ``../`` path cannot escape the temp
+    folder. Returns the new paths and ``{temp_path: original}`` (``archive.zip!member`` for
+    zip members) so ``_source_file`` reports where each row really came from.
+    """
+    import fnmatch
+    import gzip
+    import shutil
+    import tempfile
+    import zipfile
+
+    out: List[str] = []
+    origin: Dict[str, str] = {}
+    tmp: Optional[str] = None
+
+    def _target(name: str) -> str:
+        nonlocal tmp
+        tmp = tmp or tempfile.mkdtemp(prefix="lakelogic_unpack_")
+        return os.path.join(tmp, f"{len(out):04d}_{os.path.basename(name)}")
+
+    pattern = (options or {}).get("archive_member")
+    for p in paths:
+        low = str(p).lower()
+        if low.endswith(".gz"):
+            target = _target(os.path.basename(p)[:-3])
+            with gzip.open(p, "rb") as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            out.append(target)
+            origin[target] = p
+        elif low.endswith(".zip"):
+            with zipfile.ZipFile(p) as zf:
+                members = [
+                    m
+                    for m in zf.namelist()
+                    if not m.endswith("/") and "__MACOSX" not in m and not os.path.basename(m).startswith(".")
+                ]
+                if pattern:
+                    members = [
+                        m for m in members if fnmatch.fnmatch(m, pattern) or fnmatch.fnmatch(os.path.basename(m), pattern)
+                    ]
+                else:
+                    # No pattern: take the files of the contract's format, so a README or a
+                    # manifest in the archive is not read as data. Unknown format: take all.
+                    exts = _FORMAT_EXTENSIONS.get(str(fmt or "").lower())
+                    if exts:
+                        members = [m for m in members if m.lower().endswith(exts)]
+                if not members:
+                    raise ValueError(f"No files in {p} match archive_member={pattern!r}; it holds: {zf.namelist()[:20]}")
+                for m in sorted(members):
+                    target = _target(m)
+                    with zf.open(m) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    out.append(target)
+                    origin[target] = f"{p}!{m}"
+        else:
+            out.append(p)
+    return out, origin
+
+
+def _archive_structure_check(paths: List[str], origin: Dict[str, str], fmt: Optional[str],
+                             options: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """A warning when the files unpacked from one archive do not share one set of columns.
+
+    Several files are combined BY COLUMN NAME, so a file missing a column contributes nulls
+    and an extra column appears only for its rows — easy to miss in a zip of regional or
+    monthly extracts. Column ORDER is not compared. Only header-bearing formats are checked
+    (CSV and JSON/JSONL, read cheaply: the header line or the first record). Returns the
+    message, or None when they agree; the caller logs it.
+    """
+    import json as _json
+
+    import polars as pl
+
+    fmt = str(fmt or "").lower()
+    cols: Dict[str, List[str]] = {}
+    for p in paths:
+        name = origin.get(p, p)
+        low = p.lower()
+        try:
+            if fmt in ("csv", "") and low.endswith((".csv", ".tsv", ".txt")):
+                cols[name] = pl.read_csv(p, n_rows=0, **_csv_read_kwargs(options)).columns
+            elif low.endswith((".jsonl", ".ndjson")) or fmt in ("ndjson", "jsonl"):
+                with open(p, encoding="utf-8") as fh:
+                    first = next((ln for ln in fh if ln.strip()), "{}")
+                cols[name] = list(_json.loads(first))
+            elif low.endswith(".json") or fmt == "json":
+                data = _json.loads(open(p, encoding="utf-8").read() or "[]")
+                rec = data[0] if isinstance(data, list) and data else data
+                cols[name] = list(rec) if isinstance(rec, dict) else []
+        except Exception:  # a broken file is reported by the real read, not here
+            continue
+    if len(cols) < 2:
+        return None
+    union = sorted({c for v in cols.values() for c in v})
+    diffs = []
+    for name, cs in cols.items():
+        missing, extra = sorted(set(union) - set(cs)), sorted(set(cs) - set.intersection(*map(set, cols.values())))
+        if missing:
+            diffs.append(f"{name.rsplit('!', 1)[-1]} lacks {missing}")
+        elif extra:
+            diffs.append(f"{name.rsplit('!', 1)[-1]} adds {extra}")
+    if not diffs:
+        return None
+    archives = sorted({v.split("!", 1)[0] for v in origin.values()})
+    return (
+        f"Files in {', '.join(os.path.basename(a) for a in archives)} do not share one structure: "
+        f"{'; '.join(diffs)}. They are combined by column name, so a missing column is null for "
+        "that file's rows. Pick files with source.options.archive_member if they are different feeds."
+    )
+
+
+def _read_avro_records(path: str) -> Any:
+    """An Avro file (Kafka / Debezium / Confluent exports) as a Polars frame.
+
+    Polars reads Avro natively — no extra dependency. Scalar columns keep their Avro types;
+    nested records and arrays become JSON text, the same shape as a nested JSON or XML source,
+    so ``flatten_nested``, ``json_extract`` and ``explode`` work on all three alike.
+    """
+    import json as _json
+
+    import polars as pl
+
+    df = pl.read_avro(path)
+    nested = [c for c, t in df.schema.items() if isinstance(t, (pl.Struct, pl.List, pl.Array))]
+    for c in nested:
+        df = df.with_columns(
+            pl.Series(
+                c,
+                [None if v is None else _json.dumps(v, ensure_ascii=False, default=str) for v in df[c].to_list()],
+                dtype=pl.Utf8,
+            )
+        )
+    return df
+
+
+def _nested_to_json_text(df: Any) -> Any:
+    """Struct/list columns of a Polars frame as JSON text — the shape flatten_nested expects."""
+    import json as _json
+
+    import polars as pl
+
+    for c, t in df.schema.items():
+        if isinstance(t, (pl.Struct, pl.List, pl.Array)):
+            df = df.with_columns(
+                pl.Series(
+                    c,
+                    [None if v is None else _json.dumps(v, ensure_ascii=False, default=str) for v in df[c].to_list()],
+                    dtype=pl.Utf8,
+                )
+            )
+    return df
+
+
+def _polars_read_local_file(fp: str, fmt: str, options: Dict[str, Any], fields: List[Any]) -> Any:
+    """One LOCAL landing file as a Polars frame, by format — the readers every engine shares.
+
+    Spark uses this on the driver for the formats it has no reader for (XML, Excel, archives,
+    and fixed-width/CSV settings Spark cannot express), so one contract gives one answer on
+    every engine. Raw values are text where the format is text, as in the Polars path.
+    """
+    import json as _json
+
+    import polars as pl
+
+    low = fp.lower()
+    fmt = (fmt or "").lower()
+    if fmt == "fixed_width":
+        return _read_fixed_width(fp, options, fields=fields)
+    if fmt == "avro" or low.endswith(".avro"):
+        return _read_avro_records(fp)
+    if fmt == "xml" or low.endswith(".xml"):
+        return _read_xml_records(fp, options)
+    if fmt in ("xlsx", "xls", "excel") or low.endswith((".xlsx", ".xls")):
+        return _read_excel_polars(fp, options)
+    if fmt == "parquet" or low.endswith(".parquet"):
+        return _nested_to_json_text(pl.read_parquet(fp))
+    if fmt in ("ndjson", "jsonl") or low.endswith((".ndjson", ".jsonl")):
+        return _nested_to_json_text(pl.read_ndjson(fp))
+    if fmt == "json" or low.endswith(".json"):
+        text = open(fp, encoding="utf-8").read()
+        try:
+            data = _json.loads(text)
+        except ValueError:
+            data = [_json.loads(ln) for ln in text.splitlines() if ln.strip()]
+        rows = data if isinstance(data, list) else [data]
+        flat = [
+            {k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in r.items()}
+            for r in rows
+            if isinstance(r, dict)
+        ]
+        return pl.DataFrame(flat) if flat else pl.DataFrame()
+    return pl.read_csv(fp, infer_schema_length=0, **_csv_read_kwargs(options))
+
+
+def _polars_to_spark(spark: Any, df: Any) -> Any:
+    """A Polars frame as a Spark DataFrame with an explicit schema (no inference on nulls)."""
+    import polars as pl
+    from pyspark.sql import types as T
+
+    mapping = {
+        pl.Utf8: T.StringType(), pl.Int64: T.LongType(), pl.Int32: T.IntegerType(), pl.Int16: T.ShortType(),
+        pl.Int8: T.ByteType(), pl.Float64: T.DoubleType(), pl.Float32: T.FloatType(),
+        pl.Boolean: T.BooleanType(), pl.Date: T.DateType(),
+    }
+    fields, casts = [], []
+    for c, t in df.schema.items():
+        st = mapping.get(t.base_type() if hasattr(t, "base_type") else t)
+        if st is None and isinstance(t, pl.Datetime):
+            st = T.TimestampType()
+        if st is None:
+            st, casts = T.StringType(), casts + [c]
+        fields.append(T.StructField(c, st, True))
+    if casts:
+        df = df.with_columns([pl.col(c).cast(pl.Utf8) for c in casts])
+    return spark.createDataFrame(df.rows(), T.StructType(fields))
+
+
 def _compact_entity(name: str, layer: Optional[str], system: Optional[str]) -> str:
     """Drop the leading `<layer>_` / `<system>_` from a table name for log display.
 
@@ -1289,6 +2076,19 @@ class DataProcessor:
                     for src, tgt in mappings.items():
                         rename_sources.add(src)
                         rename_targets.add(tgt)
+                    # Nested-data steps: their OUTPUT is created here (not missing from the
+                    # source) and their INPUT is consumed here (not unknown). Without this every
+                    # flatten→explode→json_extract contract warned missing=[sku] unknown=[items].
+                    for _step in ("explode", "json_extract"):
+                        cfg = t_dict.get(_step) or {}
+                        if not cfg:
+                            continue
+                        out = cfg.get("output") or cfg.get("field")
+                        if out:
+                            derived_fields.add(out)
+                        for _in in (cfg.get("source"), cfg.get("field") if _step == "explode" else None):
+                            if _in:
+                                rename_sources.add(_in)
                     # Drop columns — explicitly removed by the contract
                     drop = t_dict.get("drop") or {}
                     drop_cols = drop.get("columns") or []
@@ -1366,8 +2166,8 @@ class DataProcessor:
             # Remove rename sources, drop columns, internal columns, and framework lineage columns
             real_unknown = sorted(
                 c
-                for c in set(unknown) - rename_sources - drop_columns - internal_cols
-                if not c.startswith("_lakelogic_")
+                for c in set(unknown) - rename_sources - drop_columns - internal_cols - derived_fields
+                if not c.startswith(("_lakelogic_", "__"))  # "__": reader/engine scratch (e.g. __type_err__record)
             )
 
             # If SQL transformations exist, source columns are expected to
@@ -1978,6 +2778,54 @@ class DataProcessor:
         df = None
         file_paths = [f["path"] for f in source_files] if source_files else None
 
+        # ── Compressed landing files (.gz / .zip) ────────────────────────────
+        # Unpacked to a temp folder so every reader below (CSV, JSON, XML, Excel,
+        # fixed-width, Avro) sees a plain file. Local paths only; removed after load.
+        self._unpacked_origin: Dict[str, str] = {}
+        self._fetched_copies: List[str] = []
+        _orig_source_path = path
+        if self.engine_name in ("polars", "duckdb"):
+            _cands = file_paths or (
+                [str(path)] if isinstance(path, str) and not self._is_uri_path(path) and os.path.isfile(path) else []
+            )
+            if not _cands and file_paths is None and isinstance(path, str) and self._is_uri_path(path) and str(
+                path
+            ).lower().endswith((".gz", ".zip")):
+                _cands = [str(path)]
+            if any(str(c).lower().endswith((".gz", ".zip")) for c in _cands):
+                # Cloud archives are copied to a temp folder first (removed after the load).
+                _cands, _fetched = self._localize_paths(_cands)
+                file_paths, self._unpacked_origin = _decompress_local(
+                    _cands,
+                    getattr(getattr(self.contract, "source", None), "options", None),
+                    getattr(getattr(self.contract, "source", None), "format", None),
+                )
+                self._unpacked_origin = {
+                    k: (_fetched.get(v.split("!", 1)[0], v.split("!", 1)[0]) + ("!" + v.split("!", 1)[1] if "!" in v else ""))
+                    for k, v in self._unpacked_origin.items()
+                }
+                self._fetched_copies = list(_fetched)
+                _structure = _archive_structure_check(
+                    file_paths,
+                    self._unpacked_origin,
+                    getattr(getattr(self.contract, "source", None), "format", None),
+                    getattr(getattr(self.contract, "source", None), "options", None),
+                )
+                if _structure:
+                    logger.warning(_structure)
+                _folders = sorted({
+                    os.path.dirname(v.split("!", 1)[1]) or "."
+                    for v in self._unpacked_origin.values() if "!" in v
+                })
+                if len(_folders) > 1:
+                    logger.info(f"Archive members come from {len(_folders)} folders: {_folders}")
+                # Downstream format detection looks at the path's extension: point it at
+                # what is INSIDE (orders.csv.gz -> orders.csv; a zip -> its first member).
+                if str(path).lower().endswith(".gz"):
+                    path = str(path)[:-3]
+                elif str(path).lower().endswith(".zip"):
+                    path = file_paths[0]
+
         # Non-tabular sources (PDF, image, etc.) with zero matched files must
         # NOT fall through to pl.read_csv — Polars then throws a confusing
         # "csv: expanded paths were empty" error that masks the real cause.
@@ -2175,8 +3023,8 @@ class DataProcessor:
                                 # cast downstream, instead of aborting the whole
                                 # ingest with a Polars parse error. infer_schema_length=0
                                 # makes Polars default all columns to Utf8.
-                                _csv_read_opts = {**_read_opts, "infer_schema_length": 0}
-                                _csv_scan_kw = {**_scan_kw, "infer_schema_length": 0}
+                                _csv_read_opts = {**_read_opts, "infer_schema_length": 0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))}
+                                _csv_scan_kw = {**_scan_kw, "infer_schema_length": 0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None), lazy=True)}
                                 if _is_local:
                                     # Eager read — bypasses Polars' internal
                                     # path canonicalisation which breaks on
@@ -2184,13 +3032,13 @@ class DataProcessor:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
                                             [
-                                                pl.read_csv(p, infer_schema_length=0).with_columns(_file_cols(p))
+                                                pl.read_csv(p, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))).with_columns(_file_cols(p))
                                                 for p in file_paths
                                             ],
                                             how=_concat_how,
                                         )
                                     else:
-                                        df = pl.read_csv(file_paths[0], infer_schema_length=0)
+                                        df = pl.read_csv(file_paths[0], infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
                                 else:
                                     if _tag_source:
                                         df = pl.concat(  # pragma: no cover
@@ -2270,26 +3118,34 @@ class DataProcessor:
 
                             if len(file_paths) == 1:
                                 fp = file_paths[0]
-                                if fp.endswith(".xml"):
-                                    df = pl.read_xml(fp)
+                                if (fp.endswith('.avro') or str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'avro'):
+                                    df = _read_avro_records(fp)
+                                elif str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'fixed_width':
+                                    df = self._read_fixed_width_source(fp)
+                                elif fp.endswith(".xml"):
+                                    df = _read_xml_records(fp, getattr(getattr(self.contract, 'source', None), 'options', None))
                                 elif fp.endswith((".xlsx", ".xls")):
-                                    df = pl.read_excel(fp)
+                                    df = _read_excel_polars(fp, getattr(getattr(self.contract, 'source', None), 'options', None))
                                 elif fp.endswith(".json"):
                                     df = _read_json_flat(fp)
                                 else:
                                     # raw landing CSV → read all-string (see note above)
-                                    df = pl.read_csv(fp, infer_schema_length=0)
+                                    df = pl.read_csv(fp, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
                             else:
                                 frames = []
                                 for fp in file_paths:
-                                    if fp.endswith(".xml"):
-                                        frames.append(pl.read_xml(fp))
+                                    if (fp.endswith('.avro') or str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'avro'):
+                                        frames.append(_read_avro_records(fp))
+                                    elif str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'fixed_width':
+                                        frames.append(self._read_fixed_width_source(fp))
+                                    elif fp.endswith(".xml"):
+                                        frames.append(_read_xml_records(fp, getattr(getattr(self.contract, 'source', None), 'options', None)))
                                     elif fp.endswith((".xlsx", ".xls")):
-                                        frames.append(pl.read_excel(fp))
+                                        frames.append(_read_excel_polars(fp, getattr(getattr(self.contract, 'source', None), 'options', None)))
                                     elif fp.endswith(".json"):
                                         frames.append(_read_json_flat(fp))
                                     else:
-                                        frames.append(pl.read_csv(fp, infer_schema_length=0))
+                                        frames.append(pl.read_csv(fp, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))))
                                 df = pl.concat(frames, how="diagonal_relaxed")  # coerce type conflicts across files
 
                     else:
@@ -2476,10 +3332,15 @@ class DataProcessor:
                             )
                             # Polars needs explicit glob if it's a directory
                             _supported_globs = ["csv", "parquet", "json", "jsonl", "ndjson"]
+                            # A FILE is never a directory: `orders.tsv` / `export.txt` declared
+                            # `format: csv` used to become `orders.tsv/**/*.csv` and load nothing
+                            # ("Could not load data", found 2026-10-07).
+                            _is_local_file = not self._is_uri_path(path) and os.path.isfile(path)
                             if (
                                 fmt in _supported_globs
                                 and not any(chr in path for chr in ["*", "?", "["])
                                 and not path.endswith(f".{fmt}")
+                                and not _is_local_file
                             ):
                                 path = f"{path.rstrip('/')}/**/*.{fmt}"
 
@@ -2510,12 +3371,12 @@ class DataProcessor:
                                         # that breaks on Windows drive letters.
                                         if not self._is_uri_path(path):
                                             df = pl.concat(
-                                                [pl.read_csv(p, infer_schema_length=0) for p in _resolved],
+                                                [pl.read_csv(p, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None))) for p in _resolved],
                                                 how="diagonal_relaxed",
                                             )
                                         else:
                                             lf = pl.concat(
-                                                [pl.scan_csv(p, glob=False, infer_schema_length=0) for p in _resolved],
+                                                [pl.scan_csv(p, glob=False, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None), lazy=True)) for p in _resolved],
                                                 how="diagonal_relaxed",
                                             )
                                             df = lf.collect()
@@ -2540,9 +3401,9 @@ class DataProcessor:
                                         df = lf.collect()
                                     else:
                                         if not self._is_uri_path(path):
-                                            df = pl.read_csv(path, infer_schema_length=0)
+                                            df = pl.read_csv(path, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
                                         else:
-                                            lf = pl.scan_csv(path, glob=False, infer_schema_length=0)
+                                            lf = pl.scan_csv(path, glob=False, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None), lazy=True))
                                             df = lf.collect()
                                 except Exception as e:
                                     if (
@@ -2601,16 +3462,20 @@ class DataProcessor:
                                         for r in rows
                                     ]
                                     df = pl.DataFrame(flat)
+                            elif (path.endswith('.avro') or str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'avro'):
+                                df = _read_avro_records(path)
+                            elif str(getattr(getattr(self.contract, 'source', None), 'format', '') or '').lower() == 'fixed_width':
+                                df = self._read_fixed_width_source(path)
                             elif path.endswith(".xml"):
-                                df = pl.read_xml(path)
+                                df = _read_xml_records(path, getattr(getattr(self.contract, 'source', None), 'options', None))
                             elif path.endswith((".xlsx", ".xls")):
-                                df = pl.read_excel(path)
+                                df = _read_excel_polars(path, getattr(getattr(self.contract, 'source', None), 'options', None))
                             else:
                                 # Raw landing CSV → all Utf8 (infer_schema_length=0),
                                 # consistent with the primary CSV path above: malformed
                                 # values pass through and are quarantined at the typed
                                 # cast downstream instead of aborting the read.
-                                df = pl.read_csv(path, infer_schema_length=0)
+                                df = pl.read_csv(path, infer_schema_length=0, **_csv_read_kwargs(getattr(getattr(self.contract, 'source', None), 'options', None)))
 
             elif self.engine_name == "spark":  # pragma: no cover
                 from pyspark.sql import SparkSession
@@ -2922,163 +3787,175 @@ class DataProcessor:
                             # Skip the regular tabular reader path below
                             return self.run(df, source_path=path, reset_trace=False)
 
-                        reader = spark.read.format(fmt)
-                        if fmt == "csv":
-                            reader = reader.option("header", "true")
-                        elif fmt == "json":
-                            # WHETHER A JSON FILE HOLDS ONE VALUE OR ONE PER LINE IS A
-                            # PROPERTY OF THE DATA, so the contract decides it.
-                            #
-                            # This was hardcoded to `true`, which tells Spark to parse each
-                            # FILE as a single JSON value. Against JSON Lines — the ordinary
-                            # landing-zone shape, and Spark's own default — that reads the
-                            # first object and silently discards the rest. Live: a landing
-                            # zone holding 200 rows across ten `batch_NN_*.json` files was
-                            # ingested as TEN rows. No error, no warning; bronze reported
-                            # success, and 190 rows were simply gone.
-                            #
-                            # An estate that lands JSON Lines can say so outright:
-                            #   source:
-                            #     options:
-                            #       multiLine: false
-                            #
-                            # ABSENT A DECLARATION, SNIFF — the same answer the polars reader
-                            # has always given. Polars tries the whole file and falls back to
-                            # line-by-line, so it read the landing zone correctly while Spark
-                            # truncated it. One contract, two engines, two answers, and the
-                            # local dry run (polars) passed: conformance case OLC-S-003
-                            # reproduces exactly that in fourteen seconds.
-                            #
-                            # The sniff is one character of one file. A JSON array starts `[`;
-                            # anything else is one value per line.
-                            _json_opts = getattr(self.contract.source, "options", {}) or {}
-                            _multiline = _json_opts.get("multiLine", _json_opts.get("multiline"))
-                            if _multiline is None:
-                                _multiline = self._json_is_one_value_per_file(file_paths, path)
-                            reader = reader.option("multiLine", "true" if _multiline else "false")
-                        # When reading a directory (no explicit file list), enable
-                        # recursive scanning so Spark finds files in partition
-                        # subdirectories (e.g. y_2026/m_03/d_21/data.csv).
-                        if not file_paths:
-                            reader = reader.option("recursiveFileLookup", "true")
+                        # Formats and settings Spark has no reader for are read with the
+                        # shared readers (driver side) so every engine gives one answer.
+                        df = self._spark_read_file_source(spark, fmt, file_paths, path)
+                        if df is None:
+                            reader = spark.read.format(fmt)
+                            if fmt == "csv":
+                                _csv_o = getattr(self.contract.source, "options", None) or {}
+                                reader = reader.option("header", "false" if _csv_o.get("has_header") is False else "true")
+                                for _k, _v in _spark_csv_options(_csv_o).items():
+                                    reader = reader.option(_k, _v)
+                            elif fmt == "json":
+                                # WHETHER A JSON FILE HOLDS ONE VALUE OR ONE PER LINE IS A
+                                # PROPERTY OF THE DATA, so the contract decides it.
+                                #
+                                # This was hardcoded to `true`, which tells Spark to parse each
+                                # FILE as a single JSON value. Against JSON Lines — the ordinary
+                                # landing-zone shape, and Spark's own default — that reads the
+                                # first object and silently discards the rest. Live: a landing
+                                # zone holding 200 rows across ten `batch_NN_*.json` files was
+                                # ingested as TEN rows. No error, no warning; bronze reported
+                                # success, and 190 rows were simply gone.
+                                #
+                                # An estate that lands JSON Lines can say so outright:
+                                #   source:
+                                #     options:
+                                #       multiLine: false
+                                #
+                                # ABSENT A DECLARATION, SNIFF — the same answer the polars reader
+                                # has always given. Polars tries the whole file and falls back to
+                                # line-by-line, so it read the landing zone correctly while Spark
+                                # truncated it. One contract, two engines, two answers, and the
+                                # local dry run (polars) passed: conformance case OLC-S-003
+                                # reproduces exactly that in fourteen seconds.
+                                #
+                                # The sniff is one character of one file. A JSON array starts `[`;
+                                # anything else is one value per line.
+                                _json_opts = getattr(self.contract.source, "options", {}) or {}
+                                _multiline = _json_opts.get("multiLine", _json_opts.get("multiline"))
+                                if _multiline is None:
+                                    _multiline = self._json_is_one_value_per_file(file_paths, path)
+                                reader = reader.option("multiLine", "true" if _multiline else "false")
+                            # When reading a directory (no explicit file list), enable
+                            # recursive scanning so Spark finds files in partition
+                            # subdirectories (e.g. y_2026/m_03/d_21/data.csv).
+                            if not file_paths:
+                                reader = reader.option("recursiveFileLookup", "true")
 
-                        # ── Contract-driven schema ────────────────────────────
-                        # Build a Spark StructType from the contract's model
-                        # fields so CSV/JSON reads don't need to infer schema
-                        # (which fails on empty dirs or Volumes FUSE paths).
-                        _contract_type = type(self.contract).__name__
-                        logger.debug(
-                            f"Spark read: fmt={fmt}, "
-                            f"file_paths={len(file_paths) if file_paths else 'None'}, "
-                            f"contract_type={_contract_type}"
-                        )
-
-                        _model = getattr(self.contract, "model", None)
-                        _fields_list = getattr(_model, "fields", None) if _model else None
-                        if not _fields_list and isinstance(self.contract, dict):
-                            _fields_list = self.contract.get("model", {}).get("fields", [])
-
-                        logger.debug(
-                            f"Spark schema: model={_model is not None}, "
-                            f"fields_list={len(_fields_list) if _fields_list else 'None'}"
-                        )
-
-                        # `flatten_nested` means the contract describes the schema AFTER
-                        # flattening (payload_a, payload_b), while the FILE still holds
-                        # the nested column (payload). Forcing the contract schema onto
-                        # the reader therefore asks Spark for columns the file does not
-                        # have: they come back NULL, `payload` is never read at all, and
-                        # the flattening then has nothing to work on — the rows land
-                        # accepted and empty. Let Spark infer here; validation still
-                        # enforces the contract after the flattening step.
-                        _flatten = getattr(getattr(self.contract, "source", None), "flatten_nested", False)
-                        if _flatten and _fields_list:
-                            logger.info(
-                                "Contract schema NOT applied to the Spark reader: "
-                                "source.flatten_nested is set, so the file's own (nested) "
-                                "schema is read and flattened before validation."
-                            )
-                        if _fields_list and not _flatten and str(fmt).lower() not in ("delta", "iceberg", "hudi"):
-                            from pyspark.sql.types import (
-                                StructType,
-                                StructField,
-                                StringType,
+                            # ── Contract-driven schema ────────────────────────────
+                            # Build a Spark StructType from the contract's model
+                            # fields so CSV/JSON reads don't need to infer schema
+                            # (which fails on empty dirs or Volumes FUSE paths).
+                            _contract_type = type(self.contract).__name__
+                            logger.debug(
+                                f"Spark read: fmt={fmt}, "
+                                f"file_paths={len(file_paths) if file_paths else 'None'}, "
+                                f"contract_type={_contract_type}"
                             )
 
-                            # Resolved through lakelogic.core.types so the reader
-                            # schema matches the CAST and the CREATE TABLE.
-                            from lakelogic.core import types as _types
+                            _model = getattr(self.contract, "model", None)
+                            _fields_list = getattr(_model, "fields", None) if _model else None
+                            if not _fields_list and isinstance(self.contract, dict):
+                                _fields_list = self.contract.get("model", {}).get("fields", [])
 
-                            spark_fields = []
-                            for f in _fields_list:
-                                fname = f.get("name") if isinstance(f, dict) else getattr(f, "name", None)
-                                ftype = f.get("type", "string") if isinstance(f, dict) else getattr(f, "type", "string")
-                                if isinstance(f, dict):
-                                    freq = f.get("required", False)
+                            logger.debug(
+                                f"Spark schema: model={_model is not None}, "
+                                f"fields_list={len(_fields_list) if _fields_list else 'None'}"
+                            )
+
+                            # `flatten_nested` means the contract describes the schema AFTER
+                            # flattening (payload_a, payload_b), while the FILE still holds
+                            # the nested column (payload). Forcing the contract schema onto
+                            # the reader therefore asks Spark for columns the file does not
+                            # have: they come back NULL, `payload` is never read at all, and
+                            # the flattening then has nothing to work on — the rows land
+                            # accepted and empty. Let Spark infer here; validation still
+                            # enforces the contract after the flattening step.
+                            _flatten = getattr(getattr(self.contract, "source", None), "flatten_nested", False)
+                            if _flatten and _fields_list:
+                                logger.info(
+                                    "Contract schema NOT applied to the Spark reader: "
+                                    "source.flatten_nested is set, so the file's own (nested) "
+                                    "schema is read and flattened before validation."
+                                )
+                            if _fields_list and not _flatten and str(fmt).lower() not in ("delta", "iceberg", "hudi"):
+                                from pyspark.sql.types import (
+                                    StructType,
+                                    StructField,
+                                    StringType,
+                                )
+
+                                # Resolved through lakelogic.core.types so the reader
+                                # schema matches the CAST and the CREATE TABLE.
+                                from lakelogic.core import types as _types
+
+                                spark_fields = []
+                                for f in _fields_list:
+                                    fname = f.get("name") if isinstance(f, dict) else getattr(f, "name", None)
+                                    ftype = f.get("type", "string") if isinstance(f, dict) else getattr(f, "type", "string")
+                                    if isinstance(f, dict):
+                                        freq = f.get("required", False)
+                                    else:
+                                        freq = getattr(f, "required", False)
+                                    nullable = not freq
+                                    _t = (ftype or "string").lower()
+                                    spark_type = (
+                                        _types.spark_type_object(_t) if _types.is_known(_t) else None
+                                    ) or StringType()
+                                    if str(fmt).lower() == "csv":
+                                        # Landing CSV is TEXT, as on Polars and DuckDB: the engine's
+                                        # try_cast then QUARANTINES "n/a" in a number column. A typed
+                                        # reader schema turned it into NULL silently (found 2026-10-07).
+                                        spark_type = StringType()
+                                    if fname:
+                                        spark_fields.append(StructField(fname, spark_type, nullable))
+                                if spark_fields:
+                                    schema = StructType(spark_fields)
+                                    reader = reader.schema(schema)
+                                    logger.info(f"✅ Applied contract schema ({len(spark_fields)} fields) to Spark reader")
                                 else:
-                                    freq = getattr(f, "required", False)
-                                nullable = not freq
-                                _t = (ftype or "string").lower()
-                                spark_type = (
-                                    _types.spark_type_object(_t) if _types.is_known(_t) else None
-                                ) or StringType()
-                                if fname:
-                                    spark_fields.append(StructField(fname, spark_type, nullable))
-                            if spark_fields:
-                                schema = StructType(spark_fields)
-                                reader = reader.schema(schema)
-                                logger.info(f"✅ Applied contract schema ({len(spark_fields)} fields) to Spark reader")
+                                    logger.warning("⚠ Contract model.fields found but produced 0 Spark fields")
+                            elif _fields_list:
+                                logger.info(
+                                    f"✅ Contract schema exists but bypassed for native '{fmt}' format schema inference."
+                                )
                             else:
-                                logger.warning("⚠ Contract model.fields found but produced 0 Spark fields")
-                        elif _fields_list:
-                            logger.info(
-                                f"✅ Contract schema exists but bypassed for native '{fmt}' format schema inference."
-                            )
-                        else:
-                            logger.warning("⚠ No contract model.fields found — Spark will infer schema")
+                                logger.warning("⚠ No contract model.fields found — Spark will infer schema")
 
-                        _load_target = file_paths if file_paths else path
-                        if isinstance(_load_target, list):
-                            logger.info(f"Spark loading {len(_load_target)} file(s)")
-                        else:
-                            logger.info(f"Spark loading: {_load_target}")
-                        df = reader.load(_load_target)
+                            _load_target = file_paths if file_paths else path
+                            if isinstance(_load_target, list):
+                                logger.info(f"Spark loading {len(_load_target)} file(s)")
+                            else:
+                                logger.info(f"Spark loading: {_load_target}")
+                            df = reader.load(_load_target)
 
-                        # Capture per-row file path from Spark's hidden
-                        # _metadata column before transformations strip it.
-                        # This enables per-row source traceability in
-                        # _lakelogic_source (vs. a single directory path).
-                        _source_captured = False
-                        try:
-                            from pyspark.sql import functions as F
-
-                            # Strategy 1: _metadata.file_path (full path — preferred)
-                            df = df.select("*", F.col("_metadata.file_path").alias("_source_file"))
-                            _source_captured = True
-                        except Exception:
+                            # Capture per-row file path from Spark's hidden
+                            # _metadata column before transformations strip it.
+                            # This enables per-row source traceability in
+                            # _lakelogic_source (vs. a single directory path).
+                            _source_captured = False
                             try:
                                 from pyspark.sql import functions as F
 
-                                # Strategy 2: _metadata.file_name (just filename)
-                                df = df.select("*", F.col("_metadata.file_name").alias("_source_file"))
+                                # Strategy 1: _metadata.file_path (full path — preferred)
+                                df = df.select("*", F.col("_metadata.file_path").alias("_source_file"))
                                 _source_captured = True
                             except Exception:
                                 try:
                                     from pyspark.sql import functions as F
 
-                                    # Strategy 3: input_file_name() (works for non-UC file reads)
-                                    ifn = F.input_file_name()
-                                    df = df.withColumn(
-                                        "_source_file", F.when(ifn != F.lit(""), ifn).otherwise(F.lit(path))
-                                    )
+                                    # Strategy 2: _metadata.file_name (just filename)
+                                    df = df.select("*", F.col("_metadata.file_name").alias("_source_file"))
                                     _source_captured = True
-                                except Exception as exc:
-                                    logger.debug(f"input_file_name() fallback failed: {exc}")
-                        if not _source_captured:
-                            logger.debug(
-                                f"Could not capture per-row source file path"
-                                f" for {path} — lineage will use directory path"
-                            )
+                                except Exception:
+                                    try:
+                                        from pyspark.sql import functions as F
+
+                                        # Strategy 3: input_file_name() (works for non-UC file reads)
+                                        ifn = F.input_file_name()
+                                        df = df.withColumn(
+                                            "_source_file", F.when(ifn != F.lit(""), ifn).otherwise(F.lit(path))
+                                        )
+                                        _source_captured = True
+                                    except Exception as exc:
+                                        logger.debug(f"input_file_name() fallback failed: {exc}")
+                            if not _source_captured:
+                                logger.debug(
+                                    f"Could not capture per-row source file path"
+                                    f" for {path} — lineage will use directory path"
+                                )
 
             elif self.engine_name in ["snowflake", "bigquery"]:
                 table_name = path[6:] if path.startswith("table:") else path
@@ -3152,6 +4029,22 @@ class DataProcessor:
                 prefix = getattr(lineage_cfg, "upstream_prefix", "_upstream") or "_upstream"
                 df = _preserve_upstream_lineage(df, preserve_cols, prefix, self.engine_name)
 
+        if self.engine_name in ("polars", "duckdb", "spark"):
+            df = _apply_landing_text_options(df, self.contract, self.engine_name)
+        if self._unpacked_origin:
+            path = _orig_source_path
+            if df is not None and hasattr(df, "columns") and "_source_file" in df.columns:
+                try:
+                    import polars as pl
+
+                    if isinstance(df, pl.DataFrame):
+                        df = df.with_columns(pl.col("_source_file").replace(self._unpacked_origin))
+                except Exception:  # pragma: no cover - provenance is best effort
+                    pass
+            import shutil as _shutil
+
+            for _tmp_dir in {os.path.dirname(t) for t in list(self._unpacked_origin) + getattr(self, "_fetched_copies", [])}:
+                _shutil.rmtree(_tmp_dir, ignore_errors=True)
         result = self.run(df, source_path=path, reset_trace=False)
 
         # ── Post-ingestion cleanup (source-level) ────────────────────────
@@ -3350,14 +4243,42 @@ class DataProcessor:
         from pyspark.sql import functions as F
 
         _SAMPLE = 50
+        # Spark's JSON/Avro/Parquet readers give STRUCT and ARRAY columns, not JSON text; this
+        # flattened only text columns, so a nested JSON file on Spark kept `customer` whole and
+        # every `customer_name` came out NULL (found 2026-10-07). Nested columns become JSON
+        # text first — the shape Polars and DuckDB flatten — then flattening repeats level by
+        # level (customer -> customer_address -> customer_address_city), up to 5 levels.
+        nested = [
+            f.name
+            for f in df.schema.fields
+            if f.dataType.typeName() in ("struct", "array", "map") and (not target_cols or f.name in target_cols)
+        ]
+        for c in nested:
+            df = df.withColumn(c, F.to_json(F.col(c)))
+        out = df
+        flattened: list[str] = []
+        for _level in range(5):
+            before = len(flattened)
+            out = self._flatten_json_spark_level(out, target_cols if _level == 0 else set(), flattened, _SAMPLE)
+            if len(flattened) == before:
+                break
+        if flattened:
+            logger.info(f"flatten_nested applied on Spark to: {', '.join(flattened)}")
+        return out
+
+    def _flatten_json_spark_level(self, df, target_cols: set, flattened: list, _SAMPLE: int):
+        """One level of ``_flatten_json_spark``: JSON-object text columns -> ``col_key`` columns."""
+        import json as _json
+
+        from pyspark.sql import functions as F
+
         string_cols = [f.name for f in df.schema.fields if f.dataType.simpleString() == "string"]
-        candidates = [c for c in string_cols if not target_cols or c in target_cols]
+        candidates = [c for c in string_cols if (not target_cols or c in target_cols) and c not in flattened]
         if not candidates:
             return df
 
         sample = df.select(*candidates).limit(_SAMPLE).collect()  # bounded, not the batch
         out = df
-        flattened: list[str] = []
         for col in candidates:
             keys: list[str] = []
             for row in sample:
@@ -3378,9 +4299,6 @@ class DataProcessor:
                 out = out.withColumn(f"{col}_{k}", F.get_json_object(F.col(col), f"$.{k}"))
             out = out.drop(col)
             flattened.append(col)
-
-        if flattened:
-            logger.info(f"flatten_nested applied on Spark to: {', '.join(flattened)}")
         return out
 
     def _flatten_json_df(self, df, flatten_nested):
@@ -3521,8 +4439,6 @@ class DataProcessor:
                 val = row.get(col)
                 if isinstance(val, dict):
                     all_keys.update({k: v for k, v in val.items() if k not in all_keys})
-                elif isinstance(val, list) and val and isinstance(val[0], dict):
-                    all_keys.update({k: v for k, v in val[0].items() if k not in all_keys})
             if not all_keys:
                 return rows
             out = []
@@ -3536,7 +4452,7 @@ class DataProcessor:
                             _json.dumps(child, ensure_ascii=False) if isinstance(child, (dict, list)) else child
                         )
                 elif isinstance(val, list):
-                    new[f"{col}_values"] = _json.dumps(val, ensure_ascii=False)
+                    new[col] = val  # an array is kept whole, for `explode`
                 else:
                     for key in all_keys:
                         new[f"{col}_{key}"] = None
@@ -3567,12 +4483,21 @@ class DataProcessor:
                         for row in rows
                     ]
 
+            # Only OBJECTS expand into parent_child columns. An array stays one column,
+            # under its own name, as JSON text — `explode` turns it into rows. (Arrays
+            # used to become `<col>_values` and, re-detected each pass, were re-wrapped
+            # until `items_values_values_values_values_values`: found 2026-10-07.)
             to_explode = [
-                col for col in list(rows[0].keys()) if any(isinstance(row.get(col), (dict, list)) for row in rows)
+                col for col in list(rows[0].keys()) if any(isinstance(row.get(col), dict) for row in rows)
             ]
             for col in to_explode:
                 rows = _explode(rows, col)
                 changed = True
+
+        rows = [
+            {k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in row.items()}
+            for row in rows
+        ]
 
         # ── Rebuild DataFrame ─────────────────────────────────────────────────
         try:
@@ -4206,6 +5131,215 @@ class DataProcessor:
 
         return is_uri_path(str(path))
 
+    def _spark_read_file_source(self, spark: Any, fmt: str, file_paths: Optional[List[str]], path: str) -> Any:
+        """The Spark read for landing formats Spark cannot read natively, else None.
+
+        * ``fixed_width`` — native and distributed (``read.text`` + ``substring``), including the
+          record-length check and per-file header/trailer skipping. Non-UTF-8 encodings and
+          files with no line breaks are read on the driver.
+        * ``avro`` — native ``format("avro")``; without the spark-avro package, the driver.
+        * ``xml``, Excel, ``.zip`` and CSV settings Spark has no option for (``skip_rows``,
+          several ``null_values``) — read on the DRIVER with the shared readers, then turned
+          into a Spark DataFrame. Right for landing files of normal size; a multi-GB XML or
+          zip is better landed as Parquet first.
+        ``.gz`` CSV/JSON/text is left to Spark, which decompresses it natively.
+        """
+        src = getattr(self.contract, "source", None)
+        opts = dict(getattr(src, "options", None) or {})
+        for key in ("record_length", "encoding", "skip_rows", "skip_footer", "strip"):
+            val = (getattr(src, "model_extra", None) or {}).get(key) if src is not None else None
+            if val is not None and key not in opts:
+                opts[key] = val
+        fields = getattr(getattr(self.contract, "model", None), "fields", None) or []
+        paths = list(file_paths or [path])
+        low = [str(p).lower() for p in paths]
+        fmt = (fmt or "").lower()
+
+        driver = (
+            any(p.endswith(".zip") for p in low)
+            or fmt in ("xml", "xlsx", "xls", "excel")
+            or any(p.endswith((".xml", ".xlsx", ".xls", ".xml.gz", ".avro.gz")) for p in low)
+            or (fmt == "csv" and (opts.get("skip_rows") or len(opts.get("null_values") or []) > 1))
+            or (fmt == "fixed_width" and not self._spark_fixed_width_native(paths, opts))
+        )
+        if driver:
+            return self._spark_read_on_driver(spark, fmt, paths, opts, fields)
+        for gz in [p for p in paths if str(p).lower().endswith(".gz")][:1]:
+            # Spark decompresses .gz lazily and fails at collect time with a bare Java error;
+            # check the gzip header up front so the message says what is wrong.
+            try:
+                if self._is_uri_path(str(gz)):
+                    import fsspec
+
+                    with fsspec.open(gz, "rb", **self._get_cloud_storage_options(gz)) as fh:
+                        magic = fh.read(2)
+                else:
+                    with open(gz, "rb") as fh:
+                        magic = fh.read(2)
+            except Exception:
+                magic = _GZIP_MAGIC
+            if magic != _GZIP_MAGIC:
+                raise ValueError(f"{gz} is named .gz but is not a gzip file (it does not start with the gzip header).")
+        if fmt in ("csv", "fixed_width") and not any(p.endswith(".gz") for p in low):
+            probe = str(paths[0])
+            opener = None
+            if self._is_uri_path(probe):
+                import fsspec
+
+                opener = lambda p: fsspec.open(p, "rb", **self._get_cloud_storage_options(p))  # noqa: E731
+            bad = _first_bytes_are_text(probe, str(opts.get("encoding") or "utf-8"), opener)
+            if bad:
+                raise ValueError(bad)
+        if fmt == "fixed_width":
+            return self._spark_read_fixed_width(spark, paths, opts, fields)
+        if fmt == "avro":
+            try:
+                return spark.read.format("avro").load(paths)
+            except Exception as exc:  # spark-avro is not on the classpath of every Spark
+                if "avro" not in str(exc).lower():
+                    raise
+                logger.warning(
+                    "Spark has no Avro reader here (add org.apache.spark:spark-avro); reading the "
+                    f"{len(paths)} Avro file(s) on the driver instead."
+                )
+                return self._spark_read_on_driver(spark, fmt, paths, opts, fields)
+        return None
+
+    def _spark_fixed_width_native(self, paths: List[str], opts: Dict[str, Any]) -> bool:
+        """Whether Spark's text reader can read these fixed-width files as they are."""
+        enc = str(opts.get("encoding") or "utf-8").lower().replace("-", "").replace("_", "")
+        if enc not in ("utf8", "ascii", "usascii"):
+            return False  # Spark's text reader decodes UTF-8 only (EBCDIC, Latin-1: driver)
+        rl = opts.get("record_length")
+        if not rl:
+            return True
+        probe = str(paths[0])
+        try:
+            if self._is_uri_path(probe):
+                import fsspec
+
+                with fsspec.open(probe, "rb", **self._get_cloud_storage_options(probe)) as fh:
+                    head = fh.read(int(rl) + 2)
+            else:
+                with open(probe, "rb") as fh:
+                    head = fh.read(int(rl) + 2)
+        except Exception:
+            return True
+        # No line break within the first record: mainframe fixed-length records, split on the driver.
+        return b"\n" in head or b"\r" in head or len(head) <= int(rl)
+
+    def _spark_read_fixed_width(self, spark: Any, paths: List[str], opts: Dict[str, Any], fields: List[Any]) -> Any:
+        """Fixed-width on Spark: distributed ``substring`` slicing over ``read.text``."""
+        from pyspark.sql import Window
+        from pyspark.sql import functions as F
+
+        layout = _fixed_width_layout(opts, fields)
+        rl = opts.get("record_length")
+        df = spark.read.text(paths).withColumn("_source_file", F.input_file_name())
+        skip_rows, skip_footer = int(opts.get("skip_rows") or 0), int(opts.get("skip_footer") or 0)
+        if skip_rows or skip_footer:
+            # Header/trailer records are per FILE; line order within a file is the read order.
+            df = df.withColumn("__mid", F.monotonically_increasing_id())
+            w = Window.partitionBy("_source_file").orderBy("__mid")
+            df = df.withColumn("__rn", F.row_number().over(w)).withColumn(
+                "__cnt", F.count(F.lit(1)).over(Window.partitionBy("_source_file"))
+            )
+            df = df.filter((F.col("__rn") > skip_rows) & (F.col("__rn") <= F.col("__cnt") - skip_footer))
+        df = df.filter(F.trim(F.col("value")) != "")
+        cols = []
+        for name, start, width in layout:
+            e = F.substring(F.col("value"), start + 1, width)
+            if opts.get("strip", True):
+                e = F.trim(e)
+            cols.append(F.when(F.length(e) == 0, F.lit(None)).otherwise(e).alias(name))
+        if rl:
+            length = F.length(F.col("value"))
+            cols.append(
+                F.when(length != int(rl), F.concat(F.lit(f"Line length mismatch: expected {int(rl)}, got "),
+                                                   length.cast("string")))
+                .otherwise(F.lit(None)).alias(RECORD_ERROR_COLUMN)
+            )
+        return df.select(*cols, "_source_file")
+
+    def _spark_read_on_driver(self, spark: Any, fmt: str, paths: List[str], opts: Dict[str, Any], fields: List[Any]) -> Any:
+        """Read on the driver with the shared Polars readers; return a Spark DataFrame."""
+        import shutil as _shutil
+
+        import polars as pl
+
+        local, origin = self._localize_paths(paths)
+        unpacked: Dict[str, str] = {}
+        try:
+            if any(str(p).lower().endswith((".gz", ".zip")) for p in local):
+                local, unpacked = _decompress_local(local, opts, fmt)
+                structure = _archive_structure_check(local, unpacked, fmt, opts)
+                if structure:
+                    logger.warning(structure)
+            frames = []
+            for fp in local:
+                frame = _polars_read_local_file(fp, fmt, opts, fields)
+                where = unpacked.get(fp, fp)
+                where = origin.get(where, where)
+                frames.append(frame.with_columns(pl.lit(where).alias("_source_file")))
+            df = pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
+            logger.info(f"Spark: read {len(frames)} {fmt or 'file'} file(s) on the driver ({len(df)} rows)")
+            return _polars_to_spark(spark, df)
+        finally:
+            for d in {os.path.dirname(t) for t in list(unpacked) + [k for k in origin]}:
+                if os.path.basename(d).startswith("lakelogic_"):
+                    _shutil.rmtree(d, ignore_errors=True)
+
+    def _localize_paths(self, paths: List[str]) -> Tuple[List[str], Dict[str, str]]:
+        """Cloud objects (abfss/s3/gs) copied to a temp folder; local paths unchanged.
+
+        Returns the local paths and ``{local_copy: cloud_path}`` for provenance. Used where a
+        reader needs a real file (archives, Excel, XML) — the copy is removed after the read.
+        """
+        import shutil as _shutil
+        import tempfile
+
+        out: List[str] = []
+        origin: Dict[str, str] = {}
+        tmp = None
+        for p in paths:
+            if not self._is_uri_path(str(p)):
+                out.append(str(p))
+                continue
+            import fsspec
+
+            tmp = tmp or tempfile.mkdtemp(prefix="lakelogic_fetch_")
+            target = os.path.join(tmp, f"{len(out):04d}_{os.path.basename(str(p).rstrip('/'))}")
+            with fsspec.open(p, "rb", **self._get_cloud_storage_options(p)) as src, open(target, "wb") as dst:
+                _shutil.copyfileobj(src, dst)
+            out.append(target)
+            origin[target] = str(p)
+        return out, origin
+
+    def _read_fixed_width_source(self, path: str) -> Any:
+        """``_read_fixed_width`` with this contract's settings, for a local or cloud file.
+
+        The settings may sit on ``source`` itself (``record_length``, ``encoding``, as most
+        layout specs write them) or under ``source.options``; ``options`` wins. Cloud paths
+        (abfss/s3/gs) are read through fsspec with the same credentials as other sources.
+        """
+        src = getattr(self.contract, "source", None)
+        opts: Dict[str, Any] = {}
+        for key in ("record_length", "encoding", "skip_rows", "skip_footer", "strip"):
+            val = getattr(src, key, None) if src is not None else None
+            if val is None and src is not None and getattr(src, "model_extra", None):
+                val = src.model_extra.get(key)
+            if val is not None:
+                opts[key] = val
+        opts.update(getattr(src, "options", None) or {})
+        fields = getattr(getattr(self.contract, "model", None), "fields", None) or []
+        data = None
+        if self._is_uri_path(str(path)):
+            import fsspec
+
+            with fsspec.open(path, "rb", **self._get_cloud_storage_options(path)) as fh:
+                data = fh.read()
+        return _read_fixed_width(path, opts, fields=fields, data=data)
+
     def _get_cloud_storage_options(self, path: str) -> Dict[str, str]:
         """
         Build storage_options dict for fsspec/adlfs from environment variables.
@@ -4295,20 +5429,38 @@ class DataProcessor:
         Configure logging based on environment variables.
         """
         debug = os.getenv("LAKELOGIC_DEBUG", "false").lower() == "true"
-        if not debug:
+        global _LOGGING_CONFIGURED, _LOGGING_HANDLER
+        if not debug and not _LOGGING_CONFIGURED:
+            # Replace ONLY loguru's built-in DEBUG stderr handler (id 0), and only once. This
+            # used to call logger.remove() on every DataProcessor, deleting every handler the
+            # host application had added — its file/JSON sinks, a notebook's own settings, a
+            # test's capture — each time a contract ran (found 2026-10-07).
+            _LOGGING_CONFIGURED = True
             try:
-                logger.remove()
-                logger.add(sys.stderr, level="INFO")
-            except Exception:
+                logger.remove(0)
+                _LOGGING_HANDLER = (logger.add(sys.stderr, level="INFO"), sys.stderr)
+            except ValueError:
+                pass  # the host already removed the default handler: leave its logging alone
+        elif not debug and _LOGGING_HANDLER and _LOGGING_HANDLER[1] is not sys.stderr:
+            # Notebooks and test runners swap sys.stderr. Re-point OUR handler (and only ours)
+            # at the current stream, so later runs do not write to a stale or closed one.
+            try:
+                logger.remove(_LOGGING_HANDLER[0])
+            except ValueError:
                 pass
+            _LOGGING_HANDLER = (logger.add(sys.stderr, level="INFO"), sys.stderr)
 
         # Suppress third-party warnings
         warnings.filterwarnings("ignore", message=".*PerformanceWarning.*")
         try:
             import polars as pl
 
-            # This is specific to polars but global for the process
-            warnings.filterwarnings("ignore", category=pl.PerformanceWarning)
+            # Polars 2.0 removed the top-level `pl.PerformanceWarning` alias (accessing it RAISES
+            # AttributeRemovedError, not ImportError), which failed every DataProcessor on a
+            # fresh install (found 2026-10-07). The class lives in polars.exceptions in 1.x and 2.x.
+            _perf = getattr(getattr(pl, "exceptions", None), "PerformanceWarning", None)
+            if _perf is not None:
+                warnings.filterwarnings("ignore", category=_perf)
         except ImportError:
             pass
 

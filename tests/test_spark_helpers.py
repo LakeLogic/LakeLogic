@@ -109,6 +109,10 @@ class FakeFunctions:
         return FakeExpr(("explode", value.value))
 
     @staticmethod
+    def explode_outer(value):  # the engine keeps rows whose list is empty (2026-10-07)
+        return FakeExpr(("explode", value.value))
+
+    @staticmethod
     def lower(value):
         return FakeExpr(("lower", value.value))
 
