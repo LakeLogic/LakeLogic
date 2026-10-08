@@ -80,7 +80,7 @@ dependencies = [
     # <0.16.0 (2026-09-21): 0.15.0 adds `materialization.scd1` — the key 1.66.1's unknown-member
     # fix reads. Leaving the cap at <0.15 made this release uninstallable beside lakelogic-saas,
     # which needs 0.15 to validate the scd1 blocks it generates. Suite green against 0.15.0.
-    "open-lakehouse-contract[models]>=0.20.0,<0.21.0",  # SOURCE_TYPES (core/processor.py); 0.20 adds FieldDefinition.range (fixed-width) — an older OLC silently drops it
+    "open-lakehouse-contract[models]>=0.21.0,<0.22.0",  # 0.21: typed source.options (olc.models.source_options) — Core validates options at load
     # A CONSTRAINT, not a feature: `rich` is transitive (via typer), and rich 15
     # is incompatible with pyiceberg (<15), which lakelogic itself imports for
     # Iceberg catalogs in core/materialization, core/quarantine and core/run_log.

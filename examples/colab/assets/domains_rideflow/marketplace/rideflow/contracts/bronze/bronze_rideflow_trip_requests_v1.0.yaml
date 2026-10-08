@@ -12,52 +12,53 @@ info:
 
 model:
   fields:
-    - name: request_id
-      type: string
-      required: true
-      description: "Unique request identifier"
-    - name: rider_id
-      type: string
-      required: true
-      description: "FK to rider_profiles"
-    - name: trip_type
-      type: string
-      description: "ride or eats_delivery"
-    - name: pickup_lat
-      type: string
-      description: "Requested pickup latitude"
-    - name: pickup_lng
-      type: string
-      description: "Requested pickup longitude"
-    - name: dropoff_lat
-      type: string
-      description: "Requested dropoff latitude"
-    - name: dropoff_lng
-      type: string
-      description: "Requested dropoff longitude"
-    - name: city_code
-      type: string
-      description: "City code"
-    - name: requested_at
-      type: string
-      description: "Request timestamp"
-    - name: estimated_fare
-      type: string
-      description: "Estimated fare shown to rider"
-    - name: estimated_eta_minutes
-      type: string
-      description: "Estimated time of arrival"
-    - name: surge_multiplier
-      type: string
-      description: "Surge multiplier at time of request"
+  - name: request_id
+    type: string
+    required: true
+    description: "Unique request identifier"
+  - name: rider_id
+    type: string
+    required: true
+    description: "FK to rider_profiles"
+  - name: trip_type
+    type: string
+    description: "ride or eats_delivery"
+  - name: pickup_lat
+    type: string
+    description: "Requested pickup latitude"
+  - name: pickup_lng
+    type: string
+    description: "Requested pickup longitude"
+  - name: dropoff_lat
+    type: string
+    description: "Requested dropoff latitude"
+  - name: dropoff_lng
+    type: string
+    description: "Requested dropoff longitude"
+  - name: city_code
+    type: string
+    description: "City code"
+  - name: requested_at
+    type: string
+    description: "Request timestamp"
+  - name: estimated_fare
+    type: string
+    description: "Estimated fare shown to rider"
+  - name: estimated_eta_minutes
+    type: string
+    description: "Estimated time of arrival"
+  - name: surge_multiplier
+    type: string
+    description: "Surge multiplier at time of request"
 
 source:
   type: landing
   path: "{landing_root}/trip_requests"
   format: csv
   options:
-    header: "true"
-    recursiveFileLookup: "true"
+    engine_options:
+      header: "true"
+      recursiveFileLookup: "true"
   load_mode: incremental
   watermark_strategy: pipeline_log
   partition:

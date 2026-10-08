@@ -11,65 +11,66 @@ info:
 
 model:
   fields:
-    - name: ticket_id
-      type: string
-      required: true
-      description: "Zendesk ticket ID"
-    - name: requester_email
-      type: string
-      required: true
-      pii: true
-      description: "Requester email"
-    - name: requester_name
-      type: string
-      pii: true
-      description: "Requester display name"
-    - name: requester_phone
-      type: string
-      pii: true
-      description: "Requester phone number"
-    - name: subject
-      type: string
-      description: "Ticket subject"
-    - name: ticket_description
-      type: string
-      pii: true
-      description: "Ticket body (may contain PII)"
-    - name: status
-      type: string
-      description: "new, open, pending, solved, closed"
-    - name: priority
-      type: string
-      description: "low, normal, high, urgent"
-    - name: channel
-      type: string
-      description: "email, chat, phone, web"
-    - name: assignee
-      type: string
-      description: "Assigned agent"
-    - name: tags_json
-      type: string
-      description: "Tags array as JSON"
-    - name: created_at
-      type: string
-      description: "Ticket creation timestamp"
-    - name: updated_at
-      type: string
-      description: "Last update timestamp"
-    - name: solved_at
-      type: string
-      description: "Resolution timestamp"
-    - name: satisfaction_rating
-      type: string
-      description: "CSAT score"
+  - name: ticket_id
+    type: string
+    required: true
+    description: "Zendesk ticket ID"
+  - name: requester_email
+    type: string
+    required: true
+    pii: true
+    description: "Requester email"
+  - name: requester_name
+    type: string
+    pii: true
+    description: "Requester display name"
+  - name: requester_phone
+    type: string
+    pii: true
+    description: "Requester phone number"
+  - name: subject
+    type: string
+    description: "Ticket subject"
+  - name: ticket_description
+    type: string
+    pii: true
+    description: "Ticket body (may contain PII)"
+  - name: status
+    type: string
+    description: "new, open, pending, solved, closed"
+  - name: priority
+    type: string
+    description: "low, normal, high, urgent"
+  - name: channel
+    type: string
+    description: "email, chat, phone, web"
+  - name: assignee
+    type: string
+    description: "Assigned agent"
+  - name: tags_json
+    type: string
+    description: "Tags array as JSON"
+  - name: created_at
+    type: string
+    description: "Ticket creation timestamp"
+  - name: updated_at
+    type: string
+    description: "Last update timestamp"
+  - name: solved_at
+    type: string
+    description: "Resolution timestamp"
+  - name: satisfaction_rating
+    type: string
+    description: "CSAT score"
 
 source:
   type: landing
   path: "{landing_root}/support_tickets"
   format: csv
   options:
-    header: "true"
-    recursiveFileLookup: "true"
+    engine_options:
+      header: "true"
+      recursiveFileLookup: "true"
   load_mode: incremental
   watermark_strategy: pipeline_log
   partition:

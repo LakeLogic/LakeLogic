@@ -1024,7 +1024,7 @@ def test_processor_run_database_source_polars_uses_projection_and_incremental_wa
     assert result == "validated"
     assert queries[0][1] == "postgresql://db/orders"
     assert 'SELECT "id", "status", "updated_at" FROM "orders"' in queries[0][0]
-    assert "WHERE updated_at > '2024-01-01T00:00:00+00:00'" in queries[0][0]
+    assert "WHERE updated_at > '2024-01-01 00:00:00.000000'" in queries[0][0]
     assert captured["df"]["status"].to_list() == ["ok"]
     assert captured["source_path"] == "database://orders"
 
@@ -1413,11 +1413,11 @@ source:
   type: landing
   path: input.csv
   options:
-    flag: true
+    delimiter: ";"
 """
     loaded_inline = processor._load_contract(inline)
     assert loaded_inline.metadata["mode"] == "on"
-    assert loaded_inline.source.options["flag"] is True
+    assert loaded_inline.source.options["delimiter"] == ";"
 
     with pytest.raises(FileNotFoundError):
         processor._load_contract(tmp_path / "missing.yaml")
@@ -1862,12 +1862,19 @@ def test_processor_database_source_error_fetch_and_duckdb_paths(monkeypatch):
     duck.run = lambda df, source_path=None: proc_mod.ValidationResult(df, pl.DataFrame())
 
     queries = []
+    fake_con = types.SimpleNamespace(
+        sql=lambda query: queries.append(query) or types.SimpleNamespace(pl=lambda: pl.DataFrame({"id": [1]})),
+        close=lambda: None,
+    )
     fake_duckdb = types.ModuleType("duckdb")
-    fake_duckdb.sql = lambda query: queries.append(query) or types.SimpleNamespace(pl=lambda: pl.DataFrame({"id": [1]}))
+    fake_duckdb.connect = lambda *a, **k: fake_con
     monkeypatch.setitem(sys.modules, "duckdb", fake_duckdb)
     duck_result = duck._run_database_source()
     assert duck_result.good["id"].to_list() == [1]
-    assert any("sqlite_scan" in query for query in queries)
+    # SQLite is attached and the SAME query the other engines run executes in it — projection,
+    # incremental filter and all (the old `sqlite_scan(uri, table)` ignored them).
+    assert any("ATTACH" in q and "TYPE sqlite" in q for q in queries)
+    assert any(q.startswith("SELECT") and "updated_at >" in q for q in queries)
 
     # An engine with no database-source branch (polars/duckdb/spark are supported).
     bad_engine = object.__new__(proc_mod.DataProcessor)

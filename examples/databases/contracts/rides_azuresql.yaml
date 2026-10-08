@@ -1,0 +1,37 @@
+# Rides from Azure SQL / SQL Server. Rows are fetched in chunks of fetch_size, so a large
+# table never has to fit in memory at once.
+version: 1.0.0
+dataset: rides
+info: {title: bronze_rides_azuresql}
+primary_key: [ride_id]
+source:
+  type: database
+  path: env:AZURE_SQL_URI               # mssql://user:password@server.database.windows.net:1433/db?encrypt=true
+  load_mode: incremental           # full — every row, every run | incremental — rows newer than the last run's watermark_field
+                                      # | cdc — the database's change log (inserts, updates, deletes)
+  watermark_field: updated_at          # incremental: a timestamp/number column that grows when a row changes
+  options:
+    fetch_size: 1000                  # rows per chunk; leave out to read the result in one go
+  # query: SELECT * FROM rides WHERE city = 'Paris'   # optional: read a query instead of the whole table
+model:
+  fields:
+    - {name: ride_id, type: long, required: true}
+    - {name: city, type: string, required: true}
+    - {name: fare, type: double, required: true}
+    - {name: status, type: string}
+    - {name: updated_at, type: timestamp}
+quality:
+  row_rules:
+    - {name: fare_not_negative, sql: "fare >= 0"}
+materialization:
+  strategy: merge                     # append | overwrite | merge (upsert on primary_key) | scd2
+  format: delta
+  target_path: data/bronze/rides_azuresql
+quarantine:
+  target: data/quarantine/rides_azuresql
+  format: delta
+metadata:
+  # The run log remembers the incremental watermark between runs.
+  run_log_table: run_log
+  run_log_backend: duckdb
+  run_log_database: data/run_log_azuresql.duckdb   # one per contract: the watermark is per source

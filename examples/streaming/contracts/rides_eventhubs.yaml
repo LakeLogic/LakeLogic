@@ -1,0 +1,41 @@
+# Bronze rides from an Azure Event Hub. Same contract as rides_kafka.yaml; only the source differs:
+# the namespace connection string (an environment variable) gives the brokers and the SASL login.
+version: 1.0.0
+dataset: rides
+info: {title: bronze_rides_eventhubs}
+primary_key: [ride_id]
+source:
+  type: stream
+  options:
+    kind: eventhubs                         # eventhubs — Azure Event Hubs, through its Kafka endpoint (port 9093)
+                                            # kafka     — any Kafka-protocol broker (see rides_kafka.yaml)
+    connection_string: env:EVENTHUBS_CONNECTION_STRING   # namespace connection string; MUST be env:VAR.
+                                            #   The brokers (<namespace>.servicebus.windows.net:9093) and the
+                                            #   SASL_SSL / PLAIN login are taken from it
+    topic: rides                            # the event hub name (default: source.path)
+    # brokers: my-ns.servicebus.windows.net:9093   # optional override of the address from the connection string
+    starting_offsets: earliest              # earliest | latest — where a FIRST run starts; later runs continue from the checkpoint
+    checkpoint: data/checkpoints/rides_eventhubs.sqlite   # where the read position is kept (default: _checkpoints/<dataset> beside the contract).
+                                            #   Polars/DuckDB: this SQLite file. Spark: a folder beside it (rides_eventhubs_spark/)
+    batch_size: 100                         # events per micro-batch (Polars/DuckDB; default 1000)
+    trigger: available_now                  # available_now — read everything there now, then stop (scheduled jobs)
+                                            # continuous    — keep running and read new events as they arrive
+    # processing_time: 30 seconds           # Spark + continuous only: how often a micro-batch runs (default 30 seconds)
+    # max_offsets_per_trigger: 10000        # Spark only: cap on events per micro-batch (default: no cap)
+    # group_id: lakelogic-rides             # optional Kafka consumer group name (offsets are kept in the checkpoint either way)
+model:
+  fields:
+    - {name: ride_id, type: long, required: true}
+    - {name: city, type: string, required: true}
+    - {name: fare, type: double, required: true}
+    - {name: status, type: string}
+quality:
+  row_rules:
+    - {name: fare_not_negative, sql: "fare >= 0"}
+materialization:
+  strategy: merge
+  format: delta
+  target_path: data/bronze
+quarantine:
+  target: data/quarantine
+  format: delta

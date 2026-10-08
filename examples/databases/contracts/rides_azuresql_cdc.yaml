@@ -1,0 +1,36 @@
+# Rides from SQL Server / Azure SQL change data capture: inserts, updates AND deletes, read from
+# the database's own change log. Each run reads the changes committed since the last run.
+# Needs CDC enabled on the database and table (Azure SQL: S3 tier or higher):
+#   EXEC sys.sp_cdc_enable_db;
+#   EXEC sys.sp_cdc_enable_table @source_schema='dbo', @source_name='rides', @role_name=NULL;
+version: 1.0.0
+dataset: rides
+info: {title: bronze_rides_azuresql_cdc}
+primary_key: [ride_id]
+source:
+  type: database
+  path: env:AZURE_SQL_URI
+  load_mode: cdc                   # full — every row, every run | incremental — rows newer than the last run's watermark_field
+                                      # | cdc — the database's change log (inserts, updates, deletes)
+  options:
+    cdc_provider: azuresql            # azuresql | sqlserver (native CDC); Postgres CDC is not supported yet
+    cdc_capture_instance: dbo_rides   # the capture instance sp_cdc_enable_table created
+  # Each row carries _lakelogic_cdc_op (insert / update / delete) and _lakelogic_cdc_ts (commit time).
+model:
+  fields:
+    - {name: ride_id, type: long, required: true}
+    - {name: city, type: string}
+    - {name: fare, type: double}
+    - {name: status, type: string}
+    - {name: updated_at, type: timestamp}
+quality:
+  row_rules:
+    - {name: fare_not_negative, sql: "fare IS NULL OR fare >= 0"}
+materialization:
+  strategy: merge                     # append | overwrite | merge (upsert on primary_key) | scd2
+  format: delta
+  target_path: data/bronze/rides_azuresql_cdc
+metadata:
+  run_log_table: run_log
+  run_log_backend: duckdb
+  run_log_database: data/run_log_azuresql_cdc.duckdb   # one per contract: the watermark is per source

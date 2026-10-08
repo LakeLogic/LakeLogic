@@ -491,6 +491,7 @@ def test_get_last_run_watermark_and_dlt_state_from_delta_backend(monkeypatch, tm
 
     fake_pc = types.SimpleNamespace(
         not_equal=lambda column, value: [item != value for item in column.values],
+        fill_null=lambda column, value: types.SimpleNamespace(values=[value if item is None else item for item in column.values]),
         is_valid=lambda column: [item is not None for item in column.values],
         and_=lambda left, right: [a and b for a, b in zip(left, right)],
         max=lambda column: FakeScalar(max(column.values)),
@@ -821,7 +822,12 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
         def collect(self):
             return [{"dlt_state_json": json.dumps({"cursor": "spark"})}]
 
-    fake_functions = types.SimpleNamespace(col=lambda name: FakeColumn(name), max=lambda expr: expr)
+    fake_functions = types.SimpleNamespace(
+        col=lambda name: FakeColumn(name),
+        max=lambda expr: expr,
+        lit=lambda value: value,
+        coalesce=lambda column, default: column,  # null-safe status filter
+    )
     fake_spark = types.SimpleNamespace(table=lambda name: FakeSparkFrame())
     fake_sql_module = types.ModuleType("pyspark.sql")
     fake_sql_module.SparkSession = types.SimpleNamespace(builder=types.SimpleNamespace(getOrCreate=lambda: fake_spark))
@@ -901,6 +907,7 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
 
     fake_pc = types.SimpleNamespace(
         not_equal=lambda column, value: [item != value for item in column.values],
+        fill_null=lambda column, value: types.SimpleNamespace(values=[value if item is None else item for item in column.values]),
         is_valid=lambda column: [item is not None for item in column.values],
         and_=lambda left, right: [a and b for a, b in zip(left, right)],
         max=lambda column: FakeScalar(max(value for value in column.values if value is not None)),

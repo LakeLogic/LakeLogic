@@ -356,3 +356,9 @@ playwright-mcp/
 
 # Scenario suite inputs (examples/file_formats/scenarios.py writes them on every run)
 examples/file_formats/data/scenarios/
+
+# Streaming example runs (examples/streaming/kafka_scenarios.py writes them on every run)
+examples/streaming/data/
+
+# Database example runs (seeded SQLite file, run logs, bronze; databases.ipynb writes them)
+examples/databases/data/

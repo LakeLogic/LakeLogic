@@ -34,6 +34,103 @@ SOURCE_READERS: Dict[str, str] = {
 PATH_READ_SOURCE_TYPES = frozenset({"landing", "stream", "table", "delta", "iceberg"})
 assert set(SOURCE_READERS) | PATH_READ_SOURCE_TYPES == set(SOURCE_TYPES), "source.type dispatch drifted from OLC"
 
+#: ``source.type: stream`` + ``options.kind`` read from a broker instead of a folder of files.
+KAFKA_STREAM_KINDS = frozenset({"kafka", "eventhubs"})
+
+
+def _sqlite_absolute(uri: Optional[str]) -> Optional[str]:
+    """``sqlite:///data/x.db`` is RELATIVE (SQLAlchemy's convention) — ConnectorX read it as ``/data``.
+
+    Make it absolute against the working directory so every reader agrees.
+    """
+    if not uri or not str(uri).lower().startswith("sqlite:///"):
+        return uri
+    rest = str(uri)[len("sqlite:///"):]
+    if rest.startswith("/") or re.match(r"^[A-Za-z]:[/\\]", rest) or rest.startswith(":memory:"):
+        return uri
+    return "sqlite:///" + Path(rest).resolve().as_posix()
+
+
+def _stream_kind(source: Any) -> Optional[str]:
+    if source is None or getattr(source, "type", None) != "stream":
+        return None
+    kind = (getattr(source, "options", None) or {}).get("kind")
+    return str(kind).lower() if kind else None
+
+
+def _kafka_stream_settings(source: Any) -> Dict[str, Any]:
+    """The broker settings a ``source.type: stream`` contract declares, secrets resolved.
+
+    ``options``: ``kind`` (kafka | eventhubs), ``topic`` (default: ``source.path``), ``brokers``
+    (``env:VAR`` allowed), ``group_id``, ``starting_offsets`` (earliest | latest), ``checkpoint``
+    (a SQLite file for Polars/DuckDB, a folder for Spark; default ``_checkpoints/<dataset>`` next
+    to the contract), ``batch_size``, ``trigger`` (available_now | continuous), ``processing_time``,
+    ``max_offsets_per_trigger``, and auth: ``security_protocol``, ``sasl_mechanism``,
+    ``sasl_username``, ``sasl_password``. ``kind: eventhubs`` needs only ``connection_string``: it
+    fills SASL_SSL / PLAIN / ``$ConnectionString`` and the namespace's port 9093. Secrets must be
+    ``env:VAR`` or ``${ENV:VAR}`` — a literal password in a contract is refused.
+    """
+    from lakelogic.core.materialization import _resolve_env_value
+
+    o = dict(getattr(source, "options", None) or {})
+    kind = str(o.get("kind")).lower()
+
+    def secret(key: str) -> Optional[str]:
+        raw = o.get(key)
+        if raw is None:
+            return None
+        if not str(raw).strip().startswith(("env:", "${ENV:")):
+            raise ValueError(
+                f"source.options.{key} must reference an environment variable (env:VAR) — "
+                "secrets are never written into a contract"
+            )
+        val = _resolve_env_value(str(raw))
+        if not val or val == raw:
+            raise ValueError(f"source.options.{key}: the environment variable in {raw!r} is not set")
+        return val
+
+    topic = o.get("topic") or getattr(source, "path", None)
+    if not topic:
+        raise ValueError("A Kafka stream source needs source.options.topic (or source.path)")
+    brokers = _resolve_env_value(str(o["brokers"])) if o.get("brokers") else None
+    auth: Dict[str, Any] = {}
+    if kind == "eventhubs":
+        conn = secret("connection_string")
+        if not conn:
+            raise ValueError("kind: eventhubs needs source.options.connection_string: env:VAR")
+        if not brokers:
+            ns = next((p.split("=", 1)[1] for p in conn.split(";") if p.lower().startswith("endpoint=")), "")
+            brokers = ns.replace("sb://", "").strip("/") + ":9093"
+        auth = {
+            "security_protocol": "SASL_SSL",
+            "sasl_mechanism": "PLAIN",
+            "sasl_username": "$ConnectionString",
+            "sasl_password": conn,
+        }
+    else:
+        for k in ("security_protocol", "sasl_mechanism"):
+            if o.get(k):
+                auth[k] = str(o[k])
+        if o.get("sasl_username"):
+            auth["sasl_username"] = _resolve_env_value(str(o["sasl_username"]))
+        if o.get("sasl_password"):
+            auth["sasl_password"] = secret("sasl_password")
+    if not brokers:
+        raise ValueError("A Kafka stream source needs source.options.brokers")
+    return {
+        "kind": kind,
+        "topic": str(topic),
+        "brokers": brokers,
+        "group_id": o.get("group_id"),
+        "starting_offsets": str(o.get("starting_offsets") or "earliest"),
+        "checkpoint": o.get("checkpoint"),
+        "batch_size": int(o.get("batch_size") or 1000),
+        "trigger": str(o.get("trigger") or "available_now"),
+        "processing_time": o.get("processing_time"),
+        "max_offsets_per_trigger": o.get("max_offsets_per_trigger"),
+        "auth": auth,
+    }
+
 
 class ValidationResult:
     """
@@ -537,9 +634,7 @@ _FORMAT_EXTENSIONS = {
 }
 
 _CSV_OPTION_KEYS = {
-    "delimiter": "separator",
-    "separator": "separator",
-    "sep": "separator",
+    "delimiter": "separator",  # one spelling (OLC 0.21 typed options); `sep` / `separator` are refused
     "encoding": "encoding",
     "skip_rows": "skip_rows",
     "quote_char": "quote_char",
@@ -678,7 +773,7 @@ def _spark_csv_options(options: Dict[str, Any]) -> Dict[str, str]:
     ``implied_decimals`` and ``date_formats`` are applied after the read on every engine.
     """
     out: Dict[str, str] = {}
-    sep = options.get("delimiter") or options.get("separator") or options.get("sep")
+    sep = options.get("delimiter")
     if sep:
         out["sep"] = "\t" if sep in ("\\t", "tab", "TAB") else str(sep)
     if options.get("encoding"):
@@ -1028,6 +1123,38 @@ def _polars_to_spark(spark: Any, df: Any) -> Any:
     if casts:
         df = df.with_columns([pl.col(c).cast(pl.Utf8) for c in casts])
     return spark.createDataFrame(df.rows(), T.StructType(fields))
+
+
+def _sqlalchemy_db_uri(uri: str) -> str:
+    """A database URI SQLAlchemy can open, from the form ConnectorX/contracts use.
+
+    ``mssql://user:pw@host/db`` works for ConnectorX, but SQLAlchemy maps bare ``mssql`` to pyodbc
+    with NO driver name, which fails ("Data source name not found") — so every chunked
+    (``fetch_size``) read from Azure SQL / SQL Server failed (found 2026-10-07). Add the newest
+    installed "ODBC Driver NN for SQL Server" when the URI names none.
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(uri)
+    scheme = parts.scheme.lower()
+    if scheme not in ("mssql", "mssql+pyodbc", "sqlserver"):
+        return uri
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if "driver" not in {k.lower() for k in params}:
+        driver = "ODBC Driver 18 for SQL Server"
+        try:
+            import pyodbc
+
+            found = sorted(d for d in pyodbc.drivers() if d.startswith("ODBC Driver") and "SQL Server" in d)
+            if found:
+                driver = found[-1]
+        except Exception:  # pragma: no cover - pyodbc missing: SQLAlchemy will say so
+            pass
+        params["driver"] = driver
+    if str(params.get("encrypt", "")).lower() == "true":  # ConnectorX spelling -> ODBC spelling
+        params.pop("encrypt")
+        params["Encrypt"] = "yes"
+    return urlunsplit(("mssql+pyodbc", parts.netloc, parts.path, urlencode(params), parts.fragment))
 
 
 def _compact_entity(name: str, layer: Optional[str], system: Optional[str]) -> str:
@@ -2614,6 +2741,10 @@ class DataProcessor:
 
         self._is_reprocess = bool(reprocess_from or reprocess_to or (resolved_reprocess_column and reprocess_values))
 
+        # ── a message broker declared in the contract (Kafka / Azure Event Hubs) ──
+        if _stream_kind(self.contract.source) in KAFKA_STREAM_KINDS:
+            return self._run_kafka_stream_source()
+
         # ── dedicated readers: dlt (API), database (SQL), sftp (remote files) ──
         _reader = SOURCE_READERS.get(self.contract.source.type) if self.contract.source else None
         if _reader:
@@ -3126,7 +3257,7 @@ class DataProcessor:
                             def _parse_json_text(text: str) -> Any:
                                 """One JSON value, or one per line — whichever the file holds.
 
-                                THE CONTRACT DECIDES WHEN IT SAYS SO. `source.options.multiLine`
+                                THE CONTRACT DECIDES WHEN IT SAYS SO. `source.options.multiline`
                                 is the same field the Spark reader consumes, so a contract that
                                 declares its shape gets the SAME answer from both engines. That
                                 is the whole point: Spark hardcoded `multiLine=true`, polars
@@ -3139,7 +3270,7 @@ class DataProcessor:
                                 back to line-by-line.
                                 """
                                 _o = getattr(getattr(self.contract, "source", None), "options", {}) or {}
-                                _declared = _o.get("multiLine", _o.get("multiline"))
+                                _declared = _o.get("multiline")
                                 if _declared is False:
                                     return [_json.loads(line) for line in text.strip().splitlines() if line.strip()]
                                 try:
@@ -3979,7 +4110,7 @@ class DataProcessor:
                                 # An estate that lands JSON Lines can say so outright:
                                 #   source:
                                 #     options:
-                                #       multiLine: false
+                                #       multiline: false
                                 #
                                 # ABSENT A DECLARATION, SNIFF — the same answer the polars reader
                                 # has always given. Polars tries the whole file and falls back to
@@ -3991,7 +4122,7 @@ class DataProcessor:
                                 # The sniff is one character of one file. A JSON array starts `[`;
                                 # anything else is one value per line.
                                 _json_opts = getattr(self.contract.source, "options", {}) or {}
-                                _multiline = _json_opts.get("multiLine", _json_opts.get("multiline"))
+                                _multiline = _json_opts.get("multiline")
                                 if _multiline is None:
                                     _multiline = self._json_is_one_value_per_file(file_paths, path)
                                 reader = reader.option("multiLine", "true" if _multiline else "false")
@@ -5275,7 +5406,9 @@ class DataProcessor:
         """
         Return an empty frame suitable for the current engine.
         """
-        if self.engine_name == "polars":
+        if self.engine_name in ("polars", "duckdb"):
+            # DuckDB runs return Polars frames (DuckDBAdapter._to_output_df), so its "no new data"
+            # result must too — it was a bare list, which broke callers only when nothing was new.
             try:
                 import polars as pl
 
@@ -5317,10 +5450,6 @@ class DataProcessor:
         """
         src = getattr(self.contract, "source", None)
         opts = dict(getattr(src, "options", None) or {})
-        for key in ("record_length", "encoding", "skip_rows", "skip_footer", "strip"):
-            val = (getattr(src, "model_extra", None) or {}).get(key) if src is not None else None
-            if val is not None and key not in opts:
-                opts[key] = val
         fields = getattr(getattr(self.contract, "model", None), "fields", None) or []
         paths = list(file_paths or [path])
         low = [str(p).lower() for p in paths]
@@ -5499,14 +5628,8 @@ class DataProcessor:
         (abfss/s3/gs) are read through fsspec with the same credentials as other sources.
         """
         src = getattr(self.contract, "source", None)
-        opts: Dict[str, Any] = {}
-        for key in ("record_length", "encoding", "skip_rows", "skip_footer", "strip"):
-            val = getattr(src, key, None) if src is not None else None
-            if val is None and src is not None and getattr(src, "model_extra", None):
-                val = src.model_extra.get(key)
-            if val is not None:
-                opts[key] = val
-        opts.update(getattr(src, "options", None) or {})
+        # Fixed-width settings live only under source.options (OLC 0.21 typed options).
+        opts: Dict[str, Any] = dict(getattr(src, "options", None) or {})
         fields = getattr(getattr(self.contract, "model", None), "fields", None) or []
         data = None
         if self._is_uri_path(str(path)):
@@ -6011,6 +6134,22 @@ class DataProcessor:
                 incremental_metadata=getattr(self, "_incremental_metadata", None),
                 is_reprocess=getattr(self, "_is_reprocess", False),
             )
+
+        _q = getattr(self.contract, "quarantine", None)
+        if bad_df is not None and not (_q and _q.target) and not getattr(self, "_warned_quarantine_unsaved", False):
+            try:
+                _n_bad = bad_df.count() if hasattr(bad_df, "sparkSession") else len(bad_df)
+            except Exception:  # pragma: no cover - a frame we cannot count is still a frame
+                _n_bad = None
+            if _n_bad:
+                # Rows were quarantined and counted, then DISCARDED, without a word (found 2026-10-07).
+                # Once per processor, so a stream does not repeat it every micro-batch.
+                self._warned_quarantine_unsaved = True
+                logger.warning(
+                    f"{_n_bad} quarantined row(s) were NOT saved: the contract sets no quarantine.target, "
+                    "so they are counted but discarded. Set `quarantine: {target: <path or table>}` to keep them "
+                    "(and their reasons)."
+                )
 
         if bad_df is not None and self.contract.quarantine and self.contract.quarantine.target:
             try:
@@ -6860,6 +6999,7 @@ class DataProcessor:
         columns: str,
         capture_instance: Optional[str] = None,
         watermark_iso: Optional[str] = None,
+        lsn_range: Optional[Tuple[str, str]] = None,
     ) -> str:
         """Build a NATIVE change-capture query — reading the change log, not polling.
 
@@ -6882,10 +7022,22 @@ class DataProcessor:
             # is the documented reader. The capture instance defaults to SQL Server's
             # own convention (schema_table) when not given.
             instance = capture_instance or table.replace(".", "_")
+            if lsn_range:
+                # A range already checked against the capture instance (_sqlserver_cdc_lsn_range):
+                # fn_cdc_get_all_changes rejects a range outside it ("insufficient number of
+                # arguments") instead of returning nothing.
+                return (
+                    f"SELECT {columns}, __$operation AS _lakelogic_cdc_op_raw, "
+                    f"__$start_lsn AS _lakelogic_cdc_lsn, "
+                    f"sys.fn_cdc_map_lsn_to_time(__$start_lsn) AS _lakelogic_cdc_ts "
+                    f"FROM cdc.fn_cdc_get_all_changes_{instance}({lsn_range[0]}, {lsn_range[1]}, 'all') "
+                    f"WHERE __$operation <> {self._SQLSERVER_CDC_BEFORE_IMAGE} "
+                    f"ORDER BY __$start_lsn"
+                )
             if watermark_iso:
                 # Map a timestamp to the first LSN AFTER it, so a re-run does not
                 # replay the change it already consumed.
-                from_lsn = f"sys.fn_cdc_map_time_to_lsn('smallest greater than', CAST('{watermark_iso}' AS DATETIME))"
+                from_lsn = f"sys.fn_cdc_map_time_to_lsn('smallest greater than', CAST('{watermark_iso}' AS DATETIME2))"
             else:
                 from_lsn = "sys.fn_cdc_get_min_lsn('" + instance + "')"
             return (
@@ -6913,6 +7065,41 @@ class DataProcessor:
             "Supported: sqlserver/azuresql. For anything else, land the change feed "
             "and consume it with `load_mode: cdc`."
         )
+
+    def _sqlserver_cdc_lsn_range(self, uri: str, instance: str, watermark_iso: Optional[str]):
+        """``(from_lsn, to_lsn)`` hex literals for the next CDC read, or None if nothing is new.
+
+        The CDC watermark is the COMMIT time of the last change consumed (``_lakelogic_cdc_ts``),
+        mapped to the first LSN after it, and clamped to the capture instance's minimum LSN.
+        Before 2026-10-07 the watermark came from a DATA column (e.g. ``updated_at``): mapped to an
+        LSN it could fall before the capture instance existed, and SQL Server refused the whole read.
+        """
+        import polars as pl
+
+        wm_expr = (
+            f", CONVERT(VARCHAR(30), sys.fn_cdc_map_time_to_lsn('smallest greater than', "
+            f"CAST('{watermark_iso}' AS DATETIME2)), 1) AS from_lsn"
+            if watermark_iso
+            else ""
+        )
+        q = (
+            f"SELECT CONVERT(VARCHAR(30), sys.fn_cdc_get_min_lsn('{instance}'), 1) AS min_lsn, "
+            f"CONVERT(VARCHAR(30), sys.fn_cdc_get_max_lsn(), 1) AS max_lsn{wm_expr}"
+        )
+        row = pl.read_database_uri(q, uri).row(0, named=True)
+        as_int = lambda h: int(h, 16) if h and h != "0x" else 0  # noqa: E731
+        min_lsn, max_lsn = row["min_lsn"], row["max_lsn"]
+        if not as_int(min_lsn):
+            raise ValueError(f"CDC capture instance '{instance}' does not exist or has no valid range")
+        start = min_lsn
+        if watermark_iso:
+            nxt = row.get("from_lsn")
+            if not nxt or not as_int(nxt):
+                return None  # no change committed after the watermark
+            start = nxt if as_int(nxt) > as_int(min_lsn) else min_lsn
+        if as_int(start) > as_int(max_lsn):
+            return None
+        return start, max_lsn
 
     def _normalise_cdc_ops(self, df: Any, provider: str) -> Any:
         """Map a provider's raw operation codes to insert/update/delete.
@@ -6985,8 +7172,8 @@ class DataProcessor:
 
         options = dict(getattr(src, "options", {}) or {})
         remote_dir = parsed.path or "/"
-        pattern = getattr(src, "pattern", None) or options.get("pattern") or "*"
-        fmt = (getattr(src, "format", None) or options.get("format") or "csv").lower()
+        pattern = getattr(src, "pattern", None) or "*"
+        fmt = (getattr(src, "format", None) or "csv").lower()
 
         username = parsed.username or options.get("username") or os.getenv("LAKELOGIC_SFTP_USER")
         password = options.get("password") or os.getenv("LAKELOGIC_SFTP_PASSWORD")
@@ -7060,12 +7247,18 @@ class DataProcessor:
         if not dataset:
             raise ValueError("Database source requires 'dataset' to be defined in contract to use as table name")
 
-        uri = self.contract.source.path
+        # `env:VAR` / `${ENV:VAR}` keep the credentials out of the contract (the materialization
+        # targets already resolved these; the database source took the URI literally).
+        from lakelogic.core.materialization import _resolve_env_value
+
+        uri = _sqlite_absolute(_resolve_env_value(self.contract.source.path))
         if not uri:
             raise ValueError("Database source requires 'source.path' connection URI")
 
         # ── Options extraction ───────────────────────────────
         options = getattr(self.contract.source, "options", {}) or {}
+        if str(uri).lower().startswith(("mongodb://", "mongodb+srv://")):
+            return self._run_mongodb_source(uri, dataset, options)
         partition_column = options.get("partition_column")
         partition_num = options.get("partition_num")
         fetch_size = options.get("fetch_size")
@@ -7107,13 +7300,24 @@ class DataProcessor:
             if _wm is not None:
                 from datetime import datetime, timezone
 
-                _wm_iso = datetime.fromtimestamp(_wm, tz=timezone.utc).isoformat()
+                _wm_iso = datetime.fromtimestamp(_wm, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            lsn_range = None
+            if str(cdc_provider).lower() in ("sqlserver", "mssql", "azuresql", "azure_sql"):
+                instance = options.get("cdc_capture_instance") or dataset.replace(".", "_")
+                lsn_range = self._sqlserver_cdc_lsn_range(uri, instance, _wm_iso)
+                if lsn_range is None:
+                    self._cdc_provider = cdc_provider
+                    empty = self._handle_empty_source(f"database://{dataset}", "No new CDC changes")
+                    if empty is not None:
+                        return empty
+                    raise FileNotFoundError(f"No new CDC changes for {dataset}")
             query = self._build_cdc_query(
                 provider=cdc_provider,
                 table=dataset,
                 columns=columns,
                 capture_instance=options.get("cdc_capture_instance"),
                 watermark_iso=_wm_iso,
+                lsn_range=lsn_range,
             )
             self._cdc_provider = cdc_provider
             logger.info(
@@ -7127,6 +7331,11 @@ class DataProcessor:
             if not watermark_field:
                 raise ValueError("Incremental load mode requires 'source.watermark_field' in contract config")
 
+            if not (getattr(self.contract, "metadata", None) or {}).get("run_log_table"):
+                logger.warning(
+                    "load_mode: incremental needs a run log (metadata.run_log_table) to remember the last "
+                    f"{watermark_field}; without one, every run is a full extraction."
+                )
             watermark = self._get_last_source_watermark()
             if watermark is not None:
                 # _get_last_source_watermark returns a float (Unix epoch).
@@ -7134,7 +7343,9 @@ class DataProcessor:
                 # TIMESTAMP / DATETIME columns in all database dialects.
                 from datetime import datetime, timezone
 
-                watermark_iso = datetime.fromtimestamp(watermark, tz=timezone.utc).isoformat()
+                # A plain UTC timestamp, no offset: Azure SQL's datetime2 rejects '...+00:00', and
+                # Postgres/MySQL read it as the same instant for a UTC (naive) column.
+                watermark_iso = datetime.fromtimestamp(watermark, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
                 query += f" WHERE {watermark_field} > '{watermark_iso}'"
                 logger.info(f"Incremental mode active. Appending filter: WHERE {watermark_field} > '{watermark_iso}'")
             else:
@@ -7172,7 +7383,9 @@ class DataProcessor:
                 try:
                     import sqlalchemy
 
-                    sa_engine = sqlalchemy.create_engine(uri).execution_options(yield_per=fetch_size)
+                    sa_engine = sqlalchemy.create_engine(_sqlalchemy_db_uri(uri)).execution_options(
+                        yield_per=fetch_size
+                    )
 
                     all_good: list = []
                     all_bad: list = []
@@ -7187,6 +7400,7 @@ class DataProcessor:
                             logger.info(f"Processing database chunk {batch_idx} ({chunk_df.height} rows)...")
 
                             chunk_df = self._normalise_cdc_ops(chunk_df, getattr(self, "_cdc_provider", None))
+                            self._capture_db_watermark(chunk_df)
                             res = self.run(chunk_df, source_path=f"database://{dataset}")
                             all_good.append(res.good)
                             all_bad.append(res.bad)
@@ -7235,33 +7449,39 @@ class DataProcessor:
         elif self.engine_name == "duckdb":
             import duckdb
 
-            # Sniff dialect for accurate DuckDB extension mapping
+            # The SAME query the other engines run (projection, source.query, incremental and CDC
+            # filters), executed IN the database. The old code called `postgres_scan(uri, table)`:
+            # current DuckDB needs (dsn, schema, table), so every database read failed; it also
+            # ignored source.query, the column list and CDC, and sent SQL Server and Oracle URIs to
+            # the Postgres scanner (DuckDB has no SQL Server reader). Found against Azure, 2026-10-07.
             dialect = uri.split("://")[0].lower()
-            extension = "postgres"
-            scanner = "postgres_scan"
-
-            if "mysql" in dialect:
-                extension = "mysql"
-                scanner = "mysql_scan"
-            elif "sqlite" in dialect:
-                extension = "sqlite"
-                scanner = "sqlite_scan"
-
-            duckdb.sql(f"INSTALL {extension}; LOAD {extension};")
             try:
-                # DuckDB sqlite_scan expects a raw path, not a URI
-                duckdb_uri = uri
-                if extension == "sqlite":
-                    duckdb_uri = duckdb_uri.replace("sqlite:///", "").replace("sqlite://", "")
-
-                duckdb_query = f"SELECT * FROM {scanner}('{duckdb_uri}', '{dataset}')"
-                if load_mode == "incremental" and watermark is not None:
-                    duckdb_query += f" WHERE {watermark_field} > '{watermark_iso}'"
-
-                logger.debug(f"Executing DuckDB {scanner}: {duckdb_query}")
-                df = duckdb.sql(duckdb_query).pl()
+                if dialect.startswith(("postgres", "mysql")):
+                    ext = "postgres" if dialect.startswith("postgres") else "mysql"
+                    con = duckdb.connect()
+                    con.sql(f"INSTALL {ext}; LOAD {ext};")
+                    attach_uri = uri.replace("postgresql+psycopg2://", "postgresql://").replace(
+                        "mysql+pymysql://", "mysql://"
+                    )
+                    con.sql(f"ATTACH '{attach_uri.replace(chr(39), chr(39) * 2)}' AS __ll_src (TYPE {ext}, READ_ONLY)")
+                    q = query.replace(chr(39), chr(39) * 2)
+                    df = con.sql(f"SELECT * FROM {ext}_query('__ll_src', '{q}')").pl()
+                    con.close()
+                elif dialect.startswith("sqlite"):
+                    con = duckdb.connect()
+                    con.sql("INSTALL sqlite; LOAD sqlite;")
+                    path = uri.split("://", 1)[1].lstrip("/") if "://" in uri else uri
+                    path = "/" + path if uri.startswith("sqlite:////") else path
+                    con.sql(f"ATTACH '{path.replace(chr(39), chr(39) * 2)}' AS __ll_src (TYPE sqlite, READ_ONLY)")
+                    con.sql("USE __ll_src")
+                    df = con.sql(query).pl()
+                    con.close()
+                else:
+                    # SQL Server, Oracle…: DuckDB has no reader, so read with the connector the polars
+                    # path uses; the frame then runs through the DuckDB engine like any other input.
+                    df = pl.read_database_uri(query, uri)
             except Exception as e:
-                raise RuntimeError(f"DuckDB {extension} DB extraction failed. Error: {e}")
+                raise RuntimeError(f"DuckDB database extraction failed ({dialect}). Error: {e}")
 
         elif self.engine_name == "spark":
             # Spark reads via JDBC. Unlike the polars driver-side chunk loop, Spark
@@ -7321,6 +7541,8 @@ class DataProcessor:
 
             logger.info(f"database (spark jdbc): loaded columns {df.columns}")
             df = self._normalise_cdc_ops(df, getattr(self, "_cdc_provider", None))
+            self._capture_db_watermark(df)
+            df = self._apply_source_flatten(df)
             return self.run(df, source_path=f"database://{dataset}")
 
         else:
@@ -7329,11 +7551,290 @@ class DataProcessor:
         logger.info(f"database: loaded {df.height} rows, {df.width} columns")
 
         df = self._normalise_cdc_ops(df, getattr(self, "_cdc_provider", None))
+        self._capture_db_watermark(df)
+        df = self._apply_source_flatten(df)
 
         return self.run(
             df,
             source_path=f"database://{dataset}",
         )
+
+    def _run_kafka_stream_source(self) -> "ValidationResult":
+        """Drain a Kafka / Event Hubs topic declared in the contract, micro-batch by micro-batch.
+
+        Polars / DuckDB: ``StreamSink`` + ``KafkaOffsetSource`` (offsets in a SQLite checkpoint).
+        Spark: Structured Streaming — ``kafka_json_stream`` + ``SparkStreamSink`` (Spark checkpoint).
+        Every micro-batch is validated and WRITTEN here (good rows to the target, bad rows to
+        quarantine) and the position is committed after the write, so the next run continues where
+        this one stopped. Returns an empty result (the rows are already written) with
+        ``.stream_summary``.
+        """
+        from lakelogic.core.stream_sink import (
+            KafkaOffsetSource,
+            SparkStreamSink,
+            SQLiteCheckpointStore,
+            StreamSink,
+            kafka_json_stream,
+        )
+
+        cfg = _kafka_stream_settings(self.contract.source)
+        name = self.contract.dataset or getattr(getattr(self.contract, "info", None), "title", None) or cfg["topic"]
+        base = Path(getattr(self, "_explicit_contract_path", None) or ".").resolve()
+        base = base.parent if base.suffix else base
+        checkpoint = str(cfg["checkpoint"] or (base / "_checkpoints" / str(name)))
+        logger.info(f"stream source: {cfg['kind']} topic '{cfg['topic']}' at {cfg['brokers']} (checkpoint {checkpoint})")
+        auth = cfg["auth"]
+        continuous = cfg["trigger"] in ("continuous", "processing_time")
+
+        if self.engine_name == "spark":
+            from pyspark.sql import SparkSession
+
+            opts: Dict[str, Any] = {}
+            if auth.get("security_protocol"):
+                opts["kafka.security.protocol"] = auth["security_protocol"]
+            if auth.get("sasl_mechanism"):
+                opts["kafka.sasl.mechanism"] = auth["sasl_mechanism"]
+            if auth.get("sasl_password") is not None:
+                opts["kafka.sasl.jaas.config"] = (
+                    "org.apache.kafka.common.security.plain.PlainLoginModule required "
+                    f'username="{auth.get("sasl_username", "")}" password="{auth["sasl_password"]}";'
+                )
+            if cfg["max_offsets_per_trigger"]:
+                opts["maxOffsetsPerTrigger"] = str(cfg["max_offsets_per_trigger"])
+            fields = [f.name for f in (self.contract.model.fields if self.contract.model else [])]
+            spark = SparkSession.builder.getOrCreate()
+            stream = kafka_json_stream(
+                spark, cfg["topic"], fields, brokers=cfg["brokers"], starting_offsets=cfg["starting_offsets"], **opts
+            )
+            # One contract runs on every engine: a ``.sqlite`` checkpoint becomes a Spark folder beside it.
+            spark_ckpt = re.sub(r"\.(sqlite|db)$", "", checkpoint) + ("_spark" if checkpoint.endswith((".sqlite", ".db")) else "")
+            sink = SparkStreamSink(
+                stream_df=stream,
+                checkpoint_location=spark_ckpt,
+                trigger="processing_time" if continuous else "available_now",
+                processing_time=cfg["processing_time"] or ("30 seconds" if continuous else None),
+                processor=self,
+            )
+            sink.run()
+            summary = {
+                "batches": len(sink.batches),
+                "source_count": sum(b.source_count or 0 for b in sink.batches),
+                "good_count": sum(b.good_count for b in sink.batches),
+                "bad_count": sum(b.bad_count for b in sink.batches),
+                "superseded_count": sum(b.superseded_count for b in sink.batches),
+            }
+        else:
+            import json as _json
+
+            renamed = {"sasl_username": "sasl_plain_username", "sasl_password": "sasl_plain_password"}
+            source = KafkaOffsetSource(
+                cfg["topic"],
+                brokers=cfg["brokers"],
+                group_id=cfg["group_id"],
+                auto_offset_reset=cfg["starting_offsets"],
+                value_deserializer=_json.loads,
+                **{renamed.get(k, k): v for k, v in auth.items()},
+            )
+            db = checkpoint if checkpoint.endswith((".sqlite", ".db")) else checkpoint + ".sqlite"
+            Path(db).parent.mkdir(parents=True, exist_ok=True)
+            sink = StreamSink(
+                source=source,
+                engine=self.engine_name,
+                processor=self,
+                checkpoint=SQLiteCheckpointStore(db),
+                checkpoint_key=f"stream::{name}",
+                batch_size=cfg["batch_size"],
+            )
+            s = sink.run("continuous" if continuous else "available_now")
+            summary = {
+                "batches": s.batches,
+                "source_count": s.source_count,
+                "good_count": s.good_count,
+                "bad_count": s.bad_count,
+                "superseded_count": s.superseded_count,
+                "cursor": s.cursor,
+            }
+        logger.info(f"stream source: {summary}")
+        result = ValidationResult(self._empty_frame(), self._empty_frame())
+        result.stream_summary = summary
+        return result
+
+    def _run_mongodb_source(self, uri: str, collection: str, options: Dict[str, Any]) -> "ValidationResult":
+        """Read a MongoDB-protocol collection: MongoDB, Atlas, Cosmos DB (MongoDB API), DocumentDB.
+
+        ``source.type: database`` with a ``mongodb://`` / ``mongodb+srv://`` path (``env:VAR``
+        keeps it out of the contract); ``dataset`` is the collection; ``options``:
+
+          * ``database`` — default: the database named in the URI;
+          * ``filter`` — a MongoDB query document; ``projection``; ``batch_size`` (default 1000).
+
+        Each document is one row. Top-level fields become columns; nested objects and arrays become
+        JSON text — the shape nested JSON, XML and Avro land in, so ``flatten_nested``, ``explode``
+        and ``json_extract`` apply unchanged. Every value is TEXT (``_id`` included), like a landing
+        file: a document whose field holds an unexpected type is quarantined by the typed cast,
+        instead of breaking a typed read. ``load_mode: incremental`` + ``watermark_field`` asks the
+        server only for documents newer than the last run (a date, ISO string or number field).
+        """
+        import json as _json
+        from datetime import date, datetime, timezone
+
+        import polars as pl
+
+        try:
+            from bson import Decimal128, ObjectId
+            from pymongo import ASCENDING, MongoClient
+            from pymongo.uri_parser import parse_uri
+        except ImportError as exc:
+            raise ImportError('MongoDB sources need pymongo: pip install "lakelogic[mongodb]"') from exc
+
+        db_name = options.get("database") or parse_uri(uri).get("database")
+        if not db_name:
+            raise ValueError("MongoDB source needs options.database (or a database name in the URI path)")
+
+        def plain(v: Any) -> Any:
+            """BSON values as JSON-able Python (for nested values)."""
+            if isinstance(v, dict):
+                return {k: plain(x) for k, x in v.items()}
+            if isinstance(v, (list, tuple)):
+                return [plain(x) for x in v]
+            if isinstance(v, ObjectId):
+                return str(v)
+            if isinstance(v, datetime):
+                return (v if v.tzinfo else v.replace(tzinfo=timezone.utc)).isoformat()
+            if isinstance(v, date):
+                return v.isoformat()
+            if isinstance(v, Decimal128):
+                return str(v.to_decimal())
+            if isinstance(v, bytes):
+                return v.hex()
+            return v
+
+        def text(v: Any) -> Optional[str]:
+            if v is None:
+                return None
+            if isinstance(v, (dict, list, tuple)):
+                return _json.dumps(plain(v), ensure_ascii=False)
+            if isinstance(v, bool):
+                return "true" if v else "false"
+            if isinstance(v, datetime):
+                return (v.replace(tzinfo=None) if v.tzinfo is None else v.astimezone(timezone.utc).replace(tzinfo=None)).isoformat(sep=" ")
+            return str(plain(v))
+
+        load_mode = getattr(self.contract.source, "load_mode", "full")
+        wf = getattr(self.contract.source, "watermark_field", None)
+        query: Dict[str, Any] = dict(options.get("filter") or {})
+        if load_mode == "incremental":
+            if not wf:
+                raise ValueError("Incremental load mode requires 'source.watermark_field' in contract config")
+            wm = self._get_last_source_watermark()
+            if wm is not None:
+                after = datetime.fromtimestamp(wm, tz=timezone.utc)
+                # MongoDB compares within a BSON type, so ask for each form a watermark field can take.
+                newer = {"$or": [{wf: {"$gt": after.replace(tzinfo=None)}},
+                                 {wf: {"$gt": after.strftime("%Y-%m-%dT%H:%M:%S.%f")}},
+                                 {wf: {"$gt": after.strftime("%Y-%m-%d %H:%M:%S.%f")}},
+                                 {wf: {"$gt": wm}}]}
+                query = {"$and": [query, newer]} if query else newer
+                logger.info(f"MongoDB incremental: {wf} > {after.isoformat()}")
+
+        client = MongoClient(uri, appname="lakelogic", serverSelectionTimeoutMS=30000)
+        try:
+            cursor = client[db_name][collection].find(query, options.get("projection"))
+            cursor = cursor.batch_size(int(options.get("batch_size") or 1000))
+            if wf:
+                cursor = cursor.sort(wf, ASCENDING)
+            rows: List[Dict[str, Any]] = []
+            max_wm: Optional[float] = None
+            for doc in cursor:
+                rows.append({k: text(v) for k, v in doc.items()})
+                raw = doc.get(wf) if wf else None
+                if raw is not None:
+                    if isinstance(raw, datetime):
+                        epoch = (raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)).timestamp()
+                    elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                        epoch = float(raw)
+                    else:
+                        try:
+                            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                            epoch = (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).timestamp()
+                        except ValueError:
+                            epoch = None
+                    if epoch is not None and (max_wm is None or epoch > max_wm):
+                        max_wm = epoch
+        finally:
+            client.close()
+
+        logger.info(f"mongodb: read {len(rows)} document(s) from {db_name}.{collection}")
+        if not rows:
+            empty = self._handle_empty_source(f"mongodb://{db_name}/{collection}", "No new documents")
+            if empty is not None:
+                return empty
+            raise FileNotFoundError(f"No documents in {db_name}.{collection}")
+        if max_wm is not None and (self._source_max_mtime is None or max_wm > self._source_max_mtime):
+            self._source_max_mtime = max_wm
+        cols: List[str] = []
+        for r in rows:
+            for k in r:
+                if k not in cols:
+                    cols.append(k)
+        df = pl.DataFrame({c: [r.get(c) for r in rows] for c in cols}, schema={c: pl.Utf8 for c in cols})
+        df = self._apply_source_flatten(df)
+        if self.engine_name == "spark" and not hasattr(df, "sparkSession"):
+            from pyspark.sql import SparkSession
+
+            df = _polars_to_spark(SparkSession.builder.getOrCreate(), df)
+        return self.run(df, source_path=f"mongodb://{db_name}/{collection}")
+
+    def _apply_source_flatten(self, df: Any) -> Any:
+        """``source.flatten_nested`` for frames that do not come through the file path.
+
+        The file readers flatten after loading; the database and MongoDB readers hand their frame
+        straight to ``run()``, so ``flatten_nested: true`` was silently ignored for every database
+        source — nested MongoDB documents and Postgres/SQL Server JSON columns alike (2026-10-07).
+        """
+        flatten = getattr(getattr(self.contract, "source", None), "flatten_nested", None)
+        return self._flatten_json_df(df, flatten) if flatten else df
+
+    def _capture_db_watermark(self, df: Any) -> None:
+        """Record the highest ``source.watermark_field`` value read, for the next incremental run.
+
+        The file and table readers record it; the database reader did not, so the run log never
+        held a watermark and every ``load_mode: incremental`` database run re-read the whole
+        table (found against Azure PostgreSQL, 2026-10-07). A timestamp WITHOUT a time zone is
+        taken as UTC — ``datetime.timestamp()`` would read it as local time and shift the
+        watermark by the machine's offset. Running maximum, so chunked reads end on the true max.
+        """
+        from datetime import date, datetime, timezone
+
+        wf = getattr(getattr(self.contract, "source", None), "watermark_field", None)
+        if "_lakelogic_cdc_ts" in list(getattr(df, "columns", []) or []):
+            wf = "_lakelogic_cdc_ts"  # native CDC: the change's commit time, not a data column
+        if not wf or df is None or wf not in list(getattr(df, "columns", []) or []):
+            return
+        try:
+            if hasattr(df, "sparkSession"):
+                from pyspark.sql import functions as F
+
+                val = df.agg(F.max(wf)).collect()[0][0]
+            else:
+                val = df[wf].max()
+        except Exception as exc:  # pragma: no cover - a max we cannot compute is not fatal
+            logger.debug(f"Watermark capture skipped: {exc}")
+            return
+        if val is None:
+            return
+        if isinstance(val, datetime):
+            val = val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+            epoch = val.timestamp()
+        elif isinstance(val, date):
+            epoch = datetime(val.year, val.month, val.day, tzinfo=timezone.utc).timestamp()
+        elif isinstance(val, str):
+            parsed = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            epoch = (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).timestamp()
+        else:
+            epoch = float(val)
+        if self._source_max_mtime is None or epoch > self._source_max_mtime:
+            self._source_max_mtime = epoch
 
     # ── Polars Streaming ─────────────────────────────────────────────────
 

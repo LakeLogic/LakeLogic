@@ -54,6 +54,33 @@ resumability model that the current `fetch_size` path lacks.
 - **Effectively-once** proven end-to-end: a real `merge` contract replayed over
   already-processed ids leaves the Delta target with no duplicates.
 
+- **Verified against a real broker (2026-10-07)** — Redpanda in Docker,
+  `examples/streaming/kafka_streaming.ipynb` + `kafka_scenarios.py`, the same 8 scenarios on Polars,
+  DuckDB and Spark (all pass): drain with quarantine, resume reads only new events, crash after a
+  batch, crash between write and commit, full replay into `merge`, non-JSON messages, wrong types,
+  and two updates of one key in one batch. The fakes had missed three defects, now fixed:
+  - a message that is not JSON raised out of the loop before the checkpoint commit, so every
+    restart died on it (a poison pill): it is now a row the contract quarantines, with partition,
+    offset and its first bytes (`stream_sink.UNREADABLE_COLUMN`);
+  - two events for one key in one micro-batch were both inserted by `merge`: the last now wins and
+    the rest are counted as `superseded_count` (source = good + bad + superseded);
+  - the Spark engine converted a Polars batch through pandas, turning nulls into the string "NaN"
+    (every valid row quarantined): it now converts with an explicit schema.
+- **Spark Structured Streaming verified on the same broker** (`examples/streaming/spark_structured_streaming.ipynb`,
+  `structured_scenarios.py`; all 8 pass): `SparkStreamSink` had only been tested with a fake writer. New
+  `kafka_json_stream(spark, topic, fields, brokers=...)` builds the Kafka read for a contract — JSON objects
+  only, fields as text, a non-object message quarantined with the same reason as `StreamSink` (Spark's
+  `from_json` otherwise yields a silent row of nulls; values are decoded with `decode()` so invalid UTF-8
+  cannot break the reason), Kafka timestamp/partition/offset kept for ordering then dropped.
+  `SparkStreamSink` now keeps the last event per key in a micro-batch for `merge` contracts
+  (`SparkBatchResult.superseded_count`), as `StreamSink` does.
+- **Azure Event Hubs (Kafka endpoint, Standard) verified 2026-10-07**: all 8 scenarios pass on Polars, DuckDB,
+  Spark (`StreamSink`) and Spark Structured Streaming. It exposed one more defect, fixed: `available_now`
+  treated the first EMPTY poll as "caught up". On Event Hubs the first polls after a reconnect can be empty
+  while messages wait, so a restart read 0 of 100 waiting events. `KafkaOffsetSource` now snapshots each
+  partition's end offset when the run starts and drains to it (with `drain_idle_timeout_s`, default 60s, as
+  a safety stop that logs a warning). Empty-poll remains the fallback for consumers without `end_offsets`.
+
 **Pending** (still proposed): SQS / Pub-Sub ack cursors (the offset-aware protocol
 is in place — Kafka, SSE and watermark sources prove it generalizes across dict-,
 scalar- and value-cursor sources; these just implement it). Everything else in the

@@ -731,6 +731,23 @@ class PolarsAdapter(EngineAdapter):
                         # the whole contract. Via text, an overflow is a null — quarantined on
                         # that row, the same as DuckDB's TRY_CAST and Spark's try_cast.
                         cast_expr = pl.col(field.name).cast(pl.Utf8).cast(dtype, strict=False)
+                    elif current_dtype in (pl.Utf8, pl.String) and (
+                        isinstance(dtype, pl.Datetime) or dtype in (pl.Datetime, pl.Date)
+                    ):
+                        # A plain String->Datetime cast accepts only the 'T' separator: the
+                        # "2026-10-01 09:00:00" form that SQL databases, Excel and most CSV exports
+                        # write became NULL and the row was quarantined as a type mismatch (found
+                        # reading MongoDB, 2026-10-07). Parse the common forms explicitly; the old
+                        # cast stays as the final fallback so nothing that parsed before regresses.
+                        _t = pl.col(field.name).str.strip_chars()
+                        _target = pl.Datetime("us") if dtype == pl.Date else dtype
+                        _cands = [
+                            _t.str.to_datetime(fmt, strict=False).cast(_target, strict=False)
+                            for fmt in ("%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.fZ", "%Y-%m-%d")
+                        ] + [pl.col(field.name).cast(_target, strict=False)]
+                        cast_expr = pl.coalesce(_cands)
+                        if dtype == pl.Date:
+                            cast_expr = cast_expr.dt.date()
                     else:
                         cast_expr = pl.col(field.name).cast(dtype, strict=False)
                     err_col = f"__type_err_{field.name}"

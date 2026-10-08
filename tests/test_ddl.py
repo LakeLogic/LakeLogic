@@ -83,6 +83,16 @@ class TestTypeResolution:
         assert is_safe_widening("BOOLEAN", "VARCHAR") is True
         assert is_safe_widening("DOUBLE", "INT") is False
 
+    def test_decimal_narrowing_is_not_safe(self):
+        # Same base type used to read as "no change": DECIMAL(12,2) → DECIMAL(10,2) loses digits.
+        assert is_safe_widening("DECIMAL(10,2)", "DECIMAL(12,2)") is True
+        assert is_safe_widening("DECIMAL(10,2)", "DECIMAL(12,4)") is True
+        assert is_safe_widening("DECIMAL(12,2)", "DECIMAL(10,2)") is False
+        assert is_safe_widening("DECIMAL(10,4)", "DECIMAL(10,2)") is False
+        assert is_safe_widening("DECIMAL(10,2)", "DECIMAL(10,4)") is False  # integer digits shrink
+        assert is_safe_widening("DECIMAL(10,2)", "decimal(10, 2)") is True
+        assert is_safe_widening("DECIMAL", "DECIMAL(10,2)") is False
+
     def test_string_types(self):
         assert _resolve_type("string", "spark") == "STRING"
         assert _resolve_type("string", "duckdb") == "VARCHAR"

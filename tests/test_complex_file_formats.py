@@ -184,11 +184,11 @@ BACS_FIELDS = [
 ]
 
 
-def _bacs(path, **source):
+def _bacs(path, **options):
     contract = {
         "version": "1.0",
         "info": {"title": "bacs"},
-        "source": {"type": "landing", "path": str(path), "format": "fixed_width", **source},
+        "source": {"type": "landing", "path": str(path), "format": "fixed_width", "options": options},
         "model": {"fields": BACS_FIELDS},
     }
     return DataProcessor(engine="polars", contract=contract).run_source()
@@ -211,11 +211,23 @@ def test_a_file_with_no_line_breaks_is_split_every_record_length(tmp_path):
     assert bad["_lakelogic_errors"].to_list()[0][0] == "Line length mismatch: expected 15, got 5"
 
 
-def test_record_length_in_options_wins_and_ebcdic_decodes(tmp_path):
+def test_ebcdic_decodes(tmp_path):
     p = tmp_path / "s.dat"
     p.write_bytes("D20157500001050".encode("cp037"))
-    good, _ = _bacs(p, record_length=99, options={"record_length": 15, "encoding": "cp037"})
+    good, _ = _bacs(p, record_length=15, encoding="cp037")
     assert good.select(["sort_code", "amount_pence"]).rows() == [("201575", 1050)]
+
+
+def test_fixed_width_settings_on_source_are_refused_with_the_fix(tmp_path):
+    """OLC 0.21: format settings live only under source.options (one place for every format)."""
+    contract = {
+        "version": "1.0",
+        "info": {"title": "bacs"},
+        "source": {"type": "landing", "path": str(tmp_path), "format": "fixed_width", "record_length": 15},
+        "model": {"fields": BACS_FIELDS},
+    }
+    with pytest.raises(Exception, match="`record_length` belongs under source.options"):
+        DataProcessor(engine="polars", contract=contract)
 
 
 def test_fixed_width_reads_a_cloud_object_through_fsspec(tmp_path, monkeypatch):

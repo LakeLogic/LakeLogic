@@ -96,15 +96,18 @@ def test_a_local_ndjson_file_reads(tmp_path):
 
 
 def test_a_declared_shape_is_honoured(tmp_path):
-    """`source.options.multiLine` is the SAME field the Spark reader consumes. A contract
+    """`source.options.multiline` is the SAME field the Spark reader consumes. A contract
     that declares its shape must get the same answer from either engine."""
     _write_ndjson(tmp_path)
-    assert _read(tmp_path, _contract(tmp_path, options={"multiLine": False})) == len(ROWS)
-
-
-def test_either_spelling_is_accepted(tmp_path):
-    _write_ndjson(tmp_path)
     assert _read(tmp_path, _contract(tmp_path, options={"multiline": False})) == len(ROWS)
+
+
+def test_the_spark_spelling_is_refused_with_the_contract_spelling(tmp_path):
+    """OLC 0.21 typed options: one spelling, `multiline`; Spark's `multiLine` gets the fix."""
+    with pytest.raises(Exception, match="did you mean 'multiline'"):
+        from lakelogic.core.processor import DataProcessor
+
+        DataProcessor(contract=_contract(tmp_path, options={"multiLine": False}), engine="polars")
 
 
 def test_a_contract_that_no_longer_describes_its_data_fails_loudly(tmp_path):
@@ -113,7 +116,7 @@ def test_a_contract_that_no_longer_describes_its_data_fails_loudly(tmp_path):
     default (no declaration) still auto-detects, so this is opt-in strictness."""
     _write_ndjson(tmp_path, batches=1)
     with pytest.raises(Exception):
-        _read(tmp_path, _contract(tmp_path, options={"multiLine": True}))
+        _read(tmp_path, _contract(tmp_path, options={"multiline": True}))
 
 
 def test_the_default_is_still_auto_detection(tmp_path):
@@ -137,7 +140,7 @@ def test_both_engines_consult_the_same_contract_field():
     spark_branch = src[src.index('elif fmt == "json":') :][:2600]
     polars_branch = src[src.index("def _parse_json_text") :][:2600]
     for branch in (spark_branch, polars_branch):
-        assert '"multiLine"' in branch and '"multiline"' in branch
+        assert '"multiline"' in branch  # the contract spelling, on both engines
     # And both fall back to reading the DATA when the contract says nothing, rather than one
     # detecting and the other assuming — which is the divergence itself.
     assert "_json_is_one_value_per_file" in spark_branch

@@ -17,7 +17,7 @@ The option was hardcoded on Spark. Polars, meanwhile, has always AUTO-DETECTED t
 `_read_json_flat`), so the same contract read 200 rows locally and 10 on Fabric — with the
 local dry run passing. Two engines, one contract, two answers.
 
-Both engines now behave the same way: an explicit `source.options.multiLine` wins, and
+Both engines now behave the same way: an explicit `source.options.multiline` wins, and
 absent one, the shape is read from the data. Pinned end-to-end by conformance cases
 OLC-S-002 / OLC-S-003, which run the same rows in both layouts on duckdb, polars and Spark.
 """
@@ -48,10 +48,11 @@ def test_the_option_is_not_hardcoded():
     assert 'getattr(self.contract.source, "options"' in branch
 
 
-def test_both_spellings_are_accepted():
-    """A contract author will write one or the other, and being wrong is invisible."""
+def test_the_contract_spelling_is_read():
+    """One spelling, `multiline` (OLC 0.21 typed options); `multiLine` is refused at load with
+    "did you mean 'multiline'", so being wrong is no longer invisible."""
     branch = _json_branch()
-    assert '"multiLine"' in branch and '"multiline"' in branch
+    assert '_json_opts.get("multiline")' in branch
     assert '"true" if _multiline else "false"' in branch
 
 

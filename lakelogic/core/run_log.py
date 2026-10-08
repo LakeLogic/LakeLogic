@@ -2739,6 +2739,11 @@ def write_run_log(
     return str(log_path) if log_path else None
 
 
+#: Which run-log rows carry a usable watermark. COALESCE: a run logged with no status is not a failure
+#: (``status != 'failed'`` is NULL for it, and such runs were skipped — found 2026-10-07).
+_WM_WHERE = "{key} = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND COALESCE(status, '') != 'failed'"
+
+
 def get_last_run_watermark(
     contract,
     contract_title: str,
@@ -2794,13 +2799,16 @@ def get_last_run_watermark(
             else:
                 full_table = table_name
             if _use_precise:
-                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                # COALESCE: a run logged with no status is not a failure. `status != 'failed'` is NULL
+                # for it, so every such run was skipped and incremental loads never found a watermark
+                # (found against Azure PostgreSQL, 2026-10-07). Same fix in every backend below.
+                where = _WM_WHERE.format(key="dataset")
                 params = [dataset]
                 if data_layer:
                     where += " AND data_layer = ?"
                     params.append(data_layer)
             else:
-                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                where = _WM_WHERE.format(key="contract")
                 params = [contract_title]
                 if data_layer:
                     where += " AND data_layer = ?"
@@ -2832,13 +2840,13 @@ def get_last_run_watermark(
         try:
             table_name = _prepare_table_name(table_value, backend)
             if _use_precise:
-                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                where = _WM_WHERE.format(key="dataset")
                 params = (dataset,)
                 if data_layer:
                     where += " AND data_layer = ?"
                     params = (dataset, data_layer)
             else:
-                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                where = _WM_WHERE.format(key="contract")
                 params = (contract_title,)
                 if data_layer:
                     where += " AND data_layer = ?"
@@ -2868,7 +2876,7 @@ def get_last_run_watermark(
                     (F.col("dataset") == dataset)
                     & (F.col("stage") != "no_new_data")
                     & (F.col("stage") != "reprocess")
-                    & (F.col("status") != "failed")
+                    & (F.coalesce(F.col("status"), F.lit("")) != "failed")
                 )
                 if data_layer:
                     filt = filt & (F.col("data_layer") == data_layer)
@@ -2877,7 +2885,7 @@ def get_last_run_watermark(
                     (F.col("contract") == contract_title)
                     & (F.col("stage") != "no_new_data")
                     & (F.col("stage") != "reprocess")
-                    & (F.col("status") != "failed")
+                    & (F.coalesce(F.col("status"), F.lit("")) != "failed")
                 )
                 if data_layer:
                     filt = filt & (F.col("data_layer") == data_layer)
@@ -2927,7 +2935,7 @@ def get_last_run_watermark(
                     pc.not_equal(df.column("stage"), "no_new_data"),
                     pc.not_equal(df.column("stage"), "reprocess"),
                 ),
-                pc.not_equal(df.column("status"), "failed"),
+                pc.not_equal(pc.fill_null(df.column("status"), ""), "failed"),
             )
             df = df.filter(mask)
             if len(df) == 0:
@@ -3051,13 +3059,13 @@ def get_last_run_dlt_state(
             else:
                 full_table = table_name
             if _use_precise:
-                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                where = _WM_WHERE.format(key="dataset")
                 params = [dataset]
                 if data_layer:
                     where += " AND data_layer = ?"
                     params.append(data_layer)
             else:
-                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                where = _WM_WHERE.format(key="contract")
                 params = [contract_title]
                 if data_layer:
                     where += " AND data_layer = ?"
@@ -3089,13 +3097,13 @@ def get_last_run_dlt_state(
         try:
             table_name = _prepare_table_name(table_value, backend)
             if _use_precise:
-                where = "dataset = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                where = _WM_WHERE.format(key="dataset")
                 params = [dataset]
                 if data_layer:
                     where += " AND data_layer = ?"
                     params.append(data_layer)
             else:
-                where = "contract = ? AND stage != 'no_new_data' AND stage != 'reprocess' AND status != 'failed'"
+                where = _WM_WHERE.format(key="contract")
                 params = [contract_title]
                 if data_layer:
                     where += " AND data_layer = ?"
@@ -3125,7 +3133,7 @@ def get_last_run_dlt_state(
                     (F.col("dataset") == dataset)
                     & (F.col("stage") != "no_new_data")
                     & (F.col("stage") != "reprocess")
-                    & (F.col("status") != "failed")
+                    & (F.coalesce(F.col("status"), F.lit("")) != "failed")
                     & (F.col("dlt_state_json").isNotNull())
                 )
                 if data_layer:
@@ -3135,7 +3143,7 @@ def get_last_run_dlt_state(
                     (F.col("contract") == contract_title)
                     & (F.col("stage") != "no_new_data")
                     & (F.col("stage") != "reprocess")
-                    & (F.col("status") != "failed")
+                    & (F.coalesce(F.col("status"), F.lit("")) != "failed")
                     & (F.col("dlt_state_json").isNotNull())
                 )
                 if data_layer:
@@ -3177,7 +3185,10 @@ def get_last_run_dlt_state(
                     pc.not_equal(df.column("stage"), "no_new_data"),
                     pc.not_equal(df.column("stage"), "reprocess"),
                 ),
-                pc.and_(pc.not_equal(df.column("status"), "failed"), pc.is_valid(df.column("dlt_state_json"))),
+                pc.and_(
+                    pc.not_equal(pc.fill_null(df.column("status"), ""), "failed"),
+                    pc.is_valid(df.column("dlt_state_json")),
+                ),
             )
             df = df.filter(mask)
             if len(df) == 0:

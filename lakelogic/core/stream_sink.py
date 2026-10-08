@@ -154,6 +154,9 @@ class StreamRunSummary:
     source_count: int = 0
     good_count: int = 0
     bad_count: int = 0
+    #: Events replaced by a later event for the same key in the same micro-batch (merge only).
+    #: source_count == good_count + bad_count + superseded_count.
+    superseded_count: int = 0
     cursor: Any = None
     resumed_from: Any = None
     per_batch: List[Dict[str, Any]] = field(default_factory=list)
@@ -248,12 +251,48 @@ class StreamSink:
             return iter(src.stream())
         return iter(src)
 
+    def _merge_keys(self) -> List[str]:
+        contract = getattr(self.processor, "contract", None)
+        mat = getattr(contract, "materialization", None)
+        if str(getattr(mat, "strategy", "") or "").lower() not in ("merge", "upsert"):
+            return []
+        return list(getattr(contract, "primary_key", None) or [])
+
+    def _latest_per_key(self, events: List[Dict[str, Any]]):
+        """For a ``merge`` contract: the LAST event per primary key in this micro-batch.
+
+        Two events for one key in one batch are an update arriving before the first version
+        was written. Both used to reach the merge and BOTH were inserted — a merge target with
+        duplicate keys (found against a real broker, 2026-10-07). Arrival order is the stream's
+        order, so the last event wins; the earlier ones are counted as ``superseded``. Events
+        with a missing key, or unreadable ones, are all kept — the contract quarantines them.
+        """
+        keys = self._merge_keys()
+        if not keys:
+            return events, 0
+        last: Dict[Any, int] = {}
+        for i, e in enumerate(events):
+            k = tuple(e.get(c) for c in keys)
+            if None in k or UNREADABLE_COLUMN in e:
+                continue
+            last[k] = i
+        kept = [
+            e
+            for i, e in enumerate(events)
+            if UNREADABLE_COLUMN in e
+            or None in tuple(e.get(c) for c in keys)
+            or last.get(tuple(e.get(c) for c in keys)) == i
+        ]
+        return kept, len(events) - len(kept)
+
     def _build_frame(self, events: List[Dict[str, Any]]):
         # Build a Polars frame from the batch — accepted by the polars & duckdb
         # adapters. (Spark converts internally.) One import, kept local.
         import polars as pl
 
-        return pl.DataFrame(events)
+        # infer_schema_length=None: a field (or the unreadable-message column) first seen
+        # after the 100th event must not be dropped from the batch.
+        return pl.from_dicts(events, infer_schema_length=None)
 
     # -- the loop --------------------------------------------------------------
 
@@ -328,12 +367,14 @@ class StreamSink:
             if not buf:
                 return False
             batch_id += 1
-            frame = self._build_frame(buf)
+            received = len(buf)
+            events, superseded = self._latest_per_key(buf)
+            frame = self._build_frame(events)
             result = self.processor.run(frame)
             # Durable write FIRST …
             self.processor.materialize(result.good, result.bad, target_path=self.target_path)
             # … THEN advance the cursor (at-least-once boundary).
-            running_count += len(buf)
+            running_count += received
             if offset_aware:
                 cursor = self.source.current_cursor()
             elif self.cursor_fn is not None:
@@ -351,14 +392,16 @@ class StreamSink:
             self.checkpoint.commit(self.checkpoint_key, ckpt)
 
             summary.batches += 1
-            summary.source_count += result.source_count
+            summary.source_count += received
+            summary.superseded_count += superseded
             summary.good_count += result.good_count
             summary.bad_count += result.bad_count
             summary.cursor = cursor
             summary.per_batch.append(
                 {
                     "batch_id": batch_id,
-                    "source": result.source_count,
+                    "source": received,
+                    "superseded": superseded,
                     "good": result.good_count,
                     "bad": result.bad_count,
                     "cursor": cursor,
@@ -366,7 +409,7 @@ class StreamSink:
             )
             logger.info(
                 f"[StreamSink {self.checkpoint_key}] batch {batch_id} committed — "
-                f"good={result.good_count} bad={result.bad_count} cursor={cursor}"
+                f"good={result.good_count} bad={result.bad_count} superseded={superseded} cursor={cursor}"
             )
             buf.clear()
             return True
@@ -392,6 +435,26 @@ class StreamSink:
                     break
 
         return summary
+
+
+#: The per-row error column the engines quarantine on (``lakelogic.core.processor``).
+UNREADABLE_COLUMN = "__type_err__record"
+
+
+def _unreadable(reason: str, raw: Any = None, where: str = "") -> Dict[str, Any]:
+    """A message that could not be decoded, as a row the contract engine QUARANTINES.
+
+    One bad message used to raise out of the stream and kill the run — and, because the
+    checkpoint was never committed, every restart died on the same message: a poison pill
+    that stopped the stream for good (found against a real broker, 2026-10-07). Now it is a
+    row whose only content is the reason (with the first bytes, for diagnosis), and the
+    stream moves on. Every engine quarantines a row carrying this column.
+    """
+    preview = ""
+    if raw is not None:
+        text = bytes(raw).decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        preview = f": {text[:80]!r}"
+    return {UNREADABLE_COLUMN: f"{reason}{where}{preview}"}
 
 
 def _utc_now_iso() -> str:
@@ -441,6 +504,7 @@ class KafkaOffsetSource:
         auto_offset_reset: str = "earliest",
         value_deserializer: Optional[Callable[[bytes], Any]] = None,
         poll_timeout_ms: int = 1000,
+        drain_idle_timeout_s: float = 60.0,
         max_poll_records: int = 500,
         drain: bool = False,
         consumer: Any = None,
@@ -450,6 +514,7 @@ class KafkaOffsetSource:
         self.topic = topic
         self.value_deserializer = value_deserializer
         self.poll_timeout_ms = poll_timeout_ms
+        self.drain_idle_timeout_s = drain_idle_timeout_s
         self.max_poll_records = max_poll_records
         self.drain = drain
         self._positions: Dict[str, int] = {}  # "topic:partition" -> next_offset
@@ -486,6 +551,7 @@ class KafkaOffsetSource:
             self._assigned = True
             return
         self.consumer.assign(tps)
+        self._tps = tps
         cursor = cursor or {}
         for tp in tps:
             offset = cursor.get(_tp_key(self.topic, tp.partition))
@@ -497,26 +563,72 @@ class KafkaOffsetSource:
     def current_cursor(self) -> Dict[str, int]:
         return dict(self._positions)
 
+    def _end_offsets(self) -> Optional[Dict[str, int]]:
+        """``{"topic:partition": end_offset}`` now, or None when the consumer cannot say."""
+        tps = getattr(self, "_tps", None) or []
+        fn = getattr(self.consumer, "end_offsets", None)
+        if not tps or fn is None:
+            return None
+        try:
+            ends = fn(tps)
+        except Exception:  # pragma: no cover - a broker that cannot answer falls back to empty-poll
+            return None
+        out = {}
+        for tp in tps:
+            out[_tp_key(self.topic, tp.partition)] = int(ends.get(tp, 0))
+            if _tp_key(self.topic, tp.partition) not in self._positions:
+                try:
+                    self._positions[_tp_key(self.topic, tp.partition)] = int(self.consumer.position(tp))
+                except Exception:  # pragma: no cover
+                    pass
+        return out
+
+    def _caught_up(self, end: Dict[str, int]) -> bool:
+        return all(self._positions.get(k, 0) >= v for k, v in end.items())
+
     def stream(self) -> Iterator[Dict[str, Any]]:
         if not self._assigned:
             self.seek(None)  # direct use (no StreamSink resume): assign from start
+        # AvailableNow = "everything that was in the topic when this run started". Snapshot each
+        # partition's END offset now and drain until every partition reaches it. An empty poll is
+        # NOT "caught up": on Azure Event Hubs the first polls after a reconnect can be empty while
+        # messages are waiting, and a restart read 0 of 100 waiting events (found 2026-10-07).
+        end = self._end_offsets() if self.drain else None
+        last_data = time.monotonic()
         while True:
+            if self.drain and end is not None and self._caught_up(end):
+                return  # reached the end offsets snapshotted at the start → AvailableNow stop
             batch = self.consumer.poll(timeout_ms=self.poll_timeout_ms, max_records=self.max_poll_records)
             if not batch:
-                if self.drain:
-                    return  # caught up → AvailableNow stop
-                continue  # continuous: keep blocking for new records
+                if self.drain and end is None:
+                    return  # no end offsets available (e.g. a test consumer): an empty poll = caught up
+                if self.drain and time.monotonic() - last_data > self.drain_idle_timeout_s:
+                    logger.warning(
+                        f"[KafkaOffsetSource {self.topic}] stopped draining after {self.drain_idle_timeout_s:.0f}s "
+                        f"with no data, before reaching the end offsets {end}; the next run continues from here."
+                    )
+                    return
+                continue  # continuous, or not yet at the end offsets: keep polling
+            last_data = time.monotonic()
             for _tp_obj, records in batch.items():
                 for rec in records:
                     self._positions[_tp_key(rec.topic, rec.partition)] = rec.offset + 1
-                    yield self._decode(rec.value)
+                    yield self._decode(rec.value, f" (partition {rec.partition}, offset {rec.offset})")
 
-    def _decode(self, value: Any) -> Any:
-        if isinstance(value, (bytes, bytearray)):
-            if self.value_deserializer:
-                return self.value_deserializer(value)
-            return json.loads(bytes(value).decode("utf-8"))
-        return value
+    def _decode(self, value: Any, where: str = "") -> Any:
+        try:
+            if isinstance(value, (bytes, bytearray)):
+                if self.value_deserializer:
+                    decoded = self.value_deserializer(value)
+                else:
+                    decoded = json.loads(bytes(value).decode("utf-8"))
+            else:
+                decoded = value
+        except Exception as exc:  # noqa: BLE001 - any decode failure is one bad message
+            return _unreadable(f"Message is not valid JSON ({type(exc).__name__})", value, where)
+        if not isinstance(decoded, dict):
+            return _unreadable(f"Message is not a JSON object (got {type(decoded).__name__})", value, where)
+        return decoded
 
     def close(self) -> None:  # pragma: no cover - trivial
         try:
@@ -660,6 +772,75 @@ class SparkBatchResult:
     source_count: int = 0
     good_count: int = 0
     bad_count: int = 0
+    #: Events replaced by a later event for the same key in this micro-batch (merge only);
+    #: source_count == good_count + bad_count + superseded_count.
+    superseded_count: int = 0
+
+
+#: Kafka bookkeeping columns ``kafka_json_stream`` adds for ordering; dropped before the contract.
+KAFKA_ORDER_COLUMNS = ("__kafka_timestamp", "__kafka_partition", "__kafka_offset")
+
+
+def kafka_json_stream(
+    spark: Any,
+    topic: str,
+    fields: List[str],
+    *,
+    brokers: str,
+    starting_offsets: str = "earliest",
+    **kafka_options: Any,
+) -> Any:
+    """A Spark Structured Streaming DataFrame of JSON Kafka messages, ready for ``SparkStreamSink``.
+
+    Each message value must be a JSON object. The contract's ``fields`` come out as TEXT (the
+    engine's typed cast then quarantines what does not fit, as for every landing source). A message
+    that is not a JSON object becomes a row carrying ``UNREADABLE_COLUMN`` — the same reason, with
+    partition, offset and the first bytes, that ``StreamSink`` gives — so the contract quarantines
+    it. (Spark's own ``from_json`` returns a row of nulls for invalid JSON, silently.) Kafka
+    timestamp/partition/offset ride along in ``KAFKA_ORDER_COLUMNS`` for ``SparkStreamSink`` to
+    order updates by; they never reach the contract. Needs Spark's Kafka connector
+    (``org.apache.spark:spark-sql-kafka-0-10_2.12:<spark version>``).
+    """
+    from pyspark.sql import functions as F
+
+    reader = (
+        spark.readStream.format("kafka")
+        .option("kafka.bootstrap.servers", brokers)
+        .option("subscribe", topic)
+        .option("startingOffsets", starting_offsets)
+    )
+    for k, v in kafka_options.items():
+        reader = reader.option(k, v)
+    raw = reader.load()
+    # decode(), not cast: a plain CAST keeps invalid UTF-8 bytes, and the reason text built from
+    # them could not be read back (UnicodeDecodeError). decode() replaces them with U+FFFD.
+    text = F.decode(F.col("value"), "UTF-8")
+    obj = F.from_json(text, "map<string,string>")  # null for invalid JSON AND for non-object JSON
+    where = F.concat(
+        F.lit(" (partition "),
+        F.col("partition").cast("string"),
+        F.lit(", offset "),
+        F.col("offset").cast("string"),
+        F.lit("): '"),
+        F.substring(text, 1, 80),
+        F.lit("'"),
+    )
+    reason = F.when(
+        obj.isNull(),
+        F.concat(
+            F.when(F.get_json_object(text, "$").isNull(), F.lit("Message is not valid JSON")).otherwise(
+                F.lit("Message is not a JSON object")
+            ),
+            where,
+        ),
+    )
+    return raw.select(
+        *[F.when(obj.isNotNull(), obj.getItem(f)).alias(f) for f in fields],
+        reason.alias(UNREADABLE_COLUMN),
+        F.col("timestamp").alias("__kafka_timestamp"),
+        F.col("partition").alias("__kafka_partition"),
+        F.col("offset").alias("__kafka_offset"),
+    )
 
 
 class SparkStreamSink:
@@ -743,13 +924,15 @@ class SparkStreamSink:
         # Fresh run_id per micro-batch so lineage/run reporting isn't reused.
         if hasattr(self.processor, "last_run_id"):
             self.processor.last_run_id = None
+        batch_df, received, superseded = self._latest_per_key(batch_df)
         result = self.processor.run(batch_df)
         self.processor.materialize(result.good, result.bad, target_path=self.target_path)
         summary = SparkBatchResult(
             batch_id=batch_id,
-            source_count=result.source_count,
+            source_count=received if received is not None else result.source_count,
             good_count=result.good_count,
             bad_count=result.bad_count,
+            superseded_count=superseded,
         )
         self.batches.append(summary)
         if self.on_batch is not None:
@@ -759,6 +942,41 @@ class SparkStreamSink:
             f"bad={summary.bad_count} (checkpoint={self.checkpoint_location})"
         )
         return summary
+
+    def _latest_per_key(self, batch_df: Any):
+        """For a ``merge`` contract: the LAST event per primary key in this micro-batch.
+
+        Same rule as ``StreamSink._latest_per_key`` (two events for one key in one batch both
+        reached the merge and both were inserted). Order: Kafka timestamp, then partition and
+        offset (``KAFKA_ORDER_COLUMNS``, added by ``kafka_json_stream``); those columns are dropped
+        before the contract runs. Rows with a missing key or unreadable rows are all kept.
+        Returns ``(df, received, superseded)``; counts are None/0 for a non-Spark (test) frame.
+        """
+        cols = list(getattr(batch_df, "columns", []) or [])
+        kafka_cols = [c for c in KAFKA_ORDER_COLUMNS if c in cols]
+        if not hasattr(batch_df, "sparkSession"):
+            return batch_df, None, 0
+        contract = getattr(self.processor, "contract", None)
+        mat = getattr(contract, "materialization", None)
+        keys = list(getattr(contract, "primary_key", None) or [])
+        is_merge = str(getattr(mat, "strategy", "") or "").lower() in ("merge", "upsert")
+        if not is_merge or not keys or not set(keys) <= set(cols):
+            return batch_df.drop(*kafka_cols), None, 0
+        from pyspark.sql import Window
+        from pyspark.sql import functions as F
+
+        received = batch_df.count()
+        order = [F.col(c).desc() for c in kafka_cols] or [F.monotonically_increasing_id().desc()]
+        keyed = F.lit(True)
+        for k in keys:
+            keyed = keyed & F.col(k).isNotNull()
+        if UNREADABLE_COLUMN in cols:
+            keyed = keyed & F.col(UNREADABLE_COLUMN).isNull()
+        w = Window.partitionBy(*keys).orderBy(*order)
+        ranked = batch_df.withColumn("__lakelogic_rank", F.when(keyed, F.row_number().over(w)).otherwise(F.lit(1)))
+        latest = ranked.filter(F.col("__lakelogic_rank") == 1).drop("__lakelogic_rank", *kafka_cols)
+        kept = latest.count()
+        return latest, received, received - kept
 
     def _apply_trigger(self, writer: Any) -> Any:
         if self.trigger == "available_now":

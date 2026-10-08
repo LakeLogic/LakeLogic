@@ -1,0 +1,34 @@
+# Rides from a local SQLite file: runs anywhere, no server. The same contract shape works for
+# Postgres, MySQL, SQL Server / Azure SQL; only source.path changes.
+version: 1.0.0
+dataset: rides
+info: {title: bronze_rides_sqlite}
+primary_key: [ride_id]
+source:
+  type: database
+  path: sqlite:///data/rides.db       # a file relative to where the run starts
+  load_mode: incremental           # full — every row, every run | incremental — rows newer than the last run's watermark_field
+                                      # | cdc — the database's change log (inserts, updates, deletes)
+  watermark_field: updated_at          # incremental: a timestamp/number column that grows when a row changes
+model:
+  fields:
+    - {name: ride_id, type: long, required: true}
+    - {name: city, type: string, required: true}
+    - {name: fare, type: double, required: true}
+    - {name: status, type: string}
+    - {name: updated_at, type: timestamp}
+quality:
+  row_rules:
+    - {name: fare_not_negative, sql: "fare >= 0"}
+materialization:
+  strategy: merge                     # append | overwrite | merge (upsert on primary_key) | scd2
+  format: delta
+  target_path: data/bronze/rides_sqlite
+quarantine:
+  target: data/quarantine/rides_sqlite
+  format: delta
+metadata:
+  # The run log remembers the incremental watermark between runs.
+  run_log_table: run_log
+  run_log_backend: duckdb
+  run_log_database: data/run_log_sqlite.duckdb   # one per contract: the watermark is per source

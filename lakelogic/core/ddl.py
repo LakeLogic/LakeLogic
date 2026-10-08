@@ -110,6 +110,16 @@ def _extract_varchar_length(sql_type: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _extract_decimal_params(sql_type: str) -> Optional[tuple]:
+    """``(precision, scale)`` from DECIMAL(p,s) / NUMERIC(p) (scale 0). None if unstated."""
+    import re
+
+    m = re.match(r"^(?:decimal|numeric)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)", sql_type.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0)
+
+
 def is_safe_widening(from_type: str, to_type: str) -> bool:
     """
     Check whether a type change is a safe (lossless) widening.
@@ -140,6 +150,15 @@ def is_safe_widening(from_type: str, to_type: str) -> bool:
             if to_len is None:
                 return True  # removing length constraint is safe
             return to_len >= from_len
+        if from_base in ("decimal", "numeric"):
+            # DECIMAL(12,2) → DECIMAL(10,2) loses digits. Safe only when neither the scale nor
+            # the integer digits shrink; an unstated precision is not comparable, so not safe.
+            old, new = _extract_decimal_params(from_type), _extract_decimal_params(to_type)
+            if old == new:
+                return True
+            if old is None or new is None:
+                return False
+            return new[1] >= old[1] and (new[0] - new[1]) >= (old[0] - old[1])
         # Same base, same type — no change needed
         return True
 

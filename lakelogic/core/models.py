@@ -289,13 +289,28 @@ class SourceConfig(_olcn.SourceConfig):
         "flatten_nested",
         "dlt",
         "post_ingestion",
-        # Fixed-width settings (also accepted under source.options) — 2026-10-07.
-        "record_length",
-        "encoding",
-        "skip_rows",
-        "skip_footer",
-        "strip",
     }
+
+    @model_validator(mode="before")
+    @classmethod
+    def _typed_options(cls, data: Any) -> Any:
+        """``source.format`` / ``source.options`` must match OLC's typed options (OLC 0.21).
+
+        A misspelled option used to be ignored and the load quietly read the wrong row or
+        separator; a password in a contract was accepted. Now both fail the contract load, with
+        the fix in the message ("did you mean 'header_row'?", "use a connection secret",
+        "`record_length` belongs under source.options"). ``lakelogic migrate-options`` rewrites
+        an older contract."""
+        if isinstance(data, dict):
+            from olc.models.source_options import check_source_options
+
+            problems = check_source_options(data)
+            if problems:
+                raise ValueError(
+                    "invalid source options (run `lakelogic migrate-options` to update an older "
+                    "contract): " + "; ".join(problems)
+                )
+        return data
 
     @model_validator(mode="after")
     def _warn_unknown_keys(self) -> "SourceConfig":
@@ -1689,6 +1704,15 @@ class DataContract(BaseModel):
                 )
 
         elif load_mode == "cdc":
+            # Native change capture (`options.cdc_provider`, e.g. azuresql) PRODUCES the operation
+            # column itself: `_lakelogic_cdc_op` = insert/update/delete. Default the fields to it
+            # rather than reject the contract — the native reader could not be used at all without
+            # the author restating LakeLogic's own column names (found 2026-10-07).
+            if (getattr(source, "options", None) or {}).get("cdc_provider"):
+                if not getattr(source, "cdc_op_field", None):
+                    source.cdc_op_field = "_lakelogic_cdc_op"
+                if not getattr(source, "cdc_delete_values", None):
+                    source.cdc_delete_values = ["delete"]
             has_op_field = bool(getattr(source, "cdc_op_field", None))
             has_ts_field = bool(getattr(source, "cdc_timestamp_field", None))
             if not has_op_field and not has_ts_field:

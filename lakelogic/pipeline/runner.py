@@ -3013,7 +3013,11 @@ class LakehousePipeline:
             is_bad_empty = _frame_is_empty(df_bad)
 
             _status = "success"
-            if is_good_empty and is_bad_empty:
+            _streamed = getattr(result, "stream_summary", None)
+            if _streamed and _streamed.get("source_count"):
+                # A broker source wrote every micro-batch itself; the returned frames are empty.
+                logger.info(f"{c.entity}: streamed {_streamed}")
+            elif is_good_empty and is_bad_empty:
                 logger.info(f"No new rows for {c.entity} - proceeding to ensure target schema existence.")
                 _status = "no_new_rows"
             elif is_good_empty:

@@ -78,8 +78,13 @@ class SparkAdapter(EngineAdapter):
         ):  # pragma: no cover - requires Spark+Polars+Pandas
             from pyspark.sql import SparkSession
 
+            # NOT via pandas: to_pandas() turns None into NaN, Spark then stores the STRING
+            # "NaN" — a null error column became a non-null error and every valid row was
+            # quarantined, and a null id failed its cast (found streaming to Spark, 2026-10-07).
+            from lakelogic.core.processor import _polars_to_spark
+
             _spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
-            df = _spark.createDataFrame(df.to_pandas())
+            df = _polars_to_spark(_spark, df)
 
         elif not isinstance(df, _df_types):
             raise TypeError(f"Expected Spark DataFrame, got {type(df)}")

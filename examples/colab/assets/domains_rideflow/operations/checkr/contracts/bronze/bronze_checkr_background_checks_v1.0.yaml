@@ -11,58 +11,59 @@ info:
 
 model:
   fields:
-    - name: report_id
-      type: string
-      required: true
-      description: "Checkr report ID"
-    - name: driver_id
-      type: string
-      required: true
-      pii: true
-      description: "FK to marketplace driver"
-    - name: full_name
-      type: string
-      pii: true
-      description: "Driver full legal name"
-    - name: date_of_birth
-      type: string
-      pii: true
-      description: "Driver date of birth"
-    - name: ssn_last_four
-      type: string
-      pii: true
-      description: "Last 4 of SSN"
-    - name: licence_number
-      type: string
-      pii: true
-      description: "Driver licence number"
-    - name: address
-      type: string
-      pii: true
-      description: "Driver address"
-    - name: status
-      type: string
-      description: "clear, consider, suspended, dispute"
-    - name: result
-      type: string
-      description: "Overall result"
-    - name: completed_at
-      type: string
-      description: "Check completion timestamp"
-    - name: created_at
-      type: string
-      description: "Check initiation timestamp"
-    - name: adjudication
-      type: string
-      description: "Manual review result"
+  - name: report_id
+    type: string
+    required: true
+    description: "Checkr report ID"
+  - name: driver_id
+    type: string
+    required: true
+    pii: true
+    description: "FK to marketplace driver"
+  - name: full_name
+    type: string
+    pii: true
+    description: "Driver full legal name"
+  - name: date_of_birth
+    type: string
+    pii: true
+    description: "Driver date of birth"
+  - name: ssn_last_four
+    type: string
+    pii: true
+    description: "Last 4 of SSN"
+  - name: licence_number
+    type: string
+    pii: true
+    description: "Driver licence number"
+  - name: address
+    type: string
+    pii: true
+    description: "Driver address"
+  - name: status
+    type: string
+    description: "clear, consider, suspended, dispute"
+  - name: result
+    type: string
+    description: "Overall result"
+  - name: completed_at
+    type: string
+    description: "Check completion timestamp"
+  - name: created_at
+    type: string
+    description: "Check initiation timestamp"
+  - name: adjudication
+    type: string
+    description: "Manual review result"
 
 source:
   type: landing
   path: "{landing_root}/background_checks"
   format: csv
   options:
-    header: "true"
-    recursiveFileLookup: "true"
+    engine_options:
+      header: "true"
+      recursiveFileLookup: "true"
   load_mode: incremental
   watermark_strategy: pipeline_log
   partition:

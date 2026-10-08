@@ -1,0 +1,43 @@
+# Bronze rides from a Kafka topic. Everything the run needs is here: the broker, the topic,
+# where the offsets are kept, the schema, the rules, and where good and bad rows go.
+version: 1.0.0
+dataset: rides
+info: {title: bronze_rides_kafka}
+primary_key: [ride_id]
+source:
+  type: stream
+  options:
+    kind: kafka                             # kafka     — any Kafka-protocol broker (Apache Kafka, Confluent, Redpanda, MSK)
+                                            # eventhubs — Azure Event Hubs (see rides_eventhubs.yaml)
+    brokers: env:KAFKA_BROKERS              # host:port[,host:port]; a literal or env:VAR — e.g. localhost:19092 (Redpanda in Docker)
+    topic: rides                            # the topic to read (default: source.path)
+    starting_offsets: earliest              # earliest | latest — where a FIRST run starts; later runs continue from the checkpoint
+    checkpoint: data/checkpoints/rides_kafka.sqlite   # where the read position is kept (default: _checkpoints/<dataset> beside the contract).
+                                            #   Polars/DuckDB: this SQLite file. Spark: a folder beside it (rides_kafka_spark/)
+    batch_size: 100                         # events per micro-batch (Polars/DuckDB; default 1000)
+    trigger: available_now                  # available_now — read everything there now, then stop (scheduled jobs)
+                                            # continuous    — keep running and read new events as they arrive
+    # processing_time: 30 seconds           # Spark + continuous only: how often a micro-batch runs (default 30 seconds)
+    # max_offsets_per_trigger: 10000        # Spark only: cap on events per micro-batch (default: no cap)
+    # group_id: lakelogic-rides             # optional Kafka consumer group name (offsets are kept in the checkpoint either way)
+    # A secured cluster. Leave these out for a local broker.
+    # security_protocol: SASL_SSL           # PLAINTEXT (default) | SSL | SASL_PLAINTEXT | SASL_SSL
+    # sasl_mechanism: PLAIN                 # PLAIN (all engines) | SCRAM-SHA-256 | SCRAM-SHA-512 (Polars/DuckDB only)
+    # sasl_username: my-user                # a literal or env:VAR
+    # sasl_password: env:KAFKA_PASSWORD     # MUST be env:VAR or ${ENV:VAR} — a literal password is refused
+model:
+  fields:
+    - {name: ride_id, type: long, required: true}
+    - {name: city, type: string, required: true}
+    - {name: fare, type: double, required: true}
+    - {name: status, type: string}
+quality:
+  row_rules:
+    - {name: fare_not_negative, sql: "fare >= 0"}
+materialization:
+  strategy: merge
+  format: delta
+  target_path: data/bronze
+quarantine:
+  target: data/quarantine
+  format: delta

@@ -51,6 +51,9 @@ app.command(name="lint", rich_help_panel="Governance")(lint_command)
 from lakelogic.cli.scaffold_cmd import scaffold_command  # noqa: E402
 
 app.command(name="scaffold", rich_help_panel="Data Tooling")(scaffold_command)
+from lakelogic.cli.migrate_options_cmd import migrate_options_command  # noqa: E402
+
+app.command(name="migrate-options", rich_help_panel="Governance")(migrate_options_command)
 app.add_typer(observatory_app, name="observatory", rich_help_panel="Observatory")
 app.add_typer(registry_app, name="registry", rich_help_panel="Governance")
 app.add_typer(diagnose_app, name="diagnose", rich_help_panel="Governance")

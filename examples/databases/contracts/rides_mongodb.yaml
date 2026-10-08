@@ -1,0 +1,41 @@
+# Rides from a MongoDB-protocol collection: MongoDB, Atlas, Azure Cosmos DB (MongoDB API) or
+# Amazon DocumentDB. dataset is the collection. Nested objects are flattened into columns
+# (customer.name -> customer_name); arrays stay as JSON text for explode / json_extract.
+version: 1.0.0
+dataset: rides
+info: {title: bronze_rides_mongodb}
+primary_key: [ride_id]
+source:
+  type: database
+  path: env:MONGO_URI                 # mongodb://host:27017 or mongodb+srv://user:password@cluster/...
+  flatten_nested: true                # true — nested objects become columns (customer.name -> customer_name) | false — kept as JSON text
+  load_mode: incremental           # full — every row, every run | incremental — rows newer than the last run's watermark_field
+                                      # | cdc — the database's change log (inserts, updates, deletes)
+  watermark_field: updated_at          # incremental: a timestamp/number column that grows when a row changes
+  options:
+    database: lakelogic_test          # default: the database named in the URI
+    filter: {status: {$ne: test}}     # optional MongoDB query, applied by the server
+    # projection: {items: 0}          # optional: fields to include (1) or leave out (0)
+    # batch_size: 1000                # documents fetched per round trip (default 1000)
+model:
+  fields:
+    - {name: _id, type: string, required: true}
+    - {name: ride_id, type: long, required: true}
+    - {name: customer_name, type: string, required: true}
+    - {name: fare, type: double, required: true}
+    - {name: status, type: string}
+    - {name: updated_at, type: timestamp}
+quality:
+  row_rules:
+    - {name: fare_not_negative, sql: "fare >= 0"}
+materialization:
+  strategy: merge                     # append | overwrite | merge (upsert on primary_key) | scd2
+  format: delta
+  target_path: data/bronze/rides_mongodb
+quarantine:
+  target: data/quarantine/rides_mongodb
+  format: delta
+metadata:
+  run_log_table: run_log
+  run_log_backend: duckdb
+  run_log_database: data/run_log_mongodb.duckdb   # one per contract: the watermark is per source
