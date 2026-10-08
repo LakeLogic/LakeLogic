@@ -26,12 +26,24 @@ def test_kafka_settings_resolve_the_brokers_and_password_from_the_environment(mo
     monkeypatch.setenv("KB", "broker:9092")
     monkeypatch.setenv("KP", "s3cret")
     cfg = _kafka_stream_settings(
-        _src(kind="kafka", brokers="env:KB", topic="rides", security_protocol="SASL_SSL",
-             sasl_mechanism="PLAIN", sasl_username="u", sasl_password="env:KP", batch_size=50)
+        _src(
+            kind="kafka",
+            brokers="env:KB",
+            topic="rides",
+            security_protocol="SASL_SSL",
+            sasl_mechanism="PLAIN",
+            sasl_username="u",
+            sasl_password="env:KP",
+            batch_size=50,
+        )
     )
     assert cfg["brokers"] == "broker:9092" and cfg["topic"] == "rides" and cfg["batch_size"] == 50
-    assert cfg["auth"] == {"security_protocol": "SASL_SSL", "sasl_mechanism": "PLAIN",
-                           "sasl_username": "u", "sasl_password": "s3cret"}
+    assert cfg["auth"] == {
+        "security_protocol": "SASL_SSL",
+        "sasl_mechanism": "PLAIN",
+        "sasl_username": "u",
+        "sasl_password": "s3cret",
+    }
 
 
 def test_a_literal_password_in_the_contract_is_refused():

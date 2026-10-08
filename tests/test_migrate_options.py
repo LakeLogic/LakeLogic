@@ -25,10 +25,14 @@ model:
 
 
 def test_settings_move_spellings_change_and_credentials_are_removed():
-    src, notes = migrate_source({
-        "type": "sftp", "path": "sftp://h/in", "record_length": 15,
-        "options": {"sep": ";", "pattern": "*.csv", "password": "hunter2", "known_hosts": "/k", "x": 1},
-    })
+    src, notes = migrate_source(
+        {
+            "type": "sftp",
+            "path": "sftp://h/in",
+            "record_length": 15,
+            "options": {"sep": ";", "pattern": "*.csv", "password": "hunter2", "known_hosts": "/k", "x": 1},
+        }
+    )
     assert src["pattern"] == "*.csv" and "record_length" not in src
     assert src["options"] == {"record_length": 15, "delimiter": ";", "known_hosts": "/k", "engine_options": {"x": 1}}
     assert any("REMOVED the credential source.options.password" in n for n in notes)
@@ -55,7 +59,9 @@ def test_an_old_contract_fails_then_runs_the_same_after_migration(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "# BACS layout" in text  # comments on kept lines survive (ruamel)
     src = yaml.safe_load(text)["source"]
-    assert src["options"] == {"engine_options": {"flavour": "legacy"}, "record_length": 15, "encoding": "ascii"} or \
-        src["options"]["record_length"] == 15
+    assert (
+        src["options"] == {"engine_options": {"flavour": "legacy"}, "record_length": 15, "encoding": "ascii"}
+        or src["options"]["record_length"] == 15
+    )
     good, bad = DataProcessor(engine="polars", contract=str(path)).run_source()
     assert good["sort_code"].to_list() == ["201575", "309634"] and bad.height == 0

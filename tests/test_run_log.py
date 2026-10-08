@@ -491,7 +491,9 @@ def test_get_last_run_watermark_and_dlt_state_from_delta_backend(monkeypatch, tm
 
     fake_pc = types.SimpleNamespace(
         not_equal=lambda column, value: [item != value for item in column.values],
-        fill_null=lambda column, value: types.SimpleNamespace(values=[value if item is None else item for item in column.values]),
+        fill_null=lambda column, value: types.SimpleNamespace(
+            values=[value if item is None else item for item in column.values]
+        ),
         is_valid=lambda column: [item is not None for item in column.values],
         and_=lambda left, right: [a and b for a, b in zip(left, right)],
         max=lambda column: FakeScalar(max(column.values)),
@@ -907,7 +909,9 @@ def test_run_log_write_modes_and_watermark_readers_spark_and_delta(monkeypatch, 
 
     fake_pc = types.SimpleNamespace(
         not_equal=lambda column, value: [item != value for item in column.values],
-        fill_null=lambda column, value: types.SimpleNamespace(values=[value if item is None else item for item in column.values]),
+        fill_null=lambda column, value: types.SimpleNamespace(
+            values=[value if item is None else item for item in column.values]
+        ),
         is_valid=lambda column: [item is not None for item in column.values],
         and_=lambda left, right: [a and b for a, b in zip(left, right)],
         max=lambda column: FakeScalar(max(value for value in column.values if value is not None)),

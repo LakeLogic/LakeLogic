@@ -743,7 +743,12 @@ class PolarsAdapter(EngineAdapter):
                         _target = pl.Datetime("us") if dtype == pl.Date else dtype
                         _cands = [
                             _t.str.to_datetime(fmt, strict=False).cast(_target, strict=False)
-                            for fmt in ("%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.fZ", "%Y-%m-%d")
+                            for fmt in (
+                                "%Y-%m-%d %H:%M:%S%.f",
+                                "%Y-%m-%dT%H:%M:%S%.f",
+                                "%Y-%m-%dT%H:%M:%S%.fZ",
+                                "%Y-%m-%d",
+                            )
                         ] + [pl.col(field.name).cast(_target, strict=False)]
                         cast_expr = pl.coalesce(_cands)
                         if dtype == pl.Date:

@@ -19,8 +19,13 @@ T0 = dt.datetime(2026, 10, 1, 9, 0)
 def _rows(ids, minutes=0, **over):
     out = []
     for i in ids:
-        r = {"ride_id": i, "city": ["London", "Paris", "Lagos"][i % 3], "fare": float(5 + i % 40),
-             "status": "completed", "updated_at": T0 + dt.timedelta(minutes=minutes)}
+        r = {
+            "ride_id": i,
+            "city": ["London", "Paris", "Lagos"][i % 3],
+            "fare": float(5 + i % 40),
+            "status": "completed",
+            "updated_at": T0 + dt.timedelta(minutes=minutes),
+        }
         r.update(over)
         out.append(r)
     return out
@@ -45,8 +50,14 @@ def _sql_conn(kind):
     if kind == "postgres":
         import psycopg2
 
-        c = psycopg2.connect(host=u.hostname, port=u.port or 5432, user=unquote(u.username),
-                             password=unquote(u.password), dbname=u.path.lstrip("/"), sslmode="require")
+        c = psycopg2.connect(
+            host=u.hostname,
+            port=u.port or 5432,
+            user=unquote(u.username),
+            password=unquote(u.password),
+            dbname=u.path.lstrip("/"),
+            sslmode="require",
+        )
         c.autocommit = True
         return c, "%s", "TIMESTAMP"
     import pyodbc
@@ -74,20 +85,34 @@ def seed(kind: str) -> None:
         with MongoClient(os.environ["MONGO_URI"]) as cl:
             coll = cl["lakelogic_test"]["rides"]
             coll.drop()
-            docs = [{"ride_id": r["ride_id"], "customer": {"name": f"rider{r['ride_id']}", "tier": "gold"},
-                     "fare": r["fare"], "status": r["status"], "updated_at": r["updated_at"],
-                     "items": [{"sku": "A", "qty": 1}]} for r in _initial()]
+            docs = [
+                {
+                    "ride_id": r["ride_id"],
+                    "customer": {"name": f"rider{r['ride_id']}", "tier": "gold"},
+                    "fare": r["fare"],
+                    "status": r["status"],
+                    "updated_at": r["updated_at"],
+                    "items": [{"sku": "A", "qty": 1}],
+                }
+                for r in _initial()
+            ]
             docs[-1].pop("customer")  # one document missing a required field
-            coll.insert_many(docs + [{"ride_id": 3000, "customer": {"name": "x"}, "fare": "abc",
-                                      "status": "completed", "updated_at": T0}])
+            coll.insert_many(
+                docs
+                + [{"ride_id": 3000, "customer": {"name": "x"}, "fare": "abc", "status": "completed", "updated_at": T0}]
+            )
         return
     con, mark, ts = _sql_conn(kind)
     cur = con.cursor()
     cur.execute("DROP TABLE IF EXISTS rides")
-    cur.execute(f"CREATE TABLE rides (ride_id INT PRIMARY KEY, city VARCHAR(40), fare FLOAT, "
-                f"status VARCHAR(20), updated_at {ts})")
-    cur.executemany(f"INSERT INTO rides VALUES ({','.join([mark] * 5)})",
-                    [tuple(_value(kind, r[c]) for c in COLS) for r in _initial()])
+    cur.execute(
+        f"CREATE TABLE rides (ride_id INT PRIMARY KEY, city VARCHAR(40), fare FLOAT, "
+        f"status VARCHAR(20), updated_at {ts})"
+    )
+    cur.executemany(
+        f"INSERT INTO rides VALUES ({','.join([mark] * 5)})",
+        [tuple(_value(kind, r[c]) for c in COLS) for r in _initial()],
+    )
     con.commit()
     con.close()
 
@@ -100,16 +125,26 @@ def changes(kind: str) -> None:
 
         with MongoClient(os.environ["MONGO_URI"]) as cl:
             coll = cl["lakelogic_test"]["rides"]
-            coll.insert_many([{"ride_id": r["ride_id"], "customer": {"name": f"rider{r['ride_id']}"},
-                               "fare": r["fare"], "status": "completed", "updated_at": r["updated_at"]}
-                              for r in _changes()])
+            coll.insert_many(
+                [
+                    {
+                        "ride_id": r["ride_id"],
+                        "customer": {"name": f"rider{r['ride_id']}"},
+                        "fare": r["fare"],
+                        "status": "completed",
+                        "updated_at": r["updated_at"],
+                    }
+                    for r in _changes()
+                ]
+            )
             coll.update_many({"ride_id": {"$lt": 5}}, {"$set": {"status": "refunded", "updated_at": later}})
         return
     con, mark, _ = _sql_conn(kind)
     cur = con.cursor()
-    cur.executemany(f"INSERT INTO rides VALUES ({','.join([mark] * 5)})",
-                    [tuple(_value(kind, r[c]) for c in COLS) for r in _changes()])
-    cur.execute(f"UPDATE rides SET status = 'refunded', updated_at = {mark} WHERE ride_id < 5",
-                (_value(kind, later),))
+    cur.executemany(
+        f"INSERT INTO rides VALUES ({','.join([mark] * 5)})",
+        [tuple(_value(kind, r[c]) for c in COLS) for r in _changes()],
+    )
+    cur.execute(f"UPDATE rides SET status = 'refunded', updated_at = {mark} WHERE ride_id < 5", (_value(kind, later),))
     con.commit()
     con.close()

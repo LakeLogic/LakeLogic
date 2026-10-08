@@ -45,7 +45,7 @@ def _sqlite_absolute(uri: Optional[str]) -> Optional[str]:
     """
     if not uri or not str(uri).lower().startswith("sqlite:///"):
         return uri
-    rest = str(uri)[len("sqlite:///"):]
+    rest = str(uri)[len("sqlite:///") :]
     if rest.startswith("/") or re.match(r"^[A-Za-z]:[/\\]", rest) or rest.startswith(":memory:"):
         return uri
     return "sqlite:///" + Path(rest).resolve().as_posix()
@@ -7582,7 +7582,9 @@ class DataProcessor:
         base = Path(getattr(self, "_explicit_contract_path", None) or ".").resolve()
         base = base.parent if base.suffix else base
         checkpoint = str(cfg["checkpoint"] or (base / "_checkpoints" / str(name)))
-        logger.info(f"stream source: {cfg['kind']} topic '{cfg['topic']}' at {cfg['brokers']} (checkpoint {checkpoint})")
+        logger.info(
+            f"stream source: {cfg['kind']} topic '{cfg['topic']}' at {cfg['brokers']} (checkpoint {checkpoint})"
+        )
         auth = cfg["auth"]
         continuous = cfg["trigger"] in ("continuous", "processing_time")
 
@@ -7607,7 +7609,9 @@ class DataProcessor:
                 spark, cfg["topic"], fields, brokers=cfg["brokers"], starting_offsets=cfg["starting_offsets"], **opts
             )
             # One contract runs on every engine: a ``.sqlite`` checkpoint becomes a Spark folder beside it.
-            spark_ckpt = re.sub(r"\.(sqlite|db)$", "", checkpoint) + ("_spark" if checkpoint.endswith((".sqlite", ".db")) else "")
+            spark_ckpt = re.sub(r"\.(sqlite|db)$", "", checkpoint) + (
+                "_spark" if checkpoint.endswith((".sqlite", ".db")) else ""
+            )
             sink = SparkStreamSink(
                 stream_df=stream,
                 checkpoint_location=spark_ckpt,
@@ -7717,7 +7721,9 @@ class DataProcessor:
             if isinstance(v, bool):
                 return "true" if v else "false"
             if isinstance(v, datetime):
-                return (v.replace(tzinfo=None) if v.tzinfo is None else v.astimezone(timezone.utc).replace(tzinfo=None)).isoformat(sep=" ")
+                return (
+                    v.replace(tzinfo=None) if v.tzinfo is None else v.astimezone(timezone.utc).replace(tzinfo=None)
+                ).isoformat(sep=" ")
             return str(plain(v))
 
         load_mode = getattr(self.contract.source, "load_mode", "full")
@@ -7730,10 +7736,14 @@ class DataProcessor:
             if wm is not None:
                 after = datetime.fromtimestamp(wm, tz=timezone.utc)
                 # MongoDB compares within a BSON type, so ask for each form a watermark field can take.
-                newer = {"$or": [{wf: {"$gt": after.replace(tzinfo=None)}},
-                                 {wf: {"$gt": after.strftime("%Y-%m-%dT%H:%M:%S.%f")}},
-                                 {wf: {"$gt": after.strftime("%Y-%m-%d %H:%M:%S.%f")}},
-                                 {wf: {"$gt": wm}}]}
+                newer = {
+                    "$or": [
+                        {wf: {"$gt": after.replace(tzinfo=None)}},
+                        {wf: {"$gt": after.strftime("%Y-%m-%dT%H:%M:%S.%f")}},
+                        {wf: {"$gt": after.strftime("%Y-%m-%d %H:%M:%S.%f")}},
+                        {wf: {"$gt": wm}},
+                    ]
+                }
                 query = {"$and": [query, newer]} if query else newer
                 logger.info(f"MongoDB incremental: {wf} > {after.isoformat()}")
 

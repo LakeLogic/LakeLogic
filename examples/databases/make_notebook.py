@@ -156,8 +156,10 @@ else:
 
 nb = {
     "cells": cells,
-    "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-                 "language_info": {"name": "python"}},
+    "metadata": {
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python"},
+    },
     "nbformat": 4,
     "nbformat_minor": 5,
 }

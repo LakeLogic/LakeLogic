@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.72.0] — 2026-10-08
+
+### Added
+
+- **migrate-options**: Implement migration of contracts to OLC 0.21 typed source options
 ## [1.70.0] — 2026-10-04
 
 ### Added
@@ -860,6 +865,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.72.0]: https://github.com/lakelogic/LakeLogic/compare/v1.71.0...v1.72.0
 [1.70.0]: https://github.com/lakelogic/LakeLogic/compare/v1.69.0...v1.70.0
 [1.69.0]: https://github.com/lakelogic/LakeLogic/compare/v1.68.0...v1.69.0
 [1.68.0]: https://github.com/lakelogic/LakeLogic/compare/v1.67.0...v1.68.0

@@ -165,8 +165,12 @@ def test_polars_casts_space_separated_timestamps_instead_of_quarantining_them():
             "model": {"fields": [{"name": "t", "type": "timestamp"}, {"name": "d", "type": "date"}]},
         },
     )
-    src = pl.DataFrame({"t": ["2026-10-01 09:00:00", "2026-10-01T09:00:00.5Z", "2026-10-01", "nope"],
-                        "d": ["2026-10-01", "2026-10-01 09:00:00", "2026-10-01", "2026-10-01"]})
+    src = pl.DataFrame(
+        {
+            "t": ["2026-10-01 09:00:00", "2026-10-01T09:00:00.5Z", "2026-10-01", "nope"],
+            "d": ["2026-10-01", "2026-10-01 09:00:00", "2026-10-01", "2026-10-01"],
+        }
+    )
     good, bad = p.run(src)[:2]
     assert good.height == 3 and bad.height == 1
     assert good["t"][0] == dt.datetime(2026, 10, 1, 9, 0)

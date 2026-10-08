@@ -20,8 +20,21 @@ _LOOKUP = re.compile(
 )
 #: `options.get` calls in processor.py that read something other than source.options.
 NOT_SOURCE_OPTIONS = {
-    "title", "table_name", "target_layer", "domain", "system", "description", "version",
-    "updated", "tier", "layer", "last_modified", "mtime", "output", "field", "account_name",
+    "title",
+    "table_name",
+    "target_layer",
+    "domain",
+    "system",
+    "description",
+    "version",
+    "updated",
+    "tier",
+    "layer",
+    "last_modified",
+    "mtime",
+    "output",
+    "field",
+    "account_name",
 }
 
 
