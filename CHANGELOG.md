@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.73.0] — 2026-10-09
+
+### Added
+
+- Add dlt_sink for writing data to various destinations
 ## [1.72.0] — 2026-10-08
 
 ### Added
@@ -865,6 +870,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.73.0]: https://github.com/lakelogic/LakeLogic/compare/v1.72.0...v1.73.0
 [1.72.0]: https://github.com/lakelogic/LakeLogic/compare/v1.71.0...v1.72.0
 [1.70.0]: https://github.com/lakelogic/LakeLogic/compare/v1.69.0...v1.70.0
 [1.69.0]: https://github.com/lakelogic/LakeLogic/compare/v1.68.0...v1.69.0

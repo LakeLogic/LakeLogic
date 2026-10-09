@@ -1097,7 +1097,10 @@ def test_write_run_log_table_dlt_backend(monkeypatch, tmp_path: Path):
 
     fake_dlt = types.SimpleNamespace(
         destinations=FakeDestinations(),
-        resource=lambda name, write_disposition, primary_key=None: lambda fn: resource_calls.append((name, write_disposition)) or fn,
+        resource=lambda name, write_disposition, primary_key=None: lambda fn: resource_calls.append(
+            (name, write_disposition)
+        )
+        or fn,
         pipeline=lambda **kwargs: pipeline_calls.append(kwargs) or FakePipeline(),
     )
     monkeypatch.setitem(sys.modules, "dlt", fake_dlt)

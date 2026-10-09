@@ -225,7 +225,14 @@ code("""for target, (destination, url) in TARGETS.items():
     con.close()
     print(f"{target}: dropped {SCHEMA}")""")
 
-nb = {"cells": cells, "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-                                   "language_info": {"name": "python"}}, "nbformat": 4, "nbformat_minor": 5}
+nb = {
+    "cells": cells,
+    "metadata": {
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python"},
+    },
+    "nbformat": 4,
+    "nbformat_minor": 5,
+}
 Path(__file__).with_name("dlt_materialization.ipynb").write_text(json.dumps(nb, indent=1), encoding="utf-8")
 print("wrote dlt_materialization.ipynb")
