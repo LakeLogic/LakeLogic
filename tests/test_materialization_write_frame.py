@@ -433,7 +433,7 @@ class TestWriteFrameDlt:
     def test_dlt_run_failure_wraps_in_value_error(self, monkeypatch, tmp_path):
         _install_fake_dlt(monkeypatch, raise_on_run=True)
         df = pl.DataFrame({"a": [1]})
-        with pytest.raises(ValueError, match="dlt materialization failed"):
+        with pytest.raises(ValueError, match="dlt write to duckdb failed"):
             mat._write_frame(df, tmp_path / "x", "dlt")
 
 

@@ -213,7 +213,7 @@ class TestQuarantineDltFormat:
         monkeypatch.setitem(sys.modules, "dlt", None)
         contract = _contract_with_quarantine(target="q/bad", format="dlt")
         df = pl.DataFrame({"id": [1]})
-        with pytest.raises(ImportError, match="dlt quarantine format requires"):
+        with pytest.raises(ImportError, match="requires the 'dlt' package"):
             q.materialize_quarantine(df, contract)
 
 

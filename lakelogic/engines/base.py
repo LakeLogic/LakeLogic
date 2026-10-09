@@ -147,6 +147,60 @@ def _not_null_columns(rules: List[Any]) -> set:
     return cols
 
 
+def unique_rule_columns(spec: Any) -> List[str]:
+    """The column(s) a ``unique`` rule covers, in any accepted form — on OLC 0.22+ (typed
+    mapping) and on older OLC (free-form dict), so Core never depends on which one is installed."""
+    if hasattr(spec, "columns") and callable(spec.columns):
+        return spec.columns()
+    u = spec.unique
+    if isinstance(u, str):
+        return [u]
+    if isinstance(u, list):
+        return [c for c in u if isinstance(c, str)]
+    cfg = u if isinstance(u, dict) else {}
+    cols = cfg.get("columns") or cfg.get("fields")
+    if isinstance(cols, list):
+        return [c for c in cols if isinstance(c, str)]
+    return [cfg["field"]] if isinstance(cfg.get("field"), str) else []
+
+
+def unique_rule_label(spec: Any, key: str) -> Optional[str]:
+    """``name``/``severity``/``category``/``description`` of a ``unique`` rule: beside it, else inside it."""
+    if hasattr(spec, "label") and callable(spec.label):
+        return spec.label(key)
+    own = getattr(spec, key, None)
+    if own is not None:
+        return own
+    u = spec.unique
+    return u.get(key) if isinstance(u, dict) else getattr(u, key, None)
+
+
+def _checked_unique_columns(sql: Optional[str]) -> Optional[set]:
+    """The columns a SQL rule checks for duplicates, lower-cased; None if it is not such a check.
+
+    Recognises ``COUNT(DISTINCT a)`` / ``COUNT(DISTINCT CONCAT_WS(…, a, b))`` (what the
+    ``unique`` shorthand expands to, and how people write it) and
+    ``GROUP BY a, b HAVING COUNT(*) > 1``.
+    """
+    if not sql:
+        return None
+    try:
+        tree = sqlglot.parse_one(sql)
+    except Exception:  # noqa: BLE001 - an unparseable rule simply isn't recognised
+        return None
+    for count in tree.find_all(sqlglot.exp.Count):
+        inner = count.this
+        if isinstance(inner, sqlglot.exp.Distinct):
+            cols = {c.name.lower() for c in inner.find_all(sqlglot.exp.Column)}
+            if cols:
+                return cols
+    group = tree.find(sqlglot.exp.Group)
+    if group is not None and tree.find(sqlglot.exp.Having) is not None:
+        cols = {c.name.lower() for e in group.expressions for c in e.find_all(sqlglot.exp.Column)}
+        return cols or None
+    return None
+
+
 class EngineAdapter(ABC):
     """
     Abstract Base Class for all execution engines.
@@ -482,16 +536,41 @@ class EngineAdapter(ABC):
 
     def get_dataset_rules(self) -> List[QualityRule]:
         """
-        Returns all rules that are aggregate/metric based.
+        Returns all rules that are aggregate/metric based, plus the uniqueness check
+        ``primary_key`` implies (``_primary_key_rule``).
         """
-        if not self.contract.quality or not self.contract.quality.dataset_rules:
-            return []
         rules: List[QualityRule] = []
-        for spec in self.contract.quality.dataset_rules:
+        specs = list(self.contract.quality.dataset_rules) if self.contract.quality else []
+        for spec in specs:
             expanded = self._expand_dataset_rule(spec)
             if expanded:
                 rules.append(expanded)
+        implied = self._primary_key_rule(rules)
+        if implied is not None:
+            rules.append(implied)
         return rules
+
+    def _primary_key_rule(self, declared: List[QualityRule]) -> Optional[QualityRule]:
+        """The ``<keys>_unique`` check ``primary_key`` implies, or None when it is not wanted.
+
+        Skipped when a declared rule already checks exactly the key columns — a ``unique``
+        shorthand, a ``COUNT(DISTINCT …)`` SQL rule, or a ``GROUP BY … HAVING COUNT(*) > 1``
+        SQL rule — so the same check never runs twice. Skipped for ``scd2``, whose table
+        keeps several versions of each key by design.
+        """
+        pk = [str(c) for c in (self.contract.primary_key or []) if c]
+        if not pk:
+            return None
+        mat = getattr(self.contract, "materialization", None)
+        if (getattr(mat, "strategy", None) or "").lower() == "scd2":
+            return None
+        wanted = {c.lower() for c in pk}
+        if any(_checked_unique_columns(r.sql) == wanted for r in declared):
+            return None
+        rule = self._expand_dataset_rule(DatasetRuleUnique(unique=pk))
+        if rule is not None:
+            rule.description = "Implied by primary_key: no two rows share the key."
+        return rule
 
     def _normalize_engine(self) -> str:
         """
@@ -1278,25 +1357,12 @@ class EngineAdapter(ABC):
         dataset = self.contract.dataset or "source"
 
         if isinstance(spec, DatasetRuleUnique):
-            payload = spec.unique
-            cfg = payload if isinstance(payload, dict) else {}
-            # `unique` may be a single column (str), a COMPOSITE key (list of str),
-            # or a verbose dict ({field: …} or {columns: [...]}).
-            if isinstance(payload, str):
-                columns = [payload]
-            elif isinstance(payload, list):
-                columns = [c for c in payload if isinstance(c, str)]
-            else:
-                cols = cfg.get("columns") or cfg.get("fields")
-                if isinstance(cols, list):
-                    columns = [c for c in cols if isinstance(c, str)]
-                elif cfg.get("field"):
-                    columns = [cfg["field"]]
-                else:
-                    columns = []
+            # One reading of every accepted form (str / list / {field|columns, labels}) — the
+            # OLC model rejects anything else, so no form can quietly expand to nothing.
+            columns = unique_rule_columns(spec)
             if not columns:
                 return None
-            name = cfg.get("name") or ("_".join(columns) + "_unique")
+            name = unique_rule_label(spec, "name") or ("_".join(columns) + "_unique")
             if len(columns) == 1:
                 distinct_expr = self._quote_ident(columns[0])
             else:
@@ -1310,9 +1376,9 @@ class EngineAdapter(ABC):
             return QualityRule(
                 name=name,
                 sql=f"SELECT COUNT(*) - COUNT(DISTINCT {distinct_expr}) FROM {dataset}",
-                category=cfg.get("category", "uniqueness"),
-                description=cfg.get("description"),
-                severity=cfg.get("severity", "error"),
+                category=unique_rule_label(spec, "category") or "uniqueness",
+                description=unique_rule_label(spec, "description"),
+                severity=unique_rule_label(spec, "severity") or "error",
                 must_be_less_than=1,
             )
 

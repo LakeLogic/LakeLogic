@@ -1,0 +1,33 @@
+# Silver customers written straight into a relational database through dlt.
+# The notebook points `dlt_destination` / `dlt_credentials` at each database in turn;
+# the credentials are only ever an env: reference — never a password in this file.
+version: 1.0.0
+info:
+  title: Customers (database target)
+  version: 1.0.0
+dataset: customers
+primary_key: [customer_id]            # top level; also adds the customer_id_unique check
+model:
+  fields:
+    - {name: customer_id, type: integer, required: true}
+    - {name: name, type: string, required: true}
+    - {name: city, type: string}
+    - {name: lifetime_value, type: double}
+quality:
+  row_rules:
+    - name: lifetime_value_not_negative
+      category: validity
+      sql: "lifetime_value >= 0"
+materialization:
+  strategy: merge                     # append | overwrite | merge (merge uses primary_key)
+  format: dlt
+  dlt_destination: postgres           # postgres | mssql | duckdb | snowflake | bigquery | ...
+  dlt_credentials: env:DLT_TARGET_URL
+  dlt_dataset_name: lakelogic_dlt_demo
+quarantine:
+  target: unused_for_dlt
+  format: dlt
+  table: customers_quarantine         # failing rows land beside the good ones
+  dlt_destination: postgres
+  dlt_credentials: env:DLT_TARGET_URL
+  dlt_dataset_name: lakelogic_dlt_demo

@@ -174,6 +174,10 @@ integrations = [
 api = ["requests>=2.31.0"]
 # dlt — declarative API ingestion driven by Data Contracts
 dlt = ["dlt[parquet]>=1.0", "pyarrow>=23.0.1"]
+# Materialize to relational databases through dlt (format: dlt / secondary_targets).
+# SQL Server / Azure SQL also need the Microsoft ODBC Driver 18 installed on the host.
+dlt-postgres = ["dlt[parquet,postgres]>=1.0", "pyarrow>=23.0.1", "psycopg2-binary>=2.9.0"]
+dlt-mssql = ["dlt[parquet,mssql]>=1.0", "pyarrow>=23.0.1", "pyodbc>=5.0.0"]
 sftp = ["asyncssh>=2.14.0"]  # SFTP/SSH; verifies host keys by default (paramiko's AutoAddPolicy did not)
 azure_messaging = ["azure-servicebus>=7.11.0", "azure-eventgrid>=4.17.0", "azure-identity>=1.15.0"]
 aws_messaging = ["boto3>=1.28.0"]
@@ -433,6 +437,7 @@ ignore = []
 "tests/_smoke_*.py" = ["E402", "E501", "F401", "I001"]
 "tests/test_*.py" = ["E402", "E501", "E702", "E712", "F401", "F811", "F841", "I001"]
 "scripts/*.py" = ["E722", "E501", "I001"]
+"examples/**/make_*notebook.py" = ["E501"]  # notebook text (Markdown tables) inside strings
 "lakelogic/engines/bigquery.py" = ["I001"]
 "lakelogic/engines/database_connectors.py" = ["I001"]
 "lakelogic/engines/duckdb.py" = ["I001"]

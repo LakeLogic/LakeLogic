@@ -2206,8 +2206,14 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+mssql = [
+    { name = "pyodbc" },
+]
 parquet = [
     { name = "pyarrow" },
+]
+postgres = [
+    { name = "psycopg2-binary" },
 ]
 
 [[package]]
@@ -3853,7 +3859,7 @@ wheels = [
 
 [[package]]
 name = "lakelogic"
-version = "1.70.0"
+version = "1.72.0"
 source = { editable = "." }
 dependencies = [
     { name = "deltalake" },
@@ -3980,6 +3986,16 @@ dev = [
 ]
 dlt = [
     { name = "dlt", extra = ["parquet"] },
+    { name = "pyarrow" },
+]
+dlt-mssql = [
+    { name = "dlt", extra = ["mssql", "parquet"] },
+    { name = "pyarrow" },
+    { name = "pyodbc" },
+]
+dlt-postgres = [
+    { name = "dlt", extra = ["parquet", "postgres"] },
+    { name = "psycopg2-binary" },
     { name = "pyarrow" },
 ]
 docs = [
@@ -4194,6 +4210,8 @@ requires-dist = [
     { name = "deltalake", marker = "extra == 'engines'", specifier = ">=1.0.0" },
     { name = "deltalake", marker = "extra == 'polars'", specifier = ">=1.0.0" },
     { name = "dlt", extras = ["parquet"], marker = "extra == 'dlt'", specifier = ">=1.0" },
+    { name = "dlt", extras = ["parquet", "mssql"], marker = "extra == 'dlt-mssql'", specifier = ">=1.0" },
+    { name = "dlt", extras = ["parquet", "postgres"], marker = "extra == 'dlt-postgres'", specifier = ">=1.0" },
     { name = "duckdb", specifier = ">=0.9.0" },
     { name = "duckdb", marker = "extra == 'all'", specifier = ">=0.9.0" },
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=0.9.0" },
@@ -4237,7 +4255,7 @@ requires-dist = [
     { name = "nbclient", marker = "extra == 'notebook'", specifier = ">=0.9.0" },
     { name = "nbformat", marker = "extra == 'enterprise'", specifier = ">=5.9.0" },
     { name = "nbformat", marker = "extra == 'notebook'", specifier = ">=5.9.0" },
-    { name = "open-lakehouse-contract", extras = ["models"], specifier = ">=0.20.0,<0.21.0" },
+    { name = "open-lakehouse-contract", extras = ["models"], specifier = ">=0.21.0,<0.22.0" },
     { name = "openai", marker = "extra == 'ai'", specifier = ">=1.0.0" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1.0" },
     { name = "openpyxl", marker = "extra == 'duckdb'", specifier = ">=3.1.0" },
@@ -4256,10 +4274,13 @@ requires-dist = [
     { name = "presidio-anonymizer", marker = "extra == 'pii'", specifier = ">=2.2.0" },
     { name = "presidio-anonymizer", marker = "extra == 'profiling'", specifier = ">=2.2.0" },
     { name = "psycopg2-binary", marker = "extra == 'databases'", specifier = ">=2.9.0" },
+    { name = "psycopg2-binary", marker = "extra == 'dlt-postgres'", specifier = ">=2.9.0" },
     { name = "psycopg2-binary", marker = "extra == 'postgresql'", specifier = ">=2.9.0" },
     { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "pyarrow", marker = "extra == 'all'", specifier = ">=23.0.1" },
     { name = "pyarrow", marker = "extra == 'dlt'", specifier = ">=23.0.1" },
+    { name = "pyarrow", marker = "extra == 'dlt-mssql'", specifier = ">=23.0.1" },
+    { name = "pyarrow", marker = "extra == 'dlt-postgres'", specifier = ">=23.0.1" },
     { name = "pyarrow", marker = "extra == 'duckdb'", specifier = ">=23.0.1" },
     { name = "pyarrow", marker = "extra == 'engines'", specifier = ">=23.0.1" },
     { name = "pydantic", specifier = ">=2.0.0,<3" },
@@ -4269,6 +4290,7 @@ requires-dist = [
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1.0" },
     { name = "pyodbc", marker = "extra == 'azuresql'", specifier = ">=5.0.0" },
     { name = "pyodbc", marker = "extra == 'databases'", specifier = ">=5.0.0" },
+    { name = "pyodbc", marker = "extra == 'dlt-mssql'", specifier = ">=5.0.0" },
     { name = "pypandoc-binary", marker = "extra == 'extraction'", specifier = ">=1.13" },
     { name = "pypandoc-binary", marker = "extra == 'extraction-ocr'", specifier = ">=1.13" },
     { name = "pyspark", marker = "extra == 'enterprise'", specifier = ">=3.3.0" },
@@ -4315,7 +4337,7 @@ requires-dist = [
     { name = "xlrd", marker = "extra == 'engines'", specifier = ">=2.0.1" },
     { name = "xlrd", marker = "extra == 'polars'", specifier = ">=2.0.1" },
 ]
-provides-extras = ["cli", "engines", "azure", "notify", "delta", "polars", "duckdb", "spark", "sql", "databases", "azuresql", "postgresql", "mysql", "mongodb", "integrations", "api", "dlt", "sftp", "azure-messaging", "aws-messaging", "gcp-messaging", "streaming", "kafka", "sse", "websocket", "snowflake", "bigquery", "notebook", "profiling", "notifications", "docs", "dev", "all", "cloud", "pii", "ai", "review", "enterprise", "nlp", "pdf", "extraction", "extraction-ocr", "synthetic", "demo"]
+provides-extras = ["cli", "engines", "azure", "notify", "delta", "polars", "duckdb", "spark", "sql", "databases", "azuresql", "postgresql", "mysql", "mongodb", "integrations", "api", "dlt", "dlt-postgres", "dlt-mssql", "sftp", "azure-messaging", "aws-messaging", "gcp-messaging", "streaming", "kafka", "sse", "websocket", "snowflake", "bigquery", "notebook", "profiling", "notifications", "docs", "dev", "all", "cloud", "pii", "ai", "review", "enterprise", "nlp", "pdf", "extraction", "extraction-ocr", "synthetic", "demo"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -5741,15 +5763,15 @@ wheels = [
 
 [[package]]
 name = "open-lakehouse-contract"
-version = "0.20.0"
+version = "0.21.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c0/c6/abfd35cda1cc87e3fa5e5216aaee5258e7b196bfd8a78a3f795dddb1aca8/open_lakehouse_contract-0.20.0.tar.gz", hash = "sha256:66276134c6e1640d7b201e0ad34bf0b824ae3624520e9926beb085c520685ab7", size = 216487, upload-time = "2026-10-07T15:54:35.562Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/67/33b65b9b1ae376cce4176e285207460330436b649293f14f1663e033add5/open_lakehouse_contract-0.21.0.tar.gz", hash = "sha256:94af798c7abcdce043150712cc9f71a6cb41d9d9d2d2a94787305852e60f6f59", size = 292859, upload-time = "2026-10-08T11:19:19.825Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/ab/b234705a48a31c0c522cebc40651a6e2de12aaabc8d7e0ebf749d9391c49/open_lakehouse_contract-0.20.0-py3-none-any.whl", hash = "sha256:a38e2e85ddc6b7e14b27239701a1858357e6abf17bca59ddcd746133d81f8eac", size = 228285, upload-time = "2026-10-07T15:54:34.358Z" },
+    { url = "https://files.pythonhosted.org/packages/67/6e/5917f401d583dbb6f6d4277cf2093250f0fb700b8f76b4bc60e5c0fd01a7/open_lakehouse_contract-0.21.0-py3-none-any.whl", hash = "sha256:b113cd26ad590267a975d77627ac299fbfdfb63b647294c6b2e413fc84bb32c7", size = 304080, upload-time = "2026-10-08T11:19:18.348Z" },
 ]
 
 [package.optional-dependencies]

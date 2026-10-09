@@ -146,3 +146,57 @@ When `load_mode: cdc`, LakeLogic automatically handles soft deletes — marking 
 ## Fact Table Configuration
 
 See [Dimensional Modeling](dimensional_modeling.md) for the `fact:` block (transaction, periodic snapshot, accumulating snapshot, factless, aggregate).
+
+---
+
+## Relational Databases (Postgres, SQL Server, Azure SQL) via dlt
+
+LakeLogic writes to any [dlt destination](https://dlthub.com/docs/dlt-ecosystem/destinations/), including Postgres, SQL Server and Azure SQL, Snowflake and BigQuery. Use it in one of two ways:
+
+- **As the main target.** Set `format: dlt` and the table lands in the database instead of the lake. The table is named after the contract's `dataset`.
+- **As a secondary target.** Write to the lake as usual, and also copy the same rows into a database (`secondary_targets`).
+
+Install the destination's extras, for example `pip install "dlt[postgres]"` or `pip install "dlt[mssql]"`. SQL Server and Azure SQL also need ODBC Driver 18.
+
+!!! example "Example: Postgres as the main target, with merge"
+
+    ```yaml
+    primary_key: ["customer_id"]
+
+    materialization:
+      strategy: merge                       # append | overwrite | merge (merge needs primary_key)
+      format: dlt
+      dlt_destination: postgres
+      dlt_credentials: env:SALES_DB_URL     # postgresql://user:pass@host:5432/db?sslmode=require
+      dlt_dataset_name: sales               # the database schema
+    ```
+
+!!! example "Example: Delta in the lake, plus a copy in Azure SQL"
+
+    ```yaml
+    materialization:
+      strategy: append
+      format: delta
+      secondary_targets:
+        - format: dlt
+          dlt_destination: mssql
+          dlt_credentials: keyvault://my-vault/reporting-sql-url
+          dlt_dataset_name: reporting
+          table_name: customers
+          fail_on_error: true               # fail the run if the copy fails
+    ```
+
+**Credentials** never need to be in the contract. `dlt_credentials` accepts:
+
+| Value | Reads the secret from |
+| --- | --- |
+| `env:VAR` or `${ENV:VAR}` | an environment variable |
+| `keyvault://vault/secret` | Azure Key Vault (`DefaultAzureCredential`) |
+| `databricks://scope/key` | a Databricks secret scope |
+| *(omitted)* | dlt's `DESTINATION__<NAME>__CREDENTIALS` variable or `secrets.toml` |
+
+A literal connection string still works but logs a warning. Error messages never contain the password.
+
+**Strategies:** `append` appends, `overwrite` replaces the table, and `merge` updates and inserts on `primary_key`. `scd2` and fact loads are refused, because they need a lakehouse format such as Delta.
+
+**Secondary targets** run after every main format: Delta, Parquet, CSV, Iceberg or dlt. A secondary target with `fail_on_error: false` logs its error and lets the run continue. It also tries dlt's own configuration when no credentials are set.

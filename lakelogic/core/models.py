@@ -1325,11 +1325,14 @@ def _rule_to_odcs_quality(rule: Any, is_dataset: bool) -> Optional[Dict[str, Any
     """Reverse-map a LakeLogic quality rule object to an ODCS quality entry."""
     # Structured dataset unique rule
     if isinstance(rule, DatasetRuleUnique):
-        payload = rule.unique
-        field = payload if isinstance(payload, str) else (payload or {}).get("field")
+        from lakelogic.engines.base import unique_rule_columns
+
+        cols = unique_rule_columns(rule)
         item: Dict[str, Any] = {"type": "library", "rule": "uniqueCheck", "mustBe": 0}
-        if field:
-            item["column"] = field
+        if len(cols) == 1:
+            item["column"] = cols[0]
+        elif cols:
+            item["columns"] = cols
         return item
 
     # Plain QualityRule (row predicate or dataset aggregate)
@@ -1366,6 +1369,33 @@ class DataContract(BaseModel):
         """Intercept and convert ODCS YAML into LakeLogic dict before Pydantic parses it."""
         if isinstance(data, dict):
             return _convert_odcs_to_lakelogic(data)
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_misplaced_keys(cls, data: Any) -> Any:
+        """``primary_key`` and ``unique`` in the places agents most often put them by mistake.
+
+        The lenient runtime model used to drop them without a word, so a contract with
+        ``model.primary_key`` ran with NO key (merges by nothing, no uniqueness check). The
+        standard rejects these; the runtime now says where they belong instead of ignoring them.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("model"), dict):
+            return data
+        model = data["model"]
+        problems = []
+        if "primary_key" in model:
+            problems.append("`model.primary_key` → move it to the top level: `primary_key: [...]`")
+        for f in model.get("fields") or []:
+            if not isinstance(f, dict):
+                continue
+            name = f.get("name", "?")
+            if "primary_key" in f:
+                problems.append(f"field `{name}` has `primary_key:` → list it in the top-level `primary_key: [...]`")
+            if "unique" in f:
+                problems.append(f"field `{name}` has `unique:` → add `- unique: {name}` under `quality.dataset_rules`")
+        if problems:
+            raise ValueError("Misplaced keys in the contract:\n  - " + "\n  - ".join(problems))
         return data
 
     @model_validator(mode="before")

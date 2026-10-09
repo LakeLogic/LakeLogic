@@ -1,0 +1,25 @@
+# The usual lakehouse write (Delta), plus the same rows copied into a database for an app or
+# a report — `secondary_targets` run after every main format (Delta, Parquet, CSV, Iceberg, dlt).
+version: 1.0.0
+info:
+  title: Customers (lake + database copy)
+  version: 1.0.0
+dataset: customers
+primary_key: [customer_id]
+model:
+  fields:
+    - {name: customer_id, type: integer, required: true}
+    - {name: name, type: string, required: true}
+    - {name: city, type: string}
+    - {name: lifetime_value, type: double}
+materialization:
+  strategy: merge
+  format: delta
+  target_path: data/lake/silver_customers
+  secondary_targets:
+    - format: dlt
+      dlt_destination: postgres
+      dlt_credentials: env:DLT_TARGET_URL
+      dlt_dataset_name: lakelogic_dlt_demo
+      table_name: customers_reporting_copy
+      fail_on_error: true             # a failed copy fails the run

@@ -127,7 +127,7 @@ class TestWriteToSecondaryTargetsCredentialValidation:
             }
         ]
         monkeypatch.delenv("DESTINATION__POSTGRES__CREDENTIALS", raising=False)
-        with pytest.raises(ValueError, match="No credentials for 'postgres'"):
+        with pytest.raises(ValueError, match="No credentials for dlt destination 'postgres'"):
             mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "t")
 
     def test_warning_only_when_credentials_missing_and_fail_on_error_false(self, monkeypatch, caplog):
@@ -162,10 +162,17 @@ class TestWriteToSecondaryTargetsCredentialValidation:
 
 
 class TestWriteToSecondaryTargetsStrategyMapping:
+    def test_merge_with_a_primary_key_merges(self, monkeypatch):
+        rec = _install_fake_dlt(monkeypatch)
+        targets = [{"format": "dlt", "dlt_destination": "duckdb"}]
+        mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "t", strategy="merge", primary_key=["a"])
+        assert rec.resource_calls[0]["write_disposition"] == "merge"
+
     @pytest.mark.parametrize(
         "in_strategy,expected_disposition",
         [
-            ("merge", "merge"),
+            # dlt's merge needs a key; without one the rows are appended, and it now says so.
+            ("merge", "append"),
             ("append", "append"),
             ("overwrite", "replace"),
             ("something_unknown", "append"),  # default fallback
@@ -223,7 +230,7 @@ class TestWriteToSecondaryTargetsErrorHandling:
     def test_dlt_run_failure_reraises_when_fail_on_error_true(self, monkeypatch):
         _install_fake_dlt(monkeypatch, raise_on_run=True)
         targets = [{"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": True}]
-        with pytest.raises(RuntimeError, match="simulated dlt run failure"):
+        with pytest.raises(ValueError, match="dlt write to duckdb failed: simulated dlt run failure"):
             mat.write_to_secondary_targets(targets, pl.DataFrame({"a": [1]}), "t")
 
 
@@ -319,7 +326,7 @@ class TestRunSecondaryTargetsErrorPropagation:
         mat_cfg = SimpleNamespace(
             secondary_targets=[{"format": "dlt", "dlt_destination": "duckdb", "fail_on_error": True}]
         )
-        with pytest.raises(RuntimeError, match="simulated dlt run failure"):
+        with pytest.raises(ValueError, match="dlt write to duckdb failed: simulated dlt run failure"):
             mat._run_secondary_targets(mat_cfg, contract, pl.DataFrame({"a": [1]}), "append", [], 1, {})
 
     def test_unsupported_format_records_no_write(self, monkeypatch):

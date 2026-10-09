@@ -1367,28 +1367,17 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             arrays.append(pa.array([val], type=field.type))
         arrow_table = pa.table(arrays, schema=schema)
 
-        # Build dlt config from metadata
+        # One dlt writer (dlt_sink): secret references resolved, passwords scrubbed from errors.
+        from lakelogic.core.dlt_sink import destination_for, write_dlt
+
         dlt_config = {k: v for k, v in metadata.items() if k.startswith("dlt_")}
-        destination = dlt_config.get("dlt_destination", "duckdb")
-        credentials = dlt_config.get("dlt_credentials")
-
-        dest_kwargs = {}
-        if credentials:
-            dest_kwargs["credentials"] = credentials
-        for k, v in dlt_config.items():
-            if k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
-                dest_kwargs[k[4:]] = v
-
         rl_table_name = table_name
-
-        def _dest():
-            return (
-                _dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs) if dest_kwargs else destination
-            )
 
         def _has_dataset(name: str) -> bool:
             probe = _dlt.pipeline(
-                pipeline_name=f"lakelogic_{rl_table_name}_run_log_probe", destination=_dest(), dataset_name=name
+                pipeline_name=f"lakelogic_{rl_table_name}_run_log_probe",
+                destination=destination_for(dlt_config),
+                dataset_name=name,
             )
             with probe.sql_client() as client:
                 return bool(client.has_dataset())
@@ -1398,23 +1387,19 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         from lakelogic.core.metadata_names import resolve_dlt_run_log_dataset
 
         dataset_name = dlt_config.get("dlt_dataset_name") or resolve_dlt_run_log_dataset(_has_dataset)
-
-        @_dlt.resource(
-            name=rl_table_name,
-            write_disposition="append",
+        written = write_dlt(
+            arrow_table,
+            table_name=rl_table_name,
+            config={
+                **dlt_config,
+                "dlt_dataset_name": dataset_name,
+                "dlt_pipeline_name": f"lakelogic_{rl_table_name}_run_log",
+            },
+            strategy="append",
+            require_credentials=False,
         )
-        def _rl_sink():
-            yield arrow_table
-
-        pipeline = _dlt.pipeline(
-            pipeline_name=f"lakelogic_{rl_table_name}_run_log",
-            destination=_dest(),
-            dataset_name=dataset_name,
-        )
-
-        pipeline.run(_rl_sink())
-        logger.info(f"Wrote run log via dlt to {destination}:{dataset_name}.{rl_table_name}")
-        return f"{destination}:{dataset_name}.{rl_table_name}"
+        logger.info(f"Wrote run log via dlt to {written['target']}")
+        return written["target"]
 
     if backend == "snowflake":
         conn = _snowflake_log_connection(metadata)

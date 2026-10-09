@@ -1030,60 +1030,26 @@ def materialize_quarantine(
     # it sat after and was therefore dead code (the allowlist always raised
     # 'Unsupported quarantine format dlt' first).
     if resolved_format == "dlt":
-        try:
-            import dlt as _dlt
-            import pyarrow as pa
-        except ImportError as exc:
-            raise ImportError("dlt quarantine format requires the dlt package") from exc
+        # One dlt writer (dlt_sink): secret references resolved, passwords scrubbed from errors.
+        import pyarrow as pa
 
-        dlt_config = contract.quarantine.model_extra or {} if hasattr(contract.quarantine, "model_extra") else {}
-        destination = dlt_config.get("dlt_destination", "duckdb")
-        dataset_name = dlt_config.get("dlt_dataset_name", "quarantine")
-        credentials = dlt_config.get("dlt_credentials")
+        from lakelogic.core.dlt_sink import write_dlt
 
-        dest_kwargs = {}
-        if credentials:
-            dest_kwargs["credentials"] = credentials
-        for k, v in dlt_config.items():
-            if k.startswith("dlt_") and k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
-                dest_kwargs[k[4:]] = v
-
-        # Convert df to arrow
-        if isinstance(df, pa.Table):
-            arrow_data = df
-        elif hasattr(df, "to_arrow"):
-            arrow_data = df.to_arrow()
+        dlt_config = dict(getattr(contract.quarantine, "model_extra", None) or {})
+        dlt_config.setdefault("dlt_dataset_name", "quarantine")
+        q_table_name = getattr(contract.quarantine, "table", None) or dlt_config["dlt_dataset_name"]
+        dlt_config.setdefault("dlt_pipeline_name", f"lakelogic_{q_table_name}_quarantine")
+        if isinstance(df, pa.Table) or hasattr(df, "to_arrow"):
+            frame = df
         elif hasattr(df, "to_pandas"):
-            arrow_data = pa.Table.from_pandas(df.to_pandas())
+            frame = df.to_pandas()
         else:
-            arrow_data = pa.Table.from_pandas(_to_pandas(df))
-
-        rows_written = arrow_data.num_rows if hasattr(arrow_data, "num_rows") else 0
-        q_table_name = getattr(contract.quarantine, "table", None) or dataset_name
-
-        @_dlt.resource(
-            name=q_table_name,
-            write_disposition="append",
+            frame = _to_pandas(df)
+        written = write_dlt(
+            frame, table_name=q_table_name, config=dlt_config, strategy="append", require_credentials=False
         )
-        def _q_sink():
-            yield arrow_data
-
-        pipeline = _dlt.pipeline(
-            pipeline_name=f"lakelogic_{q_table_name}_quarantine",
-            destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
-            if dest_kwargs
-            else destination,
-            dataset_name=dataset_name,
-        )
-
-        pipeline.run(_q_sink())
-        logger.info(f"Wrote {rows_written} quarantined rows via dlt to {destination}:{dataset_name}.{q_table_name}")
-        return {
-            "target": f"{destination}:{dataset_name}.{q_table_name}",
-            "rows_written": rows_written,
-            "format": "dlt",
-            "dlt_destination": destination,
-        }
+        logger.info(f"Wrote {written['rows_written']} quarantined rows via dlt to {written['target']}")
+        return {k: written[k] for k in ("target", "rows_written", "format", "dlt_destination")}
 
     # ── File formats: csv / parquet ───────────────────────────────────────────
     if resolved_format not in ["csv", "parquet"]:

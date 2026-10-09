@@ -1068,94 +1068,19 @@ def _write_frame(
         except Exception as e:
             raise ValueError(f"DuckDB materialization failed: {e}")
     elif output_format == "dlt":
-        # ── dlt Destination Materialization ──────────────────────────────────
-        # Enables writing to any dlt-supported destination:
-        #   postgres, snowflake, bigquery, redshift, mssql, databricks,
-        #   motherduck, clickhouse, synapse, filesystem, and more.
-        #
-        # Contract YAML usage:
-        #   materialization:
-        #     format: dlt
-        #     dlt_destination: postgres          # any dlt destination name
-        #     dlt_credentials: "postgresql://user:pass@host:5432/db"
-        #     dlt_dataset_name: analytics        # optional schema/dataset
-        #     strategy: merge                    # append | merge | overwrite
-        #     primary_key: [id]                  # required for merge
-        try:
-            import dlt as _dlt
-            import pyarrow as pa
-            import re
+        # Low-level path (no contract): settings may ride on the path object. The contract
+        # path is materialize_dataframe → dlt_sink.write_dlt, which reads the contract itself.
+        from lakelogic.core.dlt_sink import write_dlt
 
-            # Extract dlt config from the path object or contract extras.
-            # When called from materialize_dataframe, the path carries the
-            # target table name.  The actual destination config is passed
-            # via the contract's materialization extras (extra="allow").
-            dlt_config = {}
-            if hasattr(path, "_dlt_config"):
-                dlt_config = path._dlt_config
-
-            destination = dlt_config.get("dlt_destination", "duckdb")
-            credentials = dlt_config.get("dlt_credentials")
-            dataset_name = dlt_config.get("dlt_dataset_name", "lakelogic")
-            write_disposition = dlt_config.get("write_disposition", "append")
-            primary_key = dlt_config.get("primary_key")
-
-            # Derive table name from path
-            table_name = (
-                re.sub(r"[^a-zA-Z0-9_]", "_", str(Path(path).stem))
-                if not hasattr(path, "_dlt_table")
-                else path._dlt_table
-            )
-            if not table_name:
-                table_name = "data"
-
-            # Convert DataFrame to Arrow for efficient transfer
-            if hasattr(df, "to_arrow"):
-                arrow_data = df.to_arrow()
-            elif hasattr(df, "to_arrow_table"):
-                arrow_data = df.to_arrow_table()
-            elif isinstance(df, pa.Table):
-                arrow_data = df
-            else:
-                # Pandas or other — go through Arrow
-                arrow_data = pa.Table.from_pandas(df) if hasattr(df, "columns") else df
-
-            @_dlt.resource(
-                name=table_name,
-                write_disposition=write_disposition,
-                primary_key=primary_key,
-            )
-            def _dlt_sink():
-                yield arrow_data
-
-            # Build destination kwargs dynamically from any dlt_* config
-            dest_kwargs = {}
-            if credentials:
-                dest_kwargs["credentials"] = credentials
-            for k, v in dlt_config.items():
-                if k.startswith("dlt_") and k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
-                    dest_kwargs[k[4:]] = v
-
-            pipeline = _dlt.pipeline(
-                pipeline_name=f"lakelogic_{table_name}",
-                destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
-                if dest_kwargs
-                else destination,
-                dataset_name=dataset_name,
-            )
-
-            load_info = pipeline.run(_dlt_sink())
-            logger.info(
-                f"dlt materialization complete: {table_name} → {destination} ({write_disposition}) | {load_info}"
-            )
-
-        except ImportError:
-            raise ValueError(
-                "dlt materialization requires the 'dlt' package and the target destination extras. "
-                "Install with: pip install dlt[postgres]  (or dlt[snowflake], dlt[bigquery], etc.)"
-            )
-        except Exception as e:
-            raise ValueError(f"dlt materialization failed: {e}")
+        config = dict(getattr(path, "_dlt_config", {}) or {})
+        table = getattr(path, "_dlt_table", None) or Path(path).stem
+        write_dlt(
+            df,
+            table_name=table,
+            config=config,
+            strategy=config.get("write_disposition", "append"),
+            primary_key=config.get("primary_key"),
+        )
     else:
         raise ValueError(f"Unsupported output format: {output_format}")
 
@@ -4187,6 +4112,18 @@ def _secondary_target_as_mapping(sec: Any) -> Dict[str, Any]:
     return dict(vars(sec))
 
 
+def _secondary_strategy(sec: dict, strategy: str, primary_key: Optional[list]) -> str:
+    """A secondary target's own ``strategy`` wins; else the primary's when dlt can express it
+    (append/overwrite/merge with a key); else append, as secondary writes always have."""
+    own = sec.get("strategy")
+    if own:
+        return own
+    s = (strategy or "append").lower()
+    if s in ("append", "overwrite") or (s == "merge" and primary_key):
+        return s
+    return "append"
+
+
 def _run_secondary_targets(
     mat, contract, df, strategy: str, primary_key: list, rows_written: int, result: dict
 ) -> dict:
@@ -4230,84 +4167,21 @@ def _run_secondary_targets(
         fail_on_error = sec.get("fail_on_error", False)
         try:
             if sec_format == "dlt":
-                import dlt as _dlt
-                import pyarrow as pa
+                from lakelogic.core.dlt_sink import write_dlt
 
-                destination = sec.get("dlt_destination", "duckdb")
-                credentials = sec.get("dlt_credentials")
-                dataset_name = sec.get("dlt_dataset_name", "lakelogic")
-
-                # Build destination kwargs dynamically
-                dest_kwargs = {}
-                if credentials:
-                    dest_kwargs["credentials"] = credentials
-                for k, v in sec.items():
-                    if k.startswith("dlt_") and k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
-                        dest_kwargs[k[4:]] = v
-
-                # ── Credentials validation ──────────────────────────────
-                if not credentials and destination not in _LOCAL_DESTINATIONS and "credentials" not in dest_kwargs:
-                    # Check if dlt can resolve from env vars / secrets.toml
-                    import os
-
-                    env_key = f"DESTINATION__{destination.upper()}__CREDENTIALS"
-                    env_cred = os.environ.get(env_key)
-                    if not env_cred:
-                        msg = (
-                            f"Secondary target [{i}]: No credentials for '{destination}'. "
-                            f"Set 'dlt_credentials' in the contract or the "
-                            f"'{env_key}' environment variable."
-                        )
-                        if fail_on_error:
-                            raise ValueError(msg)
-                        logger.warning(f"⚠️ {msg} — the write may fail.")
-
-                write_disp = {
-                    "merge": "merge",
-                    "append": "append",
-                    "overwrite": "replace",
-                }.get(strategy, "append")
-
-                # Convert to Arrow for efficient transfer
-                if isinstance(df, pa.Table):
-                    arrow_data = df
-                elif hasattr(df, "to_arrow"):
-                    arrow_data = df.to_arrow()
-                elif hasattr(df, "values"):  # pandas
-                    arrow_data = pa.Table.from_pandas(df)
-                else:
-                    arrow_data = df
-
-                pk = primary_key if primary_key else None
-
-                @_dlt.resource(
-                    name=sec_table,
-                    write_disposition=write_disp,
-                    primary_key=pk,
+                written = write_dlt(
+                    df,
+                    table_name=sec_table,
+                    config=sec,
+                    strategy=_secondary_strategy(sec, strategy, primary_key),
+                    primary_key=primary_key,
+                    require_credentials=bool(fail_on_error),
                 )
-                def _secondary_sink():
-                    yield arrow_data
-
-                pipeline = _dlt.pipeline(
-                    pipeline_name=f"lakelogic_{sec_table}_secondary",
-                    destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
-                    if dest_kwargs
-                    else destination,
-                    dataset_name=dataset_name,
-                )
-
-                pipeline.run(_secondary_sink())
                 logger.info(
-                    f"Secondary target [{i}]: {sec_table} \u2192 {destination} ({write_disp}, {rows_written} rows)"
+                    f"Secondary target [{i}]: {written['target']} ({written['write_disposition']}, "
+                    f"{written['rows_written']} rows)"
                 )
-                result["secondary_writes"].append(
-                    {
-                        "target": f"{destination}:{dataset_name}.{sec_table}",
-                        "format": "dlt",
-                        "dlt_destination": destination,
-                        "rows_written": rows_written,
-                    }
-                )
+                result["secondary_writes"].append(written)
             else:
                 logger.warning(f"Secondary target [{i}]: unsupported format '{sec_format}' (only 'dlt' is supported)")
         except Exception as e:
@@ -4359,83 +4233,22 @@ def write_to_secondary_targets(
         fail_on_error = sec.get("fail_on_error", False)
         try:
             if sec_format == "dlt":
-                import dlt as _dlt
-                import pyarrow as pa
+                from lakelogic.core.dlt_sink import write_dlt
 
-                destination = sec.get("dlt_destination", "duckdb")
-                credentials = sec.get("dlt_credentials")
-                dataset_name = sec.get("dlt_dataset_name", "lakelogic")
-
-                # Build destination kwargs dynamically
-                dest_kwargs = {}
-                if credentials:
-                    dest_kwargs["credentials"] = credentials
-                for k, v in sec.items():
-                    if k.startswith("dlt_") and k not in ("dlt_destination", "dlt_credentials", "dlt_dataset_name"):
-                        dest_kwargs[k[4:]] = v
-
-                # Credentials validation
-                if not credentials and destination not in _LOCAL_DESTINATIONS and "credentials" not in dest_kwargs:
-                    import os
-
-                    env_key = f"DESTINATION__{destination.upper()}__CREDENTIALS"
-                    env_cred = os.environ.get(env_key)
-                    if not env_cred:
-                        msg = (
-                            f"Secondary target [{i}]: No credentials for '{destination}'. "
-                            f"Set 'dlt_credentials' in the contract or the "
-                            f"'{env_key}' environment variable."
-                        )
-                        if fail_on_error:
-                            raise ValueError(msg)
-                        logger.warning(f"\u26a0\ufe0f {msg} \u2014 the write may fail.")
-
-                write_disp = {
-                    "merge": "merge",
-                    "append": "append",
-                    "overwrite": "replace",
-                }.get(strategy, "append")
-
-                # Convert to Arrow
-                if isinstance(df, pa.Table):
-                    arrow_data = df
-                elif hasattr(df, "to_arrow"):
-                    arrow_data = df.to_arrow()
-                elif hasattr(df, "values"):  # pandas
-                    arrow_data = pa.Table.from_pandas(df)
-                else:
-                    arrow_data = df
-
-                pk = primary_key if primary_key else None
-                rows = arrow_data.num_rows if hasattr(arrow_data, "num_rows") else 0
                 sec_table = sec.get("table_name", table_name)
-
-                @_dlt.resource(
-                    name=sec_table,
-                    write_disposition=write_disp,
-                    primary_key=pk,
+                written = write_dlt(
+                    df,
+                    table_name=sec_table,
+                    config=sec,
+                    strategy=_secondary_strategy(sec, strategy, primary_key),
+                    primary_key=primary_key,
+                    require_credentials=bool(fail_on_error),
                 )
-                def _sec_sink():
-                    yield arrow_data
-
-                pipeline = _dlt.pipeline(
-                    pipeline_name=f"lakelogic_{sec_table}_secondary",
-                    destination=_dlt.destinations.__dict__.get(destination, destination)(**dest_kwargs)
-                    if dest_kwargs
-                    else destination,
-                    dataset_name=dataset_name,
+                logger.info(
+                    f"Secondary target [{i}]: {written['target']} ({written['write_disposition']}, "
+                    f"{written['rows_written']} rows)"
                 )
-
-                pipeline.run(_sec_sink())
-                logger.info(f"Secondary target [{i}]: {sec_table} \u2192 {destination} ({write_disp}, {rows} rows)")
-                results.append(
-                    {
-                        "target": f"{destination}:{dataset_name}.{sec_table}",
-                        "format": "dlt",
-                        "dlt_destination": destination,
-                        "rows_written": rows,
-                    }
-                )
+                results.append(written)
             else:
                 logger.warning(f"Secondary target [{i}]: unsupported format '{sec_format}'")
         except Exception as e:
@@ -4707,7 +4520,7 @@ def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strate
     return {"target": f"{catalog}.{schema}.{table}", "rows_written": arrow.num_rows, "format": "ducklake", "op": op}
 
 
-def materialize_dataframe(
+def _materialize_primary(
     df: Any,
     contract,
     target_path: Optional[Path] = None,
@@ -4758,6 +4571,20 @@ def materialize_dataframe(
 
     if output_format:
         resolved_format = output_format
+
+    if (resolved_format or getattr(mat, "format", None) or "").lower() == "dlt":
+        # A database target has no file path, so this runs before the path check below.
+        # The contract's own dlt_* keys say where (dlt_sink: one writer, secrets resolved).
+        from lakelogic.core.dlt_sink import write_dlt
+
+        config = {k: v for k, v in mat.model_dump().items() if k.startswith("dlt_") and v is not None}
+        return write_dlt(
+            df,
+            table_name=getattr(mat, "table_name", None) or getattr(contract, "dataset", None) or "data",
+            config=config,
+            strategy=mat.strategy,
+            primary_key=list(contract.primary_key or []),
+        )
     if resolved_format:
         resolved_format = resolved_format.lower()
 
@@ -5495,6 +5322,59 @@ def materialize_dataframe(
 
 
 # ── Delta Compaction ─────────────────────────────────────────────────────────
+
+
+def materialize_dataframe(
+    df: Any,
+    contract,
+    target_path: Optional[Path] = None,
+    *,
+    output_format: Optional[str] = None,
+    engine_name: Optional[str] = None,
+    storage_options: Optional[Dict[str, str]] = None,
+    incremental_metadata: Optional[Dict[str, Any]] = None,
+    is_reprocess: bool = False,
+) -> Dict[str, Any]:
+    """
+    Materialize validated data to the configured target, then to every ``secondary_targets``
+    entry.
+
+    Secondary targets used to run only after a Delta write, so a Parquet, CSV, Iceberg or dlt
+    primary skipped them without a word. Paths that already ran them (Delta) are left as they
+    are; every other path gets them here.
+
+    Args:
+        df: Engine dataframe (polars/pandas/duckdb/spark).
+        contract: DataContract with materialization settings.
+        target_path: Optional override target path.
+        output_format: Optional override output format.
+        engine_name: Optional engine name for engine-specific write paths.
+
+    Returns:
+        Metadata about the write (target, rows_written, format, secondary_writes).
+    """
+    result = _materialize_primary(
+        df,
+        contract,
+        target_path,
+        output_format=output_format,
+        engine_name=engine_name,
+        storage_options=storage_options,
+        incremental_metadata=incremental_metadata,
+        is_reprocess=is_reprocess,
+    )
+    mat = getattr(contract, "materialization", None) if contract is not None else None
+    if not result or mat is None or not getattr(mat, "secondary_targets", None) or "secondary_writes" in result:
+        return result
+    return _run_secondary_targets(
+        mat,
+        contract,
+        df,
+        (mat.strategy or "append").lower(),
+        list(contract.primary_key or []),
+        result.get("rows_written") or 0,
+        result,
+    )
 
 
 def optimize_delta(
