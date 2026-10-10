@@ -3,6 +3,7 @@ from typing import Optional, Dict
 from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
 from lakelogic.core.bootstrap import ContractDraft, ContractInferrer, infer_contract
 from lakelogic.core.describe_columns import describe_columns
+from lakelogic.core.profile import profile
 from lakelogic.core.generator import DataGenerator
 from lakelogic.core.incremental import Boundary, IncrementalBoundary
 from lakelogic.core.streaming import StreamingSimulator
@@ -222,6 +223,8 @@ __all__ = [
     "ContractInferrer",
     "ContractDraft",
     "describe_columns",
+    # Data profiling
+    "profile",
     # Schema API
     "validate_contract",
     "contract_schema",

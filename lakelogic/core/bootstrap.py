@@ -45,6 +45,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
+from lakelogic.core.pii_names import PII_NAME_TOKENS, pii_columns_by_name
+
 # ---------------------------------------------------------------------------
 # Polars dtype → LakeLogic contract type mapping
 # ---------------------------------------------------------------------------
@@ -1565,49 +1567,9 @@ class ContractInferrer:
         return rules
 
     # ── PII keyword / regex patterns (no external deps) ─────────
-    _PII_COLUMN_KEYWORDS: Dict[str, str] = {
-        "email": "email",
-        "e_mail": "email",
-        "email_address": "email",
-        "user_email": "email",
-        "phone": "phone",
-        "phone_number": "phone",
-        "mobile": "phone",
-        "telephone": "phone",
-        "cell": "phone",
-        "ssn": "ssn",
-        "social_security": "ssn",
-        "social_security_number": "ssn",
-        "first_name": "person_name",
-        "last_name": "person_name",
-        "full_name": "person_name",
-        "name": "person_name",
-        "address": "address",
-        "street": "address",
-        "city": "address",
-        "zip": "address",
-        "zipcode": "address",
-        "zip_code": "address",
-        "postal_code": "address",
-        "postcode": "address",
-        "date_of_birth": "date_of_birth",
-        "dob": "date_of_birth",
-        "birth_date": "date_of_birth",
-        "birthday": "date_of_birth",
-        "credit_card": "credit_card",
-        "card_number": "credit_card",
-        "cc_number": "credit_card",
-        "ip_address": "ip_address",
-        "ip": "ip_address",
-        "user_ip": "ip_address",
-        "passport": "passport",
-        "passport_number": "passport",
-        "drivers_license": "drivers_license",
-        "license_number": "drivers_license",
-        "national_id": "national_id",
-        "tax_id": "tax_id",
-        "tin": "tax_id",
-    }
+    # Name-based PII: whole tokens, not substrings -- one definition shared with the
+    # profiler (lakelogic.core.pii_names). Kept as an attribute for compatibility.
+    _PII_COLUMN_KEYWORDS: Dict[str, str] = PII_NAME_TOKENS
 
     # Pre-compiled pattern to identify date-like values (ISO 8601, etc.)
     # so they are excluded from PII value scanning.
@@ -1635,15 +1597,10 @@ class ContractInferrer:
         No external dependencies required. This runs automatically even
         when ``detect_pii=False`` to provide baseline PII awareness.
         """
-        pii_map: Dict[str, str] = {}
+        # Column names: whole-token match (lakelogic.core.pii_names), not substrings.
+        pii_map: Dict[str, str] = pii_columns_by_name(df.columns)
         for col_name in df.columns:
             col_lower = col_name.lower().replace(" ", "_")
-
-            # Check column name against PII keywords
-            for keyword, pii_type in self._PII_COLUMN_KEYWORDS.items():
-                if keyword in col_lower:
-                    pii_map[col_name] = pii_type
-                    break
 
             # If not detected by name, check sample values.
             # Skip columns whose name signals a date/timestamp — their values

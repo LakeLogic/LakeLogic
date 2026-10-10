@@ -1759,5 +1759,56 @@ def scan(
         raise typer.Exit(1)
 
 
+@app.command(rich_help_panel="Data Tooling")
+def profile(
+    source: str = typer.Argument(..., help="Table name (with --engine) or a file/folder path (local, s3://, abfss://, gs://)."),
+    engine: Optional[str] = typer.Option(
+        None, "--engine", "-e", help="Profile a TABLE by SQL pushdown: duckdb | databricks | <SQLAlchemy URL>."
+    ),
+    database: Optional[str] = typer.Option(None, "--database", help="DuckDB database file (with --engine duckdb)."),
+    warehouse_id: Optional[str] = typer.Option(
+        None, "--warehouse-id", help="Databricks SQL warehouse id (else DATABRICKS_WAREHOUSE_ID)."
+    ),
+    fmt: Optional[str] = typer.Option(None, "--format", "-f", help="csv | json | parquet | delta (auto-detected)."),
+    max_files: int = typer.Option(10, "--max-files", help="CSV/JSON: newest N files to sample."),
+    max_mb: float = typer.Option(64.0, "--max-mb", help="CSV/JSON: cap on bytes read, in MB."),
+    no_distincts: bool = typer.Option(False, "--no-distincts", help="Parquet/Delta: metadata only, skip the read."),
+    contract: Optional[Path] = typer.Option(
+        None, "--contract", "-c", help="Contract whose pii/classification marks sensitive columns."
+    ),
+    sensitive: Optional[str] = typer.Option(None, "--sensitive", help="Comma-separated extra sensitive columns."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write the JSON here (default: stdout)."),
+):
+    """Profile a dataset: one versioned JSON document of statistics, never rows."""
+    import json as _json
+
+    from lakelogic.core.profile import DatabricksStatementExecutor, DuckDBExecutor, profile as _profile
+
+    connection = None
+    if engine:
+        if engine == "duckdb":
+            connection = DuckDBExecutor(database=database)
+        elif engine == "databricks":
+            connection = DatabricksStatementExecutor(warehouse_id=warehouse_id)
+        else:
+            connection = engine  # SQLAlchemy URL
+    doc = _profile(
+        source,
+        connection=connection,
+        fmt=fmt,
+        max_files=max_files,
+        max_bytes=int(max_mb * 1024 * 1024),
+        read_distincts=not no_distincts,
+        contract=str(contract) if contract else None,
+        sensitive_columns=[s.strip() for s in sensitive.split(",") if s.strip()] if sensitive else None,
+    )
+    text = _json.dumps(doc, indent=2, default=str)
+    if output:
+        output.write_text(text, encoding="utf-8")
+        typer.secho(f"Profile written to {output}", fg=typer.colors.GREEN, err=True)
+    else:
+        typer.echo(text)
+
+
 if __name__ == "__main__":
     app()  # pragma: no cover
