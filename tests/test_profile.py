@@ -401,4 +401,3 @@ def test_cli_profile_table_and_folder(tmp_path):
     r = runner.invoke(app, ["profile", str(_landing(tmp_path)), "--max-files", "1", "-o", str(out)])
     assert r.exit_code == 0, r.output
     assert json.loads(out.read_text())["sampling"]["files_scanned"] == 1
-

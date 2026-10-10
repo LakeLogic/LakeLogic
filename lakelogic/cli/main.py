@@ -1761,7 +1761,9 @@ def scan(
 
 @app.command(rich_help_panel="Data Tooling")
 def profile(
-    source: str = typer.Argument(..., help="Table name (with --engine) or a file/folder path (local, s3://, abfss://, gs://)."),
+    source: str = typer.Argument(
+        ..., help="Table name (with --engine) or a file/folder path (local, s3://, abfss://, gs://)."
+    ),
     engine: Optional[str] = typer.Option(
         None, "--engine", "-e", help="Profile a TABLE by SQL pushdown: duckdb | databricks | <SQLAlchemy URL>."
     ),
