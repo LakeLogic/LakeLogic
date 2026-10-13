@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.75.0] — 2026-10-13
+
+### Added
+
+- Deprecate natural_key in favor of primary_key; update related documentation and tests
 ## [1.74.0] — 2026-10-10
 
 ### Added
@@ -875,6 +880,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.75.0]: https://github.com/lakelogic/LakeLogic/compare/v1.74.0...v1.75.0
 [1.74.0]: https://github.com/lakelogic/LakeLogic/compare/v1.73.0...v1.74.0
 [1.73.0]: https://github.com/lakelogic/LakeLogic/compare/v1.72.0...v1.73.0
 [1.72.0]: https://github.com/lakelogic/LakeLogic/compare/v1.71.0...v1.72.0
