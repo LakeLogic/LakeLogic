@@ -22,7 +22,7 @@ from loguru import logger
 from lakelogic.core.models import DataContract
 from lakelogic.core.observer import RemoteObserver
 from lakelogic.core.processor import DataProcessor
-from lakelogic.core.registry import DomainRegistry, RegistryContract
+from lakelogic.core.registry import DomainRegistry, RegistryContract, table_root
 from lakelogic.pipeline.impact import (
     build_restatement_impact,
     format_restatement_impact,
@@ -535,8 +535,9 @@ class LakehousePipeline:
                 if not mat.get("format"):
                     mat["format"] = "delta"
             else:
-                if not mat.get("target_path") and storage.domain_catalog:
-                    mat["target_path"] = f"{storage.domain_catalog}.{table_name}"
+                _root = table_root(storage, target_layer)
+                if not mat.get("target_path") and _root:
+                    mat["target_path"] = f"{_root}.{table_name}"
             if not mat.get("location") and _layer_root:
                 mat["location"] = f"{_layer_root}/{table_name}"
 
@@ -588,8 +589,9 @@ class LakehousePipeline:
                         source.setdefault("format", "delta")
                         contract_dict["source"] = source
                 else:
-                    if source.get("type") == "table" and not source.get("path") and storage.domain_catalog:
-                        source["path"] = f"{storage.domain_catalog}.{table_name}"
+                    _src_root = table_root(storage, target_layer)
+                    if source.get("type") == "table" and not source.get("path") and _src_root:
+                        source["path"] = f"{_src_root}.{table_name}"
                         contract_dict["source"] = source
 
         # ── Step 2: Auto-prefix table: in UC mode ────────────────────────
@@ -1022,8 +1024,9 @@ class LakehousePipeline:
                 elif _table_name and self.spark and self.registry:
                     # Derive from domain_catalog + table_name (UC convention)
                     storage = self.registry.storage  # pragma: no cover
-                    if storage and storage.domain_catalog:  # pragma: no cover
-                        main_table = f"{storage.domain_catalog}.{_table_name}"  # pragma: no cover
+                    _reset_root = table_root(storage, layer)  # pragma: no cover
+                    if storage and _reset_root:  # pragma: no cover
+                        main_table = f"{_reset_root}.{_table_name}"  # pragma: no cover
                         try:  # pragma: no cover
                             self.spark.sql(f"DROP TABLE IF EXISTS {main_table}")  # pragma: no cover
                             logger.info(f"  Dropped main table {main_table}")  # pragma: no cover

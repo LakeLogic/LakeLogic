@@ -237,6 +237,11 @@ class RegistryStorage(BaseModel):
     # Databricks Volume / operational roots
     landing_root: Optional[str] = None
     contract_root: Optional[str] = None
+    # WHERE A LAYER'S TABLES LIVE, when each layer has its own schema: "`catalog`.bronze".
+    # Set, a contract's table is `{<layer>_root}.{table_name}`; unset, it is
+    # `{domain_catalog}.{table_name}` (one schema per domain, layer in the table name).
+    # A catalog per domain is these three plus `domain_catalog: "`catalog`.lakelogic"` for the
+    # engine's own tables. See `table_root`.
     bronze_root: Optional[str] = None
     silver_root: Optional[str] = None
     gold_root: Optional[str] = None
@@ -251,6 +256,21 @@ class RegistryStorage(BaseModel):
     quarantine_path: Optional[str] = None
     slo_checks_path: Optional[str] = None  # cloud/local path for _slo_checks table
     slo_checks_table: Optional[str] = None  # UC table name (e.g. "`catalog`.domain._slo_checks")
+
+
+def table_root(storage: Any, layer: Optional[str]) -> Optional[str]:
+    """The catalog.schema a layer's tables are written to and read from.
+
+    ``storage.<layer>_root`` when the estate gives each layer its own schema, else
+    ``storage.domain_catalog``. THE definition: the pipeline (target, source, reset) and the
+    SLO checks all name a table through it. Before 2026-10-13 only the SLO checks read
+    ``<layer>_root``; the pipeline wrote every layer to ``domain_catalog``, so a schema per
+    layer could be measured but not built.
+    """
+    if storage is None:
+        return None
+    root = getattr(storage, f"{(layer or '').strip().lower()}_root", None) if layer else None
+    return root or getattr(storage, "domain_catalog", None)
 
 
 class RegistryContract(BaseModel):
