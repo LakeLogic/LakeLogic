@@ -345,7 +345,6 @@ metadata:
 
 dataset: "customers"            # SQL alias in transformations
 primary_key: ["customer_id"]    # Used for merge, dedup, uniqueness
-natural_key: ["customer_id"]    # Business key for SCD2 (optional)
 tier: "silver"                  # Explicit medallion tier
 ```
 

@@ -24,6 +24,28 @@ def _yaml():
         return "pyyaml", yaml
 
 
+def _list_indent(text: str) -> int:
+    """How far a file indents a list's dash under its key: 0 or 2 spaces.
+
+    ruamel writes 0 unless told. A file written the other way was re-indented on every list
+    line, so a one-line migration read as hundreds of changed lines (2026-10-13)."""
+    prev_indent = None
+    for line in text.splitlines():
+        stripped = line.lstrip(" ")
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(stripped)
+        if stripped.startswith("- ") and prev_indent is not None:
+            return 2 if indent > prev_indent else 0
+        prev_indent = indent if stripped.rstrip().endswith(":") else None
+    return 0
+
+
+def _comment_count(text: str) -> int:
+    """Lines that are, or end in, a comment."""
+    return sum(1 for line in text.splitlines() if line.lstrip().startswith("#") or " #" in line)
+
+
 def _files(paths: List[Path]) -> List[Path]:
     out: List[Path] = []
     for p in paths:
@@ -53,6 +75,10 @@ def migrate_options_command(
     for path in _files(paths):
         text = path.read_text(encoding="utf-8")
         try:
+            if kind == "ruamel":
+                # Write lists the way this file already does.
+                offset = _list_indent(text)
+                y.indent(mapping=2, sequence=2 + offset, offset=offset)
             data = y.load(text) if kind == "ruamel" else y.safe_load(text)
         except Exception as exc:  # noqa: BLE001 - report and continue
             typer.echo(f"{path}: not YAML ({exc.__class__.__name__}) — skipped")
@@ -74,7 +100,11 @@ def migrate_options_command(
                 if kind == "ruamel":
                     buf = io.StringIO()
                     y.dump(data, buf)
-                    path.write_text(buf.getvalue(), encoding="utf-8")
+                    out = buf.getvalue()
+                    lost = _comment_count(text) - _comment_count(out)
+                    if lost > 0:
+                        typer.echo(f"  ! {lost} comment line(s) could not be kept: compare the file before committing")
+                    path.write_text(out, encoding="utf-8")
                 else:
                     path.write_text(y.safe_dump(data, sort_keys=False), encoding="utf-8")
     verb = "rewrote" if write else "would rewrite (use --write)"

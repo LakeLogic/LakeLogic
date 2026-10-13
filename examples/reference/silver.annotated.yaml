@@ -43,9 +43,8 @@ source:
   load_mode: full              # full | incremental | cdc
   # flatten_nested: [attributes]          # expand Bronze JSON-string columns into parent_child columns
 
-# - PRIMARY / NATURAL KEY -
-primary_key: [order_id]        # logical key of the Silver table
-natural_key: [order_id]        # business key used by SCD2 (stable across versions)
+# - PRIMARY KEY -
+primary_key: [order_id]        # the business key: merge, dedup and SCD2 all match on it
 
 # -----------------------------------------------------------------------------
 # LINKS - reference/lookup datasets made available to transformations & joins.

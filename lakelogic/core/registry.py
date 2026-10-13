@@ -612,6 +612,7 @@ class DomainRegistry(BaseModel):
     # entity -> {dotted path: Provenance} for the system -> contract ownership fold.
     # Populated by from_yaml; lets a caller explain why a contract has the owner it has.
     _ownership_provenance: Dict[str, Any] = {}
+    _inferred_dependencies: Dict[str, List[str]] = {}
 
     @model_validator(mode="after")
     def validate_unique_entities(self) -> "DomainRegistry":
@@ -941,6 +942,16 @@ class DomainRegistry(BaseModel):
                             c_dict[k].setdefault(sub_k, _resolve_placeholders(sub_v, storage_vars))
 
                 c.contract_dict = c_dict
+
+        # A contract's `source` and `links` already say what it reads; `depends_on` need only
+        # state what they do not. Inferred here, once, so ordering, parallel waves and the
+        # impact report all see the same dependencies.
+        from lakelogic.pipeline.impact import infer_dependencies
+
+        inferred = infer_dependencies(registry.contracts)
+        registry._inferred_dependencies = inferred
+        for entity, names in sorted(inferred.items()):
+            logger.debug("depends_on inferred from source/links: {} -> {}", entity, ", ".join(names))
 
         registry._ownership_provenance = _ownership_provenance
 

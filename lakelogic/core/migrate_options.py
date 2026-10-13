@@ -78,6 +78,25 @@ def migrate_source(source: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     return src, notes
 
 
+def _tail_comment(mapping: Any, key: str) -> Any:
+    """The comment ruamel hangs after ``key``'s value (the lines up to the next key), if any."""
+    items = getattr(getattr(mapping, "ca", None), "items", None)
+    tokens = items.get(key) if isinstance(items, dict) else None
+    return tokens[2] if tokens and len(tokens) > 2 and tokens[2] is not None else None
+
+
+def _last_scalar_slot(mapping: Any) -> Tuple[Any, Any]:
+    """``(mapping, key)`` of the last line the mapping writes: its last key, followed into a
+    nested mapping. A comment hung there is written after the whole block."""
+    while isinstance(mapping, dict) and mapping:
+        key = list(mapping)[-1]
+        if isinstance(mapping[key], dict) and mapping[key] and hasattr(mapping[key], "ca"):
+            mapping = mapping[key]
+            continue
+        return mapping, key
+    return None, None
+
+
 def migrate_contract(contract: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     """Migrate ``contract['source']`` IN PLACE. ``(notes, remaining_problems)``."""
     source = contract.get("source")
@@ -92,11 +111,26 @@ def migrate_contract(contract: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         for key, val in new.items():
             if key == "options" and isinstance(source.get("options"), dict):
                 opts = source["options"]
+                # ruamel hangs the comment lines that FOLLOW a key on that key. A key that moves
+                # (into engine_options) or is renamed took them with it: a two-line note between
+                # `options:` and `load_mode:` vanished from a real contract (2026-10-13). Collect
+                # them from every key that goes, and hang them where the block now ends.
+                orphaned = [c for c in (_tail_comment(opts, k) for k in list(opts) if k not in val) if c]
                 for k in list(opts):
                     if k not in val:
                         del opts[k]
                 for k, v in val.items():
+                    if isinstance(v, dict) and not hasattr(v, "ca") and hasattr(opts, "ca"):
+                        v = type(opts)(v)  # a commented map, so the block's end can carry a comment
                     opts[k] = v
+                if orphaned:
+                    holder, last = _last_scalar_slot(opts)
+                    if holder is not None and hasattr(holder, "ca"):
+                        kept = _tail_comment(holder, last)
+                        first = orphaned[0]
+                        tail = "".join(c.value for c in orphaned[1:]) + (kept.value if kept else "")
+                        first.value = first.value + tail
+                        holder.ca.items[last] = [None, None, first, None]
             else:
                 source[key] = val
     return notes, check_source_options(dict(source))

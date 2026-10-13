@@ -529,6 +529,37 @@ def check_scd2_no_track_columns(raw, name, ctx):  # SCD-001
     return []
 
 
+def check_natural_key_deprecated(raw, name, ctx):  # KEY-003
+    """`natural_key` is parsed but no engine reads it. `primary_key` is the business key the
+    load matches on, so a contract that states both says the same thing twice — or, on SCD2,
+    uses `natural_key` for what is really a uniqueness rule."""
+    nk = raw.get("natural_key")
+    if not nk:
+        return []
+    pk = raw.get("primary_key") or []
+    if list(nk) == list(pk):
+        fix = "Remove `natural_key`: it repeats `primary_key`."
+    else:
+        cols = ", ".join(str(c) for c in nk)
+        fix = (
+            f"Remove `natural_key` and state it as a rule: `quality.dataset_rules: "
+            f"[{{unique: {{columns: [{cols}]}}}}]`."
+        )
+    return [
+        _c(
+            name,
+            "KEY-003",
+            "info",
+            "keys",
+            "`natural_key` is deprecated and is not read by the engine. `primary_key` is the "
+            "business key every load matches on; the surrogate key is declared under "
+            "`materialization`.",
+            field="natural_key",
+            suggestion=fix,
+        )
+    ]
+
+
 def check_unpartitioned_landing(raw, name, ctx):  # SRC-001 — Bronze only (landing ingest)
     # Landing zones are a Bronze concern; Silver/Gold read from upstream Delta.
     if _layer(raw) != "bronze":
@@ -718,6 +749,7 @@ _CHECKS: List[Callable[[Dict[str, Any], str, Optional[GovernanceContext]], List[
     check_no_delete_strategy,
     check_no_quality,
     check_scd2_no_track_columns,
+    check_natural_key_deprecated,
     check_unpartitioned_landing,
     check_no_volume_freshness_slo,
     check_append_on_resumable_stream,

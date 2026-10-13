@@ -81,3 +81,60 @@ def test_nothing_is_deferred_when_the_contract_is_not_scd2():
     empty set must defer nothing at all."""
     rule = _rule("driver_sk_unique", "SELECT COUNT(*) - COUNT(DISTINCT driver_sk) FROM t")
     assert EngineAdapter._rule_targets_deferred_column(rule, set()) is None
+
+
+def test_spark_defers_the_same_rules_the_other_engines_do():
+    """Spark evaluated a rule over an SCD2-injected column and recorded a failure, so a
+    contract that was healthy on Polars and DuckDB was Degraded on Databricks (2026-10-13).
+    Driven with a stub session: only a rule over a real column reaches Spark.
+    """
+    from lakelogic.engines.spark import SparkAdapter
+
+    ran = []
+
+    class _Session:
+        def sql(self, text):
+            ran.append(text)
+            return SimpleNamespace(collect=lambda: [[0]])
+
+    frame = SimpleNamespace(createOrReplaceTempView=lambda name: None, sparkSession=_Session())
+    rules = [
+        SimpleNamespace(
+            name="driver_sk_unique",
+            description=None,
+            must_be_between=None,
+            must_be_less_than=1,
+            must_be_greater_than=None,
+            sql="SELECT COUNT(*) - COUNT(DISTINCT driver_sk) FROM {dataset}",
+        ),
+        SimpleNamespace(
+            name="driver_version_unique",
+            description=None,
+            must_be_between=None,
+            must_be_less_than=1,
+            must_be_greater_than=None,
+            sql="SELECT COUNT(*) - COUNT(DISTINCT driver_id, effective_from) FROM {dataset}",
+        ),
+        SimpleNamespace(
+            name="driver_id_present",
+            description=None,
+            must_be_between=None,
+            must_be_less_than=1,
+            must_be_greater_than=None,
+            sql="SELECT COUNT(*) FROM {dataset} WHERE driver_id IS NULL",
+        ),
+    ]
+    engine = SimpleNamespace(
+        get_dataset_rules=lambda: rules,
+        contract=SimpleNamespace(dataset="dim_driver"),
+        _scd2_injected_columns=_injected,
+        _rule_targets_deferred_column=EngineAdapter._rule_targets_deferred_column,
+        dataset_rule_results=[],
+    )
+    SparkAdapter._run_dataset_rules(engine, frame)
+
+    by_name = {r["name"]: r for r in engine.dataset_rule_results}
+    assert by_name["driver_sk_unique"]["deferred"] is True and by_name["driver_sk_unique"]["passed"] is None
+    assert by_name["driver_version_unique"]["deferred"] is True  # names effective_from
+    assert by_name["driver_id_present"]["passed"] is True
+    assert ran == ["SELECT COUNT(*) FROM dim_driver WHERE driver_id IS NULL"]  # only the real-column rule ran

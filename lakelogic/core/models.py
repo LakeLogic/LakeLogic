@@ -1501,7 +1501,10 @@ class DataContract(BaseModel):
 
     dataset: Optional[str] = None
     primary_key: List[str] = Field(default_factory=list)
-    natural_key: List[str] = Field(default_factory=list)  # Business key for SCD2 (repeated across versions)
+    # DEPRECATED (2026-10-13): parsed so existing contracts load, never read by an engine.
+    # `primary_key` IS the business key (SCD2 matches versions on it; the surrogate key is
+    # `materialization.scd2.surrogate_key`). State version uniqueness as a `unique` rule.
+    natural_key: List[str] = Field(default_factory=list)
 
     # LINEAGE & OBSERVABILITY
     lineage: Optional[LineageConfig] = Field(default_factory=LineageConfig)

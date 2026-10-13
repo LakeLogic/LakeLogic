@@ -45,7 +45,6 @@ def _contract(**unknown_member):
                 ]
             },
             "primary_key": ["city_code"],
-            "natural_key": ["city_code"],
             "materialization": {
                 "strategy": "merge",
                 "scd1": {

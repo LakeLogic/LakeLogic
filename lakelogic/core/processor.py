@@ -765,6 +765,38 @@ def _first_bytes_are_text(path: str, encoding: str, opener: Any = None, size: in
     return None
 
 
+def _engine_options(source: Any) -> Dict[str, Any]:
+    """``source.options.engine_options``: the contract's engine-specific extras (OLC 0.21)."""
+    opts = getattr(source, "options", None) or {}
+    extra = opts.get("engine_options") if isinstance(opts, dict) else None
+    return dict(extra) if isinstance(extra, dict) else {}
+
+
+def _apply_spark_engine_options(reader: Any, source: Any) -> Any:
+    """Pass ``engine_options`` to a Spark file reader as written, one ``.option()`` each.
+
+    OLC says they are "passed through as they are"; until 2026-10-13 nothing read them, so an
+    option that existed only here was dropped without a word. Called BEFORE the framework sets
+    its own reader options, so a declared key (``has_header``, ``multiline`` ...) still decides.
+    """
+    for key, value in _engine_options(source).items():
+        reader = reader.option(str(key), value if isinstance(value, (str, int, float, bool)) else str(value))
+    return reader
+
+
+def _warn_engine_options_unused(source: Any, engine_name: str) -> None:
+    """Say so when an engine other than Spark is given ``engine_options``: they are Spark reader
+    options by name (``recursiveFileLookup``, ``mergeSchema`` ...) and are not applied here."""
+    extra = _engine_options(source)
+    if extra and engine_name not in ("spark", "pyspark"):
+        logger.warning(
+            "source.options.engine_options ({}) is applied by the Spark file reader only; "
+            "the {} engine does not use it.",
+            ", ".join(sorted(map(str, extra))),
+            engine_name,
+        )
+
+
 def _spark_csv_options(options: Dict[str, Any]) -> Dict[str, str]:
     """The CSV dialect settings Spark's CSV reader can express, as Spark option names.
 
@@ -2753,6 +2785,7 @@ class DataProcessor:
         path_val = source or (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
+        _warn_engine_options_unused(self.contract.source, self.engine_name)
         path = self._resolve_source_path(path_val)
 
         # Resolve catalog table names (Unity Catalog, Fabric LakeDB, Synapse) to storage paths
@@ -4088,6 +4121,7 @@ class DataProcessor:
                         df = self._spark_read_file_source(spark, fmt, file_paths, path)
                         if df is None:
                             reader = spark.read.format(fmt)
+                            reader = _apply_spark_engine_options(reader, self.contract.source)
                             if fmt == "csv":
                                 _csv_o = getattr(self.contract.source, "options", None) or {}
                                 reader = reader.option(

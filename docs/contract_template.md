@@ -496,12 +496,9 @@ primary_key:
   - "customer_id"
 # Business value: Uniqueness validation, merge operations
 
-# OPTIONAL: Business/natural key for SCD2 dimensions
-# In SCD2, primary_key is the surrogate (unique per row), while natural_key
-# is the business key that repeats across versions.
-natural_key:
-  - "customer_id"
-# Business value: Separates surrogate identity from business identity
+# In SCD2, primary_key is still the BUSINESS key: versions are matched on it. The surrogate
+# key (unique per version) is named under materialization.scd2.surrogate_key.
+# `natural_key` is deprecated and is not read; state version uniqueness as a `unique` rule.
 
 # ============================================================
 # 7. SCHEMA MODEL
@@ -2292,8 +2289,7 @@ source:
   watermark_strategy: "pipeline_log"
 
 dataset: "customers"
-primary_key: ["customer_key"]
-natural_key: ["customer_id"]
+primary_key: ["customer_id"]
 
 model:
   fields:

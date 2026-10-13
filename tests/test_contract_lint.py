@@ -299,3 +299,25 @@ def test_report_summary_and_severity(tmp_path):
     assert report.summary["warning"] >= 1  # DEL-001 + QLT-001 at least
     assert report.worst_severity in {"warning", "critical", "info"}
     assert all(isinstance(f, ContractFinding) for f in report.findings)
+
+
+def test_natural_key_is_flagged_as_deprecated():  # KEY-003
+    """No engine reads `natural_key`: `primary_key` is the business key every load matches on."""
+    same = [
+        f
+        for f in review_contract_dict({"primary_key": ["city_code"], "natural_key": ["city_code"]}, "dim_city")
+        if f.check_id == "KEY-003"
+    ]
+    assert len(same) == 1 and same[0].severity == "info" and same[0].field == "natural_key"
+    assert same[0].suggestion == "Remove `natural_key`: it repeats `primary_key`."
+
+    version = [
+        f
+        for f in review_contract_dict(
+            {"primary_key": ["driver_id"], "natural_key": ["driver_id", "effective_from"]}, "dim_driver"
+        )
+        if f.check_id == "KEY-003"
+    ]
+    assert "unique: {columns: [driver_id, effective_from]}" in version[0].suggestion
+
+    assert not [f for f in review_contract_dict({"primary_key": ["city_code"]}, "dim_city") if f.check_id == "KEY-003"]

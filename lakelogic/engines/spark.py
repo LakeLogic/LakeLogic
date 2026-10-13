@@ -252,7 +252,29 @@ class SparkAdapter(EngineAdapter):
 
         import re
 
+        # SCD2 columns (surrogate key, effective_from/to, is_current, version) are written by
+        # the materializer AFTER this runs. Polars and DuckDB defer a rule over one of them;
+        # Spark evaluated it against a frame that does not have the column yet and recorded
+        # a failure, so the same contract was healthy locally and Degraded on Databricks.
+        deferred_cols = self._scd2_injected_columns()
+
         for rule in rules:
+            target = self._rule_targets_deferred_column(rule, deferred_cols)
+            if target:
+                logger.info(
+                    f"Quality Check (Spark): {rule.name} | DEFERRED — '{target}' is injected by the "
+                    "SCD2 materializer after validation, so it cannot be evaluated here"
+                )
+                self.dataset_rule_results.append(
+                    {
+                        "name": rule.name,
+                        "value": f"not evaluated — '{target}' is materialized after validation",
+                        "passed": None,
+                        "deferred": True,
+                        "description": rule.description,
+                    }
+                )
+                continue
             try:
                 # Same placeholders as the Polars and DuckDB engines: `{dataset}` / `{source}`
                 # were sent to Spark verbatim (PARSE_SYNTAX_ERROR at '{'), then bare `source`.

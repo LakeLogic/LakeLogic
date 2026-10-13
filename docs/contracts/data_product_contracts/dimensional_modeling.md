@@ -42,8 +42,7 @@ materialization:
 Tracks every change with validity windows. Auto-generates surrogate keys, version numbers, and change reason.
 
 ```yaml
-primary_key: ["customer_key"]             # Surrogate (unique per row)
-natural_key: ["customer_id"]               # Business key (repeats across versions)
+primary_key: ["customer_id"]              # Business key: versions are matched on it
 
 materialization:
   strategy: "scd2"
@@ -198,7 +197,7 @@ The `'-1'` fallback maps to the unknown member row in the dimension.
 | Pattern | Strategy | Primary Key | Extra Config |
 |---|---|---|---|
 | SCD1 dim | `merge` | Business key | `scd1:` block |
-| SCD2 dim | `scd2` | Surrogate key + `natural_key:` | `scd2:` block |
+| SCD2 dim | `scd2` | Business key | `scd2:` block (names the surrogate key) |
 | Transaction fact | `append` | Event key | `fact: { type: transaction }` |
 | Periodic snapshot | `append` | Entity + snapshot date | `fact: { type: periodic_snapshot }` |
 | Accumulating snapshot | `merge` | Entity key | `fact: { type: accumulating_snapshot, milestone_dates: [...] }` |

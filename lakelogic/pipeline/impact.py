@@ -86,6 +86,94 @@ def build_forward_edges(contracts: Sequence[Any]) -> ForwardEdges:
     return ForwardEdges(by_entity=by_entity, graph=graph, in_degree=in_degree, unresolved=unresolved)
 
 
+# ── Dependencies a contract already states in `source` and `links` ───────────
+
+
+def _table_name(ref: Any) -> str:
+    """The table a `source.path` / link `path` names: its last dotted part, unquoted.
+
+    ``table:`cat`.marketplace.gold_dim_driver`` -> ``gold_dim_driver``. A file path
+    (anything with a slash) names no table.
+    """
+    text = str(ref or "").strip()
+    if text.lower().startswith("table:"):
+        text = text[6:]
+    if not text or "/" in text or "\\" in text:
+        return ""
+    return text.replace("`", "").replace('"', "").split(".")[-1].strip()
+
+
+def _own_names(contract: Any) -> List[str]:
+    """Every name another contract may use for this one: its entity, dataset and table."""
+    doc = getattr(contract, "contract_dict", None) or {}
+    info = doc.get("info") or {}
+    names = [getattr(contract, "entity", ""), doc.get("dataset"), _table_name(info.get("table_name"))]
+    return [str(n) for n in names if n]
+
+
+def infer_dependencies(contracts: Sequence[Any]) -> Dict[str, List[str]]:
+    """Add to each contract's ``depends_on`` the same-layer contracts its ``source`` and
+    ``links`` read, and return what was added (entity -> inferred names).
+
+    A fact that links to ``gold_dim_driver`` depends on it whether or not the registry says
+    so; before this, forgetting the ``depends_on`` line ran the fact first and every key fell
+    back to the unknown member. The registry's ``depends_on`` stays the place for a dependency
+    the contract does not show (a table read inside custom logic, a business ordering).
+
+    * Same layer only: the layer sequence already orders bronze, silver and gold.
+    * Explicit ``depends_on`` is never removed or reordered; inferred names are appended.
+    * An inferred edge that would close a cycle is left out, so inference can never make a
+      registry that ran yesterday unrunnable.
+    """
+    by_layer: Dict[str, List[Any]] = defaultdict(list)
+    for c in contracts:
+        if getattr(c, "contract_dict", None):
+            by_layer[getattr(c, "layer", "")].append(c)
+
+    added: Dict[str, List[str]] = {}
+    for layer_contracts in by_layer.values():
+        owner: Dict[str, str] = {}
+        for c in layer_contracts:
+            for name in _own_names(c):
+                owner.setdefault(name, c.entity)
+
+        deps: Dict[str, List[str]] = {c.entity: list(getattr(c, "depends_on", None) or []) for c in layer_contracts}
+
+        def _reaches(start: str, goal: str) -> bool:
+            seen, stack = set(), [start]
+            while stack:
+                node = stack.pop()
+                if node == goal:
+                    return True
+                if node in seen:
+                    continue
+                seen.add(node)
+                stack.extend(d for d in deps.get(node, []) if d in deps)
+            return False
+
+        for c in layer_contracts:
+            doc = c.contract_dict or {}
+            refs: List[Any] = []
+            source = doc.get("source") or {}
+            if isinstance(source, dict):
+                refs.append(source.get("path"))
+                refs.append(source.get("table"))
+            for link in doc.get("links") or []:
+                if isinstance(link, dict):
+                    refs.extend([link.get("path"), link.get("table"), link.get("name")])
+            for ref in refs:
+                target = owner.get(_table_name(ref)) or owner.get(str(ref or ""))
+                if not target or target == c.entity or target in deps[c.entity]:
+                    continue
+                if _reaches(target, c.entity):  # would close a cycle
+                    continue
+                deps[c.entity].append(target)
+                added.setdefault(c.entity, []).append(target)
+            if c.entity in added:
+                c.depends_on = deps[c.entity]
+    return added
+
+
 def topological_order(contracts: Sequence[Any]) -> List[Any]:
     """Order *contracts* by ``depends_on`` (Kahn).
 
