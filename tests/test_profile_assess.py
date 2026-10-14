@@ -1,5 +1,6 @@
 """Profiling with findings, sampling and path selection -- in Core, so the CLI, a job in your own
 platform and the LakeLogic service produce the same findings."""
+
 import duckdb
 import pytest
 
@@ -29,10 +30,12 @@ def ex():
 CONTRACT = {
     "info": {"title": "Trips", "domain": "mobility"},
     "primary_key": ["trip_id"],
-    "model": {"fields": [
-        {"name": "trip_id", "type": "long", "required": True},
-        {"name": "payment", "type": "string", "accepted_values": ["card", "cash"]},
-    ]},
+    "model": {
+        "fields": [
+            {"name": "trip_id", "type": "long", "required": True},
+            {"name": "payment", "type": "string", "accepted_values": ["card", "cash"]},
+        ]
+    },
 }
 
 
@@ -101,11 +104,14 @@ def test_text_ranges_are_hidden(ex):
     assert pay["min"] is None and pay["max"] is None and pay["range_hidden"] == "text"
 
 
-@pytest.mark.parametrize("path,table,expected", [
-    ("raw/finance", "raw/finance/invoices", True),
-    ("raw/fin", "raw/finance/invoices", False),
-    ("main.sales", "main.sales.orders", True),
-])
+@pytest.mark.parametrize(
+    "path,table,expected",
+    [
+        ("raw/finance", "raw/finance/invoices", True),
+        ("raw/fin", "raw/finance/invoices", False),
+        ("main.sales", "main.sales.orders", True),
+    ],
+)
 def test_one_path_rule_for_buckets_and_warehouses(path, table, expected):
     assert ps.under_path(table, path) is expected
 
@@ -122,8 +128,16 @@ def test_choices_are_refused_with_the_reason():
 
 def test_change_since_the_previous_run():
     def run(null_pct, rc):
-        return {"tables": [{"name": "t", "status": "profiled",
-                            "profile": {"row_count": rc, "columns": [{"name": "c", "null_pct": null_pct}]}}]}
+        return {
+            "tables": [
+                {
+                    "name": "t",
+                    "status": "profiled",
+                    "profile": {"row_count": rc, "columns": [{"name": "c", "null_pct": null_pct}]},
+                }
+            ]
+        }
+
     d = ps.diff(run(30.0, 120), run(10.0, 100))
     assert d["tables"][0]["row_count_change"] == 20
     assert d["tables"][0]["null_shifts"][0]["delta_points"] == 20.0
@@ -139,11 +153,15 @@ def test_a_folder_of_files_gets_the_same_findings(tmp_path):
 
     d = tmp_path / "landing" / "payments"
     d.mkdir(parents=True)
-    rows = ["payment_id,method,paid_at"] + [f"{i},{'card' if i % 2 else 'cash'},2024-01-0{1 + i % 9} 10:00:00"
-                                            for i in range(200)] + ["7,card,2024-01-05 10:00:00"]
+    rows = (
+        ["payment_id,method,paid_at"]
+        + [f"{i},{'card' if i % 2 else 'cash'},2024-01-0{1 + i % 9} 10:00:00" for i in range(200)]
+        + ["7,card,2024-01-05 10:00:00"]
+    )
     (d / "part-1.csv").write_text("\n".join(rows), encoding="utf-8")
-    e = assess_files(str(d), name="landing/payments", contract={"primary_key": ["payment_id"],
-                                                                 "info": {"title": "Payments"}})
+    e = assess_files(
+        str(d), name="landing/payments", contract={"primary_key": ["payment_id"], "info": {"title": "Payments"}}
+    )
     assert ("confirmed", "Duplicate primary key (payment_id)") in _titles(e)
     s = assess_files(str(d), settings={"mode": "sample", "sample_unit": "percent", "sample_percent": 10})
     assert s["profile"]["sampling"]["rows_available"] == 201

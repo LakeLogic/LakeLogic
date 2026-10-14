@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.79.0] — 2026-10-14
+
+### Added
+
+- **materialization**: The table follows its contract - declared columns are added before a MERGE, widening types change in place, other type changes stop with SchemaChangeNeedsMigration and lakelogic migrate rewrites the table
+- **profile**: Findings, sampling and path selection in Core - assess_table, assess_files and assess_tables return confirmed issues, potential issues and control gaps; samples are rows or a percentage, newest first or at random; paths select every table under a folder or catalog.schema; lakelogic profile --findings / --sample-rows / --sample-percent
 ## [1.78.0] — 2026-10-14
 
 ### Added
@@ -930,6 +936,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.79.0]: https://github.com/lakelogic/LakeLogic/compare/v1.78.0...v1.79.0
 [1.78.0]: https://github.com/lakelogic/LakeLogic/compare/v1.77.1...v1.78.0
 [1.77.1]: https://github.com/lakelogic/LakeLogic/compare/v1.77.0...v1.77.1
 [1.77.0]: https://github.com/lakelogic/LakeLogic/compare/v1.76.0...v1.77.0

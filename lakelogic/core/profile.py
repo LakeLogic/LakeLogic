@@ -125,7 +125,6 @@ def _contract_sensitive_columns(contract: Any) -> set:
     if contract is None:
         return set()
     if isinstance(contract, (str, Path)):
-
         with open(contract, encoding="utf-8") as fh:
             from lakelogic.core.contract_yaml import load_contract_yaml
 

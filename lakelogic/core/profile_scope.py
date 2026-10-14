@@ -15,6 +15,7 @@ with no timestamp column is sampled at random, and the result says so.
 **What it adds up to.** Per-table metrics, worst-first ordering, the run summary and the change
 since the previous run. Not-measured columns are counted, never zeroed.
 """
+
 from __future__ import annotations
 
 import re
@@ -46,8 +47,13 @@ EMPTY_THRESHOLD_PCT = pf.EMPTY_THRESHOLD_PCT
 NULL_SHIFT_POINTS = 5.0
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
-    "tables": None, "paths": None, "mode": MODE_FULL, "sample_rows": SAMPLE_ROWS_DEFAULT,
-    "sample_order": ORDER_NEWEST, "sample_unit": UNIT_ROWS, "sample_percent": SAMPLE_PERCENT_DEFAULT,
+    "tables": None,
+    "paths": None,
+    "mode": MODE_FULL,
+    "sample_rows": SAMPLE_ROWS_DEFAULT,
+    "sample_order": ORDER_NEWEST,
+    "sample_unit": UNIT_ROWS,
+    "sample_percent": SAMPLE_PERCENT_DEFAULT,
 }
 
 _FRESHNESS_NAME = re.compile(r"(updated|modified|event|created|timestamp|ingest|loaded)", re.I)
@@ -98,8 +104,15 @@ def normalize_settings(raw: Optional[Dict[str, Any]], *, max_tables: int = MAX_T
         tables = list(dict.fromkeys(str(t).strip() for t in tables if str(t).strip())) or None
         if tables and len(tables) > max_tables:
             raise ValueError(f"Choose at most {max_tables} tables.")
-    return {"tables": tables, "paths": paths, "mode": mode, "sample_rows": rows, "sample_order": order,
-            "sample_unit": unit, "sample_percent": pct}
+    return {
+        "tables": tables,
+        "paths": paths,
+        "mode": mode,
+        "sample_rows": rows,
+        "sample_order": order,
+        "sample_unit": unit,
+        "sample_percent": pct,
+    }
 
 
 def under_path(table: str, path: str) -> bool:
@@ -129,8 +142,10 @@ def choose_tables(every: Sequence[str], settings: Dict[str, Any], max_tables: in
     picked = set(chosen) | {t for t in every if any(under_path(t, p) for p in paths)}
     names = [t for t in every if t in picked]
     if len(names) > max_tables:
-        raise ValueError(f"{len(names):,} tables chosen; the limit per run is {max_tables:,}. "
-                         f"Choose a narrower path, or split the run.")
+        raise ValueError(
+            f"{len(names):,} tables chosen; the limit per run is {max_tables:,}. "
+            f"Choose a narrower path, or split the run."
+        )
     return names
 
 
@@ -151,8 +166,14 @@ def freshness_column(schema: Sequence[Tuple[str, str]]) -> Optional[str]:
     return (named or temporal or [None])[0]
 
 
-def sample_sql(from_sql: str, schema: Sequence[Tuple[str, str]], settings: Dict[str, Any],
-               quote: Callable[[str], str], *, dialect: str) -> Tuple[str, str]:
+def sample_sql(
+    from_sql: str,
+    schema: Sequence[Tuple[str, str]],
+    settings: Dict[str, Any],
+    quote: Callable[[str], str],
+    *,
+    dialect: str,
+) -> Tuple[str, str]:
     """``(select, selection)`` drawing the sample from ``from_sql``. ``selection`` says what was
     read (``newest 10% by event_at``, ``1,000 random rows``)."""
     col = freshness_column(schema) if settings.get("sample_order") == ORDER_NEWEST else None
@@ -162,15 +183,17 @@ def sample_sql(from_sql: str, schema: Sequence[Tuple[str, str]], settings: Dict[
         p = float(settings["sample_percent"])
         if col:
             # The newest p% of rows: one window pass, same SQL in DuckDB, Databricks and Snowflake.
-            return (f"SELECT * FROM {from_sql} QUALIFY row_number() OVER (ORDER BY {quote(col)} DESC NULLS LAST)"
-                    f" <= ceil(count(*) OVER () * {p} / 100)", f"newest {p:g}% by {col}")
+            return (
+                f"SELECT * FROM {from_sql} QUALIFY row_number() OVER (ORDER BY {quote(col)} DESC NULLS LAST)"
+                f" <= ceil(count(*) OVER () * {p} / 100)",
+                f"newest {p:g}% by {col}",
+            )
         if duck:
             return (f"SELECT * FROM {from_sql} USING SAMPLE {p} PERCENT (bernoulli, 42)", f"{p:g}% at random{why}")
         return (f"SELECT * FROM {from_sql} TABLESAMPLE ({p} PERCENT) REPEATABLE (42)", f"{p:g}% at random{why}")
     n = int(settings["sample_rows"])
     if col:
-        return (f"SELECT * FROM {from_sql} ORDER BY {quote(col)} DESC NULLS LAST LIMIT {n}",
-                f"newest first by {col}")
+        return (f"SELECT * FROM {from_sql} ORDER BY {quote(col)} DESC NULLS LAST LIMIT {n}", f"newest first by {col}")
     if duck:
         return (f"SELECT * FROM {from_sql} USING SAMPLE reservoir({n} ROWS) REPEATABLE (42)", f"at random{why}")
     return (f"SELECT * FROM {from_sql} TABLESAMPLE ({n} ROWS) REPEATABLE (42)", f"{n:,} random rows{why}")
@@ -206,22 +229,33 @@ def worst_first_key(entry: Dict[str, Any]) -> Tuple:
     m = entry.get("metrics") or {}
     unmeasured = entry.get("status") != "profiled" or m.get("pct_columns_with_nulls") is None
     kinds = entry.get("finding_counts") or {}
-    return (1 if unmeasured else 0, -(kinds.get("confirmed") or 0), -(kinds.get("potential") or 0),
-            -(m.get("columns_over_threshold") or 0), -(m.get("pct_columns_with_nulls") or 0.0),
-            str(entry.get("name") or ""))
+    return (
+        1 if unmeasured else 0,
+        -(kinds.get("confirmed") or 0),
+        -(kinds.get("potential") or 0),
+        -(m.get("columns_over_threshold") or 0),
+        -(m.get("pct_columns_with_nulls") or 0.0),
+        str(entry.get("name") or ""),
+    )
 
 
 def order_worst_first(entries: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(entries, key=worst_first_key)
 
 
-def summarize(tables: Sequence[Dict[str, Any]], caps: Optional[Dict[str, Any]] = None,
-              *, sources_found: Optional[int] = None) -> Dict[str, Any]:
+def summarize(
+    tables: Sequence[Dict[str, Any]], caps: Optional[Dict[str, Any]] = None, *, sources_found: Optional[int] = None
+) -> Dict[str, Any]:
     """The run's headline figures. Not-measured columns are COUNTED, never zeroed."""
     profiled = [t for t in tables if t.get("status") == "profiled"]
     metrics = [table_metrics(t.get("profile")) for t in profiled]
-    methods = sorted({str(((t.get("profile") or {}).get("sampling") or {}).get("method"))
-                      for t in profiled if (t.get("profile") or {}).get("sampling")})
+    methods = sorted(
+        {
+            str(((t.get("profile") or {}).get("sampling") or {}).get("method"))
+            for t in profiled
+            if (t.get("profile") or {}).get("sampling")
+        }
+    )
     return {
         "tables_found": sources_found if sources_found is not None else len(tables),
         "tables_profiled": len(profiled),
@@ -240,8 +274,9 @@ def summarize(tables: Sequence[Dict[str, Any]], caps: Optional[Dict[str, Any]] =
     }
 
 
-def diff(latest: Optional[Dict[str, Any]], previous: Optional[Dict[str, Any]],
-         *, points: float = NULL_SHIFT_POINTS) -> Optional[Dict[str, Any]]:
+def diff(
+    latest: Optional[Dict[str, Any]], previous: Optional[Dict[str, Any]], *, points: float = NULL_SHIFT_POINTS
+) -> Optional[Dict[str, Any]]:
     """Change since the previous run; ``None`` when there is no previous one."""
     if not latest or not previous:
         return None
@@ -261,17 +296,25 @@ def diff(latest: Optional[Dict[str, Any]], previous: Optional[Dict[str, Any]],
                 continue
             delta = round(float(c["null_pct"]) - float(o["null_pct"]), 2)
             if abs(delta) >= points:
-                shifts.append({"column": c["name"], "before": o["null_pct"], "after": c["null_pct"],
-                               "delta_points": delta})
-        out.append({
-            "name": t["name"], "row_count_before": rc_a, "row_count_after": rc_b,
-            "row_count_change": (rc_b - rc_a) if (rc_a is not None and rc_b is not None) else None,
-            "null_shifts": shifts,
-        })
+                shifts.append(
+                    {"column": c["name"], "before": o["null_pct"], "after": c["null_pct"], "delta_points": delta}
+                )
+        out.append(
+            {
+                "name": t["name"],
+                "row_count_before": rc_a,
+                "row_count_after": rc_b,
+                "row_count_change": (rc_b - rc_a) if (rc_a is not None and rc_b is not None) else None,
+                "null_shifts": shifts,
+            }
+        )
     names_prev = set(prev)
     names_now = {t["name"] for t in latest.get("tables") or [] if t.get("status") == "profiled"}
     return {
-        "previous_id": previous.get("id"), "previous_started_at": previous.get("started_at"),
-        "points": points, "tables": out,
-        "tables_added": sorted(names_now - names_prev), "tables_removed": sorted(names_prev - names_now),
+        "previous_id": previous.get("id"),
+        "previous_started_at": previous.get("started_at"),
+        "points": points,
+        "tables": out,
+        "tables_added": sorted(names_now - names_prev),
+        "tables_removed": sorted(names_prev - names_now),
     }

@@ -27,6 +27,7 @@ a name in a column called ``screen_name`` showed two full names (2026-10-13).
 **Not checked is not passing.** A check that could not run is recorded with its reason and
 produces no finding; the table's ``checks`` entry says it was not run.
 """
+
 from __future__ import annotations
 
 import re
@@ -55,8 +56,12 @@ LIFECYCLE: Tuple[Tuple[str, ...], ...] = (
     ("dropoff", "completed", "ended", "end", "arrived", "delivered", "finished", "closed"),
 )
 #: Pairs checked independently of the lifecycle: (earlier, later).
-ORDERED_PAIRS: Tuple[Tuple[str, str], ...] = (("created", "updated"), ("valid_from", "valid_to"),
-                                              ("start", "end"), ("signup", "updated"))
+ORDERED_PAIRS: Tuple[Tuple[str, str], ...] = (
+    ("created", "updated"),
+    ("valid_from", "valid_to"),
+    ("start", "end"),
+    ("signup", "updated"),
+)
 
 _TS_SUFFIX = re.compile(r"_(at|time|ts|timestamp|date|datetime|on)$", re.I)
 _TEXT_TYPES = ("CHAR", "STRING", "TEXT", "VARCHAR", "UUID", "JSON")
@@ -124,10 +129,10 @@ def lifecycle_pairs(columns: Sequence[Dict[str, Any]]) -> List[Tuple[str, str]]:
     staged = sorted(((s, c["name"]) for c in temporal if (s := _stage_of(c["name"])) is not None))
     pairs: List[Tuple[str, str]] = []
     for i, (stage, name) in enumerate(staged):
-        later = [n for s, n in staged[i + 1:] if s > stage]
+        later = [n for s, n in staged[i + 1 :] if s > stage]
         if later:
-            nxt_stage = min(s for s, n in staged[i + 1:] if s > stage)
-            pairs += [(name, n) for s, n in staged[i + 1:] if s == nxt_stage]
+            nxt_stage = min(s for s, n in staged[i + 1 :] if s > stage)
+            pairs += [(name, n) for s, n in staged[i + 1 :] if s == nxt_stage]
     names = {c["name"].lower(): c["name"] for c in temporal}
     for a, b in ORDERED_PAIRS:
         ca = next((names[n] for n in names if _TS_SUFFIX.sub("", n) == a), None)
@@ -147,8 +152,9 @@ def _singular(word: str) -> str:
     return word
 
 
-def candidate_key(entity: str, columns: Sequence[Dict[str, Any]],
-                  distincts: Dict[str, Optional[int]], rows: Optional[int]) -> Optional[str]:
+def candidate_key(
+    entity: str, columns: Sequence[Dict[str, Any]], distincts: Dict[str, Optional[int]], rows: Optional[int]
+) -> Optional[str]:
     """The column most likely to identify a row when the contract declares no key.
 
     Among ``id`` / ``*_id`` columns that are mostly distinct (``KEY_MIN_DISTINCT_RATIO``),
@@ -182,8 +188,13 @@ def candidate_key(entity: str, columns: Sequence[Dict[str, Any]],
 class Relation:
     """What the checks query: a FROM clause, a quoting rule, and a way to fetch a few rows."""
 
-    def __init__(self, from_sql: str, quote: Callable[[str], str],
-                 fetch: Callable[[str, int], List[tuple]], text_type: str = "VARCHAR"):
+    def __init__(
+        self,
+        from_sql: str,
+        quote: Callable[[str], str],
+        fetch: Callable[[str, int], List[tuple]],
+        text_type: str = "VARCHAR",
+    ):
         self.from_sql = from_sql
         self.text_type = text_type
         self.quote = quote
@@ -205,9 +216,14 @@ def exact_distincts(rel: Relation, names: Sequence[str]) -> Dict[str, Optional[i
 
 def frequencies(rel: Relation, name: str, limit: int = FREQUENCY_MAX_DISTINCT + 1) -> List[Tuple[Any, int]]:
     c = rel.quote(name)
-    return [(r[0], int(r[1])) for r in rel.fetch(
-        f"SELECT {c}, COUNT(*) AS n FROM {rel.from_sql} WHERE {c} IS NOT NULL "
-        f"GROUP BY {c} ORDER BY n DESC LIMIT {int(limit)}", limit)]
+    return [
+        (r[0], int(r[1]))
+        for r in rel.fetch(
+            f"SELECT {c}, COUNT(*) AS n FROM {rel.from_sql} WHERE {c} IS NOT NULL "
+            f"GROUP BY {c} ORDER BY n DESC LIMIT {int(limit)}",
+            limit,
+        )
+    ]
 
 
 def duplicate_keys(rel: Relation, key: Sequence[str]) -> Dict[str, int]:
@@ -217,7 +233,8 @@ def duplicate_keys(rel: Relation, key: Sequence[str]) -> Dict[str, int]:
     not_null = " AND ".join(f"{q(k)} IS NOT NULL" for k in key)
     row = rel.one(
         f"SELECT COUNT(*), COALESCE(SUM(n), 0) FROM (SELECT {cols}, COUNT(*) AS n FROM {rel.from_sql} "
-        f"WHERE {not_null} GROUP BY {cols} HAVING COUNT(*) > 1) d")
+        f"WHERE {not_null} GROUP BY {cols} HAVING COUNT(*) > 1) d"
+    )
     return {"repeated_keys": int(row[0] or 0), "rows_involved": int(row[1] or 0)}
 
 
@@ -227,7 +244,8 @@ def order_violations(rel: Relation, earlier: str, later: str) -> Dict[str, int]:
     b = f"TRY_CAST({rel.quote(later)} AS TIMESTAMP)"
     row = rel.one(
         f"SELECT COUNT(*) FILTER (WHERE {a} IS NOT NULL AND {b} IS NOT NULL), "
-        f"COUNT(*) FILTER (WHERE {b} < {a}) FROM {rel.from_sql}")
+        f"COUNT(*) FILTER (WHERE {b} < {a}) FROM {rel.from_sql}"
+    )
     return {"compared": int(row[0] or 0), "violations": int(row[1] or 0)}
 
 
@@ -240,8 +258,9 @@ def _as_number(v: Any) -> Optional[float]:
         return None
 
 
-def outside_accepted(rel: Relation, name: str, accepted: Sequence[Any],
-                     type_name: Optional[str] = None) -> List[Tuple[Any, int]]:
+def outside_accepted(
+    rel: Relation, name: str, accepted: Sequence[Any], type_name: Optional[str] = None
+) -> List[Tuple[Any, int]]:
     """Values (with counts) of ``name`` that are not in ``accepted``.
 
     A numeric column with all-numeric accepted values is compared AS NUMBERS: a CSV reader types
@@ -251,13 +270,23 @@ def outside_accepted(rel: Relation, name: str, accepted: Sequence[Any],
     nums = [_as_number(v) for v in accepted]
     if not is_text_type(type_name) and type_name and all(n is not None for n in nums):
         allowed = ", ".join(repr(float(n)) for n in nums)
-        return [(r[0], int(r[1])) for r in rel.fetch(
-            f"SELECT {c} AS v, COUNT(*) AS n FROM {rel.from_sql} WHERE {c} IS NOT NULL "
-            f"AND TRY_CAST({c} AS DOUBLE) NOT IN ({allowed}) GROUP BY v ORDER BY n DESC LIMIT 20", 20)]
+        return [
+            (r[0], int(r[1]))
+            for r in rel.fetch(
+                f"SELECT {c} AS v, COUNT(*) AS n FROM {rel.from_sql} WHERE {c} IS NOT NULL "
+                f"AND TRY_CAST({c} AS DOUBLE) NOT IN ({allowed}) GROUP BY v ORDER BY n DESC LIMIT 20",
+                20,
+            )
+        ]
     allowed = ", ".join("'" + str(v).replace("'", "''") + "'" for v in accepted)
-    return [(r[0], int(r[1])) for r in rel.fetch(
-        f"SELECT CAST({c} AS {rel.text_type}) AS v, COUNT(*) AS n FROM {rel.from_sql} WHERE {c} IS NOT NULL "
-        f"AND CAST({c} AS {rel.text_type}) NOT IN ({allowed}) GROUP BY v ORDER BY n DESC LIMIT 20", 20)]
+    return [
+        (r[0], int(r[1]))
+        for r in rel.fetch(
+            f"SELECT CAST({c} AS {rel.text_type}) AS v, COUNT(*) AS n FROM {rel.from_sql} WHERE {c} IS NOT NULL "
+            f"AND CAST({c} AS {rel.text_type}) NOT IN ({allowed}) GROUP BY v ORDER BY n DESC LIMIT 20",
+            20,
+        )
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,13 +306,17 @@ def contract_rules(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "primary_key": [str(k) for k in pk],
         "required": [f["name"] for f in fields if f.get("required") is True],
-        "accepted_values": {f["name"]: list(dict.fromkeys(f["accepted_values"]))
-                            for f in fields if isinstance(f.get("accepted_values"), list)},
+        "accepted_values": {
+            f["name"]: list(dict.fromkeys(f["accepted_values"]))
+            for f in fields
+            if isinstance(f.get("accepted_values"), list)
+        },
         "pii": [f["name"] for f in fields if f.get("pii") is True],
         "freshness": (sl.get("freshness") if isinstance(sl, dict) else None),
         "quality_rules": len(((doc.get("quality") or {}).get("row_rules") or []))
-                         + len(((doc.get("quality") or {}).get("dataset_rules") or []))
-        if isinstance(doc.get("quality"), dict) else 0,
+        + len(((doc.get("quality") or {}).get("dataset_rules") or []))
+        if isinstance(doc.get("quality"), dict)
+        else 0,
     }
 
 
@@ -292,8 +325,7 @@ def contract_rules(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def run_checks(rel: Relation, entity: str, doc: Dict[str, Any],
-               rules: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def run_checks(rel: Relation, entity: str, doc: Dict[str, Any], rules: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Exact distincts, frequencies, key, order and contract-rule checks for one table.
 
     Mutates ``doc``'s columns with ``distinct_exact``, ``frequencies``, ``values_hidden`` and
@@ -340,14 +372,19 @@ def run_checks(rel: Relation, entity: str, doc: Dict[str, Any],
         if name not in names:
             continue
         ctype = next((c.get("type") for c in cols if c["name"] == name), None)
-        res = guard(f"accepted values of {name}",
-                    lambda n=name, v=values, t=ctype: outside_accepted(rel, n, v, t))
+        res = guard(f"accepted values of {name}", lambda n=name, v=values, t=ctype: outside_accepted(rel, n, v, t))
         if res is not None:
             col = next(c for c in cols if c["name"] == name)
             shown, hidden = visible_values(res, sensitive=bool(col.get("sensitive")))
-            out["accepted"].append({"column": name, "accepted": [str(v) for v in values],
-                                    "rows_outside": sum(n for _v, n in res),
-                                    "values": shown, "values_hidden": hidden})
+            out["accepted"].append(
+                {
+                    "column": name,
+                    "accepted": [str(v) for v in values],
+                    "rows_outside": sum(n for _v, n in res),
+                    "values": shown,
+                    "values_hidden": hidden,
+                }
+            )
     return out
 
 
@@ -360,16 +397,42 @@ def _pct(n: int, d: Optional[int]) -> str:
     return f"{(100.0 * n / d):.1f}%" if d else "n/a"
 
 
-def _finding(kind: str, table: str, title: str, *, evidence: str, why: str, action: str,
-             verify: str, columns: Sequence[str] = (), count: Optional[int] = None) -> Dict[str, Any]:
+def _finding(
+    kind: str,
+    table: str,
+    title: str,
+    *,
+    evidence: str,
+    why: str,
+    action: str,
+    verify: str,
+    columns: Sequence[str] = (),
+    count: Optional[int] = None,
+) -> Dict[str, Any]:
     slug = re.sub(r"[^a-z0-9]+", "-", f"{kind}-{table}-{title}".lower()).strip("-")[:120]
-    return {"id": slug, "kind": kind, "table": table, "columns": list(columns), "title": title,
-            "count": count, "evidence": evidence, "why": why, "action": action, "verify": verify}
+    return {
+        "id": slug,
+        "kind": kind,
+        "table": table,
+        "columns": list(columns),
+        "title": title,
+        "count": count,
+        "evidence": evidence,
+        "why": why,
+        "action": action,
+        "verify": verify,
+    }
 
 
-def findings_for(table: str, doc: Dict[str, Any], checks: Dict[str, Any],
-                 contract: Optional[Dict[str, Any]], rules: Optional[Dict[str, Any]],
-                 *, sampled: bool) -> List[Dict[str, Any]]:
+def findings_for(
+    table: str,
+    doc: Dict[str, Any],
+    checks: Dict[str, Any],
+    contract: Optional[Dict[str, Any]],
+    rules: Optional[Dict[str, Any]],
+    *,
+    sampled: bool,
+) -> List[Dict[str, Any]]:
     """The findings for one profiled table, confirmed first. See the module docstring."""
     rows = doc.get("row_count")
     cols = {c["name"]: c for c in doc.get("columns") or []}
@@ -381,114 +444,181 @@ def findings_for(table: str, doc: Dict[str, Any], checks: Dict[str, Any],
     key = checks.get("key")
     if key and key["repeated_keys"] > 0:
         k = ", ".join(key["columns"])
-        ev = (f"{key['repeated_keys']} {k} values appear more than once, across {key['rows_involved']} "
-              f"of {rows} rows{scope}.")
+        ev = (
+            f"{key['repeated_keys']} {k} values appear more than once, across {key['rows_involved']} "
+            f"of {rows} rows{scope}."
+        )
         if key["declared"]:
-            out.append(_finding(KIND_CONFIRMED, table, f"Duplicate primary key ({k})", columns=key["columns"],
-                                count=key["rows_involved"], evidence=ev,
-                                why=f"The contract \"{cname}\" declares {k} as the primary key: one row per key. "
-                                    "Joins and counts downstream will multiply these rows.",
-                                action="Find where the duplicates enter (re-sent files, retries, missing dedup) "
-                                       "and deduplicate on the key before the table is published.",
-                                verify=f"Profile again: repeated {k} values should be 0."))
+            out.append(
+                _finding(
+                    KIND_CONFIRMED,
+                    table,
+                    f"Duplicate primary key ({k})",
+                    columns=key["columns"],
+                    count=key["rows_involved"],
+                    evidence=ev,
+                    why=f'The contract "{cname}" declares {k} as the primary key: one row per key. '
+                    "Joins and counts downstream will multiply these rows.",
+                    action="Find where the duplicates enter (re-sent files, retries, missing dedup) "
+                    "and deduplicate on the key before the table is published.",
+                    verify=f"Profile again: repeated {k} values should be 0.",
+                )
+            )
         else:
-            out.append(_finding(KIND_POTENTIAL, table, f"Repeated {k} values", columns=key["columns"],
-                                count=key["rows_involved"], evidence=ev,
-                                why=f"If one row per {k} is expected, these rows are duplicates and will "
-                                    "inflate every count that uses this table. Event or history tables "
-                                    "repeat keys by design.",
-                                action=f"Confirm the table's grain. If it is one row per {k}, declare "
-                                       f"primary_key: [{k}] in the contract so it is enforced.",
-                                verify="Once declared, the contract's run reports duplicates, and this "
-                                       "becomes a confirmed issue until they are gone."))
+            out.append(
+                _finding(
+                    KIND_POTENTIAL,
+                    table,
+                    f"Repeated {k} values",
+                    columns=key["columns"],
+                    count=key["rows_involved"],
+                    evidence=ev,
+                    why=f"If one row per {k} is expected, these rows are duplicates and will "
+                    "inflate every count that uses this table. Event or history tables "
+                    "repeat keys by design.",
+                    action=f"Confirm the table's grain. If it is one row per {k}, declare "
+                    f"primary_key: [{k}] in the contract so it is enforced.",
+                    verify="Once declared, the contract's run reports duplicates, and this "
+                    "becomes a confirmed issue until they are gone.",
+                )
+            )
 
     for o in checks.get("order") or []:
         if o["violations"] <= 0:
             continue
-        out.append(_finding(
-            KIND_POTENTIAL, table, f"{o['later']} before {o['earlier']}", columns=[o["earlier"], o["later"]],
-            count=o["violations"],
-            evidence=f"{o['violations']} of {o['compared']} rows ({_pct(o['violations'], o['compared'])}) "
-                     f"have {o['later']} earlier than {o['earlier']}{scope}.",
-            why="Events recorded out of order make durations negative and break any metric built on "
+        out.append(
+            _finding(
+                KIND_POTENTIAL,
+                table,
+                f"{o['later']} before {o['earlier']}",
+                columns=[o["earlier"], o["later"]],
+                count=o["violations"],
+                evidence=f"{o['violations']} of {o['compared']} rows ({_pct(o['violations'], o['compared'])}) "
+                f"have {o['later']} earlier than {o['earlier']}{scope}.",
+                why="Events recorded out of order make durations negative and break any metric built on "
                 "them (trip time, time to deliver).",
-            action=f"Check the source's clock and time zone handling for {o['later']}. If the order "
-                   f"is a rule, add a row rule: {o['later']} >= {o['earlier']}.",
-            verify=f"Profile again: rows with {o['later']} before {o['earlier']} should be 0."))
+                action=f"Check the source's clock and time zone handling for {o['later']}. If the order "
+                f"is a rule, add a row rule: {o['later']} >= {o['earlier']}.",
+                verify=f"Profile again: rows with {o['later']} before {o['earlier']} should be 0.",
+            )
+        )
 
     for a in checks.get("accepted") or []:
         if a["rows_outside"] <= 0:
             continue
         shown = ", ".join(f"{v['value']} ({v['count']})" for v in a["values"])
         h = a["values_hidden"]
-        more = (f"{'; ' if shown else ''}{h} {'value' if h == 1 else 'values'} not shown "
-                f"(seen fewer than {MIN_VALUE_COUNT} times, or sensitive)") if h else ""
-        out.append(_finding(
-            KIND_CONFIRMED, table, f"{a['column']} outside its accepted values", columns=[a["column"]],
-            count=a["rows_outside"],
-            evidence=f"{a['rows_outside']} of {rows} rows{scope} are not one of "
-                     f"{', '.join(a['accepted'])}" + (f": {shown}{more}." if (shown or more) else "."),
-            why=f"The contract \"{cname}\" lists the values {a['column']} may take. Reports that group "
+        more = (
+            (
+                f"{'; ' if shown else ''}{h} {'value' if h == 1 else 'values'} not shown "
+                f"(seen fewer than {MIN_VALUE_COUNT} times, or sensitive)"
+            )
+            if h
+            else ""
+        )
+        out.append(
+            _finding(
+                KIND_CONFIRMED,
+                table,
+                f"{a['column']} outside its accepted values",
+                columns=[a["column"]],
+                count=a["rows_outside"],
+                evidence=f"{a['rows_outside']} of {rows} rows{scope} are not one of "
+                f"{', '.join(a['accepted'])}" + (f": {shown}{more}." if (shown or more) else "."),
+                why=f'The contract "{cname}" lists the values {a["column"]} may take. Reports that group '
                 "by it will show unexpected categories or drop these rows.",
-            action="Decide whether the new values are valid. If they are, add them to accepted_values; "
-                   "if not, fix them at the source or map them in the pipeline.",
-            verify=f"Profile again: rows outside accepted values for {a['column']} should be 0."))
+                action="Decide whether the new values are valid. If they are, add them to accepted_values; "
+                "if not, fix them at the source or map them in the pipeline.",
+                verify=f"Profile again: rows outside accepted values for {a['column']} should be 0.",
+            )
+        )
 
     for name in rules.get("required") or []:
         c = cols.get(name)
         if c and (c.get("null_count") or 0) > 0:
-            out.append(_finding(
-                KIND_CONFIRMED, table, f"Required {name} is empty", columns=[name], count=c["null_count"],
-                evidence=f"{c['null_count']} of {rows} rows ({c.get('null_pct')}%) have no {name}{scope}.",
-                why=f"The contract \"{cname}\" marks {name} as required.",
-                action=f"Find why {name} is missing at the source, or stop marking it required.",
-                verify=f"Profile again: empty {name} should be 0."))
+            out.append(
+                _finding(
+                    KIND_CONFIRMED,
+                    table,
+                    f"Required {name} is empty",
+                    columns=[name],
+                    count=c["null_count"],
+                    evidence=f"{c['null_count']} of {rows} rows ({c.get('null_pct')}%) have no {name}{scope}.",
+                    why=f'The contract "{cname}" marks {name} as required.',
+                    action=f"Find why {name} is missing at the source, or stop marking it required.",
+                    verify=f"Profile again: empty {name} should be 0.",
+                )
+            )
 
     required = set(rules.get("required") or [])
     for c in cols.values():
         if c.get("system") or c["name"] in required or c.get("null_pct") is None:
             continue
         if float(c["null_pct"]) > EMPTY_THRESHOLD_PCT:
-            out.append(_finding(
-                KIND_POTENTIAL, table, f"{c['name']} is mostly empty", columns=[c["name"]],
-                count=c.get("null_count"),
-                evidence=f"{c['null_pct']}% of rows{scope} have no {c['name']}.",
-                why="An empty field cannot be used for filtering, joining or reporting. It may be "
+            out.append(
+                _finding(
+                    KIND_POTENTIAL,
+                    table,
+                    f"{c['name']} is mostly empty",
+                    columns=[c["name"]],
+                    count=c.get("null_count"),
+                    evidence=f"{c['null_pct']}% of rows{scope} have no {c['name']}.",
+                    why="An empty field cannot be used for filtering, joining or reporting. It may be "
                     "optional by design.",
-                action=f"Confirm whether {c['name']} is optional. If it should always be present, "
-                       "mark it required in the contract.",
-                verify=f"Profile again and compare: {c['name']} should drop below {EMPTY_THRESHOLD_PCT:.0f}% empty."))
+                    action=f"Confirm whether {c['name']} is optional. If it should always be present, "
+                    "mark it required in the contract.",
+                    verify=f"Profile again and compare: {c['name']} should drop below {EMPTY_THRESHOLD_PCT:.0f}% empty.",
+                )
+            )
 
     if contract is None:
-        out.append(_finding(
-            KIND_GAP, table, "No contract governs this table",
-            evidence="No published contract reads or names this table.",
-            why="Nothing declares what this table should contain, so none of its problems can be "
+        out.append(
+            _finding(
+                KIND_GAP,
+                table,
+                "No contract governs this table",
+                evidence="No published contract reads or names this table.",
+                why="Nothing declares what this table should contain, so none of its problems can be "
                 "confirmed or enforced.",
-            action="Draft a contract from this profile (types, key, accepted values), then publish it.",
-            verify="Profile again: findings for this table are then checked against the contract."))
+                action="Draft a contract from this profile (types, key, accepted values), then publish it.",
+                verify="Profile again: findings for this table are then checked against the contract.",
+            )
+        )
     else:
         missing = []
         if not rules.get("primary_key"):
             missing.append("no primary key")
         if not rules.get("freshness"):
             missing.append("no freshness target")
-        categorical = [c["name"] for c in cols.values()
-                       if not c.get("system") and not c.get("sensitive") and c.get("frequencies") is not None
-                       and c["name"] not in (rules.get("accepted_values") or {})
-                       and is_text_type(c.get("type"))]
+        categorical = [
+            c["name"]
+            for c in cols.values()
+            if not c.get("system")
+            and not c.get("sensitive")
+            and c.get("frequencies") is not None
+            and c["name"] not in (rules.get("accepted_values") or {})
+            and is_text_type(c.get("type"))
+        ]
         if categorical:
             noun = "column" if len(categorical) == 1 else "columns"
-            missing.append(f"{len(categorical)} categorical {noun} without accepted values "
-                           f"({', '.join(categorical[:5])}{'…' if len(categorical) > 5 else ''})")
+            missing.append(
+                f"{len(categorical)} categorical {noun} without accepted values "
+                f"({', '.join(categorical[:5])}{'…' if len(categorical) > 5 else ''})"
+            )
         if missing:
-            out.append(_finding(
-                KIND_GAP, table, "Contract is missing controls", columns=categorical,
-                evidence=f"The contract \"{cname}\" has " + "; ".join(missing) + ".",
-                why="Without these, duplicates, stale data and unexpected categories pass unnoticed.",
-                action="Add what is missing to the contract. The profile shows the observed key and "
-                       "values to start from.",
-                verify="Once added, the next profile checks them and reports any failures as confirmed."))
+            out.append(
+                _finding(
+                    KIND_GAP,
+                    table,
+                    "Contract is missing controls",
+                    columns=categorical,
+                    evidence=f'The contract "{cname}" has ' + "; ".join(missing) + ".",
+                    why="Without these, duplicates, stale data and unexpected categories pass unnoticed.",
+                    action="Add what is missing to the contract. The profile shows the observed key and "
+                    "values to start from.",
+                    verify="Once added, the next profile checks them and reports any failures as confirmed.",
+                )
+            )
     rank = {k: i for i, k in enumerate(KIND_ORDER)}
     return sorted(out, key=lambda f: (rank[f["kind"]], -(f.get("count") or 0)))
 

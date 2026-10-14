@@ -451,6 +451,7 @@ def test_materialize_dataframe_handles_no_pandas_and_native_polars_paths(monkeyp
 def test_materialize_spark_dataframe_merge_scd2_and_table_writes(monkeypatch, tmp_path):
     # The fake session has no catalog: there is no existing table to bring to the contract.
     monkeypatch.setattr(mat, "_align_existing_spark_table", lambda *a, **k: None)
+
     class FakeWriter:
         def __init__(self):
             self.formats = []

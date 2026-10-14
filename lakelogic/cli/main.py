@@ -1845,7 +1845,9 @@ def profile(
     sensitive: Optional[str] = typer.Option(None, "--sensitive", help="Comma-separated extra sensitive columns."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write the JSON here (default: stdout)."),
     findings: bool = typer.Option(
-        False, "--findings", help="Also run the checks and list findings (confirmed issue, potential issue, control gap)."
+        False,
+        "--findings",
+        help="Also run the checks and list findings (confirmed issue, potential issue, control gap).",
     ),
     sample_rows: Optional[int] = typer.Option(None, "--sample-rows", help="Sample this many rows (1,000-1,000,000)."),
     sample_percent: Optional[float] = typer.Option(
@@ -1885,13 +1887,19 @@ def profile(
         try:
             if connection is not None:
                 doc = assess_table(
-                    source, connection, settings=settings, contract=str(contract) if contract else None,
+                    source,
+                    connection,
+                    settings=settings,
+                    contract=str(contract) if contract else None,
                     sensitive_columns=sensitive_list,
                 )
             else:
                 doc = assess_files(
-                    source, fmt=fmt if fmt in ("csv", "json", "parquet") else None, settings=settings,
-                    contract=str(contract) if contract else None, sensitive_columns=sensitive_list,
+                    source,
+                    fmt=fmt if fmt in ("csv", "json", "parquet") else None,
+                    settings=settings,
+                    contract=str(contract) if contract else None,
+                    sensitive_columns=sensitive_list,
                 )
         except ValueError as exc:
             typer.secho(str(exc), fg=typer.colors.RED, err=True)
@@ -1903,7 +1911,8 @@ def profile(
             typer.secho(
                 f"Profile written to {output}: {counts.get('confirmed', 0)} confirmed, "
                 f"{counts.get('potential', 0)} potential, {counts.get('gap', 0)} control gaps.",
-                fg=typer.colors.GREEN, err=True,
+                fg=typer.colors.GREEN,
+                err=True,
             )
         else:
             typer.echo(text)

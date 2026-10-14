@@ -233,3 +233,33 @@ def test_migrate_fails_on_a_value_that_does_not_convert_and_leaves_the_table(spa
         migrate_spark_table(spark, f"delta.`{path}`", _typed_contract([("order_id", "string"), ("code", "int")]))
     assert _types(spark, path)["code"] == "string"
     assert sorted(r.code for r in spark.read.format("delta").load(path).collect()) == ["10", "N/A"]
+
+
+# ── unknown member on a table with NOT NULL columns (Databricks, 2026-10-14) ────────────────
+
+
+def test_unknown_member_fills_not_null_columns_instead_of_failing(spark, tmp_path):
+    from lakelogic.core.materialization import _spark_merge_dataframe
+
+    name = f"dim_device_category_{tmp_path.name[-6:]}".replace("-", "_")
+    spark.sql(f"DROP TABLE IF EXISTS {name}")
+    spark.sql(
+        f"CREATE TABLE {name} (device_category_sk STRING, device_category STRING NOT NULL, "
+        f"system STRING NOT NULL, rank INT NOT NULL, note STRING) USING delta"
+    )
+    spark.sql(f"INSERT INTO {name} VALUES ('a1', 'mobile', 'ga', 1, NULL)")
+
+    incoming = spark.createDataFrame(
+        [("a2", "desktop", "ga", 2, None)],
+        "device_category_sk string, device_category string, system string, rank int, note string",
+    )
+    scd1 = {"surrogate_key": "device_category_sk", "unknown_member": {"enabled": True}}
+    _spark_merge_dataframe(spark, incoming, f"table:{name}", ["device_category"], "delta", scd1_cfg=scd1)
+
+    rows = {r.device_category_sk: r for r in spark.table(name).collect()}
+    unknown = rows["-1"]
+    assert unknown.system == "Unknown" and unknown.rank == -1 and unknown.note is None
+    assert unknown.device_category  # a sentinel, not null
+    # idempotent: a second merge does not add a second unknown member
+    _spark_merge_dataframe(spark, incoming, f"table:{name}", ["device_category"], "delta", scd1_cfg=scd1)
+    assert spark.table(name).filter("device_category_sk = '-1'").count() == 1

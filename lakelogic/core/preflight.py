@@ -56,7 +56,6 @@ def _as_raw(contract: Union[Dict[str, Any], str, Path, Any]) -> Dict[str, Any]:
     if isinstance(contract, dict):
         return contract
     if isinstance(contract, (str, Path)):
-
         from lakelogic.core.contract_yaml import load_contract_yaml
 
         d = load_contract_yaml(Path(contract).read_text(encoding="utf-8"))

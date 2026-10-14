@@ -1937,6 +1937,28 @@ def _spark_path_holds_table(spark: Any, output_format: str, path: str) -> bool: 
         return False
 
 
+def _unknown_placeholder(data_type: Any, key_sentinel: Any = None) -> Any:
+    """The value an unknown-member row holds in a column that cannot be null, by its type."""
+    name = data_type.simpleString() if hasattr(data_type, "simpleString") else str(data_type)
+    if key_sentinel is not None and name == "string":
+        return key_sentinel
+    if name == "string":
+        return "Unknown"
+    if name in ("tinyint", "smallint", "int", "bigint", "float", "double") or name.startswith("decimal"):
+        return -1
+    if name == "boolean":
+        return False
+    if name == "date":
+        from datetime import date
+
+        return date(1900, 1, 1)
+    if name.startswith("timestamp"):
+        from datetime import datetime
+
+        return datetime(1900, 1, 1)
+    return None
+
+
 def _inject_unknown_member_spark_table(  # pragma: no cover
     spark,
     table_name: str,
@@ -2019,6 +2041,14 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
             unknown_row[col] = defaults[col]
         elif col in _lineage_values:
             unknown_row[col] = _lineage_values[col]
+        elif not field.nullable or (not sk_column and col in (primary_key or [])):
+            # A NOT NULL column (a `required: true` field the setup DDL declared) cannot take
+            # null: the append failed with DELTA_NOT_NULL_CONSTRAINT_VIOLATED, live on Databricks
+            # (2026-10-14). A key column without a surrogate key gets the sentinel the
+            # already-present check above looks for, so the row is not added again every run.
+            unknown_row[col] = _unknown_placeholder(
+                field.dataType, defaults.get(col, "_UNKNOWN") if col in (primary_key or []) else None
+            )
         else:
             unknown_row[col] = None
 
@@ -2884,6 +2914,7 @@ def _spark_merge_dataframe(  # pragma: no cover
         # key lookup against the dim resolved to nothing. Same expression as the fallback.
         incoming_df = _with_scd1_surrogate_key_spark(incoming_df, primary_key, scd1_cfg)
 
+        _merged = False
         try:
             from delta.tables import DeltaTable
 
@@ -2951,15 +2982,7 @@ def _spark_merge_dataframe(  # pragma: no cover
                     )
 
                 merge_builder.execute()
-                _inject_scd1_unknown_member_after_write(spark, table_or_path, primary_key, scd1_cfg)
-
-                rows_written = incoming_df.count()
-                logger.info(f"Merged {rows_written} rows into Delta table {table_or_path}")
-                return {
-                    "target": table_or_path,
-                    "rows_written": rows_written,
-                    "format": output_format,
-                }
+                _merged = True
         except Exception as e:
             # A merge that cannot merge FAILS THE RUN (owner decision, 2026-10-14). It used to fall
             # back to rewriting the whole table, which turns a merge problem into a full overwrite
@@ -2967,6 +2990,17 @@ def _spark_merge_dataframe(  # pragma: no cover
             raise MergeFailed(
                 f"Delta MERGE into {table_or_path} failed, so the run stopped rather than rewrite the table: {e}"
             ) from e
+        if _merged:
+            # After the try: the MERGE has committed, so a failure here is not a merge failure and
+            # must not be reported as one (it was, live on Databricks, 2026-10-14).
+            _inject_scd1_unknown_member_after_write(spark, table_or_path, primary_key, scd1_cfg)
+            rows_written = incoming_df.count()
+            logger.info(f"Merged {rows_written} rows into Delta table {table_or_path}")
+            return {
+                "target": table_or_path,
+                "rows_written": rows_written,
+                "format": output_format,
+            }
 
     # Iceberg catalog table: a real MERGE INTO (one snapshot, only the changed files), as Delta
     # gets above. It used to fall through to the full-table rewrite below on every run.
