@@ -2743,8 +2743,28 @@ def _spark_merge_dataframe(  # pragma: no cover
 
     _join_condition = [existing_df[col] == incoming_df[col] for col in primary_key]
 
+    # A change feed's DELETES. Only the catalog-table Delta MERGE above handled them; a target
+    # written by PATH (and every non-Delta format) came through here, where a delete was merged
+    # as an ordinary update: the row stayed, unmarked.
+    _has_deletes = bool(cdc_op_field and cdc_delete_values and cdc_op_field in incoming_df.columns)
+    if _has_deletes and soft_delete_col:
+        incoming_df = _seed_soft_delete_columns_spark(
+            incoming_df,
+            soft_delete_col,
+            soft_delete_time_col,
+            soft_delete_reason_col,
+            cdc_op_field,
+            cdc_delete_values,
+            soft_delete_val,
+            cdc_timestamp_field,
+        )
+
     # Get non-matching existing rows (rows not being updated)
     unchanged = existing_df.join(incoming_df, on=primary_key, how="left_anti")
+    if _has_deletes and not soft_delete_col:
+        # No soft-delete column: the delete removes the row. Its key is already out of
+        # `unchanged`; the delete marker itself is not written.
+        incoming_df = incoming_df.filter(~F.col(cdc_op_field).isin(list(cdc_delete_values)))
 
     # Align columns
     all_columns = list(
@@ -3627,8 +3647,9 @@ def _materialize_spark_dataframe(  # pragma: no cover
 
         _default_evo = _SP().evolution
         evolution = _default_evo
-        if server and getattr(server, "schema_policy", None):
-            evolution = getattr(server.schema_policy, "evolution", _default_evo) or _default_evo
+        from lakelogic.core.models import effective_schema_policy
+
+        evolution = getattr(effective_schema_policy(contract, server), "evolution", None) or _default_evo
         if evolution in ("append", "merge", "compatible", "allow"):
             writer = writer.option("mergeSchema", "true")
         elif evolution == "overwrite":
@@ -3705,8 +3726,9 @@ def _partition_aware_merge(
     if contract:
         _srv = contract.effective_server() if hasattr(contract, "effective_server") else None
         _evo = None
-        if _srv and getattr(_srv, "schema_policy", None):
-            _evo = getattr(_srv.schema_policy, "evolution", None)
+        from lakelogic.core.models import declared_schema_policy
+
+        _evo = getattr(declared_schema_policy(contract, _srv), "evolution", None)
         # Fallback: check _server_layer_defaults injected by runner from _system.yaml
         if _evo is None and hasattr(contract, "metadata") and contract.metadata:
             _layer_defaults = contract.metadata.get("_server_layer_defaults", {})
@@ -4553,8 +4575,9 @@ def _materialize_primary(
     if contract:
         _srv = contract.effective_server() if hasattr(contract, "effective_server") else None
         _evo = None
-        if _srv and getattr(_srv, "schema_policy", None):
-            _evo = getattr(_srv.schema_policy, "evolution", None)
+        from lakelogic.core.models import declared_schema_policy
+
+        _evo = getattr(declared_schema_policy(contract, _srv), "evolution", None)
         # Fallback: check _server_layer_defaults injected by runner from _system.yaml
         if _evo is None and hasattr(contract, "metadata") and contract.metadata:
             _layer_defaults = contract.metadata.get("_server_layer_defaults", {})
@@ -4982,7 +5005,7 @@ def _materialize_primary(
                     # type registry made `integer` a real INT32 rather than
                     # everything being int64 by accident.
                     try:
-                        _existing_schema = dt.schema().to_pyarrow()
+                        _existing_schema = pa.schema(dt.schema().to_arrow())
                         arrow_data = _coerce_declared_temporal(arrow_data, contract, _existing_schema)
                         _fields = [
                             _existing_schema.field(name)
@@ -5021,17 +5044,62 @@ def _materialize_primary(
                             arrow_data = _sanitize_arrow_nulls(arrow_data)
                     pk_predicate = " AND ".join(f"source.{pk} = target.{pk}" for pk in primary_key)
                     dt = DeltaTable(target_str, storage_options=_dt_opts)
-                    (
-                        dt.merge(
-                            source=arrow_data,
-                            predicate=pk_predicate,
-                            source_alias="source",
-                            target_alias="target",
+                    _src_cfg = getattr(contract, "source", None)
+                    _cdc_op = getattr(_src_cfg, "cdc_op_field", None) if _src_cfg else None
+                    _cdc_deletes = getattr(_src_cfg, "cdc_delete_values", None) if _src_cfg else None
+                    if _cdc_op and _cdc_deletes and _cdc_op in arrow_data.schema.names:
+                        # A change feed carries DELETES. The plain upsert below wrote a delete as
+                        # an update: the row stayed, unmarked, and nothing said so. The partitioned
+                        # and file targets already went through _merge_frames; this one did not.
+                        merged = _merge_frames(
+                            dt.to_pandas(),
+                            arrow_data.to_pandas(),
+                            primary_key,
+                            soft_delete_col=getattr(mat, "soft_delete_column", None),
+                            soft_delete_val=getattr(mat, "soft_delete_value", True),
+                            soft_delete_time_col=getattr(mat, "soft_delete_time_column", None),
+                            soft_delete_reason_col=getattr(mat, "soft_delete_reason_column", None),
+                            cdc_op_field=_cdc_op,
+                            cdc_delete_values=_cdc_deletes,
+                            cdc_timestamp_field=getattr(_src_cfg, "cdc_timestamp_field", None),
+                            merge_dedup_guard=_dedup_enabled,
                         )
-                        .when_matched_update_all()
-                        .when_not_matched_insert_all()
-                        .execute()
-                    )
+                        arrow_data = _sanitize_arrow_nulls(pa.Table.from_pandas(merged, preserve_index=False))
+                        try:  # keep the table's own types: pandas widens integers on the way through
+                            _existing_schema = pa.schema(dt.schema().to_arrow())
+                            arrow_data = _coerce_declared_temporal(arrow_data, contract, _existing_schema)
+                            arrow_data = arrow_data.cast(
+                                pa.schema(
+                                    [
+                                        _existing_schema.field(name)
+                                        if name in _existing_schema.names
+                                        and not pa.types.is_null(_existing_schema.field(name).type)
+                                        else arrow_data.schema.field(name)
+                                        for name in arrow_data.schema.names
+                                    ]
+                                )
+                            )
+                        except Exception as exc:  # pragma: no cover - defensive
+                            logger.warning(f"Could not re-align the merged change feed to the table schema: {exc}")
+                        _safe_write_deltalake(
+                            target_str,
+                            arrow_data,
+                            mode="overwrite",
+                            schema_mode="overwrite",  # the soft-delete columns may be new to the table
+                            storage_options=_dt_opts,
+                        )
+                    else:
+                        (
+                            dt.merge(
+                                source=arrow_data,
+                                predicate=pk_predicate,
+                                source_alias="source",
+                                target_alias="target",
+                            )
+                            .when_matched_update_all()
+                            .when_not_matched_insert_all()
+                            .execute()
+                        )
                     rows_written = len(arrow_data)
             else:
                 # First write — seed the table

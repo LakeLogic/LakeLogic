@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import polars as pl
 from loguru import logger
 
-from lakelogic.engines.base import EngineAdapter, struct_drift_errors
+from lakelogic.engines.base import EngineAdapter, TransformationFailed, struct_drift_errors
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
@@ -653,9 +653,11 @@ class PolarsAdapter(EngineAdapter):
 
         if server:
             cast_to_string = bool(server.cast_to_string)
-            if server.schema_policy:
-                evolution = (server.schema_policy.evolution or _sp_defaults.evolution).lower()
-                policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
+        from lakelogic.core.models import effective_schema_policy
+
+        _sp = effective_schema_policy(self.contract)
+        evolution = (_sp.evolution or _sp_defaults.evolution).lower()
+        policy = (_sp.unknown_fields or _sp_defaults.unknown_fields).lower()
 
         self._type_err_cols = []
         # A record the READER rejected (fixed-width: wrong record length) carries its reason in
@@ -943,6 +945,83 @@ class PolarsAdapter(EngineAdapter):
 
         return good_lf.collect(), bad_lf.drop(internal_cols, strict=False).collect()
 
+    def _pivot_first_last(self, lf, plan):
+        """A pivot whose aggregations are all first/last, built without SQL; else ``None``.
+
+        Polars SQL cannot skip blanks in FIRST/LAST (no FILTER, no ANY_VALUE), and a pivot is
+        mostly blanks: the SQL form returned empty where a value existed.
+        """
+        columns = plan.get("columns") or []
+        if not columns or any(agg not in ("first", "any_value", "last") for _, _, _, agg in columns):
+            return None
+        pivot_col, fill = pl.col(plan["pivot_col"]), plan.get("fill_value")
+        exprs = []
+        for alias, value_col, value, agg in columns:
+            picked = pl.col(value_col).filter(pivot_col == value).drop_nulls()
+            picked = picked.last() if agg == "last" else picked.first()
+            exprs.append((picked if fill is None else picked.fill_null(fill)).alias(alias))
+        id_vars = plan.get("id_vars") or []
+        if id_vars:
+            return lf.group_by(id_vars, maintain_order=True).agg(exprs)
+        return lf.select(exprs)
+
+    def _reference_rule_columns(self, lf, row_rules, ctx, prefix):
+        """Evaluate referential-integrity and lifecycle-window rules as joins, not SQL.
+
+        Their SQL puts a subquery inside a row expression, which Polars SQL refuses ("subplan
+        not allowed in this context"): the run failed outright. Returns the frame with one
+        boolean column per such rule, and ``{rule index: column name}``.
+        """
+        parts = self._reference_rules()
+        cols: Dict[int, str] = {}
+        for i, rule in enumerate(row_rules):
+            spec = parts.get(rule.name)
+            if not spec:
+                continue
+            col = f"__ll_ref_{prefix}{i}"
+            try:
+                ref = ctx.execute(f"SELECT * FROM {spec['reference']}")
+            except Exception as exc:
+                logger.warning(f"Rule '{rule.name}': reference '{spec['reference']}' is not loaded: {exc}")
+                continue
+            schema = lf.collect_schema()
+            if spec["kind"] == "referential_integrity":
+                keys = (
+                    ref.select(pl.col(spec["key"]).cast(schema[spec["field"]], strict=False))
+                    .drop_nulls()
+                    .unique()
+                    .collect()
+                    .to_series()
+                )
+                # An empty key gives an unknown result, as NULL IN (...) does in SQL, and an
+                # unknown result rejects the row: the same as on the other engines.
+                lf = lf.with_columns(
+                    pl.when(pl.col(spec["field"]).is_null())
+                    .then(None)
+                    .otherwise(pl.col(spec["field"]).is_in(keys.implode()))
+                    .alias(col)
+                )
+            else:
+                ts_type = schema[spec["event_ts"]]
+                window = (
+                    ref.select(
+                        pl.col(spec["reference_key"]).cast(schema[spec["event_key"]], strict=False).alias("__ll_k"),
+                        pl.col(spec["start_field"]).cast(ts_type, strict=False).alias("__ll_s"),
+                        pl.col(spec["end_field"]).cast(ts_type, strict=False).alias("__ll_e"),
+                    )
+                    .group_by("__ll_k")
+                    .agg(pl.col("__ll_s").max(), pl.col("__ll_e").max())
+                )
+                end = pl.coalesce(pl.col("__ll_e"), pl.lit(str(spec["end_default"])).cast(ts_type, strict=False))
+                ts = pl.col(spec["event_ts"])
+                lf = (
+                    lf.join(window, left_on=spec["event_key"], right_on="__ll_k", how="left", maintain_order="left")
+                    .with_columns(((ts >= pl.col("__ll_s")) & (end >= ts)).alias(col))
+                    .drop("__ll_s", "__ll_e")
+                )
+            cols[i] = col
+        return lf, cols
+
     def _evaluate_row_rules(self, lf, row_rules, schema_errors, type_err_cols, prefix):
         """Attach ERROR/CATEGORY columns for ``row_rules`` (+ schema and type errors) to ``lf``.
 
@@ -954,9 +1033,13 @@ class PolarsAdapter(EngineAdapter):
 
         if row_rules:
             step_start = time.perf_counter()
+            lf, native_rule_cols = self._reference_rule_columns(lf, row_rules, ctx, prefix)
+            if native_rule_cols:
+                ctx = self._get_context(lf)
             rule_exprs = []
             for i, rule in enumerate(row_rules):
-                rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as {prefix}{i}")
+                rule_sql = f'"{native_rule_cols[i]}"' if i in native_rule_cols else rule.sql
+                rule_exprs.append(f"CAST(({rule_sql}) AS BOOLEAN) as {prefix}{i}")
 
             dataset_name = self.contract.dataset or "source"
 
@@ -994,6 +1077,7 @@ class PolarsAdapter(EngineAdapter):
             _schema_aux_cols: List[
                 str
             ] = []  # internal scratch — must be dropped before yielding quarantine/good frames
+            _schema_aux_cols.extend(native_rule_cols.values())
 
             if schema_errors:
                 # Schema errors apply to every row (or no rows on empty frames).
@@ -1178,7 +1262,7 @@ class PolarsAdapter(EngineAdapter):
                     current_lf = self._apply_sql_transformation(current_lf, trans.sql)
                     existing = set(current_lf.collect_schema().names())
                 except Exception as e:
-                    logger.warning(f"Pre-Transform [SQL] failed: {e}")
+                    raise TransformationFailed(f"Pre-Transform [SQL] failed: {e}") from e
                 continue
 
             if trans.json_extract and trans_phase == "pre":
@@ -1219,11 +1303,17 @@ class PolarsAdapter(EngineAdapter):
                         if self.contract.dataset:
                             _ctx.register(self.contract.dataset, current_lf)
                         tbl = "source"
-                        if field_name in existing:
-                            query = f"SELECT * EXCLUDE ({field_name}), ({derive_sql}) AS {field_name} FROM {tbl}"
-                        else:
-                            query = f"SELECT *, ({derive_sql}) AS {field_name} FROM {tbl}"
-                        current_lf = _ctx.execute(query)
+                        # Evaluate the expression ALONE and attach it natively, as the post
+                        # phase does. Polars SQL's `SELECT * EXCLUDE (x), <expr> AS x` silently
+                        # DROPS x, so a pre derive onto a column the frame already had (a gold
+                        # `system` column a source also carries) lost the column and every row
+                        # then failed its required check (2026-10-13).
+                        _derived = _ctx.execute(f"SELECT ({derive_sql}) AS __lakelogic_derived FROM {tbl}")
+                        current_lf = (
+                            pl.concat([current_lf, _derived], how="horizontal")
+                            .with_columns(pl.col("__lakelogic_derived").alias(field_name))
+                            .drop("__lakelogic_derived")
+                        )
                         existing = set(current_lf.collect_schema().names())
                         _resolved = True
                     except Exception as e:
@@ -1253,7 +1343,14 @@ class PolarsAdapter(EngineAdapter):
                 continue
 
             if trans.pivot and trans_phase == "pre":
-                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=self.contract.dataset or "source")
+                pivot_plan: Dict[str, Any] = {}
+                pivot_sql = self._build_pivot_sql(
+                    trans.pivot, source_table=self.contract.dataset or "source", plan=pivot_plan
+                )
+                native = self._pivot_first_last(current_lf, pivot_plan) if pivot_sql else None
+                if native is not None:
+                    current_lf = native
+                    continue
                 if not pivot_sql:
                     continue
                 logger.debug(f"Pre-Transform [Pivot]: {pivot_sql}")
@@ -1261,7 +1358,7 @@ class PolarsAdapter(EngineAdapter):
                     current_lf = self._apply_sql_transformation(current_lf, pivot_sql)
                     existing = set(current_lf.collect_schema().names())
                 except Exception as e:
-                    logger.warning(f"Pre-Transform [Pivot] failed: {e}")
+                    raise TransformationFailed(f"Pre-Transform [Pivot] failed: {e}") from e
                 continue
 
             if trans.unpivot and trans_phase == "pre":
@@ -1273,7 +1370,7 @@ class PolarsAdapter(EngineAdapter):
                     current_lf = self._apply_sql_transformation(current_lf, unpivot_sql)
                     existing = set(current_lf.collect_schema().names())
                 except Exception as e:
-                    logger.warning(f"Pre-Transform [Unpivot] failed: {e}")
+                    raise TransformationFailed(f"Pre-Transform [Unpivot] failed: {e}") from e
                 continue
 
             if trans.rename:
@@ -1390,7 +1487,7 @@ class PolarsAdapter(EngineAdapter):
                         ctx.register("source", current_lf)
                         current_lf = ctx.execute(f"SELECT * FROM source WHERE {filter_cfg.sql}")
                     except Exception as e:
-                        logger.warning(f"Pre-Transform [Filter] failed: {e}")
+                        raise TransformationFailed(f"Pre-Transform [Filter] failed: {e}") from e
                 elif dedupe_cfg:
                     logger.debug(f"Pre-Transform [Deduplicate]: {dedupe_cfg.on}")
                     # Nested dtypes are not orderable in Polars, so they can't take
@@ -1480,8 +1577,13 @@ class PolarsAdapter(EngineAdapter):
                 continue
 
             if trans.pivot and trans_phase != "pre":
-                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=tbl_name)
+                pivot_plan = {}
+                pivot_sql = self._build_pivot_sql(trans.pivot, source_table=tbl_name, plan=pivot_plan)
                 if not pivot_sql:
+                    continue
+                native = self._pivot_first_last(current_lf, pivot_plan)
+                if native is not None:
+                    current_lf = native
                     continue
                 logger.debug(f"Post-Transform [Pivot]: {pivot_sql}")
                 current_lf = self._apply_sql_transformation(current_lf, pivot_sql)

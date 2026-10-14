@@ -1355,6 +1355,37 @@ def _rule_to_odcs_quality(rule: Any, is_dataset: bool) -> Optional[Dict[str, Any
     return {"type": "text", "description": str(dumped)}
 
 
+def declared_schema_policy(contract: Any, server: Any = None) -> Optional["SchemaPolicy"]:
+    """The schema policy a contract STATES, or ``None`` when it states none.
+
+    One definition, for every reader (the engines, table creation, the write path). A contract
+    may state it in two places and both are valid:
+
+      * ``server.schema_policy`` — beside the storage target; this one wins when both are set;
+      * ``schema_policy`` at the top level — the only place available to a contract that has
+        no ``server`` block (a validate-only contract, or one that writes through
+        ``materialization``).
+
+    Each reader used to look under ``server`` on its own, so a top-level policy was either
+    ignored or, at load, moved into an invented ``server`` block that then failed validation
+    ("server.type: Field required"). ``server`` lets a caller pass the environment-resolved
+    block (``contract.effective_server()``).
+    """
+    if server is None:
+        server = getattr(contract, "server", None)
+    policy = getattr(server, "schema_policy", None) if server is not None else None
+    if policy is not None and getattr(policy, "model_fields_set", None) == set():
+        # The server block is there but says nothing about schema policy (the model fills in
+        # a default object): a top-level statement is the contract's answer.
+        policy = None
+    return policy or getattr(contract, "schema_policy", None) or None
+
+
+def effective_schema_policy(contract: Any, server: Any = None) -> "SchemaPolicy":
+    """``declared_schema_policy``, or the default policy when the contract states none."""
+    return declared_schema_policy(contract, server) or SchemaPolicy()
+
+
 class DataContract(BaseModel):
     """
     Finalized SQL-First Data Contract Model.
@@ -1448,6 +1479,27 @@ class DataContract(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def _tsv_is_tab_separated_csv(cls, data: Any) -> Any:
+        """``source.format: tsv`` -> ``csv`` with a tab delimiter, once, for every engine.
+
+        ``tsv`` is a format a contract can name, but no reader knew it: the file was read with a
+        comma, so each line became ONE column, every declared column came back empty and no row
+        was rejected. A delimiter the contract sets itself is kept.
+        """
+        if not isinstance(data, dict):
+            return data
+        source = data.get("source")
+        if isinstance(source, dict) and str(source.get("format") or "").lower() == "tsv":
+            source = dict(source)
+            options = dict(source.get("options") or {})
+            options.setdefault("delimiter", "\t")
+            source["options"] = options
+            source["format"] = "csv"
+            data = {**data, "source": source}
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
     def _schema_policy_migrator(cls, data: Any) -> Any:
         """Migrate legacy root-level schema_policy or server.schema_evolution -> server.schema_policy."""
         if not isinstance(data, dict):
@@ -1455,16 +1507,10 @@ class DataContract(BaseModel):
 
         server_block = data.get("server")
         if not isinstance(server_block, dict):
-            # If there's no server block at all, but there is root policy, we instantiate it
-            if (
-                data.get("schema_policy") is not None
-                or data.get("schema_evolution") is not None
-                or data.get("allow_schema_drift") is not None
-            ):
-                server_block = {}
-                data["server"] = server_block
-            else:
-                return data
+            # No server block: a top-level schema_policy stays where it was written and is
+            # read from there (declared_schema_policy). Inventing a server block to hold it
+            # failed validation, because a server needs a type and a path.
+            return data
 
         policy = server_block.setdefault("schema_policy", {})
 

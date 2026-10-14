@@ -201,6 +201,15 @@ def _checked_unique_columns(sql: Optional[str]) -> Optional[set]:
     return None
 
 
+class TransformationFailed(RuntimeError):
+    """A contract transformation errored. The run stops: the output would not be what the contract says.
+
+    Until 2026-10-14 DuckDB logged a warning, skipped the step and wrote the UNtransformed rows
+    as if they were the result (a gold aggregation wrote silver's rows, reported as success);
+    Polars did the same for four pre-phase steps; Spark failed. One contract, three answers.
+    """
+
+
 class EngineAdapter(ABC):
     """
     Abstract Base Class for all execution engines.
@@ -770,7 +779,7 @@ class EngineAdapter(ABC):
             cols.add(lineage.system_column_name)
         return cols
 
-    def _build_rollup_sql(self, rollup: Any, source_table: str = "source") -> str:
+    def _build_rollup_sql(self, rollup: Any, source_table: str = "source", source_columns: Optional[Any] = None) -> str:
         """
         Build SQL for a rollup transformation.
 
@@ -817,6 +826,10 @@ class EngineAdapter(ABC):
             if rollup_keys_count_col:
                 select_parts.append(f"COUNT({distinct_sql}{key_expr}) AS {self._quote_ident(rollup_keys_count_col)}")
 
+        # A source that was not written by an upstream contract has no run id column. Naming it
+        # anyway made the whole rollup fail on DuckDB and Spark (and be skipped with a warning).
+        if source_columns is not None and upstream_run_id_col not in set(source_columns):
+            upstream_run_id_col = None
         if upstream_run_id_col and upstream_run_ids_col:
             uid_q = self._quote_ident(upstream_run_id_col)
             uids_q = self._quote_ident(upstream_run_ids_col)
@@ -844,11 +857,18 @@ class EngineAdapter(ABC):
         agg_norm = (agg or "first").lower().strip()
         engine = self._normalize_engine()
 
-        if agg_norm in {"first", "any_value"}:
-            func = "ANY_VALUE" if engine in {"bigquery", "snowflake"} else "FIRST"
-            return f"{func}({expr})"
-        if agg_norm == "last":
-            func = "ANY_VALUE" if engine in {"bigquery", "snowflake"} else "LAST"
+        # A pivot aggregates CASE WHEN <pivot value> THEN <value> END, which is empty for every
+        # row of another pivot value. A plain FIRST took whichever row came first, so a value
+        # that existed came back empty. First and last must skip the blanks. (Polars SQL has no
+        # way to say so; that engine builds the pivot itself, see PolarsEngine._pivot_first_last.)
+        if agg_norm in {"first", "any_value", "last"}:
+            func = "LAST" if agg_norm == "last" else "FIRST"
+            if engine in {"bigquery", "snowflake"}:
+                return f"ANY_VALUE({expr})"
+            if engine == "spark":
+                return f"{func}({expr}, TRUE)"
+            if engine == "duckdb":
+                return f"{func}({expr}) FILTER (WHERE ({expr}) IS NOT NULL)"
             return f"{func}({expr})"
         if agg_norm in {"count_distinct", "distinct_count"}:
             return f"COUNT(DISTINCT {expr})"
@@ -866,7 +886,9 @@ class EngineAdapter(ABC):
         func = "ANY_VALUE" if engine in {"bigquery", "snowflake"} else "FIRST"
         return f"{func}({expr})"
 
-    def _build_pivot_sql(self, pivot: Any, source_table: str = "source") -> Optional[str]:
+    def _build_pivot_sql(
+        self, pivot: Any, source_table: str = "source", plan: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
         """
         Build SQL for a pivot transformation using conditional aggregation.
 
@@ -913,6 +935,8 @@ class EngineAdapter(ABC):
 
         pivot_qcol = self._quote_ident(pivot_col)
         select_parts: List[str] = [self._quote_ident(col) for col in id_vars]
+        if plan is not None:  # the same pivot as its parts, for an engine that builds it natively
+            plan.update({"pivot_col": pivot_col, "id_vars": id_vars, "fill_value": fill_value, "columns": []})
 
         for value_col in value_cols:
             agg_name = aggs.get(value_col, default_agg)
@@ -932,6 +956,8 @@ class EngineAdapter(ABC):
                     )
                 else:
                     alias_text = f"{value_col}{separator}{alias}"
+                if plan is not None:
+                    plan["columns"].append((alias_text, value_col, value, str(agg_name or "first").lower().strip()))
                 select_parts.append(f"{agg_expr} AS {self._quote_ident(alias_text)}")
 
         if not select_parts:
@@ -1078,6 +1104,16 @@ class EngineAdapter(ABC):
             # works on string dates and matches the Polars branch's date granularity.
             diff_expr = f"DATEDIFF('{unit}', CAST({qfrom} AS DATE), CAST({qto} AS DATE))"
         return f"SELECT *, ({diff_expr}) AS {self._quote_ident(field)} FROM {source_table}"
+
+    def _reference_rules(self) -> Dict[str, Dict[str, Any]]:
+        """Rules that check a row against reference data, by rule name, as their PARTS.
+
+        Their SQL is a subquery inside a row expression. Polars SQL cannot run one there, so
+        that engine evaluates these rules from the parts instead (``_reference_rule_columns``).
+        """
+        if not hasattr(self, "_reference_rule_parts"):
+            self._reference_rule_parts = {}
+        return self._reference_rule_parts
 
     def _expand_row_rule(self, spec: Any) -> Optional[Any]:
         """
@@ -1229,6 +1265,12 @@ class EngineAdapter(ABC):
             name = cfg.get("name") or f"{field}_referential_integrity"
             qfield = self._quote_ident(field)
             qkey = self._quote_ident(key)
+            self._reference_rules()[name] = {
+                "kind": "referential_integrity",
+                "field": field,
+                "reference": reference,
+                "key": key,
+            }
             return QualityRule(
                 name=name,
                 sql=f"{qfield} IN (SELECT {qkey} FROM {reference})",
@@ -1255,12 +1297,28 @@ class EngineAdapter(ABC):
             q_start = self._quote_ident(start_field)
             q_end = self._quote_ident(end_field)
             end_literal = self._format_literal(end_default)
-            sql = (
-                f"{q_event_ts} >= (SELECT r.{q_start} FROM {reference} r "
-                f"WHERE r.{q_ref_key} = {q_event_key}) AND "
-                f"COALESCE((SELECT r.{q_end} FROM {reference} r "
-                f"WHERE r.{q_ref_key} = {q_event_key}), {end_literal}) >= {q_event_ts}"
+            # The reference's columns are renamed inside the subquery: when both sides call the
+            # key the same thing (driver_id = driver_id), an unrenamed lookup compared the
+            # reference with ITSELF and returned every row. MAX makes it one value per key,
+            # which Spark requires of a correlated subquery and which a duplicated key needs.
+            ref = (
+                f"(SELECT {q_ref_key} AS __ll_k, {q_start} AS __ll_s, {q_end} AS __ll_e FROM {reference}) r "
+                f"WHERE r.__ll_k = {q_event_key}"
             )
+            sql = (
+                f"{q_event_ts} >= (SELECT MAX(r.__ll_s) FROM {ref}) AND "
+                f"COALESCE((SELECT MAX(r.__ll_e) FROM {ref}), {end_literal}) >= {q_event_ts}"
+            )
+            self._reference_rules()[name] = {
+                "kind": "lifecycle_window",
+                "event_ts": event_ts,
+                "event_key": event_key,
+                "reference": reference,
+                "reference_key": reference_key,
+                "start_field": start_field,
+                "end_field": end_field,
+                "end_default": end_default,
+            }
             return QualityRule(
                 name=name,
                 sql=sql,
@@ -1393,7 +1451,9 @@ class EngineAdapter(ABC):
                 threshold_val = threshold_val / 100.0
             name = cfg.get("name") or f"{field}_null_ratio"
             qfield = self._quote_ident(field)
-            sql = f"SELECT SUM(CASE WHEN {qfield} IS NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) FROM {dataset}"
+            # 1.0, not 1: integer / integer is whole-number division on Polars (2 / 4 = 0), so the
+            # ratio was always 0 there and the rule could not fail.
+            sql = f"SELECT SUM(CASE WHEN {qfield} IS NULL THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*), 0) FROM {dataset}"
             return QualityRule(
                 name=name,
                 sql=sql,

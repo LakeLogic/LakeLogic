@@ -85,15 +85,9 @@ def apply_schema_policy_migration(data: Any) -> Any:
 
     server_block = data.get("server")
     if not isinstance(server_block, dict):
-        if (
-            data.get("schema_policy") is not None
-            or data.get("schema_evolution") is not None
-            or data.get("allow_schema_drift") is not None
-        ):
-            server_block = {}
-            data["server"] = server_block
-        else:
-            return data
+        # No server block: a top-level schema_policy stays at the top level, where the
+        # standard also accepts it. An invented server block has no path and is invalid.
+        return data
 
     policy = server_block.setdefault("schema_policy", {})
 

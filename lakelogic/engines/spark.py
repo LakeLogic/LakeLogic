@@ -125,7 +125,7 @@ class SparkAdapter(EngineAdapter):
         if pre_rules:
             rule_exprs = ["*"]
             for i, rule in enumerate(pre_rules):
-                rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as _rule_{i}")
+                rule_exprs.append(f"CAST(({self._with_link_views(rule.sql)}) AS BOOLEAN) as _rule_{i}")
                 internal_cols.append(f"_rule_{i}")
 
             df_eval = df.selectExpr(*rule_exprs)
@@ -180,7 +180,7 @@ class SparkAdapter(EngineAdapter):
             post_internal = []
             for i, rule in enumerate(post_rules):
                 col_id = f"_post_rule_{i}"
-                post_rule_exprs.append(f"CAST(({rule.sql}) AS BOOLEAN) as {col_id}")
+                post_rule_exprs.append(f"CAST(({self._with_link_views(rule.sql)}) AS BOOLEAN) as {col_id}")
                 post_internal.append(col_id)
 
             good_eval = good_df.selectExpr(*post_rule_exprs)
@@ -707,7 +707,9 @@ class SparkAdapter(EngineAdapter):
                 current_df = current_df.sparkSession.sql(sql_str)
                 continue
             if trans.rollup and trans_phase != "pre":
-                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=self._step_view(current_df))
+                rollup_sql = self._build_rollup_sql(
+                    trans.rollup, source_table=self._step_view(current_df), source_columns=current_df.columns
+                )
                 logger.debug(f"Post-Transform [Rollup]: {rollup_sql}")
                 current_df.createOrReplaceTempView(self._temp_src)
                 if self.contract.dataset:
@@ -878,6 +880,19 @@ class SparkAdapter(EngineAdapter):
             if link.name == reference and getattr(link, "broadcast", False):
                 return True
         return False
+
+    def _with_link_views(self, sql: str) -> str:
+        """``sql`` with each ``links:`` name replaced by the view this run registered it as.
+
+        Reference data is registered per run (``<name>_<id>``) so two runs in one session cannot
+        read each other's. SQL transforms were rewritten to those names; row rules were not, so
+        a referential-integrity or lifecycle rule failed with TABLE_OR_VIEW_NOT_FOUND.
+        """
+        import re
+
+        for link in self.contract.links or []:
+            sql = re.sub(rf"\b{re.escape(link.name)}\b", f"{link.name}_{id(self)}", sql, flags=re.IGNORECASE)
+        return sql
 
     def _register_links(self, spark) -> None:
         """
@@ -1060,9 +1075,11 @@ class SparkAdapter(EngineAdapter):
 
         if server:
             cast_to_string = bool(server.cast_to_string)
-            if server.schema_policy:
-                evolution = (server.schema_policy.evolution or _sp_defaults.evolution).lower()
-                policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
+        from lakelogic.core.models import effective_schema_policy
+
+        _sp = effective_schema_policy(self.contract)
+        evolution = (_sp.evolution or _sp_defaults.evolution).lower()
+        policy = (_sp.unknown_fields or _sp_defaults.unknown_fields).lower()
 
         select_exprs = []
         self._type_err_cols = []

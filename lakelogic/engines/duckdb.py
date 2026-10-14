@@ -19,7 +19,7 @@ from typing import Any, List, Tuple
 
 from loguru import logger
 
-from lakelogic.engines.base import EngineAdapter, struct_drift_errors
+from lakelogic.engines.base import EngineAdapter, TransformationFailed, struct_drift_errors
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
@@ -325,9 +325,11 @@ class DuckDBAdapter(EngineAdapter):
 
         if server:
             cast_to_string = bool(server.cast_to_string)
-            if server.schema_policy:
-                evolution = (server.schema_policy.evolution or _sp_defaults.evolution).lower()
-                policy = (server.schema_policy.unknown_fields or _sp_defaults.unknown_fields).lower()
+        from lakelogic.core.models import effective_schema_policy
+
+        _sp = effective_schema_policy(self.contract)
+        evolution = (_sp.evolution or _sp_defaults.evolution).lower()
+        policy = (_sp.unknown_fields or _sp_defaults.unknown_fields).lower()
 
         if cast_to_string:
             cols = [row[0] for row in self.con.sql(f"SELECT column_name FROM (DESCRIBE {table_name})").fetchall()]
@@ -702,7 +704,7 @@ class DuckDBAdapter(EngineAdapter):
                 try:
                     current = self._apply_sql_transformation(current, trans.sql)
                 except Exception as e:
-                    logger.warning(f"Pre-Transform [SQL] failed: {e}")
+                    raise TransformationFailed(f"Pre-Transform [SQL] failed: {e}") from e
                 continue
 
             if trans.derive and trans_phase == "pre":
@@ -735,7 +737,7 @@ class DuckDBAdapter(EngineAdapter):
                     self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current} WHERE {filter_sql}")
                     current = view_name
                 except Exception as e:
-                    logger.warning(f"Pre-Transform [Filter] failed: {e}")
+                    raise TransformationFailed(f"Pre-Transform [Filter] failed: {e}") from e
                 continue
 
             # No phase gate — matching Polars and Spark. `phase` defaults to "post",
@@ -800,7 +802,7 @@ class DuckDBAdapter(EngineAdapter):
                     )
                     current = view_name
                 except Exception as e:
-                    logger.warning(f"Pre-Transform [Deduplicate] failed: {e}")
+                    raise TransformationFailed(f"Pre-Transform [Deduplicate] failed: {e}") from e
                 continue
 
             # JSON extract in the PRE phase. This branch did not exist, so a
@@ -827,7 +829,7 @@ class DuckDBAdapter(EngineAdapter):
                 try:
                     current = self._apply_sql_transformation(current, trans.sql)
                 except Exception as e:
-                    logger.warning(f"Post-Transform [SQL] failed: {e}")
+                    raise TransformationFailed(f"Post-Transform [SQL] failed: {e}") from e
                 continue
 
             if trans.derive:
@@ -858,19 +860,23 @@ class DuckDBAdapter(EngineAdapter):
                     self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM {current} WHERE {filter_sql}")
                     current = view_name
                 except Exception as e:
-                    logger.warning(f"Post-Transform [Filter] failed: {e}")
+                    raise TransformationFailed(f"Post-Transform [Filter] failed: {e}") from e
                 continue
 
             # Rollup
             if trans.rollup:
-                rollup_sql = self._build_rollup_sql(trans.rollup, source_table=current)
+                rollup_sql = self._build_rollup_sql(
+                    trans.rollup,
+                    source_table=current,
+                    source_columns=self.con.sql(f"SELECT * FROM {current} LIMIT 0").columns,
+                )
                 if rollup_sql:
                     view_name = f"_post_rollup_{id(rollup_sql) & 0xFFFFFF:06x}"
                     try:
                         self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS {rollup_sql}")
                         current = view_name
                     except Exception as e:
-                        logger.warning(f"Post-Transform [Rollup] failed: {e}")
+                        raise TransformationFailed(f"Post-Transform [Rollup] failed: {e}") from e
                 continue
 
             # Pivot
@@ -882,7 +888,7 @@ class DuckDBAdapter(EngineAdapter):
                         self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS {pivot_sql}")
                         current = view_name
                     except Exception as e:
-                        logger.warning(f"Post-Transform [Pivot] failed: {e}")
+                        raise TransformationFailed(f"Post-Transform [Pivot] failed: {e}") from e
                 continue
 
             # Unpivot
@@ -894,7 +900,7 @@ class DuckDBAdapter(EngineAdapter):
                         self.con.sql(f"CREATE OR REPLACE VIEW {view_name} AS {unpivot_sql}")
                         current = view_name
                     except Exception as e:
-                        logger.warning(f"Post-Transform [Unpivot] failed: {e}")
+                        raise TransformationFailed(f"Post-Transform [Unpivot] failed: {e}") from e
                 continue
 
             # Date diff — tolerant of ISO (YYYY-MM-DD) and compact (YYYYMMDD, e.g. GA4)

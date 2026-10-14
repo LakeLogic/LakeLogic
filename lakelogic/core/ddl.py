@@ -743,8 +743,9 @@ def generate_alter_ddl(
 
     _default_evo = _SP().evolution
     evolution = _default_evo
-    if server and getattr(server, "schema_policy", None):
-        evolution = getattr(server.schema_policy, "evolution", _default_evo) or _default_evo
+    from lakelogic.core.models import effective_schema_policy
+
+    evolution = getattr(effective_schema_policy(contract, server), "evolution", None) or _default_evo
     evolution = str(evolution).lower()
 
     # ── 1. New columns ────────────────────────────────────────────────────

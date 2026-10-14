@@ -509,6 +509,54 @@ _LOGGING_HANDLER: Optional[Tuple[int, Any]] = None  # (loguru id, stream) of Lak
 _GZIP_MAGIC = bytes([0x1F, 0x8B])
 
 
+def _is_iceberg_table_dir(path: str, source_type: Optional[str] = None, fmt: Optional[str] = None) -> bool:
+    """A local directory holding an Iceberg table: ``metadata/`` with at least one metadata file."""
+    if "://" in str(path):
+        return False
+    meta = Path(path) / "metadata"
+    # The directory's own shape decides, as `_delta_log` does for Delta: a table directory is
+    # never a file to parse, whatever `type`/`format` the contract names.
+    return meta.is_dir() and any(meta.glob("*.metadata.json"))
+
+
+def _read_iceberg_table_dir(path: str) -> Any:
+    """An Iceberg table directory as a Polars frame, read through its newest metadata file.
+
+    ``source.type: iceberg`` is documented as "an Iceberg table directory, read by path without
+    a catalog", but only Spark could: on Polars and DuckDB the directory went to the FILE reader
+    and failed with "expected a file path; ... is a directory".
+
+    The newest metadata is the one ``metadata/version-hint.text`` names, else the highest version
+    number among ``*.metadata.json`` (``v3.metadata.json`` or ``00003-<uuid>.metadata.json``).
+    A local path is opened through pyiceberg's fsspec file layer: its default (pyarrow) layer
+    turns ``C:\\...`` into ``/C:/...`` and cannot open it.
+    """
+    import re
+
+    import polars as pl
+    from pyiceberg.table import StaticTable
+
+    meta = Path(path) / "metadata"
+    chosen = None
+    hint = meta / "version-hint.text"
+    if hint.exists():
+        version = hint.read_text(encoding="utf-8").strip()
+        for name in (f"v{version}.metadata.json", f"{version}.metadata.json"):
+            if (meta / name).exists():
+                chosen = meta / name
+    if chosen is None:
+
+        def _version(f: Path) -> int:
+            m = re.match(r"v?(\d+)", f.name)
+            return int(m.group(1)) if m else -1
+
+        chosen = max(meta.glob("*.metadata.json"), key=_version)
+    table = StaticTable.from_metadata(
+        chosen.resolve().as_uri(), properties={"py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO"}
+    )
+    return pl.scan_iceberg(table).collect()
+
+
 def _fixed_width_layout(options: Dict[str, Any], fields: Optional[List[Any]]) -> List[Tuple[str, int, int]]:
     """``[(name, start0, width)]`` from either way a contract can declare a fixed-width layout.
 
@@ -1879,17 +1927,9 @@ class DataProcessor:
             # Resolve unknown_fields policy: server.schema_policy > contract.schema_policy > SchemaPolicy default
             from lakelogic.core.models import SchemaPolicy as _SP
 
-            policy = _SP().unknown_fields  # Use the model default
+            from lakelogic.core.models import effective_schema_policy
 
-            # Check root-level schema_policy first
-            root_sp = getattr(self.contract, "schema_policy", None)
-            if root_sp and getattr(root_sp, "unknown_fields", None):
-                policy = root_sp.unknown_fields.lower()
-
-            # Server-level schema_policy takes priority
-            server = getattr(self.contract, "server", None)
-            if server and getattr(server, "schema_policy", None):
-                policy = (server.schema_policy.unknown_fields or policy).lower()
+            policy = (effective_schema_policy(self.contract).unknown_fields or _SP().unknown_fields).lower()
 
             # If policy is 'drop', prune unknown columns.
             if policy == "drop":
@@ -3598,6 +3638,11 @@ class DataProcessor:
                                     except Exception as _cap_err:
                                         logger.debug(f"Watermark capture failed: {_cap_err}")
 
+                        elif _is_iceberg_table_dir(
+                            path, getattr(getattr(self.contract, "source", None), "type", None), source_fmt
+                        ):
+                            df = _read_iceberg_table_dir(path)
+
                         elif _scannable:
                             fmt = (
                                 self.contract.source.format.lower()
@@ -4120,6 +4165,12 @@ class DataProcessor:
                         # shared readers (driver side) so every engine gives one answer.
                         df = self._spark_read_file_source(spark, fmt, file_paths, path)
                         if df is None:
+                            # Spark has no "jsonl" / "ndjson" reader: one value per line is its
+                            # "json" reader with multiLine off. Naming the format the contract
+                            # standard names failed with DATA_SOURCE_NOT_FOUND.
+                            _json_lines = str(fmt).lower() in ("jsonl", "ndjson")
+                            if _json_lines:
+                                fmt = "json"
                             reader = spark.read.format(fmt)
                             reader = _apply_spark_engine_options(reader, self.contract.source)
                             if fmt == "csv":
@@ -4157,7 +4208,9 @@ class DataProcessor:
                                 # anything else is one value per line.
                                 _json_opts = getattr(self.contract.source, "options", {}) or {}
                                 _multiline = _json_opts.get("multiline")
-                                if _multiline is None:
+                                if _json_lines:
+                                    _multiline = False
+                                elif _multiline is None:
                                     _multiline = self._json_is_one_value_per_file(file_paths, path)
                                 reader = reader.option("multiLine", "true" if _multiline else "false")
                             # When reading a directory (no explicit file list), enable
@@ -4202,7 +4255,13 @@ class DataProcessor:
                                     "source.flatten_nested is set, so the file's own (nested) "
                                     "schema is read and flattened before validation."
                                 )
-                            if _fields_list and not _flatten and str(fmt).lower() not in ("delta", "iceberg", "hudi"):
+                            # A format that carries its own column types is read WITH those types;
+                            # the engine then converts each column to the contract's type, as it
+                            # does on Polars and DuckDB. Handing the contract's types to the reader
+                            # made Spark refuse the file outright when they differed (a Parquet
+                            # INT64 column under a text or 32-bit contract column).
+                            _self_describing = ("delta", "iceberg", "hudi", "parquet", "avro", "orc")
+                            if _fields_list and not _flatten and str(fmt).lower() not in _self_describing:
                                 from pyspark.sql.types import (
                                     StructType,
                                     StructField,
@@ -5488,6 +5547,16 @@ class DataProcessor:
         paths = list(file_paths or [path])
         low = [str(p).lower() for p in paths]
         fmt = (fmt or "").lower()
+
+        if (fmt == "iceberg" or getattr(src, "type", None) == "iceberg") and _is_iceberg_table_dir(path):
+            # Spark reads Iceberg only with the Iceberg runtime on its classpath (Databricks has
+            # it; a local or plain Spark does not, and failed with DATA_SOURCE_NOT_FOUND). A local
+            # table directory is then read on the driver with the reader Polars and DuckDB use.
+            try:
+                return spark.read.format("iceberg").load(path)
+            except Exception as exc:  # noqa: BLE001 - only the missing reader is expected here
+                logger.info(f"Spark has no Iceberg reader ({type(exc).__name__}); reading {path} on the driver")
+                return spark.createDataFrame(_read_iceberg_table_dir(path).to_pandas())
 
         driver = (
             any(p.endswith(".zip") for p in low)
