@@ -30,6 +30,30 @@ def _is_remote_path(path) -> bool:
     return is_uri_path(str(path))
 
 
+def _holds_data(target: Any) -> bool:
+    """Whether a write target already holds data, asked of the storage itself.
+
+    Append, merge and SCD2 read what is there before writing. A cloud target used to answer
+    "no" without looking (``URIPath.exists`` is always False), so on Polars/DuckDB an append or
+    merge to a Parquet/CSV/JSON file in ADLS/S3/GCS REPLACED it with only the new rows (found
+    2026-10-14). A cloud path is checked through fsspec; if the storage cannot be asked, the run
+    stops, because "could not tell" must never be read as "empty".
+    """
+    if not isinstance(target, URIPath):
+        return Path(target).exists()
+    uri = str(target)
+    try:
+        import fsspec
+
+        fs, path = fsspec.core.url_to_fs(uri)
+        return bool(fs.exists(path))
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"Could not tell whether {uri} already holds data ({type(exc).__name__}: {exc}). The run "
+            f"stopped rather than risk overwriting it; check the storage credentials for fsspec."
+        ) from exc
+
+
 class URIPath:
     """Lightweight Path-compatible wrapper for cloud URIs and table: references.
 
@@ -1162,7 +1186,7 @@ def _append_without_pandas(df: Any, target_file: Path, output_format: str) -> in
     if not isinstance(df, pl.DataFrame):
         raise ValueError("Append without pandas requires a Polars DataFrame.")
 
-    if target_file.exists():
+    if _holds_data(target_file):
         if output_format == "csv":
             existing = pl.read_csv(target_file)
             combined = pl.concat([existing, df], how="vertical")
@@ -1773,6 +1797,17 @@ def _inject_unknown_member_spark(  # pragma: no cover
     return result
 
 
+class MergeFailed(RuntimeError):
+    """A merge into a table that exists could not be done as a merge; the run stops.
+
+    Nothing is rewritten: a merge never falls back to replacing a table that holds data.
+    """
+
+
+class IcebergNeedsCatalog(ValueError):
+    """An Iceberg target was given as a path; Iceberg tables are written through a catalog."""
+
+
 class TargetFormatMismatch(RuntimeError):
     """The target already holds data in a different table format than the contract now writes.
 
@@ -1996,7 +2031,9 @@ def _inject_unknown_member_spark_table(  # pragma: no cover
     )
 
     # Append the unknown member row
-    unknown_df.write.format("delta").mode("append").saveAsTable(table_name)
+    # In the table's own format: a hard-coded `format("delta")` could not append to an Iceberg
+    # table. writeTo(...).append() resolves the existing table, whatever its format.
+    unknown_df.writeTo(table_name).append()
     logger.info(f"Injected unknown member row (SK={sk_value}) into {table_name}")
 
 
@@ -2633,6 +2670,91 @@ def _with_scd1_surrogate_key_spark(df, primary_key: List[str], scd1_cfg: Optiona
     return df.select(sk_column, *[c for c in df.columns if c != sk_column])
 
 
+def _spark_iceberg_merge(  # pragma: no cover
+    spark,
+    incoming_df,
+    table: str,
+    primary_key: List[str],
+    *,
+    scd1_cfg=None,
+    cdc_op_field=None,
+    cdc_delete_values=None,
+    cdc_timestamp_field=None,
+    soft_delete_col=None,
+    soft_delete_val=True,
+    soft_delete_time_col=None,
+    soft_delete_reason_col=None,
+    merge_dedup_guard=False,
+) -> Dict[str, Any]:
+    """``MERGE INTO`` an existing Iceberg catalog table: the same meaning as the Delta merge.
+
+    * a CDC delete with a soft-delete column marks the row; without one it deletes it;
+    * matched rows are updated, new keys inserted; the SCD1 surrogate key is computed first;
+    * columns the target lacks are added first (``ALTER TABLE ... ADD COLUMNS``), and the
+      UPDATE/INSERT name only the incoming columns, so target-only columns are left alone.
+    """
+    from pyspark.sql import functions as F
+
+    has_deletes = bool(cdc_op_field and cdc_delete_values and cdc_op_field in incoming_df.columns)
+    if has_deletes and soft_delete_col:
+        incoming_df = _seed_soft_delete_columns_spark(
+            incoming_df,
+            soft_delete_col,
+            soft_delete_time_col,
+            soft_delete_reason_col,
+            cdc_op_field,
+            cdc_delete_values,
+            soft_delete_val,
+            cdc_timestamp_field,
+        )
+    incoming_df = _with_scd1_surrogate_key_spark(incoming_df, primary_key, scd1_cfg)
+    if merge_dedup_guard:
+        from pyspark.sql.window import Window as _W
+
+        _w = _W.partitionBy(*primary_key).orderBy(F.monotonically_increasing_id().desc())
+        incoming_df = (
+            incoming_df.withColumn("_dedup_rn", F.row_number().over(_w))
+            .filter(F.col("_dedup_rn") == 1)
+            .drop("_dedup_rn")
+        )
+
+    have = {f.name for f in spark.table(table).schema}
+    new = [f for f in incoming_df.schema if f.name not in have]
+    if new:
+        spark.sql(
+            f"ALTER TABLE {table} ADD COLUMNS ("
+            + ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in new)
+            + ")"
+        )
+
+    view = f"_lakelogic_merge_{abs(hash((table, id(incoming_df)))) & 0xFFFFFF:06x}"
+    incoming_df.createOrReplaceTempView(view)
+    cols = list(incoming_df.columns)
+    on = " AND ".join(f"t.`{c}` = s.`{c}`" for c in primary_key)
+    update = ", ".join(f"t.`{c}` = s.`{c}`" for c in cols if c not in primary_key)
+    insert_cols = ", ".join(f"`{c}`" for c in cols)
+    insert_vals = ", ".join(f"s.`{c}`" for c in cols)
+    clauses = []
+    if has_deletes and not soft_delete_col:
+        values = ", ".join("'" + str(v).replace("'", "''") + "'" for v in cdc_delete_values)
+        clauses.append(f"WHEN MATCHED AND s.`{cdc_op_field}` IN ({values}) THEN DELETE")
+        not_deleted = f" AND s.`{cdc_op_field}` NOT IN ({values})"
+    else:
+        not_deleted = ""
+    if update:
+        clauses.append(f"WHEN MATCHED THEN UPDATE SET {update}")
+    clauses.append(f"WHEN NOT MATCHED{not_deleted} THEN INSERT ({insert_cols}) VALUES ({insert_vals})")
+    spark.sql(f"MERGE INTO {table} t USING {view} s ON {on} " + " ".join(clauses))
+    try:
+        spark.catalog.dropTempView(view)
+    except Exception:  # noqa: BLE001
+        pass
+    _inject_scd1_unknown_member_after_write(spark, table, primary_key, scd1_cfg)
+    rows = incoming_df.count()
+    logger.info(f"Merged {rows} rows into Iceberg table {table} (MERGE INTO)")
+    return {"target": table, "rows_written": rows, "format": "iceberg"}
+
+
 def _inject_scd1_unknown_member_after_write(
     spark, table_name: str, primary_key: List[str], scd1_cfg
 ) -> None:  # pragma: no cover
@@ -2796,12 +2918,38 @@ def _spark_merge_dataframe(  # pragma: no cover
                     "rows_written": rows_written,
                     "format": output_format,
                 }
-        except ImportError:
-            logger.debug("Delta Lake not available, falling back to DataFrame merge")
         except Exception as e:
-            # A WARNING, not debug: the fallback rewrites the whole table, so the reason it was
-            # needed is what an operator has to see (it was invisible on Databricks).
-            logger.warning(f"Delta MERGE failed, falling back to a full-table rewrite: {e}")
+            # A merge that cannot merge FAILS THE RUN (owner decision, 2026-10-14). It used to fall
+            # back to rewriting the whole table, which turns a merge problem into a full overwrite
+            # of a table that holds data — and on Databricks that fallback was taken on every run.
+            raise MergeFailed(
+                f"Delta MERGE into {table_or_path} failed, so the run stopped rather than rewrite the table: {e}"
+            ) from e
+
+    # Iceberg catalog table: a real MERGE INTO (one snapshot, only the changed files), as Delta
+    # gets above. It used to fall through to the full-table rewrite below on every run.
+    if output_format == "iceberg" and is_table:
+        try:
+            if spark.catalog.tableExists(table_or_path):
+                return _spark_iceberg_merge(
+                    spark,
+                    incoming_df,
+                    table_or_path,
+                    primary_key,
+                    scd1_cfg=scd1_cfg,
+                    cdc_op_field=cdc_op_field,
+                    cdc_delete_values=cdc_delete_values,
+                    cdc_timestamp_field=cdc_timestamp_field,
+                    soft_delete_col=soft_delete_col,
+                    soft_delete_val=soft_delete_val,
+                    soft_delete_time_col=soft_delete_time_col,
+                    soft_delete_reason_col=soft_delete_reason_col,
+                    merge_dedup_guard=merge_dedup_guard,
+                )
+        except Exception as e:
+            raise MergeFailed(
+                f"Iceberg MERGE INTO {table_or_path} failed, so the run stopped rather than rewrite the table: {e}"
+            ) from e
 
     # Fallback: DataFrame-based merge for non-Delta or when Delta unavailable
     try:
@@ -3805,6 +3953,27 @@ def _materialize_spark_dataframe(  # pragma: no cover
         elif evolution == "overwrite":
             writer = writer.option("overwriteSchema", "true")
 
+    # Iceberg has no `mergeSchema` writer option: new columns are added to the catalog table
+    # explicitly first, as the schema policy allows (a write with an extra column failed with
+    # INSERT_COLUMN_ARITY_MISMATCH). `strict` refuses in the words Delta's path uses.
+    if output_format == "iceberg" and contract and str(target_str).startswith("table:"):
+        _ice_name = str(target_str)[len("table:") :]
+        if spark.catalog.tableExists(_ice_name):
+            _have = {f.name for f in spark.table(_ice_name).schema}
+            _new = [f for f in df.schema if f.name not in _have]
+            if _new:
+                from lakelogic.core.models import effective_schema_policy
+
+                _evo = (effective_schema_policy(contract).evolution or "allow").lower()
+                if _evo == "strict":
+                    raise ValueError(
+                        "Schema Evolution Blocked (policy=strict): New columns in data not in table: "
+                        + ", ".join(f.name for f in _new)
+                    )
+                _cols = ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in _new)
+                spark.sql(f"ALTER TABLE {_ice_name} ADD COLUMNS ({_cols})")
+                logger.info(f"Added {len(_new)} column(s) to Iceberg table {_ice_name}: {_cols}")
+
     mode = "append" if strategy == "append" else "overwrite"
     if (
         strategy == "append"
@@ -3824,13 +3993,12 @@ def _materialize_spark_dataframe(  # pragma: no cover
     if target_str.startswith("table:"):
         table_name = target_str[len("table:") :]
         # For append mode on UC with external locations, the table must
-        # already exist. On first run, fall back to overwrite to create it.
-        if mode == "append":
-            try:
-                spark.table(table_name)
-            except Exception:
-                logger.info(f"Initialize `{table_name}` (overwrite mode)")
-                mode = "overwrite"
+        # already exist. On first run, create it with overwrite — only when the CATALOG says the
+        # table is not there. Treating "could not read it" (a permission or transient error) as
+        # "not there" overwrote a table that held data.
+        if mode == "append" and not spark.catalog.tableExists(table_name):
+            logger.info(f"Initialize `{table_name}` (overwrite mode)")
+            mode = "overwrite"
         _spark_save_as_table(writer, table_name, mode, location)
         _spark_apply_table_metadata(spark, table_name, contract)
         if incremental_metadata and incremental_metadata.get("strategy") == "delta_version":
@@ -4217,7 +4385,7 @@ def _partition_aware_merge(
         part_file = part_dir / f"data.{resolved_format}"
 
         # Load existing partition data (if any)
-        if part_file.exists():
+        if _holds_data(part_file):
             existing = _read_frame(part_file, resolved_format)
         else:
             existing = pd.DataFrame(columns=group.columns)
@@ -4432,6 +4600,74 @@ def write_to_secondary_targets(
     return results
 
 
+def _declared_types_for_empty_columns(table: Any, contract: Any) -> Any:
+    """Columns with no values at all (Arrow ``null`` type) typed as the contract declares them.
+
+    An Iceberg table keeps the type its first write gave a column. A column that arrived all
+    empty (a soft-delete flag no row has set yet) used to become TEXT, and setting it later
+    failed ("Invalid value for dtype 'str'"). Columns the model does not declare keep the old
+    fallback (``_sanitize_arrow_nulls``).
+    """
+    import pyarrow as pa
+
+    from lakelogic.core import types as _types
+
+    fields = getattr(getattr(contract, "model", None), "fields", None) or []
+    declared = {}
+    for f in fields:
+        name, kind = getattr(f, "name", None), str(getattr(f, "type", "") or "")
+        if name and _types.is_known(kind):
+            try:
+                declared[name] = pa.type_for_alias(_types.arrow_type(kind))
+            except (ValueError, KeyError):
+                pass
+    for i, field in enumerate(table.schema):
+        if pa.types.is_null(field.type) and field.name in declared:
+            table = table.set_column(
+                i, pa.field(field.name, declared[field.name]), pa.nulls(table.num_rows, declared[field.name])
+            )
+    return table
+
+
+def _evolve_iceberg_schema(tbl: Any, data: Any, contract: Any) -> Any:
+    """Add columns the data has and the Iceberg table lacks, as the schema policy allows.
+
+    ``strict`` refuses, in the words Delta's writer uses; every other evolution mode adds the new
+    columns (nullable) to the table first. Without this an Iceberg target refused any new
+    column ("PyArrow table contains more columns").
+    """
+    have = set(tbl.schema().column_names)
+    new = [name for name in data.schema.names if name not in have]
+    if not new:
+        return tbl
+    from lakelogic.core.models import effective_schema_policy
+
+    evolution = (effective_schema_policy(contract).evolution or "allow").lower()
+    if evolution == "strict":
+        raise ValueError(
+            f"Schema Evolution Blocked (policy=strict): New columns in data not in table: {', '.join(new)}"
+        )
+    with tbl.update_schema() as update:
+        update.union_by_name(data.schema)
+    return tbl
+
+
+def _to_iceberg_types(tbl: Any, data: Any) -> Any:
+    """``data`` cast to the table's own column types (pandas widens integers on the way)."""
+    import pyarrow as pa
+
+    target = tbl.schema().as_arrow()
+    columns, fields = [], []
+    for field in target:
+        if field.name in data.schema.names:
+            col = data.column(field.name)
+            columns.append(col.cast(field.type) if col.type != field.type else col)
+        else:
+            columns.append(pa.nulls(data.num_rows, field.type))
+        fields.append(pa.field(field.name, field.type, nullable=True))
+    return pa.Table.from_arrays(columns, schema=pa.schema(fields))
+
+
 def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
     """Create/update a **catalog-registered** Iceberg table via pyiceberg.
 
@@ -4483,6 +4719,10 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
     )
     if warehouse:
         props["warehouse"] = warehouse
+    # Anything else a catalog needs (credentials, endpoints, `py-io-impl`), as given.
+    extra = metadata.get("iceberg_catalog_properties") or {}
+    if isinstance(extra, dict):
+        props.update({str(k): v for k, v in extra.items()})
 
     catalog = load_catalog(catalog_name, **props)
 
@@ -4492,7 +4732,7 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
         arrow = df.to_arrow_table()
     else:
         arrow = pa.Table.from_pandas(df, preserve_index=False)
-    arrow = _sanitize_arrow_nulls(arrow)
+    arrow = _sanitize_arrow_nulls(_declared_types_for_empty_columns(arrow, contract))
 
     try:
         catalog.create_namespace_if_not_exists(namespace)
@@ -4506,24 +4746,59 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
 
     try:
         tbl = catalog.load_table(identifier)
-        exists = True
     except Exception:
-        tbl = catalog.create_table(identifier, schema=arrow.schema)
-        exists = False
+        tbl = None
 
     primary_key = list(getattr(contract, "primary_key", None) or [])
-    if not exists:
-        tbl.append(arrow)
-        op = "create+append"
-    elif strategy == "overwrite":
-        tbl.overwrite(arrow)
-        op = "overwrite"
-    elif strategy in ("merge", "scd2", "upsert") and primary_key and hasattr(tbl, "upsert"):
-        tbl.upsert(arrow, join_cols=primary_key)
-        op = "upsert"
+    if strategy in ("merge", "scd2", "upsert") and primary_key:
+        # The SAME frame logic as every other target (_merge_frames / _scd2_frames), so CDC
+        # deletes, soft deletes, SCD1 keys and SCD2 history mean one thing everywhere. Before
+        # 2026-10-14 merge AND scd2 were a pyiceberg upsert: deletes were ignored and SCD2 kept
+        # no history at all. The result is committed as one overwrite (a new snapshot).
+        import pandas as _pd
+
+        existing = tbl.scan().to_pandas() if tbl is not None else _pd.DataFrame(columns=arrow.schema.names)
+        incoming = arrow.to_pandas()
+        if strategy == "scd2":
+            scd2_cfg = dict(getattr(mat, "scd2", None) or {})
+            scd2_cfg["merge_dedup_guard"] = bool(getattr(mat, "merge_dedup_guard", False))
+            result = _scd2_frames(existing, incoming, primary_key, scd2_cfg)
+        else:
+            src = getattr(contract, "source", None)
+            result = _merge_frames(
+                existing,
+                incoming,
+                primary_key,
+                soft_delete_col=getattr(mat, "soft_delete_column", None),
+                soft_delete_val=getattr(mat, "soft_delete_value", True),
+                soft_delete_time_col=getattr(mat, "soft_delete_time_column", None),
+                soft_delete_reason_col=getattr(mat, "soft_delete_reason_column", None),
+                cdc_op_field=getattr(src, "cdc_op_field", None) if src else None,
+                cdc_delete_values=getattr(src, "cdc_delete_values", None) if src else None,
+                cdc_timestamp_field=getattr(src, "cdc_timestamp_field", None) if src else None,
+                scd1_cfg=_scd1_config(mat),
+                merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
+            )
+        data = _sanitize_arrow_nulls(
+            _declared_types_for_empty_columns(pa.Table.from_pandas(result, preserve_index=False), contract)
+        )
+        write_mode = "overwrite"
     else:
-        tbl.append(arrow)
-        op = "append"
+        data = arrow
+        write_mode = "overwrite" if strategy == "overwrite" else "append"
+
+    if tbl is None:
+        tbl = catalog.create_table(identifier, schema=data.schema)
+        tbl.append(data)
+        op = f"create+{strategy}"
+    else:
+        tbl = _evolve_iceberg_schema(tbl, data, contract)
+        data = _to_iceberg_types(tbl, data)
+        if write_mode == "overwrite":
+            tbl.overwrite(data)
+        else:
+            tbl.append(data)
+        op = strategy
 
     logger.info(f"Materialized {arrow.num_rows} rows to Iceberg catalog table {catalog_name}.{identifier} (op={op})")
     return {"target": f"{catalog_name}.{identifier}", "rows_written": arrow.num_rows, "format": "iceberg", "op": op}
@@ -4798,6 +5073,16 @@ def _materialize_primary(
     _spark_session = getattr(df, "sparkSession", None) if engine_name == "spark" else None
     _guard_target_format(str(resolved_target), resolved_format, spark=_spark_session)
 
+    # Iceberg is a CATALOG format (2026-10-14): Spark resolves an Iceberg write by table name and
+    # pyiceberg commits through a catalog, so a bare path failed on every engine (DuckDB's
+    # `COPY ... FORMAT ICEBERG` does not exist; Spark: "table not found"). Say so up front.
+    if resolved_format == "iceberg" and not str(resolved_target).startswith("table:"):
+        raise IcebergNeedsCatalog(
+            f"Iceberg target '{resolved_target}' is a path. Iceberg tables are written through a "
+            f"catalog: set the target to `table:<catalog>.<namespace>.<table>` (Unity Catalog, Glue, "
+            f"REST or a Hadoop warehouse catalog), or use format: delta for a table written by path."
+        )
+
     if engine_name == "spark" and hasattr(df, "sparkSession") and hasattr(df, "write"):  # pragma: no cover
         return _materialize_spark_dataframe(
             df,
@@ -4904,7 +5189,7 @@ def _materialize_primary(
                 f"Materialization strategy '{strategy}' for format '{resolved_format}' requires pandas "
                 "(or Spark). Install pandas to proceed."
             )
-        elif strategy == "append" and target_file.exists():
+        elif strategy == "append" and _holds_data(target_file):
             rows_written = _append_without_pandas(df, target_file, resolved_format)
         else:
             _write_frame(df, target_file, resolved_format)
@@ -4923,7 +5208,7 @@ def _materialize_primary(
         and not partition_by
         and strategy in ["overwrite", "append"]
     ):
-        if strategy == "append" and target_file.exists():
+        if strategy == "append" and _holds_data(target_file):
             rows_written = _append_without_pandas(df, target_file, resolved_format)
         else:
             _write_frame(df, target_file, resolved_format)
@@ -5446,7 +5731,7 @@ def _materialize_primary(
         _write_frame(pdf, target_file, resolved_format)
         rows_written = len(pdf)
     elif strategy == "append":
-        if target_file.exists():
+        if _holds_data(target_file):
             import pandas as pd
 
             existing = _read_frame(target_file, resolved_format)
@@ -5465,7 +5750,7 @@ def _materialize_primary(
         soft_delete_time_col = getattr(mat, "soft_delete_time_column", None)
         soft_delete_reason_col = getattr(mat, "soft_delete_reason_column", None)
 
-        if target_file.exists():
+        if _holds_data(target_file):
             existing = _read_frame(target_file, resolved_format)
 
             scd1_cfg = getattr(mat, "scd1", None)
@@ -5517,7 +5802,7 @@ def _materialize_primary(
         _write_frame(merged, target_file, resolved_format)
         rows_written = len(merged)
     elif strategy == "scd2":
-        if target_file.exists():
+        if _holds_data(target_file):
             existing = _read_frame(target_file, resolved_format)
             merged = _scd2_frames(existing, pdf, primary_key, scd2_cfg)
         else:
