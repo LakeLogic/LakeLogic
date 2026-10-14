@@ -1072,6 +1072,68 @@ Sync mode:
     typer.echo(base)  # pragma: no cover
 
 
+@app.command(rich_help_panel="Contract Execution")
+def migrate(
+    contract: Path = typer.Option(..., "--contract", "-c", help="Path to the contract YAML file."),
+    target: Optional[str] = typer.Option(
+        None, "--target", help="The table to migrate (catalog name or Delta path). Default: the contract's target."
+    ),
+    engine: str = typer.Option(
+        "polars", "--engine", "-e", help="spark (catalog or path tables) or polars/duckdb (Delta paths)."
+    ),
+):
+    """
+    Rewrite an existing Delta table to the contract's column types.
+
+    A pipeline run widens types in place and adds new columns on its own, but stops on a type
+    change that needs every row rewritten. This command makes that rewrite, deliberately:
+    a strict cast (a value that does not convert fails it, never becomes null), one commit,
+    the previous version kept in the table's history.
+
+    Example:
+
+        lakelogic migrate --contract contracts/gold/dim_platform.yaml
+    """
+    from lakelogic.core.materialization import _resolve_target
+    from lakelogic.core.models import DataContract
+
+    loaded = DataContract.from_yaml(str(contract))
+    resolved, fmt = _resolve_target(loaded)
+    target_str = target or (str(resolved) if resolved else "")
+    if not target_str:
+        logger.error("The contract names no target; pass --target.")
+        raise typer.Exit(code=1)
+    if not target and (fmt or "delta") != "delta":
+        logger.error(f"lakelogic migrate rewrites Delta tables; this contract's target is {fmt}.")
+        raise typer.Exit(code=1)
+    if target and not target.startswith("table:") and "/" not in target and "\\" not in target:
+        target_str = f"table:{target}"
+    if engine != "spark":
+        from lakelogic.core.schema_alignment import migrate_delta_rs_table
+
+        if target_str.startswith("table:"):
+            logger.error("A catalog table is migrated with --engine spark.")
+            raise typer.Exit(code=1)
+        result = migrate_delta_rs_table(target_str, loaded)
+        if not result["changed"]:
+            logger.info(f"{target_str} already matches the contract.")
+        return
+
+    from pyspark.sql import SparkSession
+
+    from lakelogic.core.materialization import _spark_table_ref
+    from lakelogic.core.schema_alignment import migrate_spark_table
+
+    spark = SparkSession.builder.getOrCreate()
+    ref = _spark_table_ref(spark, target_str, "delta")
+    if ref is None:
+        logger.error(f"No existing Delta table at {target_str}: nothing to migrate.")
+        raise typer.Exit(code=1)
+    result = migrate_spark_table(spark, ref, loaded, "delta")
+    if not result["changed"]:
+        logger.info(f"{ref} already matches the contract.")
+
+
 @app.command(rich_help_panel="Data Tooling")
 def generate(
     contract: Path = typer.Option(..., "--contract", "-c", help="Path to the contract YAML file."),

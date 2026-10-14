@@ -2685,12 +2685,13 @@ def _spark_iceberg_merge(  # pragma: no cover
     soft_delete_time_col=None,
     soft_delete_reason_col=None,
     merge_dedup_guard=False,
+    contract=None,
 ) -> Dict[str, Any]:
     """``MERGE INTO`` an existing Iceberg catalog table: the same meaning as the Delta merge.
 
     * a CDC delete with a soft-delete column marks the row; without one it deletes it;
     * matched rows are updated, new keys inserted; the SCD1 surrogate key is computed first;
-    * columns the target lacks are added first (``ALTER TABLE ... ADD COLUMNS``), and the
+    * columns the target lacks are added first (``_spark_add_merge_columns``), and the
       UPDATE/INSERT name only the incoming columns, so target-only columns are left alone.
     """
     from pyspark.sql import functions as F
@@ -2718,14 +2719,7 @@ def _spark_iceberg_merge(  # pragma: no cover
             .drop("_dedup_rn")
         )
 
-    have = {f.name for f in spark.table(table).schema}
-    new = [f for f in incoming_df.schema if f.name not in have]
-    if new:
-        spark.sql(
-            f"ALTER TABLE {table} ADD COLUMNS ("
-            + ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in new)
-            + ")"
-        )
+    _spark_add_merge_columns(spark, table, spark.table(table).schema, incoming_df, contract)
 
     view = f"_lakelogic_merge_{abs(hash((table, id(incoming_df)))) & 0xFFFFFF:06x}"
     incoming_df.createOrReplaceTempView(view)
@@ -2767,6 +2761,43 @@ def _inject_scd1_unknown_member_after_write(
     _inject_unknown_member_spark_table(spark, table_name, primary_key, scd1_cfg, unknown_cfg)
 
 
+def _merge_columns_to_add(have: set, incoming_fields: List[Any], contract: Any) -> List[Any]:
+    """The incoming columns a MERGE must first add to its target, as the schema policy allows.
+
+    A column the contract DECLARES (``model.fields``) is always added: the contract says the table
+    has it, so a table that lacks it is behind the contract, not ahead of it. Any other new column
+    is added unless the policy is ``strict``, which refuses it in the words Delta's writer uses.
+    Without this a Delta MERGE failed on any new column ("Cannot resolve <col> in UPDATE clause").
+    """
+    new = [f for f in incoming_fields if f.name not in have]
+    if not new or contract is None:
+        return new
+    from lakelogic.core.models import effective_schema_policy
+
+    declared = {f.name for f in (getattr(getattr(contract, "model", None), "fields", None) or [])}
+    evolution = (getattr(effective_schema_policy(contract), "evolution", None) or "allow").lower()
+    undeclared = [f.name for f in new if f.name not in declared]
+    if undeclared and evolution == "strict":
+        raise ValueError(
+            f"Schema Evolution Blocked (policy=strict): New columns in data not in table: {', '.join(undeclared)}"
+        )
+    return new
+
+
+def _spark_add_merge_columns(  # pragma: no cover
+    spark, table_ref: str, target_schema: Any, incoming_df: Any, contract: Any
+) -> None:
+    """``ALTER TABLE ... ADD COLUMNS`` for what ``_merge_columns_to_add`` says the target lacks."""
+    new = _merge_columns_to_add({f.name for f in target_schema}, list(incoming_df.schema), contract)
+    if new:
+        spark.sql(
+            f"ALTER TABLE {table_ref} ADD COLUMNS ("
+            + ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in new)
+            + ")"
+        )
+        logger.info(f"Added {len(new)} column(s) to {table_ref} before MERGE: {', '.join(f.name for f in new)}")
+
+
 def _spark_merge_dataframe(  # pragma: no cover
     spark,
     incoming_df: Any,
@@ -2784,6 +2815,7 @@ def _spark_merge_dataframe(  # pragma: no cover
     soft_delete_reason_col: Optional[str] = None,
     merge_dedup_guard: bool = False,
     partition_by: Optional[List[str]] = None,
+    contract: Any = None,
 ) -> Dict[str, Any]:
     """
     Perform a native Spark merge (upsert) without collecting to pandas.
@@ -2866,6 +2898,16 @@ def _spark_merge_dataframe(  # pragma: no cover
                 delta_table = (
                     DeltaTable.forName(spark, table_or_path) if is_table else DeltaTable.forPath(spark, table_or_path)
                 )
+                _spark_add_merge_columns(
+                    spark,
+                    table_or_path if is_table else f"delta.`{table_or_path}`",
+                    delta_table.toDF().schema,
+                    incoming_df,
+                    contract,
+                )
+                delta_table = (
+                    DeltaTable.forName(spark, table_or_path) if is_table else DeltaTable.forPath(spark, table_or_path)
+                )
                 merge_condition = " AND ".join([f"target.{col} = source.{col}" for col in primary_key])
 
                 # ── Dedup guard: deduplicate incoming by PK before MERGE ──
@@ -2945,6 +2987,7 @@ def _spark_merge_dataframe(  # pragma: no cover
                     soft_delete_time_col=soft_delete_time_col,
                     soft_delete_reason_col=soft_delete_reason_col,
                     merge_dedup_guard=merge_dedup_guard,
+                    contract=contract,
                 )
         except Exception as e:
             raise MergeFailed(
@@ -3765,6 +3808,31 @@ def _spark_update_incremental_version(spark, table_name, version):  # pragma: no
         logger.warning(f"Failed to update table property for {clean_name}: {e}")
 
 
+def _spark_table_ref(spark: Any, target_str: str, output_format: str) -> Optional[str]:  # pragma: no cover
+    """The SQL name of an EXISTING Spark table target, or None when there is no table yet."""
+    if target_str.startswith("table:"):
+        name = target_str[6:]
+        return name if spark.catalog.tableExists(name) else None
+    if output_format == "delta":
+        try:
+            from delta.tables import DeltaTable
+
+            return f"delta.`{target_str}`" if DeltaTable.isDeltaTable(spark, target_str) else None
+        except Exception:  # noqa: BLE001 - no Delta on this session: nothing to align
+            return None
+    return None
+
+
+def _align_existing_spark_table(  # pragma: no cover
+    spark: Any, target_str: str, output_format: str, contract: Any
+) -> None:
+    from lakelogic.core.schema_alignment import align_spark_table
+
+    ref = _spark_table_ref(spark, target_str, output_format)
+    if ref is not None:
+        align_spark_table(spark, ref, contract, output_format)
+
+
 def _materialize_spark_dataframe(  # pragma: no cover
     df: Any,
     contract,
@@ -3808,6 +3876,11 @@ def _materialize_spark_dataframe(  # pragma: no cover
 
     spark = df.sparkSession
     target_str = str(target)
+
+    # The table follows the contract: added columns are added, widened types widened in place;
+    # a type change that needs a rewrite stops the run and names `lakelogic migrate`.
+    if strategy in ("append", "merge", "scd2") and output_format in ("delta", "iceberg"):
+        _align_existing_spark_table(spark, target_str, output_format, contract)
 
     # Handle merge strategy natively
     if strategy == "merge":
@@ -3883,6 +3956,7 @@ def _materialize_spark_dataframe(  # pragma: no cover
             soft_delete_reason_col=soft_delete_reason_col,
             merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
             partition_by=partition_by,
+            contract=contract,
         )
 
         # UNPERSIST: release the checkpoint's cached blocks now the merge has
@@ -4967,6 +5041,19 @@ def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strate
     return {"target": f"{catalog}.{schema}.{table}", "rows_written": arrow.num_rows, "format": "ducklake", "op": op}
 
 
+def _align_existing_delta_rs_table(path: str, contract: Any, storage_options: Optional[Dict[str, str]]) -> Any:
+    try:
+        from deltalake import DeltaTable
+    except ImportError:  # no Delta support installed: nothing can exist to align
+        return None
+    is_delta = getattr(DeltaTable, "is_deltatable", None)
+    if is_delta is None or not is_delta(path, storage_options=storage_options):
+        return None
+    from lakelogic.core.schema_alignment import align_delta_rs_table
+
+    return align_delta_rs_table(path, contract, storage_options)
+
+
 def _materialize_primary(
     df: Any,
     contract,
@@ -5096,6 +5183,15 @@ def _materialize_primary(
     strategy = (mat.strategy or "append").lower()
     partition_by = list(mat.partition_by or [])
     reprocess_policy = getattr(mat, "reprocess_policy", "overwrite_partition")
+
+    # The table follows the contract (as on Spark): declared columns added in place; a type
+    # change stops the run and names `lakelogic migrate` (delta-rs cannot change a type in place).
+    if resolved_format == "delta" and strategy in ("append", "merge", "scd2"):
+        _plan = _align_existing_delta_rs_table(str(resolved_target), contract, storage_options)
+        if _plan is not None and _plan.kept and _delta_schema_mode is None:
+            # Columns the contract dropped stay in the table; new rows write null there, which
+            # delta-rs only accepts in merge mode ("number of fields does not match").
+            _delta_schema_mode = "merge"
 
     primary_key = list(contract.primary_key or [])
     scd2_cfg = getattr(mat, "scd2", None)

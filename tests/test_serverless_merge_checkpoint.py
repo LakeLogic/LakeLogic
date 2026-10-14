@@ -65,6 +65,8 @@ def _contract():
 
 @pytest.fixture()
 def merge_spy(monkeypatch):
+    # The fake session has no catalog: there is no existing table to bring to the contract.
+    monkeypatch.setattr(mat, "_align_existing_spark_table", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr(
         mat,
