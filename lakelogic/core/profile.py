@@ -333,6 +333,11 @@ class SqlExecutor:
     def columns(self, table: str) -> List[Tuple[str, str]]:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def rows(self, sql: str, limit: int) -> List[tuple]:
+        """At most ``limit`` rows -- for the profile checks (value frequencies, at most ~20
+        rows of aggregates). Never a table scan into memory."""
+        raise NotImplementedError(f"{type(self).__name__} cannot fetch check rows")  # pragma: no cover
+
     def aggregate_row(self, sql: str) -> Dict[str, Any]:
         """The only data path: one row of aggregates, or an error."""
         names, rows = self.query(sql)
@@ -353,6 +358,9 @@ class DuckDBExecutor(SqlExecutor):
         cur = self.conn.execute(sql)
         names = [d[0] for d in cur.description]
         return names, cur.fetchmany(2)  # one aggregate row; a 2nd row is an error, never a scan
+
+    def rows(self, sql: str, limit: int):
+        return self.conn.execute(sql).fetchmany(int(limit))
 
     def columns(self, table: str):
         cur = self.conn.execute(f"DESCRIBE {table}")
@@ -376,6 +384,9 @@ class SparkExecutor(SqlExecutor):
         df = self.spark.sql(sql)
         return list(df.columns), [tuple(r) for r in df.take(2)]
 
+    def rows(self, sql: str, limit: int):
+        return [tuple(r) for r in self.spark.sql(sql).take(int(limit))]
+
     def columns(self, table: str):
         return [(f.name, f.dataType.simpleString()) for f in self.spark.table(table).schema.fields]
 
@@ -396,6 +407,12 @@ class SqlAlchemyExecutor(SqlExecutor):
         with self.engine.connect() as cx:
             res = cx.execute(text(sql))
             return list(res.keys()), [tuple(r) for r in res.fetchmany(2)]
+
+    def rows(self, sql: str, limit: int):
+        from sqlalchemy import text
+
+        with self.engine.connect() as cx:
+            return [tuple(r) for r in cx.execute(text(sql)).fetchmany(int(limit))]
 
     def columns(self, table: str):
         from sqlalchemy import inspect
@@ -433,6 +450,9 @@ class DatabricksStatementExecutor(SqlExecutor):
 
     def query(self, sql: str):
         return self._run(sql, row_limit=2)  # one aggregate row; a 2nd row is an error
+
+    def rows(self, sql: str, limit: int):
+        return [tuple(r) for r in self._run(sql, row_limit=int(limit))[1]]
 
     def _run(self, sql: str, row_limit: Optional[int]):
         import time as _time

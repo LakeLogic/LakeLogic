@@ -1844,8 +1844,19 @@ def profile(
     ),
     sensitive: Optional[str] = typer.Option(None, "--sensitive", help="Comma-separated extra sensitive columns."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write the JSON here (default: stdout)."),
+    findings: bool = typer.Option(
+        False, "--findings", help="Also run the checks and list findings (confirmed issue, potential issue, control gap)."
+    ),
+    sample_rows: Optional[int] = typer.Option(None, "--sample-rows", help="Sample this many rows (1,000-1,000,000)."),
+    sample_percent: Optional[float] = typer.Option(
+        None, "--sample-percent", help="Sample this percentage of the table (0.1-100)."
+    ),
+    sample_order: str = typer.Option("newest", "--sample-order", help="newest (by a timestamp column) | random."),
 ):
-    """Profile a dataset: one versioned JSON document of statistics, never rows."""
+    """Profile a dataset: one versioned JSON document of statistics, never rows.
+
+    With --findings (or a --sample-*), the checks run on the rows read and the result lists
+    findings, the same ones the LakeLogic service reports."""
     import json as _json
 
     from lakelogic.core.profile import DatabricksStatementExecutor, DuckDBExecutor, profile as _profile
@@ -1858,6 +1869,45 @@ def profile(
             connection = DatabricksStatementExecutor(warehouse_id=warehouse_id)
         else:
             connection = engine  # SQLAlchemy URL
+    sensitive_list = [s.strip() for s in sensitive.split(",") if s.strip()] if sensitive else None
+    if findings or sample_rows or sample_percent:
+        from lakelogic.core.profile_assess import assess_files, assess_table
+
+        settings = {"mode": "full"}
+        if sample_rows or sample_percent:
+            settings = {
+                "mode": "sample",
+                "sample_unit": "percent" if sample_percent else "rows",
+                "sample_rows": sample_rows,
+                "sample_percent": sample_percent,
+                "sample_order": sample_order,
+            }
+        try:
+            if connection is not None:
+                doc = assess_table(
+                    source, connection, settings=settings, contract=str(contract) if contract else None,
+                    sensitive_columns=sensitive_list,
+                )
+            else:
+                doc = assess_files(
+                    source, fmt=fmt if fmt in ("csv", "json", "parquet") else None, settings=settings,
+                    contract=str(contract) if contract else None, sensitive_columns=sensitive_list,
+                )
+        except ValueError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2)
+        text = _json.dumps(doc, indent=2, default=str)
+        if output:
+            output.write_text(text, encoding="utf-8")
+            counts = doc.get("finding_counts") or {}
+            typer.secho(
+                f"Profile written to {output}: {counts.get('confirmed', 0)} confirmed, "
+                f"{counts.get('potential', 0)} potential, {counts.get('gap', 0)} control gaps.",
+                fg=typer.colors.GREEN, err=True,
+            )
+        else:
+            typer.echo(text)
+        return
     doc = _profile(
         source,
         connection=connection,
@@ -1866,7 +1916,7 @@ def profile(
         max_bytes=int(max_mb * 1024 * 1024),
         read_distincts=not no_distincts,
         contract=str(contract) if contract else None,
-        sensitive_columns=[s.strip() for s in sensitive.split(",") if s.strip()] if sensitive else None,
+        sensitive_columns=sensitive_list,
     )
     text = _json.dumps(doc, indent=2, default=str)
     if output:
