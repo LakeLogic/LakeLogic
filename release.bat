@@ -223,9 +223,17 @@ echo.
 echo [0c/6] Running ruff lint and format...
 REM Through this repo's venv for the same reason as %PY%: bare `ruff` resolved to the
 REM SaaS venv's 0.16, outside this repo's pin (<0.14), and would reformat to its rules.
+REM Stage ONLY what ruff itself changed in files that had no uncommitted edits before it ran.
+REM Staging every modified tracked file put another change in progress into the release commit,
+REM half-finished (1.79.1 shipped a profile_findings.py that imported a module never committed).
+REM Work that is not committed is never part of a release.
+git diff --name-only > "%TEMP%\ll_release_dirty_before.txt"
 "%PY%" -m ruff check . --exclude _ref --fix --quiet
 "%PY%" -m ruff format . --exclude _ref --quiet
-git add -u
+for /f "delims=" %%f in ('git diff --name-only') do (
+    findstr /x /l /c:"%%f" "%TEMP%\ll_release_dirty_before.txt" >nul
+    if errorlevel 1 git add "%%f"
+)
 
 REM Step 1: Bump version (creates tag + bump commit)
 echo.

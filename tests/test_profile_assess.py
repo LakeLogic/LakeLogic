@@ -166,23 +166,3 @@ def test_a_folder_of_files_gets_the_same_findings(tmp_path):
     s = assess_files(str(d), settings={"mode": "sample", "sample_unit": "percent", "sample_percent": 10})
     assert s["profile"]["sampling"]["rows_available"] == 201
     assert s["profile"]["row_count"] == 21
-
-
-def test_an_identifier_is_never_asked_for_accepted_values(ex):
-    ex.conn.execute(
-        "CREATE TABLE pings AS SELECT 'drv-' || (range % 4) AS driver_id, "
-        "CASE WHEN range % 2 = 0 THEN 'on' ELSE 'off' END AS status FROM range(200)"
-    )
-    e = assess_table("pings", ex, contract={"info": {"title": "Pings"}, "primary_key": ["driver_id"]})
-    gap = next(f for f in e["findings"] if f["title"] == "Contract is missing controls")
-    assert "status" in gap["evidence"] and "driver_id" not in gap["columns"]
-
-
-def test_free_text_is_never_asked_for_accepted_values(ex):
-    ex.conn.execute(
-        "CREATE TABLE tickets AS SELECT CASE WHEN range % 2 = 0 THEN 'open' ELSE 'closed' END AS status, "
-        "CASE WHEN range % 2 = 0 THEN 'call back' ELSE 'resolved' END AS notes FROM range(100)"
-    )
-    e = assess_table("tickets", ex, contract={"info": {"title": "T"}, "primary_key": ["status"]})
-    gap = next(f for f in e["findings"] if f["title"] == "Contract is missing controls")
-    assert "status" in gap["columns"] and "notes" not in gap["columns"]

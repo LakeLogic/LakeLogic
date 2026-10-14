@@ -44,9 +44,6 @@ MIN_VALUE_COUNT = 5
 FREQUENCY_MAX_DISTINCT = 12
 #: A column more than this % empty is a potential issue (the baseline's own threshold).
 EMPTY_THRESHOLD_PCT = 20.0
-#: A candidate key this close to unique is the key; its repeats are duplicates, not a sign
-#: of a composite key.
-NEAR_UNIQUE_RATIO = 0.95
 #: A candidate key must be distinct on at least this share of rows to be checked as a key.
 KEY_MIN_DISTINCT_RATIO = 0.5
 
@@ -68,24 +65,6 @@ ORDERED_PAIRS: Tuple[Tuple[str, str], ...] = (
 
 _TS_SUFFIX = re.compile(r"_(at|time|ts|timestamp|date|datetime|on)$", re.I)
 _TEXT_TYPES = ("CHAR", "STRING", "TEXT", "VARCHAR", "UUID", "JSON")
-
-
-#: Identifier-like names: an id needs a key or relationship check, never a list of allowed values.
-_IDENTIFIER = re.compile(r"(^id$|_id$|_key$|_uuid$|_guid$|_no$|_num$|_number$|_ref$)", re.I)
-
-
-def is_identifier_name(name: str) -> bool:
-    return bool(_IDENTIFIER.search(str(name or "")))
-
-
-#: Free-text names: few distinct values in a sample does not make prose a category.
-_FREE_TEXT = re.compile(
-    r"(^|_)(notes?|comments?|descriptions?|desc|reasons?|messages?|remarks?|feedback|text|body|summary)$", re.I
-)
-
-
-def is_free_text_name(name: str) -> bool:
-    return bool(_FREE_TEXT.search(str(name or "")))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -378,24 +357,7 @@ def run_checks(rel: Relation, entity: str, doc: Dict[str, Any], rules: Optional[
 
     rules = rules or {}
     declared = [k for k in rules.get("primary_key") or [] if k in names]
-    key = declared
-    if not declared:
-        # No declared key: find the smallest unique combination from the data (composite keys
-        # included). Found means the rows ARE unique on it, so nothing repeats; only when no
-        # combination is unique is the single-column guess checked for repeated values.
-        from lakelogic.core.profile_keys import discover_key
-
-        found = guard("key discovery", lambda: discover_key(rel, cols, distincts, rows))
-        if found is not None:
-            out["key_discovery"] = found
-        single = candidate_key(entity, cols, distincts, rows)
-        near_unique = bool(single and rows and (distincts.get(single) or 0) >= NEAR_UNIQUE_RATIO * rows)
-        if not (found and found.get("columns")) or (near_unique and found["columns"] != [single]):
-            # An id column already unique on almost every row (trip_id, 1,000 of 1,001) is the
-            # key, and its repeats are duplicates: a timestamp that happens to be unique, or one
-            # added to "make it unique", would hide them. Only an id far from unique (order_id on
-            # order lines) needs a partner.
-            key = [single] if single else []
+    key = declared or ([k] if (k := candidate_key(entity, cols, distincts, rows)) else [])
     if key:
         res = guard("duplicate keys", lambda: duplicate_keys(rel, key))
         if res is not None:
@@ -605,39 +567,27 @@ def findings_for(
                     "optional by design.",
                     action=f"Confirm whether {c['name']} is optional. If it should always be present, "
                     "mark it required in the contract.",
-                    verify=f"Profile again and compare: {c['name']} should drop below "
-                    f"{EMPTY_THRESHOLD_PCT:.0f}% empty.",
+                    verify=f"Profile again and compare: {c['name']} should drop below {EMPTY_THRESHOLD_PCT:.0f}% empty.",
                 )
             )
 
-    found = checks.get("key_discovery")
-    likely = ""
-    if found:
-        from lakelogic.core.profile_keys import describe
-
-        likely = " " + describe(found, sampled=sampled)
     if contract is None:
         out.append(
             _finding(
                 KIND_GAP,
                 table,
                 "No contract governs this table",
-                evidence="No published contract reads or names this table." + likely,
+                evidence="No published contract reads or names this table.",
                 why="Nothing declares what this table should contain, so none of its problems can be "
                 "confirmed or enforced.",
                 action="Draft a contract from this profile (types, key, accepted values), then publish it.",
                 verify="Profile again: findings for this table are then checked against the contract.",
             )
         )
-        out[-1]["controls"] = [{"control": "contract"}]
     else:
         missing = []
         if not rules.get("primary_key"):
-            key_cols = (found or {}).get("columns")
-            scope = "in the sample" if sampled else "on all rows"
-            missing.append(
-                f"no primary key (likely ({', '.join(key_cols)}), unique {scope})" if key_cols else "no primary key"
-            )
+            missing.append("no primary key")
         if not rules.get("freshness"):
             missing.append("no freshness target")
         categorical = [
@@ -648,8 +598,6 @@ def findings_for(
             and c.get("frequencies") is not None
             and c["name"] not in (rules.get("accepted_values") or {})
             and is_text_type(c.get("type"))
-            and not is_identifier_name(c["name"])
-            and not is_free_text_name(c["name"])
         ]
         if categorical:
             noun = "column" if len(categorical) == 1 else "columns"
@@ -671,36 +619,8 @@ def findings_for(
                     verify="Once added, the next profile checks them and reports any failures as confirmed.",
                 )
             )
-            out[-1]["controls"] = _controls(rules, checks, cols, categorical)
     rank = {k: i for i, k in enumerate(KIND_ORDER)}
     return sorted(out, key=lambda f: (rank[f["kind"]], -(f.get("count") or 0)))
-
-
-def _controls(
-    rules: Dict[str, Any], checks: Dict[str, Any], cols: Dict[str, Dict[str, Any]], categorical: Sequence[str]
-) -> List[Dict[str, Any]]:
-    """The missing controls of one table, structured, each with what the profile suggests, so a
-    surface can group gaps by fix ("No freshness target: 7 tables") instead of by table."""
-    out: List[Dict[str, Any]] = []
-    if not rules.get("primary_key"):
-        found = (checks.get("key_discovery") or {}).get("columns")
-        key = checks.get("key") or {}
-        suggested = found or (
-            key.get("columns") if key and not key.get("declared") and key.get("repeated_keys") == 0 else None
-        )
-        out.append({"control": "primary_key", "suggested": suggested})
-    if not rules.get("freshness"):
-        out.append({"control": "freshness"})
-    if categorical:
-        out.append(
-            {
-                "control": "accepted_values",
-                "columns": [
-                    {"name": n, "values": [v["value"] for v in (cols[n].get("frequencies") or [])]} for n in categorical
-                ],
-            }
-        )
-    return out
 
 
 def count_by_kind(findings: Iterable[Dict[str, Any]]) -> Dict[str, int]:
