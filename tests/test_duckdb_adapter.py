@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from lakelogic.core.models import DataContract
+from lakelogic.engines.base import TransformationFailed
 from lakelogic.engines.duckdb import DuckDBAdapter
 
 
@@ -324,14 +325,16 @@ def test_duckdb_adapter_cast_to_string_and_transform_failure_branches(monkeypatc
     assert bad.is_empty()
     assert good["id"].dtype == pl.String
 
-    contract = DataContract(
-        version="1.0.0",
-        transformations=[
-            {"sql": "SELECT * FROM source", "phase": "pre"},
-            {"derive": {"field": "id", "sql": "missing + 1"}, "phase": "pre"},
+    # A step that errors FAILS THE RUN. It used to be logged and skipped, and the untransformed
+    # rows carried on as if they were the result (a broken gold aggregation wrote silver's rows).
+    failing = {
+        "pre": [
+            {"sql": "SELECT * FROM source", "phase": "pre"},  # made to fail below
             {"filter": "missing > 0", "phase": "pre"},
-            {"sql": "SELECT * FROM source", "phase": "post"},
-            {"derive": {"field": "id", "sql": "missing + 1"}, "phase": "post"},
+        ],
+        "post": [
+            {"sql": "SELECT * FROM source", "phase": "post"},  # made to fail below
+            {"filter": "missing > 0", "phase": "post"},
             {"rollup": {"group_by": ["missing"], "aggregations": {"n": "COUNT(*)"}}, "phase": "post"},
             {
                 "pivot": {"id_vars": ["missing"], "pivot_col": "id", "value_cols": ["id"], "values": [1]},
@@ -339,32 +342,20 @@ def test_duckdb_adapter_cast_to_string_and_transform_failure_branches(monkeypatc
             },
             {"unpivot": {"id_vars": ["id"], "value_vars": ["missing"]}, "phase": "post"},
         ],
-    )
-    adapter = DuckDBAdapter(contract)
-    adapter._register_df("source", pl.DataFrame({"id": [1]}))
-
-    original_apply = adapter._apply_sql_transformation
-    monkeypatch.setattr(
-        adapter,
-        "_apply_sql_transformation",
-        lambda table_name, sql: (_ for _ in ()).throw(RuntimeError("forced")),
-    )
-    assert adapter._apply_pre_transformations("source") == "source"
-    assert adapter._apply_post_transformations("source") == "source"
-
-    monkeypatch.setattr(adapter, "_apply_sql_transformation", original_apply)
-    adapter.contract.transformations = [
-        types.SimpleNamespace(
-            phase="post",
-            sql=None,
-            derive=None,
-            filter="missing > 0",
-            rollup=None,
-            pivot=None,
-            unpivot=None,
-        )
-    ]
-    assert adapter._apply_post_transformations("source") == "source"
+    }
+    for phase, steps in failing.items():
+        for step in steps:
+            adapter = DuckDBAdapter(DataContract(version="1.0.0", transformations=[step]))
+            adapter._register_df("source", pl.DataFrame({"id": [1]}))
+            if "sql" in step:
+                monkeypatch.setattr(
+                    adapter,
+                    "_apply_sql_transformation",
+                    lambda table_name, sql: (_ for _ in ()).throw(RuntimeError("forced")),
+                )
+            apply = adapter._apply_pre_transformations if phase == "pre" else adapter._apply_post_transformations
+            with pytest.raises(TransformationFailed):
+                apply("source")
 
     contract_ok = DataContract(
         version="1.0.0",

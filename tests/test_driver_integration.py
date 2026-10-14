@@ -114,7 +114,6 @@ def _write_registry(path: Path, entries: list[dict]) -> Path:
 # ── DuckDB End-to-End Pipeline ───────────────────────────────────────────────
 
 
-@pytest.mark.skip(reason="DuckDB execution engine is deprecated")
 class TestDuckDBPipelineE2E:
     """End-to-end pipeline test running on the DuckDB engine."""
 
@@ -184,7 +183,11 @@ class TestDuckDBPipelineE2E:
             upstream=["silver_orders"],
             transformations=[
                 {
-                    "sql": "SELECT customer_id, SUM(amount) AS total_amount, COUNT(*) AS order_count FROM source GROUP BY customer_id"
+                    # Silver lands as CSV, which is read as TEXT: the amount must be cast to sum it.
+                    # (Uncast, Polars failed the run while DuckDB skipped the step and wrote silver's
+                    # rows as "gold" — the test was skipped as "deprecated", so nobody saw either.)
+                    "sql": "SELECT customer_id, SUM(CAST(amount AS DOUBLE)) AS total_amount, COUNT(*) AS order_count "
+                    "FROM source GROUP BY customer_id"
                 },
             ],
         )
@@ -670,7 +673,6 @@ class TestBackfillWindows:
 # ── DuckDB Derive & Filter Transforms ───────────────────────────────────────
 
 
-@pytest.mark.skip(reason="DuckDB execution engine is deprecated")
 class TestDuckDBTransforms:
     """Tests for DuckDB derive and filter post-transformations (bug-fix coverage).
 

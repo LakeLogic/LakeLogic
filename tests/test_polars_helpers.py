@@ -454,7 +454,9 @@ def test_polars_helper_post_transformations_cover_sql_lookup_join_and_date_range
     )
     adapter = PolarsAdapter(contract)
     monkeypatch.setattr(adapter, "_build_rollup_sql", lambda cfg, source_table="orders": "SELECT * FROM orders")
-    monkeypatch.setattr(adapter, "_build_pivot_sql", lambda cfg, source_table="orders": "SELECT * FROM orders")
+    monkeypatch.setattr(
+        adapter, "_build_pivot_sql", lambda cfg, source_table="orders", plan=None: "SELECT * FROM orders"
+    )
     monkeypatch.setattr(adapter, "_build_unpivot_sql", lambda cfg, source_table="orders": "SELECT * FROM orders")
     monkeypatch.setattr(
         adapter,
@@ -624,7 +626,6 @@ def test_polars_pre_transform_left_right_trim_select_drop_and_failure_branches(m
             {"phase": "pre", "trim": {"fields": ["left_text"], "side": "left"}},
             {"phase": "pre", "trim": {"fields": ["right_text"], "side": "right"}},
             {"phase": "pre", "cast": {"columns": {"missing_cast": "integer"}}},
-            {"phase": "pre", "filter": {"sql": "this is not sql"}},
             {"phase": "pre", "select": {"columns": ["id", "left_text", "right_text", "drop_me"]}},
             {"phase": "pre", "drop": {"columns": ["drop_me"]}},
         ],
@@ -650,7 +651,19 @@ def test_polars_pre_transform_left_right_trim_select_drop_and_failure_branches(m
     assert df["right_text"].to_list() == ["  y"]
     assert any("Rename" in message for message in warnings_seen)
     assert any("JsonExtract" in message for message in warnings_seen)
-    assert any("Filter" in message for message in warnings_seen)
+
+
+def test_polars_pre_filter_that_errors_fails_the_run():
+    # It used to be logged and skipped, carrying the unfiltered rows on as the result.
+    from lakelogic.engines.base import TransformationFailed
+
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        transformations=[{"phase": "pre", "filter": {"sql": "this is not sql"}}],
+    )
+    with pytest.raises(TransformationFailed, match=r"Pre-Transform \[Filter\] failed"):
+        PolarsAdapter(contract)._apply_pre_transformations(pl.DataFrame({"id": [1]}).lazy()).collect()
 
 
 def test_polars_pre_transform_derive_duckdb_failure_raises(monkeypatch):

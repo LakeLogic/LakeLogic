@@ -930,7 +930,9 @@ def test_spark_helper_post_transformations_cover_sql_lookup_and_filter(monkeypat
     adapter._temp_src = "source"
     adapter._cast_to_contract_types = lambda df: df
     adapter._transpile_derive_sql = lambda derive: "UPPER(status)"
-    adapter._build_rollup_sql = lambda cfg, source_table="source": "SELECT id, SUM(amount) AS total_amount FROM source"
+    adapter._build_rollup_sql = (
+        lambda cfg, source_table="source", source_columns=None: "SELECT id, SUM(amount) AS total_amount FROM source"
+    )
     adapter._build_pivot_sql = lambda cfg, source_table="source": "SELECT id, status FROM source"
     adapter._build_unpivot_sql = lambda cfg, source_table="source": "SELECT id, metric, value FROM source"
     adapter._build_bucket_sql = lambda cfg, source_table="temp_src": (

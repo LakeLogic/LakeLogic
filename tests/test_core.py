@@ -412,12 +412,10 @@ def spark_session():
     yield spark
 
 
-import sys as _sys
-
-_SKIP_SPARK = not _HAS_PYSPARK or _sys.platform == "win32"
-_SKIP_SPARK_REASON = (
-    "PySpark not installed" if not _HAS_PYSPARK else "PySpark local mode unreliable on Windows (run in CI/Databricks)"
-)
+# Gated like every other real-Spark test (tests/conftest.py, RUN_SPARK_TESTS=1), not by platform:
+# a Windows skip here meant these never ran on the machine releases are cut from.
+_SKIP_SPARK = not _HAS_PYSPARK
+_SKIP_SPARK_REASON = "PySpark not installed"
 
 
 @pytest.mark.skipif(_SKIP_SPARK, reason=_SKIP_SPARK_REASON)

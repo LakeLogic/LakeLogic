@@ -198,8 +198,8 @@ def test_expand_row_rules_for_supported_structured_types():
         )
     )
     assert (
-        'COALESCE((SELECT r."end_date" FROM dim_customers r WHERE r."id" = "customer_id"), \'9999-12-31\')'
-        in lifecycle.sql
+        'COALESCE((SELECT MAX(r.__ll_e) FROM (SELECT "id" AS __ll_k, "start_date" AS __ll_s, "end_date" AS __ll_e '
+        "FROM dim_customers) r WHERE r.__ll_k = \"customer_id\"), '9999-12-31')" in lifecycle.sql
     )
 
     rule = QualityRule(name="raw", sql="1=1")
