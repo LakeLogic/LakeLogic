@@ -103,6 +103,7 @@ nav:
       - Catalog Table Names: catalog_table_names.md
       - Delta Lake (Spark-Free): delta_lake_support.md
       - CLI: cli.md
+      - AI Assistants (MCP): ai_assistants_mcp.md
       - Driver: driver.md
       - Bootstrap: bootstrap.md
       - API: api.md
