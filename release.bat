@@ -4,6 +4,14 @@ REM -- LakeLogic Release Script ------------------------------------------
 REM Usage:   release.bat           (auto-detect bump: patch/minor/major)
 REM          release.bat minor     (force minor bump)
 REM          release.bat major     (force major bump)
+REM          release.bat --with-spark  (optionally with minor or major as well)
+REM                                (also run the real-Spark tests and Spark conformance)
+REM
+REM Spark is OFF by default. A change that touches Spark is proven on Spark BEFORE it gets
+REM here (RUN_SPARK_TESTS=1 pytest tests/, and the OLC conformance suite with
+REM OLC_CONFORMANCE_ENGINES=polars,duckdb,spark); the release re-runs Polars and DuckDB, which
+REM take minutes. --with-spark adds Spark for a release that wants the full proof again
+REM (about an hour longer).
 REM
 REM Prerequisites:
 REM   pip install commitizen
@@ -65,6 +73,20 @@ REM on a missing path. The failure was the lucky part — `uv lock --upgrade` an
 REM test gate had already run against the wrong repository and reported green.
 cd /d "%~dp0"
 
+REM Arguments, in any order: an optional bump (minor/major) and an optional --with-spark.
+set "BUMP="
+set "WITH_SPARK="
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="--with-spark" (
+    set "WITH_SPARK=1"
+) else (
+    set "BUMP=%~1"
+)
+shift
+goto parse_args
+:args_done
+
 REM Use THIS repo's virtualenv, not whatever `python` happens to be first on PATH.
 REM That is not hypothetical either: on the release box `python` resolved to a
 REM SIBLING project's .venv (LakeLogic_SaaS), which has no google-cloud-bigquery —
@@ -99,6 +121,16 @@ REM JVM can drop its py4j connection late in a long run ("connection forcibly cl
 REM which fails whichever Spark test is running and every Spark test after it. That is
 REM not hypothetical: it blocked a release at test 1215 of ~2450 while the same test
 REM passed alone in 10s. A real failure fails twice and still stops the release.
+REM
+REM Real-Spark tests are skipped unless RUN_SPARK_TESTS=1, which --with-spark sets. They are
+REM run BEFORE a release for any change that touches Spark (see Usage at the top).
+set "RUN_SPARK_TESTS="
+if defined WITH_SPARK (
+    set "RUN_SPARK_TESTS=1"
+    echo   Real-Spark tests: ON ^(--with-spark^)
+) else (
+    echo   Real-Spark tests: off ^(run them before releasing a Spark change; --with-spark to include^)
+)
 "%PY%" -m pytest tests/ -q --tb=short
 if errorlevel 1 (
     echo.
@@ -108,6 +140,35 @@ if errorlevel 1 (
         echo.
         echo ERROR: Tests failed twice after dependency upgrade. Review uv.lock changes.
         echo   To revert: git checkout uv.lock
+        exit /b 1
+    )
+)
+
+REM Step 0b2: OLC conformance
+REM The same contract, the same input, one expected result, run on every engine named.
+REM Core's own tests mostly run on Polars; this is where an engine that reads a file, applies a
+REM rule or merges a delete differently is caught. OLC_CONFORMANCE_REQUIRE=1 makes a skipped
+REM case a failure, so a missing engine cannot pass for a green run. Polars and DuckDB take
+REM about two minutes; --with-spark adds Spark (about an hour).
+set "OLC_CONFORMANCE_ENGINES=polars,duckdb"
+if defined WITH_SPARK set "OLC_CONFORMANCE_ENGINES=polars,duckdb,spark"
+echo.
+echo [0b2/6] Running OLC conformance on %OLC_CONFORMANCE_ENGINES%...
+set "OLC_REPO=%CD%\..\open-lakehouse-contract"
+if not exist "%OLC_REPO%\conformance\test_conformance.py" (
+    echo ERROR: OLC conformance suite not found at %OLC_REPO%\conformance.
+    echo   Clone open-lakehouse-contract next to this repo. A release does not ship untested.
+    exit /b 1
+)
+set "OLC_CONFORMANCE_REQUIRE=1"
+"%PY%" -m pytest "%OLC_REPO%\conformance" -q --tb=short
+if errorlevel 1 (
+    echo.
+    echo Retrying the failed conformance cases once in a fresh process...
+    "%PY%" -m pytest "%OLC_REPO%\conformance" --lf -q --tb=short
+    if errorlevel 1 (
+        echo.
+        echo ERROR: OLC conformance failed twice. An engine disagrees with the contract.
         exit /b 1
     )
 )
@@ -124,10 +185,10 @@ git add -u
 REM Step 1: Bump version (creates tag + bump commit)
 echo.
 echo [1/6] Bumping version...
-if "%1"=="" (
+if "%BUMP%"=="" (
     "%PY%" -m commitizen bump --yes
 ) else (
-    "%PY%" -m commitizen bump --increment %1 --yes
+    "%PY%" -m commitizen bump --increment %BUMP% --yes
 )
 set "BUMP_RC=%ERRORLEVEL%"
 
