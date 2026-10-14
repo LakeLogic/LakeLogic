@@ -71,3 +71,37 @@ def test_a_catalog_table_is_read_from_its_provider():
     assert _existing_table_format("table:cat.silver.trips", Spark()) == ("delta", True)
     with pytest.raises(TargetFormatMismatch, match="cat.silver.trips already holds data"):
         _guard_target_format("table:cat.silver.trips", "iceberg", Spark())
+
+
+@pytest.mark.parametrize("engine", ["polars", "duckdb"])
+def test_the_refused_run_leaves_the_delta_table_untouched(tmp_path, engine):
+    """End to end: the layer's format is switched to Iceberg on a Delta table that holds data."""
+    from deltalake import DeltaTable
+
+    from lakelogic import DataProcessor
+
+    def contract(fmt):
+        return {
+            "version": "1.0.0",
+            "info": {"title": "Trips", "table_name": "trips"},
+            "model": {
+                "fields": [{"name": "id", "type": "integer", "required": True}, {"name": "city", "type": "string"}]
+            },
+            "materialization": {"strategy": "append", "format": fmt},
+        }
+
+    target = str(tmp_path / "silver_trips")
+    DataProcessor(engine=engine, contract=contract("delta")).run(
+        pl.DataFrame([{"id": 1, "city": "LON"}, {"id": 2, "city": "NYC"}]), materialize=True, materialize_target=target
+    )
+    before = DeltaTable(target)
+    version, rows = before.version(), sorted(pl.from_arrow(before.to_pyarrow_table()).select("id", "city").rows())
+
+    with pytest.raises(TargetFormatMismatch):
+        DataProcessor(engine=engine, contract=contract("iceberg")).run(
+            pl.DataFrame([{"id": 3, "city": "BER"}]), materialize=True, materialize_target=target
+        )
+
+    after = DeltaTable(target)
+    assert after.version() == version
+    assert sorted(pl.from_arrow(after.to_pyarrow_table()).select("id", "city").rows()) == rows

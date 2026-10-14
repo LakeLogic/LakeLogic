@@ -1221,6 +1221,9 @@ def test_inject_unknown_member_spark_and_table_paths(monkeypatch):
             self.columns = list(columns)
             return self
 
+        def writeTo(self, table_name):  # the unknown member is appended in the table's own format
+            return types.SimpleNamespace(append=lambda: save_calls.append(("writeTo.append", table_name)))
+
     class FakeSpark:
         def __init__(self, schema):
             self.schema = schema
@@ -1335,7 +1338,8 @@ def test_inject_unknown_member_spark_and_table_paths(monkeypatch):
     assert created_rows[-1]["id"] == "_UNKNOWN"
     assert created_rows[-1]["payload"] == "Unknown payload"
     assert created_rows[-1]["_lakelogic_run_id"] == "run-2"
-    assert save_calls[-3:] == [("format", "delta"), ("mode", "append"), ("saveAsTable", "catalog.schema.dim_orders")]
+    # writeTo(...).append() — format-neutral, so it also appends to an Iceberg table.
+    assert save_calls[-1] == ("writeTo.append", "catalog.schema.dim_orders")
 
 
 def test_sanitize_arrow_nulls_casts_only_null_columns(monkeypatch):
