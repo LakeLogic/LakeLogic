@@ -38,8 +38,8 @@ def _fields(*names):
     return [SimpleNamespace(name=n) for n in names]
 
 
-@pytest.mark.parametrize("evolution", [None, "allow", "strict"])
-def test_a_declared_column_the_table_lacks_is_always_added(evolution):
+@pytest.mark.parametrize("evolution", [None, "allow"])
+def test_a_declared_column_the_table_lacks_is_added(evolution):
     new = _merge_columns_to_add(
         {"platform_id", "platform"}, _fields("platform_id", "platform", "system"), _contract(evolution)
     )
@@ -263,3 +263,23 @@ def test_unknown_member_fills_not_null_columns_instead_of_failing(spark, tmp_pat
     # idempotent: a second merge does not add a second unknown member
     _spark_merge_dataframe(spark, incoming, f"table:{name}", ["device_category"], "delta", scd1_cfg=scd1)
     assert spark.table(name).filter("device_category_sk = '-1'").count() == 1
+
+
+def test_engine_managed_scd2_columns_are_not_retyped():
+    """Conformance OLC-SCD2-001: the contract declares version/effective_* loosely (int, string);
+    the engine stores them as bigint/timestamp. That is not a type change to migrate."""
+    plan = plan_alignment(
+        {"id": "string", "version": "bigint", "effective_from": "timestamp"},
+        {"id": "string", "version": "int", "effective_from": "string"},
+        managed={"version", "effective_from"},
+    )
+    assert plan.widen == [] and plan.rewrite == []
+
+
+def test_strict_refuses_even_a_declared_new_column():
+    """Conformance OLC-EVO-001 (OLC: strict means the incoming schema must match exactly)."""
+    from lakelogic.core.schema_alignment import AlignmentPlan, _refuse_if_strict
+
+    with pytest.raises(ValueError, match="policy=strict"):
+        _refuse_if_strict("t", AlignmentPlan(add=[("tier", "string")]), _contract("strict"))
+    _refuse_if_strict("t", AlignmentPlan(add=[("tier", "string")]), _contract())  # default: allowed

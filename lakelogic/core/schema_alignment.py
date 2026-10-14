@@ -62,12 +62,15 @@ def is_widening(old: str, new: str) -> bool:
     return False
 
 
-def plan_alignment(table_types: Dict[str, str], contract_types: Dict[str, str]) -> AlignmentPlan:
+def plan_alignment(
+    table_types: Dict[str, str], contract_types: Dict[str, str], managed: Optional[set] = None
+) -> AlignmentPlan:
     """What the table needs, given its column types and the contract's (Spark type names).
 
     Columns are matched case-insensitively, as Spark resolves them. A contract column with no known
     type is left alone. Columns whose names start with ``_lakelogic`` are the engine's own.
     """
+    managed_l = {m.lower() for m in (managed or set())}
     have = {k.lower(): (k, v) for k, v in table_types.items()}
     want = {k.lower(): (k, v) for k, v in contract_types.items() if v}
     plan = AlignmentPlan()
@@ -76,7 +79,9 @@ def plan_alignment(table_types: Dict[str, str], contract_types: Dict[str, str]) 
             plan.add.append((name, new))
             continue
         old = have[key][1]
-        if old == new:
+        if old == new or key in managed_l:
+            # A column the ENGINE manages (SCD2 effective dates, version, current flag, surrogate
+            # key) is stored in the engine's own type, whatever the contract declares for it.
             continue
         (plan.widen if is_widening(old, new) else plan.rewrite).append((have[key][0], old, new))
     plan.kept = [name for key, (name, _) in have.items() if key not in want and not key.startswith("_lakelogic")]
@@ -96,6 +101,49 @@ def contract_spark_types(contract: Any) -> Dict[str, str]:
         if t is not None:
             out[f.name] = t.simpleString()
     return out
+
+
+def managed_columns(contract: Any) -> set:
+    """Columns the engine writes and types itself: SCD2 history columns and surrogate keys."""
+    mat = getattr(contract, "materialization", None)
+    if mat is None:
+        return set()
+    out: set = set()
+    scd2 = getattr(mat, "scd2", None)
+    scd2 = dict(scd2) if isinstance(scd2, dict) else {}
+    if (getattr(mat, "strategy", None) or "").lower() == "scd2":
+        out |= {
+            scd2.get("effective_from_field", "effective_from"),
+            scd2.get("effective_to_field", "effective_to"),
+            scd2.get("current_flag_field", "is_current"),
+            scd2.get("version_column", "_version"),
+            scd2.get("change_reason_column", "_change_reason"),
+        }
+    for cfg in (scd2, getattr(mat, "scd1", None)):
+        if isinstance(cfg, dict) and cfg.get("surrogate_key"):
+            out.add(cfg["surrogate_key"])
+    return {c for c in out if c}
+
+
+def _strict(contract: Any) -> bool:
+    try:
+        from lakelogic.core.models import effective_schema_policy
+
+        return (getattr(effective_schema_policy(contract), "evolution", None) or "").lower() == "strict"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _refuse_if_strict(table: str, plan: AlignmentPlan, contract: Any) -> None:
+    """``strict`` (OLC): the incoming schema must match the table exactly; nothing changes on its own,
+    declared or not. Every other policy lets the table follow the contract."""
+    if _strict(contract) and (plan.add or plan.widen or plan.rewrite):
+        changes = [f"add {c}" for c, _ in plan.add] + [f"{c}: {o} -> {n}" for c, o, n in plan.widen + plan.rewrite]
+        raise ValueError(
+            f"Schema Evolution Blocked (policy=strict): {table} differs from the contract ({'; '.join(changes)}). "
+            "Under strict nothing changes the table automatically: "
+            "relax schema_policy.evolution, or run lakelogic migrate."
+        )
 
 
 def _needs_migration_message(table: str, rewrite: List[Tuple[str, str, str]]) -> str:
@@ -118,7 +166,10 @@ def align_spark_table(
     ``table_ref`` is a catalog name, or ``delta.`<path>``` for a Delta table written by path.
     """
     schema = spark.table(table_ref).schema
-    plan = plan_alignment({f.name: f.dataType.simpleString() for f in schema}, contract_spark_types(contract))
+    plan = plan_alignment(
+        {f.name: f.dataType.simpleString() for f in schema}, contract_spark_types(contract), managed_columns(contract)
+    )
+    _refuse_if_strict(table_ref, plan, contract)
 
     if plan.rewrite:
         raise SchemaChangeNeedsMigration(_needs_migration_message(table_ref, plan.rewrite))
@@ -231,7 +282,8 @@ def align_delta_rs_table(path: str, contract: Any, storage_options: Optional[Dic
     from deltalake import DeltaTable, Schema
 
     dt = DeltaTable(path, storage_options=storage_options)
-    plan = plan_alignment(delta_table_types(dt), contract_spark_types(contract))
+    plan = plan_alignment(delta_table_types(dt), contract_spark_types(contract), managed_columns(contract))
+    _refuse_if_strict(path, plan, contract)
 
     if plan.rewrite:
         raise SchemaChangeNeedsMigration(_needs_migration_message(path, plan.widen + plan.rewrite))

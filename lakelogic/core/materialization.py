@@ -2794,9 +2794,8 @@ def _inject_scd1_unknown_member_after_write(
 def _merge_columns_to_add(have: set, incoming_fields: List[Any], contract: Any) -> List[Any]:
     """The incoming columns a MERGE must first add to its target, as the schema policy allows.
 
-    A column the contract DECLARES (``model.fields``) is always added: the contract says the table
-    has it, so a table that lacks it is behind the contract, not ahead of it. Any other new column
-    is added unless the policy is ``strict``, which refuses it in the words Delta's writer uses.
+    Under every policy but ``strict`` the new columns are added: a declared column means the table is
+    behind the contract. ``strict`` (OLC) refuses any change, in the words Delta's writer uses.
     Without this a Delta MERGE failed on any new column ("Cannot resolve <col> in UPDATE clause").
     """
     new = [f for f in incoming_fields if f.name not in have]
@@ -2804,12 +2803,13 @@ def _merge_columns_to_add(have: set, incoming_fields: List[Any], contract: Any) 
         return new
     from lakelogic.core.models import effective_schema_policy
 
-    declared = {f.name for f in (getattr(getattr(contract, "model", None), "fields", None) or [])}
     evolution = (getattr(effective_schema_policy(contract), "evolution", None) or "allow").lower()
-    undeclared = [f.name for f in new if f.name not in declared]
-    if undeclared and evolution == "strict":
+    # strict (OLC): the schema must match exactly, so nothing is added, declared or not
+    # (conformance OLC-EVO-001). Every other policy adds the new columns.
+    if evolution == "strict":
         raise ValueError(
-            f"Schema Evolution Blocked (policy=strict): New columns in data not in table: {', '.join(undeclared)}"
+            f"Schema Evolution Blocked (policy=strict): New columns in data not in table: "
+            f"{', '.join(f.name for f in new)}"
         )
     return new
 
