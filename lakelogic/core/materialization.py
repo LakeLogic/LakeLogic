@@ -306,7 +306,7 @@ def _spark_partition_columns(  # pragma: no cover
       the rebuild that applies the new one.
     """
     wanted = [str(c) for c in (partition_by or []) if c]
-    if not wanted:
+    if not wanted and str(output_format or "").lower() != "delta":
         return []
     columns = set(df.columns)
     missing = [c for c in wanted if c not in columns]
@@ -317,7 +317,7 @@ def _spark_partition_columns(  # pragma: no cover
             f"shared across multiple contracts."
         )
         wanted = [c for c in wanted if c in columns]
-    if not wanted or str(output_format or "").lower() != "delta":
+    if str(output_format or "").lower() != "delta":
         return wanted
 
     is_table = target.startswith("table:")
@@ -337,6 +337,10 @@ def _spark_partition_columns(  # pragma: no cover
     if str(detail.get("format") or "").lower() != "delta":
         return wanted
     existing = [str(c) for c in (detail.get("partitionColumns") or [])]
+    if not wanted:
+        # Nothing declared, but the table HAS a layout (created by DDL or an earlier run):
+        # an overwrite without it is refused (DELTA_METADATA_MISMATCH), so keep it.
+        return existing if all(c in columns for c in existing) else []
     if existing == wanted or not all(c in columns for c in existing):
         return wanted
     logger.warning(
@@ -1769,6 +1773,135 @@ def _inject_unknown_member_spark(  # pragma: no cover
     return result
 
 
+class TargetFormatMismatch(RuntimeError):
+    """The target already holds data in a different table format than the contract now writes.
+
+    A layer's format comes from ``_system.yaml``. Changing it (Delta to Iceberg, say) on a table
+    that already holds data used to be a side effect of the next run: Spark replaced the table,
+    losing its history and properties; Polars/DuckDB wrote the new format into the old table's
+    folder. A format change is a migration; the run stops instead.
+    """
+
+
+#: Formats that are TABLES with their own signature on storage. A plain-file format (parquet,
+#: csv, json) has no signature that sets it apart from data an engine merely wrote there.
+_TABLE_FORMATS = ("delta", "iceberg")
+
+
+def _spark_glob_has_files(spark: Any, pattern: str) -> bool:  # pragma: no cover
+    """Whether any file matches ``pattern``, asked of Spark so cloud storage works too."""
+    try:
+        return bool(spark.read.format("binaryFile").load(pattern).select("path").limit(1).collect())
+    except Exception:  # noqa: BLE001 - "no such path" in every storage's own words
+        return False
+
+
+def _existing_table_format(target: str, spark: Any = None) -> Optional[Tuple[str, bool]]:
+    """``(format, holds_rows)`` of the table already at ``target``; ``None`` if there is none.
+
+    * A catalog table (``table:`` with Spark): its ``Provider`` from ``DESCRIBE TABLE EXTENDED``.
+    * A path: Delta has a ``_delta_log``; Iceberg has ``metadata/*.metadata.json``. With Spark the
+      path is probed through Spark (local or cloud). Without Spark, a local path is read from
+      disk and a cloud path is checked for Delta through delta-rs.
+    """
+    target = str(target)
+    if target.startswith("table:"):
+        if spark is None:
+            return None
+        name = target[len("table:") :]
+        try:
+            if not spark.catalog.tableExists(name):
+                return None
+            rows = spark.sql(f"DESCRIBE TABLE EXTENDED {name}").collect()
+        except Exception:  # noqa: BLE001
+            return None
+        provider = next((str(r[1]).strip().lower() for r in rows if str(r[0]).strip().lower() == "provider"), "")
+        try:
+            holds = bool(spark.table(name).limit(1).collect())
+        except Exception:  # noqa: BLE001
+            holds = True  # unknown: assume there is data, the safe side
+        return (provider, holds) if provider else None
+
+    root = target.rstrip("/")
+    if spark is not None:
+        if _spark_glob_has_files(spark, f"{root}/_delta_log/*.json"):
+            try:
+                detail = spark.sql(f"DESCRIBE DETAIL delta.`{root}`").collect()[0].asDict()
+                holds = int(detail.get("numFiles") or 0) > 0
+            except Exception:  # noqa: BLE001
+                holds = True
+            return ("delta", holds)
+        if _spark_glob_has_files(spark, f"{root}/metadata/*.metadata.json"):
+            return ("iceberg", _spark_glob_has_files(spark, f"{root}/data/*"))
+        return None
+
+    if _is_remote_path(root):
+        try:
+            from deltalake import DeltaTable
+
+            return ("delta", bool(DeltaTable(root, storage_options=_build_storage_options()).file_uris()))
+        except Exception:  # noqa: BLE001 - not a Delta table, or not reachable
+            return None
+    local = Path(root)
+    if (local / "_delta_log").is_dir() and any((local / "_delta_log").glob("*.json")):
+        try:
+            from deltalake import DeltaTable
+
+            holds = bool(DeltaTable(str(local)).file_uris())
+        except Exception:  # noqa: BLE001
+            holds = True
+        return ("delta", holds)
+    if (local / "metadata").is_dir() and any((local / "metadata").glob("*.metadata.json")):
+        return ("iceberg", (local / "data").is_dir() and any((local / "data").rglob("*.parquet")))
+    return None
+
+
+def _guard_target_format(target: str, declared_format: str, spark: Any = None) -> None:
+    """Stop the run when ``target`` already holds data in another table format.
+
+    A table that exists in another format but holds NO rows is allowed, with a warning: there
+    is nothing to lose.
+    """
+    declared = (declared_format or "").lower()
+    if declared not in _TABLE_FORMATS and declared not in ("parquet", "csv", "json"):
+        return
+    found = _existing_table_format(target, spark)
+    if not found:
+        return
+    existing, holds_rows = found
+    if existing not in _TABLE_FORMATS or existing == declared:
+        return
+    where = str(target)[len("table:") :] if str(target).startswith("table:") else str(target)
+    if not holds_rows:
+        logger.warning(
+            f"{where} is an empty {existing} table; the contract now writes {declared}. It holds no "
+            f"rows, so the run continues and the table is written as {declared}."
+        )
+        return
+    raise TargetFormatMismatch(
+        f"{where} already holds data as a {existing.capitalize()} table, but the contract now writes "
+        f"{declared}. The run was stopped before writing so the existing table is not overwritten. "
+        f"If the format change was intended, migrate the table deliberately (or point the contract "
+        f"at a new location); if not, set the layer's format back to {existing} in _system.yaml."
+    )
+
+
+def _spark_path_holds_table(spark: Any, output_format: str, path: str) -> bool:  # pragma: no cover
+    """Whether a path target already holds data, asked of SPARK, not the local disk.
+
+    A local ``Path(path).exists()`` is always False for ``abfss://`` / ``s3://`` / ``gs://``: a
+    merge into an existing cloud table was treated as a first write and OVERWROTE the table with
+    only the incoming batch (found 2026-10-14). Spark resolves the path wherever it lives.
+    """
+    if not _is_remote_path(path):
+        return Path(path).exists()
+    try:
+        spark.read.format(output_format).load(path).schema  # resolves the files, reads no rows
+        return True
+    except Exception:  # noqa: BLE001 - "nothing there" in every format's own words
+        return False
+
+
 def _inject_unknown_member_spark_table(  # pragma: no cover
     spark,
     table_name: str,
@@ -2551,8 +2684,10 @@ def _spark_merge_dataframe(  # pragma: no cover
     is_table = target.startswith("table:")
     table_or_path = target[6:] if is_table else target
 
-    # For Delta tables, use native MERGE INTO
-    if output_format == "delta" and is_table:
+    # For Delta tables, use native MERGE INTO — a catalog table by its name, a Delta table
+    # written by path by its path. Path targets used to skip this and always rewrite the
+    # whole table, although the by-path branch below was there for them.
+    if output_format == "delta":
         # ── Pre-process incoming_df for soft deletes BEFORE checking target ──
         # This ensures the schema includes soft-delete columns even on first write.
         is_soft_delete = bool(cdc_op_field and cdc_delete_values and soft_delete_col)
@@ -2598,7 +2733,14 @@ def _spark_merge_dataframe(  # pragma: no cover
         try:
             from delta.tables import DeltaTable
 
-            if DeltaTable.isDeltaTable(spark, table_or_path) or spark.catalog.tableExists(table_or_path):
+            # A catalog NAME is asked of the catalog, never of isDeltaTable: isDeltaTable takes a
+            # PATH, and on Databricks a name there raises "Path must be absolute" instead of
+            # answering no — so every merge into a catalog table abandoned the native MERGE for
+            # the full-table rewrite (found 2026-10-14).
+            _target_exists = (
+                spark.catalog.tableExists(table_or_path) if is_table else DeltaTable.isDeltaTable(spark, table_or_path)
+            )
+            if _target_exists:
                 delta_table = (
                     DeltaTable.forName(spark, table_or_path) if is_table else DeltaTable.forPath(spark, table_or_path)
                 )
@@ -2657,13 +2799,15 @@ def _spark_merge_dataframe(  # pragma: no cover
         except ImportError:
             logger.debug("Delta Lake not available, falling back to DataFrame merge")
         except Exception as e:
-            logger.debug(f"Delta MERGE failed, falling back to DataFrame merge: {e}")
+            # A WARNING, not debug: the fallback rewrites the whole table, so the reason it was
+            # needed is what an operator has to see (it was invisible on Databricks).
+            logger.warning(f"Delta MERGE failed, falling back to a full-table rewrite: {e}")
 
     # Fallback: DataFrame-based merge for non-Delta or when Delta unavailable
     try:
         if is_table and spark.catalog.tableExists(table_or_path):
             existing_df = spark.table(table_or_path)
-        elif not is_table and Path(table_or_path).exists():
+        elif not is_table and _spark_path_holds_table(spark, output_format, table_or_path):
             existing_df = spark.read.format(output_format).load(table_or_path)
         else:
             # No existing data — seed soft-delete columns before first write
@@ -2811,6 +2955,12 @@ def _spark_merge_dataframe(  # pragma: no cover
         merged = merged.select(sk_column, *other_cols)
 
     writer = merged.write.format(output_format)
+    # The rewrite replaces the WHOLE table, so it must carry the table's partitioning: without
+    # it Delta refuses the overwrite (DELTA_METADATA_MISMATCH) — found on Databricks, 2026-10-14,
+    # on every silver table a generated project's DDL step had created partitioned.
+    _merge_parts = _spark_partition_columns(spark, merged, target, partition_by, output_format)
+    if _merge_parts:
+        writer = writer.partitionBy(*_merge_parts)
     if is_table:
         _spark_save_as_table(writer, table_or_path, "overwrite", location)
     else:
@@ -4643,6 +4793,10 @@ def _materialize_primary(
                 f"is not supported and no 'location' fallback is configured."
             )
             return {}
+
+    # Before ANY write, on every engine: the table must not already hold data in another format.
+    _spark_session = getattr(df, "sparkSession", None) if engine_name == "spark" else None
+    _guard_target_format(str(resolved_target), resolved_format, spark=_spark_session)
 
     if engine_name == "spark" and hasattr(df, "sparkSession") and hasattr(df, "write"):  # pragma: no cover
         return _materialize_spark_dataframe(
