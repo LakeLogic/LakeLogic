@@ -378,7 +378,10 @@ constraint-dependencies = [
     "pillow>=12.1.1; python_version >= '3.10'",  # CVE-2026-25990 PSD out-of-bounds write, FITS GZIP decompression bomb
     "orjson>=3.11.6; python_version >= '3.10'",  # CVE-2025-67221 recursion DoS on deeply nested JSON
     "pytest>=9.0.3; python_version >= '3.10'",  # CVE-2025-71176 predictable tmpdir symlink attack
-    "unstructured>=0.18.18; python_version >= '3.10'",  # CVE-2025-64712 MSG attachment path traversal
+    "unstructured>=0.18.18; python_version == '3.10'",  # CVE-2025-64712 MSG attachment path traversal
+    # SSRF in URL-based partitioning (Dependabot #93) is fixed in 0.24.0, which needs Python 3.11+.
+    # Python 3.10 cannot get the fix; it closes when 3.10 support is dropped.
+    "unstructured>=0.24.0; python_version >= '3.11'",
 ]
 
 [dependency-groups]

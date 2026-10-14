@@ -28,7 +28,8 @@ constraints = [
     { name = "orjson", marker = "python_full_version >= '3.10'", specifier = ">=3.11.6" },
     { name = "pillow", marker = "python_full_version >= '3.10'", specifier = ">=12.1.1" },
     { name = "pytest", marker = "python_full_version >= '3.10'", specifier = ">=9.0.3" },
-    { name = "unstructured", marker = "python_full_version >= '3.10'", specifier = ">=0.18.18" },
+    { name = "unstructured", marker = "python_full_version == '3.10.*'", specifier = ">=0.18.18" },
+    { name = "unstructured", marker = "python_full_version >= '3.11'", specifier = ">=0.24.0" },
 ]
 
 [[package]]
@@ -4052,7 +4053,7 @@ wheels = [
 
 [[package]]
 name = "lakelogic"
-version = "1.76.0"
+version = "1.77.0"
 source = { editable = "." }
 dependencies = [
     { name = "deltalake" },
