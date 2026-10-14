@@ -1,6 +1,5 @@
 import os
 import sys
-import yaml
 import re
 import warnings
 from typing import Any, Tuple, Union, Dict, Optional, List, Sequence
@@ -1585,26 +1584,9 @@ class DataProcessor:
             loaded = self._apply_fact_governance(loaded)
             return self._apply_cdc_defaults(loaded)
 
-        def _load_yaml_no_on_bool(handle):
-            """
-            Load YAML without treating 'on/off/yes/no' as booleans.
-            Keeps true/false boolean parsing intact.
-            """
-
-            class Loader(yaml.SafeLoader):
-                pass
-
-            # Remove default bool resolver
-            for key, mappings in list(Loader.yaml_implicit_resolvers.items()):
-                Loader.yaml_implicit_resolvers[key] = [
-                    (tag, regex) for tag, regex in mappings if tag != "tag:yaml.org,2002:bool"
-                ]
-
-            # Re-add bool resolver for true/false only
-            bool_regex = re.compile(r"^(?:true|false)$", re.IGNORECASE)
-            Loader.add_implicit_resolver("tag:yaml.org,2002:bool", bool_regex, list("tTfF"))
-
-            return yaml.load(handle, Loader=Loader)
+        # The one contract YAML reader (on/off/yes/no stay strings). This copy used to edit
+        # SafeLoader's shared resolver table in place, changing `yaml.safe_load` process-wide.
+        from lakelogic.core.contract_yaml import load_contract_yaml as _load_yaml_no_on_bool
 
         # Handle inline YAML strings
         if isinstance(contract, str) and ("\n" in contract or "version:" in contract):
@@ -6360,9 +6342,19 @@ class DataProcessor:
                 # single plan, which can make Catalyst's plan grow super-linearly
                 # and OOM the driver at plan time. Separate counts keep each plan
                 # single-lineage; the row volumes here are always small.
-                source_count = source_df.count() if source_df is not None else None
-                good_count = good_df.count() if good_df is not None else 0
-                bad_count = bad_df.count() if bad_df is not None else 0
+                # One retry: a local or busy cluster can drop a Python worker mid-action
+                # ("Python worker failed to connect back"). Without it the whole block fell
+                # through silently and the run reported its counts as unknown.
+                for _attempt in (1, 2):
+                    try:
+                        source_count = source_df.count() if source_df is not None else None
+                        good_count = good_df.count() if good_df is not None else 0
+                        bad_count = bad_df.count() if bad_df is not None else 0
+                        break
+                    except Exception as _count_exc:
+                        if _attempt == 2:
+                            raise
+                        logger.warning(f"Row counts failed, retrying once: {type(_count_exc).__name__}: {_count_exc}")
                 logger.debug(f"counts: source={source_count} good={good_count} bad={bad_count}")
 
                 total = (good_count or 0) + (bad_count or 0)
@@ -6389,8 +6381,13 @@ class DataProcessor:
                     "pre_transform_added": added,
                     **self._attribute_dropped_rows(dropped),
                 }
-            except Exception:
-                pass  # Fall back to individual counts
+            except Exception as _counts_exc:
+                # Said out loud: the run's counts will read as unknown, and the reason must be
+                # findable (this was a silent `pass`).
+                logger.warning(
+                    f"Could not count rows on Spark ({type(_counts_exc).__name__}: {_counts_exc}); "
+                    "the run's counts are reported as unknown."
+                )
 
         # Non-Spark engines: use len() which is O(1) for most dataframe types
         def _count(obj: Any) -> Optional[int]:

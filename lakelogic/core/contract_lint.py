@@ -22,8 +22,9 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-import yaml
 from pydantic import BaseModel, Field
+
+from lakelogic.core.contract_yaml import load_contract_yaml
 
 # ── Finding schema ──────────────────────────────────────────────────────────
 
@@ -236,7 +237,7 @@ class GovernanceContext(BaseModel):
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
     try:
-        d = yaml.safe_load(path.read_text(encoding="utf-8"))
+        d = load_contract_yaml(path.read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}
@@ -782,7 +783,7 @@ def review_contract(path: str | Path, ctx: Optional[GovernanceContext] = None) -
     (walks up to `_domain.yaml`/`_system.yaml`) unless a ``ctx`` is supplied."""
     path = Path(path)
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = load_contract_yaml(path.read_text(encoding="utf-8"))
     except Exception as e:
         return [_c(path.stem, "PARSE-000", "critical", "parse", f"could not read YAML: {e}")]
     if not isinstance(raw, dict):

@@ -125,10 +125,11 @@ def _contract_sensitive_columns(contract: Any) -> set:
     if contract is None:
         return set()
     if isinstance(contract, (str, Path)):
-        import yaml
 
         with open(contract, encoding="utf-8") as fh:
-            contract = yaml.safe_load(fh) or {}
+            from lakelogic.core.contract_yaml import load_contract_yaml
+
+            contract = load_contract_yaml(fh) or {}
     if not isinstance(contract, dict) and hasattr(contract, "model_dump"):
         contract = contract.model_dump()
     model = (contract or {}).get("model") or {}

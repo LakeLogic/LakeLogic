@@ -332,8 +332,10 @@ def validate(
 
     try:
         # Load contract
-        with open(contract, "r") as f:
-            contract_data = yaml.safe_load(f)
+        from lakelogic.core.contract_yaml import load_contract_yaml
+
+        with open(contract, "r", encoding="utf-8") as f:
+            contract_data = load_contract_yaml(f)
 
         if not contract_data:
             typer.secho("❌ Contract file is empty.", fg=typer.colors.RED)

@@ -1843,33 +1843,16 @@ class DataContract(BaseModel):
             contract.reset(dry_run=True)   # preview managed paths
             contract.reset()               # wipe quarantine + output + watermark
         """
-        import re as _re
-        import yaml as _yaml
         from pathlib import Path as _P
 
         _path = _P(path)
         if not _path.exists():
             raise FileNotFoundError(f"Contract file not found: {_path}")
 
-        class _Loader(_yaml.SafeLoader):
-            pass
+        from lakelogic.core.contract_yaml import load_contract_yaml
 
-        # Strip 'on/off/yes/no' → not booleans; keep true/false.
-        # REBIND, never mutate in place: `yaml_implicit_resolvers` is inherited from
-        # SafeLoader, so assigning into it edited PyYAML's own loader process-wide —
-        # loading one contract changed what `yaml.safe_load` meant everywhere else.
-        _Loader.yaml_implicit_resolvers = {
-            _key: [(tag, regex) for tag, regex in _mappings if tag != "tag:yaml.org,2002:bool"]
-            for _key, _mappings in _Loader.yaml_implicit_resolvers.items()
-        }
-        _Loader.add_implicit_resolver(
-            "tag:yaml.org,2002:bool",
-            _re.compile(r"^(?:true|false)$", _re.IGNORECASE),
-            list("tTfF"),
-        )
-
-        with open(_path, "r") as _f:
-            data = _yaml.load(_f, Loader=_Loader)
+        with open(_path, "r", encoding="utf-8") as _f:
+            data = load_contract_yaml(_f)
 
         instance = cls(**data)
         try:

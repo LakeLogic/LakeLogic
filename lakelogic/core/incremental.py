@@ -1210,9 +1210,10 @@ class IncrementalBoundary:
                 partition_filters={"country": dbutils.widgets.get("country")},
             )
         """
-        import yaml as _yaml
 
-        data = _yaml.safe_load(Path(contract_path).read_text(encoding="utf-8"))
+        from lakelogic.core.contract_yaml import load_contract_yaml
+
+        data = load_contract_yaml(Path(contract_path).read_text(encoding="utf-8"))
         src = data.get("source") or {}
 
         strategy = src.get("watermark_strategy", "max_target")

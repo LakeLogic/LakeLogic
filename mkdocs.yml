@@ -94,6 +94,7 @@ nav:
           - Dimensional Modeling: contracts/data_product_contracts/dimensional_modeling.md
       - Schema & Model: contracts/schema_model.md
       - Schema Validation API: contracts/schema_api.md
+      - Lint Rules: contracts/lint_rules.md
       - Versioning: contracts/versioning.md
   - Reference:
       - Complete Contract Template: contract_template.md
