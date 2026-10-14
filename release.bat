@@ -111,10 +111,24 @@ REM past that, which overwrote whatever had landed on main since (it wiped 0d2ca
 REM Rebasing here instead means the final push is a plain one that can never overwrite.
 echo.
 echo [0a/6] Updating from origin/main...
-git pull --rebase origin main
+REM Rebase only when origin is AHEAD. An up-to-date main needs nothing, and uncommitted work in
+REM the tree (another change in progress) then does not block the release: it is not shipped
+REM anyway, because CI builds the published package from the tagged commit.
+git fetch origin main
 if errorlevel 1 (
-    echo ERROR: could not rebase onto origin/main. Commit or set aside your changes and resolve, then re-run.
+    echo ERROR: could not fetch origin/main.
     exit /b 1
+)
+for /f %%n in ('git rev-list --count HEAD..origin/main') do set "BEHIND=%%n"
+if not "%BEHIND%"=="0" (
+    echo   origin/main is %BEHIND% commit^(s^) ahead: rebasing onto it...
+    git pull --rebase origin main
+    if errorlevel 1 (
+        echo ERROR: could not rebase onto origin/main. Commit or set aside your changes and resolve, then re-run.
+        exit /b 1
+    )
+) else (
+    echo   Up to date with origin/main.
 )
 
 REM Step 0: Upgrade dependencies (pull latest security patches)
