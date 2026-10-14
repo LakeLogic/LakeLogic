@@ -104,6 +104,19 @@ echo ======================================================
 echo   Repo: %CD%
 echo ======================================================
 
+REM Step 0a: Start from what is on origin/main.
+REM The publish workflow pushes a "docs: update changelog" commit to main after every release,
+REM so a local main is behind origin after each one. The push at the end used --force to get
+REM past that, which overwrote whatever had landed on main since (it wiped 0d2ca10, 2026-10-14).
+REM Rebasing here instead means the final push is a plain one that can never overwrite.
+echo.
+echo [0a/6] Updating from origin/main...
+git pull --rebase origin main
+if errorlevel 1 (
+    echo ERROR: could not rebase onto origin/main. Commit or set aside your changes and resolve, then re-run.
+    exit /b 1
+)
+
 REM Step 0: Upgrade dependencies (pull latest security patches)
 echo.
 echo [0/6] Upgrading dependencies (security patches)...
@@ -131,11 +144,23 @@ if defined WITH_SPARK (
 ) else (
     echo   Real-Spark tests: off ^(run them before releasing a Spark change; --with-spark to include^)
 )
-"%PY%" -m pytest tests/ -q --tb=short
-if errorlevel 1 (
+REM --cache-clear: the retry below reads THIS run's failures, never a list left by an earlier run.
+REM pytest exit codes: 0 passed, 1 tests failed, 2+ interrupted / internal / usage / no tests.
+REM Only 1 is retried; anything else stops the release. A run that was stopped or hung and
+REM killed must never count as finished (2026-10-14: a stopped conformance step was retried
+REM against a stale failure list, "passed", and 1.79.0 shipped without its Spark gate).
+"%PY%" -m pytest tests/ -q --tb=short --cache-clear
+set "TEST_RC=%ERRORLEVEL%"
+if %TEST_RC% GTR 1 (
+    echo.
+    echo ERROR: the test run did not finish ^(pytest exit %TEST_RC%^). Not releasing.
+    exit /b 1
+)
+if %TEST_RC% EQU 1 (
     echo.
     echo Retrying the failed tests once in a fresh process...
-    "%PY%" -m pytest tests/ --lf -q --tb=short
+    REM If the run recorded no failures ^(it was cut short^), --lfnf all reruns everything.
+    "%PY%" -m pytest tests/ --lf --lfnf all -q --tb=short
     if errorlevel 1 (
         echo.
         echo ERROR: Tests failed twice after dependency upgrade. Review uv.lock changes.
@@ -161,11 +186,17 @@ if not exist "%OLC_REPO%\conformance\test_conformance.py" (
     exit /b 1
 )
 set "OLC_CONFORMANCE_REQUIRE=1"
-"%PY%" -m pytest "%OLC_REPO%\conformance" -q --tb=short
-if errorlevel 1 (
+"%PY%" -m pytest "%OLC_REPO%\conformance" -q --tb=short --cache-clear
+set "CONF_RC=%ERRORLEVEL%"
+if %CONF_RC% GTR 1 (
+    echo.
+    echo ERROR: OLC conformance did not finish ^(pytest exit %CONF_RC%^). Not releasing.
+    exit /b 1
+)
+if %CONF_RC% EQU 1 (
     echo.
     echo Retrying the failed conformance cases once in a fresh process...
-    "%PY%" -m pytest "%OLC_REPO%\conformance" --lf -q --tb=short
+    "%PY%" -m pytest "%OLC_REPO%\conformance" --lf --lfnf all -q --tb=short
     if errorlevel 1 (
         echo.
         echo ERROR: OLC conformance failed twice. An engine disagrees with the contract.
@@ -247,7 +278,17 @@ git tag -f -a %NEW_TAG% -m "release %NEW_TAG%"
 REM Step 5: Push
 echo.
 echo [5/6] Pushing to remote...
-git push --force --follow-tags
+REM A plain push: never --force. If origin moved during the release, this fails safely; nothing
+REM on origin is overwritten. Then: git pull --rebase origin main, re-tag, push again.
+git push --follow-tags
+if errorlevel 1 (
+    echo.
+    echo ERROR: push refused ^(origin/main moved during the release^). Nothing was overwritten.
+    echo   git pull --rebase origin main
+    echo   git tag -f -a %NEW_TAG% -m "release %NEW_TAG%"
+    echo   git push --follow-tags
+    exit /b 1
+)
 
 echo.
 echo ======================================================
@@ -259,5 +300,5 @@ echo     1. Edit cliff.toml or reword commits
 echo     2. git cliff -o CHANGELOG.md
 echo     3. git add CHANGELOG.md ^& git commit --amend --no-edit
 echo     4. git tag -f %NEW_TAG%
-echo     5. git push --force --follow-tags
+echo     5. git push --force-with-lease --follow-tags   ^(only if that commit is yours alone^)
 echo.
