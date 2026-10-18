@@ -784,6 +784,11 @@ class SnowflakeAdapter(EngineAdapter):
             else:
                 select_exprs.extend([self._quote_ident(col) for col in sorted(unknown)])
 
+        # The engine's own columns (`_lakelogic_processed_at`, run id, ...) are not the contract's
+        # to declare, and not drift — but they ride through, as on Spark. Dropping them here broke
+        # every deduplicate that sorts by the load time (Snowflake live run, 2026-10-18).
+        select_exprs.extend(self._quote_ident(col) for col in sorted(system_cols))
+
         schema_table = self._temp_name("schema")
         self._execute(
             conn,
