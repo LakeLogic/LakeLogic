@@ -62,7 +62,9 @@ def test_engine_columns_ride_through_the_schema_step():
     step selected only contract fields, so the sort column was gone ('invalid identifier')."""
     from lakelogic.core.models import DataContract
 
-    contract = DataContract.model_validate({"version": "1.0.0", "info": {"title": "t"}, "model": {"fields": [{"name": "id", "type": "string"}]}})
+    contract = DataContract.model_validate(
+        {"version": "1.0.0", "info": {"title": "t"}, "model": {"fields": [{"name": "id", "type": "string"}]}}
+    )
     a = sf.SnowflakeAdapter(contract)
     conn = _Conn(["ID", "_LAKELOGIC_PROCESSED_AT", "STRAY"])
     a._execute = lambda c, sql: conn.log.append(sql)
