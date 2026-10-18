@@ -78,12 +78,23 @@ def test_dataset_rules_name_the_table_under_test():
     Snowflake unreplaced — every fact with an orphan-key rule failed."""
     from lakelogic.core.models import DataContract
 
-    contract = DataContract.model_validate({
-        "version": "1.0.0", "info": {"title": "t"}, "dataset": "gold_fact_x",
-        "model": {"fields": [{"name": "driver_sk", "type": "string"}]},
-        "quality": {"dataset_rules": [{"name": "orphans", "sql": "SELECT COUNT(*) FROM {dataset} WHERE driver_sk = '-1'",
-                                        "must_be_less_than": 1}]},
-    })
+    contract = DataContract.model_validate(
+        {
+            "version": "1.0.0",
+            "info": {"title": "t"},
+            "dataset": "gold_fact_x",
+            "model": {"fields": [{"name": "driver_sk", "type": "string"}]},
+            "quality": {
+                "dataset_rules": [
+                    {
+                        "name": "orphans",
+                        "sql": "SELECT COUNT(*) FROM {dataset} WHERE driver_sk = '-1'",
+                        "must_be_less_than": 1,
+                    }
+                ]
+            },
+        }
+    )
     a = sf.SnowflakeAdapter(contract)
     conn = _Conn(["DRIVER_SK"])
     a._execute = lambda c, sql: conn.log.append(sql)
