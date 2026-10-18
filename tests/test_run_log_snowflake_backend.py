@@ -152,3 +152,16 @@ def _contract_for(registry):
             self.storage = None
 
     return Contract()
+
+
+def test_insert_uses_the_connections_bind_style():
+    """A Snowflake Notebook's Snowpark connection binds with `qmark`; `%s` was a syntax
+    error there, so the run log was never written inside Snowflake (live run 2026-10-18)."""
+    conn = FakeConn()
+    conn._paramstyle = "qmark"
+    run_log._snowflake_insert(conn, "DB.S.T", ["a", "b"], [{"a": 1, "b": 2}])
+    sql = next(e[1] for e in conn.log if e[0] == "executemany")
+    assert "VALUES (?, ?)" in sql
+    conn2 = FakeConn()
+    run_log._snowflake_insert(conn2, "DB.S.T", ["a"], [{"a": 1}])
+    assert "VALUES (%s)" in next(e[1] for e in conn2.log if e[0] == "executemany")

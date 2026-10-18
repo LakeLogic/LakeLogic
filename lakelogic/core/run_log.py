@@ -293,7 +293,12 @@ def _snowflake_insert(conn, table: str, columns: List[str], records: List[Dict[s
     statement anyway; doing it explicitly keeps one round trip per batch rather than one
     per row, which matters when a check run posts 60+ objectives.
     """
-    placeholders = ", ".join(["%s"] * len(columns))
+    # The connection's own bind style: a connector connection defaults to `pyformat` (%s), but a
+    # Snowflake Notebook's Snowpark session connection binds server-side with `qmark` (?) and
+    # rejects %s (live run 2026-10-18: "unexpected '%'" — the run log was never written there).
+    style = str(getattr(conn, "_paramstyle", None) or "pyformat").lower()
+    mark = "?" if style in ("qmark", "numeric") else "%s"
+    placeholders = ", ".join([mark] * len(columns))
     sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
     rows = [tuple(rec.get(c) for c in columns) for rec in records]
     cur = conn.cursor()
