@@ -15,6 +15,32 @@ from ..core import types as _types
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
 
 
+_PLAIN_LOWER = re.compile(r"^[a-z_][a-z0-9_$]*$")
+_PLAIN_UPPER = re.compile(r"^[A-Z_][A-Z0-9_$]*$")
+
+
+def _preserve_case() -> bool:
+    return os.getenv("LAKELOGIC_SNOWFLAKE_PRESERVE_CASE", "").strip().lower() in ("1", "true", "yes")
+
+
+def _fold(name: str) -> str:
+    """A plain lowercase name as Snowflake stores it: UPPER case.
+
+    Snowflake folds an unquoted ``trip_id`` to ``TRIP_ID``; quoting the lowercase spelling
+    instead names a different column. Contracts are written in lowercase, and a table created
+    the normal way (unquoted DDL, ``COPY``, gold SQL) has UPPER-case columns, so the quoted
+    name must be the folded one. ``LAKELOGIC_SNOWFLAKE_PRESERVE_CASE=1`` keeps the old,
+    exact spelling for tables whose columns really are lowercase-quoted.
+    """
+    return name.upper() if not _preserve_case() and _PLAIN_LOWER.match(name) else name
+
+
+def _unfold(name: str) -> str:
+    """The inverse of :func:`_fold` for a name read back from Snowflake, so it compares equal
+    to the contract's lowercase field name."""
+    return name.lower() if not _preserve_case() and _PLAIN_UPPER.match(name) else name
+
+
 def _resolve_env_value(value: Optional[str]) -> Optional[str]:
     """
     Resolve simple environment variable placeholders.
@@ -369,6 +395,7 @@ class SnowflakeAdapter(EngineAdapter):
         text = str(name)
         if text.startswith('"') and text.endswith('"'):
             return text
+        text = _fold(text)
         escaped = text.replace('"', '""')
         return '"' + escaped + '"'
 
@@ -675,7 +702,7 @@ class SnowflakeAdapter(EngineAdapter):
         cursor = conn.cursor()
         try:
             cursor.execute(f"SELECT * FROM {table_name} LIMIT 0")
-            return [desc[0] for desc in cursor.description] if cursor.description else []
+            return [_unfold(desc[0]) for desc in cursor.description] if cursor.description else []
         finally:
             cursor.close()
 
@@ -952,6 +979,9 @@ class SnowflakeAdapter(EngineAdapter):
                 )
 
             cursor.execute(f"SELECT * FROM {table_name}")
-            return cursor.fetch_pandas_all()
+            df = cursor.fetch_pandas_all()
+            # Back to the contract's spelling (see `_fold`); write it back UNQUOTED so it folds again.
+            df.columns = [_unfold(str(c)) for c in df.columns]
+            return df
         finally:
             cursor.close()
