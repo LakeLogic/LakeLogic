@@ -1517,6 +1517,35 @@ class DataProcessor:
         if strict:
             raise PreflightError(name, findings)
 
+    @staticmethod
+    def _extract_file_via_spark(spark, file_path: str, config, extract) -> list:
+        """Run a local-file extractor (pdfplumber / easyocr) on a file Spark can read.
+
+        The providers open files with the local filesystem, so a remote URI
+        (abfss://, s3://, gs://, dbfs:/, ...) fails with ENOENT. Read its bytes through
+        Spark's binaryFile reader into a temp file, extract, then put the original
+        path back wherever the temp path leaked into a row.
+        """
+        if "://" not in str(file_path) or str(file_path).startswith("file://"):
+            return extract(file_path, config)
+        import tempfile
+
+        content = spark.read.format("binaryFile").load(file_path).select("content").head()
+        if content is None:
+            raise FileNotFoundError(file_path)
+        suffix = os.path.splitext(str(file_path))[1]
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(bytes(content[0]))
+            local = tmp.name
+        try:
+            rows = extract(local, config)
+        finally:
+            try:
+                os.remove(local)
+            except OSError:
+                pass
+        return [{k: (file_path if v == local else v) for k, v in r.items()} for r in rows]
+
     def _raise_if_all_files_failed(self, provider: str, file_paths: list, errors: list) -> None:
         """Fail the run when a file provider could not read a single matched file.
 
@@ -4120,7 +4149,7 @@ class DataProcessor:
                                 _file_errors: list[str] = []
                                 for _fp in file_paths:
                                     try:
-                                        _all_rows.extend(_extract_file(_fp, _ext_cfg))
+                                        _all_rows.extend(self._extract_file_via_spark(spark, _fp, _ext_cfg, _extract_file))
                                     except Exception as _fe:
                                         logger.warning(f"extract_file failed for {_fp}: {_fe}")
                                         _file_errors.append(f"{_fp}: {_fe}")
