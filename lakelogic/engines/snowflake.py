@@ -911,14 +911,15 @@ class SnowflakeAdapter(EngineAdapter):
         if not rules:
             return
 
-        self._execute(
-            conn,
-            f"CREATE OR REPLACE TEMP VIEW {self.contract.dataset or 'source'} AS SELECT * FROM {table_name}",
-        )
+        view = self.contract.dataset or "source"
+        self._execute(conn, f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT * FROM {table_name}")
         cursor = conn.cursor()
         try:
             for rule in rules:
-                cursor.execute(rule.sql)
+                # `{dataset}` / `{source}` name the table under test, as on every other engine;
+                # unreplaced, Snowflake fails at the brace (live run 2026-10-18: "unexpected
+                # 'dataset'" on every fact with an orphan-key rule).
+                cursor.execute(rule.sql.replace("{dataset}", view).replace("{source}", view))
                 val = cursor.fetchone()[0] if cursor.rowcount != 0 else None
 
                 passed = True

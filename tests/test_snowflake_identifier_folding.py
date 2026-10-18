@@ -71,3 +71,25 @@ def test_engine_columns_ride_through_the_schema_step():
     a._apply_schema(conn, "SRC")
     create = next(s for s in conn.log if s.startswith("CREATE OR REPLACE TEMP TABLE"))
     assert '"_LAKELOGIC_PROCESSED_AT"' in create
+
+
+def test_dataset_rules_name_the_table_under_test():
+    """Live run 2026-10-18: `SELECT COUNT(*) FROM {dataset} WHERE driver_sk = '-1'` reached
+    Snowflake unreplaced — every fact with an orphan-key rule failed."""
+    from lakelogic.core.models import DataContract
+
+    contract = DataContract.model_validate({
+        "version": "1.0.0", "info": {"title": "t"}, "dataset": "gold_fact_x",
+        "model": {"fields": [{"name": "driver_sk", "type": "string"}]},
+        "quality": {"dataset_rules": [{"name": "orphans", "sql": "SELECT COUNT(*) FROM {dataset} WHERE driver_sk = '-1'",
+                                        "must_be_less_than": 1}]},
+    })
+    a = sf.SnowflakeAdapter(contract)
+    conn = _Conn(["DRIVER_SK"])
+    a._execute = lambda c, sql: conn.log.append(sql)
+    try:
+        a._run_dataset_rules(conn, "GOOD")
+    except Exception:
+        pass  # the fake cursor returns no rows; only the SQL sent matters here
+    sent = [s for s in conn.log if "COUNT(*)" in s]
+    assert sent and "{dataset}" not in sent[0] and "FROM gold_fact_x WHERE" in sent[0]
