@@ -1,6 +1,7 @@
 """Snowflake folds unquoted names to UPPER case. Contracts are lowercase; the engine must quote
 `trip_id` as "TRIP_ID" and read TRIP_ID back as trip_id, or a normally created table never
 matches its contract (the RideFlow demo had to upper-case every contract to run)."""
+
 from lakelogic.engines import snowflake as sf
 
 
@@ -11,8 +12,10 @@ def _adapter():
 def test_plain_lowercase_is_quoted_as_snowflake_stores_it():
     a = _adapter()
     assert a._quote_ident("trip_id") == '"TRIP_ID"'
-    assert a._quote_qualified("lldemo_dev_marketplace.silver.silver_trips") == \
-        '"LLDEMO_DEV_MARKETPLACE"."SILVER"."SILVER_TRIPS"'
+    assert (
+        a._quote_qualified("lldemo_dev_marketplace.silver.silver_trips")
+        == '"LLDEMO_DEV_MARKETPLACE"."SILVER"."SILVER_TRIPS"'
+    )
 
 
 def test_mixed_case_and_already_quoted_names_are_kept():
