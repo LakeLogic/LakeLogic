@@ -4149,7 +4149,9 @@ class DataProcessor:
                                 _file_errors: list[str] = []
                                 for _fp in file_paths:
                                     try:
-                                        _all_rows.extend(self._extract_file_via_spark(spark, _fp, _ext_cfg, _extract_file))
+                                        _all_rows.extend(
+                                            self._extract_file_via_spark(spark, _fp, _ext_cfg, _extract_file)
+                                        )
                                     except Exception as _fe:
                                         logger.warning(f"extract_file failed for {_fp}: {_fe}")
                                         _file_errors.append(f"{_fp}: {_fe}")

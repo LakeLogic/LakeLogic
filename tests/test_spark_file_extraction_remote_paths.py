@@ -1,5 +1,6 @@
 """PDF/image extraction on Spark must read remote files (abfss://, s3://) through Spark,
 because pdfplumber/easyocr only open local paths (Fabric run 2026-10-18: ENOENT on abfss)."""
+
 import os
 
 from lakelogic.core.processor import DataProcessor
