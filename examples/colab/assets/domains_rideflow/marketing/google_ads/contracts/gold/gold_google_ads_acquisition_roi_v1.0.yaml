@@ -1,21 +1,49 @@
 version: 1.0.0
+
 info:
-  title: "Gold \u2014 Gold Google Ads Acquisition Roi"
-  table_name: '{gold_layer}_google_ads_acquisition_roi'
-  description: Aggregated Gold KPIs.
+  title: "Gold — Google Ads Acquisition ROI"
+  table_name: "{gold_layer}_google_ads_acquisition_roi"
+  description: "Spend, conversions and return per campaign."
   target_layer: gold
   domain: marketing
   system: google_ads
+
+source:
+  type: delta
+  path: "{storage_root}/{domain}/{silver_layer}_{system}_campaigns"
+
+primary_key: [campaign_id]
+
 model:
   fields:
-  - name: kpi_date
-    type: date
-  - name: metric_name
-    type: string
-  - name: metric_value
-    type: float
-source:
-  type: sql
-  query: "\n                SELECT \n                    CURRENT_DATE() as kpi_date,\n\
-    \                    'dummy_metric' as metric_name,\n                    100.0\
-    \ as metric_value\n            "
+    - name: campaign_id
+      type: string
+      required: true
+    - name: campaign_name
+      type: string
+    - name: impressions
+      type: integer
+    - name: clicks
+      type: integer
+    - name: total_cost
+      type: float
+    - name: conversions
+      type: integer
+    - name: conversion_value
+      type: float
+    - name: roi
+      type: float
+
+transformations:
+  - sql: |
+      SELECT
+          campaign_id,
+          MAX(campaign_name)                                         AS campaign_name,
+          SUM(impressions)                                           AS impressions,
+          SUM(clicks)                                                AS clicks,
+          SUM(cost)                                                  AS total_cost,
+          SUM(conversions)                                           AS conversions,
+          SUM(TRY_CAST(conversion_value AS DOUBLE))                  AS conversion_value,
+          ROUND(SUM(TRY_CAST(conversion_value AS DOUBLE)) / NULLIF(SUM(cost), 0), 2) AS roi
+      FROM source
+      GROUP BY campaign_id

@@ -16,6 +16,7 @@ model:
     type: string
     required: true
     description: "Unique rider identifier"
+    pii: true
   - name: name
     type: string
     description: "Rider full name"

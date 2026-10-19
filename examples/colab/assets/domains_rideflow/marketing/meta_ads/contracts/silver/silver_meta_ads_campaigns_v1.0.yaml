@@ -41,4 +41,4 @@ quality:
   fail_pipeline_on_dataset_error: true
 source:
   type: delta
-  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_campaigns'
+  path: '{storage_root}/{domain}/{bronze_layer}_{system}_campaigns'

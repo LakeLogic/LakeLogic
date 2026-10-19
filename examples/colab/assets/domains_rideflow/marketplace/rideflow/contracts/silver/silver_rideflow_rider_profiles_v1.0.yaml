@@ -13,6 +13,7 @@ model:
   - name: rider_id
     type: string
     required: true
+    pii: true
   - name: name
     type: string
     pii: true
@@ -29,6 +30,8 @@ model:
     type: string
     pii: true
   - name: city_code
+    type: string
+  - name: country_code
     type: string
     pii: true
   - name: signup_date

@@ -1,21 +1,47 @@
 version: 1.0.0
+
 info:
-  title: "Gold \u2014 Gold Stripe Payment Reconciliation"
-  table_name: '{gold_layer}_stripe_payment_reconciliation'
-  description: Aggregated Gold KPIs.
+  title: "Gold — Payment Reconciliation"
+  table_name: "{gold_layer}_stripe_payment_reconciliation"
+  description: "Daily Stripe charges matched to the Marketplace trips they paid for."
   target_layer: gold
   domain: payments
   system: stripe
+
+source:
+  type: delta
+  path: "{storage_root}/{domain}/{silver_layer}_{system}_charges"
+
+# Cross-domain read: the Marketplace domain's published Silver trips.
+links:
+  - name: trips
+    path: "{storage_root}/marketplace/silver/silver_rideflow_trips"
+    type: delta
+
+primary_key: [kpi_date]
+
 model:
   fields:
-  - name: kpi_date
-    type: date
-  - name: metric_name
-    type: string
-  - name: metric_value
-    type: float
-source:
-  type: sql
-  query: "\n                SELECT \n                    CURRENT_DATE() as kpi_date,\n\
-    \                    'dummy_metric' as metric_name,\n                    100.0\
-    \ as metric_value\n            "
+    - name: kpi_date
+      type: date
+      required: true
+    - name: charges
+      type: integer
+    - name: charged_amount
+      type: float
+    - name: matched_to_trip
+      type: integer
+    - name: match_rate_pct
+      type: float
+
+transformations:
+  - sql: |
+      SELECT
+          CAST(c.created_at AS DATE)                              AS kpi_date,
+          COUNT(*)                                                AS charges,
+          SUM(c.amount)                                           AS charged_amount,
+          COUNT(t.trip_id)                                        AS matched_to_trip,
+          ROUND(100.0 * COUNT(t.trip_id) / COUNT(*), 1)           AS match_rate_pct
+      FROM source c
+      LEFT JOIN trips t ON t.trip_id = c.trip_id
+      GROUP BY CAST(c.created_at AS DATE)

@@ -173,3 +173,20 @@ def test_list_columns_become_json_where_the_database_cannot_store_them():
     assert out.column("_lakelogic_errors").to_pylist() == ['["fare < 0", "no city"]', None]
     assert out.column("id").to_pylist() == [1, 2]
     assert "duckdb" in dlt_sink.NESTED_DESTINATIONS and "postgres" not in dlt_sink.NESTED_DESTINATIONS
+
+
+@pytest.mark.parametrize("strategy,pk", [("append", None), ("merge", ["id"])])
+def test_appending_or_merging_nothing_skips_dlt(fake_dlt, strategy, pk):
+    """An empty append/merge is a no-op. Handing dlt an empty batch failed on duckdb with
+    "NOT NULL constraint failed: _dlt_id" and printed a traceback (examples/colab/07_dlt)."""
+    out = dlt_sink.write_dlt(
+        DF.clear(), table_name="t", config={"dlt_destination": "duckdb"}, strategy=strategy, primary_key=pk
+    )
+    assert out["rows_written"] == 0
+    assert fake_dlt.pipeline is None  # dlt was never started
+
+
+def test_replacing_with_nothing_still_runs_because_it_empties_the_table(fake_dlt):
+    out = dlt_sink.write_dlt(DF.clear(), table_name="t", config={"dlt_destination": "duckdb"}, strategy="overwrite")
+    assert out["rows_written"] == 0 and out["write_disposition"] == "replace"
+    assert fake_dlt.pipeline is not None

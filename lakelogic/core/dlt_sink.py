@@ -221,6 +221,21 @@ def write_dlt(
     if destination not in NESTED_DESTINATIONS:
         data = nested_to_json(data)
 
+    target = f"{destination}:{dataset_name}.{table}"
+    if data.num_rows == 0 and disposition != "replace":
+        # Appending or merging nothing is a no-op. Handing dlt an empty batch made it create a
+        # load with no rows, which failed on duckdb with "NOT NULL constraint failed: _dlt_id"
+        # and printed a traceback on every quiet run. A `replace` of zero rows still runs,
+        # because it means "the table is now empty".
+        logger.info(f"dlt write: 0 rows for {target} ({disposition}); nothing to write")
+        return {
+            "target": target,
+            "format": "dlt",
+            "dlt_destination": destination,
+            "rows_written": 0,
+            "write_disposition": disposition,
+        }
+
     @dlt.resource(name=table, write_disposition=disposition, primary_key=pk or None)
     def _rows():
         yield data
@@ -242,9 +257,9 @@ def write_dlt(
         secrets = [credentials] if isinstance(credentials, str) else list((credentials or {}).values())
         raise ValueError(f"dlt write to {destination} failed: {_scrub(str(exc), secrets)}") from None
 
-    logger.info(f"dlt write: {data.num_rows} rows → {destination}:{dataset_name}.{table} ({disposition})")
+    logger.info(f"dlt write: {data.num_rows} rows → {target} ({disposition})")
     return {
-        "target": f"{destination}:{dataset_name}.{table}",
+        "target": target,
         "format": "dlt",
         "dlt_destination": destination,
         "rows_written": data.num_rows,

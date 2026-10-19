@@ -44,4 +44,4 @@ transformations:
     order: desc
 source:
   type: delta
-  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_payouts'
+  path: '{storage_root}/{domain}/{bronze_layer}_{system}_payouts'

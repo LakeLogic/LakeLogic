@@ -62,6 +62,19 @@ def test_sql_backed_extra_declares_sqlalchemy(extras, extra):
     )
 
 
+@pytest.mark.parametrize("extra", SQL_BACKED_EXTRAS)
+def test_sql_backed_extra_brings_greenlet(extras, extra):
+    """polars' read_database imports sqlalchemy.ext.asyncio, which needs `greenlet`.
+
+    SQLAlchemy no longer installs greenlet by default, so `lakelogic[sql]` installed and the
+    batched read still failed on a clean Colab runtime (examples/colab/06_integrations).
+    The `asyncio` extra of SQLAlchemy is what declares greenlet.
+    """
+    assert any(r.replace(" ", "").lower().startswith("sqlalchemy[asyncio]") for r in extras[extra]), (
+        f"extra '{extra}' must declare sqlalchemy[asyncio] so greenlet is installed"
+    )
+
+
 def test_the_lean_sql_extra_stays_lean(extras):
     """`sql` exists so SQLite users are not made to build pyodbc.
 

@@ -50,10 +50,6 @@ transformations:
 - drop:
     columns:
     - file_path
-    - _lakelogic_llm_cost_usd
-    - _lakelogic_llm_latency_ms
-    - _lakelogic_llm_model
-    - _lakelogic_llm_provider
     - _lakelogic_created_at
     - _lakelogic_created_by
 lineage:

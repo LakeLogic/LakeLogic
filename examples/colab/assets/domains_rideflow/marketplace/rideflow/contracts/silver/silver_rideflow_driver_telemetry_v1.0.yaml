@@ -33,6 +33,8 @@ model:
     type: string
   - name: city_code
     type: string
+  - name: country_code
+    type: string
   - name: timestamp
     type: timestamp
 quality:

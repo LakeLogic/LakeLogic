@@ -21,6 +21,7 @@ model:
     type: string
     required: true
     description: "FK to rider_profiles"
+    pii: true
   - name: driver_id
     type: string
     required: true

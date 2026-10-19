@@ -23,6 +23,7 @@ model:
     type: string
     required: true
     description: "FK to rider_profiles"
+    pii: true
   - name: driver_id
     type: string
     description: "FK to driver_profiles (null if cancelled before match)"

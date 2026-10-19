@@ -17,6 +17,7 @@ model:
   - name: rider_id
     type: string
     required: true
+    pii: true
   - name: driver_id
     type: string
     required: true
@@ -31,6 +32,8 @@ model:
   - name: dropoff_lng
     type: string
   - name: city_code
+    type: string
+  - name: country_code
     type: string
   - name: requested_at
     type: timestamp

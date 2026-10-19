@@ -20,7 +20,7 @@ storage:
   contract_root: "/Workspace/Shared/data_platform/domains/{domain}/{system}"
   landing_root: "/Volumes/{catalog}/nondelta/landing_{domain}/{system}"
   log_root: "/Volumes/{catalog}/nondelta/_logs"
-  landing_path: "{storage_root}/_data/{domain}/{system}"
+  landing_path: "{storage_root}/_data/landing_{domain}/{system}"
   contract_path: "{storage_root}/_contracts/{domain}/{system}"
   log_path: "{storage_root}/_logs/{domain}"
   quarantine_path: "{quarantine_root}/{domain}/{system}"

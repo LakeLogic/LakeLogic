@@ -26,6 +26,7 @@ model:
     - name: rider_id
       type: string
       required: true
+      pii: true
     - name: activity_date
       type: date
       required: true

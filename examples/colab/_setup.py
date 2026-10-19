@@ -306,3 +306,122 @@ def preview(df, n: int = 5, columns=None):
 # 8. Announce
 # ---------------------------------------------------------------------------
 print(f"lakelogic v{VERSION} | {'Colab' if IN_COLAB else 'Local'} | {WORKDIR}")
+
+
+# ---------------------------------------------------------------------------
+# 9. RideFlow series: fetch the contracts and dashboards, and build the lakehouse
+#
+# Each Colab notebook opens in its OWN empty runtime, so the RideFlow notebooks cannot rely on
+# files another notebook left behind. They call these two helpers first instead.
+# ---------------------------------------------------------------------------
+_REPO = "https://github.com/LakeLogic/LakeLogic.git"
+
+
+def fetch_assets(dest: str = "assets", ref: str = "main") -> Path:
+    """Make ``./assets`` (RideFlow contracts and dashboards) exist, fetching it from GitHub if needed.
+
+    Set ``LAKELOGIC_EXAMPLES_DIR`` to a local ``examples/colab`` folder to copy from it instead
+    (used to test a change before it is pushed).
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    target = Path(dest)
+    if (target / "domains_rideflow").is_dir():
+        return target
+
+    local = os.environ.get("LAKELOGIC_EXAMPLES_DIR")
+    if local:
+        shutil.copytree(Path(local) / "assets", target, dirs_exist_ok=True)
+        return target
+
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = Path(tmp) / "repo"
+        subprocess.check_call(
+            ["git", "clone", "-q", "--depth", "1", "--branch", ref, "--filter=blob:none", "--sparse", _REPO, str(clone)]
+        )
+        subprocess.check_call(["git", "-C", str(clone), "sparse-checkout", "set", "examples/colab/assets"])
+        shutil.copytree(clone / "examples" / "colab" / "assets", target, dirs_exist_ok=True)
+    print(f"Fetched RideFlow contracts and dashboards into ./{dest}")
+    return target
+
+
+def ensure_marketplace(engine: str = "duckdb") -> Path:
+    """Build the Marketplace lakehouse (what ``08b`` produces) unless it is already in ``./lakehouse``.
+
+    The Payments, Operations, Marketing, Data products, Erase, Backfill and Dashboards notebooks
+    all read it. It takes about 3 minutes the first time.
+    """
+    fetch_assets()
+    trips = Path("lakehouse") / "marketplace" / "silver" / "silver_rideflow_trips"
+    if trips.exists():
+        print("Marketplace lakehouse already built, reusing it.")
+        return Path("lakehouse")
+    print("Building the Marketplace lakehouse first (about 3 minutes, once)...")
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+    import contextlib
+    import io
+
+    from loguru import logger
+
+    from assets.rideflow_build import build_marketplace
+
+    # Quiet while it builds (the full log is what notebook 08b is for); show it only if it fails.
+    log = io.StringIO()
+    logger.disable("lakelogic")
+    try:
+        with contextlib.redirect_stdout(log):
+            build_marketplace(engine=engine)
+    except Exception:
+        print(log.getvalue()[-3000:])
+        raise
+    finally:
+        logger.enable("lakelogic")
+
+    from lakelogic import read_delta
+
+    trips = read_delta(str(Path("lakehouse") / "marketplace" / "silver" / "silver_rideflow_trips"))
+    print(f"Marketplace lakehouse ready: {trips.height:,} Silver trips.")
+    return Path("lakehouse")
+
+
+def run_notebook(name: str, quiet: bool = True) -> None:
+    """Run another notebook's code cells in this session, so its tables exist here.
+
+    Used by the notebooks that join data from several RideFlow domains (for example
+    ``08f``). The notebook's own install cell is skipped, and its output is hidden unless it fails.
+    """
+    import contextlib
+    import io
+    import json
+    import urllib.request
+
+    from loguru import logger
+
+    local = os.environ.get("LAKELOGIC_EXAMPLES_DIR")
+    if local:
+        with open(Path(local) / f"{name}.ipynb", encoding="utf-8") as fh:
+            nb = json.load(fh)
+    else:
+        url = f"https://raw.githubusercontent.com/LakeLogic/LakeLogic/main/examples/colab/{name}.ipynb"
+        with urllib.request.urlopen(url) as resp:
+            nb = json.load(resp)
+
+    cells = ["".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"]
+    cells = [c for c in cells if not c.lstrip().startswith(("# Install", "!pip"))]
+    ns = {"__name__": "__main__", "display": lambda *a, **k: None}
+    print(f"Running {name} (a minute or so)...")
+    log = io.StringIO()
+    if quiet:
+        logger.disable("lakelogic")
+    try:
+        with contextlib.redirect_stdout(log if quiet else sys.stdout):
+            for src in cells:
+                exec(compile(src, f"<{name}>", "exec"), ns)
+    except Exception:
+        print(log.getvalue()[-3000:])
+        raise
+    finally:
+        logger.enable("lakelogic")

@@ -7548,12 +7548,17 @@ class DataProcessor:
                     )
                     return ValidationResult(combined_good, combined_bad)
 
-                except ImportError:
+                except ImportError as e:
+                    # Name the module that is actually missing. This used to say "requires
+                    # SQLAlchemy" for ANY ImportError, so a missing `greenlet` (which polars'
+                    # database reader needs via sqlalchemy.ext.asyncio) read as a missing
+                    # SQLAlchemy that was in fact installed.
+                    missing = getattr(e, "name", None) or "a dependency"
                     raise ImportError(
-                        "Batching requires SQLAlchemy. "
-                        'Install it with the extra that declares it: pip install "lakelogic[sql]" '
+                        f"Batched database extraction could not import {missing}: {e}. "
+                        'Install the extra that declares it: pip install "lakelogic[sql]" '
                         "(or [databases] / [postgresql] / [mysql] / [azuresql] for the drivers too)."
-                    )
+                    ) from e
                 except Exception as e:
                     raise RuntimeError(f"Polars batched DB extraction failed. Error: {e}")
 

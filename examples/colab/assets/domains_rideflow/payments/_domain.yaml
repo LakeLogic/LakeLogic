@@ -71,8 +71,8 @@ cost:
 # ── Observatory Telemetry ────────────────────────────────────────────────────
 observatory:
   enabled: true
-  endpoint: "http://localhost:8001/api/v1/operations/run-logs/ingest"  # e.g., "${LAKELOGIC_OBSERVATORY_ENDPOINT}"
-  api_key: "233rwejkkioasdaskasasp"   # e.g., "${LAKELOGIC_API_KEY}" for prod
+  endpoint: "${LAKELOGIC_OBSERVATORY_ENDPOINT}"  # unset = no telemetry is sent
+  api_key: "${LAKELOGIC_API_KEY}"
   emit_on: [success, partial, failed]
   include_quarantine_sample: true     # which rules failed + counts (max 50). No source rows.
 

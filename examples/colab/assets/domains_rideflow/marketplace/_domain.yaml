@@ -87,7 +87,9 @@ observatory:
 # ── Compliance & Privacy ─────────────────────────────────────────────────────
 compliance:
   erasure:
-    strategy: nullify
+    # hash replaces the subject id with a salted token, so no row still names the person.
+    # (nullify keeps the subject id by design, so rows stay traceable to the request.)
+    strategy: hash
 
 # Layer aliases
 bronze_layer: bronze

@@ -47,7 +47,7 @@ model:
   - name: solved_at
     type: timestamp
   - name: satisfaction_rating
-    type: float
+    type: string
 quality:
   row_rules: []
   dataset_rules:
@@ -60,4 +60,4 @@ transformations:
     order: desc
 source:
   type: delta
-  path: '{storage_root}/{domain}/{storage_root}/{domain}/{bronze_layer}_{system}_support_tickets'
+  path: '{storage_root}/{domain}/{bronze_layer}_{system}_support_tickets'

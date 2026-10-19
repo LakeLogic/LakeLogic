@@ -68,6 +68,7 @@ source:
   path: "{landing_root}/support_tickets"
   format: csv
   options:
+    null_values: [""]   # blank optional fields (never opened, not solved yet) are NULL, not empty text
     engine_options:
       header: "true"
       recursiveFileLookup: "true"

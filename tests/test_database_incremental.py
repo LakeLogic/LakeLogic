@@ -175,3 +175,25 @@ def test_polars_casts_space_separated_timestamps_instead_of_quarantining_them():
     assert good.height == 3 and bad.height == 1
     assert good["t"][0] == dt.datetime(2026, 10, 1, 9, 0)
     assert good["d"][1] == dt.date(2026, 10, 1)
+
+
+def test_a_missing_import_in_batched_reads_names_the_real_module(tmp_path, monkeypatch):
+    """Batched reads used to report ANY ImportError as "requires SQLAlchemy". With SQLAlchemy
+    installed but `greenlet` missing (polars' reader imports sqlalchemy.ext.asyncio), users were
+    sent to install a package they already had (examples/colab/06_integrations)."""
+    db = tmp_path / "rides.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE rides (ride_id INTEGER, status TEXT, updated_at TEXT)")
+    con.execute("INSERT INTO rides VALUES (1, 'done', '2026-10-01 10:00:00')")
+    con.commit()
+    con.close()
+    contract = _contract(db, tmp_path / "log.duckdb", options={"fetch_size": 10})
+
+    def _no_greenlet(*_a, **_k):
+        raise ModuleNotFoundError("No module named 'greenlet'", name="greenlet")
+
+    monkeypatch.setattr(pl, "read_database", _no_greenlet)
+    proc = DataProcessor(engine="polars", contract=contract)
+    with pytest.raises(ImportError, match="could not import greenlet") as exc:
+        proc.run_source()
+    assert "requires SQLAlchemy" not in str(exc.value)

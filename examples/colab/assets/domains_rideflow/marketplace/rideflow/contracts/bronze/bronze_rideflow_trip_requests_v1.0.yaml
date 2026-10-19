@@ -20,6 +20,7 @@ model:
     type: string
     required: true
     description: "FK to rider_profiles"
+    pii: true
   - name: trip_type
     type: string
     description: "ride or eats_delivery"

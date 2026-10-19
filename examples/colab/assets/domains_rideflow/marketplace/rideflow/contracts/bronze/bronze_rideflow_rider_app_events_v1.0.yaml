@@ -20,6 +20,7 @@ model:
     type: string
     required: true
     description: "FK to rider_profiles"
+    pii: true
   - name: device_id
     type: string
     description: "Mobile device ID"
