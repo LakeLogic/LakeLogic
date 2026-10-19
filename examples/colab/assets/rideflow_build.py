@@ -4,23 +4,20 @@ Generated from cells of examples/colab/08b_rideflow_marketplace.ipynb. If 08b's 
 regenerate this file so the dependent notebooks keep building the same data.
 """
 
+
 def build_marketplace(engine: str = "duckdb") -> None:
     """Build the RideFlow Marketplace lakehouse (Bronze, Silver, Gold) headlessly.
 
     The same steps as notebook 08b, minus its dashboards and commentary. Keep in sync with 08b.
     """
-    import os
-    import sys
     from datetime import datetime, timezone
     from pathlib import Path
 
-    IN_COLAB = "google.colab" in sys.modules
     ENGINE = engine
     DOMAIN_ROOT = Path("assets/domains_rideflow/marketplace/rideflow")
     SYSTEM_YAML = str(DOMAIN_ROOT / "_system.yaml")
     LAKEHOUSE = Path("./lakehouse")
     LANDING_ROOT = LAKEHOUSE / "_data" / "landing_marketplace" / "rideflow"
-    import lakelogic as ll
     import polars as pl
 
     from lakelogic.core.registry import DomainRegistry
@@ -35,8 +32,9 @@ def build_marketplace(engine: str = "duckdb") -> None:
     for c in registry.get_active_contracts():
         print(f"  [{c.layer:6s}] {c.entity}")
 
-    from lakelogic.core.streaming import StreamingSimulator
     from datetime import timedelta
+
+    from lakelogic.core.streaming import StreamingSimulator
 
     sim = StreamingSimulator.rideflow_marketplace(
         landing_root=str(LANDING_ROOT),
@@ -63,7 +61,9 @@ def build_marketplace(engine: str = "duckdb") -> None:
 
     print(f"\n{'=' * 60}")
     if not windows:
-        print("✅ No new windows generated. The simulator has caught up to the current time (up_to constraint reached).")
+        print(
+            "✅ No new windows generated. The simulator has caught up to the current time (up_to constraint reached)."
+        )
     else:
         print(f"✅ Generated {total_rows:,} total rows across {len(windows)} windows")
         print(f"   Seed window:    {windows[0].total_rows:,} rows (initial pool)")
@@ -80,8 +80,8 @@ def build_marketplace(engine: str = "duckdb") -> None:
     # Injects exactly 800 mutated rows into the trip_completed landing zone
     # so the pipeline quarantine layer can demonstrate 100% reconciliation.
 
-    import uuid
     import random
+    import uuid
     from datetime import datetime, timedelta, timezone
 
     random.seed(42)
@@ -106,7 +106,9 @@ def build_marketplace(engine: str = "duckdb") -> None:
         rider_id = f"R-{uuid.uuid4().hex[:8]}"
         driver_id = f"D-{uuid.uuid4().hex[:8]}"
         city = random.choice(cities)
-        hr = random.choices(range(24), weights=[1, 1, 1, 1, 1, 1, 1, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3, 4, 4, 3, 1, 1, 1])[0]
+        hr = random.choices(
+            range(24), weights=[1, 1, 1, 1, 1, 1, 1, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 3, 4, 4, 3, 1, 1, 1]
+        )[0]
         req_dt = base_time.replace(hour=hr, minute=random.randint(0, 59))
         pickup_dt = req_dt + timedelta(minutes=random.randint(1, 10))
         dropoff_dt = req_dt + timedelta(minutes=random.randint(15, 60))
@@ -185,10 +187,10 @@ def build_marketplace(engine: str = "duckdb") -> None:
     retry_base_wait_seconds = 5
     engine = ENGINE
     reload_layers = ""
-    enable_incremental_streaming = False
+
+    import warnings
 
     from lakelogic.pipeline.runner import LakehousePipeline
-    import warnings
 
     warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -220,10 +222,11 @@ def build_marketplace(engine: str = "duckdb") -> None:
     print(summary)
 
     # Generate surge inference landing data for the Surge Pricing ML Model contract
-    import polars as pl
     import random
     import uuid
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
+
+    import polars as pl
 
     SURGE_LANDING = LAKEHOUSE / "marketplace" / "surge_inference_landing"
     SURGE_LANDING.mkdir(parents=True, exist_ok=True)

@@ -364,9 +364,8 @@ def ensure_marketplace(engine: str = "duckdb") -> Path:
     import contextlib
     import io
 
-    from loguru import logger
-
     from assets.rideflow_build import build_marketplace
+    from loguru import logger
 
     # Quiet while it builds (the full log is what notebook 08b is for); show it only if it fails.
     log = io.StringIO()
