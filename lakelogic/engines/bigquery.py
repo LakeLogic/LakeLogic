@@ -796,7 +796,22 @@ class BigQueryAdapter(EngineAdapter):
         Returns:
             List of column names.
         """
-        job = client.query(f"SELECT * FROM {self._quote_table(table_name)} LIMIT 0", job_config=self._job_config())
+        # A real table (project.dataset.table): its metadata is the schema, with no query cache.
+        # `SELECT * LIMIT 0` could return a cached result from before the table was rewritten
+        # with a new schema, so the cast step selected a column the table no longer had
+        # ("Unrecognized name: column_0", seen live on GCP).
+        if str(table_name).strip("`").count(".") == 2:
+            try:
+                return [field.name for field in client.get_table(str(table_name).strip("`")).schema]
+            except Exception:  # noqa: BLE001 - not a table we can describe: ask a query instead
+                pass
+        config = self._job_config()
+        if config is None:
+            from google.cloud import bigquery
+
+            config = bigquery.QueryJobConfig()
+        config.use_query_cache = False
+        job = client.query(f"SELECT * FROM {self._quote_table(table_name)} LIMIT 0", job_config=config)
         result = job.result()
         return [field.name for field in result.schema]
 
@@ -883,6 +898,12 @@ class BigQueryAdapter(EngineAdapter):
             else:
                 select_exprs.extend([self._quote_ident(col) for col in sorted(unknown)])
 
+        # The source's `_lakelogic_*` columns travel through the cast: a silver deduplicate or
+        # an incremental filter orders by `_lakelogic_processed_at`, which the cast used to drop
+        # ("Unrecognized name: _lakelogic_processed_at", seen live on GCP). The other engines
+        # keep them.
+        select_exprs.extend(self._quote_ident(col) for col in sorted(system_cols))
+
         schema_table = self._temp_name("schema")
         self._execute(
             client,
@@ -938,7 +959,7 @@ class BigQueryAdapter(EngineAdapter):
 
         for rule in row_rules:
             err = self._escape_str(f"Rule failed: {plain_text(rule.name)} ({rule.sql})")
-            cond = f"NOT COALESCE(({rule.sql}), FALSE)"
+            cond = f"NOT COALESCE(({self._rewrite_functions(rule.sql)}), FALSE)"
             error_exprs.append(f"IF({cond}, '{err}', NULL)")
             cat = self._escape_str(runtime_category(rule))
             category_exprs.append(f"IF({cond}, '{cat}', NULL)")
@@ -1017,7 +1038,12 @@ class BigQueryAdapter(EngineAdapter):
         )
 
         for rule in rules:
-            job = client.query(rule.sql, job_config=self._job_config())
+            # Built-in rules (a composite-key uniqueness check is `COUNT(DISTINCT CONCAT_WS(...))`)
+            # are written once for every engine; BigQuery needs them translated like any SQL.
+            # `{dataset}` / `{source}` name the table under test, as on every other engine.
+            view = self.contract.dataset or "source"
+            sql = rule.sql.replace("{dataset}", view).replace("{source}", view)
+            job = client.query(self._rewrite_functions(sql), job_config=self._job_config())
             result = job.result()
             val = list(result)[0][0] if result.total_rows else None
 
