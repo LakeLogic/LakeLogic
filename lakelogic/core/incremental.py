@@ -434,7 +434,7 @@ def _parse_lookback(lookback: str) -> timedelta:
 
 def _resolve_log_table(spark: Any, log_table: Optional[str]) -> str:
     """A configured ``log_table`` is used verbatim. Unset: the standard
-    ``_lakelogic_pipeline_runs``, unless a legacy table (``pipeline_runs``) already
+    ``lakelogic_pipeline_runs``, unless a legacy table (``pipeline_runs``) already
     exists — existing estates keep reading their history."""
     if log_table:
         return log_table

@@ -252,7 +252,7 @@ def test_write_run_log_secondary_targets_and_observatory_push(monkeypatch, tmp_p
 
     assert Path(path).name == "run_obs-1.json"
     assert secondary_calls[0][0] == [{"path": "secondary"}]
-    assert secondary_calls[0][1:3] == ("_lakelogic_run_log", "append")
+    assert secondary_calls[0][1:3] == ("lakelogic_run_log", "append")
     assert posts[0][0][0] == "https://obs.example/ingest"
     payload = posts[0][1]["json"]
     assert payload["status"] == "success"

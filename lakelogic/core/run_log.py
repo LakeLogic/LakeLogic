@@ -32,6 +32,87 @@ from lakelogic.core.plain_values import plain_record, plain_text, plain_value
 _CLOUD_PREFIXES = ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")
 
 
+#: Version of the per-rule measurement record (`metadata.rule_results`). The platform keeps
+#: history from it; a change of shape bumps this so old and new rows are never compared blind.
+MEASUREMENT_VERSION = 1
+
+
+def _rule_attr(rule, key):
+    return rule.get(key) if isinstance(rule, dict) else getattr(rule, key, None)
+
+
+def rules_fingerprint(row_rules, configured_dataset_rules) -> Optional[str]:
+    """A short hash of the rules a run evaluated (name + sql, order-free).
+
+    A timeline must show WHERE the rules changed: adding three checks can lower a pass rate
+    while the data stays the same. The fingerprint changes exactly when the rule set does,
+    however it was edited (a rule-set version, a hand edit, a contract release)."""
+    import hashlib
+
+    parts = sorted(
+        f"{_rule_attr(r, 'name') or ''}|{_rule_attr(r, 'sql') or ''}"
+        for r in list(row_rules or []) + list(configured_dataset_rules or [])
+    )
+    if not parts:
+        return None
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def build_rule_results(row_rules, configured_dataset_rules, dataset_results, row_failures,
+                       rows_checked, run_failed=False):
+    """Every rule the contract declares, with its OWN result for this run (2026-10-20, #570).
+
+    The run payload listed only FAILURES, so a rule that passed was a count and nothing more:
+    no per-rule history could say "passed on Monday, failed on Tuesday". Each entry:
+
+        {"name", "kind": "row"|"dataset", "category", "status": "passed"|"failed"|"not_evaluated",
+         "failed_rows": int|None, "rows_evaluated": int|None}
+
+    * A row rule FAILED when quarantined rows name it; else it PASSED over ``rows_checked``.
+    * ``rows_checked`` is the rows that reached the rule phase (kept + quarantined); None when
+      not known — a pass over an unknown denominator still says "passed", with no count.
+    * A run that failed before its rules ran evaluated nothing: every rule NOT_EVALUATED,
+      never passed (missing evidence is never green).
+    * A dataset rule takes its own verdict; ``passed: None`` / ``deferred`` is NOT_EVALUATED.
+    Counts and names only — no values travel.
+    """
+    failed_by_name: Dict[str, int] = {}
+    for f in row_failures or []:
+        if isinstance(f, dict) and str(f.get("name") or "").strip():
+            n = str(f["name"]).strip()
+            try:
+                failed_by_name[n] = failed_by_name.get(n, 0) + int(f.get("count") or 0)
+            except (TypeError, ValueError):
+                failed_by_name[n] = failed_by_name.get(n, 0)
+    out: List[Dict[str, Any]] = []
+    for r in row_rules or []:
+        name = str(_rule_attr(r, "name") or "").strip()
+        if not name:
+            continue
+        entry: Dict[str, Any] = {"name": name, "kind": "row", "category": _rule_attr(r, "category")}
+        if name in failed_by_name:
+            entry.update(status="failed", failed_rows=failed_by_name[name], rows_evaluated=rows_checked)
+        elif run_failed:
+            entry.update(status="not_evaluated", failed_rows=None, rows_evaluated=None)
+        else:
+            entry.update(status="passed", failed_rows=0, rows_evaluated=rows_checked)
+        out.append(entry)
+    results_by_name = {
+        str(d.get("name") or ""): d for d in (dataset_results or []) if isinstance(d, dict) and d.get("name")
+    }
+    names = [str(_rule_attr(r, "name") or "") for r in configured_dataset_rules or []]
+    names += [n for n in results_by_name if n not in names]
+    for name in [n for n in names if n]:
+        d = results_by_name.get(name)
+        if d is None or d.get("deferred") is True or d.get("passed") is None:
+            status = "not_evaluated"
+        else:
+            status = "passed" if d.get("passed") is True else "failed"
+        out.append({"name": name, "kind": "dataset", "category": (d or {}).get("category"),
+                    "status": status, "failed_rows": None, "rows_evaluated": None})
+    return out
+
+
 def compute_rule_counts(row_rules, configured_dataset_rules, dataset_results, row_failures):
     """(evaluated, passed, failed) for a run, or (None, None, None) when nothing is countable.
 
@@ -578,6 +659,48 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
 # ── Table write ──
 
 
+#: The run-log table's columns and declared types, for the warehouse backends (Snowflake,
+#: BigQuery). One list, so a row means the same thing on every warehouse.
+_RUN_LOG_TABLE_COLUMNS = [
+    ("pipeline_run_id", "VARCHAR"),
+    ("run_id", "VARCHAR"),
+    ("timestamp", "VARCHAR"),
+    ("start_time", "VARCHAR"),
+    ("end_time", "VARCHAR"),
+    ("run_duration_seconds", "FLOAT"),
+    ("engine", "VARCHAR"),
+    ("contract", "VARCHAR"),
+    ("stage", "VARCHAR"),
+    ("dataset", "VARCHAR"),
+    ("domain", "VARCHAR"),
+    ("system", "VARCHAR"),
+    ("environment", "VARCHAR"),
+    ("data_layer", "VARCHAR"),
+    ("status", "VARCHAR"),
+    ("error_message", "VARCHAR"),
+    ("error_traceback", "VARCHAR"),
+    ("lakelogic_version", "VARCHAR"),
+    ("source_path", "VARCHAR"),
+    ("counts_source", "INTEGER"),
+    ("counts_total", "INTEGER"),
+    ("counts_good", "INTEGER"),
+    ("counts_quarantined", "INTEGER"),
+    ("counts_aggregated", "INTEGER"),
+    ("counts_dropped", "INTEGER"),
+    ("counts_deduplicated", "INTEGER"),
+    ("counts_filtered", "INTEGER"),
+    ("quarantine_ratio", "FLOAT"),
+    ("estimated_cost", "FLOAT"),
+    ("cost_currency", "VARCHAR"),
+    ("cost_confidence", "VARCHAR"),
+    ("max_source_mtime", "FLOAT"),
+    ("max_watermark_value", "VARCHAR"),
+    ("dlt_state_json", "VARCHAR"),
+    ("slo_json", "VARCHAR"),
+    ("report_json", "VARCHAR"),
+]
+
+
 def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional[str] = None) -> Optional[str]:
     """
     Append a run report into a table backend (Spark/DuckDB/SQLite).
@@ -1085,6 +1208,12 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         # Normalize to POSIX separators — table_name is a logical/URI path,
         # not an OS filesystem path, so backslashes from Windows must be fixed.
         table_name = table_name.replace("\\", "/")
+        # A catalog-style name (`cat`.schema.table) on a local run: the Delta folder under
+        # LAKELOGIC_TABLE_ROOT, the same place the run's tables go.
+        if table_name and "/" not in table_name and "{" not in table_name:
+            from lakelogic.engines.catalog_resolver import local_table_path
+
+            table_name = local_table_path("table:" + table_name) or table_name
 
         try:
             import pyarrow as pa
@@ -1414,44 +1543,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         # A warehouse has no filesystem, so the path-style fallbacks the duckdb/delta
         # branches carry do not apply — `run_log_table` here is always a real identifier
         # (`{domain_catalog}._pipeline_run_log` resolves to DB.SCHEMA.TABLE).
-        cols = [
-            ("pipeline_run_id", "VARCHAR"),
-            ("run_id", "VARCHAR"),
-            ("timestamp", "VARCHAR"),
-            ("start_time", "VARCHAR"),
-            ("end_time", "VARCHAR"),
-            ("run_duration_seconds", "FLOAT"),
-            ("engine", "VARCHAR"),
-            ("contract", "VARCHAR"),
-            ("stage", "VARCHAR"),
-            ("dataset", "VARCHAR"),
-            ("domain", "VARCHAR"),
-            ("system", "VARCHAR"),
-            ("environment", "VARCHAR"),
-            ("data_layer", "VARCHAR"),
-            ("status", "VARCHAR"),
-            ("error_message", "VARCHAR"),
-            ("error_traceback", "VARCHAR"),
-            ("lakelogic_version", "VARCHAR"),
-            ("source_path", "VARCHAR"),
-            ("counts_source", "NUMBER"),
-            ("counts_total", "NUMBER"),
-            ("counts_good", "NUMBER"),
-            ("counts_quarantined", "NUMBER"),
-            ("counts_aggregated", "NUMBER"),
-            ("counts_dropped", "NUMBER"),
-            ("counts_deduplicated", "NUMBER"),
-            ("counts_filtered", "NUMBER"),
-            ("quarantine_ratio", "FLOAT"),
-            ("estimated_cost", "FLOAT"),
-            ("cost_currency", "VARCHAR"),
-            ("cost_confidence", "VARCHAR"),
-            ("max_source_mtime", "FLOAT"),
-            ("max_watermark_value", "VARCHAR"),
-            ("dlt_state_json", "VARCHAR"),
-            ("slo_json", "VARCHAR"),
-            ("report_json", "VARCHAR"),
-        ]
+        cols = _RUN_LOG_TABLE_COLUMNS
         cur = conn.cursor()
         try:
             cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
@@ -1465,6 +1557,18 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
         _snowflake_insert(conn, table_name, [n for n, _ in cols], [record])
         logger.info(f"Wrote run log to Snowflake table {table_name}")
+        return table_name
+
+    if backend == "bigquery":
+        from lakelogic.core import bigquery_tables as bqt
+
+        bq = bqt.client(metadata)
+        if bq is None:
+            return None
+        # `run_log_table` is `{domain_catalog}.lakelogic_run_log`, i.e. project.dataset.table.
+        bqt.ensure_table(bq, table_name, _RUN_LOG_TABLE_COLUMNS)
+        bqt.append_rows(bq, table_name, _RUN_LOG_TABLE_COLUMNS, [record])
+        logger.info(f"Wrote run log to BigQuery table {table_name}")
         return table_name
 
     logger.warning(f"Unsupported run_log_backend: {backend}")
@@ -1553,6 +1657,37 @@ def _flatten_slo_check(
         "produced_by_pipeline_run_id": getattr(result, "produced_by_pipeline_run_id", None),
         "details_json": result.model_dump_json(),
     }
+
+
+#: The SLO-checks table's columns and declared types, for the warehouse backends.
+_SLO_CHECKS_TABLE_COLUMNS = [
+    ("check_run_id", "VARCHAR"),
+    ("pipeline_run_id", "VARCHAR"),
+    ("checked_at", "VARCHAR"),
+    ("domain", "VARCHAR"),
+    ("system", "VARCHAR"),
+    ("layer", "VARCHAR"),
+    ("entity", "VARCHAR"),
+    ("check_type", "VARCHAR"),
+    ("passed", "BOOLEAN"),
+    ("severity", "VARCHAR"),
+    ("status", "VARCHAR"),
+    ("message", "VARCHAR"),
+    ("delay_minutes", "FLOAT"),
+    ("slo_max_minutes", "INTEGER"),
+    ("source_delay_minutes", "FLOAT"),
+    ("source_slo_max_minutes", "INTEGER"),
+    ("source_column_used", "VARCHAR"),
+    ("row_count", "NUMBER"),
+    ("slo_min_rows", "NUMBER"),
+    ("slo_max_rows", "NUMBER"),
+    ("anomaly_ratio", "FLOAT"),
+    ("anomaly_baseline", "FLOAT"),
+    ("quality_ratio", "FLOAT"),
+    ("quality_severity", "VARCHAR"),
+    ("duration_seconds", "FLOAT"),
+    ("details_json", "VARCHAR"),
+]
 
 
 def _write_slo_checks_table(
@@ -1845,34 +1980,7 @@ def _write_slo_checks_table(
         if conn is None:
             return None
 
-        cols = [
-            ("check_run_id", "VARCHAR"),
-            ("pipeline_run_id", "VARCHAR"),
-            ("checked_at", "VARCHAR"),
-            ("domain", "VARCHAR"),
-            ("system", "VARCHAR"),
-            ("layer", "VARCHAR"),
-            ("entity", "VARCHAR"),
-            ("check_type", "VARCHAR"),
-            ("passed", "BOOLEAN"),
-            ("severity", "VARCHAR"),
-            ("status", "VARCHAR"),
-            ("message", "VARCHAR"),
-            ("delay_minutes", "FLOAT"),
-            ("slo_max_minutes", "NUMBER"),
-            ("source_delay_minutes", "FLOAT"),
-            ("source_slo_max_minutes", "NUMBER"),
-            ("source_column_used", "VARCHAR"),
-            ("row_count", "NUMBER"),
-            ("slo_min_rows", "NUMBER"),
-            ("slo_max_rows", "NUMBER"),
-            ("anomaly_ratio", "FLOAT"),
-            ("anomaly_baseline", "FLOAT"),
-            ("quality_ratio", "FLOAT"),
-            ("quality_severity", "VARCHAR"),
-            ("duration_seconds", "FLOAT"),
-            ("details_json", "VARCHAR"),
-        ]
+        cols = _SLO_CHECKS_TABLE_COLUMNS
         cur = conn.cursor()
         try:
             cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
@@ -1883,6 +1991,17 @@ def _write_slo_checks_table(
 
         _snowflake_insert(conn, table_name, _SLO_CHECKS_COLUMNS, records)
         logger.info(f"Wrote {len(records)} SLO check rows to Snowflake table {table_name}")
+        return table_name
+
+    if backend == "bigquery":
+        from lakelogic.core import bigquery_tables as bqt
+
+        bq = bqt.client(metadata)
+        if bq is None:
+            return None
+        bqt.ensure_table(bq, table_name, _SLO_CHECKS_TABLE_COLUMNS)
+        bqt.append_rows(bq, table_name, _SLO_CHECKS_TABLE_COLUMNS, records)
+        logger.info(f"Wrote {len(records)} SLO check rows to BigQuery table {table_name}")
         return table_name
 
     logger.warning(f"Unsupported slo_checks_backend: {backend}")
@@ -2153,6 +2272,14 @@ def emit_slo_report(
                 section["age_minutes"] = r.retention_age_minutes
                 section["limit_minutes"] = r.retention_limit_minutes
                 section["period"] = r.retention_period
+                # Which column measured age, where the promise came from (contract or
+                # layer), and whether that column is a record's age or a load time.
+                if getattr(r, "source_column_used", None):
+                    section["column"] = r.source_column_used
+                if getattr(r, "retention_source", None):
+                    section["source"] = r.retention_source
+                if getattr(r, "retention_evidence", None):
+                    section["evidence"] = r.retention_evidence
             # The run this section's verdict is about, carried to the platform so
             # the correlation survives the trip. `_slo_signal_counts` ignores keys
             # it does not know, so adding these cannot change configured/passing.
@@ -2548,6 +2675,23 @@ def write_run_log(
                 except Exception:  # pragma: no cover - counts are best-effort, never fatal
                     _rules_evaluated = _rules_passed = _rules_failed = None
 
+                # Per-rule results (#570): every declared rule's own verdict, so the platform
+                # can keep a history per rule — the failures list alone made a passing rule
+                # invisible. Best-effort: absent rather than wrong.
+                _rule_results = _rules_fp = None
+                try:
+                    _q = getattr(contract, "quality", None)
+                    _rr = list(getattr(_q, "row_rules", None) or []) if _q else []
+                    _dr = list(getattr(_q, "dataset_rules", None) or []) if _q else []
+                    _checked = (_counts_good + _counts_quarantined) if (_counts_good or _counts_quarantined) else None
+                    _rule_results = build_rule_results(
+                        _rr, _dr, _dataset_rules, _raw_failures, _checked,
+                        run_failed=(status == "failed" and not _raw_failures and not _counts_good),
+                    ) or None
+                    _rules_fp = rules_fingerprint(_rr, _dr)
+                except Exception:  # pragma: no cover - never fatal
+                    _rule_results = _rules_fp = None
+
                 # Contract version + a schema fingerprint, so the SaaS can correlate
                 # an incident to the contract revision that shipped it (feeds
                 # breaking-change / drift attribution). Fingerprint is best-effort.
@@ -2665,6 +2809,11 @@ def write_run_log(
                         # `passed is False` themselves, so a failures-only list would
                         # read as "no dataset rules ran".
                         "dataset_rules": _dataset_rules or None,
+                        # One measurement record per rule (#570), its format version, and a
+                        # fingerprint of the rules evaluated (a change marks "rules changed").
+                        "rule_results": _rule_results,
+                        "rules_fingerprint": _rules_fp,
+                        "measurement_version": MEASUREMENT_VERSION,
                     },
                     # Cost observability
                     "estimated_cost": report.get("estimated_cost"),
@@ -2883,6 +3032,30 @@ def get_last_run_watermark(
             if res:
                 return res[0]["max_mtime"]
         except Exception:
+            return None
+
+    if table_value and backend == "bigquery":
+        try:
+            from lakelogic.core import bigquery_tables as bqt
+
+            bq = bqt.client(metadata)
+            if bq is None:
+                return None
+            # Same filter as the Spark branch: successful runs that loaded something.
+            key_col, key = ("dataset", dataset) if _use_precise else ("contract", contract_title)
+            sql = (
+                f"SELECT MAX(max_source_mtime) FROM {bqt.quote(table_value)} "
+                f"WHERE `{key_col}` = ? AND stage NOT IN ('no_new_data', 'reprocess') "
+                "AND COALESCE(status, '') != 'failed'"
+            )
+            params = [key]
+            if data_layer:
+                sql += " AND data_layer = ?"
+                params.append(data_layer)
+            row = bqt.fetch_one(bq, sql, params)
+            return row[0] if row else None
+        except Exception:
+            # A missing table is a first run: no watermark yet.
             return None
 
     if table_value and backend == "delta":

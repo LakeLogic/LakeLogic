@@ -1,4 +1,4 @@
-"""The erasure queue: ``_lakelogic_erasure_requests``.
+"""The erasure queue: ``lakelogic_erasure_requests``.
 
 People and DSR tools INSERT rows; LakeLogic owns the schema and every status transition.
 The table sits beside ``metadata.run_log_table`` in the domain's schema — the same
@@ -105,7 +105,7 @@ def _connect(backend: str, database: str):
 def _check_backend(backend: str) -> bool:
     if backend in _SUPPORTED:
         return True
-    logger.warning(f"_lakelogic_erasure_requests: backend '{backend}' is not supported ({', '.join(_SUPPORTED)}).")
+    logger.warning(f"lakelogic_erasure_requests: backend '{backend}' is not supported ({', '.join(_SUPPORTED)}).")
     return False
 
 

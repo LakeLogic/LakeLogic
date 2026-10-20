@@ -1630,7 +1630,7 @@ class LakehousePipeline:
     def _write_erasure_evidence_row(
         self, c, dc, profile: str, *, subject_ids, affected: int, dry_run: bool, status: str, reason=None
     ) -> None:
-        """One ``_lakelogic_erasure_evidence`` row, beside the run log in the domain's schema.
+        """One ``lakelogic_erasure_evidence`` row, beside the run log in the domain's schema.
 
         Evidence lives in TABLES only (owner decision 2026-09-30). The GDPR and HIPAA passes
         used to write JSON files to `/Workspace/Shared/lakelogic_logs/{gdpr,hipaa}_reports` - a
@@ -1691,7 +1691,7 @@ class LakehousePipeline:
         case_ref: Optional[str],
         status: str,
     ) -> None:
-        """Write the ``_lakelogic_erasure_evidence`` row and queue the platform event."""
+        """Write the ``lakelogic_erasure_evidence`` row and queue the platform event."""
         from lakelogic.core.privacy_evidence import build_privacy_action_event
 
         self._write_erasure_evidence_row(
@@ -2101,7 +2101,7 @@ class LakehousePipeline:
         hipaa_strategy: str = "nullify",
         hipaa_salt: str = "",
     ) -> Dict[str, str]:
-        """Erase every open request in ``_lakelogic_erasure_requests`` for this domain/system.
+        """Erase every open request in ``lakelogic_erasure_requests`` for this domain/system.
 
         One pass per request, with ``case_ref = request_id``, so each evidence row's ``reason``
         names exactly one request. Each request is then marked ``completed`` or ``failed``
@@ -2300,13 +2300,14 @@ class LakehousePipeline:
             # Only bootstrap _quarantine when there is NO quarantine_root.
             has_quarantine_root = bool(getattr(self.registry.storage, "quarantine_root", None))
 
-            from lakelogic.core.metadata_names import metadata_table_name, resolve_existing
+            from lakelogic.core.metadata_names import legacy_table_names, metadata_table_name, resolve_existing
 
             def _sys_table_name(kind: str, legacy: str) -> str:
-                # Existing estates keep their legacy table so history is not split.
+                # Existing estates keep their legacy table so history is not split — the
+                # `_lakelogic_<kind>` form included (2026-10-20).
                 return resolve_existing(
                     kind,
-                    [metadata_table_name(kind), legacy],
+                    [metadata_table_name(kind), *legacy_table_names(kind), legacy],
                     lambda t: self.spark.catalog.tableExists(f"{catalog_schema}.{t}"),
                 )
 

@@ -1,8 +1,8 @@
 """Plain values for LakeLogic-owned tables.
 
-Everything LakeLogic persists for its own use (``_lakelogic_run_log``,
-``_lakelogic_slo_checks``, ``_lakelogic_logs``, ``_lakelogic_pipeline_runs``,
-``_lakelogic_erasure_evidence``, ``_lakelogic_retention_evidence``) and the
+Everything LakeLogic persists for its own use (``lakelogic_run_log``,
+``lakelogic_slo_checks``, ``lakelogic_logs``, ``lakelogic_pipeline_runs``,
+``lakelogic_erasure_evidence``, ``lakelogic_retention_evidence``) and the
 ``_lakelogic_*`` metadata columns it adds to rows is data for machines: it is
 filtered, grouped and compared. An icon in a stored value ("✅ OK", "❌ failed")
 breaks equality, bloats the payload and renders as mojibake in half the tools

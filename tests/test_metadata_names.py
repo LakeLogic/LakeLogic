@@ -1,4 +1,4 @@
-"""The `_lakelogic_` naming standard for LakeLogic-owned tables and files (2026-09-26).
+"""The LakeLogic table naming standard: `lakelogic_<kind>` on every platform (2026-10-20; was `_lakelogic_`, 2026-09-26).
 
 One module decides every name LakeLogic gives its own tables; these tests pin the rule,
 the underscore-free fallback, legacy preference for existing estates, verbatim use of
@@ -17,7 +17,8 @@ from lakelogic.core.models import DataContract, FieldDefinition, Info, Model
 
 @pytest.mark.parametrize("kind", mn.METADATA_KINDS)
 def test_every_kind_gets_the_lakelogic_prefix(kind):
-    assert mn.metadata_table_name(kind) == f"_lakelogic_{kind}"
+    # One name on every platform (2026-10-20): `lakelogic_<kind>`, no leading underscore.
+    assert mn.metadata_table_name(kind) == f"lakelogic_{kind}"
 
 
 @pytest.mark.parametrize("kind", mn.METADATA_KINDS)
@@ -26,12 +27,19 @@ def test_path_based_names_drop_the_leading_underscore(kind):
     assert mn.metadata_table_name(kind, path_based=True) == f"lakelogic_{kind}"
 
 
-def test_fabric_is_underscore_unsafe_and_other_backends_are_not():
-    assert "fabric" in mn.UNDERSCORE_UNSAFE_BACKENDS
-    assert mn.metadata_table_name("run_log", backend="fabric") == "lakelogic_run_log"
-    assert mn.metadata_table_name("run_log", backend="FABRIC") == "lakelogic_run_log"
-    assert mn.metadata_table_name("run_log", backend="spark") == "_lakelogic_run_log"
-    assert mn.metadata_table_name("run_log", backend="duckdb") == "_lakelogic_run_log"
+def test_every_backend_gets_the_same_name():
+    """Databricks wrote `lakelogic_run_log` while Fabric wrote `lakelogic_run_log`; one name now."""
+    for backend in ("fabric", "FABRIC", "spark", "duckdb", "delta", None):
+        assert mn.metadata_table_name("run_log", backend=backend) == "lakelogic_run_log"
+
+
+@pytest.mark.parametrize("kind", mn.METADATA_KINDS)
+def test_the_old_underscore_form_is_a_legacy_name_so_existing_estates_keep_it(kind):
+    assert f"_lakelogic_{kind}" in mn.legacy_table_names(kind)
+    existing = {f"_lakelogic_{kind}"}
+    candidates = [mn.metadata_table_name(kind), *mn.legacy_table_names(kind)]
+    assert mn.resolve_existing(kind, candidates, existing.__contains__) == f"_lakelogic_{kind}"
+    assert mn.resolve_existing(kind, candidates, lambda _: False) == f"lakelogic_{kind}"
 
 
 def test_file_names_are_underscore_free_with_extension():
@@ -53,6 +61,7 @@ def test_the_required_kinds_exist():
         "erasure_evidence",
         "retention_evidence",
         "erasure_requests",
+        "quality_checks",  # lakelogic check results (#570)
     }
 
 
@@ -74,23 +83,23 @@ def test_legacy_names_cover_every_kind_and_every_name_used_before():
 
 
 def test_legacy_table_names_excludes_files():
-    assert mn.legacy_table_names("run_log") == ("_run_logs", "run_logs")
+    assert mn.legacy_table_names("run_log") == ("_lakelogic_run_log", "_run_logs", "run_logs")
 
 
 def test_resolve_existing_prefers_an_existing_legacy_table():
     existing = {"_logs"}
-    assert mn.resolve_existing("logs", ["_lakelogic_logs", "_logs"], existing.__contains__) == "_logs"
+    assert mn.resolve_existing("logs", ["lakelogic_logs", "_logs"], existing.__contains__) == "_logs"
 
 
 def test_resolve_existing_uses_the_new_name_for_a_new_estate():
-    assert mn.resolve_existing("logs", ["_lakelogic_logs", "_logs"], lambda _: False) == "_lakelogic_logs"
+    assert mn.resolve_existing("logs", ["lakelogic_logs", "_logs"], lambda _: False) == "lakelogic_logs"
 
 
 def test_resolve_existing_treats_a_failing_check_as_absent():
     def boom(_):
         raise RuntimeError("no catalog")
 
-    assert mn.resolve_existing("logs", ["_lakelogic_logs", "_logs"], boom) == "_lakelogic_logs"
+    assert mn.resolve_existing("logs", ["lakelogic_logs", "_logs"], boom) == "lakelogic_logs"
 
 
 def test_resolve_local_file_keeps_a_legacy_db_file(tmp_path):
@@ -154,6 +163,11 @@ def test_evidence_target_sits_beside_the_run_log():
     assert resolve_evidence_target("erasure_evidence", {}) is None
     assert resolve_evidence_target(
         "erasure_evidence", {"run_log_table": "`cat`.sales.my_run_log", "run_log_backend": "spark"}
+    ) == ("spark", "`cat`.sales.lakelogic_erasure_evidence", None)
+    # An estate whose run log still has the old `_lakelogic_` name keeps old-style evidence:
+    # one convention per estate, history not split.
+    assert resolve_evidence_target(
+        "erasure_evidence", {"run_log_table": "`cat`.sales._lakelogic_run_log", "run_log_backend": "spark"}
     ) == ("spark", "`cat`.sales._lakelogic_erasure_evidence", None)
     assert resolve_evidence_target(
         "retention_evidence", {"run_log_table": "abfss://lake/root/_logs", "run_log_backend": "delta"}
@@ -174,7 +188,7 @@ def test_erasure_writes_an_evidence_row_sqlite(tmp_path):
     try:
         rows = con.execute(
             "SELECT profile, dataset, table_name, subject_count, rows_affected, reason, contract, "
-            "contract_version, timestamp FROM _lakelogic_erasure_evidence"
+            "contract_version, timestamp FROM lakelogic_erasure_evidence"
         ).fetchall()
         # The configured run-log name is used verbatim.
         assert con.execute("SELECT COUNT(*) FROM my_run_log").fetchone()[0] >= 1
@@ -198,7 +212,7 @@ def test_erasure_writes_an_evidence_row_duckdb(tmp_path):
     con = duckdb.connect(str(db))
     try:
         row = con.execute(
-            "SELECT profile, subject_count, rows_affected, timestamp FROM _lakelogic_erasure_evidence"
+            "SELECT profile, subject_count, rows_affected, timestamp FROM lakelogic_erasure_evidence"
         ).fetchone()
     finally:
         con.close()
@@ -225,7 +239,7 @@ def test_directory_style_duckdb_run_log_uses_the_new_file_and_table(tmp_path):
     _write_run_log_table({"run_id": "r1", "contract": "c", "counts": {}}, contract, engine_name="polars")
     con = duckdb.connect(str(log_dir / "lakelogic_run_log.duckdb"))
     try:
-        assert con.execute("SELECT COUNT(*) FROM _lakelogic_run_log").fetchone()[0] == 1
+        assert con.execute("SELECT COUNT(*) FROM lakelogic_run_log").fetchone()[0] == 1
     finally:
         con.close()
 
@@ -292,11 +306,11 @@ def test_retention_evidence_has_status_and_detail_and_old_tables_gain_them(tmp_p
     con = duckdb.connect(str(db))
     # A table made before the columns existed.
     con.execute(
-        "CREATE TABLE _lakelogic_retention_evidence (run_id VARCHAR, timestamp TIMESTAMPTZ, "
+        "CREATE TABLE lakelogic_retention_evidence (run_id VARCHAR, timestamp TIMESTAMPTZ, "
         "table_name VARCHAR, policy VARCHAR, cutoff TIMESTAMPTZ, rows_expired BIGINT)"
     )
     con.close()
-    meta = {"run_log_table": "_lakelogic_run_log", "run_log_backend": "duckdb", "run_log_database": str(db)}
+    meta = {"run_log_table": "lakelogic_run_log", "run_log_backend": "duckdb", "run_log_database": str(db)}
     out = write_evidence_rows(
         "retention_evidence",
         [
@@ -314,6 +328,6 @@ def test_retention_evidence_has_status_and_detail_and_old_tables_gain_them(tmp_p
     )
     assert out
     con = duckdb.connect(str(db))
-    assert con.execute("SELECT policy, status, detail FROM _lakelogic_retention_evidence").fetchall() == [
+    assert con.execute("SELECT policy, status, detail FROM lakelogic_retention_evidence").fetchall() == [
         ("P7D", "passed", "ok (oldest 47 min)")
     ]

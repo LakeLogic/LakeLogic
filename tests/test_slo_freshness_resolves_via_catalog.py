@@ -211,9 +211,8 @@ def test_retention_does_not_depend_on_a_freshness_objective():
     spark = _RetentionSpark()
     results = SLOValidator(registry, spark=spark).check_retention()
     assert results, "retention must still be measured without a freshness objective"
-    assert "_lakelogic_processed_at" in spark.queries[0], (
-        "it should fall back to the audit columns the framework always writes"
-    )
+    # Its own age columns first (2026-10-19), the load stamps only as a last resort.
+    assert "created_at" in spark.queries[0]
 
 
 # ── Retention persists its OWN measurements ─────────────────────────────────
@@ -235,8 +234,8 @@ def test_retention_writes_its_own_fields_not_freshness_fields():
     assert r.source_delay_minutes is None, "freshness's field must stay freshness's"
     assert r.source_slo_max_minutes is None
     # Shared on purpose: "which timestamp column was resolved" means the same thing
-    # for freshness and retention.
-    assert r.source_column_used == "updated_at"
+    # for freshness and retention. Retention's own order: an age column, never `updated_at`.
+    assert r.source_column_used == "created_at"
 
 
 def test_the_slo_checks_row_carries_the_retention_numbers():

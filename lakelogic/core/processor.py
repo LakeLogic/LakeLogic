@@ -62,8 +62,10 @@ def _kafka_stream_settings(source: Any) -> Dict[str, Any]:
 
     ``options``: ``kind`` (kafka | eventhubs), ``topic`` (default: ``source.path``), ``brokers``
     (``env:VAR`` allowed), ``group_id``, ``starting_offsets`` (earliest | latest), ``checkpoint``
-    (a SQLite file for Polars/DuckDB, a folder for Spark; default ``_checkpoints/<dataset>`` next
-    to the contract), ``batch_size``, ``trigger`` (available_now | continuous), ``processing_time``,
+    (an ``s3://`` / ``abfss://`` / ``gs://`` location keeps it beside the data — the durable store,
+    so a fresh container resumes; a local path is a SQLite file for Polars/DuckDB, a folder for
+    Spark; default ``$LAKELOGIC_CHECKPOINT_ROOT/<dataset>`` when that is set, else
+    ``_checkpoints/<dataset>`` next to the contract), ``batch_size``, ``trigger`` (available_now | continuous), ``processing_time``,
     ``max_offsets_per_trigger``, and auth: ``security_protocol``, ``sasl_mechanism``,
     ``sasl_username``, ``sasl_password``. ``kind: eventhubs`` needs only ``connection_string``: it
     fills SASL_SSL / PLAIN / ``$ConnectionString`` and the namespace's port 9093. Secrets must be
@@ -1702,7 +1704,11 @@ class DataProcessor:
                             # `opened_at >= NULL` is NULL, which failed every notification
                             # opened without a recorded delivery. Completeness is a
                             # separate rule's claim, not this one's.
-                            sql=f"({end_col} IS NULL) OR ({start_col} IS NULL) OR ({end_col} >= {start_col})",
+                            # Compared as timestamps: a DATE milestone beside a TIMESTAMP one
+                            # (`arrival_date >= created_at`) is an error on BigQuery, which
+                            # will not compare the two types (seen live on GCP).
+                            sql=(f"({end_col} IS NULL) OR ({start_col} IS NULL) OR "
+                                 f"(CAST({end_col} AS TIMESTAMP) >= CAST({start_col} AS TIMESTAMP))"),
                             severity="error",
                             category="consistency",
                             description=(
@@ -2841,10 +2847,12 @@ class DataProcessor:
 
         # Resolve catalog table names (Unity Catalog, Fabric LakeDB, Synapse) to storage paths
         if self.engine_name != "spark":  # Spark handles catalogs natively
-            from lakelogic.engines.catalog_resolver import resolve_catalog_path
+            from lakelogic.engines import catalog_resolver as _cr
 
             original_path = path
-            path = resolve_catalog_path(path)
+            # No catalog, a local table root: the table is a Delta folder (LAKELOGIC_TABLE_ROOT).
+            _local = getattr(_cr, "local_table_path", lambda _p: None)(path)
+            path = _local or _cr.resolve_catalog_path(path)
             if path != original_path:
                 logger.info(f"Resolved catalog table: {original_path} -> {path}")
 
@@ -7708,8 +7716,8 @@ class DataProcessor:
         from lakelogic.core.stream_sink import (
             KafkaOffsetSource,
             SparkStreamSink,
-            SQLiteCheckpointStore,
             StreamSink,
+            checkpoint_store_for,
             kafka_json_stream,
         )
 
@@ -7717,7 +7725,10 @@ class DataProcessor:
         name = self.contract.dataset or getattr(getattr(self.contract, "info", None), "title", None) or cfg["topic"]
         base = Path(getattr(self, "_explicit_contract_path", None) or ".").resolve()
         base = base.parent if base.suffix else base
-        checkpoint = str(cfg["checkpoint"] or (base / "_checkpoints" / str(name)))
+        # A deployment target can name one durable root for every stream (a container's disk is
+        # thrown away after each run); the contract's own `checkpoint` still wins.
+        _root = os.environ.get("LAKELOGIC_CHECKPOINT_ROOT", "").rstrip("/")
+        checkpoint = str(cfg["checkpoint"] or (f"{_root}/{name}" if _root else base / "_checkpoints" / str(name)))
         logger.info(
             f"stream source: {cfg['kind']} topic '{cfg['topic']}' at {cfg['brokers']} (checkpoint {checkpoint})"
         )
@@ -7775,13 +7786,15 @@ class DataProcessor:
                 value_deserializer=_json.loads,
                 **{renamed.get(k, k): v for k, v in auth.items()},
             )
-            db = checkpoint if checkpoint.endswith((".sqlite", ".db")) else checkpoint + ".sqlite"
-            Path(db).parent.mkdir(parents=True, exist_ok=True)
+            # Object storage (s3://, abfss://, gs://) → the durable store; a local path → SQLite.
+            if "://" not in checkpoint:
+                db = checkpoint if checkpoint.endswith((".sqlite", ".db")) else checkpoint + ".sqlite"
+                Path(db).parent.mkdir(parents=True, exist_ok=True)
             sink = StreamSink(
                 source=source,
                 engine=self.engine_name,
                 processor=self,
-                checkpoint=SQLiteCheckpointStore(db),
+                checkpoint=checkpoint_store_for(checkpoint),
                 checkpoint_key=f"stream::{name}",
                 batch_size=cfg["batch_size"],
             )

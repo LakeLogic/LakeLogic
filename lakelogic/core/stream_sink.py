@@ -143,6 +143,219 @@ class SQLiteCheckpointStore(CheckpointStore):
         self._conn.close()
 
 
+class CheckpointConflict(RuntimeError):
+    """Another run committed this stream's checkpoint after this run read it.
+
+    Raised instead of overwriting: two overlapping runs (a schedule that fired while the last
+    run was still going) must not both advance the cursor. The batch this run already wrote
+    is re-read by the next run — the at-least-once boundary — so with a ``merge`` target
+    nothing is lost or duplicated."""
+
+
+class _ObjectBackend(abc.ABC):
+    """One object store's get / conditional put. ``token`` is the store's version marker
+    (S3/Azure ETag, GCS generation); ``None`` means "the object must not exist yet"."""
+
+    @abc.abstractmethod
+    def get(self, key: str) -> Optional[tuple]:
+        """``(bytes, token)``, or None when the object does not exist."""
+
+    @abc.abstractmethod
+    def put_if(self, key: str, body: bytes, token: Optional[str]) -> str:
+        """Write only if the object is still at ``token``; return the new token. Raise
+        :class:`CheckpointConflict` when it moved."""
+
+
+class _S3Backend(_ObjectBackend):
+    """S3 and S3-compatible stores (MinIO): ``If-Match`` / ``If-None-Match`` conditional
+    writes. ``AWS_ENDPOINT_URL`` points boto3 at MinIO; credentials come from boto3's chain."""
+
+    def __init__(self, bucket: str, prefix: str):
+        import boto3
+
+        self.bucket, self.prefix = bucket, prefix
+        self.s3 = boto3.client("s3")
+
+    def _key(self, key: str) -> str:
+        return f"{self.prefix}/{key}.json" if self.prefix else f"{key}.json"
+
+    def get(self, key):
+        try:
+            obj = self.s3.get_object(Bucket=self.bucket, Key=self._key(key))
+        except self.s3.exceptions.NoSuchKey:
+            return None
+        return obj["Body"].read(), obj["ETag"]
+
+    def put_if(self, key, body, token):
+        from botocore.exceptions import ClientError
+
+        kw = {"IfMatch": token} if token else {"IfNoneMatch": "*"}
+        try:
+            out = self.s3.put_object(Bucket=self.bucket, Key=self._key(key), Body=body, **kw)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("PreconditionFailed", "ConditionalRequestConflict", "412"):
+                raise CheckpointConflict(f"checkpoint {key!r} was committed by another run") from e
+            raise
+        return out["ETag"]
+
+
+class _AzureBackend(_ObjectBackend):
+    """ADLS Gen2 / Blob: ETag ``match_condition``. ``abfss://<container>@<account>.dfs.core.windows.net/<prefix>``.
+    Credentials: ``AZURE_STORAGE_CONNECTION_STRING`` if set, else ``DefaultAzureCredential``."""
+
+    def __init__(self, container: str, account_url: str, prefix: str):
+        import os
+
+        from azure.storage.blob import ContainerClient
+
+        conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+        if conn:
+            self.client = ContainerClient.from_connection_string(conn, container)
+        else:
+            from azure.identity import DefaultAzureCredential
+
+            self.client = ContainerClient(account_url, container, credential=DefaultAzureCredential())
+        self.prefix = prefix
+
+    def _key(self, key):
+        return f"{self.prefix}/{key}.json" if self.prefix else f"{key}.json"
+
+    def get(self, key):
+        from azure.core.exceptions import ResourceNotFoundError
+
+        try:
+            d = self.client.get_blob_client(self._key(key)).download_blob()
+        except ResourceNotFoundError:
+            return None
+        return d.readall(), d.properties.etag
+
+    def put_if(self, key, body, token):
+        from azure.core import MatchConditions
+        from azure.core.exceptions import ResourceExistsError, ResourceModifiedError
+
+        blob = self.client.get_blob_client(self._key(key))
+        try:
+            if token:
+                out = blob.upload_blob(body, overwrite=True, etag=token, match_condition=MatchConditions.IfNotModified)
+            else:
+                out = blob.upload_blob(body, overwrite=False)
+        except (ResourceModifiedError, ResourceExistsError) as e:
+            raise CheckpointConflict(f"checkpoint {key!r} was committed by another run") from e
+        return out["etag"]
+
+
+class _GCSBackend(_ObjectBackend):
+    """Google Cloud Storage: ``if_generation_match`` (0 = must not exist)."""
+
+    def __init__(self, bucket: str, prefix: str):
+        from google.cloud import storage
+
+        self.bucket = storage.Client().bucket(bucket)
+        self.prefix = prefix
+
+    def _key(self, key):
+        return f"{self.prefix}/{key}.json" if self.prefix else f"{key}.json"
+
+    def get(self, key):
+        blob = self.bucket.get_blob(self._key(key))
+        if blob is None:
+            return None
+        return blob.download_as_bytes(), str(blob.generation)
+
+    def put_if(self, key, body, token):
+        from google.api_core.exceptions import PreconditionFailed
+
+        blob = self.bucket.blob(self._key(key))
+        try:
+            blob.upload_from_string(body, if_generation_match=int(token) if token else 0)
+        except PreconditionFailed as e:
+            raise CheckpointConflict(f"checkpoint {key!r} was committed by another run") from e
+        return str(blob.generation)
+
+
+def _backend_for(uri: str) -> _ObjectBackend:
+    from urllib.parse import urlparse
+
+    u = urlparse(uri)
+    prefix = u.path.strip("/")
+    if u.scheme in ("s3", "s3a"):
+        return _S3Backend(u.netloc, prefix)
+    if u.scheme in ("abfss", "abfs", "az", "wasbs"):
+        container, _, host = u.netloc.partition("@")
+        if not host:
+            raise ValueError(f"an Azure checkpoint needs container@account.<host>: {uri!r}")
+        account = host.split(".")[0]
+        return _AzureBackend(container, f"https://{account}.blob.core.windows.net", prefix)
+    if u.scheme == "gs":
+        return _GCSBackend(u.netloc, prefix)
+    raise ValueError(f"no object-store checkpoint for {uri!r} (s3://, abfss://, gs://)")
+
+
+class ObjectStoreCheckpointStore(CheckpointStore):
+    """Checkpoints as one small JSON object per stream on S3 / ADLS / GCS (or MinIO).
+
+    The SQLite store keeps the cursor on the local disk, which a container, a Fabric session or a
+    job cluster throws away after each run — the next run starts again from
+    ``starting_offsets``. This store keeps it beside the data instead, so a fresh container
+    resumes where the last one stopped.
+
+    Every commit is a CONDITIONAL write against the version this run last saw: if another run
+    committed in between, the commit raises :class:`CheckpointConflict` rather than moving the
+    cursor backwards or forwards over the other run's work."""
+
+    def __init__(self, uri: str, backend: Optional[_ObjectBackend] = None):
+        self.uri = uri.rstrip("/")
+        self._backend = backend or _backend_for(self.uri)
+        self._tokens: Dict[str, Optional[str]] = {}
+
+    @staticmethod
+    def _safe(key: str) -> str:
+        return "".join(c if c.isalnum() or c in "-_." else "_" for c in key)
+
+    def load(self, key: str) -> Optional[Checkpoint]:
+        got = self._backend.get(self._safe(key))
+        if got is None:
+            self._tokens[key] = None
+            return None
+        body, token = got
+        self._tokens[key] = token
+        d = json.loads(body)
+        return Checkpoint(
+            cursor=d.get("cursor"),
+            batch_id=int(d.get("batch_id") or 0),
+            committed_at=d.get("committed_at"),
+            source_count=int(d.get("source_count") or 0),
+            good_count=int(d.get("good_count") or 0),
+            bad_count=int(d.get("bad_count") or 0),
+        )
+
+    def commit(self, key: str, checkpoint: Checkpoint) -> None:
+        if key not in self._tokens:  # commit without load: read the current version first
+            self.load(key)
+        body = json.dumps({
+            "cursor": checkpoint.cursor,
+            "batch_id": checkpoint.batch_id,
+            "committed_at": checkpoint.committed_at,
+            "source_count": checkpoint.source_count,
+            "good_count": checkpoint.good_count,
+            "bad_count": checkpoint.bad_count,
+        }).encode("utf-8")
+        self._tokens[key] = self._backend.put_if(self._safe(key), body, self._tokens.get(key))
+
+
+_OBJECT_SCHEMES = ("s3://", "s3a://", "abfss://", "abfs://", "az://", "wasbs://", "gs://")
+
+
+def checkpoint_store_for(location: str) -> CheckpointStore:
+    """The store for a contract's ``checkpoint`` location: an object-store URI gets the durable
+    :class:`ObjectStoreCheckpointStore`; a local path keeps the SQLite file (local and dev runs)."""
+    loc = str(location)
+    if loc.lower().startswith(_OBJECT_SCHEMES):
+        return ObjectStoreCheckpointStore(loc)
+    db = loc if loc.endswith((".sqlite", ".db")) else loc + ".sqlite"
+    return SQLiteCheckpointStore(db)
+
+
 # ── Stream sink ──────────────────────────────────────────────────────────────
 
 

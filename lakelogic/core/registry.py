@@ -757,10 +757,21 @@ class DomainRegistry(BaseModel):
                 for k, v in sub_map.items()
             }
         if sub_map:
+            # Per-contract placeholders (`{table}`, `{entity}`, `{dataset}`) are filled when each
+            # contract runs (e.g. `runner.quarantine_table_name`), so they are kept as written
+            # here, not reported as unresolvable: "{domain}_{table}" is valid, not a mistake.
+            _per_contract = {"table", "entity", "dataset"}
+
+            class _Keep(dict):
+                def __missing__(self, key):
+                    if key not in _per_contract:
+                        raise KeyError(key)
+                    return "{" + key + "}"
+
             for field, val in registry.storage.model_dump().items():
                 if isinstance(val, str) and "{" in val:
                     try:
-                        new_val = val.format(**sub_map)
+                        new_val = val.format_map(_Keep(sub_map))
                         setattr(registry.storage, field, new_val)
                     except KeyError as e:
                         logger.warning(f"Could not resolve template var {e} in storage.{field}: {val}")

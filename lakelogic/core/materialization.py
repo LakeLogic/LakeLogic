@@ -5179,7 +5179,10 @@ def _materialize_primary(
             df, resolved_str[6:], contract, mat, strategy=(mat.strategy or "append").lower()
         )
     if resolved_str.startswith("table:") and engine_name != "spark":
-        location = getattr(mat, "location", None)
+        from lakelogic.engines.catalog_resolver import local_table_path
+
+        # A local run (LAKELOGIC_TABLE_ROOT) writes the table as a Delta folder under the root.
+        location = getattr(mat, "location", None) or local_table_path(resolved_str)
         if location:
             logger.info(f"Non-Spark engine '{engine_name}': falling back from table target to location: {location}")
             resolved_target = URIPath(str(location))

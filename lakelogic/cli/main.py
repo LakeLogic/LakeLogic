@@ -58,6 +58,11 @@ app.add_typer(observatory_app, name="observatory", rich_help_panel="Observatory"
 app.add_typer(registry_app, name="registry", rich_help_panel="Governance")
 app.add_typer(diagnose_app, name="diagnose", rich_help_panel="Governance")
 
+# `lakelogic check` (#570): a contract's rules against a table, reported to LakeLogic.
+from lakelogic.cli.check_cmd import check as _check_cmd  # noqa: E402
+
+app.command("check", rich_help_panel="Contract Execution")(_check_cmd)
+
 
 @app.command(rich_help_panel="Contract Execution")
 def run(
@@ -969,7 +974,7 @@ def bootstrap(
         "storage": {
             "domain_catalog": "`{catalog}`.{domain}",
             "quarantine_root": "`{catalog}`.quarantine",
-            "run_log_table": "`{catalog}`.{domain}._lakelogic_run_log",
+            "run_log_table": "`{catalog}`.{domain}.lakelogic_run_log",
             "external_location_root": "abfss://{domain}@{storage_account}.dfs.core.windows.net",
             "contract_root": "/Workspace/Shared/data_platform/domains_retail/{domain}/{system}",
             "landing_root": "/Volumes/{catalog}/nondelta/landing_{domain}/{system}",

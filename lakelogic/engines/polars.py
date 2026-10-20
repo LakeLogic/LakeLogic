@@ -93,8 +93,14 @@ class PolarsAdapter(EngineAdapter):
         Args:
             ctx: Polars SQLContext.
         """
+        from lakelogic.engines.catalog_resolver import local_table_path
+
         for link in self.contract.links:
             try:
+                # A local run (LAKELOGIC_TABLE_ROOT): a table link is the Delta folder under it.
+                _local = local_table_path(link.path) if not link.table else None
+                if _local:
+                    link = link.model_copy(update={"path": _local, "type": "delta"})
                 table_path = link.path[6:] if link.path and link.path.startswith("table:") else None
                 if link.table or (link.type and link.type.lower() == "table") or table_path:
                     table_name = link.table or table_path or link.path

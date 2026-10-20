@@ -1,12 +1,12 @@
-"""Durable evidence tables: ``_lakelogic_erasure_evidence`` and ``_lakelogic_retention_evidence``.
+"""Durable evidence tables: ``lakelogic_erasure_evidence`` and ``lakelogic_retention_evidence``.
 
 Written through the SAME configuration as the run log: the destination sits beside
 ``metadata.run_log_table`` (same backend, database, catalog and schema), and the table name
 comes from :mod:`lakelogic.core.metadata_names`. Nothing is written unless a run-log
 destination is configured — the same opt-in as the run log itself.
 
-* identifier ``cat.schema.run_log`` → ``cat.schema._lakelogic_erasure_evidence``
-* DuckDB directory-style ``./x/_logs`` → table ``_lakelogic_erasure_evidence`` inside the
+* identifier ``cat.schema.run_log`` → ``cat.schema.lakelogic_erasure_evidence``
+* DuckDB directory-style ``./x/_logs`` → table ``lakelogic_erasure_evidence`` inside the
   run log's own ``.duckdb`` file in that directory
 * Delta path ``abfss://.../_logs`` → sibling path ``.../lakelogic_erasure_evidence``
   (underscore-free: Spark/Hadoop hide ``_``-prefixed paths)
@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from lakelogic.core.metadata_names import metadata_table_name, resolve_local_file
+from lakelogic.core.metadata_names import metadata_table_name, resolve_local_file, sibling_table_name
 from lakelogic.core.plain_values import plain_record
 from lakelogic.core.types import arrow_type, ddl_type, spark_type_object
 
@@ -84,7 +84,9 @@ def resolve_evidence_target(kind: str, metadata: Dict[str, Any], engine_name: Op
         return backend, f"{parent}/{metadata_table_name(kind, path_based=True)}", None
 
     parts = run_log_table.split(".")
-    parts[-1] = metadata_table_name(kind, backend=metadata.get("platform") or backend)
+    # Beside the run log, in the run log's own naming style: an estate whose run log is still
+    # `lakelogic_run_log` keeps `_lakelogic_` evidence (one convention, history not split).
+    parts[-1] = sibling_table_name(kind, run_log_table)
     database = None
     if backend == "duckdb":
         from lakelogic.core.metadata_names import default_local_db_path

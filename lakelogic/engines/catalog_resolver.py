@@ -330,6 +330,29 @@ def resolve_unity_catalog_path(path: str) -> str:
     return path
 
 
+#: A folder that stands in for a catalog when there is none: a project whose contracts name
+#: tables (`table:`{cat}`.schema.table`) runs locally on polars/duckdb by reading and writing
+#: each table as a Delta folder `<root>/<cat>/<schema>/<table>`. Unset = no mapping (platform runs).
+LOCAL_TABLE_ROOT_ENV = "LAKELOGIC_TABLE_ROOT"
+
+
+def local_table_path(ref: Optional[str]) -> Optional[str]:
+    """The local Delta folder for a `table:` reference, or None.
+
+    Only when ``LAKELOGIC_TABLE_ROOT`` is set: a run that has a real catalog (Spark, Unity
+    Catalog, DuckLake) never sets it, so its references are untouched. Backticks are dropped
+    and each dotted part becomes a folder:
+    ``table:`acme_dev_marketplace`.silver.silver_trips`` -> ``<root>/acme_dev_marketplace/silver/silver_trips``.
+    """
+    root = os.environ.get(LOCAL_TABLE_ROOT_ENV, "").strip()
+    if not root or not ref or not str(ref).startswith("table:"):
+        return None
+    parts = [p.strip().strip("`") for p in str(ref)[6:].replace("`", "").split(".") if p.strip()]
+    if not parts:
+        return None
+    return root.rstrip("/\\") + "/" + "/".join(parts)
+
+
 def resolve_catalog_path(path: str, platform: Optional[str] = None) -> str:
     """
     Resolve catalog table name to storage path (Unity Catalog, Fabric, Synapse).

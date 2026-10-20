@@ -1443,7 +1443,8 @@ class EngineAdapter(ABC):
         if isinstance(spec, DatasetRuleNullRatio):
             cfg = spec.null_ratio or {}
             field = cfg.get("field") or cfg.get("column")
-            threshold = cfg.get("max") or cfg.get("threshold")
+            # ``max: 0`` ("never empty") is a bound, not a missing one — ``or`` dropped the rule.
+            threshold = cfg.get("max") if cfg.get("max") is not None else cfg.get("threshold")
             if not field or threshold is None:
                 return None
             threshold_val = float(threshold)

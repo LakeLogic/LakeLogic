@@ -664,7 +664,7 @@ def _write_erasure_evidence(
     delete_reason: Optional[str],
     engine_name: Optional[str],
 ) -> None:
-    """One ``_lakelogic_erasure_evidence`` row per erasure run x profile x table.
+    """One ``lakelogic_erasure_evidence`` row per erasure run x profile x table.
 
     Same opt-in as the run log: nothing is written unless ``run_log_table`` is configured.
     Carries counts only — never a subject identifier.

@@ -186,3 +186,17 @@ def test_free_text_is_never_asked_for_accepted_values(ex):
     e = assess_table("tickets", ex, contract={"info": {"title": "T"}, "primary_key": ["status"]})
     gap = next(f for f in e["findings"] if f["title"] == "Contract is missing controls")
     assert "status" in gap["columns"] and "notes" not in gap["columns"]
+
+
+def test_one_value_seen_is_not_suggested_as_accepted_values():
+    """2026-10-20, seen in the UI: "status · seen: active" was offered as an accepted-values gap.
+    One value in a sample is what the sample held, not every value the column allows."""
+    from lakelogic.core.profile_findings import is_category_candidate
+
+    one = {"name": "status", "type": "VARCHAR", "frequencies": [{"value": "active", "count": 101}]}
+    two = {"name": "vehicle_type", "type": "VARCHAR",
+           "frequencies": [{"value": "suv", "count": 5}, {"value": "van", "count": 3}]}
+    assert is_category_candidate(one) is False
+    assert is_category_candidate(two) is True
+    assert is_category_candidate({**two, "name": "app_version"}) is False
+    assert is_category_candidate({**two, "frequencies": [{"value": "DROP TABLE x;"}, {"value": "a b c"}]}) is False

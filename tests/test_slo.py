@@ -847,8 +847,11 @@ def test_check_retention_duckdb_and_polars_paths(monkeypatch):
     parquet = pl.DataFrame({"event_ts": [now - datetime.timedelta(minutes=45)]})
     monkeypatch.setattr(pl, "read_parquet", lambda path, storage_options=None: parquet)
     polars_results = SLOValidator(registry, polars=True).check_retention()
-    assert {r.entity for r in polars_results} == {"fresh", "old", "none"}
+    # `no_source_columns` declares no freshness columns; retention no longer borrows them, and
+    # finds `event_ts` among its own age columns (2026-10-19).
+    assert {r.entity for r in polars_results} == {"fresh", "old", "none", "no_source_columns"}
     assert all(r.passed for r in polars_results)
+    assert all(r.retention_evidence == "record_age" and r.retention_source == "layer" for r in polars_results)
 
 
 def test_coerce_utc_treats_naive_timestamps_as_utc_not_host_local():

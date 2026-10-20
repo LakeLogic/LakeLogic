@@ -12,6 +12,7 @@ data mesh. Scans materialized files and run logs to validate:
 from __future__ import annotations
 
 import datetime
+import re
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -201,6 +202,55 @@ def format_status(result: Any) -> str:
     return f"{line} ({message})" if message else line
 
 
+# ── Retention: the contract's promise and the column that measures age ───────────────────
+
+#: Measures when a record's retention clock STARTED, best first. Not `updated_at` /
+#: `last_modified` (activity, not age) and not a load stamp (re-written on every rebuild).
+RETENTION_AGE_COLUMNS = ("created_at", "event_timestamp", "event_ts", "event_time")
+#: Last resort only, and reported as `load_time` evidence: it can breach, never pass.
+RETENTION_LOAD_COLUMNS = ("_lakelogic_loaded_at", "_lakelogic_processed_at")
+_NOT_AGE_COLUMN = re.compile(r"updated|modified|^_lakelogic_|processed|loaded|ingest", re.I)
+_SHORT_PERIOD = re.compile(r"^(\d+)([dwmy])$", re.I)
+
+
+def _is_load_stamp(column: Optional[str]) -> bool:
+    return bool(column) and str(column).lower() in RETENTION_LOAD_COLUMNS
+
+
+def retention_columns(contract_column: Optional[str], freshness_columns: List[str]) -> List[str]:
+    """The columns to try, in order, for a record's age.
+
+    The contract's ``compliance.retention.column`` alone when it names one — a person chose
+    the date that starts the clock, and a fallback would silently measure something else.
+    Otherwise the age columns, then freshness's columns that ARE ages (never ``updated_at`` /
+    ``last_modified`` / load stamps), then the load stamps as a last resort."""
+    if contract_column:
+        return [contract_column]
+    out: List[str] = list(RETENTION_AGE_COLUMNS)
+    out += [c for c in freshness_columns if c not in out and not _NOT_AGE_COLUMN.search(c)]
+    out += [c for c in RETENTION_LOAD_COLUMNS if c not in out]
+    return out
+
+
+def _contract_retention(contract_dict: Any) -> Optional[Dict[str, Any]]:
+    """OLC ``compliance.retention`` on a contract: ``{"period": ISO, "column": str|None}``.
+
+    The short form the OLC docs show (``400d`` / ``6y``) is read as ISO (``P400D`` / ``P6Y``).
+    None when the contract declares no period of its own."""
+    if not isinstance(contract_dict, dict):
+        return None
+    comp = contract_dict.get("compliance")
+    ret = comp.get("retention") if isinstance(comp, dict) else None
+    if not isinstance(ret, dict) or not ret.get("period"):
+        return None
+    period = str(ret["period"]).strip()
+    m = _SHORT_PERIOD.match(period)
+    if m:
+        period = f"P{m.group(1)}{m.group(2).upper()}"
+    column = ret.get("column")
+    return {"period": period, "column": str(column) if column else None}
+
+
 class SLOCheckResult(BaseModel):
     layer: str
     entity: str
@@ -249,6 +299,13 @@ class SLOCheckResult(BaseModel):
     retention_period: Optional[str] = None  # ISO 8601, e.g. "P7D"
     retention_age_minutes: Optional[float] = None  # age of the OLDEST record
     retention_limit_minutes: Optional[int] = None  # the period, parsed
+    # Where the promise came from: "contract" (the contract's `compliance.retention`) or
+    # "layer" (the domain's `retention:` for the contract's layer). Contract wins.
+    retention_source: Optional[str] = None
+    # What the measured column says about a record: "record_age" (a created / event / end
+    # date) or "load_time" (a LakeLogic load stamp, re-written when a table is rebuilt — it
+    # can prove data is old, never that it is young).
+    retention_evidence: Optional[str] = None
     # ── Quality ──────────────────────────────────────────────────────────────
     # `quality_min_ratio` is the DECLARED floor this ratio was judged against. It
     # existed only inside the status prose ("55.0% good") and in the domain config,
@@ -1480,7 +1537,9 @@ class SLOValidator:
         """
         from lakelogic.core.registry import _iso_period_to_minutes
 
-        if not self.registry.retention:
+        if not self.registry.retention and not any(
+            _contract_retention(getattr(c, "contract_dict", None)) for c in self.registry.get_active_contracts()
+        ):
             return []
         if not self.spark and not self.polars and not self.duckdb_con:
             logger.warning(
@@ -1520,10 +1579,26 @@ class SLOValidator:
             layer = reg_contract.layer
             entity = reg_contract.entity
 
-            _period = retention_by_layer.get(layer)
-            if not _period:
-                continue
-            iso_period, retention_minutes = _period
+            # THE CONTRACT'S OWN PROMISE WINS (OLC `compliance.retention`), so one table can
+            # be held to a different period than its layer: driver records six years, trips
+            # ninety days. An unparseable contract period is reported, not silently replaced
+            # by the layer's — that would measure a promise nobody made for this table.
+            own = _contract_retention(getattr(reg_contract, "contract_dict", None))
+            if own:
+                own_minutes = _iso_period_to_minutes(own["period"])
+                if not own_minutes:
+                    logger.warning(
+                        f"  ⚠ Retention {layer}.{entity}: could not parse the contract's period "
+                        f"'{own['period']}' — this contract is not retention-checked."
+                    )
+                    continue
+                iso_period, retention_minutes, retention_source = own["period"], own_minutes, "contract"
+            else:
+                _period = retention_by_layer.get(layer)
+                if not _period:
+                    continue
+                iso_period, retention_minutes = _period
+                retention_source = "layer"
 
             # Source columns to probe — prefer freshness SLO config, fall back to
             # the audit columns the framework always writes.
@@ -1536,14 +1611,18 @@ class SLOValidator:
             # pass. The two are declared in different blocks (`retention:` is
             # top-level next to compliance; `slo.freshness` is a service level), so
             # one must not be able to switch the other off.
+            #
+            # RETENTION HAS ITS OWN COLUMN ORDER (2026-10-19). It used to borrow freshness's
+            # `check_columns` — `updated_at` first — but the two ask opposite questions:
+            # freshness wants the newest CHANGE, retention the date the clock STARTED. MIN of
+            # `updated_at` makes a ten-year-old record touched last month read one month old,
+            # and a load stamp re-written on every rebuild makes every row minutes old, so
+            # retention passed whatever the table held. See `retention_columns`.
             layer_slo = freshness_config.get(layer)
-            source_cols = list(layer_slo.check_columns) if layer_slo else []
-            if not source_cols:
-                source_cols = ["_lakelogic_processed_at", "_lakelogic_loaded_at"]
-                logger.debug(
-                    f"  Retention [{layer}] {entity}: no freshness check_columns "
-                    f"configured; probing the audit columns {source_cols}."
-                )
+            source_cols = retention_columns(
+                own.get("column") if own else None,
+                list(layer_slo.check_columns) if layer_slo else [],
+            )
 
             schema_root = layer_roots.get(layer)
             polars_path = resolve_materialization_path(
@@ -1626,7 +1705,8 @@ class SLOValidator:
             min_utc = _coerce_utc(min_ts)
 
             age_minutes = round((now - min_utc).total_seconds() / 60, 1)
-            passed = age_minutes <= retention_minutes
+            passed: Optional[bool] = age_minutes <= retention_minutes
+            evidence = "load_time" if _is_load_stamp(col_used) else "record_age"
 
             _age = _humanise_minutes(age_minutes)
             _limit = _humanise_minutes(retention_minutes)
@@ -1636,6 +1716,14 @@ class SLOValidator:
                 if passed
                 else f"oldest record {_age} exceeds {iso_period} = {_limit} via '{col_used}'"
             )
+            if passed and evidence == "load_time":
+                # A load stamp can prove data is OLD (if even the load is past the limit,
+                # the record is too), never that it is young. Not a pass: unmeasured.
+                passed, status = None, STATUS_WARN
+                message = (
+                    f"only a load time was found ('{col_used}', {_age}): it shows when rows were "
+                    f"loaded, not how old they are — set compliance.retention.column"
+                )
             logger.debug(f"   🗄 Retention [{layer}] {entity}: {status_icon(status, passed)} {status} ({message})")
 
             results.append(
@@ -1646,10 +1734,12 @@ class SLOValidator:
                     status=status,
                     message=message,
                     passed=passed,
-                    severity="pass" if passed else "fail",
+                    severity="pass" if passed else ("warn" if passed is None else "fail"),
                     retention_period=iso_period,
                     retention_age_minutes=age_minutes,
                     retention_limit_minutes=retention_minutes,
+                    retention_source=retention_source,
+                    retention_evidence=evidence,
                     # `source_column_used` IS shared on purpose: it means "which
                     # timestamp column was resolved" for freshness and retention
                     # alike — same word, same meaning. The two above are not.

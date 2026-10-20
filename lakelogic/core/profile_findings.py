@@ -88,6 +88,30 @@ def is_free_text_name(name: str) -> bool:
     return bool(_FREE_TEXT.search(str(name or "")))
 
 
+#: Names whose values change by design (a new release, a new payload shape): a fixed list breaks.
+_NOT_A_CATEGORY = re.compile(r"(^|_)(version|json|payload|properties|attributes|metadata|params|tags)$", re.I)
+
+
+def is_category_candidate(col: Dict[str, Any]) -> bool:
+    """Whether a column's observed values make a useful ``accepted_values`` suggestion.
+
+    Not when only ONE value was seen ("status: active" is what the sample held, not every
+    status the column allows), when the type or name says JSON/version, or when the values read
+    as prose or code (spaces, semicolons, braces). Ported from the platform's copy (2026-10-15),
+    which the move to Core left behind: the findings suggested ``status: active`` again
+    (2026-10-20).
+    """
+    name = str(col.get("name") or "")
+    if is_identifier_name(name) or is_free_text_name(name) or _NOT_A_CATEGORY.search(name):
+        return False
+    if "JSON" in str(col.get("type") or "").upper():
+        return False
+    values = [str(v.get("value")) for v in (col.get("frequencies") or []) if v.get("value") is not None]
+    if len(values) < 2:
+        return False
+    return not any(re.search(r"[;{}\[\]]|\s\S+\s", v) for v in values)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Column helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -648,8 +672,7 @@ def findings_for(
             and c.get("frequencies") is not None
             and c["name"] not in (rules.get("accepted_values") or {})
             and is_text_type(c.get("type"))
-            and not is_identifier_name(c["name"])
-            and not is_free_text_name(c["name"])
+            and is_category_candidate(c)
         ]
         if categorical:
             noun = "column" if len(categorical) == 1 else "columns"

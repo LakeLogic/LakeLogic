@@ -1,4 +1,4 @@
-"""The erasure queue ``_lakelogic_erasure_requests``: people insert rows, LakeLogic erases and closes them.
+"""The erasure queue ``lakelogic_erasure_requests``: people insert rows, LakeLogic erases and closes them.
 
 Local backends (duckdb, sqlite) stand in for the Delta table; the passes themselves are
 stubbed, since what is under test is the queue: which rows are read, how each one moves,
@@ -62,7 +62,7 @@ def _statuses(md):
 
 def test_the_table_sits_beside_the_run_log_in_the_domain_schema():
     md = {"run_log_table": "`cat`.payments._pipeline_run_log", "run_log_backend": "spark"}
-    assert er.resolve_requests_target(md) == ("spark", "`cat`.payments._lakelogic_erasure_requests", None)
+    assert er.resolve_requests_target(md) == ("spark", "`cat`.payments.lakelogic_erasure_requests", None)
     assert er.resolve_requests_target(md) == resolve_evidence_target("erasure_requests", md)
     assert er.resolve_requests_target({}) is None
 
@@ -78,7 +78,7 @@ def test_ensure_is_idempotent_and_has_the_owned_schema(tmp_path, backend):
     finally:
         con.close()
     assert cols == list(er.REQUEST_COLUMNS)
-    assert target.endswith("_lakelogic_erasure_requests")
+    assert target.endswith("lakelogic_erasure_requests")
 
 
 # ── Reading and marking ────────────────────────────────────────────────────
