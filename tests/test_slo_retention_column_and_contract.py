@@ -38,15 +38,21 @@ class _Spark:
 
 
 def _registry(contract_dict=None, retention=None, freshness=None):
-    contract = SimpleNamespace(layer="silver", entity="silver_rideflow_driver_profiles",
-                               contract_dict=contract_dict or {"info": {"table_name": "silver_rideflow_driver_profiles"}})
+    contract = SimpleNamespace(
+        layer="silver",
+        entity="silver_rideflow_driver_profiles",
+        contract_dict=contract_dict or {"info": {"table_name": "silver_rideflow_driver_profiles"}},
+    )
     return SimpleNamespace(
-        domain="marketplace", system="rideflow",
-        storage=SimpleNamespace(bronze_root=None, silver_root=None, gold_root=None,
-                                domain_catalog="`rideflow_dev`.marketplace"),
+        domain="marketplace",
+        system="rideflow",
+        storage=SimpleNamespace(
+            bronze_root=None, silver_root=None, gold_root=None, domain_catalog="`rideflow_dev`.marketplace"
+        ),
         slo=SimpleNamespace(freshness=freshness or {}),
         retention=retention if retention is not None else {"silver": "P90D"},
-        get_active_contracts=lambda: [contract], metadata={},
+        get_active_contracts=lambda: [contract],
+        metadata={},
     )
 
 
@@ -56,8 +62,10 @@ def _with_retention(**ret):
 
 class TestColumns:
     def test_never_updated_or_modified_and_load_stamps_last(self):
-        cols = retention_columns(None, ["updated_at", "last_modified", "event_timestamp", "created_at",
-                                        "_lakelogic_processed_at", "signup_date"])
+        cols = retention_columns(
+            None,
+            ["updated_at", "last_modified", "event_timestamp", "created_at", "_lakelogic_processed_at", "signup_date"],
+        )
         assert "updated_at" not in cols and "last_modified" not in cols
         assert cols[0] == "created_at"
         assert "signup_date" in cols
@@ -68,8 +76,9 @@ class TestColumns:
 
     def test_a_ten_year_old_record_touched_last_month_is_ten_years_old(self):
         spark = _Spark({"updated_at": 30, "created_at": 3650})
-        r = SLOValidator(_registry(freshness={"silver": SimpleNamespace(check_columns=["updated_at"])}),
-                         spark=spark).check_retention()[0]
+        r = SLOValidator(
+            _registry(freshness={"silver": SimpleNamespace(check_columns=["updated_at"])}), spark=spark
+        ).check_retention()[0]
         assert r.source_column_used == "created_at"
         assert r.status == STATUS_BREACHED and r.passed is False
 
@@ -113,8 +122,17 @@ class TestContractPeriod:
 def test_the_platform_receives_the_column_source_and_evidence():
     from lakelogic.core.slo import SLOCheckResult
 
-    r = SLOCheckResult(layer="silver", entity="t", check_type="retention", status="OK", passed=True,
-                       retention_period="P6Y", retention_age_minutes=10.0, retention_limit_minutes=99,
-                       source_column_used="signup_date", retention_source="contract",
-                       retention_evidence="record_age")
+    r = SLOCheckResult(
+        layer="silver",
+        entity="t",
+        check_type="retention",
+        status="OK",
+        passed=True,
+        retention_period="P6Y",
+        retention_age_minutes=10.0,
+        retention_limit_minutes=99,
+        source_column_used="signup_date",
+        retention_source="contract",
+        retention_evidence="record_age",
+    )
     assert r.retention_source == "contract" and r.retention_evidence == "record_age"

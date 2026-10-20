@@ -24,14 +24,16 @@ class Duck:
         return dict(zip(names, cur.fetchone()))
 
 
-CONTRACT = {"quality": {
-    "row_rules": [
-        {"name": "valid_email", "sql": "email like '%@%'", "category": "validity"},
-        {"name": "licence_required", "sql": "licence IS NOT NULL", "category": "completeness"},
-        {"name": "valid_rating", "sql": "rating IS NULL OR (rating >= 1 AND rating <= 5)"},
-    ],
-    "dataset_rules": [{"name": "unique_driver", "sql": "SELECT ..."}],
-}}
+CONTRACT = {
+    "quality": {
+        "row_rules": [
+            {"name": "valid_email", "sql": "email like '%@%'", "category": "validity"},
+            {"name": "licence_required", "sql": "licence IS NOT NULL", "category": "completeness"},
+            {"name": "valid_rating", "sql": "rating IS NULL OR (rating >= 1 AND rating <= 5)"},
+        ],
+        "dataset_rules": [{"name": "unique_driver", "sql": "SELECT ..."}],
+    }
+}
 
 
 def _by(result):
@@ -61,13 +63,25 @@ def test_a_bad_rule_is_not_evaluated_and_does_not_hide_the_others():
 def test_a_passing_rule_passes():
     ok = {"quality": {"row_rules": [{"name": "has_id", "sql": "driver_id IS NOT NULL"}]}}
     assert _by(check_rules(Duck(), "drivers", ok))["has_id"] == {
-        "name": "has_id", "kind": "row", "category": None, "status": "passed", "failed_rows": 0, "rows_evaluated": 4}
+        "name": "has_id",
+        "kind": "row",
+        "category": None,
+        "status": "passed",
+        "failed_rows": 0,
+        "rows_evaluated": 4,
+    }
 
 
 def test_the_payload_is_a_check_not_a_pipeline_run():
     r = check_rules(Duck(), "drivers", CONTRACT)
-    p = run_log_payload("silver_drivers", r, started_at="2026-10-20T01:00:00Z", finished_at="2026-10-20T01:00:02Z",
-                        environment="dev", source="platform")
+    p = run_log_payload(
+        "silver_drivers",
+        r,
+        started_at="2026-10-20T01:00:00Z",
+        finished_at="2026-10-20T01:00:02Z",
+        environment="dev",
+        source="platform",
+    )
     assert p["metadata"]["record_type"] == RECORD_TYPE and p["engine"] == "quality_check"
     assert p["status"] == "success"  # rules failing is a RESULT of a check that ran
     assert p["rules_evaluated"] == 3 and p["rules_failed"] == 3
@@ -88,7 +102,9 @@ def test_check_contract_reports_under_the_runs_dataset_name_and_sends(monkeypatc
     import lakelogic.core.rule_check as rc
 
     sent = []
-    monkeypatch.setattr(rc, "send", lambda payload, endpoint, api_key, **kw: sent.append((payload, endpoint, api_key)) or True)
+    monkeypatch.setattr(
+        rc, "send", lambda payload, endpoint, api_key, **kw: sent.append((payload, endpoint, api_key)) or True
+    )
     doc = {"dataset": "silver_drivers", "version": "1.0.0", "info": {"table_name": "drivers"}, **CONTRACT}
     out = rc.check_contract(doc, duckdb_con=Duck().con, endpoint="https://x/ingest", api_key="k", environment="dev")
     assert out["sent"] is True
@@ -145,21 +161,31 @@ def test_a_templated_name_reports_under_the_contract_file_stem(tmp_path, monkeyp
     assert out["payload"]["dataset"] == "silver_rideflow_driver_profiles"
 
 
-
 def test_results_land_in_a_local_table_one_row_per_rule(monkeypatch):
     import lakelogic.core.rule_check as rc
 
     monkeypatch.delenv("LAKELOGIC_OBSERVATORY_ENDPOINT", raising=False)
     d = Duck()
-    out = rc.check_contract({"dataset": "silver_drivers", **CONTRACT}, duckdb_con=d.con, table="drivers",
-                            results_table="lakelogic_quality_checks", environment="dev")
+    out = rc.check_contract(
+        {"dataset": "silver_drivers", **CONTRACT},
+        duckdb_con=d.con,
+        table="drivers",
+        results_table="lakelogic_quality_checks",
+        environment="dev",
+    )
     assert out["results_table"] == "lakelogic_quality_checks" and out["results_table_error"] is None
-    rows = d.con.execute("SELECT rule_name, status, failed_rows, rows_checked, dataset, source "
-                         "FROM lakelogic_quality_checks ORDER BY rule_name").fetchall()
+    rows = d.con.execute(
+        "SELECT rule_name, status, failed_rows, rows_checked, dataset, source "
+        "FROM lakelogic_quality_checks ORDER BY rule_name"
+    ).fetchall()
     assert ("valid_email", "failed", 2, 4, "silver_drivers", "client") in rows
     assert len(rows) == 4  # 3 row rules + 1 dataset rule, one row each
-    rc.check_contract({"dataset": "silver_drivers", **CONTRACT}, duckdb_con=d.con, table="drivers",
-                      results_table="lakelogic_quality_checks")
+    rc.check_contract(
+        {"dataset": "silver_drivers", **CONTRACT},
+        duckdb_con=d.con,
+        table="drivers",
+        results_table="lakelogic_quality_checks",
+    )
     assert d.con.execute("SELECT COUNT(DISTINCT check_id) FROM lakelogic_quality_checks").fetchone()[0] == 2  # appended
 
 
@@ -184,7 +210,11 @@ class TestIncrementalScope:
         return {"to_version": 10, "rules_fingerprint": "a", "last_full_at": "2026-10-18T10:00:00+00:00", **kw}
 
     def test_changed_rows_since_the_last_checked_version(self):
-        assert self.plan(self.last()) == {"scope": "changed", "from_version": 11, "reason": "rows changed since version 10"}
+        assert self.plan(self.last()) == {
+            "scope": "changed",
+            "from_version": 11,
+            "reason": "rows changed since version 10",
+        }
 
     def test_nothing_written_since_is_skipped(self):
         assert self.plan(self.last(), version=10)["scope"] == "skip"
@@ -204,12 +234,19 @@ def test_a_failing_rule_forces_a_full_check_once_anything_is_written():
     """New good rows passing must not read as the table recovering: the bad rows are older."""
     from lakelogic.core.rule_check import plan_scope
 
-    last = {"to_version": 10, "rules_fingerprint": "a", "last_full_at": "2026-10-19T10:00:00+00:00",
-            "verdicts": [{"rule_name": "rating_range_max", "status": "failed"}]}
+    last = {
+        "to_version": 10,
+        "rules_fingerprint": "a",
+        "last_full_at": "2026-10-19T10:00:00+00:00",
+        "verdicts": [{"rule_name": "rating_range_max", "status": "failed"}],
+    }
     out = plan_scope(last=last, current_version=11, fingerprint="a", now_iso="2026-10-20T10:00:00+00:00")
     assert out["scope"] == "full" and "was failing" in out["reason"]
     # Nothing written: the failing verdict is carried forward, not re-read.
-    assert plan_scope(last=last, current_version=10, fingerprint="a", now_iso="2026-10-20T10:00:00+00:00")["scope"] == "skip"
+    assert (
+        plan_scope(last=last, current_version=10, fingerprint="a", now_iso="2026-10-20T10:00:00+00:00")["scope"]
+        == "skip"
+    )
 
 
 def test_the_results_table_is_named_by_the_metadata_standard():
@@ -223,6 +260,7 @@ def test_the_results_table_is_named_by_the_metadata_standard():
 
 def test_an_identical_repeated_rule_is_checked_and_reported_once():
     from lakelogic.core.rule_check import _row_rules
+
     rule = {"name": "driver_id_not_null", "sql": "driver_id IS NOT NULL", "category": "completeness"}
     doc = {"quality": {"row_rules": [rule, dict(rule), {"name": "status_not_null", "sql": "status IS NOT NULL"}]}}
     assert [r["name"] for r in _row_rules(doc)] == ["driver_id_not_null", "status_not_null"]
@@ -231,24 +269,37 @@ def test_an_identical_repeated_rule_is_checked_and_reported_once():
 def test_dataset_rules_are_judged_through_the_engine_expansion_on_the_whole_table():
     import duckdb
     from lakelogic.core.rule_check import DuckDBExecutor, check_rules
+
     con = duckdb.connect()
     con.execute("CREATE TABLE t AS SELECT * FROM (VALUES (1,'a'),(1,'b'),(2,NULL),(3,'c')) v(id, phone)")
-    doc = {"quality": {"row_rules": [{"name": "id_set", "sql": "id IS NOT NULL"}],
-                       "dataset_rules": [{"unique": "id"}, {"null_ratio": {"field": "phone", "max": 0.5}},
-                                         {"null_ratio": {"field": "phone", "max": 0.1, "name": "phone_mostly_set"}}]}}
+    doc = {
+        "quality": {
+            "row_rules": [{"name": "id_set", "sql": "id IS NOT NULL"}],
+            "dataset_rules": [
+                {"unique": "id"},
+                {"null_ratio": {"field": "phone", "max": 0.5}},
+                {"null_ratio": {"field": "phone", "max": 0.1, "name": "phone_mostly_set"}},
+            ],
+        }
+    }
     res = {r["name"]: r for r in check_rules(DuckDBExecutor(con), "t", doc)["rule_results"]}
     assert res["id_unique"]["status"] == "failed" and res["id_unique"]["failed_rows"] == 1
     assert res["phone_null_ratio"]["status"] == "passed"
     assert res["phone_mostly_set"]["status"] == "failed" and res["phone_mostly_set"]["failed_rows"] is None
     # an incremental check: rows from a subset, but uniqueness judged over the whole table
-    sub = {r["name"]: r for r in check_rules(DuckDBExecutor(con), "(SELECT * FROM t WHERE id = 2) s", doc,
-                                             dataset_table="t")["rule_results"]}
+    sub = {
+        r["name"]: r
+        for r in check_rules(DuckDBExecutor(con), "(SELECT * FROM t WHERE id = 2) s", doc, dataset_table="t")[
+            "rule_results"
+        ]
+    }
     assert sub["id_unique"]["status"] == "failed"
 
 
 def test_a_dataset_rule_form_that_cannot_be_expanded_is_not_evaluated_never_passed():
     import duckdb
     from lakelogic.core.rule_check import DuckDBExecutor, check_rules
+
     con = duckdb.connect()
     con.execute("CREATE TABLE t AS SELECT 1 AS id")
     res = check_rules(DuckDBExecutor(con), "t", {"quality": {"dataset_rules": [{"name": "odd", "weird": 1}]}})
@@ -258,16 +309,25 @@ def test_a_dataset_rule_form_that_cannot_be_expanded_is_not_evaluated_never_pass
 def test_a_null_ratio_of_zero_is_a_bound_not_a_missing_one():
     import duckdb
     from lakelogic.core.rule_check import DuckDBExecutor, check_rules
+
     con = duckdb.connect()
     con.execute("CREATE TABLE t AS SELECT * FROM (VALUES (1,'a'),(2,NULL)) v(id, status)")
-    res = check_rules(DuckDBExecutor(con), "t", {"quality": {"dataset_rules": [{"null_ratio": {"field": "status", "max": 0}}]}})
+    res = check_rules(
+        DuckDBExecutor(con), "t", {"quality": {"dataset_rules": [{"null_ratio": {"field": "status", "max": 0}}]}}
+    )
     assert [(r["name"], r["status"]) for r in res["rule_results"]] == [("status_null_ratio", "failed")]
 
 
 def test_a_version_means_nothing_across_a_recreated_or_rewritten_table():
     from lakelogic.core.rule_check import plan_scope
-    last = {"to_version": 40, "table_id": "a", "rules_fingerprint": "f", "last_full_at": "2026-10-20T00:00:00",
-            "verdicts": [{"status": "passed"}]}
+
+    last = {
+        "to_version": 40,
+        "table_id": "a",
+        "rules_fingerprint": "f",
+        "last_full_at": "2026-10-20T00:00:00",
+        "verdicts": [{"status": "passed"}],
+    }
     now = "2026-10-21T00:00:00"
     plan = lambda **k: plan_scope(last=last, fingerprint="f", now_iso=now, **k)
     assert plan(current_version=41, table_id="a")["scope"] == "changed"
@@ -281,12 +341,29 @@ def test_a_version_means_nothing_across_a_recreated_or_rewritten_table():
 
 def test_the_platform_memory_drives_the_same_decision_as_the_results_table():
     from lakelogic.core.rule_check import memory_from_payload, plan_scope
-    payload = {"started_at": "2026-10-20T06:00:00", "metadata": {"scope": "full", "to_version": 7, "table_id": "a",
-               "rules_fingerprint": "f", "rule_results": [{"name": "r", "kind": "row", "status": "passed"}]}}
+
+    payload = {
+        "started_at": "2026-10-20T06:00:00",
+        "metadata": {
+            "scope": "full",
+            "to_version": 7,
+            "table_id": "a",
+            "rules_fingerprint": "f",
+            "rule_results": [{"name": "r", "kind": "row", "status": "passed"}],
+        },
+    }
     mem = memory_from_payload(payload)
     assert mem["last_full_at"] == "2026-10-20T06:00:00" and mem["verdicts"][0]["rule_name"] == "r"
-    nxt = memory_from_payload({**payload, "started_at": "2026-10-20T07:00:00",
-                               "metadata": {**payload["metadata"], "scope": "changed", "to_version": 8}}, mem)
+    nxt = memory_from_payload(
+        {
+            **payload,
+            "started_at": "2026-10-20T07:00:00",
+            "metadata": {**payload["metadata"], "scope": "changed", "to_version": 8},
+        },
+        mem,
+    )
     assert nxt["last_full_at"] == "2026-10-20T06:00:00"  # a changed-rows check never resets the full clock
-    assert plan_scope(last=nxt, current_version=9, fingerprint="f", now_iso="2026-10-21T00:00:00",
-                      table_id="a")["scope"] == "changed"
+    assert (
+        plan_scope(last=nxt, current_version=9, fingerprint="f", now_iso="2026-10-21T00:00:00", table_id="a")["scope"]
+        == "changed"
+    )

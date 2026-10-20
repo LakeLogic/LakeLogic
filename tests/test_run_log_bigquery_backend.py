@@ -82,13 +82,16 @@ def _contract(**metadata):
 
 
 def test_run_log_is_written_with_a_load_job_not_streaming(bq, monkeypatch):
-    monkeypatch.setattr(run_log, "_flatten_report", lambda report: {"run_id": "abc", "status": "success",
-                                                                    "counts_good": "7", "slo_json": {"a": 1}})
+    monkeypatch.setattr(
+        run_log,
+        "_flatten_report",
+        lambda report: {"run_id": "abc", "status": "success", "counts_good": "7", "slo_json": {"a": 1}},
+    )
     out = run_log._write_run_log_table(
         {}, _contract(run_log_table="my-proj.marketplace._lakelogic_run_log", run_log_backend="bigquery")
     )
     assert out == "my-proj.marketplace._lakelogic_run_log"
-    (table, rows, config), = bq.loads
+    ((table, rows, config),) = bq.loads
     assert table == "my-proj.marketplace._lakelogic_run_log"
     assert config.write_disposition == "WRITE_APPEND"
     assert rows[0]["counts_good"] == 7, "typed as INT64, not left a string"
@@ -99,7 +102,9 @@ def test_run_log_is_written_with_a_load_job_not_streaming(bq, monkeypatch):
 def test_the_table_is_created_and_widened_with_a_quoted_name(bq, monkeypatch):
     """Project ids contain '-', which BigQuery accepts only inside backticks."""
     monkeypatch.setattr(run_log, "_flatten_report", lambda report: {"run_id": "abc"})
-    run_log._write_run_log_table({}, _contract(run_log_table="my-proj.d._lakelogic_run_log", run_log_backend="bigquery"))
+    run_log._write_run_log_table(
+        {}, _contract(run_log_table="my-proj.d._lakelogic_run_log", run_log_backend="bigquery")
+    )
     sqls = [q for q, _ in bq.queries]
     assert sqls[0].startswith("CREATE TABLE IF NOT EXISTS `my-proj.d._lakelogic_run_log` (")
     assert "`report_json` STRING" in sqls[0]
@@ -129,10 +134,12 @@ def test_an_up_to_date_table_gets_no_ddl(bq, monkeypatch):
 
 def test_slo_checks_are_written_in_one_batch_in_column_order(bq):
     registry = Registry(slo_checks_table="p.marketplace._lakelogic_slo_checks", slo_checks_backend="bigquery")
-    records = [{"check_run_id": "r", "entity": "trips", "passed": True, "row_count": "12"},
-               {"check_run_id": "r", "entity": "riders", "passed": False}]
+    records = [
+        {"check_run_id": "r", "entity": "trips", "passed": True, "row_count": "12"},
+        {"check_run_id": "r", "entity": "riders", "passed": False},
+    ]
     assert run_log._write_slo_checks_table(registry, records) == "p.marketplace._lakelogic_slo_checks"
-    (_table, rows, config), = bq.loads
+    ((_table, rows, config),) = bq.loads
     assert len(rows) == 2, "one load job for the batch"
     assert [f.name for f in config.schema] == run_log._SLO_CHECKS_COLUMNS
     assert rows[0]["row_count"] == 12 and rows[1]["passed"] is False

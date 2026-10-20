@@ -48,12 +48,14 @@ def _store(backend):
 def test_a_new_container_resumes_where_the_last_one_stopped():
     shared = _MemoryBackend()
     data = _events(120)
-    StreamSink(source=data, processor=_FakeProcessor(), checkpoint=_store(shared),
-               checkpoint_key="k", batch_size=50).run("available_now")
+    StreamSink(
+        source=data, processor=_FakeProcessor(), checkpoint=_store(shared), checkpoint_key="k", batch_size=50
+    ).run("available_now")
     # A fresh process: new store object, same bucket. Nothing is re-processed.
     proc2 = _FakeProcessor()
-    s2 = StreamSink(source=data, processor=proc2, checkpoint=_store(shared),
-                    checkpoint_key="k", batch_size=50).run("available_now")
+    s2 = StreamSink(source=data, processor=proc2, checkpoint=_store(shared), checkpoint_key="k", batch_size=50).run(
+        "available_now"
+    )
     assert s2.resumed_from == 120 and s2.batches == 0
     assert proc2.materialized_good == []
 

@@ -85,26 +85,36 @@ def _bound_passed(rule: Any, value: Any) -> Optional[bool]:
     return None
 
 
-def _check_dataset_rules(executor: Any, table: str, contract: Dict[str, Any],
-                         rows_checked: Optional[int], errors: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+def _check_dataset_rules(
+    executor: Any, table: str, contract: Dict[str, Any], rows_checked: Optional[int], errors: List[Dict[str, str]]
+) -> List[Dict[str, Any]]:
     """Each dataset rule's own verdict. A rule that cannot be expanded or run is
     ``not_evaluated`` (with its error), never passed."""
     out = []
     for i, raw in enumerate(_dataset_rules(contract)):
         rule = _expand_dataset(raw)
         name = getattr(rule, "name", None) or raw.get("name") or f"dataset_rule_{i + 1}"
-        entry = {"name": name, "kind": "dataset", "category": getattr(rule, "category", None) or raw.get("category"),
-                 "status": "not_evaluated", "failed_rows": None, "rows_evaluated": None}
+        entry = {
+            "name": name,
+            "kind": "dataset",
+            "category": getattr(rule, "category", None) or raw.get("category"),
+            "status": "not_evaluated",
+            "failed_rows": None,
+            "rows_evaluated": None,
+        }
         if rule is not None and rule.sql:
             try:
                 row = executor.aggregate_row(rule.sql.replace(_TABLE, table)) or {}
                 value = next(iter(row.values()), None)
                 passed = _bound_passed(rule, value)
                 if passed is not None:
-                    entry.update(status="passed" if passed else "failed", rows_evaluated=rows_checked,
-                                 value=float(value),
-                                 # unique: the value IS the duplicate rows; other bounds are not row counts
-                                 failed_rows=int(value) if name.endswith("_unique") or "unique" in raw else None)
+                    entry.update(
+                        status="passed" if passed else "failed",
+                        rows_evaluated=rows_checked,
+                        value=float(value),
+                        # unique: the value IS the duplicate rows; other bounds are not row counts
+                        failed_rows=int(value) if name.endswith("_unique") or "unique" in raw else None,
+                    )
             except Exception as exc:  # noqa: BLE001
                 errors.append({"rule": name, "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
         out.append(entry)
@@ -123,8 +133,9 @@ def _int(v: Any) -> Optional[int]:
         return None
 
 
-def check_rules(executor: Any, table: str, contract: Dict[str, Any], *,
-                dataset_table: Optional[str] = None) -> Dict[str, Any]:
+def check_rules(
+    executor: Any, table: str, contract: Dict[str, Any], *, dataset_table: Optional[str] = None
+) -> Dict[str, Any]:
     """Evaluate ``contract``'s row rules on ``table`` through ``executor`` (``aggregate_row(sql)``
     returns one row as a dict). Returns the per-rule record plus ``rows_checked``.
 
@@ -146,8 +157,12 @@ def check_rules(executor: Any, table: str, contract: Dict[str, Any], *,
         except Exception:  # noqa: BLE001 — one bad rule must not hide the others
             for r in rules:
                 try:
-                    row = executor.aggregate_row(
-                        f"SELECT COUNT(*) AS rows_checked, SUM({_fails(r['sql'])}) AS f FROM {table}") or {}
+                    row = (
+                        executor.aggregate_row(
+                            f"SELECT COUNT(*) AS rows_checked, SUM({_fails(r['sql'])}) AS f FROM {table}"
+                        )
+                        or {}
+                    )
                     rows_checked = _int(row.get("rows_checked")) if rows_checked is None else rows_checked
                     failed[r["name"]] = _int(row.get("f")) or 0
                 except Exception as exc:  # noqa: BLE001
@@ -158,8 +173,9 @@ def check_rules(executor: Any, table: str, contract: Dict[str, Any], *,
     for e in results:
         if e["name"] in unrun:
             e.update(status="not_evaluated", failed_rows=None, rows_evaluated=None)
-    results += _check_dataset_rules(executor, dataset_table or table, contract,
-                                    rows_checked if dataset_table is None else None, errors)
+    results += _check_dataset_rules(
+        executor, dataset_table or table, contract, rows_checked if dataset_table is None else None, errors
+    )
     return {
         "rule_results": results,
         "rows_checked": rows_checked,
@@ -169,9 +185,16 @@ def check_rules(executor: Any, table: str, contract: Dict[str, Any], *,
     }
 
 
-def run_log_payload(dataset: str, result: Dict[str, Any], *, started_at: str, finished_at: str,
-                    environment: Optional[str] = None, source: str = "client",
-                    contract_version: Optional[str] = None) -> Dict[str, Any]:
+def run_log_payload(
+    dataset: str,
+    result: Dict[str, Any],
+    *,
+    started_at: str,
+    finished_at: str,
+    environment: Optional[str] = None,
+    source: str = "client",
+    contract_version: Optional[str] = None,
+) -> Dict[str, Any]:
     """The ``RunLogIngest`` body for one check, as the pipeline sends a run.
 
     ``status`` is ``failed`` only when nothing could be evaluated (the check itself broke); a
@@ -259,8 +282,14 @@ def dataset_name(doc: Dict[str, Any]) -> str:
     return str(doc.get("dataset") or info.get("table_name") or info.get("title") or "unknown")
 
 
-def send(payload: Dict[str, Any], endpoint: str, api_key: Optional[str], *, timeout: float = 10.0,
-         spool: Optional[Dict[str, Any]] = None) -> bool:
+def send(
+    payload: Dict[str, Any],
+    endpoint: str,
+    api_key: Optional[str],
+    *,
+    timeout: float = 10.0,
+    spool: Optional[Dict[str, Any]] = None,
+) -> bool:
     """POST the check to the platform's run-log ingest, as a pipeline run is sent: the same
     ``X-API-Key`` header, and buffered for retry on a transient failure. Never raises."""
     import requests
@@ -288,13 +317,29 @@ def send(payload: Dict[str, Any], endpoint: str, api_key: Optional[str], *, time
 #: ``metadata_names``, see ``results_table_name``): ONE ROW PER RULE PER CHECK, so a
 #: team can query "which rules failed this week" in its own lakehouse without LakeLogic.
 RESULT_COLUMNS = (
-    ("check_id", "string"), ("checked_at", "string"), ("dataset", "string"), ("table_name", "string"),
-    ("environment", "string"), ("source", "string"), ("rule_name", "string"), ("rule_kind", "string"),
-    ("category", "string"), ("status", "string"), ("failed_rows", "bigint"), ("rows_evaluated", "bigint"),
-    ("rows_checked", "bigint"), ("rules_fingerprint", "string"), ("contract_version", "string"),
-    ("measurement_version", "bigint"), ("lakelogic_version", "string"), ("error", "string"),
+    ("check_id", "string"),
+    ("checked_at", "string"),
+    ("dataset", "string"),
+    ("table_name", "string"),
+    ("environment", "string"),
+    ("source", "string"),
+    ("rule_name", "string"),
+    ("rule_kind", "string"),
+    ("category", "string"),
+    ("status", "string"),
+    ("failed_rows", "bigint"),
+    ("rows_evaluated", "bigint"),
+    ("rows_checked", "bigint"),
+    ("rules_fingerprint", "string"),
+    ("contract_version", "string"),
+    ("measurement_version", "bigint"),
+    ("lakelogic_version", "string"),
+    ("error", "string"),
     # What the check covered: "full" (every row) or "changed" (rows written since `from_version`).
-    ("scope", "string"), ("from_version", "bigint"), ("to_version", "bigint"), ("table_id", "string"),
+    ("scope", "string"),
+    ("from_version", "bigint"),
+    ("to_version", "bigint"),
+    ("table_id", "string"),
 )
 
 
@@ -313,21 +358,38 @@ def result_rows(payload: Dict[str, Any], *, table: str, check_id: str) -> List[D
     except Exception:  # noqa: BLE001
         ll_version = None
     meta = payload.get("metadata") or {}
-    return [{
-        "check_id": check_id, "checked_at": payload.get("finished_at"), "dataset": payload.get("dataset"),
-        "table_name": table, "environment": meta.get("environment"), "source": meta.get("source"),
-        "rule_name": r.get("name"), "rule_kind": r.get("kind"), "category": r.get("category"),
-        "status": r.get("status"), "failed_rows": r.get("failed_rows"), "rows_evaluated": r.get("rows_evaluated"),
-        "rows_checked": payload.get("rows_input"), "rules_fingerprint": meta.get("rules_fingerprint"),
-        "contract_version": meta.get("contract_version"), "measurement_version": meta.get("measurement_version"),
-        "lakelogic_version": ll_version, "error": payload.get("error_message"),
-        "scope": meta.get("scope"), "from_version": meta.get("from_version"), "to_version": meta.get("to_version"),
-        "table_id": meta.get("table_id"),
-    } for r in meta.get("rule_results") or []]
+    return [
+        {
+            "check_id": check_id,
+            "checked_at": payload.get("finished_at"),
+            "dataset": payload.get("dataset"),
+            "table_name": table,
+            "environment": meta.get("environment"),
+            "source": meta.get("source"),
+            "rule_name": r.get("name"),
+            "rule_kind": r.get("kind"),
+            "category": r.get("category"),
+            "status": r.get("status"),
+            "failed_rows": r.get("failed_rows"),
+            "rows_evaluated": r.get("rows_evaluated"),
+            "rows_checked": payload.get("rows_input"),
+            "rules_fingerprint": meta.get("rules_fingerprint"),
+            "contract_version": meta.get("contract_version"),
+            "measurement_version": meta.get("measurement_version"),
+            "lakelogic_version": ll_version,
+            "error": payload.get("error_message"),
+            "scope": meta.get("scope"),
+            "from_version": meta.get("from_version"),
+            "to_version": meta.get("to_version"),
+            "table_id": meta.get("table_id"),
+        }
+        for r in meta.get("rule_results") or []
+    ]
 
 
-def write_results(rows: List[Dict[str, Any]], results_table: str, *, spark: Any = None,
-                  duckdb_con: Any = None) -> Optional[str]:
+def write_results(
+    rows: List[Dict[str, Any]], results_table: str, *, spark: Any = None, duckdb_con: Any = None
+) -> Optional[str]:
     """Append ``rows`` to ``results_table`` (created on first write). Returns an error sentence,
     or None when written. Never raises: a results table never fails the check it records."""
     if not rows:
@@ -336,22 +398,30 @@ def write_results(rows: List[Dict[str, Any]], results_table: str, *, spark: Any 
         if spark is not None:
             from pyspark.sql.types import LongType, StringType, StructField, StructType
 
-            schema = StructType([StructField(n, LongType() if t == "bigint" else StringType(), True)
-                                 for n, t in RESULT_COLUMNS])
+            schema = StructType(
+                [StructField(n, LongType() if t == "bigint" else StringType(), True) for n, t in RESULT_COLUMNS]
+            )
             cols = [n for n, _ in RESULT_COLUMNS]
             data = [tuple(r.get(c) for c in cols) for r in rows]
-            (spark.createDataFrame(data, schema).write.mode("append")
-             .option("mergeSchema", "true").saveAsTable(results_table))
+            (
+                spark.createDataFrame(data, schema)
+                .write.mode("append")
+                .option("mergeSchema", "true")
+                .saveAsTable(results_table)
+            )
             return None
         if duckdb_con is not None:
             cols_sql = ", ".join(f'"{n}" {"BIGINT" if t == "bigint" else "VARCHAR"}' for n, t in RESULT_COLUMNS)
             duckdb_con.execute(f"CREATE TABLE IF NOT EXISTS {results_table} ({cols_sql})")
             for n, t in RESULT_COLUMNS:
-                duckdb_con.execute(f'ALTER TABLE {results_table} ADD COLUMN IF NOT EXISTS "{n}" '
-                                   f'{"BIGINT" if t == "bigint" else "VARCHAR"}')
+                duckdb_con.execute(
+                    f'ALTER TABLE {results_table} ADD COLUMN IF NOT EXISTS "{n}" '
+                    f"{'BIGINT' if t == 'bigint' else 'VARCHAR'}"
+                )
             marks = ", ".join("?" for _ in RESULT_COLUMNS)
-            duckdb_con.executemany(f"INSERT INTO {results_table} VALUES ({marks})",
-                                   [[r.get(n) for n, _ in RESULT_COLUMNS] for r in rows])
+            duckdb_con.executemany(
+                f"INSERT INTO {results_table} VALUES ({marks})", [[r.get(n) for n, _ in RESULT_COLUMNS] for r in rows]
+            )
             return None
         return "no Spark session or DuckDB connection to write with"
     except Exception as exc:  # noqa: BLE001
@@ -397,11 +467,13 @@ def _last_check(spark: Any, results_table: str, dataset: str) -> Optional[Dict[s
         safe = dataset.replace("'", "''")
         where = f"WHERE dataset = '{safe}' AND to_version IS NOT NULL ORDER BY to_version DESC LIMIT 200"
         try:
-            rows = spark.sql(f"SELECT to_version, rules_fingerprint, scope, checked_at, table_id "
-                             f"FROM {results_table} {where}").collect()
+            rows = spark.sql(
+                f"SELECT to_version, rules_fingerprint, scope, checked_at, table_id FROM {results_table} {where}"
+            ).collect()
         except Exception:  # noqa: BLE001 — a results table from before table_id: added on next write
-            rows = spark.sql(f"SELECT to_version, rules_fingerprint, scope, checked_at "
-                             f"FROM {results_table} {where}").collect()
+            rows = spark.sql(
+                f"SELECT to_version, rules_fingerprint, scope, checked_at FROM {results_table} {where}"
+            ).collect()
     except Exception:  # noqa: BLE001 — no table yet, or no history: a full check
         return None
     if not rows:
@@ -409,11 +481,15 @@ def _last_check(spark: Any, results_table: str, dataset: str) -> Optional[Dict[s
     last = rows[0].asDict()
     full = next((r.asDict() for r in rows if r["scope"] == "full"), None)
     try:
-        verdicts = [r.asDict() for r in spark.sql(
-            f"SELECT rule_name, rule_kind, category, status, failed_rows, rows_evaluated FROM {results_table} "
-            f"WHERE dataset = '{safe}' AND to_version = {int(last['to_version'])} "
-            f"AND checked_at = (SELECT MAX(checked_at) FROM {results_table} WHERE dataset = '{safe}' "
-            f"AND to_version = {int(last['to_version'])})").collect()]
+        verdicts = [
+            r.asDict()
+            for r in spark.sql(
+                f"SELECT rule_name, rule_kind, category, status, failed_rows, rows_evaluated FROM {results_table} "
+                f"WHERE dataset = '{safe}' AND to_version = {int(last['to_version'])} "
+                f"AND checked_at = (SELECT MAX(checked_at) FROM {results_table} WHERE dataset = '{safe}' "
+                f"AND to_version = {int(last['to_version'])})"
+            ).collect()
+        ]
     except Exception:  # noqa: BLE001
         verdicts = []
     return {**last, "last_full_at": (full or {}).get("checked_at"), "verdicts": verdicts}
@@ -435,8 +511,12 @@ class ResultsTableMemory:
         """Append the check's rows; returns an error text, or None when written."""
         import uuid
 
-        return write_results(result_rows(payload, table=table, check_id=str(uuid.uuid4())),
-                             self.results_table, spark=self.spark, duckdb_con=self.duckdb_con)
+        return write_results(
+            result_rows(payload, table=table, check_id=str(uuid.uuid4())),
+            self.results_table,
+            spark=self.spark,
+            duckdb_con=self.duckdb_con,
+        )
 
 
 def memory_from_payload(payload: Dict[str, Any], previous: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -452,15 +532,30 @@ def memory_from_payload(payload: Dict[str, Any], previous: Optional[Dict[str, An
         "scope": meta.get("scope"),
         "checked_at": checked_at,
         "last_full_at": checked_at if full else (previous or {}).get("last_full_at"),
-        "verdicts": [{"rule_name": r.get("name"), "rule_kind": r.get("kind"), "category": r.get("category"),
-                      "status": r.get("status"), "failed_rows": r.get("failed_rows"),
-                      "rows_evaluated": r.get("rows_evaluated")} for r in meta.get("rule_results") or []],
+        "verdicts": [
+            {
+                "rule_name": r.get("name"),
+                "rule_kind": r.get("kind"),
+                "category": r.get("category"),
+                "status": r.get("status"),
+                "failed_rows": r.get("failed_rows"),
+                "rows_evaluated": r.get("rows_evaluated"),
+            }
+            for r in meta.get("rule_results") or []
+        ],
     }
 
 
-def plan_scope(*, last: Optional[Dict[str, Any]], current_version: Optional[int], fingerprint: Optional[str],
-               now_iso: str, full_every_days: int = FULL_EVERY_DAYS, table_id: Optional[str] = None,
-               operation: Optional[str] = None) -> Dict[str, Any]:
+def plan_scope(
+    *,
+    last: Optional[Dict[str, Any]],
+    current_version: Optional[int],
+    fingerprint: Optional[str],
+    now_iso: str,
+    full_every_days: int = FULL_EVERY_DAYS,
+    table_id: Optional[str] = None,
+    operation: Optional[str] = None,
+) -> Dict[str, Any]:
     """Full or changed-rows check, and why. Pure.
 
     full: no Delta version; no earlier check; the rules changed (old rows were never judged by
@@ -480,8 +575,11 @@ def plan_scope(*, last: Optional[Dict[str, Any]], current_version: Optional[int]
         return {"scope": "full", "reason": "the table was recreated"}
     if last.get("to_version") is not None and current_version < int(last["to_version"]):
         return {"scope": "full", "reason": "the table's history was rewritten"}
-    if (operation and current_version > int(last.get("to_version") or -1)
-            and any(operation.upper().startswith(op) for op in _REWRITES)):
+    if (
+        operation
+        and current_version > int(last.get("to_version") or -1)
+        and any(operation.upper().startswith(op) for op in _REWRITES)
+    ):
         return {"scope": "full", "reason": f"the table was rewritten ({operation.lower()})"}
     if fingerprint and last.get("rules_fingerprint") and last["rules_fingerprint"] != fingerprint:
         return {"scope": "full", "reason": "the rules changed"}
@@ -501,11 +599,22 @@ def plan_scope(*, last: Optional[Dict[str, Any]], current_version: Optional[int]
     return {"scope": "changed", "from_version": prev + 1, "reason": f"rows changed since version {prev}"}
 
 
-def check_contract(contract: Any, *, table: Optional[str] = None, spark: Any = None, duckdb_con: Any = None,
-                   executor: Any = None, endpoint: Optional[str] = None, api_key: Optional[str] = None,
-                   environment: Optional[str] = None, dataset: Optional[str] = None,
-                   results_table: Optional[str] = None, incremental: bool = True,
-                   memory: Any = None, source: str = "client") -> Dict[str, Any]:
+def check_contract(
+    contract: Any,
+    *,
+    table: Optional[str] = None,
+    spark: Any = None,
+    duckdb_con: Any = None,
+    executor: Any = None,
+    endpoint: Optional[str] = None,
+    api_key: Optional[str] = None,
+    environment: Optional[str] = None,
+    dataset: Optional[str] = None,
+    results_table: Optional[str] = None,
+    incremental: bool = True,
+    memory: Any = None,
+    source: str = "client",
+) -> Dict[str, Any]:
     """Check one table against its contract's rules where the data lives, and report it.
 
     ``table`` is the table to read (``catalog.schema.table``; on Fabric ``schema.table``);
@@ -556,46 +665,85 @@ def check_contract(contract: Any, *, table: Optional[str] = None, spark: Any = N
     version = state["version"]
     last = memory.last(name) if (incremental and memory is not None) else None
     if incremental and memory is not None:
-        scope = plan_scope(last=last, current_version=version,
-                           fingerprint=_fp(_row_rules(doc), _dataset_rules(doc)), now_iso=started,
-                           table_id=state["table_id"], operation=state["operation"])
+        scope = plan_scope(
+            last=last,
+            current_version=version,
+            fingerprint=_fp(_row_rules(doc), _dataset_rules(doc)),
+            now_iso=started,
+            table_id=state["table_id"],
+            operation=state["operation"],
+        )
     carried = None
     if scope["scope"] == "skip":
         # NOTHING WAS WRITTEN, SO THE LAST VERDICT STILL HOLDS. Sending nothing would read as a
         # missed check (Stale) on a quiet, healthy table; this says "unchanged" and carries each
         # rule's verdict forward from the version it was judged at, with 0 rows read.
         last = last or {}
-        carried = [{"name": v["rule_name"], "kind": v.get("rule_kind"), "category": v.get("category"),
-                    "status": v.get("status"), "failed_rows": v.get("failed_rows"),
-                    "rows_evaluated": v.get("rows_evaluated")} for v in last.get("verdicts") or []]
+        carried = [
+            {
+                "name": v["rule_name"],
+                "kind": v.get("rule_kind"),
+                "category": v.get("category"),
+                "status": v.get("status"),
+                "failed_rows": v.get("failed_rows"),
+                "rows_evaluated": v.get("rows_evaluated"),
+            }
+            for v in last.get("verdicts") or []
+        ]
         if not carried:
-            return {"result": None, "payload": None, "sent": False, "results_table": None,
-                    "results_table_error": None, "scope": scope}
+            return {
+                "result": None,
+                "payload": None,
+                "sent": False,
+                "results_table": None,
+                "results_table_error": None,
+                "scope": scope,
+            }
         scope = {"scope": "unchanged", "reason": scope["reason"], "from_version": version}
     read_from = target
     if scope["scope"] == "unchanged":
-        from lakelogic.core.run_log import MEASUREMENT_VERSION as _MV, rules_fingerprint as _fp2
+        from lakelogic.core.run_log import MEASUREMENT_VERSION as _MV
+        from lakelogic.core.run_log import rules_fingerprint as _fp2
 
-        result = {"rule_results": carried, "rows_checked": 0, "errors": [],
-                  "rules_fingerprint": _fp2(_row_rules(doc), _dataset_rules(doc)), "measurement_version": _MV}
+        result = {
+            "rule_results": carried,
+            "rows_checked": 0,
+            "errors": [],
+            "rules_fingerprint": _fp2(_row_rules(doc), _dataset_rules(doc)),
+            "measurement_version": _MV,
+        }
     if scope["scope"] == "changed":
-        read_from = (f"(SELECT * FROM table_changes('{target}', {scope['from_version']}, {version}) "
-                     f"WHERE {_CHANGED}) AS _changed")
+        read_from = (
+            f"(SELECT * FROM table_changes('{target}', {scope['from_version']}, {version}) "
+            f"WHERE {_CHANGED}) AS _changed"
+        )
     if scope["scope"] != "unchanged":
         result = check_rules(executor, read_from, doc, dataset_table=target)
-    if scope["scope"] == "changed" and result["rule_results"] and all(
-            r["status"] == "not_evaluated" for r in result["rule_results"] if r["kind"] == "row"):
+    if (
+        scope["scope"] == "changed"
+        and result["rule_results"]
+        and all(r["status"] == "not_evaluated" for r in result["rule_results"] if r["kind"] == "row")
+    ):
         # The change feed is off for this table: say so and check every row instead.
         scope = {"scope": "full", "reason": "change data feed is not enabled on the table"}
         read_from = target
         result = check_rules(executor, read_from, doc)
     payload = run_log_payload(
-        name, result, started_at=started,
-        finished_at=datetime.now(timezone.utc).isoformat(), environment=environment, source=source,
-        contract_version=str(doc.get("version") or "") or None)
-    payload["metadata"].update(scope=scope["scope"], scope_reason=scope.get("reason"),
-                               from_version=scope.get("from_version") if scope["scope"] in ("changed", "unchanged") else None,
-                               to_version=version, table_id=state["table_id"])
+        name,
+        result,
+        started_at=started,
+        finished_at=datetime.now(timezone.utc).isoformat(),
+        environment=environment,
+        source=source,
+        contract_version=str(doc.get("version") or "") or None,
+    )
+    payload["metadata"].update(
+        scope=scope["scope"],
+        scope_reason=scope.get("reason"),
+        from_version=scope.get("from_version") if scope["scope"] in ("changed", "unchanged") else None,
+        to_version=version,
+        table_id=state["table_id"],
+    )
     endpoint = endpoint or os.environ.get("LAKELOGIC_OBSERVATORY_ENDPOINT")
     api_key = api_key or os.environ.get("LAKELOGIC_API_KEY")
     sent = send(payload, endpoint, api_key) if endpoint else False
@@ -604,5 +752,11 @@ def check_contract(contract: Any, *, table: Optional[str] = None, spark: Any = N
     if memory is not None:
         write_error = memory.record(payload, table=target)
         written = getattr(memory, "results_table", None) if not write_error else None
-    return {"result": result, "payload": payload, "sent": sent, "results_table": written,
-            "results_table_error": write_error, "scope": scope}
+    return {
+        "result": result,
+        "payload": payload,
+        "sent": sent,
+        "results_table": written,
+        "results_table_error": write_error,
+        "scope": scope,
+    }

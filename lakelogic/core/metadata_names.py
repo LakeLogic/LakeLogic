@@ -65,7 +65,13 @@ PREFIX = "lakelogic_"
 # inside local DB files, path segments, and file names).
 LEGACY_NAMES: Dict[str, Tuple[str, ...]] = {
     # `_lakelogic_<kind>` first: the 2026-09-26 standard, the most recent legacy form.
-    "run_log": ("_lakelogic_run_log", "_run_logs", "run_logs", "lakelogic_run_logs.duckdb", "lakelogic_run_logs.sqlite"),
+    "run_log": (
+        "_lakelogic_run_log",
+        "_run_logs",
+        "run_logs",
+        "lakelogic_run_logs.duckdb",
+        "lakelogic_run_logs.sqlite",
+    ),
     "slo_checks": ("_lakelogic_slo_checks", "_slo_checks", "slo_checks"),
     "logs": ("_lakelogic_logs", "_logs"),
     "pipeline_runs": ("_lakelogic_pipeline_runs", "pipeline_runs"),

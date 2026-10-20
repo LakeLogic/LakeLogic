@@ -58,8 +58,9 @@ def rules_fingerprint(row_rules, configured_dataset_rules) -> Optional[str]:
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
-def build_rule_results(row_rules, configured_dataset_rules, dataset_results, row_failures,
-                       rows_checked, run_failed=False):
+def build_rule_results(
+    row_rules, configured_dataset_rules, dataset_results, row_failures, rows_checked, run_failed=False
+):
     """Every rule the contract declares, with its OWN result for this run (2026-10-20, #570).
 
     The run payload listed only FAILURES, so a rule that passed was a count and nothing more:
@@ -108,8 +109,16 @@ def build_rule_results(row_rules, configured_dataset_rules, dataset_results, row
             status = "not_evaluated"
         else:
             status = "passed" if d.get("passed") is True else "failed"
-        out.append({"name": name, "kind": "dataset", "category": (d or {}).get("category"),
-                    "status": status, "failed_rows": None, "rows_evaluated": None})
+        out.append(
+            {
+                "name": name,
+                "kind": "dataset",
+                "category": (d or {}).get("category"),
+                "status": status,
+                "failed_rows": None,
+                "rows_evaluated": None,
+            }
+        )
     return out
 
 
@@ -2684,10 +2693,17 @@ def write_run_log(
                     _rr = list(getattr(_q, "row_rules", None) or []) if _q else []
                     _dr = list(getattr(_q, "dataset_rules", None) or []) if _q else []
                     _checked = (_counts_good + _counts_quarantined) if (_counts_good or _counts_quarantined) else None
-                    _rule_results = build_rule_results(
-                        _rr, _dr, _dataset_rules, _raw_failures, _checked,
-                        run_failed=(status == "failed" and not _raw_failures and not _counts_good),
-                    ) or None
+                    _rule_results = (
+                        build_rule_results(
+                            _rr,
+                            _dr,
+                            _dataset_rules,
+                            _raw_failures,
+                            _checked,
+                            run_failed=(status == "failed" and not _raw_failures and not _counts_good),
+                        )
+                        or None
+                    )
                     _rules_fp = rules_fingerprint(_rr, _dr)
                 except Exception:  # pragma: no cover - never fatal
                     _rule_results = _rules_fp = None

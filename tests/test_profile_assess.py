@@ -194,8 +194,11 @@ def test_one_value_seen_is_not_suggested_as_accepted_values():
     from lakelogic.core.profile_findings import is_category_candidate
 
     one = {"name": "status", "type": "VARCHAR", "frequencies": [{"value": "active", "count": 101}]}
-    two = {"name": "vehicle_type", "type": "VARCHAR",
-           "frequencies": [{"value": "suv", "count": 5}, {"value": "van", "count": 3}]}
+    two = {
+        "name": "vehicle_type",
+        "type": "VARCHAR",
+        "frequencies": [{"value": "suv", "count": 5}, {"value": "van", "count": 3}],
+    }
     assert is_category_candidate(one) is False
     assert is_category_candidate(two) is True
     assert is_category_candidate({**two, "name": "app_version"}) is False

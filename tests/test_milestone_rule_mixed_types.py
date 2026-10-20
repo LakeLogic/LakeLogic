@@ -3,14 +3,17 @@
 `arrival_date >= created_at` (DATE vs TIMESTAMP) was an error on BigQuery, which does not
 compare the two types; the generated rule casts both sides to TIMESTAMP (seen live on GCP).
 """
+
 from __future__ import annotations
 
 import datetime as dt
 
 import pytest
 
-SQL = ("(arrival_date IS NULL) OR (created_at IS NULL) OR "
-       "(CAST(arrival_date AS TIMESTAMP) >= CAST(created_at AS TIMESTAMP))")
+SQL = (
+    "(arrival_date IS NULL) OR (created_at IS NULL) OR "
+    "(CAST(arrival_date AS TIMESTAMP) >= CAST(created_at AS TIMESTAMP))"
+)
 ROWS = {
     "arrival_date": [dt.date(2026, 1, 3), dt.date(2026, 1, 1), None],
     "created_at": [dt.datetime(2026, 1, 2, 9), dt.datetime(2026, 1, 2, 9), dt.datetime(2026, 1, 2, 9)],

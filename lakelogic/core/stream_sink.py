@@ -332,14 +332,16 @@ class ObjectStoreCheckpointStore(CheckpointStore):
     def commit(self, key: str, checkpoint: Checkpoint) -> None:
         if key not in self._tokens:  # commit without load: read the current version first
             self.load(key)
-        body = json.dumps({
-            "cursor": checkpoint.cursor,
-            "batch_id": checkpoint.batch_id,
-            "committed_at": checkpoint.committed_at,
-            "source_count": checkpoint.source_count,
-            "good_count": checkpoint.good_count,
-            "bad_count": checkpoint.bad_count,
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "cursor": checkpoint.cursor,
+                "batch_id": checkpoint.batch_id,
+                "committed_at": checkpoint.committed_at,
+                "source_count": checkpoint.source_count,
+                "good_count": checkpoint.good_count,
+                "bad_count": checkpoint.bad_count,
+            }
+        ).encode("utf-8")
         self._tokens[key] = self._backend.put_if(self._safe(key), body, self._tokens.get(key))
 
 

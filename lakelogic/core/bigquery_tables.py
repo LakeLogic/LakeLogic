@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from loguru import logger
 
+
 def bigquery_type(sql_type: str) -> str:
     """A declared column type as BigQuery names it (``VARCHAR`` -> ``STRING``), from the one
     type registry (:mod:`lakelogic.core.types`), so this table and the engines cannot disagree."""
@@ -48,9 +49,7 @@ def client(metadata: Optional[Mapping[str, Any]] = None) -> Optional[Any]:
     project = _env(
         metadata.get("bigquery_project") or os.getenv("BIGQUERY_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT")
     )
-    location = _env(
-        metadata.get("bigquery_location") or os.getenv("BIGQUERY_LOCATION") or os.getenv("BQ_LOCATION")
-    )
+    location = _env(metadata.get("bigquery_location") or os.getenv("BIGQUERY_LOCATION") or os.getenv("BQ_LOCATION"))
     return bigquery.Client(project=project or None, location=location or None)
 
 
@@ -122,16 +121,12 @@ def _cell(value: Any, bq_type: str) -> Any:
     return str(value)
 
 
-def append_rows(
-    bq: Any, table: str, columns: Sequence[Tuple[str, str]], records: Iterable[Mapping[str, Any]]
-) -> int:
+def append_rows(bq: Any, table: str, columns: Sequence[Tuple[str, str]], records: Iterable[Mapping[str, Any]]) -> int:
     """Append ``records`` (only the declared columns, typed) with a load job. Returns the count."""
     from google.cloud import bigquery
 
     types = [(name, bigquery_type(sql_type)) for name, sql_type in columns]
-    rows: List[Dict[str, Any]] = [
-        {name: _cell(rec.get(name), bq_type) for name, bq_type in types} for rec in records
-    ]
+    rows: List[Dict[str, Any]] = [{name: _cell(rec.get(name), bq_type) for name, bq_type in types} for rec in records]
     if not rows:
         return 0
     config = bigquery.LoadJobConfig(

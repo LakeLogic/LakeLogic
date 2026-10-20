@@ -1707,8 +1707,10 @@ class DataProcessor:
                             # Compared as timestamps: a DATE milestone beside a TIMESTAMP one
                             # (`arrival_date >= created_at`) is an error on BigQuery, which
                             # will not compare the two types (seen live on GCP).
-                            sql=(f"({end_col} IS NULL) OR ({start_col} IS NULL) OR "
-                                 f"(CAST({end_col} AS TIMESTAMP) >= CAST({start_col} AS TIMESTAMP))"),
+                            sql=(
+                                f"({end_col} IS NULL) OR ({start_col} IS NULL) OR "
+                                f"(CAST({end_col} AS TIMESTAMP) >= CAST({start_col} AS TIMESTAMP))"
+                            ),
                             severity="error",
                             category="consistency",
                             description=(
