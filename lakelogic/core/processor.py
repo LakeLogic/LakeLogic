@@ -65,8 +65,9 @@ def _kafka_stream_settings(source: Any) -> Dict[str, Any]:
     (an ``s3://`` / ``abfss://`` / ``gs://`` location keeps it beside the data — the durable store,
     so a fresh container resumes; a local path is a SQLite file for Polars/DuckDB, a folder for
     Spark; default ``$LAKELOGIC_CHECKPOINT_ROOT/<dataset>`` when that is set, else
-    ``_checkpoints/<dataset>`` next to the contract), ``batch_size``, ``trigger`` (available_now | continuous), ``processing_time``,
-    ``max_offsets_per_trigger``, and auth: ``security_protocol``, ``sasl_mechanism``,
+    ``_checkpoints/<dataset>`` next to the contract), ``batch_size``, ``trigger``
+    (available_now | continuous), ``processing_time``, ``max_offsets_per_trigger``, and auth:
+    ``security_protocol``, ``sasl_mechanism``,
     ``sasl_username``, ``sasl_password``. ``kind: eventhubs`` needs only ``connection_string``: it
     fills SASL_SSL / PLAIN / ``$ConnectionString`` and the namespace's port 9093. Secrets must be
     ``env:VAR`` or ``${ENV:VAR}`` — a literal password in a contract is refused.

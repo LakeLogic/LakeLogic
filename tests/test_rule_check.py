@@ -329,7 +329,10 @@ def test_a_version_means_nothing_across_a_recreated_or_rewritten_table():
         "verdicts": [{"status": "passed"}],
     }
     now = "2026-10-21T00:00:00"
-    plan = lambda **k: plan_scope(last=last, fingerprint="f", now_iso=now, **k)
+
+    def plan(**k):
+        return plan_scope(last=last, fingerprint="f", now_iso=now, **k)
+
     assert plan(current_version=41, table_id="a")["scope"] == "changed"
     assert plan(current_version=41, table_id="b")["reason"] == "the table was recreated"
     assert plan(current_version=3, table_id=None)["reason"] == "the table's history was rewritten"
