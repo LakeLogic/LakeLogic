@@ -3,6 +3,7 @@
 Polars SQL has no `current_date`; the transform paths already rewrite it, the row-rule
 path did not, so any contract with `date_of_birth <= CURRENT_DATE` failed to build.
 """
+
 import datetime as dt
 
 import polars as pl
@@ -16,12 +17,19 @@ def _contract():
         {
             "version": "1.0.0",
             "info": {"title": "S"},
-            "model": {"fields": [{"name": "id", "type": "string"}, {"name": "dob", "type": "date"},
-                                 {"name": "ts", "type": "timestamp"}]},
-            "quality": {"row_rules": [
-                {"name": "dob_not_future", "sql": "dob <= CURRENT_DATE", "category": "consistency"},
-                {"name": "ts_not_future", "sql": "ts <= CURRENT_TIMESTAMP", "category": "consistency"},
-            ]},
+            "model": {
+                "fields": [
+                    {"name": "id", "type": "string"},
+                    {"name": "dob", "type": "date"},
+                    {"name": "ts", "type": "timestamp"},
+                ]
+            },
+            "quality": {
+                "row_rules": [
+                    {"name": "dob_not_future", "sql": "dob <= CURRENT_DATE", "category": "consistency"},
+                    {"name": "ts_not_future", "sql": "ts <= CURRENT_TIMESTAMP", "category": "consistency"},
+                ]
+            },
         }
     )
 
