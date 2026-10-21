@@ -1044,7 +1044,7 @@ class PolarsAdapter(EngineAdapter):
                 ctx = self._get_context(lf)
             rule_exprs = []
             for i, rule in enumerate(row_rules):
-                rule_sql = f'"{native_rule_cols[i]}"' if i in native_rule_cols else rule.sql
+                rule_sql = f'"{native_rule_cols[i]}"' if i in native_rule_cols else self._normalize_sql(rule.sql)
                 rule_exprs.append(f"CAST(({rule_sql}) AS BOOLEAN) as {prefix}{i}")
 
             dataset_name = self.contract.dataset or "source"
