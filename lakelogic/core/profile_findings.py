@@ -92,6 +92,9 @@ def is_free_text_name(name: str) -> bool:
 _NOT_A_CATEGORY = re.compile(r"(^|_)(version|json|payload|properties|attributes|metadata|params|tags)$", re.I)
 
 
+_NUMBER = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)$")
+
+
 def is_category_candidate(col: Dict[str, Any]) -> bool:
     """Whether a column's observed values make a useful ``accepted_values`` suggestion.
 
@@ -108,6 +111,10 @@ def is_category_candidate(col: Dict[str, Any]) -> bool:
         return False
     values = [str(v.get("value")) for v in (col.get("frequencies") or []) if v.get("value") is not None]
     if len(values) < 2:
+        return False
+    # Numbers are measurements, not codes, even stored as text: "estimated_eta_minutes is one
+    # of 2..12" rejects a 13-minute wait tomorrow. A range or a type check fits (2026-10-20).
+    if all(_NUMBER.match(v.strip()) for v in values):
         return False
     return not any(re.search(r"[;{}\[\]]|\s\S+\s", v) for v in values)
 
@@ -131,9 +138,27 @@ def is_temporal_type(type_name: Optional[str]) -> bool:
     return "TIMESTAMP" in t or t.startswith("DATE")
 
 
+_ISO_DATE_TEXT = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$")
+
+
+def _dates_in_text(c: Dict[str, Any]) -> bool:
+    """A text column holding ISO dates (bronze stores every column as text): its earliest and
+    latest values are dates, not personal values, and they are what a retention check needs
+    — the "oldest record" read "not measured" for every raw table (2026-10-20). ISO text sorts
+    in date order, so MIN/MAX are the earliest/latest. Sensitive columns (a date of birth)
+    stay hidden."""
+    lo, hi = c.get("min"), c.get("max")
+    return (not c.get("sensitive") and lo is not None and hi is not None
+            and bool(_ISO_DATE_TEXT.match(str(lo).strip())) and bool(_ISO_DATE_TEXT.match(str(hi).strip())))
+
+
 def hide_text_ranges(doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Drop the smallest/largest VALUE of every text column (lengths stay). In place."""
+    """Drop the smallest/largest VALUE of every text column (lengths stay), except dates
+    stored as text (``_dates_in_text``), which are kept and marked. In place."""
     for c in doc.get("columns") or []:
+        if is_text_type(c.get("type")) and _dates_in_text(c):
+            c["range_kind"] = "dates_in_text"
+            continue
         if is_text_type(c.get("type")) and (c.get("min") is not None or c.get("max") is not None):
             c["min"] = None
             c["max"] = None
@@ -313,13 +338,17 @@ def outside_accepted(
     Everything else is compared as text."""
     c = rel.quote(name)
     nums = [_as_number(v) for v in accepted]
-    if not is_text_type(type_name) and type_name and all(n is not None for n in nums):
+    if accepted and all(n is not None for n in nums):
+        # Numbers compare AS NUMBERS, also in a text column (bronze stores every column as text):
+        # "0.00" against an allowed 0 was a violation, so 1,143 zero tips read as bad data
+        # (2026-10-20). Text that is not a number at all is still outside the list.
         allowed = ", ".join(repr(float(n)) for n in nums)
+        num = f"TRY_CAST({c} AS DOUBLE)"
         return [
             (r[0], int(r[1]))
             for r in rel.fetch(
                 f"SELECT {c} AS v, COUNT(*) AS n FROM {rel.from_sql} WHERE {c} IS NOT NULL "
-                f"AND TRY_CAST({c} AS DOUBLE) NOT IN ({allowed}) GROUP BY v ORDER BY n DESC LIMIT 20",
+                f"AND ({num} IS NULL OR {num} NOT IN ({allowed})) GROUP BY v ORDER BY n DESC LIMIT 20",
                 20,
             )
         ]
@@ -589,8 +618,15 @@ def findings_for(
                 f"{', '.join(a['accepted'])}" + (f": {shown}{more}." if (shown or more) else "."),
                 why=f'The contract "{cname}" lists the values {a["column"]} may take. Reports that group '
                 "by it will show unexpected categories or drop these rows.",
-                action="Decide whether the new values are valid. If they are, add them to accepted_values; "
-                "if not, fix them at the source or map them in the pipeline.",
+                # Check the RULE before the data (2026-10-20): a list of numbers is often a
+                # measurement that wants a range, and "add the new values" grew the list forever.
+                action=(
+                    "Check the rule first: these look like numbers, so a range may fit better than a "
+                    "list. Then decide whether the values are valid: if so, change the rule; if not, "
+                    "fix them at the source or map them in the pipeline."
+                    if all(_as_number(v) is not None for v in a["accepted"]) else
+                    "Decide whether the new values are valid. If they are, add them to accepted_values; "
+                    "if not, fix them at the source or map them in the pipeline."),
                 verify=f"Profile again: rows outside accepted values for {a['column']} should be 0.",
             )
         )
@@ -629,8 +665,10 @@ def findings_for(
                     "optional by design.",
                     action=f"Confirm whether {c['name']} is optional. If it should always be present, "
                     "mark it required in the contract.",
-                    verify=f"Profile again and compare: {c['name']} should drop below "
-                    f"{EMPTY_THRESHOLD_PCT:.0f}% empty.",
+                    # The business decides whether it is required; no target is invented
+                    # ("below 20% empty" read as an agreed threshold, 2026-10-20).
+                    verify=f"A decision is recorded: {c['name']} is optional, or required, and "
+                    "if required, the next profile finds it filled in every row.",
                 )
             )
 

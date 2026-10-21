@@ -60,6 +60,16 @@ def _rank(col: Dict[str, Any], distinct: Optional[int], rows: int) -> Optional[i
     return 3
 
 
+_TIME_NAME = re.compile(r"(_at|_date|_time|_ts|_timestamp|_on)$|^(date|time|timestamp)$", re.I)
+
+
+def _is_time(col: Optional[Dict[str, Any]]) -> bool:
+    """A date or time — by type, or by name when the table stores everything as text (bronze)."""
+    if not col:
+        return False
+    return pf.is_temporal_type(str(col.get("type") or "").upper()) or bool(_TIME_NAME.search(str(col.get("name") or "")))
+
+
 def candidates(columns: Sequence[Dict[str, Any]], distincts: Dict[str, Optional[int]], rows: int) -> List[str]:
     ranked = []
     for c in columns:
@@ -100,8 +110,14 @@ def discover_key(
         return out
     cands = candidates(columns, distincts, rows)
     out["candidates"] = cands
+    by_name = {c["name"]: c for c in columns}
     for width in range(1, max_width + 1):
         for combo in combinations(cands, width):
+            # A key made only of dates and times identifies WHEN, not WHAT: a signup_date unique
+            # in 386 rows is chance, not the rider's identity (2026-10-20). Dates stay allowed
+            # as a PART beside an identifier, e.g. (order_id, order_date).
+            if all(_is_time(by_name.get(c)) for c in combo):
+                continue
             product = 1
             for c in combo:
                 product *= distincts.get(c) or 0
