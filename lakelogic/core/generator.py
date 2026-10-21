@@ -3476,6 +3476,10 @@ def _sql_rule_constraints(
     ``OR`` of two real conditions is skipped because neither side alone is required.
     """
     text = " ".join(str(sql or "").split())
+    # A quoted column name reads the same as a bare one (`"reason_code" IS NOT NULL`). Unquoted
+    # here, the rule was not understood at all, so VALID rows left a required key empty and a
+    # dedup key rule quarantined them (2026-10-20). Only identifiers: string literals use '...'.
+    text = re.sub(r'"([A-Za-z_][A-Za-z0-9_]*)"|`([A-Za-z_][A-Za-z0-9_]*)`', lambda m: m.group(1) or m.group(2), text)
     text = re.sub(
         rf"{_SQL_IDENT} BETWEEN {_SQL_NUM} AND {_SQL_NUM}", r"\1 >= \2 AND \1 <= \3", text, flags=re.IGNORECASE
     )
@@ -7809,8 +7813,17 @@ class DataGenerator:
             fk = field.get("foreign_key")  # dict with keys: contract, column (+ severity)
             if fk and isinstance(fk, dict):
                 if fk_pools and fname in fk_pools:
-                    # Caller provided a real pool from the reference table
-                    entry["accepted_values"] = fk_pools[fname]
+                    # Caller provided a real pool from the reference table. A VALID value must
+                    # satisfy the column's own allowed values too, so the pool is narrowed to
+                    # them; with no overlap the allowed values win, so the row passes its rule.
+                    # The pool used to replace them outright: trips took every generated city's
+                    # code, and `city_code IN ('BER', …)` quarantined ~146 good rows per table.
+                    allowed = entry.get("accepted_values")
+                    pool = list(fk_pools[fname])
+                    if allowed:
+                        allowed_set = {str(v) for v in allowed}
+                        pool = [v for v in pool if str(v) in allowed_set] or list(allowed)
+                    entry["accepted_values"] = pool
                     entry["_fk_contract"] = fk.get("contract")
                     entry["_fk_column"] = fk.get("column")
                 elif "accepted_values" not in entry:
@@ -7945,7 +7958,15 @@ class DataGenerator:
                     col = field_names.get(col.lower(), col)
                     entry = result.setdefault(col, {})
                     if key == "accepted_values":
-                        entry.setdefault("accepted_values", list(value))
+                        if entry.get("_fk_contract") or entry.get("_fk_catch_all"):
+                            # The list so far is a foreign-key POOL, not the column's rule: keep
+                            # only pool values the rule allows (or the rule's own, with no
+                            # overlap), so a valid row passes `col IN (...)`.
+                            allowed_set = {str(v) for v in value}
+                            pool = [v for v in entry.get("accepted_values") or [] if str(v) in allowed_set]
+                            entry["accepted_values"] = pool or list(value)
+                        else:
+                            entry.setdefault("accepted_values", list(value))
                     elif key == "not_null":
                         entry["not_null"] = True
                     else:
