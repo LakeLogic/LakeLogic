@@ -67,7 +67,9 @@ def _is_time(col: Optional[Dict[str, Any]]) -> bool:
     """A date or time — by type, or by name when the table stores everything as text (bronze)."""
     if not col:
         return False
-    return pf.is_temporal_type(str(col.get("type") or "").upper()) or bool(_TIME_NAME.search(str(col.get("name") or "")))
+    return pf.is_temporal_type(str(col.get("type") or "").upper()) or bool(
+        _TIME_NAME.search(str(col.get("name") or ""))
+    )
 
 
 def candidates(columns: Sequence[Dict[str, Any]], distincts: Dict[str, Optional[int]], rows: int) -> List[str]:

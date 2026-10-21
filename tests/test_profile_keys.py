@@ -116,10 +116,16 @@ def test_a_date_alone_is_never_the_key_even_when_unique():
     import duckdb
     from lakelogic.core import profile_findings as pf
     from lakelogic.core.profile_keys import discover_key
+
     con = duckdb.connect()
-    con.execute("CREATE TABLE t AS SELECT * FROM (VALUES ('r1','2026-10-01T01:00:00Z'),('r1','2026-10-02T01:00:00Z'),"
-                "('r2','2026-10-03T01:00:00Z')) v(rider_id, signup_date)")
-    cols = [{"name": "rider_id", "type": "VARCHAR", "null_count": 0}, {"name": "signup_date", "type": "VARCHAR", "null_count": 0}]
+    con.execute(
+        "CREATE TABLE t AS SELECT * FROM (VALUES ('r1','2026-10-01T01:00:00Z'),('r1','2026-10-02T01:00:00Z'),"
+        "('r2','2026-10-03T01:00:00Z')) v(rider_id, signup_date)"
+    )
+    cols = [
+        {"name": "rider_id", "type": "VARCHAR", "null_count": 0},
+        {"name": "signup_date", "type": "VARCHAR", "null_count": 0},
+    ]
     rel = pf.Relation("t", lambda n: '"' + n + '"', lambda s, k: con.execute(s).fetchmany(k))
     found = discover_key(rel, cols, {"rider_id": 2, "signup_date": 3}, 3)
     assert found["columns"] != ["signup_date"]

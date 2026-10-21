@@ -148,8 +148,13 @@ def _dates_in_text(c: Dict[str, Any]) -> bool:
     in date order, so MIN/MAX are the earliest/latest. Sensitive columns (a date of birth)
     stay hidden."""
     lo, hi = c.get("min"), c.get("max")
-    return (not c.get("sensitive") and lo is not None and hi is not None
-            and bool(_ISO_DATE_TEXT.match(str(lo).strip())) and bool(_ISO_DATE_TEXT.match(str(hi).strip())))
+    return (
+        not c.get("sensitive")
+        and lo is not None
+        and hi is not None
+        and bool(_ISO_DATE_TEXT.match(str(lo).strip()))
+        and bool(_ISO_DATE_TEXT.match(str(hi).strip()))
+    )
 
 
 def hide_text_ranges(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -624,9 +629,10 @@ def findings_for(
                     "Check the rule first: these look like numbers, so a range may fit better than a "
                     "list. Then decide whether the values are valid: if so, change the rule; if not, "
                     "fix them at the source or map them in the pipeline."
-                    if all(_as_number(v) is not None for v in a["accepted"]) else
-                    "Decide whether the new values are valid. If they are, add them to accepted_values; "
-                    "if not, fix them at the source or map them in the pipeline."),
+                    if all(_as_number(v) is not None for v in a["accepted"])
+                    else "Decide whether the new values are valid. If they are, add them to accepted_values; "
+                    "if not, fix them at the source or map them in the pipeline."
+                ),
                 verify=f"Profile again: rows outside accepted values for {a['column']} should be 0.",
             )
         )
