@@ -342,7 +342,7 @@ def _extract_unstructured(
         from unstructured.partition.text import partition_text
     except ImportError:
         raise ImportError(
-            "unstructured is required for provider='unstructured'. Install with: pip install unstructured"
+            "unstructured is required for provider='unstructured' (Python 3.11+). Install with: pip install 'lakelogic[extraction]'"
         )
 
     start = time.perf_counter()
@@ -499,6 +499,44 @@ def _extract_pdfplumber(
     return rows
 
 
+#: Providers that read a FILE path rather than a text column — one list, used by the processor
+#: wherever it routes rows to file extraction (2026-10-23; it kept four copies).
+FILE_PROVIDERS = frozenset({"pdfplumber", "rapidocr", "easyocr"})
+
+
+def _extract_rapidocr(
+    file_path: str,
+    config: ExtractionConfig,
+) -> List[Dict[str, Any]]:
+    """
+    Extract text from an image with RapidOCR (ONNX Runtime; no PyTorch) — the OCR that
+    ``lakelogic[documents]`` installs and ``core.text_extraction`` uses, so a pipeline and
+    ``extract_text`` read an image the same way. Same row shape as ``easyocr``.
+    """
+    from lakelogic.core.text_extraction import _rapidocr
+
+    start = time.perf_counter()
+    result, _ = _rapidocr()(file_path)
+    lines = [r for r in (result or []) if len(r) > 2 and r[1]]
+    ocr_text = "\n".join(r[1] for r in lines)
+
+    extracted: Dict[str, Any] = {}
+    for field in config.output_schema:
+        task = (field.extraction_task or "all").lower()
+        if task == "lines":
+            extracted[field.name] = [r[1] for r in lines]
+        elif task == "confidence":
+            extracted[field.name] = [round(float(r[2]), 3) for r in lines]
+        else:
+            extracted[field.name] = ocr_text
+
+    extracted["_lakelogic_llm_model"] = "rapidocr"
+    extracted["_lakelogic_llm_provider"] = "rapidocr"
+    extracted["_lakelogic_llm_latency_ms"] = int((time.perf_counter() - start) * 1000)
+    extracted["_lakelogic_llm_cost_usd"] = 0.0
+    return [extracted]
+
+
 def _extract_easyocr(
     file_path: str,
     config: ExtractionConfig,
@@ -513,7 +551,8 @@ def _extract_easyocr(
     except ImportError as e:
         if "easyocr" in str(e):
             raise ImportError(
-                "easyocr is required for provider='easyocr'. Install with: pip install lakelogic[extraction-ocr]"
+                "easyocr is required for provider='easyocr' (it brings PyTorch). Install with: "
+                "pip install easyocr — or use provider='rapidocr' (pip install 'lakelogic[documents]')"
             ) from e
         raise e
 
@@ -847,13 +886,19 @@ def _score_confidence(
 
 def _preprocess_pdf(file_path: str, config: Dict[str, Any]) -> str:
     """Extract text from a PDF file using OCR or text extraction."""
-    engine = config.get("engine", "easyocr")
+    engine = config.get("engine", "rapidocr")
+
+    if engine == "rapidocr":
+        # The shared reader: pdfplumber's text layer, RapidOCR for scanned pages.
+        from lakelogic.core.text_extraction import extract_text
+
+        return extract_text(file_path).as_plain_text()
 
     if engine == "easyocr":
         try:
             import easyocr
         except ImportError:
-            raise ImportError("easyocr is required for PDF OCR. Install with: pip install lakelogic[ocr]")
+            raise ImportError("easyocr is required for engine='easyocr' (PyTorch). Install with: pip install easyocr")
         reader = easyocr.Reader([config.get("language", "en")])
         results = reader.readtext(file_path)
         return " ".join([text for _, text, _ in results])
@@ -1032,7 +1077,7 @@ def extract_row(
         extracted = _extract_spacy(config, prompt, config.system_prompt)
     elif provider == "local":
         extracted = _extract_local(config, prompt, config.system_prompt)
-    elif provider in ("pdfplumber", "easyocr"):
+    elif provider in FILE_PROVIDERS:
         # File-based providers read a PATH, not free text. Using the rendered
         # `prompt` here meant a row from a binary-file source (which has no
         # text column) yielded '' and every file "extracted" nothing while the
@@ -1050,7 +1095,7 @@ def extract_row(
         raise ValueError(
             f"Unknown extraction provider: {provider!r}. "
             f"Supported: openai, anthropic, azure_openai, google, local, "
-            f"regex, unstructured, spacy, pdfplumber, easyocr"
+            f"regex, unstructured, spacy, pdfplumber, rapidocr, easyocr"
         )
 
     # Step 4: Score confidence
@@ -1113,13 +1158,15 @@ def extract_file(
 
     if provider == "pdfplumber":
         return _extract_pdfplumber(file_path, config)
+    elif provider == "rapidocr":
+        return _extract_rapidocr(file_path, config)
     elif provider == "easyocr":
         return _extract_easyocr(file_path, config)
     else:
         raise ValueError(
             f"extract_file does not support provider={provider!r}. "
             f"Use extract_row() for text-based providers, or use "
-            f"provider='pdfplumber' (PDFs) or 'easyocr' (images)."
+            f"provider='pdfplumber' (PDFs), 'rapidocr' or 'easyocr' (images)."
         )
 
 
