@@ -302,4 +302,11 @@ def extract_metadata(pdf_path: Union[str, Path], contract: Union[str, Path, Dict
     return values
 
 
-__all__ = ["PROVIDER_FORMATS", "SUPPORTED_PROVIDERS", "extract_metadata", "generate_documents", "line_label", "supports_documents"]
+__all__ = [
+    "PROVIDER_FORMATS",
+    "SUPPORTED_PROVIDERS",
+    "extract_metadata",
+    "generate_documents",
+    "line_label",
+    "supports_documents",
+]

@@ -553,9 +553,15 @@ def _document_patterns(config: ExtractionConfig) -> Dict[str, str]:
 
 #: Characters OCR swaps for one another in printed labels ("c0st", "Tota1", "5tatus").
 _OCR_CONFUSABLE = {
-    "o": "[oO0]", "O": "[oO0]", "0": "[oO0]",
-    "l": "[lI1|]", "I": "[lI1|]", "1": "[lI1|]",
-    "s": "[sS5]", "S": "[sS5]", "5": "[sS5]",
+    "o": "[oO0]",
+    "O": "[oO0]",
+    "0": "[oO0]",
+    "l": "[lI1|]",
+    "I": "[lI1|]",
+    "1": "[lI1|]",
+    "s": "[sS5]",
+    "S": "[sS5]",
+    "5": "[sS5]",
 }
 
 
@@ -574,7 +580,7 @@ def _ocr_tolerant(pattern: str) -> Optional[str]:
     while i < len(label):
         ch = label[i]
         if ch == "\\" and i + 1 < len(label):  # keep escapes such as \s and \. as written
-            out.append(label[i:i + 2])
+            out.append(label[i : i + 2])
             i += 2
             continue
         if ch.isspace():

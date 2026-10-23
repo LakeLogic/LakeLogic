@@ -5,6 +5,7 @@ its raw OCR text in every field, and a Word file had no reader. Lakehouse Studio
 of them with `extract_text`, so the preview promised fields the pipeline could not produce.
 `document` reads every file with that same reader, then applies one pattern per field.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -50,10 +51,18 @@ def _image(path):
 
 def _config(**over):
     fields = [
-        {"name": "licence_number", "type": "string", "extraction_task": "metadata",
-         "extraction_examples": [PATTERNS["licence_number"]]},
-        {"name": "expiry_date", "type": "date", "extraction_task": "metadata",
-         "extraction_examples": [PATTERNS["expiry_date"]]},
+        {
+            "name": "licence_number",
+            "type": "string",
+            "extraction_task": "metadata",
+            "extraction_examples": [PATTERNS["licence_number"]],
+        },
+        {
+            "name": "expiry_date",
+            "type": "date",
+            "extraction_task": "metadata",
+            "extraction_examples": [PATTERNS["expiry_date"]],
+        },
     ]
     return ExtractionConfig(**{"provider": "document", "output_schema": fields, **over})
 
@@ -119,8 +128,11 @@ def test_a_capture_on_joined_ocr_text_stops_at_its_line(tmp_path, monkeypatch):
     monkeypatch.setattr(te, "extract_text", lambda path: _Read())
     f = tmp_path / "licence.png"
     f.write_bytes(b"")
-    cfg = ExtractionConfig(provider="document", output_schema=[{"name": "holder", "type": "string"}],
-                           patterns={"holder": r"Holder name:\s*(.+)"})
+    cfg = ExtractionConfig(
+        provider="document",
+        output_schema=[{"name": "holder", "type": "string"}],
+        patterns={"holder": r"Holder name:\s*(.+)"},
+    )
     [row] = extract_file(str(f), cfg)
     assert row["holder"] == "Jerry Meyers"
 
@@ -128,20 +140,30 @@ def test_a_capture_on_joined_ocr_text_stops_at_its_line(tmp_path, monkeypatch):
 def test_a_pattern_that_does_not_match_is_none_and_a_bad_one_fails(tmp_path):
     f = tmp_path / "licence.png"
     _image(f)
-    [row] = extract_file(str(f), ExtractionConfig(
-        provider="document", output_schema=[{"name": "policy", "type": "string"}],
-        patterns={"policy": r"Policy:\s*(\S+)"}))
+    [row] = extract_file(
+        str(f),
+        ExtractionConfig(
+            provider="document",
+            output_schema=[{"name": "policy", "type": "string"}],
+            patterns={"policy": r"Policy:\s*(\S+)"},
+        ),
+    )
     assert row["policy"] is None
     with pytest.raises(ValueError, match="not a valid regex"):
-        extract_file(str(f), ExtractionConfig(
-            provider="document", output_schema=[{"name": "x", "type": "string"}], patterns={"x": "("}))
+        extract_file(
+            str(f),
+            ExtractionConfig(provider="document", output_schema=[{"name": "x", "type": "string"}], patterns={"x": "("}),
+        )
 
 
-@pytest.mark.parametrize("fmt, path, ext", [
-    ("docx", "landing/incidents/*.docx", ".docx"),
-    ("image", "landing/receipts/*.png", ".png"),
-    ("pdf", "landing/invoices/*.pdf", ".pdf"),
-])
+@pytest.mark.parametrize(
+    "fmt, path, ext",
+    [
+        ("docx", "landing/incidents/*.docx", ".docx"),
+        ("image", "landing/receipts/*.png", ".png"),
+        ("pdf", "landing/invoices/*.pdf", ".pdf"),
+    ],
+)
 def test_synthetic_documents_for_a_document_contract_read_back(tmp_path, fmt, path, ext):
     """The Test stage's fake documents: written in the contract's own format and read back by
     the provider the deployed pipeline will use."""
@@ -150,10 +172,16 @@ def test_synthetic_documents_for_a_document_contract_read_back(tmp_path, fmt, pa
         "info": {"title": "Driving licences"},
         "source": {"type": "landing", "path": path, "format": fmt},
         "extraction": {"provider": "document"},
-        "model": {"fields": [
-            {"name": "licence_number", "type": "string", "extraction_task": "metadata",
-             "extraction_examples": [r"Licence No:\s*(\S+)"]},
-        ]},
+        "model": {
+            "fields": [
+                {
+                    "name": "licence_number",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"Licence No:\s*(\S+)"],
+                },
+            ]
+        },
     }
     assert supports_documents(contract)
     files = generate_documents(contract, tmp_path, rows=2, seed=3)
