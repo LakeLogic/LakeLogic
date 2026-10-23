@@ -108,8 +108,7 @@ def extract_text(source: PathLike, *, filename: Optional[str] = None) -> Extract
 def _done(text: str, extractor: str, **kw) -> ExtractedText:
     text = (text or "").strip()
     tables = kw.pop("tables", None) or []
-    return ExtractedText(text=text, extractor=extractor, tables=tables,
-                         no_text=not text and not tables, **kw)
+    return ExtractedText(text=text, extractor=extractor, tables=tables, no_text=not text and not tables, **kw)
 
 
 # ── plain text ──────────────────────────────────────────────────────────────
@@ -195,8 +194,10 @@ def _pdf(path: Path) -> ExtractedText:
             try:
                 ocr = _rapidocr()
             except ExtractionUnavailable:
-                note = (f"{len(blank_pages)} of {pages} page(s) have no text layer (scanned); "
-                        f"install OCR to read them: {INSTALL_HINT}")
+                note = (
+                    f"{len(blank_pages)} of {pages} page(s) have no text layer (scanned); "
+                    f"install OCR to read them: {INSTALL_HINT}"
+                )
             else:
                 read = 0
                 for i in blank_pages:
@@ -265,8 +266,11 @@ def _pptx(path: Path) -> ExtractedText:
     deck = Presentation(str(path))
     slides = []
     for n, slide in enumerate(deck.slides, 1):
-        lines = [s.text_frame.text.strip() for s in slide.shapes
-                 if getattr(s, "has_text_frame", False) and s.text_frame.text.strip()]
+        lines = [
+            s.text_frame.text.strip()
+            for s in slide.shapes
+            if getattr(s, "has_text_frame", False) and s.text_frame.text.strip()
+        ]
         if lines:
             slides.append(f"[Slide {n}]\n" + "\n".join(lines))
     return _done("\n\n".join(slides), "python-pptx", units=len(deck.slides))

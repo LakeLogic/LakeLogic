@@ -1,6 +1,7 @@
 """An append to a Parquet/CSV file in cloud storage reads the existing file by its URI, with the
 writer's credentials (2026-10-22: the second run of an append to an ADLS landing zone failed with
 `Object does not have a .read() method`)."""
+
 import polars as pl
 import pytest
 

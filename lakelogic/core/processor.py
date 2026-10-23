@@ -3131,11 +3131,7 @@ class DataProcessor:
         # "schema as contract" place) and leave extraction.output_schema empty, the
         # spark path previously skipped the mirror → pdfplumber returned empty rows
         # for every field → 100% silent quarantine.
-        if (
-            _early_ext_cfg
-            and _early_ext_prov in FILE_PROVIDERS
-            and not getattr(_early_ext_cfg, "output_schema", None)
-        ):
+        if _early_ext_cfg and _early_ext_prov in FILE_PROVIDERS and not getattr(_early_ext_cfg, "output_schema", None):
             _early_model = getattr(self.contract, "model", None)
             _early_model_fields = getattr(_early_model, "fields", None) if _early_model else None
             if _early_model_fields:

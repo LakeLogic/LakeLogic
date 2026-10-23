@@ -4,6 +4,7 @@ Each test builds the document with the library a user's tool would (reportlab, P
 python-docx, python-pptx, openpyxl), reads it back with extract_text, and checks the CONTENT,
 not just that something came back.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -53,8 +54,11 @@ def test_binary_pretending_to_be_text_is_refused(tmp_path):
 
 def test_html_drops_scripts_and_styles(tmp_path):
     f = tmp_path / "p.html"
-    f.write_text(f"<html><head><style>x{{}}</style></head><body><h1>Title</h1><script>evil()</script>"
-                 f"<p>Code {CODE}</p></body></html>", encoding="utf-8")
+    f.write_text(
+        f"<html><head><style>x{{}}</style></head><body><h1>Title</h1><script>evil()</script>"
+        f"<p>Code {CODE}</p></body></html>",
+        encoding="utf-8",
+    )
     r = extract_text(f)
     assert CODE in r.text and "evil" not in r.text and "Title" in r.text
 

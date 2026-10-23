@@ -4,6 +4,7 @@ OLC validates a recipe's shape; this proves Core accepts it too, so a recipe an 
 run. Recipes come from the installed `olc` bundle, or from a sibling open-lakehouse-contract
 checkout while they are new (OLC_RECIPES_DIR overrides both).
 """
+
 from __future__ import annotations
 
 import os
