@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import warnings
+from lakelogic.engines.llm import FILE_PROVIDERS
 from typing import Any, Tuple, Union, Dict, Optional, List, Sequence
 from pathlib import Path
 from datetime import datetime, timezone
@@ -223,6 +224,23 @@ class ValidationResult:
 
     def __repr__(self):
         return f"ValidationResult(good={self.good_count}, bad={self.bad_count})"
+
+
+def _whole_number(value, name: str):
+    """A database read option that counts something (``fetch_size``, ``partition_num``) as an int.
+    Text holding a whole number is accepted; anything else is refused by name."""
+    if value is None or isinstance(value, bool):
+        return None if value is None else _refuse_count(name, value)
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    return _refuse_count(name, value)
+
+
+def _refuse_count(name: str, value):
+    raise ValueError(f"source.options.{name} must be a whole number of rows or slices, not {value!r}")
 
 
 def _sqlalchemy_uri_to_jdbc(uri: str) -> dict:
@@ -3115,7 +3133,7 @@ class DataProcessor:
         # for every field → 100% silent quarantine.
         if (
             _early_ext_cfg
-            and _early_ext_prov in {"pdfplumber", "easyocr"}
+            and _early_ext_prov in FILE_PROVIDERS
             and not getattr(_early_ext_cfg, "output_schema", None)
         ):
             _early_model = getattr(self.contract, "model", None)
@@ -3129,10 +3147,7 @@ class DataProcessor:
                     )
                 except Exception as _early_mirror_exc:  # pragma: no cover - defensive
                     logger.warning(f"Could not mirror model.fields into extraction.output_schema: {_early_mirror_exc}")
-        _is_non_tabular = _early_fmt in {"pdf", "image", "pptx", "docx", "html"} or _early_ext_prov in {
-            "pdfplumber",
-            "easyocr",
-        }
+        _is_non_tabular = _early_fmt in {"pdf", "image", "pptx", "docx", "html"} or _early_ext_prov in FILE_PROVIDERS
         if _is_non_tabular and not file_paths:
             _msg = f"0 {_early_fmt or 'extraction-source'} files matched glob: {path}"
             _empty_result = self._handle_empty_source(path, _msg)
@@ -3193,7 +3208,7 @@ class DataProcessor:
                         # extraction.output_schema, mirror them so the engine
                         # sees the metadata mapping. Without this, every
                         # extracted PDF row is empty {} → 100% quarantine.
-                        if _ext_cfg and _ext_prov in {"pdfplumber", "easyocr"}:
+                        if _ext_cfg and _ext_prov in FILE_PROVIDERS:
                             if not getattr(_ext_cfg, "output_schema", None):
                                 _model = getattr(self.contract, "model", None)
                                 _model_fields = getattr(_model, "fields", None) if _model else None
@@ -4146,7 +4161,7 @@ class DataProcessor:
                         # and build a Spark DataFrame from the resulting rows.
                         _ext_cfg = getattr(self.contract, "extraction", None)
                         _ext_prov = str(getattr(_ext_cfg, "provider", "") or "").lower()
-                        if _ext_cfg and _ext_prov in {"pdfplumber", "easyocr"} and file_paths:
+                        if _ext_cfg and _ext_prov in FILE_PROVIDERS and file_paths:
                             try:
                                 from ..engines.llm import extract_file as _extract_file
                             except Exception as _imp_err:
@@ -7402,8 +7417,10 @@ class DataProcessor:
         if str(uri).lower().startswith(("mongodb://", "mongodb+srv://")):
             return self._run_mongodb_source(uri, dataset, options)
         partition_column = options.get("partition_column")
-        partition_num = options.get("partition_num")
-        fetch_size = options.get("fetch_size")
+        # Whole numbers written as text ("20", as a quoted YAML value or a filled-in parameter) are
+        # numbers: the Polars chunk loop compared the text with an int and failed (2026-10-22).
+        partition_num = _whole_number(options.get("partition_num"), "partition_num")
+        fetch_size = _whole_number(options.get("fetch_size"), "fetch_size")
 
         # ── Column projection from contract model ────────────
         # Push column selection down to the database query so we only

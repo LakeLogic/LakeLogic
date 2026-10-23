@@ -1187,13 +1187,19 @@ def _append_without_pandas(df: Any, target_file: Path, output_format: str) -> in
         raise ValueError("Append without pandas requires a Polars DataFrame.")
 
     if _holds_data(target_file):
+        # A cloud file (ADLS/S3/GCS) is read by its URI with the same credentials the writer uses.
+        # Reading the URIPath object with none failed every second run of an append to a landing
+        # zone (`Object does not have a .read() method`, found 2026-10-22 on ADLS).
+        remote = _is_remote_path(target_file)
+        read_from = str(target_file) if remote else target_file
+        read_opts = {"storage_options": _build_storage_options(None)} if remote else {}
         if output_format == "csv":
-            existing = pl.read_csv(target_file)
+            existing = pl.read_csv(read_from, **read_opts)
             combined = pl.concat([existing, df], how="vertical")
             _write_frame(combined, target_file, output_format)
             return int(combined.height)
         elif output_format == "parquet":
-            existing = pl.read_parquet(target_file)
+            existing = pl.read_parquet(read_from, **read_opts)
             combined = pl.concat([existing, df], how="vertical")
             _write_frame(combined, target_file, output_format)
             return int(combined.height)
