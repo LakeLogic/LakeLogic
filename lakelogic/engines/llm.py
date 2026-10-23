@@ -616,12 +616,27 @@ def _extract_document(
     flat = " ".join(text.split())
     patterns = _document_patterns(config)
 
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+    def _within_a_line(value: str) -> str:
+        """A capture made on the JOINED text, cut back to the line it starts on: `(.+)` there
+        ran past the value into every line after it ("Jerry Meyers PHOTO Date of birth")."""
+        for ln in lines:
+            if value.startswith(ln):
+                return ln
+            if ln.startswith(value):
+                return value
+        return value
+
     extracted: Dict[str, Any] = {}
     for field in config.output_schema:
         pattern = patterns.get(field.name)
         if pattern:
+            joined = False
             try:
-                m = _re.search(pattern, text, _re.MULTILINE) or _re.search(pattern, flat)
+                m = _re.search(pattern, text, _re.MULTILINE)
+                if m is None:
+                    m, joined = _re.search(pattern, flat), True
             except _re.error as exc:  # a bad pattern is a contract error, never a silent None
                 raise ValueError(f"extraction pattern for '{field.name}' is not a valid regex: {exc}") from exc
             if m is None:
@@ -630,10 +645,11 @@ def _extract_document(
                 tolerant = _ocr_tolerant(pattern)
                 if tolerant:
                     try:
-                        m = _re.search(tolerant, flat)
+                        m, joined = _re.search(tolerant, flat), True
                     except _re.error:
                         m = None
-            extracted[field.name] = ((m.group(1) if m.groups() else m.group(0)).strip() if m else None)
+            value = (m.group(1) if m.groups() else m.group(0)).strip() if m else None
+            extracted[field.name] = _within_a_line(value) if (value and joined) else value
         elif (field.extraction_task or "all").lower() in ("all", "text"):
             extracted[field.name] = text
         else:

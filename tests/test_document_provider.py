@@ -107,6 +107,24 @@ def test_an_ocr_misread_label_is_still_found_and_the_value_is_untouched():
     assert _ocr_tolerant(r"(\d+)") is None  # no label to loosen
 
 
+def test_a_capture_on_joined_ocr_text_stops_at_its_line(tmp_path, monkeypatch):
+    """OCR put the name on its own line; matching the joined text, `(.+)` took
+    "Jerry Meyers PHOTO Date of birth" (2026-10-23). The value is cut back to its line."""
+    import lakelogic.core.text_extraction as te
+
+    class _Read:
+        def as_plain_text(self):
+            return "DRIVING LICENCE\nHolder\nname:\nJerry Meyers\nPHOTO\nDate of birth\n05/06/1975"
+
+    monkeypatch.setattr(te, "extract_text", lambda path: _Read())
+    f = tmp_path / "licence.png"
+    f.write_bytes(b"")
+    cfg = ExtractionConfig(provider="document", output_schema=[{"name": "holder", "type": "string"}],
+                           patterns={"holder": r"Holder name:\s*(.+)"})
+    [row] = extract_file(str(f), cfg)
+    assert row["holder"] == "Jerry Meyers"
+
+
 def test_a_pattern_that_does_not_match_is_none_and_a_bad_one_fails(tmp_path):
     f = tmp_path / "licence.png"
     _image(f)
