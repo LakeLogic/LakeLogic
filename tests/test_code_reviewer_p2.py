@@ -209,8 +209,14 @@ def test_review_batch_skips_when_estimated_tokens_exceed_budget(tmp_path: Path) 
     assert usage["total"] == 0
 
 
-def test_review_batch_returns_empty_when_sdk_missing(tmp_path: Path) -> None:
-    """When instructor isn't installed, gracefully degrade (no crash)."""
+def test_review_batch_returns_empty_when_sdk_missing(tmp_path: Path, monkeypatch) -> None:
+    """When instructor isn't installed, gracefully degrade (no crash).
+
+    The missing package is simulated: relying on it not being installed made this test call a
+    real model wherever the LLM extras were present."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "instructor", None)  # `import instructor` now raises ImportError
     from lakelogic.ai.llm_client import review_batch
 
     f = tmp_path / "x.py"
