@@ -509,22 +509,46 @@ def _coerce_declared_temporal(table, contract, existing_schema=None):
             pa.types.is_string(existing[field.name]) or pa.types.is_large_string(existing[field.name])
         ):
             continue
-        import pandas as pd
-
-        raw = table.column(i).to_pandas()
-        parsed = pd.to_datetime(raw, utc=True, errors="coerce", format="mixed")
-        if int(parsed.isna().sum()) != int(raw.isna().sum()):
+        # Parsed one value at a time with the standard library, NOT pandas: pandas holds
+        # nanoseconds, which end in 2262, so the open-ended "9999-12-31" every current SCD2
+        # row carries came back NaT and the whole column was left as text (2026-10-23).
+        parsed = [_parse_iso_temporal(v) for v in table.column(i).to_pylist()]
+        raw = table.column(i).to_pylist()
+        if sum(p is None for p in parsed) != sum(v is None for v in raw):
             logger.warning(
                 f"Column '{field.name}' is declared {target} but holds values that do not parse; left as text"
             )
             continue
-        parsed = parsed.dt.tz_localize(None)
         if pa.types.is_date32(target):
-            col = pa.array(parsed.dt.date, type=pa.date32())
+            col = pa.array([p.date() if p else None for p in parsed], type=pa.date32())
         else:
             col = pa.array(parsed, type=target)
         table = table.set_column(i, pa.field(field.name, col.type), col)
     return table
+
+
+def _parse_iso_temporal(value):
+    """An ISO date or timestamp as a naive UTC ``datetime`` (any year), or None.
+
+    Accepts "1900-01-01", "9999-12-31", "2026-10-23 08:00:00", "2026-10-23T08:00:00+00:00"
+    and a trailing "Z". A value with an offset is converted to UTC; None stays None.
+    """
+    from datetime import datetime, timezone
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def _sanitize_arrow_nulls(table):

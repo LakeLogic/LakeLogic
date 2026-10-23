@@ -110,8 +110,9 @@ def test_a_table_storing_real_timestamps_is_left_alone():
     """Normalising to strings must not be imposed on a table that already stores datetimes —
     that would be a schema change, not a fix."""
     existing = _existing_with_string_timestamps()
-    existing["effective_from"] = pd.to_datetime(existing["effective_from"])
-    existing["effective_to"] = pd.to_datetime(existing["effective_to"])
+    # Microseconds, as Delta stores them: nanoseconds end in 2262, before the open-ended 9999-12-31.
+    existing["effective_from"] = existing["effective_from"].astype("datetime64[us]")
+    existing["effective_to"] = existing["effective_to"].astype("datetime64[us]")
 
     merged = _scd2_frames(existing, _incoming_with_a_change(), ["driver_id"], _cfg())
     assert not any(isinstance(v, str) for v in merged["effective_from"].dropna())
