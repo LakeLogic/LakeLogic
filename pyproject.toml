@@ -53,7 +53,9 @@ dependencies = [
     "Jinja2>=3.1.0",
     "sqlglot>=20.0.0",
     "polars>=0.20.0,<2",
-    "duckdb>=0.9.0",
+    # <2 (2026-10-23): DuckDB 2.0 removed relation.fetchone(), which Core calls in 43 places;
+    # a fresh install got 2.0 and every DuckDB run failed. Moving to DuckDB 2 is its own task.
+    "duckdb>=0.9.0,<2",
     "typer>=0.9.0",
     # >=1.0.0, not >=0.15.0. Three reasons, all observed rather than assumed:
     #  - polars declares `deltalake>=1.0.0` for its own delta extra, so the old floor
@@ -80,7 +82,7 @@ dependencies = [
     # <0.16.0 (2026-09-21): 0.15.0 adds `materialization.scd1` — the key 1.66.1's unknown-member
     # fix reads. Leaving the cap at <0.15 made this release uninstallable beside lakelogic-saas,
     # which needs 0.15 to validate the scd1 blocks it generates. Suite green against 0.15.0.
-    "open-lakehouse-contract[models]>=0.24.0,<0.27.0",  # tested against OLC 0.24-0.26 (typed source.options, registry layer roots, conformance corpus, compliance.retention)
+    "open-lakehouse-contract[models]>=0.24.0,<0.28.0",  # tested against OLC 0.24-0.27 (typed source.options, registry layer roots, conformance corpus, compliance.retention, recipes)
     # A CONSTRAINT, not a feature: `rich` is transitive (via typer), and rich 15
     # is incompatible with pyiceberg (<15), which lakelogic itself imports for
     # Iceberg catalogs in core/materialization, core/quarantine and core/run_log.
@@ -98,7 +100,7 @@ cli = [
 # Engine extras — install what you need: pip install lakelogic[engines]
 engines = [
     "polars>=0.20.0,<2",
-    "duckdb>=0.9.0",
+    "duckdb>=0.9.0,<2",
     "pyarrow>=23.0.1",
     "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
@@ -134,7 +136,7 @@ delta = [
     "google-cloud-storage>=2.10.0",  # GCP GCS access
 ]
 polars = ["polars>=0.20.0,<2", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
-duckdb = ["duckdb>=0.9.0", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
+duckdb = ["duckdb>=0.9.0,<2", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
 spark = ["pyspark>=3.3.0"]
 # SQLAlchemy alone — every `source.type: database` contract needs it, whatever the
 # driver, because the batched (`fetch_size`) path builds an SQLAlchemy engine and hands
@@ -227,7 +229,7 @@ dev = [
 all = [
     "typer>=0.9.0",
     "polars>=0.20.0,<2",
-    "duckdb>=0.9.0",
+    "duckdb>=0.9.0,<2",
     "pyarrow>=23.0.1",
     "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
@@ -283,12 +285,23 @@ nlp = [
 pdf = [
     "pdfplumber>=0.10.0",
 ]
+# Documents — text from PDF (incl. scanned), images, Word, PowerPoint and Excel, via
+# `lakelogic.extract_text`. All pip-only: no PyTorch, no LibreOffice, no Tesseract.
+documents = [
+    "pdfplumber>=0.10.0",
+    "rapidocr-onnxruntime>=1.4.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=1.0.0",
+    "openpyxl>=3.1.0",
+]
 # Extraction — full unstructured document processing
 # For images/PDFs, also install system deps: tesseract-ocr, poppler-utils
 # For MS Office docs: libreoffice
 # See: https://docs.unstructured.io/open-source/installation/full-installation
 extraction = [
-    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.12.0",
+    # Python 3.11+ only: the fixes for SSRF (Dependabot #93) and stored XSS (#94) are in
+    # 0.24.1, which does not support 3.10. On 3.10 this extra installs without unstructured.
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1; python_version >= '3.11'",
     "pypandoc-binary>=1.13",
     "spacy>=3.7.0",
     "textblob>=0.18.0",
@@ -296,7 +309,9 @@ extraction = [
 # Extraction + image/PDF OCR — pure Python, no system deps, no torch
 # rapidocr-onnxruntime handles images via ONNX Runtime; pdfplumber handles PDFs
 extraction-ocr = [
-    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.12.0",
+    # Python 3.11+ only: the fixes for SSRF (Dependabot #93) and stored XSS (#94) are in
+    # 0.24.1, which does not support 3.10. On 3.10 this extra installs without unstructured.
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1; python_version >= '3.11'",
     "rapidocr-onnxruntime>=1.4.0",
     "pdfplumber>=0.10.0",
     "pypandoc-binary>=1.13",
@@ -378,10 +393,9 @@ constraint-dependencies = [
     "pillow>=12.1.1; python_version >= '3.10'",  # CVE-2026-25990 PSD out-of-bounds write, FITS GZIP decompression bomb
     "orjson>=3.11.6; python_version >= '3.10'",  # CVE-2025-67221 recursion DoS on deeply nested JSON
     "pytest>=9.0.3; python_version >= '3.10'",  # CVE-2025-71176 predictable tmpdir symlink attack
-    "unstructured>=0.18.18; python_version == '3.10'",  # CVE-2025-64712 MSG attachment path traversal
-    # SSRF in URL-based partitioning (Dependabot #93) is fixed in 0.24.0, which needs Python 3.11+.
-    # Python 3.10 cannot get the fix; it closes when 3.10 support is dropped.
-    "unstructured>=0.24.0; python_version >= '3.11'",
+    # SSRF (#93, fixed 0.24.0) and stored XSS (#94, fixed 0.24.1). The fixes need Python 3.11+,
+    # so the extras no longer install unstructured on 3.10 at all (see `extraction`).
+    "unstructured>=0.24.1; python_version >= '3.11'",
 ]
 
 [dependency-groups]
