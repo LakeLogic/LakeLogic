@@ -501,7 +501,7 @@ def _extract_pdfplumber(
 
 #: Providers that read a FILE path rather than a text column — one list, used by the processor
 #: wherever it routes rows to file extraction (2026-10-23; it kept four copies).
-FILE_PROVIDERS = frozenset({"pdfplumber", "rapidocr", "easyocr"})
+FILE_PROVIDERS = frozenset({"pdfplumber", "rapidocr", "easyocr", "document"})
 
 
 def _extract_rapidocr(
@@ -532,6 +532,115 @@ def _extract_rapidocr(
 
     extracted["_lakelogic_llm_model"] = "rapidocr"
     extracted["_lakelogic_llm_provider"] = "rapidocr"
+    extracted["_lakelogic_llm_latency_ms"] = int((time.perf_counter() - start) * 1000)
+    extracted["_lakelogic_llm_cost_usd"] = 0.0
+    return [extracted]
+
+
+def _document_patterns(config: ExtractionConfig) -> Dict[str, str]:
+    """Each output field's pattern: ``extraction.patterns[field]``, else a ``metadata`` field's
+    first ``extraction_examples`` entry — the two places a contract already writes one."""
+    patterns = dict(getattr(config, "patterns", None) or {})
+    for field in config.output_schema:
+        if field.name in patterns:
+            continue
+        task = (field.extraction_task or "").lower()
+        examples = list(field.extraction_examples or [])
+        if task == "metadata" and examples:
+            patterns[field.name] = str(examples[0])
+    return patterns
+
+
+#: Characters OCR swaps for one another in printed labels ("c0st", "Tota1", "5tatus").
+_OCR_CONFUSABLE = {
+    "o": "[oO0]", "O": "[oO0]", "0": "[oO0]",
+    "l": "[lI1|]", "I": "[lI1|]", "1": "[lI1|]",
+    "s": "[sS5]", "S": "[sS5]", "5": "[sS5]",
+}
+
+
+def _ocr_tolerant(pattern: str) -> Optional[str]:
+    """``pattern`` with its LABEL — the literal text before the first capture group — matching
+    the usual OCR letter/digit swaps and any spacing. The capture group and everything after it
+    are unchanged, so a value is never altered, only found. None when there is no plain label."""
+    import re as _re
+
+    m = _re.match(r"((?:\\.|[^\\(\[])*?)(\(.*)$", pattern, _re.DOTALL)
+    if not m or not m.group(1).strip():
+        return None
+    label, rest = m.group(1), m.group(2)
+    out = []
+    i = 0
+    while i < len(label):
+        ch = label[i]
+        if ch == "\\" and i + 1 < len(label):  # keep escapes such as \s and \. as written
+            out.append(label[i:i + 2])
+            i += 2
+            continue
+        if ch.isspace():
+            out.append(r"\s*")
+        elif ch in _OCR_CONFUSABLE:
+            out.append(_OCR_CONFUSABLE[ch])
+        elif ch.isalpha():
+            out.append(f"[{ch.lower()}{ch.upper()}]")
+        else:
+            # Already regex syntax (a quantifier after an escape, ":", "-"…): kept as written.
+            out.append(ch)
+        i += 1
+    return "".join(out) + rest
+
+
+def _extract_document(
+    file_path: str,
+    config: ExtractionConfig,
+) -> List[Dict[str, Any]]:
+    """
+    Structured fields from ANY document, offline: ``core.text_extraction.extract_text`` reads
+    the file (PDF with or without a text layer, image, Word, PowerPoint, Excel, text, email),
+    then each field's regex (group 1 is the value) is applied to that text.
+
+    The same reader Lakehouse Studio previews documents with, so a field Studio found in a
+    sample is found the same way by the deployed pipeline. Deterministic and free: no model,
+    no network. A field with no pattern and task ``all`` (or none) receives the whole text; a
+    pattern that does not match yields None, so the contract's rules decide what happens next.
+    One row per file.
+    """
+    import re as _re
+
+    from lakelogic.core.text_extraction import extract_text
+
+    start = time.perf_counter()
+    text = extract_text(file_path).as_plain_text()
+    # OCR returns each detected box on its own line ("Licence\nNo: RF-1"), so a pattern written
+    # for one line also gets the text with whitespace runs collapsed to single spaces.
+    flat = " ".join(text.split())
+    patterns = _document_patterns(config)
+
+    extracted: Dict[str, Any] = {}
+    for field in config.output_schema:
+        pattern = patterns.get(field.name)
+        if pattern:
+            try:
+                m = _re.search(pattern, text, _re.MULTILINE) or _re.search(pattern, flat)
+            except _re.error as exc:  # a bad pattern is a contract error, never a silent None
+                raise ValueError(f"extraction pattern for '{field.name}' is not a valid regex: {exc}") from exc
+            if m is None:
+                # A scanned or photographed label OCR misread ("Estimated c0st:"): retry with the
+                # label tolerant of letter/digit swaps; the value's own pattern is untouched.
+                tolerant = _ocr_tolerant(pattern)
+                if tolerant:
+                    try:
+                        m = _re.search(tolerant, flat)
+                    except _re.error:
+                        m = None
+            extracted[field.name] = ((m.group(1) if m.groups() else m.group(0)).strip() if m else None)
+        elif (field.extraction_task or "all").lower() in ("all", "text"):
+            extracted[field.name] = text
+        else:
+            extracted[field.name] = None
+
+    extracted["_lakelogic_llm_model"] = "document"
+    extracted["_lakelogic_llm_provider"] = "document"
     extracted["_lakelogic_llm_latency_ms"] = int((time.perf_counter() - start) * 1000)
     extracted["_lakelogic_llm_cost_usd"] = 0.0
     return [extracted]
@@ -950,7 +1059,16 @@ def _preprocess_image(file_path: str, config: Dict[str, Any]) -> str:
     return ""
 
 
+def _preprocess_document(file_path: str, config: Dict[str, Any]) -> str:
+    """Any document's text with the shared reader (Word, PowerPoint, Excel, PDF, image…)."""
+    from lakelogic.core.text_extraction import extract_text
+
+    return extract_text(file_path).as_plain_text()
+
+
 _PREPROCESSORS = {
+    "document": _preprocess_document,
+    "docx": _preprocess_document,
     "pdf": _preprocess_pdf,
     "audio": _preprocess_audio,
     "image": _preprocess_image,
@@ -1126,6 +1244,8 @@ def extract_file(
     row per table row in a PDF, or a single row with OCR text from an image.
 
     Supported providers:
+      - ``document``  — any document (PDF incl. scans, image, Word, PowerPoint, Excel) read by
+        ``extract_text``, one row per file, each field from its pattern
       - ``pdfplumber`` — PDF table extraction (one row per table row)
       - ``easyocr``   — Image OCR via PyTorch (one row with text)
 
@@ -1158,6 +1278,8 @@ def extract_file(
 
     if provider == "pdfplumber":
         return _extract_pdfplumber(file_path, config)
+    elif provider == "document":
+        return _extract_document(file_path, config)
     elif provider == "rapidocr":
         return _extract_rapidocr(file_path, config)
     elif provider == "easyocr":
@@ -1166,7 +1288,8 @@ def extract_file(
         raise ValueError(
             f"extract_file does not support provider={provider!r}. "
             f"Use extract_row() for text-based providers, or use "
-            f"provider='pdfplumber' (PDFs), 'rapidocr' or 'easyocr' (images)."
+            f"provider='document' (any document, offline), 'pdfplumber' (PDFs), "
+            f"'rapidocr' or 'easyocr' (images)."
         )
 
 

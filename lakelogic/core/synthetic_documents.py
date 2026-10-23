@@ -38,7 +38,11 @@ from typing import Any, Dict, List, Optional, Union
 import yaml
 
 #: Extraction providers whose fields are read by a regex over the document text.
-SUPPORTED_PROVIDERS = {"pdfplumber"}
+SUPPORTED_PROVIDERS = {"pdfplumber", "document"}
+#: The formats each provider reads, and so the files this writes for it. ``document`` reads any
+#: document through ``extract_text``: a Word file, an image (OCR) or a PDF (2026-10-23).
+PROVIDER_FORMATS = {"pdfplumber": {"pdf"}, "document": {"pdf", "docx", "image"}}
+_IMAGE_EXTS = {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"}
 
 _CAPTURE_GROUP = re.compile(r"(?<!\\)\((?!\?)")
 
@@ -55,11 +59,30 @@ def supports_documents(contract: Union[str, Path, Dict[str, Any]]) -> bool:
     doc = _load(contract)
     extraction = doc.get("extraction") or {}
     source = doc.get("source") or {}
-    return (
-        isinstance(extraction, dict)
-        and str(extraction.get("provider") or "").lower() in SUPPORTED_PROVIDERS
-        and str(source.get("format") or "").lower() == "pdf"
-    )
+    if not isinstance(extraction, dict) or not isinstance(source, dict):
+        return False
+    provider = str(extraction.get("provider") or "").lower()
+    return provider in SUPPORTED_PROVIDERS and _format_of(doc) in PROVIDER_FORMATS[provider]
+
+
+def _format_of(doc: Dict[str, Any]) -> str:
+    """``pdf`` / ``docx`` / ``image`` — from ``source.format``, else the path's extension."""
+    source = doc.get("source") or {}
+    fmt = str(source.get("format") or "").lower()
+    if not fmt:
+        fmt = str(source.get("path") or "").rsplit(".", 1)[-1].lower()
+    return "image" if fmt in _IMAGE_EXTS else fmt
+
+
+def _patterns(doc: Dict[str, Any]) -> Dict[str, str]:
+    """Each field's pattern: ``extraction.patterns``, else a metadata field's first example."""
+    out = dict(((doc.get("extraction") or {}).get("patterns")) or {})
+    for f in (doc.get("model") or {}).get("fields") or []:
+        if isinstance(f, dict) and f.get("name") and f["name"] not in out:
+            examples = f.get("extraction_examples") or []
+            if str(f.get("extraction_task") or "").lower() == "metadata" and examples:
+                out[f["name"]] = str(examples[0])
+    return out
 
 
 def line_label(pattern: str) -> Optional[str]:
@@ -130,34 +153,27 @@ def generate_documents(
     doc = _load(contract)
     if not supports_documents(doc):
         raise ValueError(
-            "generate_documents supports PDF sources extracted with "
-            f"{sorted(SUPPORTED_PROVIDERS)}; this contract is not one "
+            "generate_documents supports document sources extracted with "
+            f"{sorted(SUPPORTED_PROVIDERS)} (pdfplumber: PDF; document: PDF, Word, image); "
+            "this contract is not one "
             f"(extraction.provider={((doc.get('extraction') or {}).get('provider'))!r}, "
             f"source.format={((doc.get('source') or {}).get('format'))!r})"
         )
-    try:
-        from reportlab.lib.pagesizes import letter
-        from reportlab.pdfgen import canvas
-    except ImportError as exc:  # pragma: no cover - environment dependent
-        raise ImportError(
-            "reportlab is required to write synthetic documents: pip install lakelogic[synthetic]"
-        ) from exc
-
+    fmt = _format_of(doc)
     from lakelogic.core.generator import DataGenerator
 
     # The fields a document carries: those extracted by a pattern. Values are generated from the
     # contract's own names and types, with the extraction block removed (the generator refuses it).
+    patterns = _patterns(doc)
     fields = [
         f
         for f in (doc.get("model") or {}).get("fields") or []
-        if isinstance(f, dict)
-        and f.get("name")
-        and (f.get("extraction_examples") or [])
-        and str(f.get("extraction_task") or "").lower() == "metadata"
+        if isinstance(f, dict) and f.get("name") and f["name"] in patterns
     ]
     if not fields:
         raise ValueError(
-            "the contract declares no `extraction_task: metadata` field with an extraction_examples pattern"
+            "the contract declares no field with an extraction pattern "
+            "(`extraction.patterns`, or `extraction_task: metadata` with extraction_examples)"
         )
     value_contract = {
         "version": doc.get("version", "1.0.0"),
@@ -197,21 +213,76 @@ def generate_documents(
             value = _as_text(record.get(field["name"]), str(field.get("type") or "string").lower())
             if value is None:
                 continue
-            line = _render_line(str(field["extraction_examples"][0]), value)
+            line = _render_line(patterns[field["name"]], value)
             if line is not None:
                 lines.append(line)
-        path = out / f"{prefix}_{seed}_{index:04d}.pdf"
-        pdf = canvas.Canvas(str(path), pagesize=letter)
-        pdf.setFont("Helvetica-Bold", 14)
-        pdf.drawString(72, 740, f"{title} (Synthetic - Test Data)")
-        pdf.setFont("Helvetica", 12)
-        y = 710
-        for line in lines:
-            pdf.drawString(72, y, line)
-            y -= 20
-        pdf.save()
-        written.append(path)
+        stem = out / f"{prefix}_{seed}_{index:04d}"
+        written.append(_WRITERS[fmt](stem, f"{title} (Synthetic - Test Data)", lines))
     return written
+
+
+def _write_pdf(stem: Path, title: str, lines: List[str]) -> Path:
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise ImportError(
+            "reportlab is required to write synthetic documents: pip install lakelogic[synthetic]"
+        ) from exc
+    path = stem.with_suffix(".pdf")
+    pdf = canvas.Canvas(str(path), pagesize=letter)
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(72, 740, title)
+    pdf.setFont("Helvetica", 12)
+    y = 710
+    for line in lines:
+        pdf.drawString(72, y, line)
+        y -= 20
+    pdf.save()
+    return path
+
+
+def _write_docx(stem: Path, title: str, lines: List[str]) -> Path:
+    try:
+        import docx
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise ImportError("python-docx is required for Word documents: pip install 'lakelogic[documents]'") from exc
+    path = stem.with_suffix(".docx")
+    d = docx.Document()
+    d.add_heading(title, level=1)
+    for line in lines:
+        d.add_paragraph(line)
+    d.save(str(path))
+    return path
+
+
+def _write_image(stem: Path, title: str, lines: List[str]) -> Path:
+    """A clean, large-type PNG that OCR reads back: a stand-in for a photographed or scanned
+    document, so the Test stage proves the contract — not OCR on a poor scan."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise ImportError("Pillow is required for image documents: pip install 'lakelogic[documents]'") from exc
+
+    def _font(size: int):
+        for name in ("arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf"):
+            try:
+                return ImageFont.truetype(name, size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    rows = [title, *lines]
+    img = Image.new("RGB", (1400, 90 * len(rows) + 80), "white")
+    draw = ImageDraw.Draw(img)
+    for i, text in enumerate(rows):
+        draw.text((50, 40 + i * 90), text, fill="black", font=_font(44))
+    path = stem.with_suffix(".png")
+    img.save(path)
+    return path
+
+
+_WRITERS = {"pdf": _write_pdf, "docx": _write_docx, "image": _write_image}
 
 
 def extract_metadata(pdf_path: Union[str, Path], contract: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
@@ -231,4 +302,4 @@ def extract_metadata(pdf_path: Union[str, Path], contract: Union[str, Path, Dict
     return values
 
 
-__all__ = ["SUPPORTED_PROVIDERS", "extract_metadata", "generate_documents", "line_label", "supports_documents"]
+__all__ = ["PROVIDER_FORMATS", "SUPPORTED_PROVIDERS", "extract_metadata", "generate_documents", "line_label", "supports_documents"]

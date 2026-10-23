@@ -99,5 +99,5 @@ def test_the_same_seed_writes_the_same_documents(tmp_path):
 def test_an_llm_extraction_contract_is_refused_not_faked(tmp_path):
     llm = {**LICENCES, "extraction": {"provider": "openai"}}
     assert supports_documents(LICENCES) and not supports_documents(llm)
-    with pytest.raises(ValueError, match="supports PDF sources"):
+    with pytest.raises(ValueError, match="supports document sources"):
         generate_documents(llm, tmp_path)
