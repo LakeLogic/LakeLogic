@@ -44,7 +44,9 @@ def _contract(tmp_path, strategy):
 
 
 def _batch(city, day):
-    return pl.DataFrame({"driver_id": ["d1", "d2"], "city_code": [city, "MAN"], "updated_at": [datetime(2026, 9, day)] * 2})
+    return pl.DataFrame(
+        {"driver_id": ["d1", "d2"], "city_code": [city, "MAN"], "updated_at": [datetime(2026, 9, day)] * 2}
+    )
 
 
 def _rows(tmp_path):
