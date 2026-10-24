@@ -1335,7 +1335,7 @@ html {
    --------------------------------------------------------------------------- */
 @media screen and (min-width: 76.25em) {
   html {
-    font-size: 106.25%;
+    font-size: 112.5%; /* 18px: one point above the original 17px (2026-10-24) */
   }
 
   .md-grid {
@@ -1376,11 +1376,3 @@ html {
     margin-top: 1.5rem;
   }
 }
-
-/* ── Text 5% larger (2026-10-24) ───────────────────────────────────────────────────────────
-   The pages read best a little above the default size, so the root size is raised 5% at each of
-   Material's breakpoints (125% / 137.5% / 150%). Sizes are in rem, so everything scales
-   together, as zoom does. Same rule as the OLC and LakeLogic MCP docs. */
-html { font-size: 131.25%; }
-@media screen and (min-width: 100em) { html { font-size: 144.375%; } }
-@media screen and (min-width: 125em) { html { font-size: 157.5%; } }
