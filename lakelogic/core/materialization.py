@@ -5042,6 +5042,11 @@ def _configure_ducklake_cloud(con, *paths) -> None:
         )
 
 
+def _duck_type(con, column: str) -> str:
+    """DuckDB type of ``column`` in the registered ``_ll_merged`` relation."""
+    return {r[0]: r[1] for r in con.execute("DESCRIBE _ll_merged").fetchall()}[column]
+
+
 def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strategy: str = "append") -> Dict[str, Any]:
     """Create/update a table in a **DuckLake** catalog (DuckDB's ``ducklake`` extension).
 
@@ -5055,7 +5060,8 @@ def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strate
     name, then ``schema.table``. Catalog metadata + data paths resolve from contract
     metadata (``ducklake_metadata`` / ``ducklake_data_path``) then env
     (``DUCKLAKE_METADATA`` / ``DUCKLAKE_DATA_PATH``). Write op follows ``strategy``:
-    overwrite → CREATE OR REPLACE, merge/scd2 → delete-by-PK + insert, else append.
+    overwrite → CREATE OR REPLACE; merge/scd2 → the shared frame logic (history kept for
+    scd2), written back in one transaction; else append.
     """
     import duckdb
     import pyarrow as pa
@@ -5121,17 +5127,61 @@ def _write_ducklake_via_catalog(df, table_identifier: str, contract, mat, strate
         )
         primary_key = list(getattr(contract, "primary_key", None) or [])
 
-        if not exists:
+        if strategy in ("merge", "scd2", "upsert") and primary_key:
+            # The SAME frame logic as Iceberg and the file targets (_merge_frames / _scd2_frames),
+            # so CDC deletes, soft deletes and SCD2 history mean one thing everywhere. Before
+            # 2026-10-24 both were delete-by-key + insert: scd2 kept no history rows at all.
+            existing = (
+                con.execute(f"SELECT * FROM {fq}").to_arrow_table().to_pandas()
+                if exists
+                else arrow.to_pandas().iloc[:0]
+            )
+            incoming = arrow.to_pandas()
+            if strategy == "scd2":
+                scd2_cfg = dict(getattr(mat, "scd2", None) or {})
+                scd2_cfg["merge_dedup_guard"] = bool(getattr(mat, "merge_dedup_guard", False))
+                result = _scd2_frames(existing, incoming, primary_key, scd2_cfg)
+            else:
+                src = getattr(contract, "source", None)
+                result = _merge_frames(
+                    existing,
+                    incoming,
+                    primary_key,
+                    soft_delete_col=getattr(mat, "soft_delete_column", None),
+                    soft_delete_val=getattr(mat, "soft_delete_value", True),
+                    soft_delete_time_col=getattr(mat, "soft_delete_time_column", None),
+                    soft_delete_reason_col=getattr(mat, "soft_delete_reason_column", None),
+                    cdc_op_field=getattr(src, "cdc_op_field", None) if src else None,
+                    cdc_delete_values=getattr(src, "cdc_delete_values", None) if src else None,
+                    cdc_timestamp_field=getattr(src, "cdc_timestamp_field", None) if src else None,
+                    scd1_cfg=_scd1_config(mat),
+                    merge_dedup_guard=bool(getattr(mat, "merge_dedup_guard", False)),
+                )
+            merged = _sanitize_arrow_nulls(
+                _declared_types_for_empty_columns(pa.Table.from_pandas(result, preserve_index=False), contract)
+            )
+            con.register("_ll_merged", merged)
+            op = "scd2" if strategy == "scd2" else "upsert"
+            if not exists:
+                con.execute(f"CREATE TABLE {fq} AS SELECT * FROM _ll_merged")
+                op = f"create+{op}"
+            else:
+                # One transaction: one new DuckLake snapshot, and a failure leaves the table as it was.
+                con.execute("BEGIN")
+                have = {r[0] for r in con.execute(f"DESCRIBE {fq}").fetchall()}
+                for name in merged.schema.names:
+                    if name not in have:  # e.g. SCD2 columns on a table first written as merge
+                        con.execute(f'ALTER TABLE {fq} ADD COLUMN "{name}" {_duck_type(con, name)}')
+                con.execute(f"DELETE FROM {fq}")
+                con.execute(f"INSERT INTO {fq} BY NAME SELECT * FROM _ll_merged")
+                con.execute("COMMIT")
+            arrow = merged
+        elif not exists:
             con.execute(f"CREATE TABLE {fq} AS SELECT * FROM _ll_incoming")
             op = "create"
         elif strategy == "overwrite":
             con.execute(f"CREATE OR REPLACE TABLE {fq} AS SELECT * FROM _ll_incoming")
             op = "overwrite"
-        elif strategy in ("merge", "scd2", "upsert") and primary_key:
-            _on = " AND ".join([f'{fq}."{k}" = i."{k}"' for k in primary_key])
-            con.execute(f"DELETE FROM {fq} WHERE EXISTS (SELECT 1 FROM _ll_incoming i WHERE {_on})")
-            con.execute(f"INSERT INTO {fq} SELECT * FROM _ll_incoming")
-            op = "upsert"
         else:
             con.execute(f"INSERT INTO {fq} SELECT * FROM _ll_incoming")
             op = "append"

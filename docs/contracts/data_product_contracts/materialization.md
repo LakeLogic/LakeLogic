@@ -136,9 +136,9 @@ data, with snapshots and time travel. It runs on plain DuckDB — no cloud servi
   under `./lakehouse/` is used.
 - **MotherDuck:** a metadata path starting `md:` writes a native DuckLake database in MotherDuck.
 - **Cloud storage:** data paths on `s3://`, `gs://` or `abfss://` are supported.
-- **Strategies:** `overwrite` replaces the table; `merge` replaces rows by primary key; anything
-  else appends. `scd2` is written like `merge` here — the current row replaces the old one, and
-  **no history rows are kept** on DuckLake yet.
+- **Strategies:** `overwrite` replaces the table; `merge` and `scd2` work as on every other
+  target — `scd2` keeps history rows (1.84+; earlier versions wrote it like `merge`); anything
+  else appends. Each merge or scd2 write is one transaction, so one DuckLake snapshot.
 
 ---
 

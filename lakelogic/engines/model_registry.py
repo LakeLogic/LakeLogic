@@ -7,11 +7,9 @@ data processing.  Models auto-download on first use via HuggingFace
 
 Install extras as needed::
 
-    pip install lakelogic[local]     # text NER, classification, summarization
-    pip install lakelogic[ocr]       # PDF / image text extraction
-    pip install lakelogic[vision]    # image captioning, classification
-    pip install lakelogic[audio]     # speech-to-text (Whisper)
-    pip install lakelogic[llm]       # cloud LLM providers (OpenAI, Anthropic)
+    pip install lakelogic[local]      # local models: NER, classification, summarization, local LLM
+    pip install lakelogic[documents]  # PDF / image / Office text extraction
+    pip install lakelogic[ai]         # cloud LLM providers
 
 Usage::
 
