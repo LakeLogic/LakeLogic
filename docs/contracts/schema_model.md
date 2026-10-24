@@ -27,7 +27,8 @@ model:
       classification: "public"       # public | internal | confidential | restricted
       description: "Unique customer identifier"
 
-      # Generator hints (used by DataGenerator for synthetic data)
+      # Field constraints — enforced as quality rules at run time (1.83+), and used by
+      # DataGenerator for synthetic data
       min: 1
       max: 999999
       accepted_values: ["premium", "standard", "basic"]

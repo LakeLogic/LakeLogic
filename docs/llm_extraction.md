@@ -189,7 +189,7 @@ good_df, bad_df = processor.run_source("data/tickets/batch_001.csv")
 | Provider | Setup | Example Models |
 |----------|-------|----------------|
 | `ollama` | Install [Ollama](https://ollama.com), pull a model | `llama3.1`, `mistral`, `phi3` |
-| `local` | `pip install lakelogic[local]` | HuggingFace Transformers (Phi-3-mini default) |
+| `local` | `pip install transformers torch` | HuggingFace Transformers (Phi-3-mini default) |
 
 ```bash
 # Override default provider globally

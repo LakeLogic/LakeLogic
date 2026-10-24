@@ -2,7 +2,7 @@
 
 LakeLogic is designed to be lightweight — install only what you need and scale up anytime.
 
-> **Analogy:** Think of LakeLogic like a Swiss Army knife. The base package gives you the blade (Polars engine). Extras snap on tools — Spark for big data, DuckDB for analytics, notifications for alerting, and database connectors for CDC.
+> **Analogy:** Think of LakeLogic like a Swiss Army knife. The base package gives you the blades: the Polars and DuckDB engines. Extras snap on tools — Spark for big data, notifications for alerting, database connectors for CDC, and readers for documents and SFTP.
 
 ---
 

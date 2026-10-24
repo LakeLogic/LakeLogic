@@ -65,6 +65,7 @@ nav:
       - Contract Organization: organization.md
       - Ingestion & Cloud: ingestion.md
       - Real-Time Streaming: streaming.md
+      - Profiling: profiling.md
       - Unstructured Data (LLM Extraction): llm_extraction.md
       - Reprocessing & Partitioning: reprocessing.md
       - Pipeline Resilience: resilience.md
@@ -146,7 +147,7 @@ extra_css:
   # Bump ?v= on every extra.css change to bust the browser/Pages cache
   # (GitHub Pages serves the file unhashed, so returning visitors would
   # otherwise keep the stale stylesheet — see docs deploy notes).
-  - stylesheets/extra.css?v=3
+  - stylesheets/extra.css?v=4
 
 extra_javascript:
   - javascripts/theme-switcher.js

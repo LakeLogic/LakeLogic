@@ -160,9 +160,9 @@ For catalog-specific behaviour, see [capabilities](capabilities.md), [cloud inte
 | | LakeLogic (open source) | LakeLogic Platform |
 | --- | --- | --- |
 | License | Apache 2.0 · free | Commercial |
-| Run contracts — schema, quality, PII, lineage, SLOs — across Polars / DuckDB / Spark | ✓ | ✓ |
+| Run contracts — schema, quality, PII, lineage, SLOs — on Polars / DuckDB / Spark, plus Snowflake and BigQuery | ✓ | ✓ |
 | Local development + CI validation gates | ✓ `lakelogic validate` | ✓ |
-| Materialization (Delta / Iceberg / warehouse) | ✓ | ✓ |
+| Materialization (Delta / Iceberg / DuckLake / Parquet, and any destination dlt supports) | ✓ | ✓ |
 | Quarantine, reconciliation, run evidence | ✓ | ✓ |
 | Hosting | Self-hosted / your infrastructure | Fully managed |
 | Cross-pipeline observability | Emits telemetry | Consumes it |

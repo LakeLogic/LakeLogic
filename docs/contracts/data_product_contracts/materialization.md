@@ -104,9 +104,41 @@ Partitioning organises data into physical directories. Clustering sorts data wit
     ```yaml
     materialization:
       target_path: "{data_root}/{silver_layer}_{system}_customers"
-      format: "delta"                # parquet | delta | iceberg | csv
+      format: "delta"                # delta | iceberg | ducklake | parquet | csv
       location: "abfss://container@account.dfs.core.windows.net/silver/customers/"
     ```
+
+For warehouses and databases — and **any destination dlt supports** — see
+[Relational Databases via dlt](#relational-databases-postgres-sql-server-azure-sql-via-dlt).
+
+---
+
+## DuckLake
+
+[DuckLake](https://ducklake.select) is DuckDB's open lakehouse format: a SQL catalog plus Parquet
+data, with snapshots and time travel. It runs on plain DuckDB — no cloud service or JVM needed.
+
+!!! example "Example: a DuckLake table"
+
+    ```yaml
+    metadata:
+      ducklake_metadata: "./lakehouse/ducklake_catalog.ducklake"   # or md:my_lake for MotherDuck
+      ducklake_data_path: "./lakehouse/ducklake_data/"             # or s3:// gs:// abfss://
+    materialization:
+      strategy: merge                 # append | merge | overwrite
+      format: "ducklake"
+      target_path: "table:rideflow_lake.marketplace.silver_trips"  # catalog.schema.table
+    ```
+
+- **Target:** `table:<catalog>.<schema>.<table>`; the first part is the DuckLake catalog's name.
+- **Where it lives:** `ducklake_metadata` / `ducklake_data_path` in the contract's metadata, or the
+  `DUCKLAKE_METADATA` / `DUCKLAKE_DATA_PATH` environment variables. Without either, a local catalog
+  under `./lakehouse/` is used.
+- **MotherDuck:** a metadata path starting `md:` writes a native DuckLake database in MotherDuck.
+- **Cloud storage:** data paths on `s3://`, `gs://` or `abfss://` are supported.
+- **Strategies:** `overwrite` replaces the table; `merge` replaces rows by primary key; anything
+  else appends. `scd2` is written like `merge` here — the current row replaces the old one, and
+  **no history rows are kept** on DuckLake yet.
 
 ---
 

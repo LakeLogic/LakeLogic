@@ -53,6 +53,34 @@ Use `lakelogic [COMMAND] --help` for full option detail on any command.
 
 ## Command Groups
 
+Every command, as `lakelogic --help` lists it (1.83). Run `lakelogic <command> --help` for its options;
+the most-used ones are described in detail below.
+
+| Group | Command | What it does |
+|---|---|---|
+| Contract execution | `run` | Run a data contract against a source file. |
+| | `check` | Check a table against its contract's rules; send the result to LakeLogic when an endpoint is set. |
+| | `validate` | Validate a data contract for correctness and enforceable gates. |
+| | `bootstrap` | Bootstrap contracts and registry from a landing zone. |
+| | `migrate` | Rewrite an existing Delta table to the contract's column types. |
+| Data tooling | `profile` | Profile a dataset: one versioned JSON document of statistics, never rows. |
+| | `generate` | Generate synthetic data from a contract definition. |
+| | `assert` | Validate quarantine results against a generation report. |
+| | `scaffold` | Scaffold a runnable medallion project (registry + contracts + entrypoint). |
+| | `import-dbt` | Import dbt `schema.yml` / `sources.yml` as LakeLogic contract YAML. |
+| | `export-odcs` | Export a contract as an Open Data Contract Standard (ODCS v3.x) document. |
+| Governance | `lint` | Review data contracts for governance gaps ([rules](contracts/lint_rules.md)). |
+| | `registry` | Validate and inspect the mesh registry (`_domain.yaml` / `_system.yaml`). |
+| | `diagnose` | Read-only diagnostics on already-written data (e.g. cross-layer double-hashed masking). |
+| | `migrate-options` | Rewrite contracts to OLC 0.21 typed source options. |
+| Code quality | `review` | Run code review against the given paths or git diff. |
+| | `review-reply` | Handle a `@lakelogic` mention from a pull-request comment. |
+| Observability | `scan` | Scan lakehouse tables and check SLOs without pipeline instrumentation. |
+| | `observatory` | Telemetry utilities, e.g. replay buffered run logs. |
+| Environment | `doctor` | Check your environment and report installed engines and extras. |
+| | `setup-oss` | Pre-install required extensions and check dependencies. |
+| | `help` | Contextual help for LakeLogic commands. |
+
 ### Contract Execution
 
 #### `lakelogic run`

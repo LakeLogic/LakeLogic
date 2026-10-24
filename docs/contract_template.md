@@ -517,7 +517,7 @@ model:
       description: "Unique customer identifier"
       # Business value: Schema documentation and enforcement
       
-      # OPTIONAL: Generator hints (used by DataGenerator)
+      # OPTIONAL: Field constraints — enforced at run time (1.83+), used by DataGenerator
       accepted_values: ["premium", "standard", "basic"]
       # Generator picks from this list; validator checks IN rule
       min: 1
@@ -1722,7 +1722,7 @@ extraction:
   #                  Install Ollama: https://ollama.com
   #   local        → Direct HuggingFace Transformers (Phi-3-mini default)
   #                  No server needed, downloads to ~/.cache/huggingface/
-  #                  Install with: pip install lakelogic[local]
+  #                  Install with: pip install transformers torch
   #
   # Global env var overrides:
   #   LAKELOGIC_AI_PROVIDER → default provider for all contracts

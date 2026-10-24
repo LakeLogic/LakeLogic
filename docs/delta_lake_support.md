@@ -16,8 +16,7 @@ pip install "lakelogic[delta]"
 
 # Or install with your preferred engine
 pip install "lakelogic[polars]"  # Includes Delta-RS
-pip install "lakelogic[duckdb]"  # Includes Delta-RS
-pip install "lakelogic[pandas]"  # Includes Delta-RS
+pip install "lakelogic[duckdb]"  # Includes Delta-RS and pandas
 ```
 
 ---

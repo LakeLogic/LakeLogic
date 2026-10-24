@@ -27,8 +27,13 @@ source:
   # type: "iceberg"   # Iceberg table directory, by path
   # type: "database"  # Operational DB via JDBC/SQL (Postgres, MySQL, SQL Server, Oracle, SQLite)
   # type: "dlt"       # HTTP API or dlt verified source (the `dlt:` block)
-  # type: "sftp"      # Files on an SFTP server
+  # type: "sftp"      # Files on an SFTP server (pip install "lakelogic[sftp]"; host keys are verified)
 ```
+
+!!! note "SFTP credentials"
+    Give the password as an environment variable reference, `password: "env:SFTP_PASSWORD"`.
+    LakeLogic reads the variable at run time (1.83+); a literal password written into a contract is
+    refused, so secrets never land in version control.
 
 ---
 
