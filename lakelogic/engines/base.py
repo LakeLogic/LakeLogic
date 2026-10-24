@@ -457,7 +457,7 @@ class EngineAdapter(ABC):
     def _shorthand_covered_fields(self) -> Dict[str, set]:
         covered: Dict[str, set] = {"accepted_values": set(), "range": set()}
         quality = getattr(self.contract, "quality", None)
-        for spec in (getattr(quality, "row_rules", None) or []):
+        for spec in getattr(quality, "row_rules", None) or []:
             if isinstance(spec, RowRuleAcceptedValues):
                 cfg, kind = spec.accepted_values or {}, "accepted_values"
             elif isinstance(spec, RowRuleRange):
@@ -475,12 +475,14 @@ class EngineAdapter(ABC):
         values = getattr(field, "accepted_values", None)
         if values and field.name.lower() not in covered["accepted_values"]:
             listed = ", ".join(self._format_literal(v) for v in values)
-            out.append(QualityRule(
-                name=f"{field.name}_accepted_values",
-                sql=f"{q} IN ({listed})",
-                category="validity",
-                description=f"{field.name} is one of: {', '.join(str(v) for v in values)}",
-            ))
+            out.append(
+                QualityRule(
+                    name=f"{field.name}_accepted_values",
+                    sql=f"{q} IN ({listed})",
+                    category="validity",
+                    description=f"{field.name} is one of: {', '.join(str(v) for v in values)}",
+                )
+            )
         lo, hi = getattr(field, "min", None), getattr(field, "max", None)
         if (lo is not None or hi is not None) and field.name.lower() not in covered["range"]:
             bounds = []
@@ -488,22 +490,29 @@ class EngineAdapter(ABC):
                 bounds.append(f"{q} >= {self._format_literal(lo)}")
             if hi is not None:
                 bounds.append(f"{q} <= {self._format_literal(hi)}")
-            span = f"between {lo} and {hi}" if lo is not None and hi is not None else (
-                f"at least {lo}" if lo is not None else f"at most {hi}")
-            out.append(QualityRule(
-                name=f"{field.name}_range",
-                sql=" AND ".join(bounds),
-                category="validity",
-                description=f"{field.name} is {span}",
-            ))
+            span = (
+                f"between {lo} and {hi}"
+                if lo is not None and hi is not None
+                else (f"at least {lo}" if lo is not None else f"at most {hi}")
+            )
+            out.append(
+                QualityRule(
+                    name=f"{field.name}_range",
+                    sql=" AND ".join(bounds),
+                    category="validity",
+                    description=f"{field.name} is {span}",
+                )
+            )
         limit = getattr(field, "max_length", None)
         if limit is not None:
-            out.append(QualityRule(
-                name=f"{field.name}_max_length",
-                sql=f"{q} IS NULL OR length({q}) <= {int(limit)}",
-                category="validity",
-                description=f"{field.name} is at most {int(limit)} characters",
-            ))
+            out.append(
+                QualityRule(
+                    name=f"{field.name}_max_length",
+                    sql=f"{q} IS NULL OR length({q}) <= {int(limit)}",
+                    category="validity",
+                    description=f"{field.name} is at most {int(limit)} characters",
+                )
+            )
         return out
 
     def _place_in_phase(self, rules: List[QualityRule], owner: Dict[int, str]) -> List[QualityRule]:

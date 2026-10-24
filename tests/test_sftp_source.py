@@ -420,8 +420,12 @@ def test_a_delivery_resolves_its_env_password_too(sftp_server, monkeypatch):
     monkeypatch.setattr(ic, "SFTPConnector", _Capture)
     monkeypatch.setenv("SFTP_OUT_PW", "s3cret")
     df = pl.DataFrame({"id": [1]})
-    _write_frame(df, f"sftp://t@127.0.0.1:{sftp_server.port}/out.csv", "csv",
-                 storage_options={"known_hosts": None, "password": "env:SFTP_OUT_PW"})
+    _write_frame(
+        df,
+        f"sftp://t@127.0.0.1:{sftp_server.port}/out.csv",
+        "csv",
+        storage_options={"known_hosts": None, "password": "env:SFTP_OUT_PW"},
+    )
     assert seen["password"] == "s3cret"
 
 

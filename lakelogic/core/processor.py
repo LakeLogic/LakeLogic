@@ -7370,7 +7370,10 @@ class DataProcessor:
         staging = self._sftp_staging_dir(options)
         logger.info(f"Running SFTP source: {host}:{parsed.port or 22}{remote_dir} pattern={pattern} format={fmt}")
         local_paths = connector.fetch_files(
-            remote_dir, file_pattern=pattern, dest_dir=staging, modified_since=modified_since,
+            remote_dir,
+            file_pattern=pattern,
+            dest_dir=staging,
+            modified_since=modified_since,
         )
         if not local_paths:
             # Nothing new on the server: skip, exactly as a landing folder with no new files.

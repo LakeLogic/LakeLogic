@@ -6047,8 +6047,13 @@ class SnapshotReconcileRefused(RuntimeError):
     """A load would delete more of the table than `deletion.max_delete_ratio` allows."""
 
 
-def _read_current_target(df: Any, contract: Any, target_path: Optional[Path], engine_name: Optional[str],
-                         storage_options: Optional[Dict[str, str]]) -> Any:
+def _read_current_target(
+    df: Any,
+    contract: Any,
+    target_path: Optional[Path],
+    engine_name: Optional[str],
+    storage_options: Optional[Dict[str, str]],
+) -> Any:
     """What the merge target holds now, as the engine's own frame, or None when it holds nothing.
     Resolved exactly as `_materialize_primary` resolves the target it writes."""
     mat = contract.materialization
@@ -6060,7 +6065,7 @@ def _read_current_target(df: Any, contract: Any, target_path: Optional[Path], en
     if engine_name == "spark":  # pragma: no cover - exercised on Databricks
         spark = df.sparkSession
         if where.startswith("table:"):
-            name = where[len("table:"):]
+            name = where[len("table:") :]
             return spark.table(name) if spark.catalog.tableExists(name) else None
         try:
             return spark.read.format(fmt or "delta").load(where)
@@ -6109,8 +6114,13 @@ def _check_ratio(n: int, total: int, limit: float) -> None:
         )
 
 
-def _apply_snapshot_reconcile(df: Any, contract: Any, target_path: Optional[Path], engine_name: Optional[str],
-                              storage_options: Optional[Dict[str, str]]) -> Tuple[Any, Any]:
+def _apply_snapshot_reconcile(
+    df: Any,
+    contract: Any,
+    target_path: Optional[Path],
+    engine_name: Optional[str],
+    storage_options: Optional[Dict[str, str]],
+) -> Tuple[Any, Any]:
     """``materialization.deletion: {strategy: snapshot_reconcile}``: the load is the COMPLETE
     current set, so a key the table holds (and has not already deleted) but the load lacks is
     deleted.
@@ -6203,9 +6213,13 @@ def _apply_snapshot_reconcile(df: Any, contract: Any, target_path: Optional[Path
             # A flag column that has only ever been empty is stored as text; combined with the
             # incoming booleans it would become the TEXT "false", which every reader treats as true.
             if soft_col in deletes.columns and soft_val is True:
-                deletes = deletes.with_columns(pl.col(soft_col).cast(pl.Utf8).str.to_lowercase()
-                                               .replace_strict({"true": True, "false": False}, default=None,
-                                                               return_dtype=pl.Boolean).alias(soft_col))
+                deletes = deletes.with_columns(
+                    pl.col(soft_col)
+                    .cast(pl.Utf8)
+                    .str.to_lowercase()
+                    .replace_strict({"true": True, "false": False}, default=None, return_dtype=pl.Boolean)
+                    .alias(soft_col)
+                )
         out = pl.concat([incoming, deletes], how="diagonal_relaxed")
         if is_pandas:
             out = out.to_pandas()

@@ -6,6 +6,7 @@ declaring `status: accepted_values: [...]` let any status through. `accepted_val
 `min`/`max` mean exactly what their shorthand twins mean (an empty value fails both forms);
 `max_length` lets an empty value pass. A field a written shorthand rule covers gets no second rule.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -15,12 +16,14 @@ import pytest
 
 import lakelogic as ll
 
-ROWS = pl.DataFrame({
-    "id": ["a1", "a2", "a3", "a4", "a5", "a6"],
-    "status": ["open", "closed", "lost", None, "open", "open"],
-    "amount": [10.0, 0.0, 50.0, 20.0, -1.0, 2_000.0],
-    "code": ["AB", "ABC", "AB", "AB", None, "ABCDEFG"],
-})
+ROWS = pl.DataFrame(
+    {
+        "id": ["a1", "a2", "a3", "a4", "a5", "a6"],
+        "status": ["open", "closed", "lost", None, "open", "open"],
+        "amount": [10.0, 0.0, 50.0, 20.0, -1.0, 2_000.0],
+        "code": ["AB", "ABC", "AB", "AB", None, "ABCDEFG"],
+    }
+)
 
 
 def _write(tmp_path, quality: str = "") -> str:
@@ -37,8 +40,9 @@ def _write(tmp_path, quality: str = "") -> str:
 
 
 def _failures(bad) -> Counter:
-    return Counter(e.split(" (")[0].replace("Rule failed: ", "")
-                   for errs in bad["_lakelogic_errors"].to_list() for e in errs)
+    return Counter(
+        e.split(" (")[0].replace("Rule failed: ", "") for errs in bad["_lakelogic_errors"].to_list() for e in errs
+    )
 
 
 @pytest.mark.parametrize("engine", ["polars", "duckdb"])

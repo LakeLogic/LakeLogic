@@ -5,6 +5,7 @@ SFTP, a nightly full extract) never says what was deleted. A record the table ho
 full load lacks has been deleted at source. Each test runs real loads through
 `materialize_dataframe` and reads the table back.
 """
+
 from __future__ import annotations
 
 import polars as pl
@@ -19,19 +20,34 @@ def _contract(target, *, soft=True, ratio=0.5, scope=None):
         "strategy": "merge",
         "format": "parquet",
         "target_path": str(target),
-        "deletion": {"strategy": "snapshot_reconcile", "max_delete_ratio": ratio, **({"scope": scope} if scope else {})},
+        "deletion": {
+            "strategy": "snapshot_reconcile",
+            "max_delete_ratio": ratio,
+            **({"scope": scope} if scope else {}),
+        },
     }
     if soft:
-        mat.update(soft_delete_column="is_deleted", soft_delete_time_column="deleted_at",
-                   soft_delete_reason_column="delete_reason")
-    return DataContract.model_validate({
-        "version": "1.0.0", "info": {"title": "settlements", "owner": "payments"},
-        "primary_key": ["id"],
-        "source": {"type": "landing", "path": "unused", "format": "csv"},
-        "model": {"fields": [{"name": "id", "type": "string"}, {"name": "status", "type": "string"},
-                             {"name": "country", "type": "string"}]},
-        "materialization": mat,
-    })
+        mat.update(
+            soft_delete_column="is_deleted",
+            soft_delete_time_column="deleted_at",
+            soft_delete_reason_column="delete_reason",
+        )
+    return DataContract.model_validate(
+        {
+            "version": "1.0.0",
+            "info": {"title": "settlements", "owner": "payments"},
+            "primary_key": ["id"],
+            "source": {"type": "landing", "path": "unused", "format": "csv"},
+            "model": {
+                "fields": [
+                    {"name": "id", "type": "string"},
+                    {"name": "status", "type": "string"},
+                    {"name": "country", "type": "string"},
+                ]
+            },
+            "materialization": mat,
+        }
+    )
 
 
 def _load(target, rows, **kw):
@@ -93,7 +109,7 @@ def test_scope_reconciles_only_what_the_load_covers(tmp_path):
     target = tmp_path / "settlements.parquet"
     _load(target, DAY1 + [("4", "paid", "FR")], scope=["country"])
     day2 = _load(target, [("1", "paid", "GB"), ("2", "paid", "GB")], scope=["country"])
-    assert _state(day2)["3"][1] is True   # GB, missing from the GB file
+    assert _state(day2)["3"][1] is True  # GB, missing from the GB file
     assert _state(day2)["4"][1] is False  # FR, not in this load's scope
 
 
@@ -103,8 +119,16 @@ def test_the_first_load_has_nothing_to_compare_with(tmp_path):
 
 
 def test_it_needs_merge_and_a_key():
-    base = {"version": "1.0.0", "info": {"title": "t", "owner": "o"},
-            "model": {"fields": [{"name": "id", "type": "string"}]}}
+    base = {
+        "version": "1.0.0",
+        "info": {"title": "t", "owner": "o"},
+        "model": {"fields": [{"name": "id", "type": "string"}]},
+    }
     with pytest.raises(Exception, match="merge"):
-        DataContract.model_validate({**base, "primary_key": ["id"], "materialization": {
-            "strategy": "append", "deletion": {"strategy": "snapshot_reconcile"}}})
+        DataContract.model_validate(
+            {
+                **base,
+                "primary_key": ["id"],
+                "materialization": {"strategy": "append", "deletion": {"strategy": "snapshot_reconcile"}},
+            }
+        )
