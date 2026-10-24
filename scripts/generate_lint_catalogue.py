@@ -52,7 +52,7 @@ def render() -> str:
         "",
         "Every example on this page is run through the linter in LakeLogic's test suite: the failing",
         "example raises exactly that rule, and the fixed example raises none. Fixed examples are valid",
-        "[OLC](https://lakelogic.github.io/open-lakehouse-contract/) contracts unless marked otherwise.",
+        "[OLC](https://olc.lakelogic.io/) contracts unless marked otherwise.",
         "",
         "```bash",
         "lakelogic lint contracts/",

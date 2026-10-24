@@ -1,6 +1,6 @@
 site_name: LakeLogic
 site_description: The open-source reference framework for Open Lakehouse Contracts. Validate and execute OLC contracts across Polars, DuckDB and Spark.
-site_url: https://lakelogic.github.io/LakeLogic/
+site_url: https://docs.lakelogic.io/
 site_author: LakeLogic Team
 repo_name: lakelogic/LakeLogic
 repo_url: https://github.com/lakelogic/LakeLogic

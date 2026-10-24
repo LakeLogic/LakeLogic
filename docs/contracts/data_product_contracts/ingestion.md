@@ -1,9 +1,9 @@
 # Ingestion (Source Configuration)
 
 !!! abstract "Open Lakehouse Contract - the standard"
-    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/)**, the open
     standard for lakehouse data contracts. The authoritative field-level spec for
-    **ingestion & sources** is the OLC reference: **[ingestion & sources reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/ingestion/)**.
+    **ingestion & sources** is the OLC reference: **[ingestion & sources reference →](https://olc.lakelogic.io/reference/ingestion/)**.
     This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
     examples, and runtime-specific notes).
 

@@ -1,9 +1,9 @@
 # Watermark Strategies
 
 !!! abstract "Open Lakehouse Contract - the standard"
-    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/)**, the open
     standard for lakehouse data contracts. The authoritative field-level spec for
-    **incremental / watermark strategies** is the OLC reference: **[incremental / watermark strategies reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/ingestion/)**.
+    **incremental / watermark strategies** is the OLC reference: **[incremental / watermark strategies reference →](https://olc.lakelogic.io/reference/ingestion/)**.
     This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
     examples, and runtime-specific notes).
 

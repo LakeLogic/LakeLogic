@@ -12,7 +12,7 @@ description: The open-source reference framework for Open Lakehouse Contracts.
 Validate and execute OLC contracts across Polars, DuckDB and Spark, from local development through CI and production pipelines.
 
 !!! abstract "Built on the Open Lakehouse Contract"
-    LakeLogic is the reference framework for the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)** — the open, engine-neutral standard for lakehouse data contracts. Your `.yaml` contracts are portable OLC documents; LakeLogic executes them identically across Polars, DuckDB, and Spark. See the [OLC reference](https://lakelogic.github.io/open-lakehouse-contract/reference/anatomy/) for the full spec.
+    LakeLogic is the reference framework for the **[Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/)** — the open, engine-neutral standard for lakehouse data contracts. Your `.yaml` contracts are portable OLC documents; LakeLogic executes them identically across Polars, DuckDB, and Spark. See the [OLC reference](https://olc.lakelogic.io/reference/anatomy/) for the full spec.
 
 ## How it works
 

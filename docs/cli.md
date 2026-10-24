@@ -374,7 +374,7 @@ LakeLogic.
 
 > Validating an individual **contract** (not the registry)? Use `lakelogic validate
 > --contract path.yaml` for structural + gate checks, or the portable `olc validate` from
-> the [Open Lakehouse Contract CLI](https://lakelogic.github.io/open-lakehouse-contract/reference/cli/).
+> the [Open Lakehouse Contract CLI](https://olc.lakelogic.io/reference/cli/).
 
 ---
 

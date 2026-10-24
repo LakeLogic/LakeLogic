@@ -7,20 +7,20 @@
 
 **Run data pipelines from YAML contracts.**
 
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://LakeLogic.github.io/LakeLogic/)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://docs.lakelogic.io/)
 [![PyPI](https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white)](https://pypi.org/project/lakelogic/)
 [![CI](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml)
 [![codecov](https://codecov.io/gh/LakeLogic/LakeLogic/graph/badge.svg)](https://codecov.io/gh/LakeLogic/LakeLogic)
 [![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
-Define your sources, transformations and quality rules in an [Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/). LakeLogic Core runs the supported steps with Polars, DuckDB or Spark, separating accepted rows from failed rows and recording why they failed.
+Define your sources, transformations and quality rules in an [Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/). LakeLogic Core runs the supported steps with Polars, DuckDB or Spark, separating accepted rows from failed rows and recording why they failed.
 
 Test locally, check contract changes in CI and run pipelines in your supported environment.
 
 **OLC defines the contract. LakeLogic Core executes it.** Core is the open-source reference runtime; supported features vary by engine and storage format. See the [capability matrix](docs/capabilities.md).
 
-[**Run the Colab quickstart**](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb) · [Documentation](https://lakelogic.github.io/LakeLogic/) · [Examples](https://lakelogic.github.io/LakeLogic/examples.html)
+[**Run the Colab quickstart**](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb) · [Documentation](https://docs.lakelogic.io/) · [Examples](https://docs.lakelogic.io/examples.html)
 
 ![LakeLogic Architecture](docs/assets/lakelogic_architecture.png)
 
@@ -160,7 +160,7 @@ LakeLogic does not create organisational ownership, access policies, alert deliv
 - [Pipeline concepts](docs/pipelines.md)
 - [Reconciliation](docs/reconciliation.md)
 - [Notifications](docs/notifications.md)
-- [Full documentation site](https://lakelogic.github.io/LakeLogic/)
+- [Full documentation site](https://docs.lakelogic.io/)
 
 ## Contributing
 

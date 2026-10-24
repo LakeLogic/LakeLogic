@@ -1,9 +1,9 @@
 # Transformations
 
 !!! abstract "Open Lakehouse Contract - the standard"
-    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/)**, the open
     standard for lakehouse data contracts. The authoritative field-level spec for
-    **transformations** is the OLC reference: **[transformations reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/transformation/)**.
+    **transformations** is the OLC reference: **[transformations reference →](https://olc.lakelogic.io/reference/transformation/)**.
     This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
     examples, and runtime-specific notes).
 

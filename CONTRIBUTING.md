@@ -314,7 +314,7 @@ mkdocs serve
 ### Get Help
 - [GitHub Discussions](https://github.com/lakelogic/LakeLogic/discussions) - Q&A and general discussions
 - [Discord](https://discord.gg/lakelogic) - Real-time chat (coming soon)
-- [Documentation](https://LakeLogic.github.io/LakeLogic) - Comprehensive guides
+- [Documentation](https://docs.lakelogic.io/) - Comprehensive guides
 
 ### Stay Updated
 - Watch the [repository](https://github.com/lakelogic/LakeLogic) for updates

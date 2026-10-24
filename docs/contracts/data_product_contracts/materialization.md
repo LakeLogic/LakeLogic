@@ -1,9 +1,9 @@
 # Materialization
 
 !!! abstract "Open Lakehouse Contract - the standard"
-    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://lakelogic.github.io/open-lakehouse-contract/)**, the open
+    LakeLogic implements the **[Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/)**, the open
     standard for lakehouse data contracts. The authoritative field-level spec for
-    **materialization** is the OLC reference: **[materialization reference →](https://lakelogic.github.io/open-lakehouse-contract/reference/materialization/)**.
+    **materialization** is the OLC reference: **[materialization reference →](https://olc.lakelogic.io/reference/materialization/)**.
     This page shows how the LakeLogic runtime *applies* that spec (engine behavior,
     examples, and runtime-specific notes).
 
