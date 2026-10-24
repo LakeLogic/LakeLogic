@@ -1377,10 +1377,10 @@ html {
   }
 }
 
-/* ── Text 10% larger (2026-10-24) ───────────────────────────────────────────────────────────
-   The pages read best at 110% browser zoom, so the root size is raised 10% at each of
+/* ── Text 5% larger (2026-10-24) ───────────────────────────────────────────────────────────
+   The pages read best a little above the default size, so the root size is raised 5% at each of
    Material's breakpoints (125% / 137.5% / 150%). Sizes are in rem, so everything scales
    together, as zoom does. Same rule as the OLC and LakeLogic MCP docs. */
-html { font-size: 137.5%; }
-@media screen and (min-width: 100em) { html { font-size: 151.25%; } }
-@media screen and (min-width: 125em) { html { font-size: 165%; } }
+html { font-size: 131.25%; }
+@media screen and (min-width: 100em) { html { font-size: 144.375%; } }
+@media screen and (min-width: 125em) { html { font-size: 157.5%; } }
