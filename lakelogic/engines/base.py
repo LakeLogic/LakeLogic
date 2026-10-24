@@ -412,6 +412,7 @@ class EngineAdapter(ABC):
             # one, so each row is not scanned twice for the same thing and a null is not
             # reported against two rules.
             already_not_null = _not_null_columns(declared + field_rules)
+            covered = self._shorthand_covered_fields()
             for field in self.contract.model.fields:
                 # `enforce_required: false` turns off the automatic required checks ONLY. It
                 # used to skip every field-level rule too, because both sat under this flag.
@@ -434,10 +435,76 @@ class EngineAdapter(ABC):
                     for r in field.rules:
                         owner[id(r)] = field.name
                     rules.extend(field.rules)
+                for r in self._field_constraint_rules(field, covered):
+                    rules.append(r)
+                    owner[id(r)] = field.name
 
         rules.extend(declared)
         rules.extend(self._blank_dedup_key_rules(rules))
         return self._place_in_phase(rules, owner)
+
+    # ── Field-level constraints ───────────────────────────────────────────────
+    # OLC: "Rules can also travel with a field … validity lives next to the column it
+    # constrains — still SQL under the hood" (`accepted_values`, `min`/`max`, `max_length`).
+    # Core read them for profiling and data generation but never ran them, so a contract
+    # declaring `status: accepted_values: [...]` let any status through (2026-10-24).
+    # `accepted_values` and `min`/`max` compile to EXACTLY the SQL of their shorthand twins
+    # (OLC quality.md: `status IN (...)`, `age >= 18 AND age <= 120`), so one word means one
+    # thing: an empty value fails both forms alike. `max_length` has no twin; an empty value
+    # passes it. A field a written shorthand rule already covers (the OLC examples declare both)
+    # gets no second rule — one row, one attribution.
+
+    def _shorthand_covered_fields(self) -> Dict[str, set]:
+        covered: Dict[str, set] = {"accepted_values": set(), "range": set()}
+        quality = getattr(self.contract, "quality", None)
+        for spec in (getattr(quality, "row_rules", None) or []):
+            if isinstance(spec, RowRuleAcceptedValues):
+                cfg, kind = spec.accepted_values or {}, "accepted_values"
+            elif isinstance(spec, RowRuleRange):
+                cfg, kind = spec.range or {}, "range"
+            else:
+                continue
+            name = cfg.get("field") or cfg.get("column")
+            if name:
+                covered[kind].add(str(name).lower())
+        return covered
+
+    def _field_constraint_rules(self, field: Any, covered: Dict[str, set]) -> List[QualityRule]:
+        out: List[QualityRule] = []
+        q = self._quote_ident(field.name)
+        values = getattr(field, "accepted_values", None)
+        if values and field.name.lower() not in covered["accepted_values"]:
+            listed = ", ".join(self._format_literal(v) for v in values)
+            out.append(QualityRule(
+                name=f"{field.name}_accepted_values",
+                sql=f"{q} IN ({listed})",
+                category="validity",
+                description=f"{field.name} is one of: {', '.join(str(v) for v in values)}",
+            ))
+        lo, hi = getattr(field, "min", None), getattr(field, "max", None)
+        if (lo is not None or hi is not None) and field.name.lower() not in covered["range"]:
+            bounds = []
+            if lo is not None:
+                bounds.append(f"{q} >= {self._format_literal(lo)}")
+            if hi is not None:
+                bounds.append(f"{q} <= {self._format_literal(hi)}")
+            span = f"between {lo} and {hi}" if lo is not None and hi is not None else (
+                f"at least {lo}" if lo is not None else f"at most {hi}")
+            out.append(QualityRule(
+                name=f"{field.name}_range",
+                sql=" AND ".join(bounds),
+                category="validity",
+                description=f"{field.name} is {span}",
+            ))
+        limit = getattr(field, "max_length", None)
+        if limit is not None:
+            out.append(QualityRule(
+                name=f"{field.name}_max_length",
+                sql=f"{q} IS NULL OR length({q}) <= {int(limit)}",
+                category="validity",
+                description=f"{field.name} is at most {int(limit)} characters",
+            ))
+        return out
 
     def _place_in_phase(self, rules: List[QualityRule], owner: Dict[int, str]) -> List[QualityRule]:
         """Set each rule's phase per ``lakelogic.core.rule_phases`` (one definition, every engine).
