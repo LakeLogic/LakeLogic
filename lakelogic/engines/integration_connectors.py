@@ -401,6 +401,8 @@ class SFTPConnector:
         self.password = password
         self.private_key_path = private_key_path
         self.known_hosts = known_hosts
+        #: Newest server mtime among the files the last fetch downloaded (epoch seconds).
+        self.last_max_mtime: Optional[float] = None
         if known_hosts is None:
             logger.warning(
                 f"SFTP host-key verification DISABLED for {host}. The server is not "
@@ -450,17 +452,25 @@ class SFTPConnector:
                 matching = sorted(n for n in names if n not in (".", "..") and fnmatch.fnmatch(n, file_pattern))
 
                 skipped = 0
+                # The newest server mtime among the files taken: the next incremental run's
+                # watermark. Never recorded before 1.83, so every "incremental" SFTP run read
+                # every file again and bronze held each file once per run.
+                self.last_max_mtime = None
                 for name in matching:
                     remote_file = f"{remote_path.rstrip('/')}/{name}"
-                    if modified_since is not None:
-                        attrs = await sftp.stat(remote_file)
-                        mtime = getattr(attrs, "mtime", None)
-                        if mtime is not None and mtime <= modified_since:
-                            skipped += 1
-                            continue
+                    attrs = await sftp.stat(remote_file)
+                    mtime = getattr(attrs, "mtime", None)
+                    if modified_since is not None and mtime is not None and mtime <= modified_since:
+                        skipped += 1
+                        continue
                     local_file = os.path.join(dest_dir, name)
-                    await sftp.get(remote_file, local_file)
+                    # preserve: the local copy keeps the SERVER's modification time, so a
+                    # landing reader handed this folder compares it with the run log's
+                    # watermark exactly as it would a landed file.
+                    await sftp.get(remote_file, local_file, preserve=True)
                     local_paths.append(local_file)
+                    if mtime is not None:
+                        self.last_max_mtime = max(self.last_max_mtime or 0, float(mtime))
 
                 # Say what was skipped: "0 new files" and "the pattern is wrong" look
                 # identical otherwise, and one of them is a broken pipeline.

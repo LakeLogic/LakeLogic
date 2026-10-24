@@ -363,7 +363,7 @@ model:
 **Severity:** warning (critical when the domain declares an erasure policy)  
 **Checks:** A silver or gold table with a key and a merge/upsert/SCD2/dedup load, but no delete strategy.
 
-**Why it matters.** A merge only adds and updates. When a record is deleted at the source the table never hears about it, so stale rows live on: counted in metrics and impossible to erase on request. Declare how deletes arrive (a soft-delete column or CDC).
+**Why it matters.** A merge only adds and updates. When a record is deleted at the source the table never hears about it, so stale rows live on: counted in metrics and impossible to erase on request. Declare how deletes arrive: CDC delete events with a soft-delete column, or, when every load is a full snapshot, `materialization.deletion: {strategy: snapshot_reconcile}`.
 
 **Fails:**
 

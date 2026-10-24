@@ -355,3 +355,137 @@ def test_a_password_in_the_target_is_refused(sftp_server):
             storage_options={"known_hosts": None},
         )
     assert "password" in str(exc.value).lower()
+
+
+# ── credentials: env:VAR is resolved, a literal password is refused ─────────
+def _connector_kwargs(contract, monkeypatch):
+    import lakelogic.engines.integration_connectors as ic
+
+    seen = {}
+
+    class _Capture:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+        def fetch_files(self, *a, **k):
+            raise _Stop
+
+    monkeypatch.setattr(ic, "SFTPConnector", _Capture)
+    with pytest.raises(_Stop):
+        DataProcessor(contract, engine="polars").run_source()
+    return seen
+
+
+class _Stop(Exception):
+    pass
+
+
+def test_an_env_password_reaches_the_server_as_its_value(sftp_server, monkeypatch):
+    """Until 1.82 the text "env:SFTP_PW" itself was sent as the password."""
+    monkeypatch.setenv("SFTP_PW", "s3cret")
+    c = _contract(sftp_server)
+    c["source"]["options"]["password"] = "env:SFTP_PW"
+    assert _connector_kwargs(c, monkeypatch)["password"] == "s3cret"
+
+
+def test_a_literal_password_in_the_contract_is_refused(sftp_server):
+    c = _contract(sftp_server)
+    c["source"]["options"]["password"] = "s3cret"
+    with pytest.raises(ValueError, match="env:VAR"):
+        DataProcessor(c, engine="polars").run_source()
+
+
+def test_an_unset_password_variable_is_named(sftp_server, monkeypatch):
+    monkeypatch.delenv("SFTP_PW_MISSING", raising=False)
+    c = _contract(sftp_server)
+    c["source"]["options"]["password"] = "env:SFTP_PW_MISSING"
+    with pytest.raises(ValueError, match="SFTP_PW_MISSING"):
+        DataProcessor(c, engine="polars").run_source()
+
+
+def test_a_delivery_resolves_its_env_password_too(sftp_server, monkeypatch):
+    """Both directions read the login through one function (`sftp_credentials`)."""
+    import lakelogic.engines.integration_connectors as ic
+    from lakelogic.core.materialization import _write_frame
+
+    seen = {}
+
+    class _Capture:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+        def put_files(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(ic, "SFTPConnector", _Capture)
+    monkeypatch.setenv("SFTP_OUT_PW", "s3cret")
+    df = pl.DataFrame({"id": [1]})
+    _write_frame(df, f"sftp://t@127.0.0.1:{sftp_server.port}/out.csv", "csv",
+                 storage_options={"known_hosts": None, "password": "env:SFTP_OUT_PW"})
+    assert seen["password"] == "s3cret"
+
+
+# ── incremental really is incremental (1.83, found by the RideFlow SFTP proof) ─────────────
+def test_the_newest_server_time_taken_becomes_the_next_watermark(sftp_server):
+    """Nothing recorded it, so every "incremental" run read every file again: a daily feed
+    run three times held day one three times."""
+    import os
+
+    os.utime(sftp_server.root / "orders_1.csv", (1_000_000, 1_000_000))
+    os.utime(sftp_server.root / "orders_2.csv", (3_000_000, 3_000_000))
+    connector = _connector(sftp_server)
+    connector.fetch_files("/", "*.csv")
+    assert connector.last_max_mtime == 3_000_000
+
+
+def _incremental(server, tmp_path):
+    c = _contract(server, load_mode="incremental")
+    c["metadata"] = {"run_log_dir": str(tmp_path / "runs")}
+    return c
+
+
+def test_the_processor_hands_that_time_to_the_run_log(sftp_server, monkeypatch, tmp_path):
+    import os
+
+    os.utime(sftp_server.root / "orders_1.csv", (1_000_000, 1_000_000))
+    os.utime(sftp_server.root / "orders_2.csv", (3_000_000, 3_000_000))
+    processor = DataProcessor(_incremental(sftp_server, tmp_path), engine="polars")
+    monkeypatch.setattr(processor, "_get_last_source_watermark", lambda: 2_000_000)
+    good, _bad = processor.run_source()
+    assert len(good) == 1  # orders_2 only
+    assert processor._source_max_mtime == 3_000_000
+
+
+def test_nothing_new_on_the_server_is_a_clean_skip(sftp_server, monkeypatch, tmp_path):
+    """It ran an empty, column-less frame on, and bronze's append failed on its width."""
+    processor = DataProcessor(_incremental(sftp_server, tmp_path), engine="polars")
+    monkeypatch.setattr(processor, "_get_last_source_watermark", lambda: 9_999_999_999)
+    good, bad = processor.run_source()
+    assert len(good) == 0 and len(bad) == 0
+
+
+# ── SFTP files are read by the engine's landing reader (1.83) ────────────────────────────
+def test_the_contracts_format_options_apply_to_files_fetched_by_sftp(sftp_server):
+    """SFTP had a pandas reader of its own, which ignored `source.options`: a bank's
+    semicolon-separated file came back as ONE column."""
+    (sftp_server.root / "settlement.csv").write_text("id;status\n7;ok\n8;ok\n")
+    c = _contract(sftp_server, pattern="settlement.csv")
+    c["source"]["options"]["delimiter"] = ";"
+    good, bad = DataProcessor(c, engine="polars").run_source()
+    assert len(good) == 2 and len(bad) == 0
+    assert sorted(good["id"].to_list()) == [7, 8]
+
+
+def test_spark_needs_a_staging_path_the_cluster_can_read(sftp_server):
+    processor = DataProcessor(_contract(sftp_server), engine="polars")
+    processor.engine_name = "spark"
+    with pytest.raises(ValueError, match="staging_path"):
+        processor._sftp_staging_dir({})
+
+
+def test_each_run_stages_into_a_fresh_folder_and_clears_earlier_ones(sftp_server, tmp_path):
+    processor = DataProcessor(_contract(sftp_server), engine="polars")
+    first = processor._sftp_staging_dir({"staging_path": str(tmp_path / "stage")})
+    second = processor._sftp_staging_dir({"staging_path": str(tmp_path / "stage")})
+    assert first != second
+    assert [p.name for p in (tmp_path / "stage").iterdir()] == [second.rsplit("/", 1)[-1]]

@@ -126,6 +126,35 @@ When `load_mode: cdc`, LakeLogic automatically handles soft deletes — marking 
 
 ---
 
+## Deletes From Full Snapshots
+
+A source that sends its **complete** current records every time (a full daily file over SFTP, a nightly full extract) never says what was deleted. `deletion: {strategy: snapshot_reconcile}` compares each load with the table: a key the table holds but the load lacks was deleted at source.
+
+!!! example "Example: a bank's full daily settlement file"
+
+    ```yaml
+    primary_key: [settlement_id]
+    materialization:
+      strategy: merge
+      soft_delete_column: is_deleted        # omit to remove missing records instead
+      soft_delete_time_column: deleted_at
+      soft_delete_reason_column: delete_reason
+      deletion:
+        strategy: snapshot_reconcile
+        max_delete_ratio: 0.2               # stop the run rather than delete more than 20%
+        scope: [country]                    # optional: each file covers one country
+    ```
+
+- A missing record is flagged `is_deleted: true` with `delete_reason: missing_from_snapshot` and keeps its last values. Without `soft_delete_column` it is removed.
+- A deleted record that appears again is restored (`is_deleted: false`).
+- If more than `max_delete_ratio` of the current records would be deleted, the run **fails and deletes nothing**: a truncated or empty file must never wipe a table.
+- Same behaviour on Polars, DuckDB, pandas and Spark: the missing records become the delete signal the CDC merge already applies.
+
+!!! warning "Full loads only"
+    On an incremental feed every record not in that batch would be deleted. Use CDC deletes for a source that sends delete events.
+
+---
+
 ## Table Properties
 
 !!! example "Example: Auto-optimize Delta tables"

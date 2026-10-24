@@ -2805,6 +2805,7 @@ class DataProcessor:
         reprocess_column: Optional[str] = None,
         reprocess_values: Optional[List[str]] = None,
         lookback_days: Optional[int] = None,
+        _staged: bool = False,
     ) -> ValidationResult:
         """
         Loads data from a source file and runs the contract in one step.
@@ -2856,8 +2857,10 @@ class DataProcessor:
             return self._run_kafka_stream_source()
 
         # ── dedicated readers: dlt (API), database (SQL), sftp (remote files) ──
+        # ``_staged``: a dedicated reader (SFTP) has fetched the files into a local folder and
+        # hands that folder back, so they are read by the same engine reader as a landing.
         _reader = SOURCE_READERS.get(self.contract.source.type) if self.contract.source else None
-        if _reader:
+        if _reader and not _staged:
             return getattr(self, _reader)()
 
         path_val = source or (self.contract.source.path if self.contract.source else None)
@@ -7328,9 +7331,10 @@ class DataProcessor:
         pattern = getattr(src, "pattern", None) or "*"
         fmt = (getattr(src, "format", None) or "csv").lower()
 
-        username = parsed.username or options.get("username") or os.getenv("LAKELOGIC_SFTP_USER")
-        password = options.get("password") or os.getenv("LAKELOGIC_SFTP_PASSWORD")
-        key_path = options.get("private_key_path") or os.getenv("LAKELOGIC_SFTP_KEY")
+        from lakelogic.core.materialization import sftp_credentials
+
+        creds = sftp_credentials(options, parsed.username)
+        username, password, key_path = creds["username"], creds["password"], creds["private_key_path"]
 
         # A password in the URI would be carried into logs and run metadata, so it is
         # refused rather than quietly accepted.
@@ -7352,9 +7356,8 @@ class DataProcessor:
             known_hosts=options["known_hosts"] if "known_hosts" in options else "",
         )
 
-        # `load_mode: incremental` re-downloads only files modified since the last
-        # run, using the server's own mtime. Without it a polled drop-folder re-reads
-        # every file it has ever received, every run.
+        # `load_mode: incremental` downloads only files the SERVER marks as modified since the
+        # last run's watermark (the run log's `max_source_mtime`).
         modified_since = None
         if str(getattr(src, "load_mode", "full")).lower() == "incremental":
             modified_since = self._get_last_source_watermark()
@@ -7364,10 +7367,55 @@ class DataProcessor:
                 else "SFTP incremental: first run, taking every matching file."
             )
 
+        staging = self._sftp_staging_dir(options)
         logger.info(f"Running SFTP source: {host}:{parsed.port or 22}{remote_dir} pattern={pattern} format={fmt}")
-        df = connector.extract_files(remote_dir, file_pattern=pattern, file_format=fmt, modified_since=modified_since)
+        local_paths = connector.fetch_files(
+            remote_dir, file_pattern=pattern, dest_dir=staging, modified_since=modified_since,
+        )
+        if not local_paths:
+            # Nothing new on the server: skip, exactly as a landing folder with no new files.
+            logger.info("SFTP: no new files since the last run; skipping.")
+            self._write_empty_run_log("no_new_data")
+            self._run_log_already_written = True
+            return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
 
-        return self.run(df, source_path=f"sftp://{host}{remote_dir}")
+        # The files keep the server's modification times, so the landing reader - the engine's
+        # own (Polars, DuckDB, Spark), with the contract's format options - reads them and
+        # records the newest as the next watermark, as it does for any landed file. Until 1.83
+        # SFTP had a pandas reader of its own: format options were ignored and only csv, json
+        # and parquet could be read.
+        return self.run_source(f"{staging}/{pattern}", _staged=True)
+
+    def _sftp_staging_dir(self, options: Dict[str, Any]) -> str:
+        """A fresh folder for this run's downloads.
+
+        ``options.staging_path`` names where (a Volume or lakehouse Files path on Spark, where
+        the executors must be able to read what the driver downloaded); it is required on Spark
+        for that reason. Elsewhere the default is a local temporary folder. Earlier runs' folders
+        under it are removed first; this run's stay, because a lazy reader may still read them
+        when the frame is written.
+        """
+        import shutil
+        import tempfile
+        import uuid
+
+        root = str(options.get("staging_path") or "").strip()
+        if not root:
+            if self.engine_name in ("spark", "pyspark"):
+                raise ValueError(
+                    "An SFTP source on Spark needs source.options.staging_path: a folder the cluster "
+                    "can read (a Volume or lakehouse Files path). Files are downloaded there, then read "
+                    "by Spark like any landing folder."
+                )
+            dataset = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(getattr(self.contract, "dataset", None) or "sftp"))
+            root = str(Path(tempfile.gettempdir()) / "lakelogic-sftp" / dataset)
+        base = Path(root)
+        base.mkdir(parents=True, exist_ok=True)
+        for old in base.glob("run-*"):
+            shutil.rmtree(old, ignore_errors=True)
+        run_dir = base / f"run-{uuid.uuid4().hex[:12]}"
+        run_dir.mkdir(parents=True)
+        return run_dir.as_posix()
 
     def _run_database_source(self) -> "ValidationResult":
         """Extract data natively via Polars, DuckDB, or Spark, then run validation.

@@ -130,7 +130,7 @@ def _has_delete_strategy(raw: Dict[str, Any]) -> bool:
         return True
     if mat.get("cdc_delete_values") or mat.get("cdc_op_field"):
         return True
-    return bool(raw.get("deletion"))  # proposed snapshot_reconcile block
+    return bool(mat.get("deletion"))  # materialization.deletion: {strategy: snapshot_reconcile}
 
 
 def _has_any_quality(raw: Dict[str, Any]) -> bool:
@@ -487,8 +487,9 @@ def check_no_delete_strategy(raw, name, ctx):  # DEL-001
                 "deletes",
                 f"current-state entity with a key but no delete strategy — hard deletes "
                 f"at source go undetected (stale rows persist).{extra}",
-                suggestion="Declare `soft_deletes: {enabled: true}` + CDC, or "
-                "`deletion: {strategy: snapshot_reconcile, ...}`.",
+                suggestion="If the source sends delete events, declare `soft_deletes: {enabled: true}` "
+                "+ CDC. If every load is a FULL snapshot, declare `materialization.deletion: "
+                "{strategy: snapshot_reconcile}` (with `strategy: merge`).",
             )
         ]
     return []

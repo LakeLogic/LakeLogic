@@ -621,6 +621,41 @@ def _resolve_path(raw_path: str, base_path: Optional[Path]) -> Path:
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
 
 
+def sftp_credentials(options: Dict[str, Any], uri_username: Optional[str] = None) -> Dict[str, Optional[str]]:
+    """The SFTP login for a source (``source.options``) or a delivery (``storage_options``) -
+    ONE reading for both directions.
+
+    ``env:VAR`` / ``${ENV:VAR}`` is resolved here. Until 1.82 both directions passed the option
+    on as written, so the documented ``password: env:VAR`` sent the literal text "env:VAR" to
+    the server and the login could never succeed. A password must be a reference: a literal
+    one in a contract is refused. Unset fields fall back to ``LAKELOGIC_SFTP_*``.
+    """
+
+    def _option(key: str, *, secret: bool = False) -> Optional[str]:
+        raw = options.get(key)
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        is_ref = text.startswith(("env:", "${ENV:"))
+        if secret and not is_ref:
+            raise ValueError(
+                f"SFTP {key} must reference an environment variable (env:VAR) - "
+                "secrets are never written into a contract"
+            )
+        if not is_ref:
+            return text
+        val = _resolve_env_value(text)
+        if not val or val == text:
+            raise ValueError(f"SFTP {key}: the environment variable in {text!r} is not set")
+        return val
+
+    return {
+        "username": uri_username or _option("username") or os.getenv("LAKELOGIC_SFTP_USER"),
+        "password": _option("password", secret=True) or os.getenv("LAKELOGIC_SFTP_PASSWORD"),
+        "private_key_path": _option("private_key_path") or os.getenv("LAKELOGIC_SFTP_KEY"),
+    }
+
+
 def _resolve_env_value(value: Optional[str]) -> Optional[str]:
     """
     Resolve simple environment variable placeholders.
@@ -910,9 +945,7 @@ def _write_frame_sftp(
     connector = SFTPConnector(
         host=parsed.hostname,
         port=parsed.port or 22,
-        username=parsed.username or opts.get("username") or os.getenv("LAKELOGIC_SFTP_USER"),
-        password=opts.get("password") or os.getenv("LAKELOGIC_SFTP_PASSWORD"),
-        private_key_path=opts.get("private_key_path") or os.getenv("LAKELOGIC_SFTP_KEY"),
+        **sftp_credentials(opts, parsed.username),
         known_hosts=opts["known_hosts"] if "known_hosts" in opts else "",
     )
 
@@ -1686,7 +1719,11 @@ def _inject_unknown_member_pandas(
                 import pandas as pd
 
                 dtype = df[col].dtype
-                if is_string_dtype(dtype):
+                present = df[col].dropna()
+                if len(present) and all(isinstance(v, bool) for v in present):
+                    # A flag held as Python booleans (a soft-delete column) is not text.
+                    val = False
+                elif is_string_dtype(dtype):
                     val = "Unknown"
                 elif is_numeric_dtype(dtype):
                     val = -1
@@ -3200,7 +3237,7 @@ def _spark_merge_dataframe(  # pragma: no cover
     # ── SCD1 Unknown Member Injection ────────────────────────────
     if scd1_cfg:
         unknown_cfg = scd1_cfg.get("unknown_member", {})
-        if unknown_cfg.get("enabled", True):
+        if unknown_cfg and unknown_cfg.get("enabled", True):
             merged = _inject_unknown_member_spark(merged, primary_key, scd1_cfg, unknown_cfg)
 
     # ── Enforce SCD1 Column Ordering ─────────────────────────────
@@ -5936,7 +5973,10 @@ def _materialize_primary(
             )
             # Inject unknown member once
             unknown_cfg = scd1_cfg.get("unknown_member", {})
-            if unknown_cfg.get("enabled", True):
+            # Only when configured - as every other path here and Spark's after-write injection
+            # do. It was added to EVERY merge table here, again on each run (no surrogate key to
+            # find it by), and the third run failed on the duplicate key.
+            if unknown_cfg and unknown_cfg.get("enabled", True):
                 merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
         else:
             scd1_cfg = getattr(mat, "scd1", None)
@@ -5960,7 +6000,10 @@ def _materialize_primary(
             )
             # Inject unknown member once
             unknown_cfg = scd1_cfg.get("unknown_member", {})
-            if unknown_cfg.get("enabled", True):
+            # Only when configured - as every other path here and Spark's after-write injection
+            # do. It was added to EVERY merge table here, again on each run (no surrogate key to
+            # find it by), and the third run failed on the duplicate key.
+            if unknown_cfg and unknown_cfg.get("enabled", True):
                 merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
         _write_frame(merged, target_file, resolved_format)
         rows_written = len(merged)
@@ -5994,6 +6037,187 @@ def _materialize_primary(
 # ── Delta Compaction ─────────────────────────────────────────────────────────
 
 
+#: The delete-signal column snapshot reconciliation writes, and its values. The same column
+#: Core's CDC support defaults to, so every merge path already knows how to apply it.
+SNAPSHOT_OP_COLUMN = "_lakelogic_cdc_op"
+SNAPSHOT_DELETE_REASON = "missing_from_snapshot"
+
+
+class SnapshotReconcileRefused(RuntimeError):
+    """A load would delete more of the table than `deletion.max_delete_ratio` allows."""
+
+
+def _read_current_target(df: Any, contract: Any, target_path: Optional[Path], engine_name: Optional[str],
+                         storage_options: Optional[Dict[str, str]]) -> Any:
+    """What the merge target holds now, as the engine's own frame, or None when it holds nothing.
+    Resolved exactly as `_materialize_primary` resolves the target it writes."""
+    mat = contract.materialization
+    resolved, fmt = _resolve_target(contract, target_path)
+    if resolved is None:
+        return None
+    fmt = (fmt or getattr(mat, "format", None) or "").lower()
+    where = str(resolved)
+    if engine_name == "spark":  # pragma: no cover - exercised on Databricks
+        spark = df.sparkSession
+        if where.startswith("table:"):
+            name = where[len("table:"):]
+            return spark.table(name) if spark.catalog.tableExists(name) else None
+        try:
+            return spark.read.format(fmt or "delta").load(where)
+        except Exception:
+            return None
+    import polars as pl
+
+    if where.startswith("table:"):
+        from lakelogic.engines.catalog_resolver import local_table_path
+
+        location = getattr(mat, "location", None) or local_table_path(where)
+        if not location:
+            return None
+        where, fmt = str(location), "delta"
+    target = URIPath(where)
+    if not _holds_data(target):
+        return None
+    if fmt == "delta":
+        from lakelogic.core.delta_compat import read_delta
+
+        frame = read_delta(where, storage_options=storage_options or None)
+        return frame if isinstance(frame, pl.DataFrame) else pl.from_pandas(frame)
+    frame = _read_frame(target, fmt)
+    return frame if isinstance(frame, pl.DataFrame) else pl.from_pandas(frame)
+
+
+def _unknown_member_mask_polars(frame: Any, keys: List[str]) -> Any:
+    """The unknown-member placeholder row: stamped `_lakelogic_source = 'Unknown'`, its key
+    `Unknown` or `-1`. No source file contains it, so it is never "missing"."""
+    import polars as pl
+
+    mask = pl.lit(False)
+    if "_lakelogic_source" in frame.columns:
+        mask = mask | (pl.col("_lakelogic_source") == "Unknown")
+    for k in keys:
+        mask = mask | pl.col(k).cast(pl.Utf8).is_in(["Unknown", "-1"])
+    return frame.select(mask.alias("m"))["m"].fill_null(False)
+
+
+def _check_ratio(n: int, total: int, limit: float) -> None:
+    if total and n / total > limit:
+        raise SnapshotReconcileRefused(
+            f"Snapshot reconcile stopped the run: this load would delete {n} of {total} current records "
+            f"({n / total:.0%}), more than max_delete_ratio {limit:.0%}. Nothing was deleted. Check the "
+            "file is complete; raise max_delete_ratio only if the source really shrank that much."
+        )
+
+
+def _apply_snapshot_reconcile(df: Any, contract: Any, target_path: Optional[Path], engine_name: Optional[str],
+                              storage_options: Optional[Dict[str, str]]) -> Tuple[Any, Any]:
+    """``materialization.deletion: {strategy: snapshot_reconcile}``: the load is the COMPLETE
+    current set, so a key the table holds (and has not already deleted) but the load lacks is
+    deleted.
+
+    It becomes the delete SIGNAL Core's merge already applies on every engine (soft flag, time
+    and reason, or a hard delete when no `soft_delete_column`): each missing record is re-sent as
+    its CURRENT target row with `_lakelogic_cdc_op = 'D'`, so its data survives (Spark's MERGE
+    updates every column from the incoming row). Incoming rows carry `'U'` and the flag set back
+    to false, so a deleted key that comes back is restored.
+
+    Refuses, deleting nothing, when more than `max_delete_ratio` of the current records would go:
+    an empty or truncated file must never wipe a table.
+    """
+    mat = getattr(contract, "materialization", None) if contract is not None else None
+    deletion = getattr(mat, "deletion", None) if mat is not None else None
+    if deletion is None:
+        return df, contract
+    if isinstance(deletion, dict):
+        from olc.models._nested import DeletionConfig
+
+        deletion = DeletionConfig.model_validate(deletion)
+    if str(mat.strategy or "").lower() != "merge":
+        raise ValueError("materialization.deletion needs strategy: merge")
+    keys = list(contract.primary_key or [])
+    if not keys:
+        raise ValueError("materialization.deletion: snapshot_reconcile needs primary_key")
+    soft_col = getattr(mat, "soft_delete_column", None)
+    soft_val = getattr(mat, "soft_delete_value", True)
+    reason_col = getattr(mat, "soft_delete_reason_column", None)
+    restored = False if soft_val is True else None
+    scope = list(deletion.scope or [])
+
+    existing = _read_current_target(df, contract, target_path, engine_name, storage_options)
+    if existing is None:
+        logger.info("Snapshot reconcile: the target holds nothing yet, so nothing can be missing.")
+        return df, contract
+
+    if engine_name == "spark":  # pragma: no cover - exercised on Databricks
+        from pyspark.sql import functions as F
+
+        current = existing
+        if "_lakelogic_source" in current.columns:
+            current = current.filter(F.col("_lakelogic_source").isNull() | (F.col("_lakelogic_source") != "Unknown"))
+        for k in keys:
+            current = current.filter(~F.col(k).cast("string").isin("Unknown", "-1"))
+        if soft_col and soft_col in current.columns:
+            current = current.filter(F.col(soft_col).isNull() | (F.col(soft_col) != F.lit(soft_val)))
+        if scope:
+            current = current.join(df.select(*scope).distinct(), on=scope, how="left_semi")
+        total = current.count()
+        missing = current.join(df.select(*keys).distinct(), on=keys, how="left_anti")
+        n = missing.count()
+        _check_ratio(n, total, deletion.max_delete_ratio)
+        deletes = missing.withColumn(SNAPSHOT_OP_COLUMN, F.lit("D"))
+        if reason_col:
+            deletes = deletes.withColumn(reason_col, F.lit(SNAPSHOT_DELETE_REASON))
+        incoming = df.withColumn(SNAPSHOT_OP_COLUMN, F.lit("U"))
+        if soft_col:
+            incoming = incoming.withColumn(soft_col, F.lit(restored).cast("boolean"))
+            if soft_col in deletes.columns and soft_val is True:
+                deletes = deletes.withColumn(soft_col, F.col(soft_col).cast("boolean"))
+        out = incoming.unionByName(deletes, allowMissingColumns=True)
+    else:
+        import polars as pl
+
+        is_pandas = type(df).__module__.startswith("pandas")
+        if isinstance(df, pl.DataFrame):
+            incoming = df
+        elif is_pandas:
+            incoming = pl.from_pandas(df)
+        elif hasattr(df, "pl"):
+            incoming = df.pl()
+        else:
+            incoming = pl.DataFrame(df)
+        current = existing.filter(~_unknown_member_mask_polars(existing, keys))
+        if soft_col and soft_col in current.columns:
+            current = current.filter(pl.col(soft_col).is_null() | (pl.col(soft_col) != soft_val))
+        if scope:
+            current = current.join(incoming.select(scope).unique(), on=scope, how="semi")
+        total = current.height
+        missing = current.join(incoming.select(keys).unique(), on=keys, how="anti")
+        n = missing.height
+        _check_ratio(n, total, deletion.max_delete_ratio)
+        deletes = missing.with_columns(pl.lit("D").alias(SNAPSHOT_OP_COLUMN))
+        if reason_col:
+            deletes = deletes.with_columns(pl.lit(SNAPSHOT_DELETE_REASON).alias(reason_col))
+        incoming = incoming.with_columns(pl.lit("U").alias(SNAPSHOT_OP_COLUMN))
+        if soft_col:
+            incoming = incoming.with_columns(pl.lit(restored).cast(pl.Boolean).alias(soft_col))
+            # A flag column that has only ever been empty is stored as text; combined with the
+            # incoming booleans it would become the TEXT "false", which every reader treats as true.
+            if soft_col in deletes.columns and soft_val is True:
+                deletes = deletes.with_columns(pl.col(soft_col).cast(pl.Utf8).str.to_lowercase()
+                                               .replace_strict({"true": True, "false": False}, default=None,
+                                                               return_dtype=pl.Boolean).alias(soft_col))
+        out = pl.concat([incoming, deletes], how="diagonal_relaxed")
+        if is_pandas:
+            out = out.to_pandas()
+
+    logger.info(f"Snapshot reconcile: {n} of {total} current record(s) missing from this load, deleted.")
+    reconciled = contract.model_copy(deep=True)
+    if reconciled.source is not None:
+        reconciled.source.cdc_op_field = SNAPSHOT_OP_COLUMN
+        reconciled.source.cdc_delete_values = ["D"]
+    return out, reconciled
+
+
 def materialize_dataframe(
     df: Any,
     contract,
@@ -6023,6 +6247,9 @@ def materialize_dataframe(
     Returns:
         Metadata about the write (target, rows_written, format, secondary_writes).
     """
+    # A full snapshot that never says what was deleted: compare it with what the table holds.
+    if not is_reprocess:
+        df, contract = _apply_snapshot_reconcile(df, contract, target_path, engine_name, storage_options)
     result = _materialize_primary(
         df,
         contract,

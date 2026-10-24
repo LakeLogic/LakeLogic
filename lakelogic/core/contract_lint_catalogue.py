@@ -206,7 +206,9 @@ CATALOGUE: Dict[str, RuleEntry] = {
             why=(
                 "A merge only adds and updates. When a record is deleted at the source the table "
                 "never hears about it, so stale rows live on: counted in metrics and impossible to "
-                "erase on request. Declare how deletes arrive (a soft-delete column or CDC)."
+                "erase on request. Declare how deletes arrive: CDC delete events with a soft-delete "
+                "column, or, when every load is a full snapshot, `materialization.deletion: "
+                "{strategy: snapshot_reconcile}`."
             ),
             failing=_contract(
                 "primary_key: [trip_id]\nmaterialization:\n  strategy: merge\n  format: delta\n" + _SILVER_GUARDS,

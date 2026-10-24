@@ -70,8 +70,8 @@ def test_missing_delete_strategy():  # DEL-001
     cdc = _silver(source={"type": "delta", "load_mode": "cdc"})
     cdc.pop("soft_deletes")
     assert "DEL-001" not in _ids(cdc)
-    # the proposed deletion block satisfies it
-    snap = _silver(deletion={"strategy": "snapshot_reconcile"})
+    # materialization.deletion (snapshot_reconcile, built 1.83) satisfies it
+    snap = _silver(materialization={"strategy": "merge", "deletion": {"strategy": "snapshot_reconcile"}})
     snap.pop("soft_deletes")
     assert "DEL-001" not in _ids(snap)
 

@@ -494,6 +494,7 @@ class Materialization(_olcn.Materialization):
         "soft_delete_value",
         "soft_delete_time_column",
         "soft_delete_reason_column",
+        "deletion",
         "table_properties",
         "compaction",
         "unknown_member",
