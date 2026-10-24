@@ -110,12 +110,12 @@ This eliminates the common testing pain point: *"How do I test my pipeline witho
 
 Dive deeper into how LakeLogic compares to existing tools and approaches:
 
-- :material-swap-horizontal: [**I Built LakeLogic Because 1,847 Lines of Great Expectations Weren't Telling Me Which Rows Failed**](https://lakelogic.org/blog/great-expectations-to-lakelogic/) — The founder story: why GX's approach didn't work and what replaced it.
-- :material-cash-minus: [**Data Quality Management Without the Platform Tax**](https://lakelogic.org/blog/data-quality-management/) — Enterprise DQM tools vs. YAML contracts: cost, flexibility, and version control compared.
-- :material-lightning-bolt: [**Stop the Spark Tax: One Data Contract, Any Engine**](https://lakelogic.org/blog/stop-the-spark-tax/) — Why engine portability eliminates logic drift between Spark, Polars, and DuckDB.
+- :material-shield-check-outline: [**Inline Data Quality Gates: Stop Bad Data in Pipelines**](https://www.lakelogic.io/blog/inline-data-quality-gates) — Check every row against the contract and quarantine failures before they reach downstream tables.
+- :material-file-document-check-outline: [**Data Contracts Explained**](https://www.lakelogic.io/blog/data-contracts-explained) — Why shifting quality left into a versioned contract beats fixing it downstream.
+- :material-lightning-bolt: [**Stop the Spark Tax: One Data Contract, Any Engine**](https://www.lakelogic.io/blog/spark-tax-engine-agnostic) — Why engine portability eliminates logic drift between Spark, Polars, and DuckDB.
 
 ---
 
 ## Need More?
 
-LakeLogic is fully open source and works standalone. For enterprise teams looking for additional capabilities, [LakeLogic.org](https://lakelogic.org) extends LakeLogic with AI-powered contract generation, visual lineage mapping, and collaborative governance workflows.
+LakeLogic is fully open source and works standalone. For enterprise teams looking for additional capabilities, [LakeLogic Platform](https://www.lakelogic.io) extends LakeLogic with AI-powered contract generation, visual lineage mapping, and collaborative governance workflows.

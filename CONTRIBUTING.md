@@ -19,7 +19,7 @@ We welcome contributions from the community and are pleased to have you join us.
 
 ## 📜 Code of Conduct
 
-This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to conduct@lakelogic.org.
+This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to conduct@lakelogic.io.
 
 ---
 
@@ -335,9 +335,9 @@ Contributors will be:
 ## 📞 Questions?
 
 - **Technical questions**: [GitHub Discussions](https://github.com/lakelogic/LakeLogic/discussions)
-- **Security issues**: security@lakelogic.org
-- **Code of Conduct**: conduct@lakelogic.org
-- **General inquiries**: hello@lakelogic.org
+- **Security issues**: security@lakelogic.io
+- **Code of Conduct**: conduct@lakelogic.io
+- **General inquiries**: hello@lakelogic.io
 
 ---
 

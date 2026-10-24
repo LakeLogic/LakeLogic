@@ -6,7 +6,7 @@ repo_name: lakelogic/LakeLogic
 repo_url: https://github.com/lakelogic/LakeLogic
 edit_uri: edit/main/docs/
 copyright: >
-  Copyright &copy; 2026 <a href="https://lakelogic.org" target="_blank">LakeLogic</a> ·
+  Copyright &copy; 2026 <a href="https://www.lakelogic.io" target="_blank">LakeLogic</a> ·
   Open core — Apache 2.0 · <a href="https://github.com/lakelogic/LakeLogic" target="_blank">GitHub</a>
 
 use_directory_urls: false
@@ -161,6 +161,6 @@ extra:
       link: https://pypi.org/project/lakelogic/
       name: LakeLogic on PyPI
     - icon: fontawesome/solid/globe
-      link: https://lakelogic.org
+      link: https://www.lakelogic.io
       name: LakeLogic.org Website
   generator: false

@@ -14,7 +14,7 @@ Examples of behavior that contributes to a positive environment:
 
 ## Enforcement
 
-Instances of unacceptable behavior may be reported to conduct@lakelogic.org
+Instances of unacceptable behavior may be reported to conduct@lakelogic.io
 
 ## Attribution
 
