@@ -41,6 +41,7 @@ good, bad = proc.run(files_df)  # contract.extraction.preprocessing.file_column:
 | Provider | Install | Input | Cost |
 | -------- | ------- | ----- | ---- |
 | `regex` | built-in | Semi-structured text | $0, offline, **deterministic** |
+| `document` | `lakelogic[documents]` (1.82+) | PDF (typed or scanned), image, Word: one row per file | $0, offline, **deterministic** |
 | `local` (pdfplumber) | `lakelogic[extraction-ocr]` | PDF, DOCX | $0, offline |
 | `rapidocr` | `lakelogic[extraction-ocr]` | Scanned images | $0, ONNX, no torch |
 | `spacy` | `lakelogic[nlp]` | Free text | $0, local NER |
@@ -77,6 +78,45 @@ extraction:
 A field whose pattern does not match yields `null`. Because it is deterministic, `regex`
 is the provider used to conformance-test the extraction path across engines; LLM providers
 ride the same wiring but are non-deterministic and therefore out of conformance scope.
+
+
+### `document` — labelled fields from files, offline
+
+When each file is one record and its values sit next to printed labels (a licence, an
+insurance certificate, a receipt, an incident report), `provider: document` reads every file's
+text offline and applies one regex per field, exactly as `regex` does for a column. The
+pattern is the field's first `extraction_examples` entry, or `extraction.patterns[field]`,
+which wins. Install with `pip install "lakelogic[documents]"`: pdfplumber, rapidocr and
+python-docx, all pip-only (no Tesseract, no PyTorch).
+
+```yaml
+source:
+  type: landing
+  path: "{landing_root}/receipts/**/*.png"
+  format: image                    # pdf | image | docx
+extraction:
+  provider: document
+model:
+  fields:
+    - name: file_path              # the file each row came from
+      type: string
+    - name: receipt_number
+      type: string
+      extraction_task: metadata
+      extraction_examples:
+        - 'Receipt\s*No\s*[:\t ]*\s*([A-Z]{3}-\d{6})'
+    - name: total
+      type: string                 # keep as printed; cast and check in silver
+      extraction_task: metadata
+      extraction_examples:
+        - 'Total\s*[:\t ]*\s*(\d+\.\d{2})'
+```
+
+Write each pattern as **label, then one capture group**. Scans split and misread labels, so
+when a pattern finds nothing the reader retries the label tolerating spacing and the usual
+OCR swaps (`c0st`, `Tota1`, `5tatus`); the captured value is never altered. A capture stops at
+the end of its line, so `([^\n]+)` cannot swallow the next field. A field with no match is
+`null`. Use an LLM provider instead when values are not labelled or must be inferred.
 
 ---
 
