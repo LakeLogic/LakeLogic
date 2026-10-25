@@ -41,4 +41,5 @@ quality gaps, propose a rule, test it in a sandbox, and have a person approve it
 recorded. See [Connect your AI assistant (MCP)](https://www.lakelogic.io/docs/ai-assistants) on the
 platform docs.
 
-Source: [github.com/LakeLogic/lakelogic-mcp](https://github.com/LakeLogic/lakelogic-mcp).
+Documentation: [mcp.lakelogic.io](https://mcp.lakelogic.io/) · Source:
+[github.com/LakeLogic/lakelogic-mcp](https://github.com/LakeLogic/lakelogic-mcp).

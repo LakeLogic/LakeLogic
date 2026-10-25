@@ -41,7 +41,7 @@ There are **two distinct kinds of file**, and only one of them is an open standa
 | Layer | Files | Portable? | Owned by |
 | --- | --- | --- | --- |
 | **Registry** | `_domain.yaml`, `_system.yaml` | LakeLogic-specific | LakeLogic (this repo) |
-| **Contract** | per-table `*.olc.yaml` | Portable ([OLC](https://github.com/LakeLogic/open-lakehouse-contract)) | the Open Lakehouse Contract standard |
+| **Contract** | per-table `*.olc.yaml` | Portable ([OLC](https://olc.lakelogic.io/)) | the Open Lakehouse Contract standard |
 
 The registry layer expresses **organisation, defaults and inheritance across many
 contracts**. A contract expresses **one data product** and is validated by
