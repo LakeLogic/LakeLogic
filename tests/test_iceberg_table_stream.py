@@ -11,8 +11,10 @@ from types import SimpleNamespace
 import pytest
 
 JAR = next(
-    iter(sorted((Path.home() / ".ivy2.5.2" / "jars").glob("org.apache.iceberg_iceberg-spark-runtime-4.0_2.13-*.jar"))
-         + sorted((Path.home() / ".ivy2" / "jars").glob("org.apache.iceberg_iceberg-spark-runtime-4.0_2.13-*.jar"))),
+    iter(
+        sorted((Path.home() / ".ivy2.5.2" / "jars").glob("org.apache.iceberg_iceberg-spark-runtime-4.0_2.13-*.jar"))
+        + sorted((Path.home() / ".ivy2" / "jars").glob("org.apache.iceberg_iceberg-spark-runtime-4.0_2.13-*.jar"))
+    ),
     None,
 )
 
@@ -54,8 +56,7 @@ class _Collect:
     def run(self, df):
         rows = [r["id"] for r in df.collect()]
         self.ids.extend(rows)
-        return SimpleNamespace(good=df, bad=df.limit(0), source_count=len(rows),
-                               good_count=len(rows), bad_count=0)
+        return SimpleNamespace(good=df, bad=df.limit(0), source_count=len(rows), good_count=len(rows), bad_count=0)
 
     def materialize(self, *a, **k):
         return None
@@ -67,13 +68,18 @@ def _stream_once(processor_cls, spark, checkpoint):
     sink_proc = _Collect()
     proc = SimpleNamespace(
         contract=SimpleNamespace(
-            dataset="silver_events", info=None,
-            source=SimpleNamespace(type="stream", path="table:local.db.bronze_events",
-                                   options={"kind": "iceberg", "checkpoint": checkpoint}),
+            dataset="silver_events",
+            info=None,
+            source=SimpleNamespace(
+                type="stream",
+                path="table:local.db.bronze_events",
+                options={"kind": "iceberg", "checkpoint": checkpoint},
+            ),
         ),
         _empty_frame=lambda: None,
         _write_stream_run_log=lambda summary: None,
-        run=sink_proc.run, materialize=sink_proc.materialize,
+        run=sink_proc.run,
+        materialize=sink_proc.materialize,
         _quarantine_row_count=lambda: None,
         _stamped_stream_counts=lambda: None,
         last_run_id=None,
@@ -112,14 +118,19 @@ def test_a_stream_run_is_counted_by_its_run_id_in_the_tables_it_wrote(iceberg_sp
     from lakelogic.core import processor as p
 
     spark = iceberg_spark
-    spark.createDataFrame([("a", "r1"), ("b", "r1"), ("c", "r0")], ["id", "_lakelogic_run_id"])         .write.mode("overwrite").saveAsTable("local.db.run_events")
-    spark.createDataFrame([("x", "r1"), ("y", "r0")], ["id", "_lakelogic_run_id"])         .write.mode("overwrite").saveAsTable("local.db.run_events_quarantine")
+    spark.createDataFrame([("a", "r1"), ("b", "r1"), ("c", "r0")], ["id", "_lakelogic_run_id"]).write.mode(
+        "overwrite"
+    ).saveAsTable("local.db.run_events")
+    spark.createDataFrame([("x", "r1"), ("y", "r0")], ["id", "_lakelogic_run_id"]).write.mode("overwrite").saveAsTable(
+        "local.db.run_events_quarantine"
+    )
     proc = SimpleNamespace(
         last_run_id="r1",
-        contract=SimpleNamespace(materialization=SimpleNamespace(target_path="table:local.db.run_events",
-                                                                 format="iceberg"),
-                                 quarantine=SimpleNamespace(target="table:local.db.run_events_quarantine"),
-                                 effective_server=lambda: None),
+        contract=SimpleNamespace(
+            materialization=SimpleNamespace(target_path="table:local.db.run_events", format="iceberg"),
+            quarantine=SimpleNamespace(target="table:local.db.run_events_quarantine"),
+            effective_server=lambda: None,
+        ),
     )
     proc._rows_with_run_id = lambda t: p.DataProcessor._rows_with_run_id(proc, t)
     got = p.DataProcessor._stamped_stream_counts(proc)
@@ -136,8 +147,9 @@ def test_a_landing_folder_streams_each_new_file_once(iceberg_spark, tmp_path):
     folder = tmp_path / "landing" / "trips"
     folder.mkdir(parents=True)
     # T2's address holds a line break inside quotes: still one row, its later columns intact.
-    (folder / "f1.csv").write_text('id,address,fare\nT1,a,10.5\nT2,"14 Main St\nSpringfield",7\nT3,c,3\n',
-                                   encoding="utf-8")
+    (folder / "f1.csv").write_text(
+        'id,address,fare\nT1,a,10.5\nT2,"14 Main St\nSpringfield",7\nT3,c,3\n', encoding="utf-8"
+    )
     checkpoint = (tmp_path / "ckpt").as_posix()
 
     frames = []
@@ -151,13 +163,19 @@ def test_a_landing_folder_streams_each_new_file_once(iceberg_spark, tmp_path):
         seen = _Keep()
         proc = SimpleNamespace(
             contract=SimpleNamespace(
-                dataset="bronze_trips", info=None,
-                source=SimpleNamespace(type="stream", path=folder.as_posix(), format="csv",
-                                       options={"kind": "files", "checkpoint": checkpoint}),
+                dataset="bronze_trips",
+                info=None,
+                source=SimpleNamespace(
+                    type="stream",
+                    path=folder.as_posix(),
+                    format="csv",
+                    options={"kind": "files", "checkpoint": checkpoint},
+                ),
             ),
             _empty_frame=lambda: None,
             _write_stream_run_log=lambda summary: None,
-            run=seen.run, materialize=seen.materialize,
+            run=seen.run,
+            materialize=seen.materialize,
             _quarantine_row_count=lambda: None,
             _stamped_stream_counts=lambda: None,
             last_run_id=None,
@@ -205,11 +223,20 @@ def test_kinesis_records_parse_like_kafka_messages(iceberg_spark):
 
     ts = _dt.datetime(2026, 10, 27, 12, 0, 0)
     raw = iceberg_spark.createDataFrame(
-        [(bytearray(b'{"request_id": "R1", "fare": "9.5"}'), ts, "shardId-0", "100"),
-         (bytearray(b"not json"), ts, "shardId-0", "101")],
-        "data binary, approximateArrivalTimestamp timestamp, shardId string, sequenceNumber string")
-    rows = json_message_columns(raw, ["request_id", "fare"], value="data", timestamp="approximateArrivalTimestamp",
-                                partition="shardId", offset="sequenceNumber").collect()
+        [
+            (bytearray(b'{"request_id": "R1", "fare": "9.5"}'), ts, "shardId-0", "100"),
+            (bytearray(b"not json"), ts, "shardId-0", "101"),
+        ],
+        "data binary, approximateArrivalTimestamp timestamp, shardId string, sequenceNumber string",
+    )
+    rows = json_message_columns(
+        raw,
+        ["request_id", "fare"],
+        value="data",
+        timestamp="approximateArrivalTimestamp",
+        partition="shardId",
+        offset="sequenceNumber",
+    ).collect()
     assert rows[0]["request_id"] == "R1" and rows[0]["fare"] == "9.5" and rows[0][UNREADABLE_COLUMN] is None
     assert rows[1]["request_id"] is None and "shardId-0" in rows[1][UNREADABLE_COLUMN]
     assert "101" in rows[1][UNREADABLE_COLUMN]
@@ -223,12 +250,22 @@ def test_pubsub_messages_parse_like_kafka_messages(iceberg_spark):
     from lakelogic.core.stream_sink import UNREADABLE_COLUMN, json_message_columns
 
     raw = iceberg_spark.createDataFrame(
-        [(bytearray(b'{"request_id": "R1", "fare": "9.5"}'), "1793120000000", "m-1"),
-         (bytearray(b"not json"), "1793120000500", "m-2")],
-        "payload binary, publishTimestampInMillis string, messageId string")
-    raw = (raw.withColumn("__pubsub_published", F.timestamp_millis(F.col("publishTimestampInMillis").cast("long")))
-              .withColumn("__pubsub_subscription", F.lit("trip_requests")))
-    rows = json_message_columns(raw, ["request_id", "fare"], value="payload", timestamp="__pubsub_published",
-                                partition="__pubsub_subscription", offset="messageId").collect()
+        [
+            (bytearray(b'{"request_id": "R1", "fare": "9.5"}'), "1793120000000", "m-1"),
+            (bytearray(b"not json"), "1793120000500", "m-2"),
+        ],
+        "payload binary, publishTimestampInMillis string, messageId string",
+    )
+    raw = raw.withColumn(
+        "__pubsub_published", F.timestamp_millis(F.col("publishTimestampInMillis").cast("long"))
+    ).withColumn("__pubsub_subscription", F.lit("trip_requests"))
+    rows = json_message_columns(
+        raw,
+        ["request_id", "fare"],
+        value="payload",
+        timestamp="__pubsub_published",
+        partition="__pubsub_subscription",
+        offset="messageId",
+    ).collect()
     assert rows[0]["request_id"] == "R1" and rows[0][UNREADABLE_COLUMN] is None
     assert "trip_requests" in rows[1][UNREADABLE_COLUMN] and "m-2" in rows[1][UNREADABLE_COLUMN]

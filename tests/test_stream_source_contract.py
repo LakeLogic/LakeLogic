@@ -89,8 +89,7 @@ def test_a_type_stream_contract_is_classed_as_streaming():
     ``source.options``: a real Event Hubs contract read as batch (2026-10-26)."""
     from lakelogic.core.contract_lint import _is_resumable_stream
 
-    doc = {"source": {"type": "stream", "path": "rides",
-                      "options": {"kind": "eventhubs", "trigger": "available_now"}}}
+    doc = {"source": {"type": "stream", "path": "rides", "options": {"kind": "eventhubs", "trigger": "available_now"}}}
     assert _is_resumable_stream(doc)
     assert _is_resumable_stream({"source": {"type": "landing", "options": {"trigger": "available_now"}}})
     assert not _is_resumable_stream({"source": {"type": "landing", "path": "x"}})
@@ -102,8 +101,10 @@ def test_a_placeholder_inside_a_placeholder_value_resolves():
     from lakelogic.core.registry import _resolve_placeholders
 
     path = "abfss://landing@acct.dfs.core.windows.net/{ls_folder}/{system}"
-    for order in ({"domain": "business", "ls_folder": "landing_{domain}", "system": "salesforce"},
-                  {"ls_folder": "landing_{domain}", "system": "salesforce", "domain": "business"}):
+    for order in (
+        {"domain": "business", "ls_folder": "landing_{domain}", "system": "salesforce"},
+        {"ls_folder": "landing_{domain}", "system": "salesforce", "domain": "business"},
+    ):
         assert _resolve_placeholders(path, order).endswith("/landing_business/salesforce")
     assert _resolve_placeholders("{a}", {"a": "{a}"}) == "{a}"  # a self-reference stops
 
@@ -162,9 +163,13 @@ def test_a_delta_stream_on_spark_reads_the_table_with_its_own_checkpoint(monkeyp
     monkeypatch.setattr(stream_sink, "SparkStreamSink", _Sink)
     proc = SimpleNamespace(
         contract=SimpleNamespace(
-            dataset="silver_events", info=None,
-            source=SimpleNamespace(type="stream", path="table:c.d.bronze_events",
-                                   options={"kind": "delta", "checkpoint": "abfss://x/_checkpoints/silver_events"}),
+            dataset="silver_events",
+            info=None,
+            source=SimpleNamespace(
+                type="stream",
+                path="table:c.d.bronze_events",
+                options={"kind": "delta", "checkpoint": "abfss://x/_checkpoints/silver_events"},
+            ),
         ),
         _empty_frame=lambda: None,
         _quarantine_row_count=lambda: None,
@@ -189,14 +194,22 @@ def test_a_stream_run_writes_one_run_log_row_with_its_totals(monkeypatch):
     monkeypatch.setattr(p, "write_run_log", lambda report, contract, **kw: written.append(report))
     proc = SimpleNamespace(
         contract=SimpleNamespace(info=SimpleNamespace(title="silver_events"), dataset="silver_events"),
-        engine_name="spark", _run_log_mode="table",
+        engine_name="spark",
+        _run_log_mode="table",
         _build_report=lambda title, counts: {"title": title, "counts": dict(counts), "status": "succeeded"},
     )
     proc._write_empty_run_log = lambda stage: written.append({"status": stage})
-    p.DataProcessor._write_stream_run_log(proc, {"batches": 2, "source_count": 62, "good_count": 60,
-                                                 "bad_count": 1, "superseded_count": 1})
-    assert written[-1]["counts"] == {"source": 62, "total": 61, "good": 60, "quarantined": 1,
-                                     "deduplicated": 1, "quarantine_ratio": 1 / 61}
+    p.DataProcessor._write_stream_run_log(
+        proc, {"batches": 2, "source_count": 62, "good_count": 60, "bad_count": 1, "superseded_count": 1}
+    )
+    assert written[-1]["counts"] == {
+        "source": 62,
+        "total": 61,
+        "good": 60,
+        "quarantined": 1,
+        "deduplicated": 1,
+        "quarantine_ratio": 1 / 61,
+    }
     p.DataProcessor._write_stream_run_log(proc, {"batches": 0, "source_count": 0})
     assert written[-1] == {"status": "no_new_data"}
 
@@ -211,8 +224,7 @@ def test_on_serverless_the_stream_totals_are_measured_on_the_driver():
     q_before = proc._quarantine_row_count()
     query = SimpleNamespace(recentProgress=[{"numInputRows": 200}, {"numInputRows": 91}, {"numInputRows": 0}])
     summary = p.DataProcessor._spark_stream_summary(proc, SimpleNamespace(batches=[]), query, q_before)
-    assert summary == {"batches": 2, "source_count": 291, "good_count": 288, "bad_count": 3,
-                       "superseded_count": None}
+    assert summary == {"batches": 2, "source_count": 291, "good_count": 288, "bad_count": 3, "superseded_count": None}
     # The sink kept its own tallies (classic compute, local Spark): those are used instead.
     assert p.DataProcessor._spark_stream_summary(proc, SimpleNamespace(batches=[1]), query, 0) is None
 
@@ -244,8 +256,14 @@ def test_when_no_batch_counts_were_recorded_the_run_is_counted_by_its_run_id():
     its run id, so those are counted."""
     from lakelogic.core import processor as p
 
-    stamped = {"batches": 1, "source_count": 9, "good_count": 8, "bad_count": 1,
-               "superseded_count": None, "counted_by": "run_id"}
+    stamped = {
+        "batches": 1,
+        "source_count": 9,
+        "good_count": 8,
+        "bad_count": 1,
+        "superseded_count": None,
+        "counted_by": "run_id",
+    }
     proc = SimpleNamespace(_quarantine_row_count=lambda: 0, _stamped_stream_counts=lambda: stamped)
     sink = SimpleNamespace(batches=[], driver_totals=lambda: {"batches": 0, "source_count": 0})
     query = SimpleNamespace(recentProgress=[{"numInputRows": 0}])
@@ -260,7 +278,8 @@ def test_good_rows_are_never_negative():
     proc = SimpleNamespace(_quarantine_row_count=lambda: next(counts), _stamped_stream_counts=lambda: None)
     q_before = proc._quarantine_row_count()
     summary = p.DataProcessor._spark_stream_summary(
-        proc, SimpleNamespace(batches=[]), SimpleNamespace(recentProgress=[{"numInputRows": 0}]), q_before)
+        proc, SimpleNamespace(batches=[]), SimpleNamespace(recentProgress=[{"numInputRows": 0}]), q_before
+    )
     assert summary["good_count"] is None and summary["bad_count"] == 1
 
 
@@ -273,7 +292,6 @@ def test_a_stream_run_pins_one_run_id_before_it_starts():
     assert first
     p.DataProcessor._pin_stream_run_id(proc)
     assert proc.last_run_id != first  # each stream run gets its own
-
 
 
 def test_every_micro_batch_stamps_the_run_id_the_driver_pinned():
@@ -306,8 +324,9 @@ def test_every_micro_batch_stamps_the_run_id_the_driver_pinned():
 
 
 def _kinesis_source(**opts):
-    return SimpleNamespace(type="stream", path="trip_requests",
-                           options={"kind": "kinesis", "region": "eu-west-1", **opts})
+    return SimpleNamespace(
+        type="stream", path="trip_requests", options={"kind": "kinesis", "region": "eu-west-1", **opts}
+    )
 
 
 def test_kinesis_settings_take_secrets_from_the_environment_only(monkeypatch):
@@ -315,8 +334,9 @@ def test_kinesis_settings_take_secrets_from_the_environment_only(monkeypatch):
 
     monkeypatch.setenv("KINESIS_KEY_ID", "AKIA_TEST")
     monkeypatch.setenv("KINESIS_SECRET", "s3cret")
-    cfg = _kinesis_stream_settings(_kinesis_source(access_key_id="env:KINESIS_KEY_ID",
-                                                   secret_access_key="env:KINESIS_SECRET"))
+    cfg = _kinesis_stream_settings(
+        _kinesis_source(access_key_id="env:KINESIS_KEY_ID", secret_access_key="env:KINESIS_SECRET")
+    )
     assert cfg["stream"] == "trip_requests" and cfg["region"] == "eu-west-1"
     assert cfg["auth"] == {"awsAccessKey": "AKIA_TEST", "awsSecretKey": "s3cret"}
     assert cfg["starting_position"] == "earliest" and cfg["trigger"] == "available_now"
@@ -328,7 +348,8 @@ def test_kinesis_settings_take_secrets_from_the_environment_only(monkeypatch):
         _kinesis_stream_settings(SimpleNamespace(type="stream", path="t", options={"kind": "kinesis"}))
     # No keys: the compute's own identity (an instance profile or a role the cluster assumes).
     assert _kinesis_stream_settings(_kinesis_source(role_arn="arn:aws:iam::1:role/r"))["auth"] == {
-        "roleArn": "arn:aws:iam::1:role/r"}
+        "roleArn": "arn:aws:iam::1:role/r"
+    }
 
 
 def test_kinesis_says_plainly_it_needs_spark_on_databricks():
@@ -339,8 +360,9 @@ def test_kinesis_says_plainly_it_needs_spark_on_databricks():
 
 
 def _pubsub_source(**opts):
-    return SimpleNamespace(type="stream", path="trip_requests",
-                           options={"kind": "pubsub", "project": "rideflow-dev", **opts})
+    return SimpleNamespace(
+        type="stream", path="trip_requests", options={"kind": "pubsub", "project": "rideflow-dev", **opts}
+    )
 
 
 def test_pubsub_settings_read_one_service_account_key_from_the_environment(monkeypatch):
@@ -348,14 +370,23 @@ def test_pubsub_settings_read_one_service_account_key_from_the_environment(monke
 
     from lakelogic.core.processor import _pubsub_stream_settings
 
-    key = {"type": "service_account", "client_id": "123", "client_email": "reader@p.iam.gserviceaccount.com",
-           "private_key": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n", "private_key_id": "k1"}
+    key = {
+        "type": "service_account",
+        "client_id": "123",
+        "client_email": "reader@p.iam.gserviceaccount.com",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n",
+        "private_key_id": "k1",
+    }
     monkeypatch.setenv("PUBSUB_KEY", json.dumps(key))
     cfg = _pubsub_stream_settings(_pubsub_source(credentials_json="env:PUBSUB_KEY"))
     assert cfg["subscription"] == "trip_requests" and cfg["topic"] == "trip_requests"
     assert cfg["project"] == "rideflow-dev"
-    assert cfg["auth"] == {"clientId": "123", "clientEmail": "reader@p.iam.gserviceaccount.com",
-                           "privateKey": key["private_key"], "privateKeyId": "k1"}
+    assert cfg["auth"] == {
+        "clientId": "123",
+        "clientEmail": "reader@p.iam.gserviceaccount.com",
+        "privateKey": key["private_key"],
+        "privateKeyId": "k1",
+    }
     with pytest.raises(ValueError, match="environment variable"):
         _pubsub_stream_settings(_pubsub_source(credentials_json=json.dumps(key)))
     monkeypatch.setenv("PUBSUB_BAD", "{not json")
@@ -376,10 +407,19 @@ def test_a_piped_secret_with_a_trailing_line_break_still_logs_in(monkeypatch):
 
     monkeypatch.setenv("K_USER", "lakelogic\r\n")
     monkeypatch.setenv("K_PASS", "s3cret\r\n")
-    src = SimpleNamespace(type="stream", path="trips", options={
-        "kind": "kafka", "brokers": "broker:9093", "security_protocol": "SASL_SSL", "sasl_mechanism": "PLAIN",
-        "sasl_username": "env:K_USER", "sasl_password": "env:K_PASS"})
+    src = SimpleNamespace(
+        type="stream",
+        path="trips",
+        options={
+            "kind": "kafka",
+            "brokers": "broker:9093",
+            "security_protocol": "SASL_SSL",
+            "sasl_mechanism": "PLAIN",
+            "sasl_username": "env:K_USER",
+            "sasl_password": "env:K_PASS",
+        },
+    )
     auth = _kafka_stream_settings(src)["auth"]
     assert auth["sasl_username"] == "lakelogic" and auth["sasl_password"] == "s3cret"
     # One quote and one backslash in, each escaped once in the JAAS string.
-    assert _jaas_quote('p"a' + chr(92) + 'ss') == 'p' + chr(92) + '"a' + chr(92) * 2 + 'ss'
+    assert _jaas_quote('p"a' + chr(92) + "ss") == "p" + chr(92) + '"a' + chr(92) * 2 + "ss"

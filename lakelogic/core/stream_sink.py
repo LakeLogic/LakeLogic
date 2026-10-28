@@ -1016,7 +1016,6 @@ def kafka_json_stream(
     order updates by; they never reach the contract. Needs Spark's Kafka connector
     (``org.apache.spark:spark-sql-kafka-0-10_2.12:<spark version>``).
     """
-    from pyspark.sql import functions as F
 
     reader = (
         spark.readStream.format("kafka")
@@ -1027,12 +1026,14 @@ def kafka_json_stream(
     for k, v in kafka_options.items():
         reader = reader.option(k, v)
     raw = reader.load()
-    return json_message_columns(raw, fields, value="value", timestamp="timestamp",
-                                partition="partition", offset="offset")
+    return json_message_columns(
+        raw, fields, value="value", timestamp="timestamp", partition="partition", offset="offset"
+    )
 
 
-def json_message_columns(raw: Any, fields: List[str], *, value: str, timestamp: str,
-                         partition: str, offset: str) -> Any:
+def json_message_columns(
+    raw: Any, fields: List[str], *, value: str, timestamp: str, partition: str, offset: str
+) -> Any:
     """A stream of JSON messages as the contract's text ``fields`` plus ``UNREADABLE_COLUMN`` and
     the ordering columns (``KAFKA_ORDER_COLUMNS``) — one shape for every broker: Kafka's
     ``value/timestamp/partition/offset``, Kinesis's ``data/approximateArrivalTimestamp/shardId/
@@ -1084,8 +1085,9 @@ def kinesis_json_stream(
     ``kinesis`` source), in the same shape as ``kafka_json_stream``: the contract's fields as text,
     an unreadable record quarantined with its shard and sequence number, ordered by arrival.
     ``starting_position``: ``earliest`` (TRIM_HORIZON) or ``latest``."""
-    position = {"earliest": "trim_horizon", "latest": "latest"}.get(str(starting_position).lower(),
-                                                                     str(starting_position))
+    position = {"earliest": "trim_horizon", "latest": "latest"}.get(
+        str(starting_position).lower(), str(starting_position)
+    )
     reader = (
         spark.readStream.format("kinesis")
         .option("streamName", stream_name)
@@ -1094,9 +1096,14 @@ def kinesis_json_stream(
     )
     for k, v in kinesis_options.items():
         reader = reader.option(k, v)
-    return json_message_columns(reader.load(), fields, value="data", timestamp="approximateArrivalTimestamp",
-                                partition="shardId", offset="sequenceNumber")
-
+    return json_message_columns(
+        reader.load(),
+        fields,
+        value="data",
+        timestamp="approximateArrivalTimestamp",
+        partition="shardId",
+        offset="sequenceNumber",
+    )
 
 
 def pubsub_json_stream(
@@ -1123,11 +1130,19 @@ def pubsub_json_stream(
     )
     for k, v in pubsub_options.items():
         reader = reader.option(k, v)
-    raw = (reader.load()
-           .withColumn("__pubsub_published", F.timestamp_millis(F.col("publishTimestampInMillis").cast("long")))
-           .withColumn("__pubsub_subscription", F.lit(subscription)))
-    return json_message_columns(raw, fields, value="payload", timestamp="__pubsub_published",
-                                partition="__pubsub_subscription", offset="messageId")
+    raw = (
+        reader.load()
+        .withColumn("__pubsub_published", F.timestamp_millis(F.col("publishTimestampInMillis").cast("long")))
+        .withColumn("__pubsub_subscription", F.lit(subscription))
+    )
+    return json_message_columns(
+        raw,
+        fields,
+        value="payload",
+        timestamp="__pubsub_published",
+        partition="__pubsub_subscription",
+        offset="messageId",
+    )
 
 
 class SparkStreamSink:
@@ -1282,8 +1297,16 @@ class SparkStreamSink:
         if not self.run_tag:
             return
         try:
-            row = [(self.run_tag, int(summary.batch_id), int(summary.source_count or 0),
-                    int(summary.good_count or 0), int(summary.bad_count or 0), int(summary.superseded_count or 0))]
+            row = [
+                (
+                    self.run_tag,
+                    int(summary.batch_id),
+                    int(summary.source_count or 0),
+                    int(summary.good_count or 0),
+                    int(summary.bad_count or 0),
+                    int(summary.superseded_count or 0),
+                )
+            ]
             cols = ["run_tag", "batch_id", "source_count", "good_count", "bad_count", "superseded_count"]
             batch_df.sparkSession.createDataFrame(row, cols).write.mode("append").json(self.counts_path)
         except Exception as exc:  # noqa: BLE001 - counting never fails the load
@@ -1298,12 +1321,22 @@ class SparkStreamSink:
             from pyspark.sql import functions as F
 
             df = SparkSession.builder.getOrCreate().read.json(self.counts_path).where(F.col("run_tag") == self.run_tag)
-            r = df.agg(F.count("*").alias("b"), F.sum("source_count").alias("s"), F.sum("good_count").alias("g"),
-                       F.sum("bad_count").alias("q"), F.sum("superseded_count").alias("d")).collect()[0]
+            r = df.agg(
+                F.count("*").alias("b"),
+                F.sum("source_count").alias("s"),
+                F.sum("good_count").alias("g"),
+                F.sum("bad_count").alias("q"),
+                F.sum("superseded_count").alias("d"),
+            ).collect()[0]
         except Exception:  # noqa: BLE001 - no batch ran, so nothing was written
             return {"batches": 0, "source_count": 0, "good_count": 0, "bad_count": 0, "superseded_count": 0}
-        return {"batches": int(r["b"] or 0), "source_count": int(r["s"] or 0), "good_count": int(r["g"] or 0),
-                "bad_count": int(r["q"] or 0), "superseded_count": int(r["d"] or 0)}
+        return {
+            "batches": int(r["b"] or 0),
+            "source_count": int(r["s"] or 0),
+            "good_count": int(r["g"] or 0),
+            "bad_count": int(r["q"] or 0),
+            "superseded_count": int(r["d"] or 0),
+        }
 
     def run(self, await_termination: Optional[bool] = None) -> Any:
         """Start the Structured Streaming query. Returns the ``StreamingQuery``.

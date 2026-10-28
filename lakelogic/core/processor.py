@@ -69,11 +69,15 @@ def _delta_stream_as_incremental_table(source: Any) -> Any:
     o = dict(getattr(source, "options", None) or {})
     table = str(o.get("table") or getattr(source, "path", "") or "").strip()
     path = table if table.startswith("table:") else f"table:{table}"
-    return source.model_copy(update={
-        "type": "table", "path": path, "options": None,
-        "load_mode": "incremental",  # a stream read as a table: only what is new
-        "watermark_field": getattr(source, "watermark_field", None) or "_lakelogic_processed_at",
-    })
+    return source.model_copy(
+        update={
+            "type": "table",
+            "path": path,
+            "options": None,
+            "load_mode": "incremental",  # a stream read as a table: only what is new
+            "watermark_field": getattr(source, "watermark_field", None) or "_lakelogic_processed_at",
+        }
+    )
 
 
 def _with_input_file(stream: Any) -> Any:
@@ -100,8 +104,10 @@ def _env_secret(options: Dict[str, Any], key: str) -> Optional[str]:
     if raw is None:
         return None
     if not str(raw).strip().startswith(("env:", "${ENV:")):
-        raise ValueError(f"source.options.{key} must reference an environment variable (env:VAR) — "
-                         "secrets are never written into a contract")
+        raise ValueError(
+            f"source.options.{key} must reference an environment variable (env:VAR) — "
+            "secrets are never written into a contract"
+        )
     # A secret piped into a store usually ends with a line break (PowerShell adds \r\n): it broke
     # the Kafka login string, "Value not specified for key ' password='" (2026-10-27).
     val = (_resolve_env_value(str(raw)) or "").strip()
@@ -136,10 +142,14 @@ def _kinesis_stream_settings(source: Any) -> Dict[str, Any]:
     if key_id:
         auth.update({"awsAccessKey": key_id, "awsSecretKey": secret})
     return {
-        "kind": "kinesis", "stream": str(stream), "region": region,
+        "kind": "kinesis",
+        "stream": str(stream),
+        "region": region,
         "starting_position": str(o.get("starting_position") or "earliest"),
-        "checkpoint": o.get("checkpoint"), "trigger": str(o.get("trigger") or "available_now"),
-        "processing_time": o.get("processing_time"), "auth": auth,
+        "checkpoint": o.get("checkpoint"),
+        "trigger": str(o.get("trigger") or "available_now"),
+        "processing_time": o.get("processing_time"),
+        "auth": auth,
     }
 
 
@@ -171,12 +181,20 @@ def _pubsub_stream_settings(source: Any) -> Dict[str, Any]:
         missing = [k for k in ("client_id", "client_email", "private_key", "private_key_id") if not key.get(k)]
         if missing:
             raise ValueError(f"source.options.credentials_json: the key has no {', '.join(missing)}")
-        auth = {"clientId": key["client_id"], "clientEmail": key["client_email"],
-                "privateKey": key["private_key"], "privateKeyId": key["private_key_id"]}
+        auth = {
+            "clientId": key["client_id"],
+            "clientEmail": key["client_email"],
+            "privateKey": key["private_key"],
+            "privateKeyId": key["private_key_id"],
+        }
     return {
-        "kind": "pubsub", "subscription": str(subscription), "topic": str(o.get("topic") or subscription),
-        "project": project, "checkpoint": o.get("checkpoint"),
-        "trigger": str(o.get("trigger") or "available_now"), "processing_time": o.get("processing_time"),
+        "kind": "pubsub",
+        "subscription": str(subscription),
+        "topic": str(o.get("topic") or subscription),
+        "project": project,
+        "checkpoint": o.get("checkpoint"),
+        "trigger": str(o.get("trigger") or "available_now"),
+        "processing_time": o.get("processing_time"),
         "auth": auth,
     }
 
@@ -3002,7 +3020,8 @@ class DataProcessor:
             if self.engine_name != "spark":
                 raise ValueError(
                     f"kind: {_stream_kind(self.contract.source)} streams run on Spark on Databricks; "
-                    f"the {self.engine_name} engine cannot read it (use Kafka, e.g. AWS MSK, elsewhere)")
+                    f"the {self.engine_name} engine cannot read it (use Kafka, e.g. AWS MSK, elsewhere)"
+                )
             return self._run_cloud_stream_source()
         # ── a landing folder read as a stream (each new file once) ──
         if _stream_kind(self.contract.source) in FILE_STREAM_KINDS:
@@ -5746,9 +5765,14 @@ class DataProcessor:
         q_target = getattr(q, "target", None)
         bad = self._rows_with_run_id(q_target) if q_target else 0
         bad = bad or 0
-        return {"batches": 1 if (good or bad) else 0, "source_count": good + bad,
-                "good_count": good, "bad_count": bad, "superseded_count": None,
-                "counted_by": "run_id"}
+        return {
+            "batches": 1 if (good or bad) else 0,
+            "source_count": good + bad,
+            "good_count": good,
+            "bad_count": bad,
+            "superseded_count": None,
+            "counted_by": "run_id",
+        }
 
     def _spark_stream_summary(self, sink: Any, query: Any, q_before: Optional[int]) -> Optional[Dict[str, Any]]:
         """The run's totals measured on the DRIVER, when the sink could not keep them.
@@ -5774,6 +5798,7 @@ class DataProcessor:
             progress = [p for p in (query.recentProgress or []) if p]
         except Exception:  # noqa: BLE001
             return None
+
         def _input_rows(p: Any) -> int:
             # Spark Connect hands progress back as JSON TEXT; classic Spark as dicts or objects.
             if isinstance(p, str):
@@ -5817,6 +5842,7 @@ class DataProcessor:
             return
         try:
             title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
+
             def _n(key):
                 v = summary.get(key)
                 return None if v is None else int(v)
@@ -5824,7 +5850,10 @@ class DataProcessor:
             good, bad, dup = _n("good_count"), _n("bad_count"), _n("superseded_count")
             total = (good + bad) if good is not None and bad is not None else source
             counts = {
-                "source": source, "total": total, "good": good, "quarantined": bad,
+                "source": source,
+                "total": total,
+                "good": good,
+                "quarantined": bad,
                 "deduplicated": dup,  # None = not observable on this compute, never a false 0
                 "quarantine_ratio": (bad / total) if (bad is not None and total) else None,
             }
@@ -8110,8 +8139,16 @@ class DataProcessor:
         schema beside the checkpoint. Elsewhere: Spark's file stream, with the schema of a one-off
         read of the folder as text (a file stream needs its schema up front).
         """
-        readers = {"csv": "csv", "tsv": "csv", "json": "json", "jsonl": "json", "ndjson": "json",
-                   "parquet": "parquet", "avro": "avro", "xml": "xml"}
+        readers = {
+            "csv": "csv",
+            "tsv": "csv",
+            "json": "json",
+            "jsonl": "json",
+            "ndjson": "json",
+            "parquet": "parquet",
+            "avro": "avro",
+            "xml": "xml",
+        }
         spark_fmt = readers.get(fmt)
         if not spark_fmt:
             raise ValueError(f"kind: files cannot stream format '{fmt}'; use csv, json, parquet, avro or xml")
@@ -8128,10 +8165,12 @@ class DataProcessor:
         if o.get("max_files_per_trigger"):
             opts["maxFilesPerTrigger"] = str(int(o["max_files_per_trigger"]))
         if os.environ.get("DATABRICKS_RUNTIME_VERSION"):
-            reader = (spark.readStream.format("cloudFiles")
-                      .option("cloudFiles.format", spark_fmt)
-                      .option("cloudFiles.schemaLocation", f"{checkpoint}/_schema")
-                      .option("cloudFiles.inferColumnTypes", "false"))
+            reader = (
+                spark.readStream.format("cloudFiles")
+                .option("cloudFiles.format", spark_fmt)
+                .option("cloudFiles.schemaLocation", f"{checkpoint}/_schema")
+                .option("cloudFiles.inferColumnTypes", "false")
+            )
             for k, v in opts.items():
                 reader = reader.option("cloudFiles.maxFilesPerTrigger" if k == "maxFilesPerTrigger" else k, v)
             return _with_input_file(reader.load(folder))
@@ -8159,15 +8198,24 @@ class DataProcessor:
         if _stream_kind(self.contract.source) == "pubsub":
             cfg = _pubsub_stream_settings(self.contract.source)
             checkpoint = self._stream_checkpoint({"checkpoint": cfg["checkpoint"]}, cfg["subscription"])
-            stream = pubsub_json_stream(spark, cfg["subscription"], fields, topic=cfg["topic"],
-                                        project=cfg["project"], **cfg["auth"])
-            logger.info(f"stream source: pubsub subscription '{cfg['subscription']}' in {cfg['project']} "
-                        f"(checkpoint {checkpoint})")
+            stream = pubsub_json_stream(
+                spark, cfg["subscription"], fields, topic=cfg["topic"], project=cfg["project"], **cfg["auth"]
+            )
+            logger.info(
+                f"stream source: pubsub subscription '{cfg['subscription']}' in {cfg['project']} "
+                f"(checkpoint {checkpoint})"
+            )
         else:
             cfg = _kinesis_stream_settings(self.contract.source)
             checkpoint = self._stream_checkpoint({"checkpoint": cfg["checkpoint"]}, cfg["stream"])
-            stream = kinesis_json_stream(spark, cfg["stream"], fields, region=cfg["region"],
-                                         starting_position=cfg["starting_position"], **cfg["auth"])
+            stream = kinesis_json_stream(
+                spark,
+                cfg["stream"],
+                fields,
+                region=cfg["region"],
+                starting_position=cfg["starting_position"],
+                **cfg["auth"],
+            )
             logger.info(f"stream source: kinesis stream '{cfg['stream']}' in {cfg['region']} (checkpoint {checkpoint})")
         continuous = cfg["trigger"] in ("continuous", "processing_time")
         sink = SparkStreamSink(

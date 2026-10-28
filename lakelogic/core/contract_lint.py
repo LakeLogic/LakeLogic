@@ -169,8 +169,12 @@ def _trigger(raw: Dict[str, Any]) -> str:
     """The runtime trigger, wherever it's authored (top-level, source, or
     materialization ``streaming`` block)."""
     # ``source.options.trigger`` is where a ``type: stream`` contract writes it.
-    for holder in (raw, _d(raw.get("source")), _d(_d(raw.get("source")).get("options")),
-                   _d(raw.get("materialization"))):
+    for holder in (
+        raw,
+        _d(raw.get("source")),
+        _d(_d(raw.get("source")).get("options")),
+        _d(raw.get("materialization")),
+    ):
         t = holder.get("trigger")
         if isinstance(t, dict):
             t = t.get("mode") or t.get("type")
