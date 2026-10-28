@@ -11,6 +11,14 @@ resumability model that the current `fetch_size` path lacks.
 
 ### Implementation status
 
+**Stream kinds a contract can declare** (`source.type: stream` + `options.kind`, 2026-10-27):
+`eventhubs` and `kafka` (any engine), `kinesis` and `pubsub` (Spark on Databricks only, its built-in sources),
+`files` (a landing folder, each new file once: Auto Loader on Databricks, Spark's file stream
+elsewhere, an incremental folder read on Polars/DuckDB), `delta` and `iceberg` (a table read by
+position: Silver over a streaming Bronze). Spark runs go through `SparkStreamSink`: one run id per
+stream run stamped on every row, per-batch counts beside the checkpoint, and the run log counted
+from the rows written when serverless keeps the counts in another process.
+
 **Built** (`lakelogic/core/stream_sink.py` + `contract_lint.py`;
 `tests/test_stream_sink.py` 35 tests + `test_contract_lint.py` STREAM checks):
 - `StreamSink` — micro-batch loop over any `.stream()` connector or iterable of

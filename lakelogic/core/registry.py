@@ -422,9 +422,16 @@ def _resolve_placeholders(obj: Any, vars_map: Dict[str, str]) -> Any:
     Unresolvable placeholders (no matching key) are left as-is.
     """
     if isinstance(obj, str) and "{" in obj:
-        # Partial format — replace only known keys, leave unknown {placeholders} as-is
-        for k, v in vars_map.items():
-            obj = obj.replace(f"{{{k}}}", str(v))
+        # Partial format — replace only known keys, leave unknown {placeholders} as-is.
+        # Repeated until nothing changes: a value may itself carry a placeholder
+        # (`ls_folder: landing_{domain}`), and one pass resolved it only when `domain`
+        # happened to come after `ls_folder` in the map. Bounded, so a self-reference stops.
+        for _ in range(5):
+            before = obj
+            for k, v in vars_map.items():
+                obj = obj.replace(f"{{{k}}}", str(v))
+            if obj == before or "{" not in obj:
+                break
         return obj
     elif isinstance(obj, dict):
         return {k: _resolve_placeholders(v, vars_map) for k, v in obj.items()}

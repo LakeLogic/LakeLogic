@@ -9,6 +9,9 @@ Two notebooks, the same 8 checks:
 
 - [`contracts/rides_kafka.yaml`](contracts/rides_kafka.yaml): `source.type: stream`, `options.kind: kafka`, brokers (`env:KAFKA_BROKERS`), topic, checkpoint, batch size, trigger, optional SASL (`sasl_password: env:VAR`).
 - [`contracts/rides_eventhubs.yaml`](contracts/rides_eventhubs.yaml): `kind: eventhubs` + `connection_string: env:EVENTHUBS_CONNECTION_STRING`; brokers and SASL come from the connection string.
+- Other kinds (no example contract here; see the OLC reference, *Streaming sources*): `kind: kinesis` (Amazon
+  Kinesis) and `kind: pubsub` (Google Pub/Sub), both Spark on Databricks only; `kind: files` (a landing folder, each new file read once; Auto Loader on
+  Databricks), `kind: delta` / `kind: iceberg` (a table read by position: Silver following a streaming Bronze).
 
 `DataProcessor(engine=..., contract="contracts/rides_kafka.yaml").run_source()` (or the pipeline runner) drains the topic: Polars/DuckDB through `StreamSink` + `KafkaOffsetSource`, Spark through Structured Streaming. A secret written literally in a contract is refused.
 

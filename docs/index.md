@@ -155,7 +155,7 @@ For catalog-specific behaviour, see [capabilities](capabilities.md), [cloud inte
 
 ## LakeLogic vs. LakeLogic Platform
 
-**LakeLogic (open source)** is the reference framework — it runs your OLC contracts anywhere. **LakeLogic Platform** is the commercial layer built on top of it: it consumes the telemetry the open-source framework emits and turns it into org-wide observability, governance, and AI-assisted incident resolution.
+**LakeLogic (open source)** is the reference framework — it runs your OLC contracts anywhere. **LakeLogic Platform** is the commercial layer built on top of it: it discovers your estate, designs and delivers lakehouses from your contracts, and turns the telemetry the open-source framework emits into org-wide observability, governance, and AI-assisted incident resolution.
 
 | | LakeLogic (open source) | LakeLogic Platform |
 | --- | --- | --- |
@@ -164,10 +164,14 @@ For catalog-specific behaviour, see [capabilities](capabilities.md), [cloud inte
 | Local development + CI validation gates | ✓ `lakelogic validate` | ✓ |
 | Materialization (Delta / Iceberg / DuckLake / Parquet, and any destination dlt supports) | ✓ | ✓ |
 | Quarantine, reconciliation, run evidence | ✓ | ✓ |
-| Hosting | Self-hosted / your infrastructure | Fully managed |
+| Documents (PDF, Word, PowerPoint, images) read into governed tables | ✓ `lakelogic[documents]` | ✓ |
+| Hosting | Self-hosted / your infrastructure | Managed, or in your VPC / on-premises (Enterprise) |
 | Cross-pipeline observability | Emits telemetry | Consumes it |
-| Zeus — agentic AI incident diagnosis & resolution (MTTR) | — | ✓ |
+| Estate discovery — scan connected platforms and storage, profile the data, draft contracts from what exists | — | ✓ |
+| Lakehouse Studio — design bronze / silver / gold, test on your sample or synthetic data, deliver to Databricks, Fabric, Snowflake, BigQuery or Docker as a pull request | — | ✓ |
 | Contract Studio — visual authoring & review | — | ✓ |
+| Change checks — contract standards checked on every pull request | — | ✓ |
+| Zeus — agentic AI incident diagnosis & resolution (MTTR) | — | ✓ |
 | Lineage Explorer + governance / compliance dashboards | — | ✓ |
 
 The contract is the same portable OLC document in both — start on open source, and nothing you write is locked in.

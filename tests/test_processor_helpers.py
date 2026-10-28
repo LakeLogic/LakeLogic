@@ -2198,3 +2198,19 @@ def test_report_omits_partition_presence_without_partition_config(tmp_path):
     report = processor._build_report("Events", {"source": 1, "good": 1})
     assert report["partition_presence"]["missing_keys"] == ["y_2026/m_08/d_02/h_07"]
     assert report["partition_presence"]["expected_count"] == 24
+
+
+def test_a_contract_file_is_read_as_utf8_whatever_the_platform(tmp_path, monkeypatch):
+    """Windows' default encoding (cp1252) turned "—" in a contract title into "â€”"; the run's
+    telemetry then named a contract the platform could not match (2026-10-26)."""
+    import locale
+
+    import lakelogic.core.processor as proc_mod
+
+    monkeypatch.setattr(locale, "getpreferredencoding", lambda *_a, **_k: "cp1252")
+    if hasattr(locale, "getencoding"):
+        monkeypatch.setattr(locale, "getencoding", lambda: "cp1252")
+    yaml_path = tmp_path / "contract.yaml"
+    yaml_path.write_text("version: '1.0.0'\ninfo:\n  title: \"Silver — Rideflow Trips\"\n", encoding="utf-8")
+    processor = proc_mod.DataProcessor(contract=str(yaml_path), engine="polars")
+    assert processor.contract.info.title == "Silver — Rideflow Trips"

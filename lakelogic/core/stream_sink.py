@@ -1027,15 +1027,28 @@ def kafka_json_stream(
     for k, v in kafka_options.items():
         reader = reader.option(k, v)
     raw = reader.load()
+    return json_message_columns(raw, fields, value="value", timestamp="timestamp",
+                                partition="partition", offset="offset")
+
+
+def json_message_columns(raw: Any, fields: List[str], *, value: str, timestamp: str,
+                         partition: str, offset: str) -> Any:
+    """A stream of JSON messages as the contract's text ``fields`` plus ``UNREADABLE_COLUMN`` and
+    the ordering columns (``KAFKA_ORDER_COLUMNS``) — one shape for every broker: Kafka's
+    ``value/timestamp/partition/offset``, Kinesis's ``data/approximateArrivalTimestamp/shardId/
+    sequenceNumber`` (2026-10-27).
+    """
+    from pyspark.sql import functions as F
+
     # decode(), not cast: a plain CAST keeps invalid UTF-8 bytes, and the reason text built from
     # them could not be read back (UnicodeDecodeError). decode() replaces them with U+FFFD.
-    text = F.decode(F.col("value"), "UTF-8")
+    text = F.decode(F.col(value), "UTF-8")
     obj = F.from_json(text, "map<string,string>")  # null for invalid JSON AND for non-object JSON
     where = F.concat(
         F.lit(" (partition "),
-        F.col("partition").cast("string"),
+        F.col(partition).cast("string"),
         F.lit(", offset "),
-        F.col("offset").cast("string"),
+        F.col(offset).cast("string"),
         F.lit("): '"),
         F.substring(text, 1, 80),
         F.lit("'"),
@@ -1052,10 +1065,69 @@ def kafka_json_stream(
     return raw.select(
         *[F.when(obj.isNotNull(), obj.getItem(f)).alias(f) for f in fields],
         reason.alias(UNREADABLE_COLUMN),
-        F.col("timestamp").alias("__kafka_timestamp"),
-        F.col("partition").alias("__kafka_partition"),
-        F.col("offset").alias("__kafka_offset"),
+        F.col(timestamp).alias("__kafka_timestamp"),
+        F.col(partition).alias("__kafka_partition"),
+        F.col(offset).alias("__kafka_offset"),
     )
+
+
+def kinesis_json_stream(
+    spark: Any,
+    stream_name: str,
+    fields: List[str],
+    *,
+    region: str,
+    starting_position: str = "earliest",
+    **kinesis_options: Any,
+) -> Any:
+    """A Structured Streaming DataFrame of JSON Amazon Kinesis records (Databricks' built-in
+    ``kinesis`` source), in the same shape as ``kafka_json_stream``: the contract's fields as text,
+    an unreadable record quarantined with its shard and sequence number, ordered by arrival.
+    ``starting_position``: ``earliest`` (TRIM_HORIZON) or ``latest``."""
+    position = {"earliest": "trim_horizon", "latest": "latest"}.get(str(starting_position).lower(),
+                                                                     str(starting_position))
+    reader = (
+        spark.readStream.format("kinesis")
+        .option("streamName", stream_name)
+        .option("region", region)
+        .option("initialPosition", position)
+    )
+    for k, v in kinesis_options.items():
+        reader = reader.option(k, v)
+    return json_message_columns(reader.load(), fields, value="data", timestamp="approximateArrivalTimestamp",
+                                partition="shardId", offset="sequenceNumber")
+
+
+
+def pubsub_json_stream(
+    spark: Any,
+    subscription: str,
+    fields: List[str],
+    *,
+    topic: str,
+    project: str,
+    **pubsub_options: Any,
+) -> Any:
+    """A Structured Streaming DataFrame of JSON Google Pub/Sub messages (Databricks' built-in
+    ``pubsub`` source), in the same shape as ``kafka_json_stream``: the contract's fields as text,
+    an unreadable message quarantined with its subscription and message id, ordered by publish time.
+    ``pubsub_options`` carry the service-account login (``clientId``, ``clientEmail``,
+    ``privateKey``, ``privateKeyId``)."""
+    from pyspark.sql import functions as F
+
+    reader = (
+        spark.readStream.format("pubsub")
+        .option("subscriptionId", subscription)
+        .option("topicId", topic)
+        .option("projectId", project)
+    )
+    for k, v in pubsub_options.items():
+        reader = reader.option(k, v)
+    raw = (reader.load()
+           .withColumn("__pubsub_published", F.timestamp_millis(F.col("publishTimestampInMillis").cast("long")))
+           .withColumn("__pubsub_subscription", F.lit(subscription)))
+    return json_message_columns(raw, fields, value="payload", timestamp="__pubsub_published",
+                                partition="__pubsub_subscription", offset="messageId")
 
 
 class SparkStreamSink:
@@ -1120,6 +1192,11 @@ class SparkStreamSink:
         self.target_path = target_path
         self.on_batch = on_batch
         self.batches: List[SparkBatchResult] = []
+        # Each micro-batch also writes its counts here, so the DRIVER can read them back: on
+        # serverless (Spark Connect) foreachBatch runs in another Python process and
+        # `self.batches` stays empty on the driver (Databricks, 2026-10-27).
+        self.counts_path = str(checkpoint_location).rstrip("/") + "/_lakelogic_batch_counts"
+        self.run_tag: Optional[str] = None
 
         if processor is not None:
             self.processor = processor
@@ -1136,9 +1213,10 @@ class SparkStreamSink:
         Spark calls this per micro-batch with a *deterministic* ``batch_id``; on
         restart it replays the last uncommitted batch with the same id, so an
         idempotent write (merge/overwrite-by-batch) yields effectively-once."""
-        # Fresh run_id per micro-batch so lineage/run reporting isn't reused.
+        # The stream run's id when the driver pinned one (every batch's rows carry it, so the
+        # driver can count them on serverless, 2026-10-27); otherwise a fresh id per micro-batch.
         if hasattr(self.processor, "last_run_id"):
-            self.processor.last_run_id = None
+            self.processor.last_run_id = getattr(self, "stream_run_id", None)
         batch_df, received, superseded = self._latest_per_key(batch_df)
         result = self.processor.run(batch_df)
         self.processor.materialize(result.good, result.bad, target_path=self.target_path)
@@ -1150,6 +1228,7 @@ class SparkStreamSink:
             superseded_count=superseded,
         )
         self.batches.append(summary)
+        self._record_counts(batch_df, summary)
         if self.on_batch is not None:
             self.on_batch(summary)
         logger.info(
@@ -1198,12 +1277,44 @@ class SparkStreamSink:
             return writer.trigger(availableNow=True)
         return writer.trigger(processingTime=self.processing_time)
 
+    def _record_counts(self, batch_df: Any, summary: "SparkBatchResult") -> None:
+        """Append this micro-batch's counts beside the checkpoint (best effort, never fatal)."""
+        if not self.run_tag:
+            return
+        try:
+            row = [(self.run_tag, int(summary.batch_id), int(summary.source_count or 0),
+                    int(summary.good_count or 0), int(summary.bad_count or 0), int(summary.superseded_count or 0))]
+            cols = ["run_tag", "batch_id", "source_count", "good_count", "bad_count", "superseded_count"]
+            batch_df.sparkSession.createDataFrame(row, cols).write.mode("append").json(self.counts_path)
+        except Exception as exc:  # noqa: BLE001 - counting never fails the load
+            logger.warning(f"[SparkStreamSink] could not record batch counts: {exc}")
+
+    def driver_totals(self) -> Optional[Dict[str, Any]]:
+        """This run's totals read back from ``counts_path``, or None when nothing was recorded."""
+        if not self.run_tag:
+            return None
+        try:
+            from pyspark.sql import SparkSession
+            from pyspark.sql import functions as F
+
+            df = SparkSession.builder.getOrCreate().read.json(self.counts_path).where(F.col("run_tag") == self.run_tag)
+            r = df.agg(F.count("*").alias("b"), F.sum("source_count").alias("s"), F.sum("good_count").alias("g"),
+                       F.sum("bad_count").alias("q"), F.sum("superseded_count").alias("d")).collect()[0]
+        except Exception:  # noqa: BLE001 - no batch ran, so nothing was written
+            return {"batches": 0, "source_count": 0, "good_count": 0, "bad_count": 0, "superseded_count": 0}
+        return {"batches": int(r["b"] or 0), "source_count": int(r["s"] or 0), "good_count": int(r["g"] or 0),
+                "bad_count": int(r["q"] or 0), "superseded_count": int(r["d"] or 0)}
+
     def run(self, await_termination: Optional[bool] = None) -> Any:
         """Start the Structured Streaming query. Returns the ``StreamingQuery``.
 
         For ``available_now`` the default is to block until the drain completes
         (``awaitTermination``); for ``processing_time`` the default returns the live
         query. Pass ``await_termination`` to override."""
+        import uuid as _uuid
+
+        self.run_tag = _uuid.uuid4().hex  # set before start: foreachBatch carries it to the worker
+        self.stream_run_id = getattr(self.processor, "last_run_id", None)  # pinned by the driver, or None
         writer = (
             self.stream_df.writeStream.foreachBatch(self.process_micro_batch)
             .option("checkpointLocation", self.checkpoint_location)

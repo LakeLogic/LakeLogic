@@ -126,6 +126,10 @@ def inject_lineage(
     return add_columns(good_df, columns, engine_name), add_columns(bad_df, columns, engine_name)
 
 
+#: The per-row file column a read adds (``_metadata.file_path``); lineage writes it as the source.
+INPUT_FILE_COLUMN = "_source_file"
+
+
 def _preserve_upstream_lineage(df: Any, columns: List[str], prefix: str, engine_name: str) -> Any:
     """
     Rename existing lineage columns to preserve upstream lineage
@@ -361,7 +365,8 @@ def add_columns(df: Any, columns: Dict[str, Any], engine_name: str) -> Any:
                 # For the source column, prefer the per-row _source_file column
                 # (captured from _metadata.file_path at read time).  Fall back
                 # to input_file_name(), then the static contract-level path.
-                if name.endswith("_source") and value:
+                # A stream run has no one path, only each row's file (2026-10-27).
+                if name.endswith("_source") and (value or _has_source_file):
                     if name in df.columns:
                         pass
                     elif _has_source_file:

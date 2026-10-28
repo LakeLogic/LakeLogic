@@ -36,6 +36,12 @@ assert set(SOURCE_READERS) | PATH_READ_SOURCE_TYPES == set(SOURCE_TYPES), "sourc
 
 #: ``source.type: stream`` + ``options.kind`` read from a broker instead of a folder of files.
 KAFKA_STREAM_KINDS = frozenset({"kafka", "eventhubs"})
+#: A lakehouse table read as a stream: Delta, or Iceberg (its appended snapshots).
+TABLE_STREAM_KINDS = frozenset({"delta", "iceberg"})
+#: A landing folder read as a stream: each new file once (Auto Loader on Databricks).
+FILE_STREAM_KINDS = frozenset({"files"})
+#: A cloud event service read through Databricks' built-in source (Spark on Databricks only).
+CLOUD_STREAM_KINDS = frozenset({"kinesis", "pubsub"})
 
 
 def _sqlite_absolute(uri: Optional[str]) -> Optional[str]:
@@ -56,6 +62,140 @@ def _stream_kind(source: Any) -> Optional[str]:
         return None
     kind = (getattr(source, "options", None) or {}).get("kind")
     return str(kind).lower() if kind else None
+
+
+def _delta_stream_as_incremental_table(source: Any) -> Any:
+    """A ``kind: delta`` stream source as the incremental table read engines without streaming do."""
+    o = dict(getattr(source, "options", None) or {})
+    table = str(o.get("table") or getattr(source, "path", "") or "").strip()
+    path = table if table.startswith("table:") else f"table:{table}"
+    return source.model_copy(update={
+        "type": "table", "path": path, "options": None,
+        "load_mode": "incremental",  # a stream read as a table: only what is new
+        "watermark_field": getattr(source, "watermark_field", None) or "_lakelogic_processed_at",
+    })
+
+
+def _with_input_file(stream: Any) -> Any:
+    """Each streamed row's own file, as ``INPUT_FILE_COLUMN``: lineage writes it to
+    ``_lakelogic_source``, which a stream run has no single path for (it was empty, 2026-10-27)."""
+    from pyspark.sql import functions as F
+
+    from lakelogic.core.lineage import INPUT_FILE_COLUMN
+
+    return stream.withColumn(INPUT_FILE_COLUMN, F.col("_metadata.file_path"))
+
+
+def _file_stream_as_incremental_landing(source: Any) -> Any:
+    """A ``kind: files`` stream as the incremental landing read engines without streaming do:
+    the same folder, only the files that are new."""
+    return source.model_copy(update={"type": "landing", "options": None, "load_mode": "incremental"})
+
+
+def _env_secret(options: Dict[str, Any], key: str) -> Optional[str]:
+    """``options[key]`` resolved from the environment; a literal secret in a contract is refused."""
+    from lakelogic.core.materialization import _resolve_env_value
+
+    raw = options.get(key)
+    if raw is None:
+        return None
+    if not str(raw).strip().startswith(("env:", "${ENV:")):
+        raise ValueError(f"source.options.{key} must reference an environment variable (env:VAR) — "
+                         "secrets are never written into a contract")
+    # A secret piped into a store usually ends with a line break (PowerShell adds \r\n): it broke
+    # the Kafka login string, "Value not specified for key ' password='" (2026-10-27).
+    val = (_resolve_env_value(str(raw)) or "").strip()
+    if not val or val == raw:
+        raise ValueError(f"source.options.{key}: the environment variable in {raw!r} is not set")
+    return val
+
+
+def _kinesis_stream_settings(source: Any) -> Dict[str, Any]:
+    """The Kinesis settings a ``kind: kinesis`` contract declares, secrets resolved.
+
+    ``options``: ``stream`` (default ``source.path``), ``region`` (``env:VAR`` allowed),
+    ``starting_position`` (earliest | latest), and either ``role_arn`` (an IAM role the compute
+    can assume) or ``access_key_id`` + ``secret_access_key`` (both ``env:VAR``); neither means the
+    compute's own identity. ``checkpoint``, ``trigger``, ``processing_time`` as for Kafka.
+    """
+    from lakelogic.core.materialization import _resolve_env_value
+
+    o = dict(getattr(source, "options", None) or {})
+    stream = o.get("stream") or getattr(source, "path", None)
+    if not stream:
+        raise ValueError("kind: kinesis needs source.options.stream (or source.path)")
+    region = _resolve_env_value(str(o["region"])) if o.get("region") else None
+    if not region:
+        raise ValueError("kind: kinesis needs source.options.region")
+    auth: Dict[str, str] = {}
+    if o.get("role_arn"):
+        auth["roleArn"] = _resolve_env_value(str(o["role_arn"]))
+    key_id, secret = _env_secret(o, "access_key_id"), _env_secret(o, "secret_access_key")
+    if bool(key_id) != bool(secret):
+        raise ValueError("kind: kinesis needs both access_key_id and secret_access_key, or neither")
+    if key_id:
+        auth.update({"awsAccessKey": key_id, "awsSecretKey": secret})
+    return {
+        "kind": "kinesis", "stream": str(stream), "region": region,
+        "starting_position": str(o.get("starting_position") or "earliest"),
+        "checkpoint": o.get("checkpoint"), "trigger": str(o.get("trigger") or "available_now"),
+        "processing_time": o.get("processing_time"), "auth": auth,
+    }
+
+
+def _pubsub_stream_settings(source: Any) -> Dict[str, Any]:
+    """The Pub/Sub settings a ``kind: pubsub`` contract declares, the login resolved.
+
+    ``options``: ``subscription`` (default ``source.path``), ``topic`` (default: the
+    subscription), ``project`` (``env:VAR`` allowed) and ``credentials_json: env:VAR``, a service
+    account key file's JSON kept whole in one secret; neither means the compute's own identity.
+    """
+    import json as _json
+
+    from lakelogic.core.materialization import _resolve_env_value
+
+    o = dict(getattr(source, "options", None) or {})
+    subscription = o.get("subscription") or getattr(source, "path", None)
+    if not subscription:
+        raise ValueError("kind: pubsub needs source.options.subscription (or source.path)")
+    project = _resolve_env_value(str(o["project"])) if o.get("project") else None
+    if not project:
+        raise ValueError("kind: pubsub needs source.options.project")
+    auth: Dict[str, str] = {}
+    raw = _env_secret(o, "credentials_json")
+    if raw:
+        try:
+            key = _json.loads(raw)
+        except ValueError as exc:
+            raise ValueError("source.options.credentials_json: the secret is not a service account key's JSON") from exc
+        missing = [k for k in ("client_id", "client_email", "private_key", "private_key_id") if not key.get(k)]
+        if missing:
+            raise ValueError(f"source.options.credentials_json: the key has no {', '.join(missing)}")
+        auth = {"clientId": key["client_id"], "clientEmail": key["client_email"],
+                "privateKey": key["private_key"], "privateKeyId": key["private_key_id"]}
+    return {
+        "kind": "pubsub", "subscription": str(subscription), "topic": str(o.get("topic") or subscription),
+        "project": project, "checkpoint": o.get("checkpoint"),
+        "trigger": str(o.get("trigger") or "available_now"), "processing_time": o.get("processing_time"),
+        "auth": auth,
+    }
+
+
+def _jaas_quote(value: Any) -> str:
+    """A value inside a JAAS ``key="..."`` pair, with backslashes and quotes escaped so a password
+    holding either still parses."""
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _plain_login_module() -> str:
+    """The SASL PLAIN login class Spark's Kafka source needs on THIS runtime.
+
+    Databricks ships its Kafka client shaded under ``kafkashaded.``, so the open-source class name
+    does not load there and an Event Hubs (or any SASL) stream fails to log in. Every Databricks
+    runtime, serverless included, sets ``DATABRICKS_RUNTIME_VERSION``.
+    """
+    name = "org.apache.kafka.common.security.plain.PlainLoginModule"
+    return f"kafkashaded.{name}" if os.environ.get("DATABRICKS_RUNTIME_VERSION") else name
 
 
 def _kafka_stream_settings(source: Any) -> Dict[str, Any]:
@@ -87,7 +227,7 @@ def _kafka_stream_settings(source: Any) -> Dict[str, Any]:
                 f"source.options.{key} must reference an environment variable (env:VAR) — "
                 "secrets are never written into a contract"
             )
-        val = _resolve_env_value(str(raw))
+        val = (_resolve_env_value(str(raw)) or "").strip()  # a piped secret ends with \n (see _env_secret)
         if not val or val == raw:
             raise ValueError(f"source.options.{key}: the environment variable in {raw!r} is not set")
         return val
@@ -115,7 +255,7 @@ def _kafka_stream_settings(source: Any) -> Dict[str, Any]:
             if o.get(k):
                 auth[k] = str(o[k])
         if o.get("sasl_username"):
-            auth["sasl_username"] = _resolve_env_value(str(o["sasl_username"]))
+            auth["sasl_username"] = (_resolve_env_value(str(o["sasl_username"])) or "").strip()
         if o.get("sasl_password"):
             auth["sasl_password"] = secret("sasl_password")
     if not brokers:
@@ -1651,7 +1791,9 @@ class DataProcessor:
         if not path.exists():
             raise FileNotFoundError(f"Contract file not found: {path}")
 
-        with open(path, "r") as f:
+        # UTF-8 always: on Windows the default is cp1252, which turned "—" in contract titles into
+        # "â€”" — the run then could not be matched to its contract on the platform (2026-10-26).
+        with open(path, "r", encoding="utf-8") as f:
             data = _load_yaml_no_on_bool(f)
             self._enforce_strict(data)
             contract_obj = DataContract(**data)
@@ -2855,6 +2997,24 @@ class DataProcessor:
         # ── a message broker declared in the contract (Kafka / Azure Event Hubs) ──
         if _stream_kind(self.contract.source) in KAFKA_STREAM_KINDS:
             return self._run_kafka_stream_source()
+        # ── a cloud event service (Amazon Kinesis, Google Pub/Sub): Databricks' built-in source ──
+        if _stream_kind(self.contract.source) in CLOUD_STREAM_KINDS:
+            if self.engine_name != "spark":
+                raise ValueError(
+                    f"kind: {_stream_kind(self.contract.source)} streams run on Spark on Databricks; "
+                    f"the {self.engine_name} engine cannot read it (use Kafka, e.g. AWS MSK, elsewhere)")
+            return self._run_cloud_stream_source()
+        # ── a landing folder read as a stream (each new file once) ──
+        if _stream_kind(self.contract.source) in FILE_STREAM_KINDS:
+            if self.engine_name == "spark":
+                return self._run_file_stream_source()
+            self.contract.source = _file_stream_as_incremental_landing(self.contract.source)
+        # ── a Delta table read as a stream (Silver over a streaming Bronze) ──
+        if _stream_kind(self.contract.source) in TABLE_STREAM_KINDS:
+            if self.engine_name == "spark":
+                return self._run_delta_stream_source()
+            # No Structured Streaming here (Polars / DuckDB): the same table, read incrementally.
+            self.contract.source = _delta_stream_as_incremental_table(self.contract.source)
 
         # ── dedicated readers: dlt (API), database (SQL), sftp (remote files) ──
         # ``_staged``: a dedicated reader (SFTP) has fetched the files into a local folder and
@@ -5514,6 +5674,170 @@ class DataProcessor:
         self._run_log_already_written = True
         return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
 
+    def _quarantine_row_count(self) -> Optional[int]:
+        """Rows in this contract's quarantine table now, or None when it cannot be counted."""
+        try:
+            q = getattr(self.contract, "quarantine", None)
+            target = str(getattr(q, "target", "") or "")
+            if not target:
+                return None
+            from pyspark.sql import SparkSession
+
+            name = target.removeprefix("table:").strip()
+            return SparkSession.builder.getOrCreate().table(name).count()
+        except Exception:  # noqa: BLE001 - a table not created yet, or not a table target
+            return 0 if getattr(getattr(self.contract, "quarantine", None), "target", None) else None
+
+    def _pin_stream_run_id(self) -> None:
+        """One run id for the whole stream run, set on the DRIVER before the query starts.
+
+        ``run()`` keeps a preset id, and foreachBatch carries this processor (and the id) to
+        the micro-batch, so every row the run writes is stamped with an id the driver knows.
+        Without it each micro-batch made its own id in its own process (serverless), and the
+        driver could not find the run's rows to count them (Databricks, 2026-10-27).
+        """
+        from uuid import uuid4 as _uuid4
+
+        self.last_run_id = str(_uuid4())
+
+    def _rows_with_run_id(self, target: Any) -> Optional[int]:
+        """Rows in ``target`` (``table:<name>`` or a Delta path) stamped with this run's id, or
+        None when not countable."""
+        target = str(target or "").strip()
+        if not target or not self.last_run_id:
+            return None
+        try:
+            from pyspark.sql import SparkSession
+            from pyspark.sql import functions as F
+
+            from lakelogic.core.constants import META_RUN_ID
+
+            spark = SparkSession.builder.getOrCreate()
+            if target.startswith("table:"):
+                df = spark.table(target.removeprefix("table:").strip())
+            elif "/" in target or "\\" in target:
+                df = spark.read.format("delta").load(target)
+            else:
+                df = spark.table(target)
+            if META_RUN_ID not in df.columns:
+                return None
+            return df.where(F.col(META_RUN_ID) == self.last_run_id).count()
+        except Exception:  # noqa: BLE001 - not created (nothing written) or not a table target
+            return None
+
+    def _stamped_stream_counts(self) -> Optional[Dict[str, Any]]:
+        """The run's totals counted in the tables it wrote, by run id — the same on every compute.
+
+        Good = target rows with this run's id (a merge's updated rows carry the new id too);
+        bad = quarantine rows with it. None when the target cannot be counted this way.
+        """
+        # Where the run wrote: the same resolution the write itself uses (target_path, else the
+        # environment's server path), not a `target` field contracts do not carry (2026-10-27).
+        try:
+            from lakelogic.core.materialization import _resolve_target
+
+            resolved, _fmt = _resolve_target(self.contract)
+        except Exception:  # noqa: BLE001
+            resolved = None
+        good = self._rows_with_run_id(resolved)
+        if good is None:
+            return None
+        q = getattr(self.contract, "quarantine", None)
+        q_target = getattr(q, "target", None)
+        bad = self._rows_with_run_id(q_target) if q_target else 0
+        bad = bad or 0
+        return {"batches": 1 if (good or bad) else 0, "source_count": good + bad,
+                "good_count": good, "bad_count": bad, "superseded_count": None,
+                "counted_by": "run_id"}
+
+    def _spark_stream_summary(self, sink: Any, query: Any, q_before: Optional[int]) -> Optional[Dict[str, Any]]:
+        """The run's totals measured on the DRIVER, when the sink could not keep them.
+
+        On serverless (Spark Connect) foreachBatch runs in a separate Python process, so the
+        sink's per-batch tallies stay there and the driver read 0 batches: a stream that loaded
+        288 rows reported none (Databricks, 2026-10-27). The query's progress carries each
+        micro-batch's input rows; the quarantine table's growth carries the bad ones. Rows a
+        merge superseded are not observable here, so that count is left unknown, not 0.
+        """
+        if getattr(sink, "batches", None):
+            return None  # the sink kept its own tallies (classic compute, local Spark)
+        recorded = sink.driver_totals() if hasattr(sink, "driver_totals") else None
+        if recorded and recorded.get("batches"):
+            return recorded  # each micro-batch wrote its counts beside the checkpoint
+        # The batch-counts file can be missing (the micro-batch's write failed where the job
+        # cannot show it: a run loaded 8 rows and logged 0, 2026-10-27). Count what the run
+        # wrote instead, by its run id.
+        stamped = self._stamped_stream_counts()
+        if stamped and stamped["source_count"]:
+            return stamped
+        try:
+            progress = [p for p in (query.recentProgress or []) if p]
+        except Exception:  # noqa: BLE001
+            return None
+        def _input_rows(p: Any) -> int:
+            # Spark Connect hands progress back as JSON TEXT; classic Spark as dicts or objects.
+            if isinstance(p, str):
+                import json as _json
+
+                try:
+                    p = _json.loads(p)
+                except ValueError:
+                    return 0
+            if isinstance(p, dict):
+                return int(p.get("numInputRows") or 0)
+            return int(getattr(p, "numInputRows", 0) or 0)
+
+        rows = [_input_rows(p) for p in progress]
+        source = sum(rows)
+        q_after = self._quarantine_row_count()
+        bad = (q_after - q_before) if (q_after is not None and q_before is not None) else None
+        return {
+            "batches": sum(1 for n in rows if n),
+            "source_count": source,
+            # Quarantine growth beyond the rows read means the progress missed rows: unknown.
+            "good_count": (source - bad) if (bad is not None and bad <= source) else None,
+            "bad_count": bad,
+            "superseded_count": None,
+        }
+
+    def _write_stream_run_log(self, summary: Dict[str, Any]) -> None:
+        """One run-log row for a stream run, with its totals.
+
+        Each micro-batch is validated and written inside the sink, so the batch path that writes
+        the run log was never reached: a streaming bronze or silver loaded and quarantined rows
+        and the run log said nothing, so freshness and quarantine could not be seen (Databricks,
+        2026-10-27). A run that found no new events is ``no_new_data``, as for files.
+        """
+        # The runner writes a row of its own unless told this one is it (it wrote a second,
+        # all-zero "succeeded" row beside every stream run, 2026-10-27).
+        self._run_log_already_written = True
+        source = int(summary.get("source_count") or 0)
+        if not summary.get("batches") or source == 0:
+            self._write_empty_run_log("no_new_data")
+            return
+        try:
+            title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
+            def _n(key):
+                v = summary.get(key)
+                return None if v is None else int(v)
+
+            good, bad, dup = _n("good_count"), _n("bad_count"), _n("superseded_count")
+            total = (good + bad) if good is not None and bad is not None else source
+            counts = {
+                "source": source, "total": total, "good": good, "quarantined": bad,
+                "deduplicated": dup,  # None = not observable on this compute, never a false 0
+                "quarantine_ratio": (bad / total) if (bad is not None and total) else None,
+            }
+            report = self._build_report(title, counts)
+            # The status a batch run gets for the same counts: every row kept, or some quarantined
+            # (stream rows were written with no status at all, 2026-10-27).
+            report["status"] = "partial" if (bad or 0) > 0 else "succeeded"
+            report.setdefault("stage", "succeeded")
+            self.last_report = report
+            write_run_log(report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode)
+        except Exception as e:  # noqa: BLE001 - reporting never fails the load that already happened
+            logger.warning(f"Could not write the stream run log: {e}")
+
     def _write_empty_run_log(self, stage: str = "no_new_data") -> None:
         """Write a minimal run log entry for runs that found no new data.
 
@@ -7770,6 +8094,207 @@ class DataProcessor:
             source_path=f"database://{dataset}",
         )
 
+    def _stream_checkpoint(self, options: Dict[str, Any], fallback: str) -> str:
+        """``options.checkpoint``, else ``$LAKELOGIC_CHECKPOINT_ROOT/<dataset>``, else
+        ``_checkpoints/<dataset>`` beside the contract."""
+        name = self.contract.dataset or getattr(getattr(self.contract, "info", None), "title", None) or fallback
+        _root = os.environ.get("LAKELOGIC_CHECKPOINT_ROOT", "").rstrip("/")
+        base = Path(getattr(self, "_explicit_contract_path", None) or ".").resolve()
+        base = base.parent if base.suffix else base
+        return str(options.get("checkpoint") or (f"{_root}/{name}" if _root else base / "_checkpoints" / str(name)))
+
+    def _file_stream(self, spark: Any, folder: str, fmt: str, o: Dict[str, Any], checkpoint: str) -> Any:
+        """The folder as a stream DataFrame, every column text (Bronze keeps what landed).
+
+        Databricks: Auto Loader (``cloudFiles``) — it tracks files itself and keeps the inferred
+        schema beside the checkpoint. Elsewhere: Spark's file stream, with the schema of a one-off
+        read of the folder as text (a file stream needs its schema up front).
+        """
+        readers = {"csv": "csv", "tsv": "csv", "json": "json", "jsonl": "json", "ndjson": "json",
+                   "parquet": "parquet", "avro": "avro", "xml": "xml"}
+        spark_fmt = readers.get(fmt)
+        if not spark_fmt:
+            raise ValueError(f"kind: files cannot stream format '{fmt}'; use csv, json, parquet, avro or xml")
+        opts: Dict[str, str] = {}
+        if spark_fmt == "csv":
+            opts["header"] = str(o.get("header", True)).lower()
+            opts["sep"] = str(o.get("delimiter") or ("\t" if fmt == "tsv" else ","))
+            # A quoted value may hold a line break, as the landing reader allows: read line by
+            # line, 196 of 200 driver profiles split at their address and lost `status` (2026-10-27).
+            opts["multiLine"] = "true"
+            opts["escape"] = '"'
+        if spark_fmt == "json" and o.get("multiline"):
+            opts["multiLine"] = "true"
+        if o.get("max_files_per_trigger"):
+            opts["maxFilesPerTrigger"] = str(int(o["max_files_per_trigger"]))
+        if os.environ.get("DATABRICKS_RUNTIME_VERSION"):
+            reader = (spark.readStream.format("cloudFiles")
+                      .option("cloudFiles.format", spark_fmt)
+                      .option("cloudFiles.schemaLocation", f"{checkpoint}/_schema")
+                      .option("cloudFiles.inferColumnTypes", "false"))
+            for k, v in opts.items():
+                reader = reader.option("cloudFiles.maxFilesPerTrigger" if k == "maxFilesPerTrigger" else k, v)
+            return _with_input_file(reader.load(folder))
+        from pyspark.sql.types import StringType, StructField, StructType
+
+        # Landing folders nest files in partition folders (y_2024/m_12/...); Auto Loader looks
+        # in them by itself, Spark's file stream only when told.
+        opts["recursiveFileLookup"] = "true"
+        batch_opts = {k: v for k, v in opts.items() if k != "maxFilesPerTrigger"}
+        sample = spark.read.format(spark_fmt).options(**batch_opts).load(folder)
+        schema = StructType([StructField(f.name, StringType(), True) for f in sample.schema.fields])
+        return _with_input_file(spark.readStream.format(spark_fmt).options(**opts).schema(schema).load(folder))
+
+    def _run_cloud_stream_source(self) -> "ValidationResult":
+        """Drain an Amazon Kinesis stream or a Google Pub/Sub subscription (``source.type: stream``,
+        ``options.kind: kinesis`` / ``pubsub``) on Databricks, micro-batch by micro-batch, like a
+        Kafka topic: JSON records become the
+        contract's fields, an unreadable record is quarantined, the position is kept in the
+        checkpoint (2026-10-27)."""
+        from lakelogic.core.stream_sink import SparkStreamSink, kinesis_json_stream, pubsub_json_stream
+        from pyspark.sql import SparkSession
+
+        fields = [f.name for f in (self.contract.model.fields if self.contract.model else [])]
+        spark = SparkSession.builder.getOrCreate()
+        if _stream_kind(self.contract.source) == "pubsub":
+            cfg = _pubsub_stream_settings(self.contract.source)
+            checkpoint = self._stream_checkpoint({"checkpoint": cfg["checkpoint"]}, cfg["subscription"])
+            stream = pubsub_json_stream(spark, cfg["subscription"], fields, topic=cfg["topic"],
+                                        project=cfg["project"], **cfg["auth"])
+            logger.info(f"stream source: pubsub subscription '{cfg['subscription']}' in {cfg['project']} "
+                        f"(checkpoint {checkpoint})")
+        else:
+            cfg = _kinesis_stream_settings(self.contract.source)
+            checkpoint = self._stream_checkpoint({"checkpoint": cfg["checkpoint"]}, cfg["stream"])
+            stream = kinesis_json_stream(spark, cfg["stream"], fields, region=cfg["region"],
+                                         starting_position=cfg["starting_position"], **cfg["auth"])
+            logger.info(f"stream source: kinesis stream '{cfg['stream']}' in {cfg['region']} (checkpoint {checkpoint})")
+        continuous = cfg["trigger"] in ("continuous", "processing_time")
+        sink = SparkStreamSink(
+            stream_df=stream,
+            checkpoint_location=checkpoint,
+            trigger="processing_time" if continuous else "available_now",
+            processing_time=cfg["processing_time"] or ("30 seconds" if continuous else None),
+            processor=self,
+        )
+        _q_before = self._quarantine_row_count()
+        self._pin_stream_run_id()
+        _query = sink.run()
+        summary = self._spark_stream_summary(sink, _query, _q_before) or {
+            "batches": len(sink.batches),
+            "source_count": sum(b.source_count or 0 for b in sink.batches),
+            "good_count": sum(b.good_count for b in sink.batches),
+            "bad_count": sum(b.bad_count for b in sink.batches),
+            "superseded_count": sum(b.superseded_count for b in sink.batches),
+        }
+        logger.info(f"stream source: {summary}")
+        self._write_stream_run_log(summary)
+        result = ValidationResult(self._empty_frame(), self._empty_frame())
+        result.stream_summary = summary
+        return result
+
+    def _run_file_stream_source(self) -> "ValidationResult":
+        """Read a landing folder as a stream (``source.type: stream``, ``options.kind: files``): each
+        new file is read once, validated and written like a Kafka micro-batch, its place kept in the
+        checkpoint. With ``trigger: available_now`` a run reads what landed since the last one and
+        stops — the first load and every incremental load in one job (2026-10-27).
+        """
+        from lakelogic.core.stream_sink import SparkStreamSink
+        from pyspark.sql import SparkSession
+
+        src = self.contract.source
+        o = dict(getattr(src, "options", None) or {})
+        folder = str(getattr(src, "path", "") or "").strip()
+        if not folder:
+            raise ValueError("kind: files needs source.path (the landing folder)")
+        fmt = str(getattr(src, "format", None) or "csv").lower()
+        checkpoint = self._stream_checkpoint(o, folder.rstrip("/").rsplit("/", 1)[-1])
+        trigger = str(o.get("trigger") or "available_now")
+        continuous = trigger in ("continuous", "processing_time")
+        spark = SparkSession.builder.getOrCreate()
+        stream = self._file_stream(spark, folder, fmt, o, checkpoint)
+        logger.info(f"stream source: files ({fmt}) in '{folder}' (checkpoint {checkpoint})")
+        sink = SparkStreamSink(
+            stream_df=stream,
+            checkpoint_location=checkpoint,
+            trigger="processing_time" if continuous else "available_now",
+            processing_time=o.get("processing_time") or ("30 seconds" if continuous else None),
+            processor=self,
+        )
+        _q_before = self._quarantine_row_count()
+        self._pin_stream_run_id()
+        _query = sink.run()
+        summary = self._spark_stream_summary(sink, _query, _q_before) or {
+            "batches": len(sink.batches),
+            "source_count": sum(b.source_count or 0 for b in sink.batches),
+            "good_count": sum(b.good_count for b in sink.batches),
+            "bad_count": sum(b.bad_count for b in sink.batches),
+            "superseded_count": sum(b.superseded_count for b in sink.batches),
+        }
+        logger.info(f"stream source: {summary}")
+        self._write_stream_run_log(summary)
+        result = ValidationResult(self._empty_frame(), self._empty_frame())
+        result.stream_summary = summary
+        return result
+
+    def _run_delta_stream_source(self) -> "ValidationResult":
+        """Read a Delta table as a stream (``source.type: stream``, ``options.kind: delta``) and process
+        each micro-batch like a Kafka one: validated, written (good rows to the target, bad to
+        quarantine), the position kept in the checkpoint. The Silver of a streaming Bronze: rows are
+        read by position, not by a timestamp watermark, so equal or late timestamps are not missed.
+        """
+        from lakelogic.core.stream_sink import SparkStreamSink
+        from pyspark.sql import SparkSession
+
+        src = self.contract.source
+        o = dict(getattr(src, "options", None) or {})
+        table = str(o.get("table") or getattr(src, "path", "") or "").removeprefix("table:").strip()
+        if not table:
+            raise ValueError(f"kind: {_stream_kind(src)} needs source.options.table (or source.path)")
+        name = self.contract.dataset or getattr(getattr(self.contract, "info", None), "title", None) or table
+        _root = os.environ.get("LAKELOGIC_CHECKPOINT_ROOT", "").rstrip("/")
+        base = Path(getattr(self, "_explicit_contract_path", None) or ".").resolve()
+        base = base.parent if base.suffix else base
+        checkpoint = str(o.get("checkpoint") or (f"{_root}/{name}" if _root else base / "_checkpoints" / str(name)))
+        trigger = str(o.get("trigger") or "available_now")
+        continuous = trigger in ("continuous", "processing_time")
+        spark = SparkSession.builder.getOrCreate()
+        kind = _stream_kind(src) or "delta"
+        if kind == "iceberg":
+            # An Iceberg stream reads APPENDED snapshots; one that overwrites or deletes stops it
+            # unless skipped. A bronze stream only appends, so those snapshots carry nothing new.
+            stream = (
+                spark.readStream.format("iceberg")
+                .option("streaming-skip-overwrite-snapshots", "true")
+                .option("streaming-skip-delete-snapshots", "true")
+                .load(table)
+            )
+        else:
+            stream = spark.readStream.format("delta").table(table)
+        logger.info(f"stream source: {kind} table '{table}' (checkpoint {checkpoint})")
+        sink = SparkStreamSink(
+            stream_df=stream,
+            checkpoint_location=checkpoint,
+            trigger="processing_time" if continuous else "available_now",
+            processing_time=o.get("processing_time") or ("30 seconds" if continuous else None),
+            processor=self,
+        )
+        _q_before = self._quarantine_row_count()
+        self._pin_stream_run_id()
+        _query = sink.run()
+        summary = self._spark_stream_summary(sink, _query, _q_before) or {
+            "batches": len(sink.batches),
+            "source_count": sum(b.source_count or 0 for b in sink.batches),
+            "good_count": sum(b.good_count for b in sink.batches),
+            "bad_count": sum(b.bad_count for b in sink.batches),
+            "superseded_count": sum(b.superseded_count for b in sink.batches),
+        }
+        logger.info(f"stream source: {summary}")
+        self._write_stream_run_log(summary)
+        result = ValidationResult(self._empty_frame(), self._empty_frame())
+        result.stream_summary = summary
+        return result
+
     def _run_kafka_stream_source(self) -> "ValidationResult":
         """Drain a Kafka / Event Hubs topic declared in the contract, micro-batch by micro-batch.
 
@@ -7812,8 +8337,9 @@ class DataProcessor:
                 opts["kafka.sasl.mechanism"] = auth["sasl_mechanism"]
             if auth.get("sasl_password") is not None:
                 opts["kafka.sasl.jaas.config"] = (
-                    "org.apache.kafka.common.security.plain.PlainLoginModule required "
-                    f'username="{auth.get("sasl_username", "")}" password="{auth["sasl_password"]}";'
+                    f"{_plain_login_module()} required "
+                    f'username="{_jaas_quote(auth.get("sasl_username", ""))}" '
+                    f'password="{_jaas_quote(auth["sasl_password"])}";'
                 )
             if cfg["max_offsets_per_trigger"]:
                 opts["maxOffsetsPerTrigger"] = str(cfg["max_offsets_per_trigger"])
@@ -7833,8 +8359,10 @@ class DataProcessor:
                 processing_time=cfg["processing_time"] or ("30 seconds" if continuous else None),
                 processor=self,
             )
-            sink.run()
-            summary = {
+            _q_before = self._quarantine_row_count()
+            self._pin_stream_run_id()
+            _query = sink.run()
+            summary = self._spark_stream_summary(sink, _query, _q_before) or {
                 "batches": len(sink.batches),
                 "source_count": sum(b.source_count or 0 for b in sink.batches),
                 "good_count": sum(b.good_count for b in sink.batches),
@@ -7875,6 +8403,7 @@ class DataProcessor:
                 "cursor": s.cursor,
             }
         logger.info(f"stream source: {summary}")
+        self._write_stream_run_log(summary)
         result = ValidationResult(self._empty_frame(), self._empty_frame())
         result.stream_summary = summary
         return result

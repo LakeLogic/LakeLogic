@@ -147,6 +147,9 @@ def _service_levels(raw: Dict[str, Any]) -> Dict[str, Any]:
 # Streaming transports whose ``.stream()`` is consumed resumably (StreamSink /
 # Spark Structured Streaming). A load from one of these replays on restart.
 _STREAMING_SOURCE_TYPES = {
+    # ``stream`` is Core's own contract-driven type (``options.kind: kafka | eventhubs``); it was
+    # missing, so a real Event Hubs contract was classed as batch (2026-10-26).
+    "stream",
     "kafka",
     "sse",
     "server_sent_events",
@@ -165,7 +168,9 @@ _RESUMABLE_TRIGGERS = {"available_now", "availablenow", "micro_batch", "microbat
 def _trigger(raw: Dict[str, Any]) -> str:
     """The runtime trigger, wherever it's authored (top-level, source, or
     materialization ``streaming`` block)."""
-    for holder in (raw, _d(raw.get("source")), _d(raw.get("materialization"))):
+    # ``source.options.trigger`` is where a ``type: stream`` contract writes it.
+    for holder in (raw, _d(raw.get("source")), _d(_d(raw.get("source")).get("options")),
+                   _d(raw.get("materialization"))):
         t = holder.get("trigger")
         if isinstance(t, dict):
             t = t.get("mode") or t.get("type")
