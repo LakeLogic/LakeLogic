@@ -12,17 +12,17 @@
 [![CI](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml)
 [![codecov](https://codecov.io/gh/LakeLogic/LakeLogic/graph/badge.svg)](https://codecov.io/gh/LakeLogic/LakeLogic)
 [![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green)](https://github.com/LakeLogic/LakeLogic/blob/main/LICENSE)
 
 Define your sources, transformations and quality rules in an [Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/). LakeLogic Core runs the supported steps with Polars, DuckDB or Spark, separating accepted rows from failed rows and recording why they failed.
 
 Test locally, check contract changes in CI and run pipelines in your supported environment.
 
-**OLC defines the contract. LakeLogic Core executes it.** Core is the open-source reference runtime; supported features vary by engine and storage format. See the [capability matrix](docs/capabilities.md).
+**OLC defines the contract. LakeLogic Core executes it.** Core is the open-source reference runtime; supported features vary by engine and storage format. See the [capability matrix](https://docs.lakelogic.io/capabilities.html).
 
 [**Run the Colab quickstart**](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb) · [Documentation](https://docs.lakelogic.io/) · [Examples](https://docs.lakelogic.io/examples.html)
 
-![LakeLogic Architecture](docs/assets/lakelogic_architecture.png)
+![LakeLogic Architecture](https://raw.githubusercontent.com/LakeLogic/LakeLogic/main/docs/assets/lakelogic_architecture.png)
 
 ## The Problem It Solves
 
@@ -115,7 +115,7 @@ CI gates analyse contract declarations and the comparison context supplied to th
 | **Lakehouse patterns** | Incremental processing, Delta or Iceberg outputs, merge strategies, SCD Type 2, dependencies, and external transformation logic. |
 | **Operational evidence** | Structured run logs, execution metadata, lineage evidence, and optional notification integrations. |
 
-See the [complete capability matrix](docs/capabilities.md) before choosing an engine or storage format.
+See the [complete capability matrix](https://docs.lakelogic.io/capabilities.html) before choosing an engine or storage format.
 
 ## Engine Support
 
@@ -125,7 +125,7 @@ See the [complete capability matrix](docs/capabilities.md) before choosing an en
 | **DuckDB** | Local analytical SQL and embedded workflows | Included in the base package. Some catalog and materialization combinations differ from Spark. |
 | **Spark** | Distributed lakehouse workloads and managed catalogs such as Unity Catalog | Install with `pip install "lakelogic[spark]"`. Managed catalog features depend on the Spark platform and its configuration. |
 
-The contract model is shared, but engines are not identical. Review [engine and format capabilities](docs/capabilities.md) for supported combinations.
+The contract model is shared, but engines are not identical. Review [engine and format capabilities](https://docs.lakelogic.io/capabilities.html) for supported combinations.
 
 ## Where Data Mesh Fits
 
@@ -154,18 +154,18 @@ LakeLogic does not create organisational ownership, access policies, alert deliv
 
 ## Documentation
 
-- [Installation and optional dependencies](docs/installation.md)
-- [Complete contract reference](docs/contract_template.md)
-- [Capabilities and engine boundaries](docs/capabilities.md)
-- [Pipeline concepts](docs/pipelines.md)
-- [Reconciliation](docs/reconciliation.md)
-- [Notifications](docs/notifications.md)
+- [Installation and optional dependencies](https://docs.lakelogic.io/installation.html)
+- [Complete contract reference](https://docs.lakelogic.io/contract_template.html)
+- [Capabilities and engine boundaries](https://docs.lakelogic.io/capabilities.html)
+- [Pipeline concepts](https://docs.lakelogic.io/pipelines.html)
+- [Reconciliation](https://docs.lakelogic.io/reconciliation.html)
+- [Notifications](https://docs.lakelogic.io/notifications.html)
 - [Full documentation site](https://docs.lakelogic.io/)
 
 ## Contributing
 
-Contributions and issue reports are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [developer installation](docs/installation.md#developer-installation) for environment setup.
+Contributions and issue reports are welcome. See [CONTRIBUTING.md](https://github.com/LakeLogic/LakeLogic/blob/main/CONTRIBUTING.md) for the development workflow and [developer installation](https://docs.lakelogic.io/installation.html#developer-installation) for environment setup.
 
 ## License
 
-LakeLogic is available under the [Apache 2.0 License](LICENSE).
+LakeLogic is available under the [Apache 2.0 License](https://github.com/LakeLogic/LakeLogic/blob/main/LICENSE).
