@@ -415,6 +415,11 @@ dev = [
     "mkdocstrings[python]>=0.20.0",
     "commitizen>=3.0.0",
     "git-cliff>=2.0.0",
+    # The Iceberg tests (core + OLC conformance) need pyiceberg; it was only ever installed
+    # by hand, so `uv sync` dropped it. Capped below 0.12 for the dev env ONLY: 0.12.0's
+    # compiled avro decoder is blocked by Windows Smart App Control on the maintainer's
+    # machine (2026-10-29). Lift the cap once a 0.12.x build loads there.
+    "pyiceberg>=0.11.1,<0.12",
 ]
 
 # ---------------------------------------------------------------------------
