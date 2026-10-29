@@ -33,7 +33,8 @@ def test_every_backend_gets_the_same_name():
         assert mn.metadata_table_name("run_log", backend=backend) == "lakelogic_run_log"
 
 
-@pytest.mark.parametrize("kind", mn.METADATA_KINDS)
+# Kinds added after the 2026-09-26 standard (profiles) never had the underscore form.
+@pytest.mark.parametrize("kind", [k for k in mn.METADATA_KINDS if mn.LEGACY_NAMES[k]])
 def test_the_old_underscore_form_is_a_legacy_name_so_existing_estates_keep_it(kind):
     assert f"_lakelogic_{kind}" in mn.legacy_table_names(kind)
     existing = {f"_lakelogic_{kind}"}
@@ -62,6 +63,7 @@ def test_the_required_kinds_exist():
         "retention_evidence",
         "erasure_requests",
         "quality_checks",  # lakelogic check results (#570)
+        "profiles",  # lakelogic profile --contract results
     }
 
 

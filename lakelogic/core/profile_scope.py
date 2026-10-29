@@ -196,6 +196,9 @@ def sample_sql(
         return (f"SELECT * FROM {from_sql} ORDER BY {quote(col)} DESC NULLS LAST LIMIT {n}", f"newest first by {col}")
     if duck:
         return (f"SELECT * FROM {from_sql} USING SAMPLE reservoir({n} ROWS) REPEATABLE (42)", f"at random{why}")
+    if dialect == "snowflake":
+        # Snowflake refuses a seed on a fixed-size sample.
+        return (f"SELECT * FROM {from_sql} SAMPLE ({n} ROWS)", f"{n:,} random rows{why}")
     return (f"SELECT * FROM {from_sql} TABLESAMPLE ({n} ROWS) REPEATABLE (42)", f"{n:,} random rows{why}")
 
 

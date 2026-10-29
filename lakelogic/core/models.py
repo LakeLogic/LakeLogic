@@ -1591,6 +1591,8 @@ class DataContract(BaseModel):
         validation_alias=AliasChoices("tier", "layer", "target_layer"),
     )
     contract_file_name: Optional[str] = None
+    #: Business map: the concept this contract represents (OLC ``entity``). Optional.
+    entity: Optional[str] = None
 
     @field_validator("tier", mode="before")
     @classmethod

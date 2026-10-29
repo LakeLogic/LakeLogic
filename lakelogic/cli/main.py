@@ -1830,8 +1830,10 @@ def scan(
 
 @app.command(rich_help_panel="Data Tooling")
 def profile(
-    source: str = typer.Argument(
-        ..., help="Table name (with --engine) or a file/folder path (local, s3://, abfss://, gs://)."
+    source: Optional[str] = typer.Argument(
+        None,
+        help="Table name (with --engine) or a file/folder path (local, s3://, abfss://, gs://). "
+        "With --contract it defaults to the contract's source.path.",
     ),
     engine: Optional[str] = typer.Option(
         None, "--engine", "-e", help="Profile a TABLE by SQL pushdown: duckdb | databricks | <SQLAlchemy URL>."
@@ -1859,6 +1861,23 @@ def profile(
         None, "--sample-percent", help="Sample this percentage of the table (0.1-100)."
     ),
     sample_order: str = typer.Option("newest", "--sample-order", help="newest (by a timestamp column) | random."),
+    endpoint: Optional[str] = typer.Option(
+        None,
+        "--endpoint",
+        envvar="LAKELOGIC_OBSERVATORY_ENDPOINT",
+        help="With --contract: send the profile to this LakeLogic run-log ingest URL.",
+    ),
+    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="LAKELOGIC_API_KEY", help="LakeLogic API key."),
+    environment: Optional[str] = typer.Option(None, "--environment", help="Environment to report (dev, prod...)."),
+    table: Optional[str] = typer.Option(
+        None, "--table", help="With --contract: the table to profile (default: the contract's info.table_name)."
+    ),
+    results_table: Optional[str] = typer.Option(
+        None,
+        "--results-table",
+        envvar="LAKELOGIC_PROFILES_TABLE",
+        help="With --contract: also append one row per column here (e.g. catalog.lakelogic.lakelogic_profiles).",
+    ),
 ):
     """Profile a dataset: one versioned JSON document of statistics, never rows.
 
@@ -1867,6 +1886,57 @@ def profile(
     import json as _json
 
     from lakelogic.core.profile import DatabricksStatementExecutor, DuckDBExecutor, profile as _profile
+
+    # CONTRACT-DRIVEN: the contract's `profiling` block says how, its source where; the result
+    # can be reported to LakeLogic like a rule check (lakelogic.core.profile_report).
+    if contract and engine in (None, "snowflake") and (endpoint or not source or table or results_table):
+        import os as _os
+
+        from lakelogic.core.profile_report import active_spark, profile_contract, snowflake_connection
+
+        # --engine snowflake: the table in Snowflake, over the SNOWFLAKE_* connection the
+        # Snowflake engine uses. Else Spark when a table or results table is asked for, or when a
+        # Spark session is already running (Databricks, Fabric): tables, Volumes, OneLake and
+        # cloud storage (abfss://, s3://, gs://) all read through it. Else DuckDB, locally.
+        spark = connection = None
+        if engine == "snowflake":
+            connection = snowflake_connection()
+        else:
+            spark = active_spark()
+            if spark is None and (table or results_table or _os.environ.get("DATABRICKS_RUNTIME_VERSION")):
+                from pyspark.sql import SparkSession
+
+                spark = SparkSession.builder.getOrCreate()
+        try:
+            out = profile_contract(
+                str(contract), location=source, fmt=fmt, table=table, spark=spark, connection=connection,
+                results_table=results_table, endpoint=endpoint, api_key=api_key, environment=environment,
+            )
+        except ValueError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2)
+        finally:
+            if connection is not None:
+                connection.close()
+        text = _json.dumps(out["profile"], indent=2, default=str)
+        if output:
+            output.write_text(text, encoding="utf-8")
+        else:
+            typer.echo(text)
+        counts = out["profile"].get("finding_counts") or {}
+        typer.secho(
+            f"Profiled {out['payload']['dataset']}: {out['payload']['rows_input']} rows, "
+            f"{counts.get('confirmed', 0)} confirmed, {counts.get('potential', 0)} potential, "
+            f"{counts.get('gap', 0)} control gaps. Sent to LakeLogic: {'yes' if out['sent'] else 'no'}."
+            + (f" Written to {out['results_table']}." if out.get("results_table") else "")
+            + (f" {out['results_table_error']}" if out.get("results_table_error") else ""),
+            fg=typer.colors.GREEN,
+            err=True,
+        )
+        return
+    if not source:
+        typer.secho("Pass a source, or --contract to profile the contract's data.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
 
     connection = None
     if engine:

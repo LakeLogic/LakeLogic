@@ -54,6 +54,8 @@ METADATA_KINDS: Tuple[str, ...] = (
     "erasure_requests",
     # Per-rule results of `lakelogic check` (#570): one row per rule per check.
     "quality_checks",
+    # Column statistics of `lakelogic profile --contract`: one row per column per profile.
+    "profiles",
 )
 
 # Kept for callers that still pass ``backend=``: every backend now gets the same name.
@@ -79,6 +81,7 @@ LEGACY_NAMES: Dict[str, Tuple[str, ...]] = {
     "retention_evidence": ("_lakelogic_retention_evidence",),
     "erasure_requests": ("_lakelogic_erasure_requests",),
     "quality_checks": ("_lakelogic_quality_checks", "_quality_checks"),
+    "profiles": (),
 }
 
 

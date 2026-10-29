@@ -5134,6 +5134,31 @@ class DataGenerator:
         relationships: List[Dict[str, str]] = []
         seen_fk_cols: set = set()
 
+        # 0. Field-level ``foreign_key: {contract, column}`` — the contract's own declaration,
+        #    so it wins over every inference below. Without this a key whose name differs
+        #    from its parent's (``trips.rider_id`` -> ``customers.customer_id``) was matched by
+        #    no rule and generated free values, breaking referential integrity.
+        for field in (contract_raw.get("model") or {}).get("fields") or []:
+            fk = field.get("foreign_key") if isinstance(field, dict) else None
+            fname = field.get("name", "") if isinstance(field, dict) else ""
+            if not isinstance(fk, dict) or not fk.get("contract") or not fname:
+                continue
+            ref_contract = str(fk["contract"]).lower()
+            ref_entity = None
+            for ename in all_entity_names:
+                if ename == entity_name:
+                    continue
+                el = ename.lower()
+                if ref_contract == el or el.endswith(f"_{ref_contract}") or ref_contract.endswith(f"_{el}"):
+                    ref_entity = ename
+                    break
+            if not ref_entity:
+                continue
+            ref_pks = all_pk_columns.get(ref_entity, [])
+            ref_col = fk.get("column") or (ref_pks[0] if len(ref_pks) == 1 else fname)
+            relationships.append({"fk_column": fname, "ref_entity": ref_entity, "ref_column": ref_col})
+            seen_fk_cols.add(fname)
+
         # 1. Parse links: section
         links = contract_raw.get("links") or []
         transformations = contract_raw.get("transformations") or []

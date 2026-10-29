@@ -420,6 +420,38 @@ class SqlAlchemyExecutor(SqlExecutor):
         return [(c["name"], str(c["type"])) for c in inspect(self.engine).get_columns(name, schema=schema or None)]
 
 
+class DbApiExecutor(SqlExecutor):
+    """A DB-API connection (``snowflake.connector`` is the one Core's Snowflake engine opens)."""
+
+    def __init__(self, conn: Any, dialect: str = "snowflake"):
+        self.conn = conn
+        self.dialect = dialect
+
+    def query(self, sql: str):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(sql)
+            return [d[0] for d in cur.description], [tuple(r) for r in cur.fetchmany(2)]
+        finally:
+            cur.close()
+
+    def rows(self, sql: str, limit: int):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(sql)
+            return [tuple(r) for r in cur.fetchmany(int(limit))]
+        finally:
+            cur.close()
+
+    def columns(self, table: str):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(f"DESCRIBE TABLE {_quote_table(table, _dialect(self.dialect))}")
+            return [(r[0], str(r[1])) for r in cur.fetchall()]
+        finally:
+            cur.close()
+
+
 class DatabricksStatementExecutor(SqlExecutor):
     """Databricks SQL Statement Execution API (the same API the SaaS scan uses).
 
@@ -515,6 +547,8 @@ def executor_for(connection: Any, dialect: Optional[str] = None) -> SqlExecutor:
             ex = DuckDBExecutor(connection)
         elif "Engine" in t or (isinstance(connection, str) and "://" in connection):
             ex = SqlAlchemyExecutor(connection)
+        elif mod.startswith("snowflake.connector"):
+            ex = DbApiExecutor(connection, "snowflake")
         else:
             raise TypeError(f"Unsupported connection type for profiling: {t}")
     if dialect:
