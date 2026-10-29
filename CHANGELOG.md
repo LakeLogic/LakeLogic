@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.86.0] — 2026-10-29
+
+### Added
+
+- Profile --contract on Spark, Fabric and Snowflake; business map; FK-aware test data
+
+### Documentation
+
+- Update changelog for v1.85.1
 ## [1.85.1] — 2026-10-28
 
 ### Documentation
@@ -1062,6 +1071,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.86.0]: https://github.com/lakelogic/LakeLogic/compare/v1.85.1...v1.86.0
 [1.85.1]: https://github.com/lakelogic/LakeLogic/compare/v1.85.0...v1.85.1
 [1.85.0]: https://github.com/lakelogic/LakeLogic/compare/v1.84.0...v1.85.0
 [1.84.0]: https://github.com/lakelogic/LakeLogic/compare/v1.83.0...v1.84.0
