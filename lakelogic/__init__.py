@@ -1,7 +1,7 @@
 from typing import Optional, Dict
 
 from lakelogic.adapters.dbt import DbtAdapter, load_contract_from_dbt
-from lakelogic.core.bootstrap import ContractDraft, ContractInferrer, infer_contract
+from lakelogic.core.bootstrap import ContractDraft, ContractInferrer, infer_contract, read_sample, sample_files
 from lakelogic.core.describe_columns import describe_columns
 from lakelogic.core.text_extraction import ExtractedText, extract_text
 from lakelogic.core.profile import profile
@@ -221,6 +221,8 @@ __all__ = [
     "load_contract_from_dbt",
     # Contract inference
     "infer_contract",
+    "read_sample",
+    "sample_files",
     "ContractInferrer",
     "ContractDraft",
     "describe_columns",

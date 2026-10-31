@@ -1179,7 +1179,31 @@ def profile(
         return profile_delta(s, read_distincts=read_distincts, **common)
     if fmt == "parquet" or (fmt is None and (low.endswith(".parquet") or _has_ext(s, ".parquet"))):
         return profile_parquet(s, read_distincts=read_distincts, **common)
+    if fmt in ("excel", "xml", "sql") or (fmt is None and low.endswith((".xlsx", ".xls", ".xml", ".sql"))):
+        return profile_sample_file(s, **common)
     return profile_files(s, fmt=fmt, max_files=max_files, max_bytes=max_bytes, **common)
+
+
+def profile_sample_file(
+    path: str, *, contract: Any = None, sensitive_columns: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    """Profile one file that has no SQL reader of its own (Excel, XML, a SQL script).
+
+    Read by `read_sample` — the reader `infer_contract` uses — then profiled with the same
+    aggregate query as a table, so its statistics match every other profile."""
+    import duckdb
+
+    from lakelogic.core.bootstrap import read_sample
+
+    frame = read_sample(path, max_rows=10_000_000)
+    con = duckdb.connect()
+    try:
+        con.register("_sample", frame.to_arrow())
+        doc = profile_table("_sample", DuckDBExecutor(con), contract=contract, sensitive_columns=sensitive_columns)
+    finally:
+        con.close()
+    doc["source"] = {"kind": "file", "location": path}
+    return doc
 
 
 def _has_ext(location: str, ext: str) -> bool:

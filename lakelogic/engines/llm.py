@@ -82,6 +82,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -596,6 +597,23 @@ def _ocr_tolerant(pattern: str) -> Optional[str]:
     return "".join(out) + rest
 
 
+#: Numeric contract types: a value printed in a document for people ("1,250.00") is read as one.
+_NUMERIC_TYPES = {"integer", "int", "long", "bigint", "double", "float", "decimal", "number"}
+#: Thousands grouped with commas (or spaces), a dot for decimals: "1,250.00", "12 040", "-3,000".
+_GROUPED_NUMBER = re.compile(r"^[-+]?\d{1,3}(?:[, ]\d{3})+(?:\.\d+)?$")
+
+
+def _as_document_number(value: Optional[str], field_type: Optional[str]) -> Optional[str]:
+    """A number as a document prints it, as the contract's type reads it: thousands separators
+    dropped ("1,250.00" -> "1250.00") for a numeric field only. Anything that is not plainly
+    grouped digits — "1.250,00", "12,5", "GBP 3" — is left exactly as read, so the cast
+    quarantines it with the real value instead of this guessing a locale."""
+    if value is None or str(field_type or "").lower().split("(")[0] not in _NUMERIC_TYPES:
+        return value
+    v = value.strip()
+    return v.replace(",", "").replace(" ", "") if _GROUPED_NUMBER.match(v) else value
+
+
 def _extract_document(
     file_path: str,
     config: ExtractionConfig,
@@ -655,7 +673,8 @@ def _extract_document(
                     except _re.error:
                         m = None
             value = (m.group(1) if m.groups() else m.group(0)).strip() if m else None
-            extracted[field.name] = _within_a_line(value) if (value and joined) else value
+            value = _within_a_line(value) if (value and joined) else value
+            extracted[field.name] = _as_document_number(value, field.type)
         elif (field.extraction_task or "all").lower() in ("all", "text"):
             extracted[field.name] = text
         else:

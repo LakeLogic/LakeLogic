@@ -601,6 +601,9 @@ class ContractInferrer:
         self.domain = domain
         self.system = system
         self.sample_rows = sample_rows
+        #: CSV text that reads as a date or timestamp becomes one. Off for inference, so existing
+        #: inferred contracts keep their types; `read_sample` turns it on.
+        self.parse_dates = False
         self.suggest_rules = suggest_rules
         self.detect_pii = detect_pii
         self.pii_sample_size = pii_sample_size
@@ -839,7 +842,12 @@ class ContractInferrer:
         ext = p.suffix.lower()
 
         if ext == ".csv":
-            df = pl.read_csv(p, infer_schema_length=self.sample_rows, n_rows=self.sample_rows)
+            df = pl.read_csv(
+                p,
+                infer_schema_length=self.sample_rows,
+                n_rows=self.sample_rows,
+                try_parse_dates=self.parse_dates,
+            )
         elif ext == ".parquet":
             df = pl.read_parquet(p).head(self.sample_rows)
         elif ext == ".json":
@@ -1649,6 +1657,105 @@ class ContractInferrer:
 # ---------------------------------------------------------------------------
 # Convenience function
 # ---------------------------------------------------------------------------
+
+
+#: File extensions `read_sample` (and `infer_contract`) read as a table.
+SAMPLE_EXTENSIONS = (".csv", ".parquet", ".json", ".ndjson", ".jsonl", ".xlsx", ".xls", ".xml", ".sql")
+
+#: Documents a sample may hold (read by `extract_text`, fields drawn out by an extraction).
+DOCUMENT_EXTENSIONS = (".pdf", ".docx", ".pptx", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+
+
+def sample_files(source: Any, dest: Any, *, max_files: int = 50, max_bytes: int = 50 * 1024 * 1024) -> List[Path]:
+    """The sample files in ``source``: itself, or each readable file inside a zip — tables
+    (``SAMPLE_EXTENSIONS``) and documents (``DOCUMENT_EXTENSIONS``).
+
+    A zip is unpacked into ``dest`` (flattened, so a member cannot write outside it), skipping
+    folders, hidden and ``__MACOSX`` entries and anything `read_sample` does not read. Over
+    ``max_files`` files, or over ``max_bytes`` uncompressed, raises ``ValueError`` before
+    anything is written — the sizes come from the zip's own directory, so a zip bomb is refused
+    unread."""
+    import zipfile
+
+    src = Path(source)
+    if src.suffix.lower() != ".zip":
+        return [src]
+    out: List[Path] = []
+    with zipfile.ZipFile(src) as zf:
+        members = [m for m in zf.infolist()
+                   if not m.is_dir() and "__MACOSX" not in m.filename
+                   and not Path(m.filename).name.startswith(".")
+                   and Path(m.filename).suffix.lower() in SAMPLE_EXTENSIONS + DOCUMENT_EXTENSIONS]
+        if not members:
+            raise ValueError("The zip holds no file that can be read: "
+                             + ", ".join(SAMPLE_EXTENSIONS + DOCUMENT_EXTENSIONS) + ".")
+        if len(members) > max_files:
+            raise ValueError(f"The zip holds {len(members)} files; at most {max_files} are read at once.")
+        if sum(m.file_size for m in members) > max_bytes:
+            raise ValueError(f"The zip unpacks to more than {max_bytes // (1024 * 1024)} MB.")
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        for m in members:
+            name = Path(m.filename).name
+            target = dest / name
+            n = 1
+            while target.exists():  # two folders holding the same file name
+                target = dest / f"{Path(name).stem}_{n}{Path(name).suffix}"
+                n += 1
+            with zf.open(m) as fh:
+                target.write_bytes(fh.read(m.file_size + 1)[: m.file_size])
+            out.append(target)
+    return out
+
+
+#: The only statements a sample SQL script may hold: a table's definition and its rows.
+_SQL_SAMPLE_STATEMENTS = ("CREATE", "INSERT")
+
+
+def _read_sql_script(path: Any, max_rows: int) -> Any:
+    """One table from a SQL script: ``CREATE TABLE`` gives the columns, ``INSERT`` the rows.
+
+    Run in an in-memory DuckDB with external access OFF and only CREATE / INSERT statements
+    allowed, so a script cannot read files, reach the network or load extensions. A script
+    defining no table, or more than one, raises ``ValueError`` saying so."""
+    import duckdb
+
+    script = Path(path).read_text(encoding="utf-8", errors="replace")
+    con = duckdb.connect(":memory:", config={"enable_external_access": False})
+    try:
+        statements = con.extract_statements(script)
+        for st in statements:
+            kind = str(st.type).split(".")[-1].upper()
+            if not kind.startswith(_SQL_SAMPLE_STATEMENTS):
+                raise ValueError(f"A sample SQL script may only hold CREATE TABLE and INSERT statements, not {kind}.")
+            con.execute(st.query)
+        tables = [r[0] for r in con.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()]
+        if len(tables) != 1:
+            raise ValueError(
+                "A sample SQL script must define exactly one table" + (f", not {len(tables)}." if tables else "."))
+        return con.execute(f'SELECT * FROM "{tables[0]}" LIMIT {int(max_rows)}').pl()
+    finally:
+        con.close()
+
+
+def read_sample(source: Any, *, max_rows: int = 10_000) -> Any:
+    """Read a sample file into a polars DataFrame, the way `infer_contract` reads it.
+
+    One reader for every caller that starts from a file: pass the frame to `infer_contract` for
+    the schema and to `profile` for the profile, and both see the same columns and types. CSV dates
+    and timestamps are parsed (`infer_contract` on a path leaves them as text).
+
+    Supported: ``SAMPLE_EXTENSIONS``. Anything else raises ``ValueError`` naming the extension.
+    """
+    import polars as pl
+
+    if isinstance(source, (str, Path)) and Path(source).suffix.lower() == ".sql":
+        return _read_sql_script(source, max_rows)
+    inferrer = ContractInferrer(source, sample_rows=max_rows, suggest_rules=False)
+    inferrer.parse_dates = True
+    df, _ = inferrer._load(pl)
+    return df
 
 
 def infer_contract(
