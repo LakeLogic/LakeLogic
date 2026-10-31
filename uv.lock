@@ -4945,7 +4945,7 @@ requires-dist = [
     { name = "nbclient", marker = "extra == 'notebook'", specifier = ">=0.9.0" },
     { name = "nbformat", marker = "extra == 'enterprise'", specifier = ">=5.9.0" },
     { name = "nbformat", marker = "extra == 'notebook'", specifier = ">=5.9.0" },
-    { name = "open-lakehouse-contract", extras = ["models"], specifier = ">=0.30.0,<0.31.0" },
+    { name = "open-lakehouse-contract", extras = ["models"], specifier = ">=0.31.0,<0.32.0" },
     { name = "openai", marker = "extra == 'ai'", specifier = ">=1.0.0" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1.0" },
     { name = "openpyxl", marker = "extra == 'documents'", specifier = ">=3.1.0" },
@@ -7169,15 +7169,15 @@ wheels = [
 
 [[package]]
 name = "open-lakehouse-contract"
-version = "0.30.0"
+version = "0.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/63/8f6ed1d616f51763c261dfd66f02e22af37579a7293d612a551df908782f/open_lakehouse_contract-0.30.0.tar.gz", hash = "sha256:7c36fef4203f460d2a7dec4e5beb5d39c5357145873d5da1a404c1ba38c627b7", size = 378320, upload-time = "2026-10-29T12:24:53.741Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/e7/ba93076d5c578324d3aa8673d485eda09c64f4fe8d79b703bc5a5200d2a8/open_lakehouse_contract-0.31.0.tar.gz", hash = "sha256:6ed06db6617cb7cd9edeaf4740b4ccd0a161467ada066ea6352067ff14c0c479", size = 378966, upload-time = "2026-10-31T13:12:36.45Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/08/15104a11916f1afa542af47ced0bc5c3bb419484a240b8e79c635d3fd251/open_lakehouse_contract-0.30.0-py3-none-any.whl", hash = "sha256:9455f7b4cf267e8c3d6c89e4e9d687459630bbb8a29d8fecedf78dff6a64022d", size = 384991, upload-time = "2026-10-29T12:24:52.338Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/47/9db288f265655d192f3d9ebbd760d27259e8ed6b8d233382474a5cfed384/open_lakehouse_contract-0.31.0-py3-none-any.whl", hash = "sha256:d1d4902f4c634e4914164511c994b012095268608e07891c6e48f05c34232ea2", size = 385718, upload-time = "2026-10-31T13:12:34.914Z" },
 ]
 
 [package.optional-dependencies]
