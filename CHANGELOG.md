@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.87.0] — 2026-10-31
+
+### Added
+
+- **core**: Read and profile sample files; safe unzip; document numbers
+- **landing**: Archive landing files per table and outcome; on_error moves unreadable files
+
+### Build
+
+- **deps**: Open-lakehouse-contract 0.31 (post_ingestion.on_error)
+- **dev**: Lock pyiceberg 0.11.1 for the Iceberg tests
+
+### CI/CD
+
+- **publish**: Use PyPI Trusted Publishing instead of a stored token
+
+### Documentation
+
+- Update changelog for v1.86.0
 ## [1.86.0] — 2026-10-29
 
 ### Added
@@ -1071,6 +1090,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.87.0]: https://github.com/lakelogic/LakeLogic/compare/v1.86.0...v1.87.0
 [1.86.0]: https://github.com/lakelogic/LakeLogic/compare/v1.85.1...v1.86.0
 [1.85.1]: https://github.com/lakelogic/LakeLogic/compare/v1.85.0...v1.85.1
 [1.85.0]: https://github.com/lakelogic/LakeLogic/compare/v1.84.0...v1.85.0
