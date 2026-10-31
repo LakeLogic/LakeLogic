@@ -326,6 +326,8 @@ Landing zone lifecycle policy — what to do with source files **after a success
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `action` | `string` | `"retain"` | `"delete"` (zero-retention), `"archive"` (move to archive), `"retain"` (no-op) |
+| `archive_path` | `string` | `storage.archive_path` | Archive **root**. Files go to `<root>/<table>/success/` or `<root>/<table>/error/`, so one root serves every entity |
+| `on_error` | `string` | `"retain"` | `"move"` sends the files of a load that failed while reading to `<root>/<table>/error/` |
 | `cleanup_is_blocking` | `bool` | `false` | If `true`, cleanup failure fails the pipeline |
 | `retry_orphaned_files` | `bool` | `true` | Retry cleanup of previously failed files on next run |
 

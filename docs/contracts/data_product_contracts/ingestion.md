@@ -261,17 +261,65 @@ Individual contracts can then override the system default:
       path: "s3://landing/finance/invoices"
       post_ingestion:
         action: archive               # Override system-level 'delete'
-        archive_path: "s3://archive/finance/invoices"
+        archive_path: "s3://archive/finance"   # a ROOT: see "Where archived files go"
     ```
+
+### Where archived files go
+
+`archive_path` is a **root**, not a folder. LakeLogic adds the **table name** (the `info.table_name` of the contract, with its `{system}` and layer tokens filled in: what the end user sees) and the outcome beneath it, so one system-level root serves every table and a failed file never lands among the good ones:
+
+```
+<archive_path>/<table>/success/<path relative to the landing folder>
+<archive_path>/<table>/error/<path relative to the landing folder>
+```
+
+For example, with `archive_path: s3://archive/finance`, a file read into the `bronze_invoices` table ends up at `s3://archive/finance/bronze_invoices/success/dt=2026-10-01/invoices.csv`. The path under the landing folder is kept, so date folders survive. A file name that already exists in the destination is never overwritten: the new file gets a timestamp in its name.
+
+Only the files **that load read** are moved or deleted. A file that arrived while the load was running stays in the landing folder for the next run.
+
+### Files whose cleanup fails (`retry_orphaned_files`)
+
+A file can be loaded and still fail to move or delete (a permission or network error). With `cleanup_is_blocking: false` the run carries on, and LakeLogic **remembers the file**: it writes its path to `<archive_path>/<table>/_orphaned_files.json` (with `action: delete` and no archive root, to the run-log folder instead). At the start of the next bronze run it retries the cleanup of every remembered file, and it **does not read a remembered file again**, so its rows are never loaded twice. Once the cleanup succeeds the file leaves the manifest. A failure while recording is a warning in the log, and the next run may then read the file again. `cleanup_is_blocking: true` still fails the run, and still remembers the file. This is applied by `LakehousePipeline`. Set `retry_orphaned_files: false` (system level, under `server.bronze.post_ingestion`) to turn this off: the files then stay in landing and a later run may read them again.
+
+### Files that fail to read (`on_error`)
+
+```yaml
+server:
+  bronze:
+    post_ingestion:
+      action: archive
+      archive_path: "s3://archive/finance"
+      on_error: move            # retain (default) | move
+```
+
+With `on_error: move`, a Bronze load that **fails while reading** (a corrupt or unparseable file) moves the files it read to `<archive_path>/<table>/error/` and then fails as before. It works whatever `action` is, including `delete`, because failed files should be kept for a person to look at.
+
+How a failed file is found depends on the engine:
+
+- **Polars and DuckDB** read the landing folder eagerly. The read is one batch and does not say which file broke it, so **every file in the failed load** moves to `error/`. The log says so.
+- **Spark** reads lazily, so a corrupt file fails after the read began, and Spark's error **names the file**. Only the files the error names move to `error/`. (Proven on Databricks serverless: a corrupt Parquet file went to `error/` and the good ones were archived.)
+- A failure that names no file (a rule crashing, the Delta write) is not the file's fault; the files stay in the landing folder.
+- Spark's CSV and JSON readers are permissive: a malformed line becomes a bad row, not a failed read. Those rows go to quarantine and the file is cleaned up as a success.
+
+### Auto Loader (`source.type: stream`, `options.kind: files`)
+
+On Databricks the file stream is read with Auto Loader, which keeps its own record of files in the checkpoint and does not say which a run read. LakeLogic lists the landing folder **before** the run (hidden `_x` / `.x` files are skipped, as Auto Loader skips them). After a successful run, `post_ingestion` archives or deletes those files; a file that lands during the run is left for the next one. Proven on Databricks serverless across two runs: the first archived the two listed files, the second only the file that arrived later.
+
+A continuous stream (`trigger: continuous` / `processing_time`) never finishes, so it has no cleanup.
+
+Auto Loader's own `cloudFiles.cleanSource` option is not used: in testing on Databricks serverless (environments 1 and 3, `MOVE`, with zero and default retention) it moved no files.
+
+`on_error` is applied by `LakehousePipeline`, and so is the Auto Loader cleanup above. A contract run on its own with `DataProcessor.run_source` honours `action` but not `on_error`.
 
 ### Precedence
 
-Contract-level config always takes priority, consistent with how LakeLogic handles all other overrides:
+Contract-level config takes priority, **field by field**: a contract that sets only `on_error` still inherits the system's `action` and `archive_path`.
 
 | Level | Location | Priority |
 | --- | --- | --- |
-| **Contract** | `source.post_ingestion` | Highest — overrides system default |
-| **System** | `server.post_ingestion` in `_system.yaml` | Default for all Bronze contracts |
+| **Contract** | `source.post_ingestion` | Highest — overrides the system value of each field it sets |
+| **System** | `server.bronze.post_ingestion` in `_system.yaml` | Default for all Bronze contracts |
+| **Storage** | `storage.archive_path` in `_system.yaml` | Fallback archive root |
 | **None** | Neither configured | `retain` (files stay in place) |
 
 ### Actions
@@ -295,7 +343,8 @@ The cleanup engine follows strict safety rules:
 
 | Stage | Failure | Result |
 | --- | --- | --- |
-| Read fails | File is malformed | Handled by `quarantine:` — file quarantined |
+| Read fails | File is unreadable or unparseable | Load fails; with `on_error: move` the files go to `<archive_path>/<table>/error/`, otherwise they stay in landing |
+| Rows fail rules | Bad values in a readable file | Rows go to `quarantine:`; the file is cleaned up as a success |
 | Write fails | Bronze commit crashes | File untouched in landing, retried on next run |
 | Delete/Archive fails | Permission / network error | Pipeline succeeds with warning, file stays in landing |
 
@@ -305,9 +354,10 @@ The cleanup engine follows strict safety rules:
 | --- | --- | --- | --- |
 | `action` | `string` | `"retain"` | `delete`, `archive`, or `retain` |
 | `cleanup_is_blocking` | `bool` | `false` | If `true`, cleanup failure fails the pipeline |
-| `archive_path` | `string` | `null` | Destination path for `archive` action. Required when `action: archive` |
+| `archive_path` | `string` | `null` | Archive **root**; files go under `<root>/<table>/success/` or `.../error/`. Required for `action: archive` and for `on_error: move` |
+| `on_error` | `string` | `"retain"` | `retain` or `move`: what happens to the files of a load that failed while reading |
 
-> **Archive path resolution:** When `action: archive`, files are moved to the `archive_path` specified in `post_ingestion`. If not set at the contract level, the PipelineRunner falls back to `storage.archive_path` in `_system.yaml`. How long archived files are retained is controlled by your cloud provider's lifecycle policy (e.g., Azure Blob Lifecycle Management), not by LakeLogic.
+> **Archive path resolution:** `archive_path` from `post_ingestion` (contract, then system). If neither sets it, the PipelineRunner falls back to `storage.archive_path` in `_system.yaml`. How long archived files are retained is controlled by your cloud provider's lifecycle policy (e.g., Azure Blob Lifecycle Management), not by LakeLogic.
 
 ---
 

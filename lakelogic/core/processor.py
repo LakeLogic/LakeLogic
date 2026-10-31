@@ -2008,6 +2008,7 @@ class DataProcessor:
         Returns:
             ValidationResult object (unpacks to good_df, bad_df).
         """
+        self._validation_started = True
         if reset_trace or not hasattr(self, "_active_trace_steps"):
             self._active_trace_steps = []
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
@@ -2992,6 +2993,9 @@ class DataProcessor:
         """
         self._active_trace_steps = []
         self._run_log_already_written = False
+        # False until the rows are read and handed to run(): a failure before that point is a
+        # file that could not be read, which `post_ingestion.on_error` acts on.
+        self._validation_started = False
 
         # Store reprocess range for downstream use by materialize
         self._reprocess_from = reprocess_from
@@ -3230,6 +3234,21 @@ class DataProcessor:
                 self._run_log_already_written = True
                 return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
 
+        # Files an earlier run READ but could not clean up (`post_ingestion`, remembered by
+        # PipelineRunner): reading them again would load their rows twice.
+        _orphans = getattr(self, "_orphaned_files", None)
+        if _orphans and source_files:
+            _kept = [f for f in source_files if str(f.get("path")) not in _orphans]
+            if len(_kept) != len(source_files):
+                logger.info(
+                    f"Holding back {len(source_files) - len(_kept)} already-loaded file(s) "
+                    f"whose cleanup is still pending."
+                )
+                source_files = _kept
+                if not source_files:
+                    self._write_empty_run_log("no_new_data")
+                    self._run_log_already_written = True
+                    return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
         self._source_files = source_files or []
         self._source_max_mtime = None
         # Cleared per source load: the file-provider branches below set it so the
@@ -4697,7 +4716,6 @@ class DataProcessor:
         handled by PipelineRunner which has access to fsspec/dbutils.
         """
         from pathlib import Path as _Path
-        import shutil as _shutil
 
         # Use the tracked source files from this run, filtered to only
         # include direct children of the source directory.  This prevents
@@ -4714,11 +4732,10 @@ class DataProcessor:
             logger.debug(f"Post-ingestion: no ingested files to clean up in {source_path}")
             return
 
-        if action == "delete":
-            for f in ingested_files:
-                f.unlink()
-            logger.info(f"Post-ingestion: deleted {len(ingested_files)} ingested file(s) in {source_path}")
+        from lakelogic.pipeline import landing_lifecycle as _ll
 
+        if action == "delete":
+            mode = "delete"
         elif action == "archive":
             if not archive_path:
                 raise ValueError(
@@ -4726,24 +4743,37 @@ class DataProcessor:
                     "Set archive_path in source.post_ingestion or use PipelineRunner "
                     "with storage.archive_path in _system.yaml."
                 )
-            src = _Path(source_path)
-            dst = _Path(archive_path).resolve()
-            dst.mkdir(parents=True, exist_ok=True)
-            for f in ingested_files:
-                # Preserve relative path structure in archive
-                try:
-                    rel = f.relative_to(src)
-                except ValueError:
-                    rel = _Path(f.name)
-                target = dst / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                _shutil.move(str(f), str(target))
-            logger.info(
-                f"Post-ingestion: archived {len(ingested_files)} ingested file(s) from {source_path} to {archive_path}"
-            )
-
+            mode = "move"
         else:
             logger.warning(f"Post-ingestion: unknown action '{action}', skipping cleanup")
+            return
+
+        done, failed = _ll.apply(
+            [str(f) for f in ingested_files],
+            action=mode,
+            landing_path=source_path,
+            entity=self._landing_entity_name(),
+            outcome=_ll.SUCCESS,
+            archive_root=archive_path,
+        )
+        if failed:
+            raise RuntimeError(f"{len(failed)} landing file(s) could not be cleaned up: {failed[:3]}")
+        where = f" to {archive_path}" if mode == "move" else ""
+        logger.info(f"Post-ingestion: {action}d {done} ingested file(s) from {source_path}{where}")
+
+    def _landing_entity_name(self) -> str:
+        """The table folder under the archive root: ``PipelineRunner`` sets the contract's table name."""
+        named = getattr(self, "_landing_entity", None)
+        if named:
+            return str(named)
+        path = getattr(self, "_explicit_contract_path", None)
+        if path:
+            return Path(str(path)).stem
+        c = self.contract
+        table = str(getattr(getattr(c, "info", None), "table_name", None) or "")
+        if table and "{" not in table:
+            return table.rsplit(".", 1)[-1].strip("`")
+        return str(getattr(c, "dataset", None) or getattr(getattr(c, "info", None), "title", None) or "unnamed")
 
     def _resolve_reprocess_date_column(self) -> str:
         """Resolve which column to use for date-range reprocessing.
@@ -8260,6 +8290,17 @@ class DataProcessor:
         trigger = str(o.get("trigger") or "available_now")
         continuous = trigger in ("continuous", "processing_time")
         spark = SparkSession.builder.getOrCreate()
+        # Auto Loader keeps its own record of files and does not say which a run read, so the
+        # folder is listed BEFORE the run: `post_ingestion` (PipelineRunner) cleans those files
+        # after a successful run, and a file that lands during it waits for the next one.
+        from lakelogic.pipeline import landing_lifecycle as _ll
+
+        # A file an earlier run left behind is retried by the pipeline before this run; leave it
+        # out here, so a still-stuck one is not tried twice (or fail a blocking cleanup every run).
+        _orphans = getattr(self, "_orphaned_files", None) or set()
+        self._stream_landing_files = (
+            [] if continuous else [f for f in _ll.list_folder(folder) if f not in _orphans]
+        )
         stream = self._file_stream(spark, folder, fmt, o, checkpoint)
         logger.info(f"stream source: files ({fmt}) in '{folder}' (checkpoint {checkpoint})")
         sink = SparkStreamSink(

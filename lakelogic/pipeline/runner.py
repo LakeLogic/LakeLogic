@@ -23,6 +23,7 @@ from lakelogic.core.models import DataContract
 from lakelogic.core.observer import RemoteObserver
 from lakelogic.core.processor import DataProcessor
 from lakelogic.core.registry import DomainRegistry, RegistryContract, table_root
+from lakelogic.pipeline import landing_lifecycle
 from lakelogic.pipeline.impact import (
     build_restatement_impact,
     format_restatement_impact,
@@ -307,6 +308,68 @@ _DAG_HOVER_OUT = (
     "var r=this.closest('.dag-root');if(!r)return;r.classList.remove('dag-hl');"
     "r.querySelectorAll('.dag-on').forEach(function(e){e.classList.remove('dag-on');});"
 )
+
+
+# "Fit to width" scales the canvas to the cell (CSS zoom) and back; the label says what a click does.
+# Inline, like the hover handlers above: Databricks displayHTML and Jupyter both run it.
+_DAG_FIT_JS = (
+    "var r=this.closest('.dag-root'),c=r.querySelector('.dag-canvas');"
+    "if(c.style.zoom&&c.style.zoom!=='1'){c.style.zoom='1';this.textContent='Fit to width';}"
+    "else{var w=r.clientWidth-60;c.style.zoom=String(Math.min(1,w/c.offsetWidth));"
+    "this.textContent='Full size';}"
+)
+
+_DAG_PALETTES = {
+    "dark": {
+        "bg": "#121212",
+        "dot": "#222222",
+        "text": "#ffffff",
+        "text-sub": "#a3a3a3",
+        "node-bg": "#1a1a1a",
+        "node-border": "#2a2a30",
+        "node-text": "#f0f0f0",
+        "node-sys": "#8a8a8a",
+        "path": "#8a8a8a",
+        "flow": "#8a8a8a",
+        "badge-bg": "#1e3a5f44",
+    },
+    "light": {
+        "bg": "#f8f9fa",
+        "dot": "#e5e7eb",
+        "text": "#111827",
+        "text-sub": "#4b5563",
+        "node-bg": "#ffffff",
+        "node-border": "#e5e7eb",
+        "node-text": "#1f2937",
+        "node-sys": "#6b7280",
+        "path": "#6b7280",
+        "flow": "#6b7280",
+        "badge-bg": "#f3f4f6",
+    },
+}
+
+
+def _dag_palette_vars(name: str) -> str:
+    return "".join(f"--dag-{k}:{v};" for k, v in _DAG_PALETTES[name].items())
+
+
+# Databricks dark mode puts `filter: invert(1) hue-rotate(180deg) url(#gamma)` on the output
+# frame's <html> and does not report dark to prefers-color-scheme, so a dark DAG came out grey and
+# a light one washed out. Undo the filter and show the real dark palette instead. Re-checked each
+# second because the notebook theme can be switched while the output is open.
+_DAG_THEME_JS = (
+    "(function(){function c(){var h=document.documentElement,f=getComputedStyle(h).filter||'';"
+    "var inv=f.indexOf('invert')>=0;if(inv){h.style.setProperty('filter','none','important');"
+    "h.setAttribute('data-dag-host','dark');}"
+    "var dark=h.getAttribute('data-dag-host')==='dark';"
+    "document.querySelectorAll('.dag-root[data-theme=auto]').forEach(function(r){"
+    "r.classList.toggle('dag-dark',dark);});}c();setInterval(c,1000);})();"
+)
+
+# DAG layout: a layer taller than this wraps into sub-columns (see visualize_dag).
+DAG_MIN_ROWS = 5
+DAG_LAYER_STRIDE = 410
+DAG_SUB_COLUMN_STRIDE = 400
 
 
 class LakehousePipeline:
@@ -2710,229 +2773,177 @@ class LakehousePipeline:
         )
 
     # ── Post-ingestion landing zone cleanup ────────────────────────────────
+    # The policy and the file operations live in landing_lifecycle, which the standalone
+    # DataProcessor.run_source uses too: one definition of where a file goes.
+
+    def _landing_policy(self, c: RegistryContract) -> "landing_lifecycle.LandingPolicy":
+        contract_dict = c.contract_dict or {}
+        storage = self.registry.storage if self.registry else None
+        return landing_lifecycle.resolve_policy(
+            contract_dict.get("source"),
+            contract_dict.get("server"),
+            getattr(storage, "archive_path", None) if storage else None,
+        )
+
+    def _landing_table_name(self, c: RegistryContract) -> str:
+        """The table's name as the contract declares it: what the end user sees, and the folder
+        under the archive root. ``info.table_name`` with its ``{system}`` / ``{layer}`` tokens
+        filled in (or the table a materialization target names); the registry entity only when
+        the contract names no table."""
+        cd = c.contract_dict or {}
+        mat = cd.get("materialization") or {}
+        raw = (
+            (cd.get("info") or {}).get("table_name")
+            or str(mat.get("target_path") or "").replace("table:", "")
+            or mat.get("location")
+            or ""
+        )
+        name = str(raw)
+        reg = self.registry
+        for token, value in (
+            ("{system}", getattr(reg, "system", "") or ""),
+            ("{domain}", getattr(reg, "domain", "") or ""),
+            ("{layer}", getattr(c, "layer", "bronze")),
+            ("{bronze_layer}", getattr(c, "layer", "bronze")),
+            ("{silver_layer}", getattr(c, "layer", "bronze")),
+            ("{gold_layer}", getattr(c, "layer", "bronze")),
+        ):
+            name = name.replace(token, str(value))
+        name = name.strip("`._-/ ").rstrip("/").rsplit("/", 1)[-1].rsplit(".", 1)[-1].strip("`")
+        return c.entity if (not name or "{" in name) else name
+
+    @staticmethod
+    def _landed_files(processor: Any) -> List[str]:
+        """The files this load read: a batch read tracks them; a file stream (Auto Loader) lists the
+        folder before the run, and a continuous stream never ends, so it has none."""
+        paths = [str(f["path"]) for f in (getattr(processor, "_source_files", None) or []) if f.get("path")]
+        return paths or [str(f) for f in (getattr(processor, "_stream_landing_files", None) or [])]
+
+    def _orphan_manifest(self, c: RegistryContract, policy: "landing_lifecycle.LandingPolicy") -> Optional[str]:
+        storage = self.registry.storage if self.registry else None
+        fallback = (getattr(storage, "log_path", None) or getattr(storage, "log_root", None)) if storage else None
+        return landing_lifecycle.manifest_path(policy, self._landing_table_name(c), fallback)
+
+    def _remember_orphans(self, c: RegistryContract, policy: "landing_lifecycle.LandingPolicy", exc: Exception) -> None:
+        """Files a cleanup left behind were READ already: remember them, so the next run retries the
+        cleanup and does not read them a second time. Never raises."""
+        paths = list(getattr(exc, "failed_paths", None) or [])
+        if not paths or not policy.retry_orphans:
+            return
+        manifest = self._orphan_manifest(c, policy)
+        if not manifest:
+            logger.warning(
+                f"  ⚠️ {c.entity}: {len(paths)} loaded file(s) could not be cleaned up and there is nowhere to "
+                f"remember them (no archive_path or log folder), so the next run may read them again"
+            )
+            return
+        try:
+            landing_lifecycle.record_orphans(manifest, paths, self.spark)
+        except Exception as record_exc:
+            logger.warning(f"  ⚠️ {c.entity}: could not record the files left behind in {manifest}: {record_exc}")
+
+    def _retry_orphaned_landing_files(self, c: RegistryContract) -> set:
+        """Before a Bronze load: retry the cleanup of files an earlier run read but could not clean up.
+        Returns the ones still stuck; the load must not read them again."""
+        policy = self._landing_policy(c)
+        if policy.action == "retain" or not policy.retry_orphans:
+            return set()
+        manifest = self._orphan_manifest(c, policy)
+        if not manifest:
+            return set()
+        landing_path = ((c.contract_dict or {}).get("source") or {}).get("path")
+        try:
+            stuck = landing_lifecycle.retry_orphans(
+                manifest, policy, entity=self._landing_table_name(c), landing_path=landing_path, spark=self.spark
+            )
+        except Exception as exc:
+            logger.warning(f"  ⚠️ {c.entity}: could not read the files left behind ({manifest}): {exc}")
+            return set()
+        if stuck:
+            logger.warning(
+                f"  ⚠️ {c.entity}: {len(stuck)} already-loaded file(s) still cannot be cleaned up; "
+                f"they are held back from this load"
+            )
+        return set(stuck)
 
     def _execute_post_ingestion_cleanup(self, c: RegistryContract, processor: Any) -> None:
-        """Execute landing zone cleanup after a successful Bronze commit.
-
-        Actions:
-          delete  — remove source files from the landing zone
-          archive — move source files to the archive path
-          retain  — no-op (files stay in place)
+        """Clean up the landing files a committed Bronze load read (delete / archive / retain).
 
         Safety:
-          - Only runs AFTER a successful Bronze Delta commit.
-          - If cleanup fails and cleanup_is_blocking is False (default),
-            the pipeline continues with a warning.
+          - Only runs AFTER a successful Bronze commit, and only on the files THIS load read.
+          - If cleanup fails and cleanup_is_blocking is False (default), the pipeline continues with
+            a warning; the files are remembered (`retry_orphaned_files`), the next run retries them
+            first and does not read them again.
           - If cleanup_is_blocking is True, a cleanup failure raises.
         """
-        contract_dict = c.contract_dict or {}
-        server = contract_dict.get("server") or {}
-
-        # Resolve post_ingestion config:
-        #   1. source.post_ingestion (contract-level override, highest precedence)
-        #   2. server.post_ingestion (system-level default)
-        source = contract_dict.get("source") or {}
-        pi_config = source.get("post_ingestion") or server.get("post_ingestion") or {}
-        action = pi_config.get("action", "retain")
-
-        if action == "retain":
-            return  # Nothing to do
-
-        # Resolve the source landing path
-        source = contract_dict.get("source") or {}  # pragma: no cover
-        landing_path = source.get("path")  # pragma: no cover
-        if not landing_path:  # pragma: no cover
-            logger.debug(f"  No source.path for {c.entity} — skipping post-ingestion cleanup")  # pragma: no cover
-            return  # pragma: no cover
-        # pragma: no cover
-        cleanup_is_blocking = pi_config.get("cleanup_is_blocking", False)  # pragma: no cover
-        # pragma: no cover
-        try:  # pragma: no cover
-            if action == "delete":  # pragma: no cover
-                self._cleanup_landing_files(landing_path, c.entity, mode="delete")  # pragma: no cover
-            elif action == "archive":  # pragma: no cover
-                # Resolve archive_path: config-level > storage-level  # pragma: no cover
-                archive_path = pi_config.get("archive_path")  # pragma: no cover
-                if not archive_path:  # pragma: no cover
-                    storage = self.registry.storage if self.registry else None  # pragma: no cover
-                    archive_path = getattr(storage, "archive_path", None) if storage else None  # pragma: no cover
-                if not archive_path:  # pragma: no cover
-                    logger.warning(  # pragma: no cover
-                        f"  ⚠️ post_ingestion.action=archive for {c.entity} but no "  # pragma: no cover
-                        f"archive_path configured — skipping archive"  # pragma: no cover
-                    )  # pragma: no cover
-                    return  # pragma: no cover
-                self._cleanup_landing_files(
-                    landing_path, c.entity, mode="archive", archive_path=archive_path
-                )  # pragma: no cover
-            else:  # pragma: no cover
-                logger.warning(
-                    f"  Unknown post_ingestion action '{action}' for {c.entity} — skipping"
-                )  # pragma: no cover
-                return  # pragma: no cover
-            # pragma: no cover
-            logger.info(f"  🧹 Post-ingestion: {action}d landing files for {c.entity}")  # pragma: no cover
-        # pragma: no cover
-        except Exception as cleanup_exc:  # pragma: no cover
-            if cleanup_is_blocking:  # pragma: no cover
-                raise RuntimeError(  # pragma: no cover
-                    f"Post-ingestion cleanup ({action}) failed for {c.entity}: {cleanup_exc}"  # pragma: no cover
-                ) from cleanup_exc  # pragma: no cover
-            else:  # pragma: no cover
-                logger.warning(  # pragma: no cover
-                    f"  ⚠️ Post-ingestion cleanup ({action}) failed for {c.entity}: {cleanup_exc}. "
-                    f"Pipeline continues (cleanup_is_blocking=false). "
-                    f"Files remain in landing zone and will be retried on next run."
+        policy = self._landing_policy(c)
+        if policy.action == "retain":
+            return
+        landing_path = ((c.contract_dict or {}).get("source") or {}).get("path")
+        files = self._landed_files(processor)
+        if not files:
+            logger.debug(f"  No landing files tracked for {c.entity} — skipping post-ingestion cleanup")
+            return
+        table = self._landing_table_name(c)
+        try:
+            done = landing_lifecycle.clean_after_success(
+                files, policy, entity=table, landing_path=landing_path, spark=self.spark
+            )
+            if done:
+                logger.info(f"  🧹 Post-ingestion: {policy.action}d {done} landing file(s) for {table}")
+        except Exception as cleanup_exc:
+            self._remember_orphans(c, policy, cleanup_exc)
+            if policy.cleanup_is_blocking:
+                raise RuntimeError(
+                    f"Post-ingestion cleanup ({policy.action}) failed for {c.entity}: {cleanup_exc}"
+                ) from cleanup_exc
+            logger.warning(
+                f"  ⚠️ Post-ingestion cleanup ({policy.action}) failed for {c.entity}: {cleanup_exc}. "
+                f"Pipeline continues (cleanup_is_blocking=false). "
+                + (
+                    "The files are remembered: the next run retries them first and does not read them again."
+                    if policy.retry_orphans
+                    else "retry_orphaned_files is off: the files stay in landing and a later run may read them again."
                 )
+            )
 
-    def _cleanup_landing_files(
-        self, landing_path: str, entity: str, mode: str = "delete", archive_path: Optional[str] = None
+    def _move_failed_landing_files(
+        self, c: RegistryContract, processor: Any, exc: Optional[BaseException] = None
     ) -> None:
-        """Physically delete or move files from the landing zone.
+        """``on_error: move``: a Bronze load that failed on a FILE sends it to
+        ``<archive_path>/<entity>/error/``. Never raises; the caller re-raises the real failure.
 
-        Supports three storage backends:
-          1. Local filesystem (pathlib) — for local/colab environments
-          2. Cloud storage (fsspec) — for Azure ADLS, S3, GCS
-          3. Databricks dbutils — when running on Databricks clusters
+        Two ways a file is at fault:
+          * the failure came before the rows reached validation (an eager read: Polars, DuckDB):
+            the read is one batch and does not say which file broke it, so every file of the
+            load moves;
+          * it came after (Spark reads lazily) and the error NAMES a file of this load: only
+            those files move.
+        Any other failure (a rule crashing, the Delta write) is not the files' fault and leaves
+        them where they are.
         """
-        _is_cloud = any(  # pragma: no cover
-            landing_path.startswith(pfx)
-            for pfx in ("abfss://", "abfs://", "s3://", "s3a://", "gs://", "gcs://")  # pragma: no cover
-        )  # pragma: no cover
-        _is_local = not _is_cloud  # pragma: no cover
-        # pragma: no cover
-        if _is_local:  # pragma: no cover
-            self._cleanup_local(landing_path, entity, mode, archive_path)  # pragma: no cover
-        else:  # pragma: no cover
-            # Try dbutils first (Databricks), then fall back to fsspec  # pragma: no cover
-            if self.spark and self._try_cleanup_dbutils(landing_path, entity, mode, archive_path):  # pragma: no cover
-                return  # pragma: no cover
-            self._cleanup_cloud(landing_path, entity, mode, archive_path)  # pragma: no cover
-
-    def _cleanup_local(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> None:
-        """Clean up landing files on local filesystem."""
-        import shutil  # pragma: no cover
-        from pathlib import Path  # pragma: no cover
-
-        # pragma: no cover
-        src = Path(landing_path)  # pragma: no cover
-        if not src.exists():  # pragma: no cover
-            logger.debug(f"  Landing path {src} does not exist — nothing to clean up")  # pragma: no cover
-            return  # pragma: no cover
-        # pragma: no cover
-        if mode == "delete":  # pragma: no cover
-            if src.is_dir():  # pragma: no cover
-                # Delete only the files, preserve the directory structure  # pragma: no cover
-                for f in src.rglob("*"):  # pragma: no cover
-                    if f.is_file():  # pragma: no cover
-                        f.unlink()  # pragma: no cover
-                logger.debug(f"  Deleted all files in {src}")  # pragma: no cover
-            elif src.is_file():  # pragma: no cover
-                src.unlink()  # pragma: no cover
-                logger.debug(f"  Deleted file {src}")  # pragma: no cover
-        elif mode == "archive" and archive_path:  # pragma: no cover
-            dst = Path(archive_path)  # pragma: no cover
-            dst.mkdir(parents=True, exist_ok=True)  # pragma: no cover
-            if src.is_dir():  # pragma: no cover
-                for f in src.rglob("*"):  # pragma: no cover
-                    if f.is_file():  # pragma: no cover
-                        target = dst / f.relative_to(src)  # pragma: no cover
-                        target.parent.mkdir(parents=True, exist_ok=True)  # pragma: no cover
-                        shutil.move(str(f), str(target))  # pragma: no cover
-                logger.debug(f"  Archived files from {src} → {dst}")  # pragma: no cover
-            elif src.is_file():  # pragma: no cover
-                shutil.move(str(src), str(dst / src.name))  # pragma: no cover
-                logger.debug(f"  Archived {src} → {dst}")  # pragma: no cover
-
-    def _try_cleanup_dbutils(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> bool:
-        """Attempt cleanup via Databricks dbutils. Returns True if successful."""
-        _dbutils = None  # pragma: no cover
-        try:  # pragma: no cover
-            _dbutils = self.spark._jvm.com.databricks.service.DBUtils(self.spark._jsc.sc())  # pragma: no cover
-        except Exception:  # pragma: no cover
-            try:  # pragma: no cover
-                import IPython  # pragma: no cover
-
-                # pragma: no cover
-                _dbutils = IPython.get_ipython().user_ns.get("dbutils")  # pragma: no cover
-            except Exception:  # pragma: no cover
-                pass  # pragma: no cover
-        # pragma: no cover
-        if not _dbutils:  # pragma: no cover
-            return False  # pragma: no cover
-        # pragma: no cover
-        try:  # pragma: no cover
-            if mode == "delete":  # pragma: no cover
-                # Preserve the top-level directory (managed by Terraform)
-                try:
-                    children = _dbutils.fs.ls(landing_path)
-                    for child in children:
-                        _dbutils.fs.rm(child.path, True)
-                    logger.debug(f"  Deleted contents of {landing_path} via dbutils")
-                except Exception:
-                    # Fallback if landing_path is just a file or doesn't exist as dir
-                    _dbutils.fs.rm(landing_path, True)  # pragma: no cover
-                    logger.debug(f"  Deleted {landing_path} via dbutils")  # pragma: no cover
-            elif mode == "archive" and archive_path:  # pragma: no cover
-                # dbutils.fs.mv is an atomic move on ADLS/S3  # pragma: no cover
-                _dbutils.fs.mv(landing_path, archive_path, True)  # pragma: no cover
-                logger.debug(f"  Archived {landing_path} → {archive_path} via dbutils")  # pragma: no cover
-            return True  # pragma: no cover
-        except Exception as e:  # pragma: no cover
-            logger.debug(f"  dbutils cleanup failed for {entity}: {e}")  # pragma: no cover
-            return False  # pragma: no cover
-
-    def _cleanup_cloud(self, landing_path: str, entity: str, mode: str, archive_path: Optional[str]) -> None:
-        """Clean up landing files on cloud storage via fsspec."""
-        import os as _os_cleanup  # pragma: no cover
-
-        # pragma: no cover
-        try:  # pragma: no cover
-            import fsspec  # pragma: no cover
-        except ImportError:  # pragma: no cover
-            raise RuntimeError(  # pragma: no cover
-                "fsspec is required for cloud post-ingestion cleanup but is not installed. "  # pragma: no cover
-                "Install it with: pip install fsspec adlfs  (or s3fs / gcsfs)"  # pragma: no cover
-            )  # pragma: no cover
-        # pragma: no cover
-        # Build storage options from environment variables  # pragma: no cover
-        storage_opts: dict = {}  # pragma: no cover
-        if landing_path.startswith(("abfss://", "abfs://")):  # pragma: no cover
-            for env_key, opt_key in [  # pragma: no cover
-                ("AZURE_STORAGE_ACCOUNT_NAME", "account_name"),  # pragma: no cover
-                ("AZURE_STORAGE_ACCOUNT", "account_name"),  # pragma: no cover
-                ("AZURE_STORAGE_ACCOUNT_KEY", "account_key"),  # pragma: no cover
-                ("AZURE_STORAGE_SAS_TOKEN", "sas_token"),  # pragma: no cover
-                ("AZURE_CLIENT_ID", "client_id"),  # pragma: no cover
-                ("AZURE_CLIENT_SECRET", "client_secret"),  # pragma: no cover
-                ("AZURE_TENANT_ID", "tenant_id"),  # pragma: no cover
-            ]:  # pragma: no cover
-                val = _os_cleanup.environ.get(env_key)  # pragma: no cover
-                if val:  # pragma: no cover
-                    storage_opts[opt_key] = val  # pragma: no cover
-        # pragma: no cover
-        fs, _ = fsspec.core.url_to_fs(landing_path, **storage_opts)  # pragma: no cover
-        # pragma: no cover
-        if mode == "delete":  # pragma: no cover
-            if fs.exists(landing_path):  # pragma: no cover
-                if fs.isdir(landing_path):
-                    # Delete only the contents to preserve the Terraform-managed parent dir
-                    for item in fs.ls(landing_path, detail=False):
-                        fs.rm(item, recursive=True)
-                    logger.debug(f"  Deleted contents of {landing_path} via fsspec")
-                else:
-                    fs.rm(landing_path, recursive=True)  # pragma: no cover
-                    logger.debug(f"  Deleted {landing_path} via fsspec")  # pragma: no cover
-        elif mode == "archive" and archive_path:  # pragma: no cover
-            if fs.exists(landing_path):  # pragma: no cover
-                # For cross-container moves, use copy + delete  # pragma: no cover
-                fs.copy(landing_path, archive_path, recursive=True)  # pragma: no cover
-                if fs.isdir(landing_path):
-                    for item in fs.ls(landing_path, detail=False):
-                        fs.rm(item, recursive=True)
-                else:
-                    fs.rm(landing_path, recursive=True)  # pragma: no cover
-                logger.debug(f"  Archived {landing_path} → {archive_path} via fsspec")  # pragma: no cover
+        policy = self._landing_policy(c)
+        if policy.on_error != "move":
+            return
+        files = self._landed_files(processor)
+        batch = not getattr(processor, "_validation_started", True)
+        if not batch:
+            files = landing_lifecycle.named_in_error(files, str(exc) if exc is not None else "")
+        if not files:
+            return
+        landing_path = ((c.contract_dict or {}).get("source") or {}).get("path")
+        moved = landing_lifecycle.move_failed(
+            files, policy, entity=self._landing_table_name(c), landing_path=landing_path, spark=self.spark
+        )
+        if moved:
+            how = (
+                "the read is one batch and does not say which file broke it, so every file it read"
+                if batch
+                else "the error names"
+            )
+            logger.warning(
+                f"  📂 {c.entity}: the load failed on a file; moved {moved} file(s) ({how}) to the error folder"
+            )
 
     def _process_single_contract(
         self,
@@ -3001,13 +3012,21 @@ class LakehousePipeline:
             processor._ownership = _ownership_for_contract(c.contract_dict, self.registry)
             processor._notifications = getattr(self.registry, "notifications", []) or []
             processor._notifications_enabled = getattr(self.registry, "notifications_enabled", True)
-            result = processor.run_source(
-                reprocess_from=reprocess_from,
-                reprocess_to=reprocess_to,
-                reprocess_column=reprocess_column,
-                reprocess_values=reprocess_values,
-                lookback_days=lookback_days,
-            )
+            processor._landing_entity = self._landing_table_name(c)
+            if layer == "bronze":
+                processor._orphaned_files = self._retry_orphaned_landing_files(c)
+            try:
+                result = processor.run_source(
+                    reprocess_from=reprocess_from,
+                    reprocess_to=reprocess_to,
+                    reprocess_column=reprocess_column,
+                    reprocess_values=reprocess_values,
+                    lookback_days=lookback_days,
+                )
+            except Exception as read_exc:
+                if layer == "bronze":
+                    self._move_failed_landing_files(c, processor, read_exc)
+                raise
 
             df_good = result.good
             df_bad = getattr(result, "bad", None)
@@ -3421,7 +3440,7 @@ class LakehousePipeline:
         return None
 
     def visualize_dag(
-        self, *, title: str = None, entity_filter: str = "", layer_filter: str = "", theme: str = "dark"
+        self, *, title: str = None, entity_filter: str = "", layer_filter: str = "", theme: str = "auto"
     ) -> str:
         """Generate an inline HTML DAG visualization of the pipeline.
 
@@ -3429,7 +3448,8 @@ class LakehousePipeline:
             title: Optional business value oriented label to override the default domain/system header.
             entity_filter: Comma-separated entity names to highlight (e.g. "sessions").
             layer_filter: Comma-separated layers to highlight (e.g. "bronze").
-            theme: "dark" or "light" (default "dark").
+            theme: "auto" (default) follows the notebook: dark in Databricks dark mode or a dark
+                browser, light otherwise. "dark" or "light" forces one palette.
 
         Returns HTML suitable for ``displayHTML()`` in Databricks notebooks
         or Jupyter's ``IPython.display.HTML()``.
@@ -3727,21 +3747,53 @@ class LakehousePipeline:
         header_h = 40  # space for layer column headers
         y_gap = 180  # vertical gap between nodes in same column
 
-        # Calculate dynamic x_positions based purely on which layers are populated
+        # A layer with many more tables than the others wraps into sub-columns, so a system with
+        # ten gold tables is not one long scroll. Rows per sub-column = the next-tallest layer (at
+        # least DAG_MIN_ROWS). Within a layer, tables are split by dependency depth first: the dims
+        # go in the first sub-column and the facts that read them in the next, so those arrows run
+        # left to right instead of looping down the side of one column.
         used_layer_list = [layer for layer in layer_order if any(n["layer"] == layer for n in nodes)]
-        x_positions = {layer: i * 410 for i, layer in enumerate(used_layer_list)}
+        _counts = sorted((sum(1 for n in nodes if n["layer"] == lyr) for lyr in used_layer_list), reverse=True)
+        max_rows = max(DAG_MIN_ROWS, _counts[1] if len(_counts) > 1 else DAG_MIN_ROWS)
+
+        def _sub_columns(layer_nodes: list) -> list:
+            ids = {n["id"] for n in layer_nodes}
+            parents: dict = {i: set() for i in ids}
+            for _s, _d, _ in edges:
+                if _s in ids and _d in ids and _s != _d:
+                    parents[_d].add(_s)
+            depth: dict = {}
+
+            def _depth(i: str, seen: frozenset = frozenset()) -> int:
+                if i not in depth:
+                    ps = [p for p in parents[i] if p not in seen]
+                    depth[i] = 1 + max((_depth(p, seen | {i}) for p in ps), default=-1)
+                return depth[i]
+
+            cols: list = []
+            for d in sorted({_depth(n["id"]) for n in layer_nodes}):
+                level = [n for n in layer_nodes if depth[n["id"]] == d]
+                cols += [level[k : k + max_rows] for k in range(0, len(level), max_rows)]
+            return cols if len(cols) > 1 else [layer_nodes]
+
+        layer_cols = {lyr: _sub_columns([n for n in nodes if n["layer"] == lyr]) for lyr in used_layer_list}
+        x_positions = {}
+        layer_span = {}
+        _x = 0
+        for layer in used_layer_list:
+            x_positions[layer] = _x
+            layer_span[layer] = (len(layer_cols[layer]) - 1) * DAG_SUB_COLUMN_STRIDE + node_width
+            _x += (len(layer_cols[layer]) - 1) * DAG_SUB_COLUMN_STRIDE + DAG_LAYER_STRIDE
 
         node_positions = {}
         used_layers = set(used_layer_list)
         for layer in used_layer_list:
-            layer_nodes = [n for n in nodes if n["layer"] == layer]
-
-            total = len(layer_nodes)
-            total_height = total * node_height + (total - 1) * (y_gap - node_height) if total else 0
-            start_y = max(header_h + 10, header_h + (500 - total_height) // 2) if total else header_h + 100
-            for i, n in enumerate(layer_nodes):
-                y = start_y + i * y_gap
-                node_positions[n["id"]] = (x_positions[layer], y)
+            for ci, col in enumerate(layer_cols[layer]):
+                total = len(col)
+                total_height = total * node_height + (total - 1) * (y_gap - node_height) if total else 0
+                start_y = max(header_h + 10, header_h + (500 - total_height) // 2) if total else header_h + 100
+                for i, n in enumerate(col):
+                    node_positions[n["id"]] = (x_positions[layer] + ci * DAG_SUB_COLUMN_STRIDE, start_y + i * y_gap)
 
         # Normalize x positions: shift so minimum x starts at padding
         if node_positions:
@@ -3771,7 +3823,7 @@ class LakehousePipeline:
                 x = x_positions[layer]
                 bg, fg = layer_colors.get(layer, ("#444", "#888"))
                 hdr_style = (
-                    f"position:absolute;left:{x}px;top:4px;width:{node_width}px;"
+                    f"position:absolute;left:{x}px;top:4px;width:{layer_span[layer]}px;"
                     f"font-size:0.72rem;font-weight:700;color:{fg};"
                     f"letter-spacing:0.12em;padding-bottom:6px;border-bottom:1px solid {fg}55;"
                 )
@@ -3916,7 +3968,14 @@ class LakehousePipeline:
         std_layers = {"bronze", "silver", "gold"}
         std_nodes = [n for n in nodes if n["layer"] in std_layers]
         std_contract_count = len(std_nodes)
-        std_layer_count = len(set(n["layer"] for n in std_nodes))
+        # Name the layers rather than count them: the canvas also draws Source and Downstream
+        # columns, so "3 layers" over four columns read as a miscount.
+        _present = {n["layer"] for n in std_nodes}
+        _names = [lyr.capitalize() for lyr in ("bronze", "silver", "gold") if lyr in _present]
+        std_layers_text = f"{std_contract_count} contracts"
+        if _names:
+            layers_text = _names[0] if len(_names) == 1 else ", ".join(_names[:-1]) + " and " + _names[-1]
+            std_layers_text += f" across {layers_text}"
 
         if _has_filter:
             filter_parts = []
@@ -3924,26 +3983,30 @@ class LakehousePipeline:
                 filter_parts.append(f"Layer: {', '.join(sorted(_layer_set)).upper()}")
             if _entity_set:
                 filter_parts.append(f"Entity: {', '.join(sorted(_entity_set))}")
-            subtitle = f"{std_contract_count} contracts • {std_layer_count} layers • Filter: {' / '.join(filter_parts)}"
+            subtitle = f"{std_layers_text} • Filter: {' / '.join(filter_parts)}"
         else:
-            subtitle = f"{std_contract_count} contracts • {std_layer_count} layers"  # pragma: no cover
+            subtitle = std_layers_text  # pragma: no cover
 
         dag_title = title if title else f"{self.registry.domain} / {self.registry.system}"
 
-        if theme == "light":
-            bg_color, bg_dot = "#f8f9fa", "#e5e7eb"
-            text_main, text_sub = "#111827", "#4b5563"
-            node_bg, node_border = "#ffffff", "#e5e7eb"
-            node_text, node_sys = "#1f2937", "#6b7280"
-            path_fill, flow_stroke = "#6b7280", "#6b7280"
-            badge_bg = "#f3f4f6"
-        else:
-            bg_color, bg_dot = "#121212", "#222222"
-            text_main, text_sub = "#ffffff", "#a3a3a3"
-            node_bg, node_border = "#1a1a1a", "#2a2a30"
-            node_text, node_sys = "#f0f0f0", "#8a8a8a"
-            path_fill, flow_stroke = "#8a8a8a", "#8a8a8a"
-            badge_bg = "#1e3a5f44"
+        # Both palettes ship as CSS variables; which one shows is decided where the HTML lands.
+        # theme="auto" follows the host: Databricks dark mode inverts the output frame (a filter on
+        # its <html>) without reporting dark, so _DAG_THEME_JS undoes that filter and picks the dark
+        # palette; elsewhere prefers-color-scheme decides. "dark"/"light" force one palette.
+        theme = (theme or "auto").lower()
+        theme_attr = theme if theme in ("dark", "light") else "auto"
+        palette_css = (
+            f".dag-root{{{_dag_palette_vars('dark')}}}"
+            f"@media (prefers-color-scheme: light){{.dag-root[data-theme=auto]{{{_dag_palette_vars('light')}}}}}"
+            f".dag-root[data-theme=light],.dag-root.dag-light{{{_dag_palette_vars('light')}}}"
+            f".dag-root.dag-dark{{{_dag_palette_vars('dark')}}}"
+        )
+        bg_color, bg_dot = "var(--dag-bg)", "var(--dag-dot)"
+        text_main, text_sub = "var(--dag-text)", "var(--dag-text-sub)"
+        node_bg, node_border = "var(--dag-node-bg)", "var(--dag-node-border)"
+        node_text, node_sys = "var(--dag-node-text)", "var(--dag-node-sys)"
+        path_fill, flow_stroke = "var(--dag-path)", "var(--dag-flow)"
+        badge_bg = "var(--dag-badge-bg)"
 
         # The dot colours a card by filter focus, not by run outcome - label it as such.
         if _has_filter:
@@ -3956,13 +4019,15 @@ class LakehousePipeline:
             legend_dots = '<span><span class="dag-ldot" style="background:#22c55e"></span>Active contract</span>'
 
         html = f"""
-        <div class="dag-root" style="font-family:'Inter','Segoe UI',sans-serif;background:{bg_color};
+        <div class="dag-root" data-theme="{theme_attr}"
+             style="font-family:'Inter','Segoe UI',sans-serif;background:{bg_color};
              background-image:radial-gradient(circle at 1px 1px,{bg_dot} 1px,transparent 0);
              background-size:24px 24px;padding:30px 30px 20px;border-radius:12px;position:relative;overflow-x:auto;">
           <h2 style="color:{text_main};font-size:1.2rem;margin:0 0 4px;"
-              >Lakelogic Pipeline DAG — {dag_title}</h2>
+              >LakeLogic Pipeline DAG — {dag_title}</h2>
           <p style="color:{text_sub};font-size:0.8rem;margin:0 0 24px;">{subtitle}</p>
-          <div style="position:relative;width:{canvas_w}px;height:{canvas_h}px;">
+          <button type="button" class="dag-fit" onclick="{_DAG_FIT_JS}">Fit to width</button>
+          <div class="dag-canvas" style="position:relative;width:{canvas_w}px;height:{canvas_h}px;">
             {header_html}
             <svg style="position:absolute;top:0;left:0;width:100%;
                         height:100%;pointer-events:none;"
@@ -3971,7 +4036,7 @@ class LakehousePipeline:
                 <marker id="dag-arrow" viewBox="0 0 12 10"
                         refX="11" refY="5" markerWidth="10"
                         markerHeight="8" orient="auto-start-reverse">
-                  <path d="M 0 0 L 12 5 L 0 10 z" fill="{path_fill}"/>
+                  <path d="M 0 0 L 12 5 L 0 10 z" style="fill:{path_fill}"/>
                 </marker>
                 <marker id="dag-arrow-dep" viewBox="0 0 12 10"
                         refX="11" refY="5" markerWidth="10"
@@ -3997,15 +4062,16 @@ class LakehousePipeline:
           </div>
         </div>
         <style>
-          /* Databricks dark mode inverts HTML output (filter: invert + hue-rotate), which
-             turned the dark DAG white. Counter-invert when the notebook reports dark, so the
-             two cancel and the DAG renders on black in either notebook theme. */
-          @media (prefers-color-scheme: dark){{.dag-root{{filter:invert(1) hue-rotate(180deg);}}}}
+          {palette_css}
           .dag-node{{position:absolute;background:{node_bg};border:2px solid {node_border};border-radius:12px;
                      padding:14px 18px;width:{node_width}px;height:{node_height}px;box-sizing:border-box;
                      transition:opacity 0.15s ease,box-shadow 0.15s ease;cursor:default;}}
           .dag-node:hover{{box-shadow:0 8px 32px rgba(0,0,0,0.25);border-color:var(--dag-acc) !important;}}
           .dag-ldot{{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle;}}
+          .dag-fit{{position:absolute;top:30px;right:30px;font:600 0.75rem 'Inter','Segoe UI',sans-serif;
+                    color:{text_main};background:transparent;border:1px solid {node_border};border-radius:6px;
+                    padding:5px 10px;cursor:pointer;}}
+          .dag-fit:hover{{border-color:{text_sub};}}
           .dag-root.dag-hl .dag-node{{opacity:0.25 !important;}}
           .dag-root.dag-hl .dag-node.dag-on{{opacity:1 !important;}}
           .dag-root.dag-hl svg path[data-src]{{stroke-opacity:0.06 !important;opacity:1 !important;}}
@@ -4026,5 +4092,6 @@ class LakehousePipeline:
           svg .dag-flow{{fill:none;stroke:{flow_stroke};stroke-width:1.5;stroke-dasharray:8 4;stroke-opacity:0.35;}}
           svg .dag-dep{{fill:none;stroke:#4a9eff;stroke-width:2;stroke-opacity:0.45;stroke-dasharray:none;}}
         </style>
+        <script>{_DAG_THEME_JS}</script>
         """
         return html

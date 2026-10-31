@@ -1458,8 +1458,10 @@ def test_processor_cleanup_partition_expansion_cloud_globs_and_source_paths(monk
     archive_me.write_text("id\n4\n", encoding="utf-8")
     processor._source_files = [{"path": str(archive_me)}]
     archive_dir = tmp_path / "archive_out"
+    processor._landing_entity = "orders"
     processor._post_ingestion_cleanup(str(landing), "archive", archive_path=str(archive_dir))
-    assert (archive_dir / "archive_me.csv").exists()
+    # archive_path is a root: the entity and the outcome are added beneath it
+    assert (archive_dir / "orders" / "success" / "archive_me.csv").exists()
 
     missing_archive = landing / "missing_archive.csv"
     missing_archive.write_text("id\n5\n", encoding="utf-8")

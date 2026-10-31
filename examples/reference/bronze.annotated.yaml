@@ -66,7 +66,8 @@ source:
   # -- Landing-zone lifecycle: what to do with source files AFTER a good commit -
   # post_ingestion:
   #   action: archive          # delete | archive | retain (default retain)
-  #   archive_path: s3://acme-lake/archive/storefront/orders/   # required when action: archive
+  #   archive_path: s3://acme-lake/archive/storefront   # a ROOT: files go to <root>/<table>/success/ (or /error/)
+  #   on_error: move           # retain (default) | move: files of a load that failed READING go to <root>/<table>/error/
   #   cleanup_is_blocking: false   # false = cleanup failure never fails the run
 
 # -----------------------------------------------------------------------------
