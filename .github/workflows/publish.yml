@@ -16,12 +16,17 @@ on:
     #     types: [published]
 
 permissions:
-    contents: write
+    contents: write # push the tag on manual dispatch
+    id-token: write # mint the OIDC token for PyPI Trusted Publishing (no stored secret)
 
 jobs:
     pypi-publish:
         name: Build and publish Python distributions to PyPI
         runs-on: ubuntu-latest
+        # The PyPI trusted publisher is bound to (owner=LakeLogic, repo=LakeLogic,
+        # workflow=publish.yml, environment=pypi). Required reviewers on this
+        # environment gate every release.
+        environment: pypi
         steps:
             - uses: actions/checkout@v4
 
@@ -149,4 +154,4 @@ jobs:
               run: uv build
 
             - name: Publish to PyPI
-              run: uv publish --token ${{ secrets.PYPI_API_TOKEN }}
+              run: uv publish --trusted-publishing always
