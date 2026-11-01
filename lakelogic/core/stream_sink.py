@@ -38,6 +38,31 @@ from loguru import logger
 
 DEFAULT_CHECKPOINT_PATH = "logs/lakelogic_stream_checkpoints.sqlite"
 
+#: Fabric's local mount of a notebook's default lakehouse. Only Python sees it: Spark sent a
+#: checkpoint there to OneLake as a lakehouse named "lakehouse" and got 400 (2026-11-01).
+FABRIC_MOUNT = "/lakehouse/default/"
+
+
+def spark_writable_checkpoint(path: str, runtime_context: Optional[Dict[str, Any]] = None) -> str:
+    """``path``, with a Fabric mount path rewritten to the default lakehouse's OneLake address.
+
+    By ID on both sides: OneLake takes GUIDs or names, never a mix. Elsewhere, unchanged.
+    """
+    if not path.startswith(FABRIC_MOUNT):
+        return path
+    ctx = runtime_context
+    if ctx is None:
+        try:
+            import notebookutils  # Fabric runtime
+
+            ctx = dict(notebookutils.runtime.context)
+        except Exception:
+            return path
+    ws, lh = ctx.get("currentWorkspaceId"), ctx.get("defaultLakehouseId")
+    if not (ws and lh):
+        return path
+    return f"abfss://{ws}@onelake.dfs.fabric.microsoft.com/{lh}/{path[len(FABRIC_MOUNT):]}"
+
 
 @dataclass
 class Checkpoint:
@@ -1200,7 +1225,7 @@ class SparkStreamSink:
             raise ValueError("processing_time interval required for the 'processing_time' trigger")
 
         self.stream_df = stream_df
-        self.checkpoint_location = checkpoint_location
+        self.checkpoint_location = spark_writable_checkpoint(str(checkpoint_location))
         self.trigger = trigger
         self.processing_time = processing_time
         self.output_mode = output_mode

@@ -57,6 +57,19 @@ def _sqlite_absolute(uri: Optional[str]) -> Optional[str]:
     return "sqlite:///" + Path(rest).resolve().as_posix()
 
 
+_FABRIC_MOUNT = "/lakehouse/default/"
+
+
+def _spark_checkpoint(checkpoint: str, folder: str) -> str:
+    """A checkpoint Spark can write. Fabric's ``/lakehouse/default/`` is a mount only Python
+    sees: Spark sent it to OneLake as a lakehouse named "lakehouse" and got 400 (2026-11-01).
+    Such a checkpoint moves to ``Files/_checkpoints/`` in the source folder's lakehouse."""
+    if not checkpoint.startswith(_FABRIC_MOUNT) or ".Lakehouse/Files/" not in folder:
+        return checkpoint
+    name = checkpoint.rstrip("/").rsplit("/", 1)[-1]
+    return folder.split(".Lakehouse/Files/")[0] + f".Lakehouse/Files/_checkpoints/{name}"
+
+
 def _stream_kind(source: Any) -> Optional[str]:
     if source is None or getattr(source, "type", None) != "stream":
         return None
@@ -8286,7 +8299,7 @@ class DataProcessor:
         if not folder:
             raise ValueError("kind: files needs source.path (the landing folder)")
         fmt = str(getattr(src, "format", None) or "csv").lower()
-        checkpoint = self._stream_checkpoint(o, folder.rstrip("/").rsplit("/", 1)[-1])
+        checkpoint = _spark_checkpoint(self._stream_checkpoint(o, folder.rstrip("/").rsplit("/", 1)[-1]), folder)
         trigger = str(o.get("trigger") or "available_now")
         continuous = trigger in ("continuous", "processing_time")
         spark = SparkSession.builder.getOrCreate()
