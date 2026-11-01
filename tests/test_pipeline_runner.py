@@ -56,6 +56,39 @@ def test_pipeline_run_summary_append_replace_and_render():
     assert "boom" in details
 
 
+def test_failure_details_give_a_spark_errors_cause_not_py4js_preamble():
+    """Fabric showed only "An error occurred while calling o8806.start." for a stream that failed."""
+    summary = runner.PipelineRunSummary("run-3", "dev", dry_run=False)
+    error = (
+        "An error occurred while calling o8806.start.\n"
+        ": org.apache.spark.sql.AnalysisException: checkpoint path is not writable\n"
+        "\tat org.apache.spark.sql.streaming.DataStreamWriter.start(DataStreamWriter.scala:1)"
+    )
+    summary.append("trips", "bronze", "failed", error=error, table_name="bronze_trips")
+    assert "AnalysisException: checkpoint path is not writable" in summary.failure_details()
+    assert "o8806" not in summary.failure_details()
+
+
+def test_a_spark_errors_java_cause_is_kept():
+    class _Java:
+        def toString(self):
+            return "org.apache.spark.SparkException: checkpoint path is not writable"
+
+    class _Py4J(Exception):
+        java_exception = _Java()
+
+    text = runner._error_text(_Py4J("An error occurred while calling o8806.start."))
+    assert text.endswith("SparkException: checkpoint path is not writable")
+    assert runner._error_text(ValueError("plain")) == "plain"
+    try:
+        try:
+            raise _Py4J("An error occurred while calling o8806.start.")
+        except _Py4J as inner:
+            raise RuntimeError(str(inner)) from inner
+    except RuntimeError as wrapped:
+        assert runner._error_text(wrapped).endswith("checkpoint path is not writable")
+
+
 def test_pipeline_run_summary_no_failures_details_empty():
     summary = runner.PipelineRunSummary("run-2", "dev", dry_run=False)
     summary.append("orders", "bronze", "success", rows=10, table_name="bronze_orders")

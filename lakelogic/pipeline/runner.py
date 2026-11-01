@@ -105,6 +105,26 @@ def format_duration(seconds: Optional[float]) -> str:
     return f"{total // 3600}h {(total % 3600) // 60:02d}m"
 
 
+def _error_text(e: BaseException) -> str:
+    """The error, with a Spark exception's Java cause: Py4J's message is only "An error occurred
+    while calling o8806.start." and the reason is on the Java side."""
+    text = str(e)
+    # The Spark error may arrive wrapped (`raise ... from exc`): look down the cause chain.
+    java, seen, cur = None, set(), e
+    while cur is not None and java is None and id(cur) not in seen:
+        seen.add(id(cur))
+        java = getattr(cur, "java_exception", None)
+        cur = cur.__cause__ or cur.__context__
+    if java is not None:
+        try:
+            cause = str(java.toString())
+        except Exception:
+            cause = ""
+        if cause and cause not in text:
+            text = f"{text}\n: {cause}"
+    return text
+
+
 class PipelineRunSummary:
     """Standardized summary of a pipeline execution."""
 
@@ -179,8 +199,12 @@ class PipelineRunSummary:
         for r in fails:
             name = r.get("contract") or r.get("table_name") or "?"
             layer = r.get("layer") or "?"
-            err = str(r.get("error") or "no error captured").strip().splitlines()
-            first = err[0][:300] if err else "no error captured"
+            err = [ln.strip() for ln in str(r.get("error") or "no error captured").strip().splitlines() if ln.strip()]
+            # A Spark error's first line is Py4J's "An error occurred while calling o8806.start.";
+            # the exception that says why is the next one.
+            if len(err) > 1 and err[0].startswith("An error occurred while calling"):
+                err = err[1:]
+            first = err[0].lstrip(": ")[:300] if err else "no error captured"
             parts.append(f"{name} [{layer}]: {first}")
         return f"{len(fails)} contract(s) failed — " + " | ".join(parts)
 
@@ -2507,7 +2531,7 @@ class LakehousePipeline:
             except ValueError as e:  # pragma: no cover
                 logger.error(f"Dependency error in {layer}: {e}")  # pragma: no cover
                 for c in layer_contracts:  # pragma: no cover
-                    summary.append(c.entity, layer, "failed", error=str(e))  # pragma: no cover
+                    summary.append(c.entity, layer, "failed", error=_error_text(e))  # pragma: no cover
                 continue  # pragma: no cover
 
             logger.info(f"── Processing Layer: {layer.upper()} ({len(layer_contracts)} contracts) ──")
@@ -3278,7 +3302,7 @@ class LakehousePipeline:
                 c.entity,
                 layer,
                 "failed",
-                error=str(e),
+                error=_error_text(e),
                 table_name=_table_name,
                 duration_seconds=round(time.monotonic() - _started, 1),
             )
