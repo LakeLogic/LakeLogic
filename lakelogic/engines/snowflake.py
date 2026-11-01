@@ -62,6 +62,17 @@ def _resolve_env_value(value: Optional[str]) -> Optional[str]:
     return value
 
 
+def _as_pandas(df: Any) -> Optional[Any]:
+    """A pandas copy of a Polars, pandas or Arrow frame; None for anything else."""
+    if df is None:
+        return None
+    if hasattr(df, "collect") and hasattr(df, "lazy"):  # Polars LazyFrame
+        df = df.collect()
+    if hasattr(df, "to_pandas") and not hasattr(df, "iloc"):  # Polars / Arrow
+        return df.to_pandas()
+    return df if hasattr(df, "iloc") else None
+
+
 class SnowflakeAdapter(EngineAdapter):
     """
     Snowflake execution engine for LakeLogic.
@@ -126,12 +137,17 @@ class SnowflakeAdapter(EngineAdapter):
         self.schema_drift = {}
 
         table_name = self._resolve_source_table(df)
-        if not table_name:
-            raise ValueError("Snowflake adapter requires a source table name.")
+        # A frame instead of a table: what external logic hands over (a generated date
+        # dimension). Refused before 2026-11-01, so such a contract could not run on Snowflake.
+        frame = None if table_name else _as_pandas(df)
+        if not table_name and frame is None:
+            raise ValueError("Snowflake adapter requires a source table name or a DataFrame.")
 
         conn = self._connect()
         owns_conn = SnowflakeAdapter._shared_connection is None
         try:
+            if frame is not None:
+                table_name = self._upload_frame(conn, frame)
             self._register_links(conn)
 
             current = table_name
@@ -355,6 +371,23 @@ class SnowflakeAdapter(EngineAdapter):
                 cursor.execute(f"CREATE OR REPLACE TEMP VIEW {link.name} AS SELECT {cols} FROM {table_name}")
         finally:
             cursor.close()
+
+    def _upload_frame(self, conn, frame: Any) -> str:
+        """Load a pandas frame into a temporary table and return its name.
+
+        Identifiers unquoted, so columns resolve the way every other Snowflake table here does
+        (case-insensitively, stored upper case)."""
+        from snowflake.connector.pandas_tools import write_pandas
+
+        name = self._temp_name("SRC")
+        ok, _, rows, _ = write_pandas(
+            conn, frame, name, auto_create_table=True, table_type="temporary",
+            quote_identifiers=False, use_logical_type=True,
+        )
+        if not ok:
+            raise RuntimeError(f"Snowflake: could not load the source frame into {name}.")
+        logger.info(f"Snowflake: loaded {rows:,} source rows from a frame into {name}.")
+        return name
 
     def _temp_name(self, label: str) -> str:
         """
