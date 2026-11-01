@@ -3423,6 +3423,26 @@ def _spark_scd2_late_arrivals(  # pragma: no cover
     return rewritten, inserted
 
 
+def _spark_align_to_table(df: Any, table_fields: Any, target: str) -> Any:  # pragma: no cover
+    """``df`` in the table's columns, order and types, for an SCD2 overwrite of an existing table.
+
+    Upstream columns the contract does not declare (Salesforce silver's Name, attributes,
+    CreatedDate) failed the overwrite with a Delta schema mismatch wherever it cannot replace
+    the schema (Fabric), on the first load and on every rerun (2026-11-01). They are dropped,
+    and a table column the frame lacks is written as null.
+    """
+    from pyspark.sql import functions as F
+
+    names = {f.name for f in table_fields}
+    extra = [c for c in df.columns if c not in names]
+    if extra:
+        logger.warning(f"SCD2 {target}: dropping columns the table does not have: {', '.join(extra)}")
+    return df.select(*[
+        (F.col(f.name) if f.name in df.columns else F.lit(None)).cast(f.dataType).alias(f.name)
+        for f in table_fields
+    ])
+
+
 def _spark_scd2_dataframe(  # pragma: no cover
     spark,
     incoming_df: Any,
@@ -3567,6 +3587,9 @@ def _spark_scd2_dataframe(  # pragma: no cover
         _init_um_cfg = scd2_cfg.get("unknown_member")
         if _init_um_cfg is not None and _init_um_cfg.get("enabled", True):
             incoming_df = _inject_unknown_member_spark(incoming_df, primary_key, scd2_cfg, _init_um_cfg)
+
+        if existing_df is not None:
+            incoming_df = _spark_align_to_table(incoming_df, existing_df.schema.fields, table_or_path)
 
         # No existing data, just write incoming
         writer = incoming_df.write.format(output_format)
@@ -3882,6 +3905,8 @@ def _spark_scd2_dataframe(  # pragma: no cover
             seen.add(c)
             ordered_dedup.append(c)
     result = result.select(*ordered_dedup)
+    if existing_df is not None:
+        result = _spark_align_to_table(result, existing_df.schema.fields, table_or_path)
 
     writer = result.write.format(output_format)
     if is_table:

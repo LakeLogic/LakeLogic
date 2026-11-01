@@ -568,6 +568,23 @@ def generate_ddl(
                 ddl_columns.add(col_name)
                 ddl_types[col_name] = str(col_type)
 
+    # ── SCD2 columns the materializer writes but a model may not declare ────
+    # The first SCD2 load overwrites the table with these columns; a table created
+    # without them fails that overwrite with DELTA_METADATA_MISMATCH wherever an
+    # overwrite cannot replace the schema (Fabric, UC Table ACLs).
+    scd2_cfg = getattr(mat, "scd2", None) if getattr(mat, "strategy", None) == "scd2" else None
+    if isinstance(scd2_cfg, dict):
+        existing_names = {f.name for f in fields} | ddl_columns
+        for col_name, col_type in (
+            (scd2_cfg.get("surrogate_key", "_sk"), "string"),
+            (scd2_cfg.get("version_column", "_version"), "long"),
+            (scd2_cfg.get("change_reason_column", "_change_reason"), "string"),
+        ):
+            if col_name and col_name not in existing_names:
+                col_defs.append(f"  {col_name} {_resolve_type(col_type, backend)}")
+                ddl_columns.add(col_name)
+                ddl_types[col_name] = col_type
+
     # Inherited layout defaults may name columns this table lacks — keep only the ones it has.
     partition_by = _present_layout_columns(partition_by, ddl_columns, kind="Partition", table=resolved_table)
     cluster_by = _present_layout_columns(cluster_by, ddl_columns, kind="Cluster", table=resolved_table)

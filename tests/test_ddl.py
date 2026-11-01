@@ -396,6 +396,25 @@ class TestGenerateDDL:
         assert "COMMENT 'PII'" in ddl  # email gets PII comment
         assert "COMMENT 'Full name'" in ddl  # name gets its description
 
+    def test_scd2_declares_the_columns_the_first_load_writes(self):
+        """An SCD2 table has the SK, version and change-reason columns before its first load."""
+        contract = _make_contract(
+            fields=[
+                FieldDefinition(name="id", type="string"),
+                FieldDefinition(name="accounts_sk", type="string"),
+                FieldDefinition(name="version_number", type="long"),
+            ],
+            table_name="gold.dim_accounts",
+            primary_key=["id"],
+        )
+        contract.materialization.strategy = "scd2"
+        contract.materialization.scd2 = {"surrogate_key": "accounts_sk", "version_column": "version_number"}
+
+        ddl = generate_ddl(contract, "spark")
+        assert "_change_reason STRING" in ddl
+        assert ddl.count("accounts_sk") == 1 and ddl.count("version_number") == 1
+        assert "_version" not in ddl.replace("version_number", "")
+
     def test_lineage_soft_delete_properties_and_backend_specific_options(self):
         fields = [
             FieldDefinition(name="id", type="int", required=True),
