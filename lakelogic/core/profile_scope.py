@@ -190,6 +190,9 @@ def sample_sql(
             )
         if duck:
             return (f"SELECT * FROM {from_sql} USING SAMPLE {p} PERCENT (bernoulli, 42)", f"{p:g}% at random{why}")
+        if dialect == "snowflake":
+            # Snowflake has no PERCENT keyword: the number IS the percentage.
+            return (f"SELECT * FROM {from_sql} SAMPLE BERNOULLI ({p}) SEED (42)", f"{p:g}% at random{why}")
         return (f"SELECT * FROM {from_sql} TABLESAMPLE ({p} PERCENT) REPEATABLE (42)", f"{p:g}% at random{why}")
     n = int(settings["sample_rows"])
     if col:

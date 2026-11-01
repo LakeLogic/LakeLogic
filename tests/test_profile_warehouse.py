@@ -53,3 +53,13 @@ def test_snowflake_fixed_size_sample_has_no_seed():
 
 def test_no_spark_session_here_means_no_spark():
     assert active_spark() is None
+
+
+def test_snowflake_percent_sample_has_no_percent_keyword():
+    """Snowflake refused `TABLESAMPLE (5.0 PERCENT)`: 'unexpected PERCENT' (2026-11-01)."""
+    from lakelogic.core.profile_scope import sample_sql
+
+    settings = {"sample_unit": "percent", "sample_percent": 20, "sample_order": "random"}
+    sql, label = sample_sql('"DB"."S"."T"', [("id", "NUMBER")], settings, lambda n: f'"{n}"', dialect="snowflake")
+    assert sql == 'SELECT * FROM "DB"."S"."T" SAMPLE BERNOULLI (20.0) SEED (42)' and "PERCENT" not in sql
+    assert label == "20% at random"
