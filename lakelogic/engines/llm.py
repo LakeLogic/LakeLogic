@@ -517,8 +517,11 @@ def _extract_rapidocr(
     from lakelogic.core.text_extraction import _rapidocr
 
     start = time.perf_counter()
-    result, _ = _rapidocr()(file_path)
-    lines = [r for r in (result or []) if len(r) > 2 and r[1]]
+    result = _rapidocr()(file_path)
+    if hasattr(result, "txts"):  # rapidocr 3.x: an output object -> (box, text, score) rows
+        lines = [(None, t, s) for t, s in zip(result.txts or (), result.scores or ()) if t]
+    else:  # rapidocr-onnxruntime: (rows of [box, text, score], elapsed)
+        lines = [r for r in (result[0] or []) if len(r) > 2 and r[1]]
     ocr_text = "\n".join(r[1] for r in lines)
 
     extracted: Dict[str, Any] = {}
@@ -1315,6 +1318,27 @@ def extract_file(
         rows = extract_file("receipt.png", config)
         df = pl.DataFrame(rows)
     """
+    rows = _extract_file_rows(file_path, config)
+    # A path field with nothing to extract names the file. The extractors give every such field
+    # the whole text, so `file_path` ("The document this row was extracted from") held the
+    # licence's contents in place of its path.
+    patterns = _document_patterns(config) if config.provider == "document" else {}
+    path_fields = [f.name for f in config.output_schema
+                   if f.name in _FILE_PATH_COLUMNS and not patterns.get(f.name)
+                   and (f.extraction_task or "all").lower() in ("all", "text")]
+    for row in rows:
+        for name in path_fields:
+            row[name] = str(file_path)
+    # A document the synthetic seed wrote marks its rows, as a seeded table row is marked.
+    from lakelogic.core.synthetic_documents import is_synthetic_document
+
+    if rows and is_synthetic_document(file_path):
+        for row in rows:
+            row["_synthetic"] = True
+    return rows
+
+
+def _extract_file_rows(file_path: str, config: ExtractionConfig) -> List[Dict[str, Any]]:
     provider = config.provider
 
     if provider == "pdfplumber":

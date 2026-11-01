@@ -287,7 +287,7 @@ nlp = [
 ]
 # PDF only — lightweight text/table extraction from PDFs via pdfplumber.
 # Use this instead of `extraction`/`extraction-ocr` when you only parse PDFs and
-# do NOT need `unstructured` (Office docs) or `rapidocr-onnxruntime` (image OCR).
+# do NOT need `unstructured` (Office docs) or `rapidocr` (image OCR).
 pdf = [
     "pdfplumber>=0.10.0",
 ]
@@ -295,7 +295,8 @@ pdf = [
 # `lakelogic.extract_text`. All pip-only: no PyTorch, no LibreOffice, no Tesseract.
 documents = [
     "pdfplumber>=0.10.0",
-    "rapidocr-onnxruntime>=1.4.0",
+    "rapidocr>=3.0.0",
+    "onnxruntime>=1.17.0",
     "python-docx>=1.1.0",
     "python-pptx>=1.0.0",
     "openpyxl>=3.1.0",
@@ -313,12 +314,13 @@ extraction = [
     "textblob>=0.18.0",
 ]
 # Extraction + image/PDF OCR — pure Python, no system deps, no torch
-# rapidocr-onnxruntime handles images via ONNX Runtime; pdfplumber handles PDFs
+# rapidocr handles images via ONNX Runtime; pdfplumber handles PDFs
 extraction-ocr = [
     # Python 3.11+ only: the fixes for SSRF (Dependabot #93) and stored XSS (#94) are in
     # 0.24.1, which does not support 3.10. On 3.10 this extra installs without unstructured.
     "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1; python_version >= '3.11'",
-    "rapidocr-onnxruntime>=1.4.0",
+    "rapidocr>=3.0.0",
+    "onnxruntime>=1.17.0",
     "pdfplumber>=0.10.0",
     "pypandoc-binary>=1.13",
     "spacy>=3.7.0",

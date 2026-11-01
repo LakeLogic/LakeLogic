@@ -108,6 +108,19 @@ def test_image_text_with_rapidocr(tmp_path):
     assert "PELICAN" in r.text.upper() and "silver" in r.text.lower()
 
 
+def test_ocr_reads_both_rapidocr_result_shapes():
+    """rapidocr 3.x returns an object with `.txts`; rapidocr-onnxruntime returned tuples."""
+    from types import SimpleNamespace
+
+    from lakelogic.core.text_extraction import _ocr_image
+
+    assert _ocr_image(lambda _img: SimpleNamespace(txts=("Invoice 7", "", "Total 9")), "x.png") == "Invoice 7\nTotal 9"
+    assert _ocr_image(lambda _img: SimpleNamespace(txts=None), "x.png") == ""
+    old = ([[[0, 0], "Invoice 7", 0.9], [[0, 1], "Total 9", 0.8]], 0.1)
+    assert _ocr_image(lambda _img: old, "x.png") == "Invoice 7\nTotal 9"
+    assert _ocr_image(lambda _img: (None, 0.1), "x.png") == ""
+
+
 def test_an_image_without_text_says_so(tmp_path):
     from PIL import Image
 

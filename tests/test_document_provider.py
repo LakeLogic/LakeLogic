@@ -14,7 +14,10 @@ from lakelogic.core.models import ExtractionConfig
 from lakelogic.core.synthetic_documents import generate_documents, supports_documents
 from lakelogic.engines.llm import FILE_PROVIDERS, extract_file
 
-pytest.importorskip("rapidocr_onnxruntime")
+try:
+    import rapidocr  # noqa: F401
+except ImportError:
+    pytest.importorskip("rapidocr_onnxruntime")
 pytest.importorskip("docx")
 
 PATTERNS = {
@@ -194,3 +197,24 @@ def test_synthetic_documents_for_a_document_contract_read_back(tmp_path, fmt, pa
 def test_pdfplumber_still_reads_pdf_only():
     contract = {"source": {"format": "docx"}, "extraction": {"provider": "pdfplumber"}}
     assert not supports_documents(contract)
+
+
+def test_a_path_field_names_the_document_not_its_text(tmp_path):
+    """Checkr's `file_path` ("The document this row was extracted from") held the licence text."""
+    import docx
+
+    f = tmp_path / "licence.docx"
+    d = docx.Document()
+    for line in _lines():
+        d.add_paragraph(line)
+    d.save(str(f))
+    cfg = _config()
+    cfg.output_schema.insert(0, cfg.output_schema[0].model_copy(
+        update={"name": "file_path", "extraction_task": None, "extraction_examples": None}))
+    cfg.output_schema.append(cfg.output_schema[1].model_copy(
+        update={"name": "body", "extraction_task": "all", "extraction_examples": None}))
+
+    [row] = extract_file(str(f), cfg)
+    assert row["file_path"] == str(f)
+    assert "Licence No: RF-482913" in row["body"]
+    assert row["licence_number"] == "RF-482913"

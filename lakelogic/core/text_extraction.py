@@ -212,10 +212,15 @@ def _pdf(path: Path) -> ExtractedText:
 
 # ── images (OCR) ────────────────────────────────────────────────────────────
 def _rapidocr():
+    # `rapidocr` (3.x) installs on current Pythons; `rapidocr-onnxruntime` stops at 3.12 and is
+    # what an older install still has.
     try:
-        from rapidocr_onnxruntime import RapidOCR
-    except ImportError as e:
-        raise ExtractionUnavailable(f"Reading text in images needs RapidOCR: {INSTALL_HINT}") from e
+        from rapidocr import RapidOCR
+    except ImportError:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+        except ImportError as e:
+            raise ExtractionUnavailable(f"Reading text in images needs RapidOCR: {INSTALL_HINT}") from e
     global _OCR_ENGINE
     if _OCR_ENGINE is None:
         _OCR_ENGINE = RapidOCR()
@@ -234,8 +239,12 @@ def _ocr_image(engine, image) -> str:
             image = np.array(image.convert("RGB"))
     except ImportError:
         pass
-    result, _ = engine(image)
-    return "\n".join(line[1] for line in (result or []) if len(line) > 1 and line[1]).strip()
+    result = engine(image)
+    if hasattr(result, "txts"):  # rapidocr 3.x: an output object
+        lines = result.txts or ()
+    else:  # rapidocr-onnxruntime: (rows of [box, text, score], elapsed)
+        lines = [row[1] for row in (result[0] or []) if len(row) > 1]
+    return "\n".join(t for t in lines if t).strip()
 
 
 def _image(path: Path) -> ExtractedText:
