@@ -1909,8 +1909,16 @@ def profile(
                 spark = SparkSession.builder.getOrCreate()
         try:
             out = profile_contract(
-                str(contract), location=source, fmt=fmt, table=table, spark=spark, connection=connection,
-                results_table=results_table, endpoint=endpoint, api_key=api_key, environment=environment,
+                str(contract),
+                location=source,
+                fmt=fmt,
+                table=table,
+                spark=spark,
+                connection=connection,
+                results_table=results_table,
+                endpoint=endpoint,
+                api_key=api_key,
+                environment=environment,
             )
         except ValueError as exc:
             typer.secho(str(exc), fg=typer.colors.RED, err=True)

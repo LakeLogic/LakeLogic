@@ -3437,10 +3437,9 @@ def _spark_align_to_table(df: Any, table_fields: Any, target: str) -> Any:  # pr
     extra = [c for c in df.columns if c not in names]
     if extra:
         logger.warning(f"SCD2 {target}: dropping columns the table does not have: {', '.join(extra)}")
-    return df.select(*[
-        (F.col(f.name) if f.name in df.columns else F.lit(None)).cast(f.dataType).alias(f.name)
-        for f in table_fields
-    ])
+    return df.select(
+        *[(F.col(f.name) if f.name in df.columns else F.lit(None)).cast(f.dataType).alias(f.name) for f in table_fields]
+    )
 
 
 def _spark_scd2_dataframe(  # pragma: no cover

@@ -1682,13 +1682,18 @@ def sample_files(source: Any, dest: Any, *, max_files: int = 50, max_bytes: int 
         return [src]
     out: List[Path] = []
     with zipfile.ZipFile(src) as zf:
-        members = [m for m in zf.infolist()
-                   if not m.is_dir() and "__MACOSX" not in m.filename
-                   and not Path(m.filename).name.startswith(".")
-                   and Path(m.filename).suffix.lower() in SAMPLE_EXTENSIONS + DOCUMENT_EXTENSIONS]
+        members = [
+            m
+            for m in zf.infolist()
+            if not m.is_dir()
+            and "__MACOSX" not in m.filename
+            and not Path(m.filename).name.startswith(".")
+            and Path(m.filename).suffix.lower() in SAMPLE_EXTENSIONS + DOCUMENT_EXTENSIONS
+        ]
         if not members:
-            raise ValueError("The zip holds no file that can be read: "
-                             + ", ".join(SAMPLE_EXTENSIONS + DOCUMENT_EXTENSIONS) + ".")
+            raise ValueError(
+                "The zip holds no file that can be read: " + ", ".join(SAMPLE_EXTENSIONS + DOCUMENT_EXTENSIONS) + "."
+            )
         if len(members) > max_files:
             raise ValueError(f"The zip holds {len(members)} files; at most {max_files} are read at once.")
         if sum(m.file_size for m in members) > max_bytes:
@@ -1729,11 +1734,16 @@ def _read_sql_script(path: Any, max_rows: int) -> Any:
             if not kind.startswith(_SQL_SAMPLE_STATEMENTS):
                 raise ValueError(f"A sample SQL script may only hold CREATE TABLE and INSERT statements, not {kind}.")
             con.execute(st.query)
-        tables = [r[0] for r in con.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall()]
+        tables = [
+            r[0]
+            for r in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+            ).fetchall()
+        ]
         if len(tables) != 1:
             raise ValueError(
-                "A sample SQL script must define exactly one table" + (f", not {len(tables)}." if tables else "."))
+                "A sample SQL script must define exactly one table" + (f", not {len(tables)}." if tables else ".")
+            )
         return con.execute(f'SELECT * FROM "{tables[0]}" LIMIT {int(max_rows)}').pl()
     finally:
         con.close()

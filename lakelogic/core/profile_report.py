@@ -239,8 +239,12 @@ def spark_files_view(spark: Any, location: str, fmt: Optional[str]) -> str:
     kind = (fmt or "").lower() or ("parquet" if location.rstrip("/").endswith(".parquet") else "csv")
     reader = spark.read.option("recursiveFileLookup", "true")
     if kind in ("csv", "tsv"):
-        reader = (reader.option("header", "true").option("multiLine", "true").option("escape", '"')
-                  .option("sep", "\t" if kind == "tsv" else ","))
+        reader = (
+            reader.option("header", "true")
+            .option("multiLine", "true")
+            .option("escape", '"')
+            .option("sep", "\t" if kind == "tsv" else ",")
+        )
         kind = "csv"
     elif kind in ("json", "jsonl", "ndjson"):
         kind = "json"
@@ -325,10 +329,17 @@ def profile_contract(
     sent = bool(endpoint) and send(payload, endpoint, api_key)
     error = None
     if results_table and connection is not None:
-        error = write_profile_rows_sql(profile_rows(payload, table=target, profile_id=str(uuid.uuid4())),
-                                       results_table, connection=connection)
+        error = write_profile_rows_sql(
+            profile_rows(payload, table=target, profile_id=str(uuid.uuid4())), results_table, connection=connection
+        )
     elif results_table and spark is not None:
-        error = write_profile_rows(profile_rows(payload, table=target, profile_id=str(uuid.uuid4())),
-                                   results_table, spark=spark)
-    return {"profile": profile, "payload": payload, "sent": sent,
-            "results_table": results_table if results_table and not error else None, "results_table_error": error}
+        error = write_profile_rows(
+            profile_rows(payload, table=target, profile_id=str(uuid.uuid4())), results_table, spark=spark
+        )
+    return {
+        "profile": profile,
+        "payload": payload,
+        "sent": sent,
+        "results_table": results_table if results_table and not error else None,
+        "results_table_error": error,
+    }

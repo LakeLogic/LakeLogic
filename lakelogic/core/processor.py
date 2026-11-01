@@ -8316,9 +8316,7 @@ class DataProcessor:
         # A file an earlier run left behind is retried by the pipeline before this run; leave it
         # out here, so a still-stuck one is not tried twice (or fail a blocking cleanup every run).
         _orphans = getattr(self, "_orphaned_files", None) or set()
-        self._stream_landing_files = (
-            [] if continuous else [f for f in _ll.list_folder(folder) if f not in _orphans]
-        )
+        self._stream_landing_files = [] if continuous else [f for f in _ll.list_folder(folder) if f not in _orphans]
         stream = self._file_stream(spark, folder, fmt, o, checkpoint)
         logger.info(f"stream source: files ({fmt}) in '{folder}' (checkpoint {checkpoint})")
         sink = SparkStreamSink(

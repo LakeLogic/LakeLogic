@@ -65,12 +65,15 @@ def test_a_schema_only_script_reads_as_an_empty_table(tmp_path):
     assert df.columns == ["order_id", "total"] and df.height == 0
 
 
-@pytest.mark.parametrize("script,says", [
-    ("CREATE TABLE a (x INT); CREATE TABLE b (y INT);", "exactly one table"),
-    ("SELECT * FROM read_csv('/etc/passwd');", "only hold CREATE TABLE and INSERT"),
-    ("CREATE TABLE a AS SELECT * FROM read_csv('/etc/passwd');", r"(?i)external access|disabled"),
-    ("COPY (SELECT 1) TO 'x.csv';", "only hold CREATE TABLE and INSERT"),
-])
+@pytest.mark.parametrize(
+    "script,says",
+    [
+        ("CREATE TABLE a (x INT); CREATE TABLE b (y INT);", "exactly one table"),
+        ("SELECT * FROM read_csv('/etc/passwd');", "only hold CREATE TABLE and INSERT"),
+        ("CREATE TABLE a AS SELECT * FROM read_csv('/etc/passwd');", r"(?i)external access|disabled"),
+        ("COPY (SELECT 1) TO 'x.csv';", "only hold CREATE TABLE and INSERT"),
+    ],
+)
 def test_a_sql_script_cannot_reach_outside(tmp_path, script, says):
     p = tmp_path / "x.sql"
     p.write_text(script)

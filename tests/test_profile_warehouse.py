@@ -1,5 +1,6 @@
 """lakelogic profile --contract on a SQL warehouse (Snowflake): the table is profiled over a DB-API
 connection and lakelogic_profiles is written with SQL, no Spark. DuckDB stands in for Snowflake."""
+
 import duckdb
 
 from lakelogic.core.profile import DbApiExecutor, executor_for
@@ -7,7 +8,8 @@ from lakelogic.core.profile_report import active_spark, profile_contract
 from lakelogic.core.profile_scope import sample_sql
 
 CONTRACT = {
-    "version": "1.0.0", "info": {"title": "Drivers", "table_name": "drivers"},
+    "version": "1.0.0",
+    "info": {"title": "Drivers", "table_name": "drivers"},
     "model": {"fields": [{"name": "driver_id", "type": "integer"}, {"name": "email", "type": "string", "pii": True}]},
     "profiling": {"findings": True},
 }
@@ -45,9 +47,19 @@ def test_a_snowflake_connection_gets_the_snowflake_dialect():
 
 
 def test_snowflake_fixed_size_sample_has_no_seed():
-    sql, _ = sample_sql('"t"', [("a", "INT")], {"mode": "sample", "sample_unit": "rows", "sample_rows": 1000,
-                                               "sample_percent": None, "sample_order": "random"},
-                        lambda n: f'"{n}"', dialect="snowflake")
+    sql, _ = sample_sql(
+        '"t"',
+        [("a", "INT")],
+        {
+            "mode": "sample",
+            "sample_unit": "rows",
+            "sample_rows": 1000,
+            "sample_percent": None,
+            "sample_order": "random",
+        },
+        lambda n: f'"{n}"',
+        dialect="snowflake",
+    )
     assert sql == 'SELECT * FROM "t" SAMPLE (1000 ROWS)'
 
 

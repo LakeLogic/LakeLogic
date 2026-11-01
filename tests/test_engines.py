@@ -127,7 +127,8 @@ def test_processor_drop_keeps_the_synthetic_marker():
         model={"fields": [{"name": "id", "type": "integer"}]},
     )
     good_df, _ = DataProcessor(contract, engine="polars").run(
-        pl.DataFrame({"id": [1], "extra": ["x"], "_synthetic": [True]}))
+        pl.DataFrame({"id": [1], "extra": ["x"], "_synthetic": [True]})
+    )
     assert "_synthetic" in good_df.columns and "extra" not in good_df.columns
 
 
@@ -194,7 +195,9 @@ def test_a_fabric_mount_checkpoint_moves_to_the_sources_lakehouse():
     """Spark cannot write a checkpoint under /lakehouse/default/: OneLake answered 400."""
     from lakelogic.core.processor import _spark_checkpoint
 
-    folder = "abfss://ws@onelake.dfs.fabric.microsoft.com/ws_marketplace.Lakehouse/Files/landing/rideflow/driver_telemetry"
+    folder = (
+        "abfss://ws@onelake.dfs.fabric.microsoft.com/ws_marketplace.Lakehouse/Files/landing/rideflow/driver_telemetry"
+    )
     assert _spark_checkpoint("/lakehouse/default/Files/lakelogic_logs/_checkpoints/driver_telemetry", folder) == (
         "abfss://ws@onelake.dfs.fabric.microsoft.com/ws_marketplace.Lakehouse/Files/_checkpoints/driver_telemetry"
     )

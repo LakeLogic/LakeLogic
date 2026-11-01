@@ -1185,7 +1185,10 @@ def profile(
 
 
 def profile_sample_file(
-    path: str, *, contract: Any = None, sensitive_columns: Optional[Iterable[str]] = None,
+    path: str,
+    *,
+    contract: Any = None,
+    sensitive_columns: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Profile one file that has no SQL reader of its own (Excel, XML, a SQL script).
 

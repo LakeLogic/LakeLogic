@@ -133,7 +133,12 @@ def _contract_name(c: Dict[str, Any], index: int) -> str:
 def _layer(c: Dict[str, Any], name: str) -> str:
     info = c.get("info") if isinstance(c.get("info"), dict) else {}
     for candidate in (
-        c.get("layer"), c.get("tier"), info.get("layer"), info.get("tier"), c.get("target_layer"), c.get("_layer")
+        c.get("layer"),
+        c.get("tier"),
+        info.get("layer"),
+        info.get("tier"),
+        c.get("target_layer"),
+        c.get("_layer"),
     ):
         value = _s(candidate).lower()
         if value:
@@ -250,19 +255,60 @@ def _machine_name(c: Dict[str, Any], name: str) -> str:
 #: entity, so ``gold_fact_trip_completed_daily`` and ``silver_rideflow_trip_completed`` name
 #: one thing.
 _KIND_TOKENS = {
-    "dim": "dimension", "dimension": "dimension", "fact": "fact", "fct": "fact",
-    "agg": "aggregate", "mart": "aggregate", "rpt": "aggregate", "report": "aggregate",
+    "dim": "dimension",
+    "dimension": "dimension",
+    "fact": "fact",
+    "fct": "fact",
+    "agg": "aggregate",
+    "mart": "aggregate",
+    "rpt": "aggregate",
+    "report": "aggregate",
 }
 #: Trailing parts that make a table a roll-up of an entity, not a new one.
 _AGGREGATE_SUFFIXES = {
-    "daily", "weekly", "monthly", "hourly", "yearly", "quarterly", "summary", "summaries",
-    "agg", "aggregate", "aggregates", "rollup", "totals", "metrics", "kpi", "kpis", "stats",
+    "daily",
+    "weekly",
+    "monthly",
+    "hourly",
+    "yearly",
+    "quarterly",
+    "summary",
+    "summaries",
+    "agg",
+    "aggregate",
+    "aggregates",
+    "rollup",
+    "totals",
+    "metrics",
+    "kpi",
+    "kpis",
+    "stats",
 }
 #: Trailing parts that make a table a variant (history, a seed, a master copy) of an entity.
 _VARIANT_SUFFIXES = {
-    "scd1", "scd2", "history", "current", "latest", "snapshot", "snapshots", "master", "seed",
-    "lookup", "ref", "reference", "profile", "profiles", "detail", "details", "record", "records",
-    "360", "enriched", "validated", "cleaned", "unstructured",
+    "scd1",
+    "scd2",
+    "history",
+    "current",
+    "latest",
+    "snapshot",
+    "snapshots",
+    "master",
+    "seed",
+    "lookup",
+    "ref",
+    "reference",
+    "profile",
+    "profiles",
+    "detail",
+    "details",
+    "record",
+    "records",
+    "360",
+    "enriched",
+    "validated",
+    "cleaned",
+    "unstructured",
 }
 
 
@@ -314,9 +360,26 @@ def _is_unique_column(column: str, key: List[str], field: Optional[Dict[str, Any
 
 class _Contract:
     __slots__ = (
-        "raw", "name", "source_file", "layer", "fields", "by_col", "key", "key_kind",
-        "grain", "description", "stem", "kind", "entity", "mapping_state", "mapping_evidence", "owner",
-        "machine", "system", "domain", "reads",
+        "raw",
+        "name",
+        "source_file",
+        "layer",
+        "fields",
+        "by_col",
+        "key",
+        "key_kind",
+        "grain",
+        "description",
+        "stem",
+        "kind",
+        "entity",
+        "mapping_state",
+        "mapping_evidence",
+        "owner",
+        "machine",
+        "system",
+        "domain",
+        "reads",
     )
 
     def __init__(self, raw: Dict[str, Any], index: int) -> None:
@@ -330,9 +393,7 @@ class _Contract:
         self.layer = _layer(raw, self.machine)
         # Contracts this one reads: declared upstream, then the table its source names.
         reads = _as_list(raw.get("upstream")) + [
-            _s(u.get("contract") or u.get("name"))
-            for u in (raw.get("upstream_contracts") or [])
-            if isinstance(u, dict)
+            _s(u.get("contract") or u.get("name")) for u in (raw.get("upstream_contracts") or []) if isinstance(u, dict)
         ]
         source = raw.get("source") if isinstance(raw.get("source"), dict) else {}
         if _s(source.get("path")) and _s(source.get("type")).lower() in ("table", ""):
@@ -562,8 +623,12 @@ def derive_business_map(
                 prop = props.get(col)
                 if prop is None:
                     prop = props[col] = {
-                        "name": col, "type": _s(f.get("type")) or None, "key": False,
-                        "required": False, "mapped": 0, "of": len(mapped),
+                        "name": col,
+                        "type": _s(f.get("type")) or None,
+                        "key": False,
+                        "required": False,
+                        "mapped": 0,
+                        "of": len(mapped),
                     }
                 prop["mapped"] += 1
                 prop["key"] = prop["key"] or col in pc.key
@@ -651,7 +716,11 @@ def derive_business_map(
                     kind = "join" if is_join else "foreign_key"
                     detail = f"{pc.name}.{col} -> {parent.name}.{parent_col}"
                     relationship(
-                        parent.entity, pc.entity, verb, cardinality_for(pc, col, parent, parent_col), "declared",
+                        parent.entity,
+                        pc.entity,
+                        verb,
+                        cardinality_for(pc, col, parent, parent_col),
+                        "declared",
                         _evidence(kind, pc.name, col, detail),
                     )
             elif col.endswith("_sk") and pc.kind == "fact" and pc.entity:
@@ -659,15 +728,21 @@ def derive_business_map(
                 stem = col[: -len("_sk")]
                 dim = None
                 for other in sorted(parsed, key=lambda p: p.name):
-                    if other.kind == "dimension" and other.entity and (
-                        _norm(other.stem) in (_norm(stem), _norm(stem) + "s") or col in other.by_col
+                    if (
+                        other.kind == "dimension"
+                        and other.entity
+                        and (_norm(other.stem) in (_norm(stem), _norm(stem) + "s") or col in other.by_col)
                     ):
                         dim = other
                         break
                 if dim is not None and dim.entity != pc.entity:
                     declared_columns[(pc.name, col)] = True
                     relationship(
-                        dim.entity, pc.entity, verb, cardinality_for(pc, col, dim, col), "declared",
+                        dim.entity,
+                        pc.entity,
+                        verb,
+                        cardinality_for(pc, col, dim, col),
+                        "declared",
                         _evidence("join", pc.name, col, f"gold fact {pc.name}.{col} joins dimension {dim.name}"),
                     )
             if identifies:
@@ -699,7 +774,11 @@ def derive_business_map(
                 if ent["name"] == pc.entity or not ent["identifier"] or ent["identifier"] != col:
                     continue
                 relationship(
-                    ent["name"], pc.entity, _NO_VERB, "unknown", "inferred",
+                    ent["name"],
+                    pc.entity,
+                    _NO_VERB,
+                    "unknown",
+                    "inferred",
                     _evidence("named", pc.name, col, f"{pc.name}.{col} has the name of {ent['name']}'s identifier"),
                 )
 
@@ -728,9 +807,12 @@ def derive_business_map(
                 existing["cardinality"], existing["cardinality"]
             )
             relationships[(a, b)] = {
-                "from": a, "verb": verb, "to": b,
+                "from": a,
+                "verb": verb,
+                "to": b,
                 "cardinality": card if card != "unknown" else flipped,
-                "state": "confirmed", "evidence": existing["evidence"] + [ev],
+                "state": "confirmed",
+                "evidence": existing["evidence"] + [ev],
             }
         else:
             relationship(a, b, verb, card, "confirmed", ev)
@@ -744,7 +826,7 @@ def derive_business_map(
                 return k
         return "name_only"
 
-    for (src, dst) in sorted(relationships):
+    for src, dst in sorted(relationships):
         if (src, dst) not in relationships or (dst, src) not in relationships:
             continue
         a, b = relationships[(src, dst)], relationships[(dst, src)]
@@ -773,9 +855,7 @@ def derive_business_map(
             alias_owner[_norm(alias)] = e["name"]
 
     def ask(kind: str, text: str, subjects: List[str], contracts: List[str]) -> None:
-        questions.append(
-            {"kind": kind, "text": text, "subjects": subjects, "impact": len(set(contracts))}
-        )
+        questions.append({"kind": kind, "text": text, "subjects": subjects, "impact": len(set(contracts))})
 
     # Same column name in contracts of DIFFERENT entities, at least one not settled by a key,
     # foreign key or annotation. Copies of one entity across layers are not a question.
@@ -799,7 +879,8 @@ def derive_business_map(
         ask(
             "same_identifier",
             f"Does {col} identify {target} in all {len(subjects)} data contracts that have it{where}?",
-            subjects, [c for c, _, _ in occ],
+            subjects,
+            [c for c, _, _ in occ],
         )
     # Alias-named columns (rider_id when Customer is also called Rider) — a different name for
     # what may be the same identifier. One question per column name.
@@ -819,15 +900,17 @@ def derive_business_map(
         ask(
             "same_identifier",
             f"Is {col} a {owner}" + (f" (the same as {ident})?" if ident else "?"),
-            subjects, names,
+            subjects,
+            names,
         )
-    for (src, dst) in sorted(relationships):
+    for src, dst in sorted(relationships):
         rel = relationships[(src, dst)]
         if rel["cardinality"] == "unknown":
             ask(
                 "cardinality",
                 f"How many {dst} records can one {src} have, and how many {src} records can one {dst} have?",
-                [src, dst], [e["contract"] for e in rel["evidence"] if e.get("contract")],
+                [src, dst],
+                [e["contract"] for e in rel["evidence"] if e.get("contract")],
             )
     unmapped: Dict[str, List[str]] = {}
     for pc in parsed:

@@ -209,10 +209,15 @@ def test_a_path_field_names_the_document_not_its_text(tmp_path):
         d.add_paragraph(line)
     d.save(str(f))
     cfg = _config()
-    cfg.output_schema.insert(0, cfg.output_schema[0].model_copy(
-        update={"name": "file_path", "extraction_task": None, "extraction_examples": None}))
-    cfg.output_schema.append(cfg.output_schema[1].model_copy(
-        update={"name": "body", "extraction_task": "all", "extraction_examples": None}))
+    cfg.output_schema.insert(
+        0,
+        cfg.output_schema[0].model_copy(
+            update={"name": "file_path", "extraction_task": None, "extraction_examples": None}
+        ),
+    )
+    cfg.output_schema.append(
+        cfg.output_schema[1].model_copy(update={"name": "body", "extraction_task": "all", "extraction_examples": None})
+    )
 
     [row] = extract_file(str(f), cfg)
     assert row["file_path"] == str(f)

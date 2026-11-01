@@ -1323,9 +1323,13 @@ def extract_file(
     # the whole text, so `file_path` ("The document this row was extracted from") held the
     # licence's contents in place of its path.
     patterns = _document_patterns(config) if config.provider == "document" else {}
-    path_fields = [f.name for f in config.output_schema
-                   if f.name in _FILE_PATH_COLUMNS and not patterns.get(f.name)
-                   and (f.extraction_task or "all").lower() in ("all", "text")]
+    path_fields = [
+        f.name
+        for f in config.output_schema
+        if f.name in _FILE_PATH_COLUMNS
+        and not patterns.get(f.name)
+        and (f.extraction_task or "all").lower() in ("all", "text")
+    ]
     for row in rows:
         for name in path_fields:
             row[name] = str(file_path)

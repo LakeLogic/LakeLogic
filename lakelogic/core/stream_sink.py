@@ -61,7 +61,7 @@ def spark_writable_checkpoint(path: str, runtime_context: Optional[Dict[str, Any
     ws, lh = ctx.get("currentWorkspaceId"), ctx.get("defaultLakehouseId")
     if not (ws and lh):
         return path
-    return f"abfss://{ws}@onelake.dfs.fabric.microsoft.com/{lh}/{path[len(FABRIC_MOUNT):]}"
+    return f"abfss://{ws}@onelake.dfs.fabric.microsoft.com/{lh}/{path[len(FABRIC_MOUNT) :]}"
 
 
 @dataclass

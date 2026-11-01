@@ -89,9 +89,7 @@ def test_the_first_load_matches_the_table_ddl_created(spark):
     assert "_change_reason" in table_columns
 
     # Silver brings columns the gold model does not declare.
-    df = spark.createDataFrame(
-        [("A1", "Transport", "Acme", "{}")], ["Id", "Industry", "Name", "attributes"]
-    )
+    df = spark.createDataFrame([("A1", "Transport", "Acme", "{}")], ["Id", "Industry", "Name", "attributes"])
     _materialize_spark_dataframe(df, contract, "table:ll_scd2.dim_accounts", "delta")
 
     written = spark.table("ll_scd2.dim_accounts")
@@ -101,9 +99,7 @@ def test_the_first_load_matches_the_table_ddl_created(spark):
     assert row["Id"] == "A1" and row["Industry"] == "Transport" and row["_change_reason"] == "initial"
 
     # A rerun takes the merge path, which rewrites the table: the same columns must not break it.
-    changed = spark.createDataFrame(
-        [("A1", "Logistics", "Acme", "{}")], ["Id", "Industry", "Name", "attributes"]
-    )
+    changed = spark.createDataFrame([("A1", "Logistics", "Acme", "{}")], ["Id", "Industry", "Name", "attributes"])
     _materialize_spark_dataframe(changed, contract, "table:ll_scd2.dim_accounts", "delta")
     rerun = spark.table("ll_scd2.dim_accounts")
     assert [f.name for f in rerun.schema] == table_columns

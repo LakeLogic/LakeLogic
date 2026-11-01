@@ -41,7 +41,11 @@ CONTRACTS = [
     _contract(
         "silver_payments",
         ["payment_id"],
-        ["payment_id", {"name": "trip_id", "foreign_key": {"contract": "silver_trips", "column": "trip_id"}}, "customer_id"],
+        [
+            "payment_id",
+            {"name": "trip_id", "foreign_key": {"contract": "silver_trips", "column": "trip_id"}},
+            "customer_id",
+        ],
     ),
     _contract("silver_refunds", ["refund_id"], ["refund_id", "payment_id", "customer_id", "amount"]),
     _contract("gold_dim_customer", ["customer_sk"], ["customer_sk", "customer_id"], "A registered rider account."),
@@ -231,14 +235,26 @@ def _platform(dataset, layer, system, key, fields, domain="marketplace", source=
 
 ESTATE = [
     _platform("bronze_rideflow_trips", "bronze", "rideflow", [], ["trip_id", "rider_id"]),
-    _platform("silver_rideflow_trips", "silver", "rideflow", ["trip_id"], ["trip_id", "rider_id"],
-              source="{bronze_layer}_rideflow_trips"),
+    _platform(
+        "silver_rideflow_trips",
+        "silver",
+        "rideflow",
+        ["trip_id"],
+        ["trip_id", "rider_id"],
+        source="{bronze_layer}_rideflow_trips",
+    ),
     _platform("gold_fact_trips", "gold", "rideflow", ["trip_id"], ["trip_id", "rider_sk", "date_key"]),
     _platform("gold_fact_trips_daily", "gold", "rideflow", ["date_key"], ["date_key", "trips"]),
     _platform("silver_rideflow_rider_profiles", "silver", "rideflow", ["rider_id"], ["rider_id"]),
     _platform("gold_dim_rider_scd2", "gold", "rideflow", ["rider_sk"], ["rider_sk", "rider_id"]),
-    _platform("silver_stripe_charges", "silver", "stripe", ["charge_id"], ["charge_id", "rider_id", "trip_id"],
-              domain="payments"),
+    _platform(
+        "silver_stripe_charges",
+        "silver",
+        "stripe",
+        ["charge_id"],
+        ["charge_id", "rider_id", "trip_id"],
+        domain="payments",
+    ),
     _platform("gold_agg_acquisition_roi", "gold", "hubspot", [], ["roi"], domain="marketing"),
 ]
 
