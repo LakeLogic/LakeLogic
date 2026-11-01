@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from lakelogic.core.markers import CARRIED_MARKERS
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
 from lakelogic.engines.base import EngineAdapter
@@ -742,7 +743,7 @@ class SnowflakeAdapter(EngineAdapter):
 
         missing = expected - existing_cols
         unknown = existing_cols - expected
-        system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
+        system_cols = {c for c in unknown if c.startswith("_lakelogic_") or c in CARRIED_MARKERS}
         unknown = unknown - system_cols - self._lineage_columns()
 
         server = self.contract.server

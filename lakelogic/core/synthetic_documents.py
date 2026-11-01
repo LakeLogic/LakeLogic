@@ -44,6 +44,11 @@ SUPPORTED_PROVIDERS = {"pdfplumber", "document"}
 PROVIDER_FORMATS = {"pdfplumber": {"pdf"}, "document": {"pdf", "docx", "image"}}
 _IMAGE_EXTS = {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"}
 
+#: Stamped into every document this writes (PDF keywords, Word keywords, PNG text chunk), so the
+#: rows extracted from it carry ``_synthetic=true`` like a seeded row does. The visible title says
+#: "Synthetic - Test Data"; this is the part a reader can check.
+SYNTHETIC_DOCUMENT_MARK = "lakelogic:synthetic"
+
 _CAPTURE_GROUP = re.compile(r"(?<!\\)\((?!\?)")
 
 
@@ -231,6 +236,7 @@ def _write_pdf(stem: Path, title: str, lines: List[str]) -> Path:
         ) from exc
     path = stem.with_suffix(".pdf")
     pdf = canvas.Canvas(str(path), pagesize=letter)
+    pdf.setKeywords(SYNTHETIC_DOCUMENT_MARK)
     pdf.setFont("Helvetica-Bold", 14)
     pdf.drawString(72, 740, title)
     pdf.setFont("Helvetica", 12)
@@ -249,6 +255,7 @@ def _write_docx(stem: Path, title: str, lines: List[str]) -> Path:
         raise ImportError("python-docx is required for Word documents: pip install 'lakelogic[documents]'") from exc
     path = stem.with_suffix(".docx")
     d = docx.Document()
+    d.core_properties.keywords = SYNTHETIC_DOCUMENT_MARK
     d.add_heading(title, level=1)
     for line in lines:
         d.add_paragraph(line)
@@ -277,12 +284,42 @@ def _write_image(stem: Path, title: str, lines: List[str]) -> Path:
     draw = ImageDraw.Draw(img)
     for i, text in enumerate(rows):
         draw.text((50, 40 + i * 90), text, fill="black", font=_font(44))
+    from PIL.PngImagePlugin import PngInfo
+
+    info = PngInfo()
+    info.add_text("Keywords", SYNTHETIC_DOCUMENT_MARK)
     path = stem.with_suffix(".png")
-    img.save(path)
+    img.save(path, pnginfo=info)
     return path
 
 
 _WRITERS = {"pdf": _write_pdf, "docx": _write_docx, "image": _write_image}
+
+
+def is_synthetic_document(path: Union[str, Path]) -> bool:
+    """True when ``path`` is a document :func:`generate_documents` wrote (it carries the mark).
+
+    Reads only the document's properties, never its text: a real document that happens to
+    mention the mark in its body is not synthetic. Any read failure means "not synthetic"."""
+    p = Path(path)
+    suffix = p.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            # reportlab writes the info dictionary uncompressed: `/Keywords (lakelogic:synthetic)`.
+            return f"/Keywords ({SYNTHETIC_DOCUMENT_MARK})".encode() in p.read_bytes()
+        if suffix == ".docx":
+            import zipfile
+
+            with zipfile.ZipFile(p) as z:
+                return SYNTHETIC_DOCUMENT_MARK in z.read("docProps/core.xml").decode("utf-8", "ignore")
+        if suffix == ".png":
+            from PIL import Image
+
+            with Image.open(p) as img:
+                return img.info.get("Keywords") == SYNTHETIC_DOCUMENT_MARK
+    except Exception:
+        return False
+    return False
 
 
 def extract_metadata(pdf_path: Union[str, Path], contract: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
@@ -305,8 +342,10 @@ def extract_metadata(pdf_path: Union[str, Path], contract: Union[str, Path, Dict
 __all__ = [
     "PROVIDER_FORMATS",
     "SUPPORTED_PROVIDERS",
+    "SYNTHETIC_DOCUMENT_MARK",
     "extract_metadata",
     "generate_documents",
+    "is_synthetic_document",
     "line_label",
     "supports_documents",
 ]

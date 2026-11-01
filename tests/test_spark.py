@@ -61,3 +61,25 @@ def test_spark_adapter_try_cast():
     assert rows[0]["my_int"] == 1
     assert rows[1]["my_int"] is None
     assert rows[1]["__type_err_my_int"] is not None
+
+
+def test_spark_drop_policy_keeps_the_synthetic_marker():
+    import pytest
+
+    pytest.importorskip("pyspark")
+    from lakelogic.engines.spark import SparkAdapter
+    from lakelogic.core.models import DataContract
+    from pyspark.sql import SparkSession
+
+    contract = DataContract(
+        version="1.0.0",
+        dataset="test",
+        server={"type": "local", "path": "x", "schema_policy": {"unknown_fields": "drop"}},
+        model={"fields": [{"name": "id", "type": "integer"}]},
+    )
+    spark = SparkSession.builder.getOrCreate()
+    df = spark.createDataFrame([{"id": 1, "extra": "x", "_synthetic": True}])
+    adapter = SparkAdapter(contract)
+    result_df, _ = adapter._apply_schema(df)
+    assert "_synthetic" in result_df.columns and "extra" not in result_df.columns
+    assert adapter.schema_drift["unknown_fields"] == ["extra"]

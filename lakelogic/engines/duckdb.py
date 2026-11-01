@@ -19,6 +19,7 @@ from typing import Any, List, Tuple
 
 from loguru import logger
 
+from lakelogic.core.markers import CARRIED_MARKERS
 from lakelogic.engines.base import EngineAdapter, TransformationFailed, struct_drift_errors
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
@@ -298,7 +299,7 @@ class DuckDBAdapter(EngineAdapter):
 
         # Exclude transient, framework, and lineage columns from unknown
         transient_cols = {"rn", "__index_level_0__", "_row_number"}
-        system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
+        system_cols = {c for c in unknown if c.startswith("_lakelogic_") or c in CARRIED_MARKERS}
         unknown = unknown - transient_cols - system_cols - self._lineage_columns()
 
         # Add missing columns as NULL

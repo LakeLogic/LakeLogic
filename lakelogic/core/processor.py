@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import warnings
+from lakelogic.core.markers import CARRIED_MARKERS
 from lakelogic.engines.llm import FILE_PROVIDERS
 from typing import Any, Tuple, Union, Dict, Optional, List, Sequence
 from pathlib import Path
@@ -2146,6 +2147,9 @@ class DataProcessor:
             # If policy is 'drop', prune unknown columns.
             if policy == "drop":
                 expected_cols = [f.name for f in self.contract.model.fields]
+                # `_synthetic` marks generated test rows; it must survive every layer so a
+                # synthetic row stays distinguishable from a real one downstream.
+                expected_cols += [c for c in CARRIED_MARKERS if c not in expected_cols]
 
                 # Polars Engine
                 if self.engine_name == "polars":
@@ -2617,6 +2621,7 @@ class DataProcessor:
                 c
                 for c in set(unknown) - rename_sources - drop_columns - internal_cols - derived_fields
                 if not c.startswith(("_lakelogic_", "__"))  # "__": reader/engine scratch (e.g. __type_err__record)
+                and c not in CARRIED_MARKERS
             )
 
             # If SQL transformations exist, source columns are expected to

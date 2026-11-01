@@ -2,6 +2,7 @@ import polars as pl
 import pytest
 
 from lakelogic.core.models import DataContract
+from lakelogic import DataProcessor
 from lakelogic.engines.polars import PolarsAdapter
 
 
@@ -102,6 +103,34 @@ def test_schema_policy_drop_unknown_fields():
     assert len(bad_df) == 0
 
 
+@pytest.mark.parametrize("policy", ["drop", "quarantine"])
+def test_schema_policy_carries_the_synthetic_marker(policy):
+    """`_synthetic` survives `drop` and is never an unknown field, so test rows stay marked."""
+    contract = DataContract(
+        version="1.0.0",
+        server={"type": "local", "path": "x", "schema_policy": {"unknown_fields": policy}},
+        model={"fields": [{"name": "id", "type": "integer"}]},
+    )
+    df = pl.DataFrame({"id": [1, 2], "_synthetic": [True, True]})
+    adapter = PolarsAdapter(contract)
+    good_df, bad_df = adapter.execute(df)
+    assert good_df["_synthetic"].to_list() == [True, True]
+    assert len(bad_df) == 0
+    assert adapter.schema_drift["unknown_fields"] == []
+
+
+def test_processor_drop_keeps_the_synthetic_marker():
+    """The processor's own `drop` pruning keeps the marker too."""
+    contract = DataContract(
+        version="1.0.0",
+        server={"type": "local", "path": "x", "schema_policy": {"unknown_fields": "drop"}},
+        model={"fields": [{"name": "id", "type": "integer"}]},
+    )
+    good_df, _ = DataProcessor(contract, engine="polars").run(
+        pl.DataFrame({"id": [1], "extra": ["x"], "_synthetic": [True]}))
+    assert "_synthetic" in good_df.columns and "extra" not in good_df.columns
+
+
 def test_schema_policy_quarantine_unknown_fields():
     """Unknown fields are quarantined when policy is 'quarantine'."""
     contract = DataContract(
@@ -159,3 +188,27 @@ def test_quality_helper_quotes_spaced_fields():
     adapter = PolarsAdapter(contract)
     rule = adapter.get_row_rules()[0]
     assert rule.sql == '"full name" IS NOT NULL'
+
+
+def test_a_fabric_mount_checkpoint_moves_to_the_sources_lakehouse():
+    """Spark cannot write a checkpoint under /lakehouse/default/: OneLake answered 400."""
+    from lakelogic.core.processor import _spark_checkpoint
+
+    folder = "abfss://ws@onelake.dfs.fabric.microsoft.com/ws_marketplace.Lakehouse/Files/landing/rideflow/driver_telemetry"
+    assert _spark_checkpoint("/lakehouse/default/Files/lakelogic_logs/_checkpoints/driver_telemetry", folder) == (
+        "abfss://ws@onelake.dfs.fabric.microsoft.com/ws_marketplace.Lakehouse/Files/_checkpoints/driver_telemetry"
+    )
+    assert _spark_checkpoint("/Volumes/c/s/v/_checkpoints/x", folder) == "/Volumes/c/s/v/_checkpoints/x"
+    assert _spark_checkpoint("/lakehouse/default/Files/x", "/local/landing") == "/lakehouse/default/Files/x"
+
+
+def test_every_stream_checkpoint_on_the_fabric_mount_goes_to_onelake():
+    """Silver streams read a table, so no landing folder says where the lakehouse is."""
+    from lakelogic.core.stream_sink import spark_writable_checkpoint
+
+    ctx = {"currentWorkspaceId": "w-1", "defaultLakehouseId": "l-2"}
+    assert spark_writable_checkpoint("/lakehouse/default/Files/lakelogic_logs/_checkpoints/silver_x", ctx) == (
+        "abfss://w-1@onelake.dfs.fabric.microsoft.com/l-2/Files/lakelogic_logs/_checkpoints/silver_x"
+    )
+    assert spark_writable_checkpoint("/Volumes/c/s/v/x", ctx) == "/Volumes/c/s/v/x"
+    assert spark_writable_checkpoint("/lakehouse/default/Files/x", {}) == "/lakehouse/default/Files/x"

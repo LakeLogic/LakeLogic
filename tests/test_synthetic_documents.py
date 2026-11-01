@@ -101,3 +101,34 @@ def test_an_llm_extraction_contract_is_refused_not_faked(tmp_path):
     assert supports_documents(LICENCES) and not supports_documents(llm)
     with pytest.raises(ValueError, match="supports document sources"):
         generate_documents(llm, tmp_path)
+
+
+def test_rows_extracted_from_a_synthetic_document_are_marked(tmp_path):
+    """A seeded document's rows carry `_synthetic=true`, as seeded table rows do; a real
+    document's rows do not, even when its text mentions the mark."""
+    from reportlab.pdfgen import canvas
+
+    from lakelogic.core.models import DataContract
+    from lakelogic.core.synthetic_documents import SYNTHETIC_DOCUMENT_MARK, is_synthetic_document
+    from lakelogic.engines.llm import extract_file
+
+    synthetic = generate_documents(LICENCES, tmp_path, rows=2, seed=3)
+    real = tmp_path / "real.pdf"
+    pdf = canvas.Canvas(str(real))
+    pdf.drawString(72, 740, f"Name: Real Person {SYNTHETIC_DOCUMENT_MARK}")
+    pdf.save()
+
+    assert all(is_synthetic_document(p) for p in synthetic)
+    assert not is_synthetic_document(real)
+    config = DataContract(**LICENCES).extraction
+    assert all(r.get("_synthetic") is True for p in synthetic for r in extract_file(str(p), config))
+    assert all("_synthetic" not in r for r in extract_file(str(real), config))
+
+
+def test_word_and_image_documents_carry_the_mark(tmp_path):
+    pytest.importorskip("docx")
+    pytest.importorskip("PIL")
+    from lakelogic.core.synthetic_documents import _write_docx, _write_image, is_synthetic_document
+
+    assert is_synthetic_document(_write_docx(tmp_path / "a", "T", ["Name: X"]))
+    assert is_synthetic_document(_write_image(tmp_path / "b", "T", ["Name: X"]))

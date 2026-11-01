@@ -3,6 +3,7 @@ from typing import Any, List, Tuple
 
 from loguru import logger
 
+from lakelogic.core.markers import CARRIED_MARKERS
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
 from lakelogic.engines.base import EngineAdapter
@@ -1062,7 +1063,7 @@ class SparkAdapter(EngineAdapter):
         expected = set(expected_fields)
         missing = expected - existing
         unknown = existing - expected - {"__type_err__record"}  # reader scratch, see below
-        system_cols = {c for c in unknown if c.startswith("_lakelogic_")}
+        system_cols = {c for c in unknown if c.startswith("_lakelogic_") or c in CARRIED_MARKERS}
         unknown = unknown - system_cols - self._lineage_columns()
 
         server = self.contract.server
@@ -1136,6 +1137,8 @@ class SparkAdapter(EngineAdapter):
                 select_exprs.extend([F.col(c).cast("string") for c in sorted(unknown)])
             else:
                 select_exprs.extend([F.col(c) for c in sorted(unknown)])
+        # Spark rebuilds the frame from the model, so a carried marker is selected explicitly.
+        select_exprs.extend([F.col(c) for c in CARRIED_MARKERS if c in existing])
 
         df = df.select(*select_exprs)
 
