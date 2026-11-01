@@ -350,9 +350,21 @@ demo = [
 lakelogic = "lakelogic.cli.main:app"
 lakelogic-driver = "lakelogic.cli.driver:main"
 
+[project.urls]
+Homepage = "https://www.lakelogic.io"
+Documentation = "https://docs.lakelogic.io/"
+Source = "https://github.com/LakeLogic/LakeLogic"
+Changelog = "https://github.com/LakeLogic/LakeLogic/blob/main/CHANGELOG.md"
+Issues = "https://github.com/LakeLogic/LakeLogic/issues"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# The source archive carries what builds the package, not the docs site's images, notebooks or
+# local reports (7.4 MB -> ~3 MB per release). docs/ itself stays: the wheel bundles some of it.
+[tool.hatch.build.targets.sdist]
+exclude = ["docs/assets", "examples/colab", "uv.lock", "coverage.json", "site", "htmlcov"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["lakelogic"]
