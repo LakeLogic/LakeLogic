@@ -82,9 +82,14 @@ def test_the_dataset_view_is_made_only_when_its_sql_names_it():
 
     plain = _adapter()
     assert not plain._sql_mentions("gold_dim_date")
-    named = SnowflakeAdapter(DataContract(
-        version="1.0.0", dataset="silver_trips", model={"fields": [{"name": "id", "type": "int"}]},
-        transformations=[{"phase": "post", "sql": "SELECT * FROM silver_trips WHERE id > 0"}]))
+    named = SnowflakeAdapter(
+        DataContract(
+            version="1.0.0",
+            dataset="silver_trips",
+            model={"fields": [{"name": "id", "type": "int"}]},
+            transformations=[{"phase": "post", "sql": "SELECT * FROM silver_trips WHERE id > 0"}],
+        )
+    )
     assert named._sql_mentions("silver_trips")
 
 
