@@ -6703,6 +6703,14 @@ class DataProcessor:
             try:
                 materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name)
             except Exception as q_err:
+                # A stream commits its position after this returns, so carrying on would lose
+                # these rows for good: counted as bad, never saved, never read again (found
+                # 2026-11-02 beside an Iceberg table). Stop the batch; the next run retries it.
+                if getattr(self, "quarantine_must_persist", False):
+                    raise RuntimeError(
+                        f"Quarantine write failed, so this micro-batch was not committed and will be "
+                        f"retried: {q_err}"
+                    ) from q_err
                 logger.warning(
                     f"⚠️ Quarantine write failed (pipeline continues): {q_err}. "
                     f"Bad records were validated but could not be persisted to the quarantine target. "

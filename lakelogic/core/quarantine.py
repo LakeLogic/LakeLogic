@@ -708,6 +708,11 @@ def materialize_quarantine(
     _mat_format = None
     if contract.materialization:
         _mat_format = getattr(contract.materialization, "format", None)
+    # Iceberg is written through a catalog, never to a bare path, so a path quarantine does not
+    # inherit it from the table: it is Delta. Inheriting it made every quarantine write fail
+    # beside an Iceberg table (2026-11-02). An explicit quarantine format still wins.
+    if str(_mat_format or "").lower() == "iceberg" and not str(q.target).startswith("table:"):
+        _mat_format = "delta"
     explicit_format = output_format or getattr(q, "format", None) or metadata.get("quarantine_format") or _mat_format
     resolved_format = str(explicit_format).lower() if explicit_format else None
 

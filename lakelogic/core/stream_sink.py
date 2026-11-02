@@ -472,6 +472,9 @@ class StreamSink:
             self.processor = DataProcessor(contract, engine=engine)
 
         self.checkpoint_key = checkpoint_key or self._default_key()
+        # The position is committed after each write, so a quarantine write that fails must stop
+        # the batch rather than be logged and skipped (the rows would be lost for good).
+        self.processor.quarantine_must_persist = True
 
     # -- helpers ---------------------------------------------------------------
 
@@ -1399,6 +1402,8 @@ class SparkStreamSink:
             from lakelogic.core.processor import DataProcessor
 
             self.processor = DataProcessor(contract, engine=engine)
+        # A failed quarantine write fails the micro-batch, so Spark does not commit it and replays it.
+        self.processor.quarantine_must_persist = True
 
     # -- the foreachBatch handler (the unit-testable core) ---------------------
 
