@@ -30,6 +30,10 @@ def _contract() -> DataContract:
 
 
 class _SFCursor:
+    #: A result's columns: (name, type_code, ..., precision, scale). Target and source alike.
+    description = [("ID", 0, None, None, 38, 0, True), ("NAME", 2, None, None, None, None, True)]
+    rowcount = 2
+
     def __init__(self, log):
         self.log = log
 
@@ -97,12 +101,44 @@ def test_snowflake_append_inserts_rather_than_replacing(sf_shared):
 
 
 def test_snowflake_refuses_an_unimplemented_strategy(sf_shared):
-    """merge/scd2 are not implemented. Silently writing an append instead would be a
+    """scd2 is not implemented. Silently writing an append instead would be a
     DATA error — the wrong rows in the target — not a slow path."""
     with pytest.raises(NotImplementedError) as exc:
-        _sf_adapter().materialize_native("T", strategy="merge")
-    assert "merge" in str(exc.value)
+        _sf_adapter().materialize_native("T", strategy="scd2")
+    assert "scd2" in str(exc.value)
     assert sf_shared.sql == []  # nothing was written
+
+
+def test_snowflake_merge_upserts_on_the_primary_key(sf_shared):
+    """A merge contract was overwritten on Snowflake (write_pandas overwrite=True), 2026-11-02."""
+    from lakelogic.engines.snowflake import SnowflakeAdapter
+
+    a = SnowflakeAdapter(DataContract(version="1.0.0", dataset="orders", primary_key=["id"],
+                                      model={"fields": [{"name": "id", "type": "int"}]}))
+    a.good_table = "LG_GOOD_X"
+    a.materialize_native("ANALYTICS.ORDERS", strategy="merge")
+    merge = next(s for s in sf_shared.sql if s.startswith("MERGE INTO"))
+    assert 'ON t."ID" = s."ID"' in merge and 'UPDATE SET t."NAME" = s."NAME"' in merge
+    assert "QUALIFY ROW_NUMBER() OVER (PARTITION BY \"ID\"" in merge  # one row per key
+    assert 'INSERT ("ID", "NAME")' in merge
+
+
+def test_snowflake_adds_a_column_the_target_lacks(sf_shared, monkeypatch):
+    from lakelogic.engines.snowflake import SnowflakeAdapter
+
+    cols = iter([_SFCursor.description, _SFCursor.description[:1]])  # source, then target
+
+    class Cur(_SFCursor):
+        def execute(self, sql, *a, **kw):
+            self.log.append(sql)
+            if "LIMIT 0" in sql and not sql.startswith("CREATE"):
+                self.description = next(cols)
+            return self
+
+    monkeypatch.setattr(sf_shared, "cursor", lambda: Cur(sf_shared.sql))
+    a = _sf_adapter()
+    a.write_in_place(sf_shared, "SELECT * FROM LG_GOOD_X", "ANALYTICS.ORDERS", "append")
+    assert any(s.startswith('ALTER TABLE ANALYTICS.ORDERS ADD COLUMN "NAME" VARCHAR') for s in sf_shared.sql)
 
 
 def test_snowflake_refuses_without_a_shared_connection():

@@ -19,7 +19,7 @@ import datetime
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from loguru import logger
@@ -332,6 +332,23 @@ def _resolve_path(raw_path: str, base_path: Optional[Path]) -> Path:
     return path
 
 
+#: Snowflake log tables already created and widened in this process. Checking every column
+#: before every insert cost ~36 statements per contract: 936 of a 26-contract run's 1,600
+#: statements and over a minute of it (2026-11-01).
+_SNOWFLAKE_TABLES_READY: set = set()
+
+
+def _ensure_snowflake_table(cur: Any, table_name: str, cols: Sequence[Tuple[str, str]]) -> None:
+    """Create ``table_name`` with ``cols`` and add any it lacks, once per process."""
+    key = table_name.lower()
+    if key in _SNOWFLAKE_TABLES_READY:
+        return
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
+    for name, sql_type in cols:
+        cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
+    _SNOWFLAKE_TABLES_READY.add(key)
+
+
 def _snowflake_log_connection(metadata: Dict[str, Any]) -> Optional[Any]:
     """The connection to write log tables through, or None if we cannot get one.
 
@@ -349,8 +366,8 @@ def _snowflake_log_connection(metadata: Dict[str, Any]) -> Optional[Any]:
     except Exception:  # pragma: no cover - engine extra not installed
         SnowflakeAdapter = None  # type: ignore[assignment]
 
-    if SnowflakeAdapter is not None and SnowflakeAdapter._shared_connection is not None:
-        return SnowflakeAdapter._shared_connection
+    if SnowflakeAdapter is not None and SnowflakeAdapter.shared_connection() is not None:
+        return SnowflakeAdapter.shared_connection()
 
     try:
         import snowflake.connector
@@ -1555,12 +1572,10 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         cols = _RUN_LOG_TABLE_COLUMNS
         cur = conn.cursor()
         try:
-            cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
             # Widen an older table rather than failing the insert. Columns were added to
             # this schema over several releases and a mesh that logged before them has a
             # narrower table; ADD COLUMN IF NOT EXISTS is a no-op when it is already there.
-            for name, sql_type in cols:
-                cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
+            _ensure_snowflake_table(cur, table_name, cols)
         finally:
             cur.close()
 
@@ -1992,9 +2007,7 @@ def _write_slo_checks_table(
         cols = _SLO_CHECKS_TABLE_COLUMNS
         cur = conn.cursor()
         try:
-            cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
-            for name, sql_type in cols:
-                cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
+            _ensure_snowflake_table(cur, table_name, cols)
         finally:
             cur.close()
 

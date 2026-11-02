@@ -18,6 +18,14 @@ import pytest
 from lakelogic.core import run_log
 
 
+@pytest.fixture(autouse=True)
+def _fresh_table_cache():
+    # Log tables are widened once per process; each test here starts from none.
+    run_log._SNOWFLAKE_TABLES_READY.clear()
+    yield
+    run_log._SNOWFLAKE_TABLES_READY.clear()
+
+
 class FakeCursor:
     def __init__(self, log):
         self.log = log

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -62,6 +63,29 @@ def _resolve_env_value(value: Optional[str]) -> Optional[str]:
     return value
 
 
+def _table_name(name: str) -> str:
+    """A table reference as Snowflake reads it: Databricks/Spark backtick quoting removed.
+
+    Contracts are shared across platforms, so a cross-domain link reads
+    ``table:`rideflow_dev_reference`.gold.gold_dim_city_master``. Snowflake has no backtick
+    quoting and failed with "Database '`RIDEFLOW_DEV_REFERENCE`' does not exist" (2026-11-02).
+    Unquoted, the name folds to upper case like every other Snowflake name."""
+    return str(name).replace("`", "")
+
+
+def _column_type(desc: Any) -> str:
+    """The Snowflake type of a result column, from the connector's cursor description."""
+    try:
+        from snowflake.connector.constants import FIELD_ID_TO_NAME
+        name = FIELD_ID_TO_NAME.get(desc[1], "TEXT")
+    except Exception:  # pragma: no cover - connector not importable
+        name = "TEXT"
+    if name == "FIXED":
+        p, sc = desc[4], desc[5]
+        return f"NUMBER({p or 38},{sc or 0})"
+    return {"TEXT": "VARCHAR", "REAL": "FLOAT"}.get(name, name)
+
+
 def _as_pandas(df: Any) -> Optional[Any]:
     """A pandas copy of a Polars, pandas or Arrow frame; None for anything else."""
     if df is None:
@@ -84,15 +108,28 @@ class SnowflakeAdapter(EngineAdapter):
     # Snowpark session) so the engine runs on an existing session instead of opening a
     # new password-authenticated connection. When set, execute() does NOT close it.
     _shared_connection: Any = None
+    #: A connection for the current thread only. Contracts run side by side need a session
+    #: each: the engine's temp views (`source`, the dataset's name) are session-wide, and two
+    #: contracts on one session overwrote each other's (2026-11-02).
+    _thread_connection = threading.local()
 
     @classmethod
-    def set_shared_connection(cls, conn: Any) -> None:
+    def set_shared_connection(cls, conn: Any, *, this_thread: bool = False) -> None:
         """Reuse an existing snowflake.connector connection for all runs (Notebook use).
 
         In a Snowflake Notebook: ``SnowflakeAdapter.set_shared_connection(
-        get_active_session().connection)``. Pass ``None`` to clear.
+        get_active_session().connection)``. Pass ``None`` to clear. With ``this_thread=True``
+        the connection applies to the calling thread only, ahead of the process-wide one.
         """
-        cls._shared_connection = conn
+        if this_thread:
+            cls._thread_connection.conn = conn
+        else:
+            cls._shared_connection = conn
+
+    @classmethod
+    def shared_connection(cls) -> Any:
+        """The connection runs on this thread use: the thread's own, else the shared one."""
+        return getattr(cls._thread_connection, "conn", None) or cls._shared_connection
 
     # Row count above which pulling the result through the driver is called out as
     # the scalability cliff it is. Override with LAKELOGIC_SNOWFLAKE_FETCH_WARN_ROWS.
@@ -144,7 +181,7 @@ class SnowflakeAdapter(EngineAdapter):
             raise ValueError("Snowflake adapter requires a source table name or a DataFrame.")
 
         conn = self._connect()
-        owns_conn = SnowflakeAdapter._shared_connection is None
+        owns_conn = SnowflakeAdapter.shared_connection() is None
         try:
             if frame is not None:
                 table_name = self._upload_frame(conn, frame)
@@ -231,7 +268,60 @@ class SnowflakeAdapter(EngineAdapter):
     # Strategies the native writer implements. Anything else is refused rather than
     # quietly downgraded — writing an append where the contract asked for a merge is
     # a data error, not a performance one.
-    _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace"}
+    _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace", "merge", "upsert"}
+
+    def write_in_place(self, conn, source_sql: str, target: str, strategy: str,
+                       merge_keys: Optional[List[str]] = None) -> int:
+        """Write the rows of ``source_sql`` to ``target`` without leaving Snowflake.
+
+        ``append`` inserts, ``overwrite``/``replace`` rebuilds, ``merge``/``upsert`` updates
+        rows whose ``merge_keys`` match and inserts the rest (one row per key from the source).
+        The target is created on first write, and columns the source has but the target lacks
+        are added, so a contract that gains a field does not fail its next run. Columns are
+        written by name, never by position. Returns the number of rows the source held.
+
+        The Snowflake runtime used to fetch every result to the driver and write it back with
+        ``write_pandas(overwrite=True)``: about seven statements per table, and every table
+        overwritten whatever its contract's strategy said (2026-11-02).
+        """
+        strategy = (strategy or "append").lower()
+        if strategy not in self._NATIVE_WRITE_STRATEGIES:
+            raise NotImplementedError(f"Snowflake writes in place with {sorted(self._NATIVE_WRITE_STRATEGIES)}, "
+                                      f"not '{strategy}'.")
+        cur = conn.cursor()
+        try:
+            if strategy in ("overwrite", "replace"):
+                cur.execute(f"CREATE OR REPLACE TABLE {target} AS {source_sql}")
+                return self._count_rows(conn, target)
+            cur.execute(f"SELECT * FROM ({source_sql}) LIMIT 0")
+            src = list(cur.description)
+            cols = [d[0] for d in src]
+            q = ", ".join(f'"{c}"' for c in cols)
+            cur.execute(f"CREATE TABLE IF NOT EXISTS {target} AS SELECT * FROM ({source_sql}) LIMIT 0")
+            cur.execute(f"SELECT * FROM {target} LIMIT 0")
+            have = {d[0] for d in cur.description}
+            for d in src:
+                if d[0] not in have:
+                    cur.execute(f'ALTER TABLE {target} ADD COLUMN "{d[0]}" {_column_type(d)}')
+            if strategy == "append":
+                cur.execute(f"INSERT INTO {target} ({q}) SELECT {q} FROM ({source_sql})")
+                return int(cur.rowcount or 0)
+            keys = [_fold(k) for k in (merge_keys or [])]
+            if not keys:
+                raise ValueError("merge needs the contract's primary_key.")
+            part = ", ".join(f'"{k}"' for k in keys)
+            on = " AND ".join(f't."{k}" = s."{k}"' for k in keys)
+            sets = ", ".join(f't."{c}" = s."{c}"' for c in cols if c not in keys)
+            cur.execute(
+                f"MERGE INTO {target} t USING (SELECT * FROM ({source_sql}) "
+                f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {part}) = 1) s ON {on} "
+                + (f"WHEN MATCHED THEN UPDATE SET {sets} " if sets else "")
+                + f"WHEN NOT MATCHED THEN INSERT ({q}) VALUES ({', '.join(f's.{chr(34)}{c}{chr(34)}' for c in cols)})"
+            )
+            row = cur.fetchone() or ()
+            return int(sum(int(v or 0) for v in row))
+        finally:
+            cur.close()
 
     def materialize_native(self, target_table: str, strategy: str = "overwrite") -> Dict[str, Any]:
         """Write this run's accepted rows to ``target_table`` INSIDE Snowflake.
@@ -258,7 +348,7 @@ class SnowflakeAdapter(EngineAdapter):
                 f"{sorted(self._NATIVE_WRITE_STRATEGIES)}, not '{strategy}'. Refusing "
                 "rather than writing a different strategy than the contract asked for."
             )
-        if SnowflakeAdapter._shared_connection is None:
+        if SnowflakeAdapter.shared_connection() is None:
             raise RuntimeError(
                 "materialize_native() requires a shared connection — the engine closes "
                 "its own connection at the end of execute(), which drops the TEMP "
@@ -266,21 +356,12 @@ class SnowflakeAdapter(EngineAdapter):
                 "before running so the session (and its results) survive."
             )
 
-        conn = SnowflakeAdapter._shared_connection
+        conn = SnowflakeAdapter.shared_connection()
         target = self._quote_qualified(target_table)
-
-        if strategy == "append":
-            sql = f"INSERT INTO {target} SELECT * FROM {self.good_table}"
-        else:  # overwrite / replace
-            sql = f"CREATE OR REPLACE TABLE {target} AS SELECT * FROM {self.good_table}"
-
-        self._execute(conn, sql)
-
-        cursor = conn.cursor()
-        try:
-            rows = cursor.execute(f"SELECT COUNT(*) FROM {target}").fetchone()[0]
-        finally:
-            cursor.close()
+        rows = self.write_in_place(
+            conn, f"SELECT * FROM {self.good_table}", target, strategy,
+            merge_keys=list(getattr(self.contract, "primary_key", None) or []),
+        )
 
         logger.info(
             f"Snowflake native materialization: {self.good_table} -> {target} "
@@ -300,8 +381,8 @@ class SnowflakeAdapter(EngineAdapter):
         Returns:
             Snowflake connection.
         """
-        if SnowflakeAdapter._shared_connection is not None:
-            return SnowflakeAdapter._shared_connection
+        if SnowflakeAdapter.shared_connection() is not None:
+            return SnowflakeAdapter.shared_connection()
 
         from lakelogic.core.deps import require
 
@@ -337,7 +418,7 @@ class SnowflakeAdapter(EngineAdapter):
             Table name string.
         """
         if isinstance(df, str):
-            return df[6:] if df.startswith("table:") else df
+            return _table_name(df[6:] if df.startswith("table:") else df)
         metadata = self.contract.metadata or {}
         return metadata.get("snowflake_source_table") or metadata.get("source_table")
 
@@ -368,7 +449,7 @@ class SnowflakeAdapter(EngineAdapter):
                     continue
 
                 cols = ", ".join(link.columns) if link.columns else "*"
-                cursor.execute(f"CREATE OR REPLACE TEMP VIEW {link.name} AS SELECT {cols} FROM {table_name}")
+                cursor.execute(f"CREATE OR REPLACE TEMP VIEW {link.name} AS SELECT {cols} FROM {_table_name(table_name)}")
         finally:
             cursor.close()
 
