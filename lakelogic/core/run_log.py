@@ -19,6 +19,7 @@ import datetime
 import json
 import os
 from pathlib import Path
+import threading
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
@@ -336,6 +337,7 @@ def _resolve_path(raw_path: str, base_path: Optional[Path]) -> Path:
 #: before every insert cost ~36 statements per contract: 936 of a 26-contract run's 1,600
 #: statements and over a minute of it (2026-11-01).
 _SNOWFLAKE_TABLES_READY: set = set()
+_SNOWFLAKE_TABLES_LOCK = threading.Lock()
 
 
 def _ensure_snowflake_table(cur: Any, table_name: str, cols: Sequence[Tuple[str, str]]) -> None:
@@ -343,10 +345,15 @@ def _ensure_snowflake_table(cur: Any, table_name: str, cols: Sequence[Tuple[str,
     key = table_name.lower()
     if key in _SNOWFLAKE_TABLES_READY:
         return
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
-    for name, sql_type in cols:
-        cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
-    _SNOWFLAKE_TABLES_READY.add(key)
+    # One thread widens; contracts running side by side wait for it rather than all
+    # running the same 36 checks at once (288 in a parallel run, 2026-11-02).
+    with _SNOWFLAKE_TABLES_LOCK:
+        if key in _SNOWFLAKE_TABLES_READY:
+            return
+        cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (" + ", ".join(f"{n} {t}" for n, t in cols) + ")")
+        for name, sql_type in cols:
+            cur.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {name} {sql_type}")
+        _SNOWFLAKE_TABLES_READY.add(key)
 
 
 def _snowflake_log_connection(metadata: Dict[str, Any]) -> Optional[Any]:

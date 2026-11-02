@@ -75,3 +75,24 @@ def test_backtick_table_names_are_read_as_snowflake_names():
     assert _table_name("`rideflow_dev_reference`.gold.gold_dim_city") == "rideflow_dev_reference.gold.gold_dim_city"
     assert _table_name('"DB"."S"."T"') == '"DB"."S"."T"'
     assert _adapter()._resolve_source_table("table:`db`.s.t") == "db.s.t"
+
+
+def test_the_dataset_view_is_made_only_when_its_sql_names_it():
+    from lakelogic.engines.snowflake import SnowflakeAdapter
+
+    plain = _adapter()
+    assert not plain._sql_mentions("gold_dim_date")
+    named = SnowflakeAdapter(DataContract(
+        version="1.0.0", dataset="silver_trips", model={"fields": [{"name": "id", "type": "int"}]},
+        transformations=[{"phase": "post", "sql": "SELECT * FROM silver_trips WHERE id > 0"}]))
+    assert named._sql_mentions("silver_trips")
+
+
+def test_a_caller_can_keep_results_in_the_warehouse():
+    from lakelogic.core.processor import DataProcessor
+
+    proc = DataProcessor.__new__(DataProcessor)
+    proc.adapter = _adapter()
+    proc.adapter.keep_results_in_warehouse = True
+    proc._set_defer_fetch(False, None)
+    assert proc.adapter.defer_fetch is True

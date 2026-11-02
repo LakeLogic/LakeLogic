@@ -6567,6 +6567,12 @@ class DataProcessor:
             return
         adapter.defer_fetch = False  # never leak a previous run's decision
         adapter.deferred_counts = None
+        # A caller that writes the results itself, in the warehouse (the Snowflake runtime's
+        # write_in_place), asks for them to stay there: fetching rows nobody reads cost two
+        # SELECT * per contract (2026-11-02).
+        if getattr(adapter, "keep_results_in_warehouse", False):
+            adapter.defer_fetch = True
+            return
         if not materialize:
             return
         if not hasattr(adapter, "materialize_native"):

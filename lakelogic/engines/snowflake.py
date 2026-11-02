@@ -246,6 +246,9 @@ class SnowflakeAdapter(EngineAdapter):
     # default: skipping the fetch means the returned frames are EMPTY, which is only
     # correct when the caller genuinely does not need the rows in-process.
     defer_fetch: bool = False
+    #: Set by a caller that writes the results in the warehouse itself: every run then leaves
+    #: them there (see DataProcessor._set_defer_fetch) and counts them in place.
+    keep_results_in_warehouse: bool = False
 
     #: Real row counts when ``defer_fetch`` skipped the fetch — ``{"good": n, "bad": m}``.
     #: Without this the run log would derive its counts from the empty frames and
@@ -272,7 +275,13 @@ class SnowflakeAdapter(EngineAdapter):
     _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace", "merge", "upsert"}
 
     def write_in_place(
-        self, conn, source_sql: str, target: str, strategy: str, merge_keys: Optional[List[str]] = None
+        self,
+        conn,
+        source_sql: str,
+        target: str,
+        strategy: str,
+        merge_keys: Optional[List[str]] = None,
+        columns: Optional[List[Tuple[str, str]]] = None,
     ) -> int:
         """Write the rows of ``source_sql`` to ``target`` without leaving Snowflake.
 
@@ -296,16 +305,26 @@ class SnowflakeAdapter(EngineAdapter):
             if strategy in ("overwrite", "replace"):
                 cur.execute(f"CREATE OR REPLACE TABLE {target} AS {source_sql}")
                 return self._count_rows(conn, target)
-            cur.execute(f"SELECT * FROM ({source_sql}) LIMIT 0")
-            src = list(cur.description)
-            cols = [d[0] for d in src]
+            # ``columns`` — (name, Snowflake type) of the source, when the caller already has
+            # them — saves looking them up again.
+            if columns is None:
+                cur.execute(f"SELECT * FROM ({source_sql}) LIMIT 0")
+                columns = [(d[0], _column_type(d)) for d in cur.description]
+            cols = [c for c, _ in columns]
             q = ", ".join(f'"{c}"' for c in cols)
-            cur.execute(f"CREATE TABLE IF NOT EXISTS {target} AS SELECT * FROM ({source_sql}) LIMIT 0")
-            cur.execute(f"SELECT * FROM {target} LIMIT 0")
-            have = {d[0] for d in cur.description}
-            for d in src:
-                if d[0] not in have:
-                    cur.execute(f'ALTER TABLE {target} ADD COLUMN "{d[0]}" {_column_type(d)}')
+            # One statement when the target exists (its columns); created only when that
+            # read says it is missing.
+            try:
+                cur.execute(f"SELECT * FROM {target} LIMIT 0")
+                have = {d[0] for d in cur.description}
+            except Exception as exc:  # noqa: BLE001 - only "does not exist" is expected here
+                if "does not exist" not in str(exc):
+                    raise
+                cur.execute(f"CREATE TABLE {target} AS SELECT * FROM ({source_sql}) LIMIT 0")
+                have = set(cols)
+            for name, sql_type in columns:
+                if name not in have:
+                    cur.execute(f'ALTER TABLE {target} ADD COLUMN "{name}" {sql_type}')
             if strategy == "append":
                 cur.execute(f"INSERT INTO {target} ({q}) SELECT {q} FROM ({source_sql})")
                 return int(cur.rowcount or 0)
@@ -540,6 +559,27 @@ class SnowflakeAdapter(EngineAdapter):
         """Build a qualified identifier (alias + column)."""
         return f"{alias}.{self._quote_ident(name)}"
 
+    def _sql_mentions(self, name: str) -> bool:
+        """Whether any SQL the contract carries (a ``sql`` or ``query`` value anywhere in it,
+        e.g. transformations and rules) refers to ``name``. When in doubt: yes."""
+        try:
+            doc = self.contract.model_dump()
+        except Exception:  # noqa: BLE001
+            return True
+        pattern = re.compile("\\b" + re.escape(name) + "\\b", re.IGNORECASE)
+
+        def walk(node: Any) -> bool:
+            if isinstance(node, dict):
+                return any(
+                    (k in ("sql", "query") and isinstance(v, str) and pattern.search(v)) or walk(v)
+                    for k, v in node.items()
+                )
+            if isinstance(node, list):
+                return any(walk(v) for v in node)
+            return False
+
+        return walk(doc)
+
     def _create_source_alias(self, conn, table_name: str) -> None:
         """
         Create/replace the source view for SQL transformations.
@@ -549,7 +589,9 @@ class SnowflakeAdapter(EngineAdapter):
             table_name: Table to expose as `source`.
         """
         self._execute(conn, f"CREATE OR REPLACE TEMP VIEW source AS SELECT * FROM {table_name}")
-        if self.contract.dataset:
+        # The dataset-named view only when the contract's SQL names the dataset: otherwise it
+        # was a statement per contract spent on a view nothing read (2026-11-02).
+        if self.contract.dataset and self._sql_mentions(self.contract.dataset):
             self._execute(
                 conn,
                 f"CREATE OR REPLACE TEMP VIEW {self.contract.dataset} AS SELECT * FROM {table_name}",

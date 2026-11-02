@@ -266,3 +266,17 @@ def test_neither_engine_converts_the_result_to_pandas(sf_shared):
         assert "fetch_pandas_all" not in code
         assert "to_dataframe" not in code
         assert "_fetch_dataframe" not in code
+
+
+def test_known_columns_save_the_source_lookup(sf_shared):
+    """The runtime already knows its columns; the write used to look them up again (2026-11-02)."""
+    a = _sf_adapter()
+    a.write_in_place(sf_shared, "SELECT * FROM LG_GOOD_X", "ANALYTICS.ORDERS", "append",
+                     columns=[("ID", "NUMBER(38,0)"), ("NAME", "VARCHAR")])
+    assert not any("FROM (SELECT * FROM LG_GOOD_X) LIMIT 0" in s for s in sf_shared.sql)
+    assert sum(1 for s in sf_shared.sql if "LIMIT 0" in s) == 1  # the target's columns only
+
+
+def test_an_existing_target_is_not_created_again(sf_shared):
+    _sf_adapter().write_in_place(sf_shared, "SELECT * FROM LG_GOOD_X", "ANALYTICS.ORDERS", "append")
+    assert not any(s.startswith("CREATE TABLE") for s in sf_shared.sql)
