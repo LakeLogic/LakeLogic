@@ -45,3 +45,31 @@ def test_a_frame_is_loaded_into_a_temporary_table(monkeypatch):
 def test_neither_a_table_nor_a_frame_is_still_refused():
     with pytest.raises(ValueError, match="source table name or a DataFrame"):
         _adapter().execute(None)
+
+
+def test_a_snowflake_log_table_is_widened_once_per_process():
+    """936 of a 26-contract run's 1,600 statements were the same ADD COLUMN checks (2026-11-01)."""
+    from lakelogic.core import run_log
+
+    class Cur:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, q):
+            self.sql.append(q)
+
+    run_log._SNOWFLAKE_TABLES_READY.discard("db.lakelogic.t")
+    cur = Cur()
+    cols = [("a", "VARCHAR"), ("b", "FLOAT")]
+    run_log._ensure_snowflake_table(cur, "DB.LAKELOGIC.T", cols)
+    run_log._ensure_snowflake_table(cur, "db.lakelogic.t", cols)
+    assert len(cur.sql) == 3  # CREATE + 2 ALTERs, then nothing
+
+
+def test_backtick_table_names_are_read_as_snowflake_names():
+    """Shared contracts link `rideflow_dev_reference`.gold.x; Snowflake has no backticks (2026-11-02)."""
+    from lakelogic.engines.snowflake import _table_name
+
+    assert _table_name("`rideflow_dev_reference`.gold.gold_dim_city") == "rideflow_dev_reference.gold.gold_dim_city"
+    assert _table_name('"DB"."S"."T"') == '"DB"."S"."T"'
+    assert _adapter()._resolve_source_table("table:`db`.s.t") == "db.s.t"
