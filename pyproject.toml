@@ -190,11 +190,12 @@ streaming = [
     # The Bytewax/Pathway stream-processing frameworks were removed — streaming is
     # the batch contract engine run per micro-batch over these connectors, not a
     # separate stream engine. See docs/specs/streaming-contracts.md.
-    "kafka-python>=2.0.2",  # Apache Kafka
+    "confluent-kafka>=2.6.0",  # Apache Kafka (librdkafka); KafkaOffsetSource prefers it
+    "kafka-python>=2.0.2",  # pure-Python fallback, and the legacy KafkaConnector
     "sseclient-py>=1.8.0",  # Server-Sent Events (Wikimedia, etc.)
     "websocket-client>=1.6.0",  # WebSocket (Coinbase, Binance, etc.)
 ]
-kafka = ["kafka-python>=2.0.2"]
+kafka = ["confluent-kafka>=2.6.0", "kafka-python>=2.0.2"]
 sse = ["sseclient-py>=1.8.0"]
 websocket = ["websocket-client>=1.6.0"]
 snowflake = ["snowflake-connector-python>=3.5.0"]

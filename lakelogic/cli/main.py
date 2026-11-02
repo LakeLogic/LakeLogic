@@ -1726,6 +1726,7 @@ def doctor():
 
     # ── Streaming ───────────────────────────────────────────
     streaming_pkgs = [
+        ("confluent-kafka", "confluent_kafka"),
         ("kafka-python", "kafka"),
         ("sseclient-py", "sseclient"),
         ("websocket", "websocket"),

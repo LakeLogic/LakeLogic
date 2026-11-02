@@ -121,6 +121,8 @@ from lakelogic import KafkaOffsetSource, SSEOffsetSource, WatermarkChunkSource
 
 # Kafka: cursor is a per-partition broker offset — auto-commit off, LakeLogic commits
 # after the write. On restart it seeks to the committed offset per partition.
+# Uses confluent-kafka (librdkafka) when installed, else kafka-python. Extra settings
+# accept either spelling: security_protocol="SASL_SSL" or **{"fetch.min.bytes": 1048576}.
 src = KafkaOffsetSource("orders", brokers="broker:9092", group_id="lakelogic-bronze")
 
 # SSE: cursor is the Last-Event-ID string; the feed replays after it on reconnect.

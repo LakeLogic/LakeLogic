@@ -764,12 +764,20 @@ class KafkaOffsetSource:
             self.consumer = consumer
             # Default to a simple tuple-based TP for injected (test/fake) consumers.
             self._tp = tp_factory or _SimpleTP
+        elif _confluent_available():
+            # confluent-kafka (librdkafka, C) first: batch consume, several times kafka-python's
+            # throughput, and full SASL/OAUTHBEARER for Event Hubs / MSK / Confluent Cloud.
+            self.consumer = ConfluentConsumer(
+                brokers=brokers, group_id=group_id, auto_offset_reset=auto_offset_reset, **kafka_config
+            )
+            self._tp = tp_factory or _SimpleTP
         else:  # pragma: no cover - requires a live broker / kafka-python
             try:
                 from kafka import KafkaConsumer, TopicPartition
             except ImportError as exc:
                 raise ImportError(
-                    "KafkaOffsetSource needs kafka-python. Install with `pip install 'lakelogic[kafka]'`."
+                    "KafkaOffsetSource needs confluent-kafka (or kafka-python). "
+                    "Install with `pip install 'lakelogic[kafka]'`."
                 ) from exc
             self.consumer = KafkaConsumer(
                 bootstrap_servers=brokers,
@@ -875,6 +883,153 @@ class KafkaOffsetSource:
             self.consumer.close()
         except Exception:
             pass
+
+
+def _confluent_available() -> bool:
+    try:
+        import confluent_kafka  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+#: kafka-python keyword names the contract's auth settings use → librdkafka property names.
+_LIBRDKAFKA_NAMES = {
+    "sasl_plain_username": "sasl.username",
+    "sasl_plain_password": "sasl.password",
+    "ssl_cafile": "ssl.ca.location",
+    "ssl_certfile": "ssl.certificate.location",
+    "ssl_keyfile": "ssl.key.location",
+}
+
+
+def librdkafka_config(kafka_config: Dict[str, Any]) -> Dict[str, Any]:
+    """kafka-python style keywords (``security_protocol``) → librdkafka properties
+    (``security.protocol``). Dotted names pass through unchanged; ``None`` values are dropped."""
+    out: Dict[str, Any] = {}
+    for k, v in kafka_config.items():
+        if v is None:
+            continue
+        out[_LIBRDKAFKA_NAMES.get(k) or (k if "." in k else k.replace("_", "."))] = v
+    return out
+
+
+class _ConfluentRecord:
+    """A confluent-kafka ``Message`` with kafka-python's record attributes."""
+
+    __slots__ = ("topic", "partition", "offset", "value")
+
+    def __init__(self, msg: Any):
+        self.topic = msg.topic()
+        self.partition = msg.partition()
+        self.offset = msg.offset()
+        self.value = msg.value()
+
+
+class ConfluentConsumer:
+    """confluent-kafka's ``Consumer`` behind the kafka-python calls ``KafkaOffsetSource`` makes.
+
+    Offsets are never committed to the broker (``enable.auto.commit`` and
+    ``enable.auto.offset.store`` off): the LakeLogic checkpoint is the cursor. A stored offset is
+    applied by re-assigning the partitions with it, because librdkafka's ``seek`` only works on a
+    partition that is already fetching. ``consumer`` is injectable for tests.
+    """
+
+    def __init__(
+        self,
+        *,
+        brokers: Optional[Union[str, List[str]]] = None,
+        group_id: Optional[str] = None,
+        auto_offset_reset: str = "earliest",
+        consumer: Any = None,
+        **kafka_config: Any,
+    ):
+        self._reset = auto_offset_reset
+        self._offsets: Dict[_SimpleTP, Optional[int]] = {}
+        self._pending = False
+        if consumer is not None:
+            self._c = consumer
+            return
+        from confluent_kafka import Consumer  # pragma: no cover - live broker
+
+        conf = {
+            "bootstrap.servers": ",".join(brokers) if isinstance(brokers, (list, tuple)) else brokers,
+            # librdkafka needs a group id even for assign(); nothing is committed under it.
+            "group.id": group_id or "lakelogic",
+            "enable.auto.commit": False,
+            "enable.auto.offset.store": False,
+            "auto.offset.reset": auto_offset_reset,
+            **librdkafka_config(kafka_config),
+        }
+        self._c = Consumer(conf)  # pragma: no cover
+
+    @staticmethod
+    def _ctp(tp: Any, offset: Optional[int] = None) -> Any:
+        from confluent_kafka import OFFSET_INVALID, TopicPartition
+
+        return TopicPartition(tp.topic, tp.partition, OFFSET_INVALID if offset is None else offset)
+
+    def partitions_for_topic(self, topic: str) -> set:
+        meta = self._c.list_topics(topic, timeout=10)
+        t = meta.topics.get(topic)
+        if t is None or t.error is not None:
+            return set()
+        return set(t.partitions.keys())
+
+    def _apply_assignment(self) -> None:
+        """Assign once, on the first poll, with every stored offset. Assigning on each ``seek``
+        let the first assignment's fetch from offset 0 leak into the stream: a restart re-read
+        the whole topic (2026-11-02). A partition with no stored offset starts at the reset
+        position itself; OFFSET_INVALID would ask the group coordinator for committed offsets,
+        which LakeLogic never writes, and failed with NOT_COORDINATOR on a fresh broker."""
+        if not self._pending:
+            return
+        from confluent_kafka import OFFSET_BEGINNING, OFFSET_END
+
+        start = OFFSET_END if self._reset == "latest" else OFFSET_BEGINNING
+        self._c.assign([self._ctp(tp, start if off is None else off) for tp, off in self._offsets.items()])
+        self._pending = False
+
+    def assign(self, tps: List[Any]) -> None:
+        self._offsets = {_SimpleTP(tp.topic, tp.partition): None for tp in tps}
+        self._pending = True
+
+    def seek(self, tp: Any, offset: int) -> None:
+        self._offsets[_SimpleTP(tp.topic, tp.partition)] = offset
+        self._pending = True
+
+    def end_offsets(self, tps: List[Any]) -> Dict[Any, int]:
+        return {tp: self._c.get_watermark_offsets(self._ctp(tp), timeout=10)[1] for tp in tps}
+
+    def position(self, tp: Any) -> int:
+        """The next offset to read. Before the first fetch librdkafka has none, so it is the
+        stored offset, else where ``auto_offset_reset`` starts (low or high watermark)."""
+        pos = -1 if self._pending else self._c.position([self._ctp(tp)])[0].offset
+        if pos >= 0:
+            return pos
+        stored = self._offsets.get(_SimpleTP(tp.topic, tp.partition))
+        if stored is not None:
+            return stored
+        low, high = self._c.get_watermark_offsets(self._ctp(tp), timeout=10)
+        return high if self._reset == "latest" else low
+
+    def poll(self, timeout_ms: int = 1000, max_records: int = 500) -> Dict[Any, List[_ConfluentRecord]]:
+        from confluent_kafka import KafkaError, KafkaException
+
+        self._apply_assignment()
+        out: Dict[Any, List[_ConfluentRecord]] = {}
+        for msg in self._c.consume(num_messages=max_records, timeout=timeout_ms / 1000):
+            err = msg.error()
+            if err is not None:
+                if err.code() == KafkaError._PARTITION_EOF:
+                    continue
+                raise KafkaException(err)
+            rec = _ConfluentRecord(msg)
+            out.setdefault(_SimpleTP(rec.topic, rec.partition), []).append(rec)
+        return out
+
+    def close(self) -> None:
+        self._c.close()
 
 
 class SSEOffsetSource:

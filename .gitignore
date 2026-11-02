@@ -362,3 +362,6 @@ examples/streaming/data/
 
 # Database example runs (seeded SQLite file, run logs, bronze; databases.ipynb writes them)
 examples/databases/data/
+
+# Streaming benchmark notebook run output
+docs/examples/streaming_benchmark/
