@@ -77,6 +77,7 @@ def _column_type(desc: Any) -> str:
     """The Snowflake type of a result column, from the connector's cursor description."""
     try:
         from snowflake.connector.constants import FIELD_ID_TO_NAME
+
         name = FIELD_ID_TO_NAME.get(desc[1], "TEXT")
     except Exception:  # pragma: no cover - connector not importable
         name = "TEXT"
@@ -270,8 +271,9 @@ class SnowflakeAdapter(EngineAdapter):
     # a data error, not a performance one.
     _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace", "merge", "upsert"}
 
-    def write_in_place(self, conn, source_sql: str, target: str, strategy: str,
-                       merge_keys: Optional[List[str]] = None) -> int:
+    def write_in_place(
+        self, conn, source_sql: str, target: str, strategy: str, merge_keys: Optional[List[str]] = None
+    ) -> int:
         """Write the rows of ``source_sql`` to ``target`` without leaving Snowflake.
 
         ``append`` inserts, ``overwrite``/``replace`` rebuilds, ``merge``/``upsert`` updates
@@ -286,8 +288,9 @@ class SnowflakeAdapter(EngineAdapter):
         """
         strategy = (strategy or "append").lower()
         if strategy not in self._NATIVE_WRITE_STRATEGIES:
-            raise NotImplementedError(f"Snowflake writes in place with {sorted(self._NATIVE_WRITE_STRATEGIES)}, "
-                                      f"not '{strategy}'.")
+            raise NotImplementedError(
+                f"Snowflake writes in place with {sorted(self._NATIVE_WRITE_STRATEGIES)}, not '{strategy}'."
+            )
         cur = conn.cursor()
         try:
             if strategy in ("overwrite", "replace"):
@@ -359,7 +362,10 @@ class SnowflakeAdapter(EngineAdapter):
         conn = SnowflakeAdapter.shared_connection()
         target = self._quote_qualified(target_table)
         rows = self.write_in_place(
-            conn, f"SELECT * FROM {self.good_table}", target, strategy,
+            conn,
+            f"SELECT * FROM {self.good_table}",
+            target,
+            strategy,
             merge_keys=list(getattr(self.contract, "primary_key", None) or []),
         )
 
@@ -449,7 +455,9 @@ class SnowflakeAdapter(EngineAdapter):
                     continue
 
                 cols = ", ".join(link.columns) if link.columns else "*"
-                cursor.execute(f"CREATE OR REPLACE TEMP VIEW {link.name} AS SELECT {cols} FROM {_table_name(table_name)}")
+                cursor.execute(
+                    f"CREATE OR REPLACE TEMP VIEW {link.name} AS SELECT {cols} FROM {_table_name(table_name)}"
+                )
         finally:
             cursor.close()
 
@@ -462,8 +470,13 @@ class SnowflakeAdapter(EngineAdapter):
 
         name = self._temp_name("SRC")
         ok, _, rows, _ = write_pandas(
-            conn, frame, name, auto_create_table=True, table_type="temporary",
-            quote_identifiers=False, use_logical_type=True,
+            conn,
+            frame,
+            name,
+            auto_create_table=True,
+            table_type="temporary",
+            quote_identifiers=False,
+            use_logical_type=True,
         )
         if not ok:
             raise RuntimeError(f"Snowflake: could not load the source frame into {name}.")

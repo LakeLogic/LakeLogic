@@ -1,6 +1,7 @@
 """Snowflake runs a contract whose source is a frame, not a table: what external logic hands
 over (a generated date dimension). Before 2026-11-01 the engine refused it with "Snowflake
 adapter requires a source table name", so gold_dim_date could not run on Snowflake."""
+
 from __future__ import annotations
 
 import sys
@@ -15,8 +16,9 @@ from lakelogic.engines.snowflake import SnowflakeAdapter, _as_pandas
 
 
 def _adapter() -> SnowflakeAdapter:
-    return SnowflakeAdapter(DataContract(version="1.0.0", dataset="gold_dim_date",
-                                         model={"fields": [{"name": "date_key", "type": "int"}]}))
+    return SnowflakeAdapter(
+        DataContract(version="1.0.0", dataset="gold_dim_date", model={"fields": [{"name": "date_key", "type": "int"}]})
+    )
 
 
 def test_frames_of_every_kind_become_pandas():

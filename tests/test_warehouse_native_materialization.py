@@ -113,13 +113,16 @@ def test_snowflake_merge_upserts_on_the_primary_key(sf_shared):
     """A merge contract was overwritten on Snowflake (write_pandas overwrite=True), 2026-11-02."""
     from lakelogic.engines.snowflake import SnowflakeAdapter
 
-    a = SnowflakeAdapter(DataContract(version="1.0.0", dataset="orders", primary_key=["id"],
-                                      model={"fields": [{"name": "id", "type": "int"}]}))
+    a = SnowflakeAdapter(
+        DataContract(
+            version="1.0.0", dataset="orders", primary_key=["id"], model={"fields": [{"name": "id", "type": "int"}]}
+        )
+    )
     a.good_table = "LG_GOOD_X"
     a.materialize_native("ANALYTICS.ORDERS", strategy="merge")
     merge = next(s for s in sf_shared.sql if s.startswith("MERGE INTO"))
     assert 'ON t."ID" = s."ID"' in merge and 'UPDATE SET t."NAME" = s."NAME"' in merge
-    assert "QUALIFY ROW_NUMBER() OVER (PARTITION BY \"ID\"" in merge  # one row per key
+    assert 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "ID"' in merge  # one row per key
     assert 'INSERT ("ID", "NAME")' in merge
 
 
