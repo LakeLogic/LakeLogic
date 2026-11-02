@@ -7487,21 +7487,27 @@ class DataGenerator:
             elif ch == "\\" and i + 1 < n:
                 esc = pattern[i + 1]
                 if esc == "d":
+
                     def make():
                         return str(self._rng.randint(0, 9))
                 elif esc == "w":
+
                     def make():
                         return self._rng.choice(string.ascii_letters + string.digits + "_")
                 elif esc == "s":
+
                     def make():
                         return " "
                 else:
+
                     def make(esc=esc):
                         return esc  # literal escape
+
                 i += 2
 
             # ── Dot: any char ──
             elif ch == ".":
+
                 def make():
                     return self._rng.choice(string.ascii_letters + string.digits)
 
@@ -7509,6 +7515,7 @@ class DataGenerator:
 
             # ── Literal ──
             else:
+
                 def make(ch=ch):
                     return ch
 

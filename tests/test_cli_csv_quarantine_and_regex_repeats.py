@@ -37,9 +37,19 @@ def test_quarantined_rows_can_be_written_as_csv(tmp_path):
     source.write_text("order_id,amount\nA,10\nB,-5\n", encoding="utf-8")
     bad = tmp_path / "bad.csv"
 
-    run(contract=contract, source=source, engine="polars", stage=None, output_good=None,
-        output_bad=bad, output_format=None, materialize=False, materialize_target=None,
-        trace=False, verbose=False)
+    run(
+        contract=contract,
+        source=source,
+        engine="polars",
+        stage=None,
+        output_good=None,
+        output_bad=bad,
+        output_format=None,
+        materialize=False,
+        materialize_target=None,
+        trace=False,
+        verbose=False,
+    )
 
     rows = list(csv.DictReader(bad.open(encoding="utf-8")))
     assert [r["order_id"] for r in rows] == ["B"]
