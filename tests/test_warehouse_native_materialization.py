@@ -285,3 +285,63 @@ def test_known_columns_save_the_source_lookup(sf_shared):
 def test_an_existing_target_is_not_created_again(sf_shared):
     _sf_adapter().write_in_place(sf_shared, "SELECT * FROM LG_GOOD_X", "ANALYTICS.ORDERS", "append")
     assert not any(s.startswith("CREATE TABLE") for s in sf_shared.sql)
+
+
+def test_a_merge_updates_only_rows_whose_business_columns_changed(sf_shared):
+    """Every matched row was updated, restamping _lakelogic_processed_at, so an incremental
+    reader downstream saw the whole table as new each run (2026-11-02)."""
+    a = _sf_adapter()
+    a.contract = DataContract(version="1.0.0", dataset="orders", primary_key=["id"],
+                              model={"fields": [{"name": "id", "type": "int"}]})
+    a.write_in_place(sf_shared, "SELECT * FROM LG_GOOD_X", "ANALYTICS.ORDERS", "merge", merge_keys=["id"],
+                     columns=[("ID", "NUMBER"), ("NAME", "VARCHAR"), ("_LAKELOGIC_PROCESSED_AT", "VARCHAR")])
+    merge = next(s for s in sf_shared.sql if s.startswith("MERGE INTO"))
+    assert 'WHEN MATCHED AND (t."NAME" IS DISTINCT FROM s."NAME") THEN UPDATE' in merge
+    assert 'IS DISTINCT FROM s."_LAKELOGIC_PROCESSED_AT"' not in merge
+
+
+def _incremental_adapter(target):
+    from lakelogic.engines.snowflake import SnowflakeAdapter
+
+    a = SnowflakeAdapter(DataContract(
+        version="1.0.0", dataset="facts", model={"fields": [{"name": "id", "type": "int"}]},
+        source={"type": "table", "path": "table:DB.SILVER.ORDERS", "load_mode": "incremental",
+                "watermark_field": "_lakelogic_processed_at"},
+        metadata={"run_log_table": "DB.LAKELOGIC.LAKELOGIC_RUN_LOG"}))
+    a.incremental_target = target
+    return a
+
+
+def test_an_incremental_source_reads_only_rows_newer_than_the_target(sf_shared):
+    """An append fact re-appended all of silver every run on Snowflake: 400 rows for 100."""
+    view = _incremental_adapter('"DB"."GOLD"."FACTS"')._incremental_source(sf_shared, "DB.SILVER.ORDERS")
+    assert 'SELECT MAX("_LAKELOGIC_PROCESSED_AT") FROM "DB"."GOLD"."FACTS"' in sf_shared.sql
+    made = next(s for s in sf_shared.sql if s.startswith("CREATE OR REPLACE TEMP VIEW"))
+    assert view in made and "FROM DB.SILVER.ORDERS WHERE TO_VARCHAR(\"_LAKELOGIC_PROCESSED_AT\") > '42'" in made
+
+
+def test_a_full_source_or_an_unknown_target_reads_everything(sf_shared):
+    assert _incremental_adapter(None)._incremental_source(sf_shared, "DB.SILVER.ORDERS") == "DB.SILVER.ORDERS"
+    full = _incremental_adapter('"DB"."GOLD"."FACTS"')
+    full.contract.source.load_mode = "full"
+    assert full._incremental_source(sf_shared, "DB.SILVER.ORDERS") == "DB.SILVER.ORDERS"
+    assert sf_shared.sql == []
+
+
+def test_a_missing_target_is_a_first_run(sf_shared, monkeypatch):
+    def boom(self, sql, *a, **kw):
+        raise RuntimeError("Object 'DB.GOLD.FACTS' does not exist")
+
+    monkeypatch.setattr(_SFCursor, "execute", boom)
+    a = _incremental_adapter('"DB"."GOLD"."FACTS"')
+    assert a._incremental_source(sf_shared, "DB.SILVER.ORDERS") == "DB.SILVER.ORDERS"
+
+
+def test_a_landing_source_is_never_filtered(sf_shared):
+    """Bronze reads a landing table with no watermark column; filtering it failed every bronze
+    contract with "invalid identifier '_LAKELOGIC_PROCESSED_AT'" (2026-11-02)."""
+    a = _incremental_adapter('"DB"."BRONZE"."ORDERS"')
+    a.contract.source.type = "landing"
+    a.contract.source.path = "@DB.FILES.LANDING/orders"
+    assert a._incremental_source(sf_shared, "DB.FILES.LL_LANDING_ORDERS") == "DB.FILES.LL_LANDING_ORDERS"
+    assert sf_shared.sql == []

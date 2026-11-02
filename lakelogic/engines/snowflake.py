@@ -186,6 +186,8 @@ class SnowflakeAdapter(EngineAdapter):
         try:
             if frame is not None:
                 table_name = self._upload_frame(conn, frame)
+            else:
+                table_name = self._incremental_source(conn, table_name)
             self._register_links(conn)
 
             current = table_name
@@ -254,6 +256,47 @@ class SnowflakeAdapter(EngineAdapter):
     #: Without this the run log would derive its counts from the empty frames and
     #: report zero for a run that wrote millions of rows.
     deferred_counts: Optional[Dict[str, int]] = None
+
+    #: The table this run writes to, set by a caller that knows it (the Snowflake runtime). With
+    #: it, a ``load_mode: incremental`` table source reads only rows whose ``watermark_field`` is
+    #: newer than the target's latest. Without it every run read the whole source, and an
+    #: ``append`` fact re-appended all of silver each time (400 rows for 100, 2026-11-02).
+    incremental_target: Optional[str] = None
+
+    def _incremental_source(self, conn, table_name: str) -> str:
+        """``table_name``, or a view of its rows newer than the target's latest watermark."""
+        src = getattr(self.contract, "source", None)
+        mode = str(getattr(src, "load_mode", None) or "full").lower()
+        if not self.incremental_target or mode not in ("incremental", "cdc"):
+            return table_name
+        # Table sources only, as on Spark: a landing source (bronze) has no watermark column, and
+        # its files are made incremental by COPY INTO's load history instead.
+        is_table = getattr(src, "type", None) == "table" or str(getattr(src, "path", "") or "").startswith("table:")
+        if not is_table:
+            return table_name
+        if os.environ.get("LAKELOGIC_SKIP_INCREMENTAL_CHECK"):
+            return table_name
+        field = getattr(src, "watermark_field", None) or "_lakelogic_processed_at"
+        col = self._quote_ident(_fold(field))
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT MAX({col}) FROM {self.incremental_target}")
+            row = cur.fetchone()
+            latest = row[0] if row else None
+        except Exception as exc:  # noqa: BLE001 - a missing target or column is a first run
+            logger.info(f"Incremental: no watermark in {self.incremental_target} ({exc}); reading all rows.")
+            return table_name
+        finally:
+            cur.close()
+        if latest is None:
+            logger.info("Incremental: target empty; reading all rows.")
+            return table_name
+        view = self._temp_name("incremental")
+        literal = str(latest).replace("'", "''")
+        self._execute(conn, f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT * FROM {table_name} "
+                            f"WHERE TO_VARCHAR({col}) > '{literal}'")
+        logger.info(f"Incremental: {field} > {latest!r} (latest in {self.incremental_target}).")
+        return view
 
     def _count_rows(self, conn, table_name: str) -> int:
         cursor = conn.cursor()
@@ -334,10 +377,15 @@ class SnowflakeAdapter(EngineAdapter):
             part = ", ".join(f'"{k}"' for k in keys)
             on = " AND ".join(f't."{k}" = s."{k}"' for k in keys)
             sets = ", ".join(f't."{c}" = s."{c}"' for c in cols if c not in keys)
+            # A matched row is updated only when a business column changed. Updating every match
+            # restamped _lakelogic_processed_at on rows that had not changed, so an incremental
+            # reader downstream saw the whole table as new on every run (2026-11-02).
+            business = [c for c in cols if c not in keys and not c.upper().startswith("_LAKELOGIC_")]
+            changed = " OR ".join(f't."{c}" IS DISTINCT FROM s."{c}"' for c in business)
             cur.execute(
                 f"MERGE INTO {target} t USING (SELECT * FROM ({source_sql}) "
                 f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {part}) = 1) s ON {on} "
-                + (f"WHEN MATCHED THEN UPDATE SET {sets} " if sets else "")
+                + (f"WHEN MATCHED AND ({changed}) THEN UPDATE SET {sets} " if sets and changed else "")
                 + f"WHEN NOT MATCHED THEN INSERT ({q}) VALUES ({', '.join(f's.{chr(34)}{c}{chr(34)}' for c in cols)})"
             )
             row = cur.fetchone() or ()
