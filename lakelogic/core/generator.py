@@ -7462,8 +7462,10 @@ class DataGenerator:
                 inner = pattern[i + 1 : j - 1]
                 # Split on top-level pipe
                 options = self._split_alternation(inner)
-                chosen = self._rng.choice(options)
-                token = self._regex_emit(chosen)
+
+                def make(options=options):
+                    return self._regex_emit(self._rng.choice(options))
+
                 i = j
 
             # ── Character class: [A-Z0-9] ──
@@ -7475,30 +7477,41 @@ class DataGenerator:
                     j += 1
                 class_str = pattern[i + 1 : j]
                 chars = self._expand_char_class(class_str)
-                token = self._rng.choice(chars) if chars else "?"
+
+                def make(chars=chars):
+                    return self._rng.choice(chars) if chars else "?"
+
                 i = j + 1
 
             # ── Shorthand: \d, \w, \s ──
             elif ch == "\\" and i + 1 < n:
                 esc = pattern[i + 1]
                 if esc == "d":
-                    token = str(self._rng.randint(0, 9))
+                    def make():
+                        return str(self._rng.randint(0, 9))
                 elif esc == "w":
-                    token = self._rng.choice(string.ascii_letters + string.digits + "_")
+                    def make():
+                        return self._rng.choice(string.ascii_letters + string.digits + "_")
                 elif esc == "s":
-                    token = " "
+                    def make():
+                        return " "
                 else:
-                    token = esc  # literal escape
+                    def make(esc=esc):
+                        return esc  # literal escape
                 i += 2
 
             # ── Dot: any char ──
             elif ch == ".":
-                token = self._rng.choice(string.ascii_letters + string.digits)
+                def make():
+                    return self._rng.choice(string.ascii_letters + string.digits)
+
                 i += 1
 
             # ── Literal ──
             else:
-                token = ch
+                def make(ch=ch):
+                    return ch
+
                 i += 1
 
             # ── Check for quantifier after token ──
@@ -7525,7 +7538,9 @@ class DataGenerator:
             else:
                 count = 1
 
-            result.append(token * count)
+            # Each repetition is drawn again: `[0-9]{4}` used to repeat ONE digit ("ORD-3333"),
+            # so a 4-digit pattern had 10 possible values, not 10,000 (2026-11-02).
+            result.append("".join(make() for _ in range(count)))
 
         return "".join(result)
 

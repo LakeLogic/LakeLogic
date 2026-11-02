@@ -144,6 +144,11 @@ quality:
 
 These check aggregate properties of the entire good dataset — not individual rows.
 
+A dataset rule passes or fails the batch. It does not move rows to quarantine: when `unique`
+fails, every copy of a duplicate stays in the good output and the failure is recorded in the run
+report. To stop the run instead, set `quality.fail_pipeline_on_dataset_error: true`. To keep one
+row per key, add a `deduplicate` pre-transform, which runs before the rule.
+
 ### Uniqueness
 
 !!! example "Example: Ensure no duplicate customer IDs"

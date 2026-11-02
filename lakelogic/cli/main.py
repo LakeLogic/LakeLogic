@@ -64,6 +64,28 @@ from lakelogic.cli.check_cmd import check as _check_cmd  # noqa: E402
 app.command("check", rich_help_panel="Contract Execution")(_check_cmd)
 
 
+def _csv_ready(df: Any) -> Any:
+    """A Polars frame CSV can hold: list and struct columns as JSON text. Quarantined rows carry
+    ``_lakelogic_errors`` as a list, so ``--output-bad bad.csv`` failed with "CSV format does not
+    support nested data" (2026-11-02)."""
+    try:
+        import polars as pl
+    except ImportError:  # pragma: no cover - polars is a base dependency
+        return df
+    if not isinstance(df, pl.DataFrame):
+        return df
+    nested = [c for c, t in df.schema.items() if isinstance(t, (pl.List, pl.Array, pl.Struct))]
+    if not nested:
+        return df
+    return df.with_columns(
+        pl.col(c).map_elements(
+            lambda v: json.dumps(v.to_list() if hasattr(v, "to_list") else v, default=str),
+            return_dtype=pl.Utf8,
+        )
+        for c in nested
+    )
+
+
 @app.command(rich_help_panel="Contract Execution")
 def run(
     contract: Path = typer.Option(..., "--contract", "-c", help="Path to the contract YAML file."),
@@ -77,7 +99,7 @@ def run(
         "polars",
         "--engine",
         "-e",
-        help="Execution engine (polars, spark, snowflake, bigquery).",
+        help="Execution engine (polars, duckdb, spark, snowflake, bigquery).",
     ),
     stage: Optional[str] = typer.Option(
         None, "--stage", help="Apply contract stage overrides (e.g., bronze or silver)."
@@ -158,7 +180,7 @@ def run(
 
         if fmt == "csv":
             if hasattr(df, "write_csv"):
-                df.write_csv(path)
+                _csv_ready(df).write_csv(path)
             elif hasattr(df, "to_csv"):  # pragma: no cover
                 df.to_csv(path, index=False)  # pragma: no cover
             else:  # pragma: no cover
