@@ -24,7 +24,9 @@ def _contract(tmp_path, table_format="delta", quarantine=None):
         "info": {"title": "rides"},
         "dataset": "rides",
         "primary_key": ["ride_id"],
-        "model": {"fields": [{"name": "ride_id", "type": "long", "required": True}, {"name": "fare", "type": "double"}]},
+        "model": {
+            "fields": [{"name": "ride_id", "type": "long", "required": True}, {"name": "fare", "type": "double"}]
+        },
         "quality": {"row_rules": [{"name": "fare_positive", "sql": "fare > 0"}]},
         "materialization": {"strategy": "merge", "format": table_format, "target_path": str(tmp_path / "rides")},
         "quarantine": quarantine or {"target": str(tmp_path / "quarantine")},

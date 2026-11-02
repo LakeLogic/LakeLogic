@@ -6708,8 +6708,7 @@ class DataProcessor:
                 # 2026-11-02 beside an Iceberg table). Stop the batch; the next run retries it.
                 if getattr(self, "quarantine_must_persist", False):
                     raise RuntimeError(
-                        f"Quarantine write failed, so this micro-batch was not committed and will be "
-                        f"retried: {q_err}"
+                        f"Quarantine write failed, so this micro-batch was not committed and will be retried: {q_err}"
                     ) from q_err
                 logger.warning(
                     f"⚠️ Quarantine write failed (pipeline continues): {q_err}. "
