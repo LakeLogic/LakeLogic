@@ -293,8 +293,10 @@ class SnowflakeAdapter(EngineAdapter):
             return table_name
         view = self._temp_name("incremental")
         literal = str(latest).replace("'", "''")
-        self._execute(conn, f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT * FROM {table_name} "
-                            f"WHERE TO_VARCHAR({col}) > '{literal}'")
+        self._execute(
+            conn,
+            f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT * FROM {table_name} WHERE TO_VARCHAR({col}) > '{literal}'",
+        )
         logger.info(f"Incremental: {field} > {latest!r} (latest in {self.incremental_target}).")
         return view
 

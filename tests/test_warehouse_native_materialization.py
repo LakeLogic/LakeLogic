@@ -291,10 +291,17 @@ def test_a_merge_updates_only_rows_whose_business_columns_changed(sf_shared):
     """Every matched row was updated, restamping _lakelogic_processed_at, so an incremental
     reader downstream saw the whole table as new each run (2026-11-02)."""
     a = _sf_adapter()
-    a.contract = DataContract(version="1.0.0", dataset="orders", primary_key=["id"],
-                              model={"fields": [{"name": "id", "type": "int"}]})
-    a.write_in_place(sf_shared, "SELECT * FROM LG_GOOD_X", "ANALYTICS.ORDERS", "merge", merge_keys=["id"],
-                     columns=[("ID", "NUMBER"), ("NAME", "VARCHAR"), ("_LAKELOGIC_PROCESSED_AT", "VARCHAR")])
+    a.contract = DataContract(
+        version="1.0.0", dataset="orders", primary_key=["id"], model={"fields": [{"name": "id", "type": "int"}]}
+    )
+    a.write_in_place(
+        sf_shared,
+        "SELECT * FROM LG_GOOD_X",
+        "ANALYTICS.ORDERS",
+        "merge",
+        merge_keys=["id"],
+        columns=[("ID", "NUMBER"), ("NAME", "VARCHAR"), ("_LAKELOGIC_PROCESSED_AT", "VARCHAR")],
+    )
     merge = next(s for s in sf_shared.sql if s.startswith("MERGE INTO"))
     assert 'WHEN MATCHED AND (t."NAME" IS DISTINCT FROM s."NAME") THEN UPDATE' in merge
     assert 'IS DISTINCT FROM s."_LAKELOGIC_PROCESSED_AT"' not in merge
@@ -303,11 +310,20 @@ def test_a_merge_updates_only_rows_whose_business_columns_changed(sf_shared):
 def _incremental_adapter(target):
     from lakelogic.engines.snowflake import SnowflakeAdapter
 
-    a = SnowflakeAdapter(DataContract(
-        version="1.0.0", dataset="facts", model={"fields": [{"name": "id", "type": "int"}]},
-        source={"type": "table", "path": "table:DB.SILVER.ORDERS", "load_mode": "incremental",
-                "watermark_field": "_lakelogic_processed_at"},
-        metadata={"run_log_table": "DB.LAKELOGIC.LAKELOGIC_RUN_LOG"}))
+    a = SnowflakeAdapter(
+        DataContract(
+            version="1.0.0",
+            dataset="facts",
+            model={"fields": [{"name": "id", "type": "int"}]},
+            source={
+                "type": "table",
+                "path": "table:DB.SILVER.ORDERS",
+                "load_mode": "incremental",
+                "watermark_field": "_lakelogic_processed_at",
+            },
+            metadata={"run_log_table": "DB.LAKELOGIC.LAKELOGIC_RUN_LOG"},
+        )
+    )
     a.incremental_target = target
     return a
 
