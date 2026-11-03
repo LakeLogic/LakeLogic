@@ -151,6 +151,7 @@ LakeLogic does not create organisational ownership, access policies, alert deliv
 | [Developer Experience](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/04_developer_experience.ipynb) | Validation, diagnostics, CI/CD, and development workflows. |
 | [Data Generation and AI](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/05_data_generation_ai.ipynb) | Synthetic test data and optional AI-assisted workflows. |
 | [Integrations](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/06_integrations.ipynb) | dbt, dlt, databases, streaming sources, and notifications. |
+| [Streaming Benchmark](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/12_streaming_benchmark.ipynb) | Kafka into Delta with Polars, DuckDB and Spark: throughput, freshness, quarantine and rerun safety. |
 
 ## Documentation
 
