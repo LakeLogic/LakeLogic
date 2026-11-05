@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.0.0] — 2026-11-05
+
+### Build
+
+- Require Python 3.11 (**BREAKING**)
+
+### Documentation
+
+- Update changelog for v1.90.0
+
+### Fixed
+
+- **deps**: Pillow 13 for the document extras on Python 3.11+; dnspython 2.9.2 in the lock
 ## [1.90.0] — 2026-11-05
 
 ### Added
@@ -1177,6 +1190,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.0.0]: https://github.com/lakelogic/LakeLogic/compare/v1.90.0...v2.0.0
 [1.90.0]: https://github.com/lakelogic/LakeLogic/compare/v1.89.0...v1.90.0
 [1.89.0]: https://github.com/lakelogic/LakeLogic/compare/v1.88.4...v1.89.0
 [1.88.4]: https://github.com/lakelogic/LakeLogic/compare/v1.88.3...v1.88.4
