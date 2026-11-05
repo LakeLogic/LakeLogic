@@ -298,6 +298,7 @@ pdf = [
 documents = [
     "pdfplumber>=0.10.0",
     "rapidocr>=3.0.0",
+    "pillow>=13.0.0; python_version >= '3.11'",  # reads untrusted images/PDFs: 13.0 fixes heap overflows in JPEG/TIFF/FPX decoding (Dependabot, 2026-11-05)
     "onnxruntime>=1.17.0",
     "python-docx>=1.1.0",
     "python-pptx>=1.0.0",
@@ -322,6 +323,7 @@ extraction-ocr = [
     # 0.24.1, which does not support 3.10. On 3.10 this extra installs without unstructured.
     "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1; python_version >= '3.11'",
     "rapidocr>=3.0.0",
+    "pillow>=13.0.0; python_version >= '3.11'",  # reads untrusted images/PDFs: 13.0 fixes heap overflows in JPEG/TIFF/FPX decoding (Dependabot, 2026-11-05)
     "onnxruntime>=1.17.0",
     "pdfplumber>=0.10.0",
     "pypandoc-binary>=1.13",
@@ -413,6 +415,7 @@ managed = true
 constraint-dependencies = [
     "nltk>=3.9.4; python_version >= '3.10'",    # CVE-2025-14009 Zip Slip, Path Traversal AFO, remote shutdown, XSS, unbounded recursion
     "pillow>=12.1.1; python_version >= '3.10'",  # CVE-2026-25990 PSD out-of-bounds write, FITS GZIP decompression bomb
+    "pillow>=13.0.0; python_version >= '3.11'",  # 13.0: JPEG/TIFF/FPX heap overflows; 13 dropped 3.10, which stays on 12.x
     "orjson>=3.11.6; python_version >= '3.10'",  # CVE-2025-67221 recursion DoS on deeply nested JSON
     "pytest>=9.0.3; python_version >= '3.10'",  # CVE-2025-71176 predictable tmpdir symlink attack
     # SSRF (#93, fixed 0.24.0) and stored XSS (#94, fixed 0.24.1). The fixes need Python 3.11+,
