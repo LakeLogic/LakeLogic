@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.90.0] — 2026-11-05
+
+### Added
+
+- **extraction**: Azure OpenAI, Gemini and Bedrock read documents on every engine; unknown model cost is null, not 0
+
+### Documentation
+
+- **examples**: Streaming benchmark notebook update
+- **examples**: Describe every function in the streaming benchmark notebook
+- **examples**: Streaming benchmark notebook (Kafka to Delta on Polars, DuckDB and Spark) in Learn by Doing
+- Update changelog for v1.89.0
 ## [1.89.0] — 2026-11-02
 
 ### Added
@@ -1165,6 +1177,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[1.90.0]: https://github.com/lakelogic/LakeLogic/compare/v1.89.0...v1.90.0
 [1.89.0]: https://github.com/lakelogic/LakeLogic/compare/v1.88.4...v1.89.0
 [1.88.4]: https://github.com/lakelogic/LakeLogic/compare/v1.88.3...v1.88.4
 [1.88.3]: https://github.com/lakelogic/LakeLogic/compare/v1.88.2...v1.88.3
