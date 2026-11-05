@@ -3,7 +3,7 @@ name = "lakelogic"
 version = "1.90.0"
 description = "Run YAML data contracts with Polars, DuckDB or Spark. Validate data, apply transformations and quarantine failed rows."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 # authors = [{ name = "LakeLogic Team", email = "lakelogic@gmail.com" }]
 license = { text = "Apache-2.0" }
 keywords = [
@@ -30,7 +30,6 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -298,7 +297,7 @@ pdf = [
 documents = [
     "pdfplumber>=0.10.0",
     "rapidocr>=3.0.0",
-    "pillow>=13.0.0; python_version >= '3.11'",  # reads untrusted images/PDFs: 13.0 fixes heap overflows in JPEG/TIFF/FPX decoding (Dependabot, 2026-11-05)
+    "pillow>=13.0.0",  # reads untrusted images/PDFs: 13.0 fixes heap overflows in JPEG/TIFF/FPX decoding (Dependabot, 2026-11-05)
     "onnxruntime>=1.17.0",
     "python-docx>=1.1.0",
     "python-pptx>=1.0.0",
@@ -309,9 +308,8 @@ documents = [
 # For MS Office docs: libreoffice
 # See: https://docs.unstructured.io/open-source/installation/full-installation
 extraction = [
-    # Python 3.11+ only: the fixes for SSRF (Dependabot #93) and stored XSS (#94) are in
-    # 0.24.1, which does not support 3.10. On 3.10 this extra installs without unstructured.
-    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1; python_version >= '3.11'",
+    # 0.24.1: fixes for SSRF (Dependabot #93) and stored XSS (#94).
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1",
     "pypandoc-binary>=1.13",
     "spacy>=3.7.0",
     "textblob>=0.18.0",
@@ -319,11 +317,10 @@ extraction = [
 # Extraction + image/PDF OCR — pure Python, no system deps, no torch
 # rapidocr handles images via ONNX Runtime; pdfplumber handles PDFs
 extraction-ocr = [
-    # Python 3.11+ only: the fixes for SSRF (Dependabot #93) and stored XSS (#94) are in
-    # 0.24.1, which does not support 3.10. On 3.10 this extra installs without unstructured.
-    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1; python_version >= '3.11'",
+    # 0.24.1: fixes for SSRF (Dependabot #93) and stored XSS (#94).
+    "unstructured[csv,doc,docx,pptx,xlsx,md,rst,tsv]>=0.24.1",
     "rapidocr>=3.0.0",
-    "pillow>=13.0.0; python_version >= '3.11'",  # reads untrusted images/PDFs: 13.0 fixes heap overflows in JPEG/TIFF/FPX decoding (Dependabot, 2026-11-05)
+    "pillow>=13.0.0",  # reads untrusted images/PDFs: 13.0 fixes heap overflows in JPEG/TIFF/FPX decoding (Dependabot, 2026-11-05)
     "onnxruntime>=1.17.0",
     "pdfplumber>=0.10.0",
     "pypandoc-binary>=1.13",
@@ -413,14 +410,12 @@ managed = true
 
 # Security: force minimum versions for transitive deps to close Dependabot alerts
 constraint-dependencies = [
-    "nltk>=3.9.4; python_version >= '3.10'",    # CVE-2025-14009 Zip Slip, Path Traversal AFO, remote shutdown, XSS, unbounded recursion
-    "pillow>=12.1.1; python_version >= '3.10'",  # CVE-2026-25990 PSD out-of-bounds write, FITS GZIP decompression bomb
-    "pillow>=13.0.0; python_version >= '3.11'",  # 13.0: JPEG/TIFF/FPX heap overflows; 13 dropped 3.10, which stays on 12.x
-    "orjson>=3.11.6; python_version >= '3.10'",  # CVE-2025-67221 recursion DoS on deeply nested JSON
-    "pytest>=9.0.3; python_version >= '3.10'",  # CVE-2025-71176 predictable tmpdir symlink attack
-    # SSRF (#93, fixed 0.24.0) and stored XSS (#94, fixed 0.24.1). The fixes need Python 3.11+,
-    # so the extras no longer install unstructured on 3.10 at all (see `extraction`).
-    "unstructured>=0.24.1; python_version >= '3.11'",
+    "nltk>=3.9.4",    # CVE-2025-14009 Zip Slip, Path Traversal AFO, remote shutdown, XSS, unbounded recursion
+    "pillow>=13.0.0",  # 13.0: JPEG/TIFF/FPX heap overflows (12.1.1: CVE-2026-25990 PSD OOB write)
+    "orjson>=3.11.6",  # CVE-2025-67221 recursion DoS on deeply nested JSON
+    "pytest>=9.0.3",  # CVE-2025-71176 predictable tmpdir symlink attack
+    # SSRF (#93, fixed 0.24.0) and stored XSS (#94, fixed 0.24.1).
+    "unstructured>=0.24.1",
 ]
 
 [dependency-groups]
@@ -467,7 +462,7 @@ version_files = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py311"
 exclude = [
     "_ref",
     ".venv",

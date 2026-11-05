@@ -11,7 +11,7 @@
 [![PyPI](https://img.shields.io/pypi/v/lakelogic?logo=pypi&logoColor=white)](https://pypi.org/project/lakelogic/)
 [![CI](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/LakeLogic/LakeLogic/actions/workflows/ci-gate.yml)
 [![codecov](https://codecov.io/gh/LakeLogic/LakeLogic/graph/badge.svg)](https://codecov.io/gh/LakeLogic/LakeLogic)
-[![Python](https://img.shields.io/badge/python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org)
+[![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python&logoColor=white)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](https://github.com/LakeLogic/LakeLogic/blob/main/LICENSE)
 
 Define your sources, transformations and quality rules in an [Open Lakehouse Contract (OLC)](https://olc.lakelogic.io/). LakeLogic Core runs the supported steps with Polars, DuckDB or Spark, separating accepted rows from failed rows and recording why they failed.
