@@ -11,6 +11,11 @@ from lakelogic.engines.base import EngineAdapter
 from ..core import types as _types
 
 
+def _is_extraction_lineage(column: str) -> bool:
+    """A column the extraction engine writes about HOW a row was read (``engines.llm``)."""
+    return column.startswith("_lakelogic_llm_") or column == "_lakelogic_extraction_confidence"
+
+
 class SparkAdapter(EngineAdapter):
     """
     Spark execution engine for LakeLogic.
@@ -1139,6 +1144,10 @@ class SparkAdapter(EngineAdapter):
                 select_exprs.extend([F.col(c) for c in sorted(unknown)])
         # Spark rebuilds the frame from the model, so a carried marker is selected explicitly.
         select_exprs.extend([F.col(c) for c in CARRIED_MARKERS if c in existing])
+        # So is the extraction's lineage — model, provider, tokens, cost, latency, prompt hash,
+        # confidence. Polars keeps these on every row; this select dropped them, so a Spark
+        # bronze table could not say what reading its documents cost (2026-11-04).
+        select_exprs.extend([F.col(c) for c in sorted(system_cols) if _is_extraction_lineage(c)])
 
         df = df.select(*select_exprs)
 

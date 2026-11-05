@@ -260,6 +260,7 @@ ai = [
     "google-genai>=0.5.0",
     "typing-extensions>=4.12.0",  # PEP 728 TypedDict support for google-genai on Python <3.12
     "instructor>=1.5.0",  # typed LLM output + auto-retry for `lakelogic review` Tier 2
+    "boto3>=1.28.0",  # provider: bedrock — Bedrock Converse in the customer's AWS account
 ]
 # Tiered code reviewer (`lakelogic review`).
 # Tier 1 = deterministic (ruff + sqlfluff + PII regex), no API key required.

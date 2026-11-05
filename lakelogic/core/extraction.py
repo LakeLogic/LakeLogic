@@ -37,10 +37,21 @@ def _rows_to_frame(rows: list, like: Any) -> Any:
     """list[dict] -> a frame in the SAME framework as ``like``."""
     mod = type(like).__module__
     if mod.startswith("pyspark"):
-        import pandas as pd
+        # An explicit schema: a column null in every row (an unpriced model's cost, a field no
+        # document stated) is un-inferrable on Spark Connect — CANNOT_DETERMINE_TYPE.
+        from pyspark.sql.types import DoubleType, StructField, StructType
 
-        # Round-trip via pandas so mixed/None extracted columns get a stable schema.
-        return like.sparkSession.createDataFrame(pd.DataFrame(rows))
+        from lakelogic.core.processor import DataProcessor
+
+        schema, keys = DataProcessor._spark_schema_for_extracted_rows(rows)
+        schema = StructType([
+            StructField(f.name, DoubleType(), True) if f.name.endswith("_cost_usd") else f for f in schema.fields
+        ])
+        data = [
+            tuple((float(r[k]) if k.endswith("_cost_usd") and r.get(k) is not None else r.get(k)) for k in keys)
+            for r in rows
+        ]
+        return like.sparkSession.createDataFrame(data, schema)
     if mod.startswith("polars"):
         import polars as pl
 
@@ -85,4 +96,29 @@ def apply_extraction(contract: Any, df: Any, engine_name: str) -> Any:
     if failures:
         logger.warning(f"Extraction failed for {len(failures)}/{len(enriched)} rows: {failures[0]}")
 
+    drop = _read_text_column_to_drop(contract, config)
+    if drop:
+        for r in enriched:
+            r.pop(drop, None)
     return _rows_to_frame(enriched, df)
+
+
+def _read_text_column_to_drop(contract: Any, config: Any) -> str:
+    """The column of text the engine READ from each document (``preprocessing.text_output_column``)
+    — dropped after extraction unless ``extraction.keep_document_text: true``, or the contract
+    declares that column as a field. A document's full text can carry personal data the
+    extracted fields were chosen to leave out, and it is the bulk of the row (2026-11-04).
+    A text column the SOURCE supplied (a ticket body) is never dropped: only read text is."""
+    prep = getattr(config, "preprocessing", None)
+    column = getattr(prep, "text_output_column", None) if prep else None
+    if not column:
+        return ""
+    keep = getattr(config, "keep_document_text", None)
+    if keep is None and getattr(config, "model_extra", None):
+        keep = config.model_extra.get("keep_document_text")
+    if keep is True or str(keep).lower() == "true":
+        return ""
+    fields = getattr(getattr(contract, "model", None), "fields", None) or []
+    if any((getattr(f, "name", None) or (f.get("name") if isinstance(f, dict) else None)) == column for f in fields):
+        return ""
+    return column

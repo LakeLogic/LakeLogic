@@ -1739,6 +1739,61 @@ class DataProcessor:
                 pass
         return [{k: (file_path if v == local else v) for k, v in r.items()} for r in rows]
 
+    def _model_document_frame(self, file_paths: list, fmt: str) -> Any:
+        """One row per document — ``{file_column: path, text_column: text}`` — for a MODEL reader.
+
+        The text is read here, by the engine's own preprocessor for the format (the shared
+        pdfplumber / RapidOCR reader for PDFs), so a remote file (abfss://, s3://, dbfs:/) is
+        fetched through Spark exactly as the file readers fetch it. ``preprocess_row`` then sees
+        the text already present and does not read the file a second time.
+        """
+        from lakelogic.engines.llm import _PREPROCESSORS
+
+        cfg = self.contract.extraction
+        if not getattr(cfg, "output_schema", None):
+            # The fields are the model's instruction (``engines.llm._fields_prompt``).
+            _fields = getattr(getattr(self.contract, "model", None), "fields", None)
+            if _fields:
+                cfg.output_schema = list(_fields)
+        prep = getattr(cfg, "preprocessing", None)
+        file_col = (getattr(prep, "file_column", None) if prep else None) or "file_path"
+        text_col = (
+            (getattr(prep, "text_output_column", None) if prep else None)
+            or getattr(cfg, "text_column", None)
+            or "document_text"
+        )
+        content_type = (getattr(prep, "content_type", None) if prep else None) or fmt or "pdf"
+        reader = _PREPROCESSORS.get(content_type) or _PREPROCESSORS["document"]
+        options = ((getattr(prep, "ocr", None) or {}) if prep else {}) or {}
+
+        def _one(local_path: str, _config: Any) -> list:
+            return [{file_col: local_path, text_col: reader(local_path, options)}]
+
+        spark = None
+        if self.engine_name == "spark":
+            from pyspark.sql import SparkSession
+
+            spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+        rows: list = []
+        errors: list = []
+        for fp in file_paths:
+            try:
+                rows.extend(self._extract_file_via_spark(spark, fp, cfg, _one) if spark else _one(fp, cfg))
+            except Exception as exc:  # noqa: BLE001 — one unreadable file must not hide the rest
+                logger.warning(f"could not read the text of {fp}: {exc}")
+                errors.append(f"{fp}: {exc}")
+        self._raise_if_all_files_failed(str(getattr(cfg, "provider", "")), file_paths, errors)
+        logger.info(f"Model extraction: {len(rows)} document(s) read to text for provider={cfg.provider}")
+
+        if spark is not None:
+            from pyspark.sql.types import StringType, StructField, StructType
+
+            schema = StructType([StructField(file_col, StringType(), True), StructField(text_col, StringType(), True)])
+            return spark.createDataFrame([(r[file_col], r[text_col]) for r in rows], schema)
+        import polars as pl
+
+        return pl.DataFrame(rows, schema={file_col: pl.Utf8, text_col: pl.Utf8})
+
     def _raise_if_all_files_failed(self, provider: str, file_paths: list, errors: list) -> None:
         """Fail the run when a file provider could not read a single matched file.
 
@@ -3369,6 +3424,18 @@ class DataProcessor:
             if _empty_result is not None:
                 return _empty_result
             raise FileNotFoundError(_msg)
+
+        # A MODEL reads the documents (openai / azure_openai / anthropic / google / bedrock):
+        # each file becomes one row of its path + text, and run() sends the text to the model.
+        # Without this a model contract on PDFs fell through to the tabular readers and failed
+        # on every engine ("Failed to find the data source: pdf" on Spark, 2026-11-04).
+        if _is_non_tabular and file_paths:
+            from lakelogic.engines.llm import MODEL_EXTRACT_PROVIDERS
+
+            if _early_ext_prov in MODEL_EXTRACT_PROVIDERS:
+                with self.trace_step("Load Source", path=str(path)):
+                    df = self._model_document_frame(file_paths, _early_fmt)
+                return self.run(df, source_path=path, reset_trace=False)
 
         with self.trace_step("Load Source", path=str(path)):
             if self.engine_name in ("polars", "duckdb"):

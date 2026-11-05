@@ -13,8 +13,7 @@ Supported providers::
     provider: anthropic       # Claude 3.5 Sonnet, Haiku
     provider: azure_openai    # Azure-hosted OpenAI
     provider: google          # Gemini 2.0 Flash, Gemini Pro
-    provider: bedrock         # AWS Bedrock (Claude, Llama, Titan)
-    provider: ollama          # Local models via Ollama
+    provider: bedrock         # Amazon Bedrock via Converse (Claude, Nova, Llama, Mistral)
     provider: local           # Direct HuggingFace transformers
     provider: unstructured    # Document parsing (PDF, DOCX, HTML)
     provider: spacy           # NER + text classification (local, fast)
@@ -93,13 +92,73 @@ from lakelogic.core.models import DataContract, ExtractionConfig
 # ── Provider Clients ──────────────────────────────────────────────────────────
 
 
+#: Credentials come from the RUNNING environment (the customer's platform secrets or IAM
+#: role), never from the contract: a contract is committed to a repository.
+#:   openai        OPENAI_API_KEY
+#:   anthropic     ANTHROPIC_API_KEY
+#:   azure_openai  AZURE_OPENAI_API_KEY + endpoint (contract ``endpoint`` or AZURE_OPENAI_ENDPOINT);
+#:                 ``model`` is the DEPLOYMENT name
+#:   google        GOOGLE_API_KEY (or GEMINI_API_KEY)
+#:   bedrock       the AWS identity the job runs as (IAM role / profile / env keys); region from
+#:                 the contract ``region``, else AWS_REGION / AWS_DEFAULT_REGION
+_INSTALL_HINT = "Install with: pip install lakelogic[ai]"
+
+
+def _extra(config: ExtractionConfig, name: str) -> Optional[str]:
+    """A provider setting the contract may carry beside the OLC fields (``endpoint``, ``region``)."""
+    value = getattr(config, name, None)
+    if value is None and getattr(config, "model_extra", None):
+        value = config.model_extra.get(name)
+    return str(value) if value not in (None, "") else None
+
+
+def _require_model(config: ExtractionConfig, provider: str, what: str = "model") -> str:
+    model = (config.model or "").strip()
+    if not model or model == "auto":
+        raise ValueError(f"provider={provider!r} needs an explicit {what} in extraction.model, not 'auto'")
+    return model
+
+
 def _init_openai(config: ExtractionConfig) -> Any:
     """Initialize OpenAI client."""
     try:
         from openai import OpenAI
     except ImportError:
-        raise ImportError("openai is required for provider='openai'. Install with: pip install lakelogic[llm]")
+        raise ImportError(f"openai is required for provider='openai'. {_INSTALL_HINT}")
     return OpenAI()
+
+
+def _azure_base_url(endpoint: str) -> str:
+    """The resource's OpenAI-compatible v1 base: ``https://<resource>.openai.azure.com/openai/v1``."""
+    base = endpoint.strip().rstrip("/")
+    for suffix in ("/chat/completions", "/openai/v1"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+    return f"{base}/openai/v1"
+
+
+def _init_azure_openai(config: ExtractionConfig) -> Any:
+    """Azure OpenAI through its v1 API on the customer's own resource.
+
+    The plain ``OpenAI()`` client this used to build sent the Azure key to api.openai.com,
+    which answers 401 — Azure extraction never worked (found 2026-11-04)."""
+    import os
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise ImportError(f"openai is required for provider='azure_openai'. {_INSTALL_HINT}")
+    endpoint = _extra(config, "endpoint") or os.environ.get("AZURE_OPENAI_ENDPOINT")
+    key = os.environ.get("AZURE_OPENAI_API_KEY")
+    if not endpoint:
+        raise ValueError(
+            "provider='azure_openai' needs the resource endpoint: set extraction.endpoint "
+            "or AZURE_OPENAI_ENDPOINT"
+        )
+    if not key:
+        raise ValueError("provider='azure_openai' needs AZURE_OPENAI_API_KEY in the environment")
+    _require_model(config, "azure_openai", "deployment name")
+    return OpenAI(api_key=key, base_url=_azure_base_url(endpoint))
 
 
 def _init_anthropic(config: ExtractionConfig) -> Any:
@@ -107,26 +166,47 @@ def _init_anthropic(config: ExtractionConfig) -> Any:
     try:
         from anthropic import Anthropic
     except ImportError:
-        raise ImportError("anthropic is required for provider='anthropic'. Install with: pip install lakelogic[llm]")
+        raise ImportError(f"anthropic is required for provider='anthropic'. {_INSTALL_HINT}")
     return Anthropic()
 
 
 def _init_google(config: ExtractionConfig) -> Any:
-    """Initialize Google Generative AI client."""
+    """Gemini through the ``google-genai`` SDK — the one ``lakelogic[ai]`` installs. The old
+    ``google.generativeai`` import this used was never installed by that extra."""
+    import os
+
     try:
-        import google.generativeai as genai
+        from google import genai
     except ImportError:
-        raise ImportError(
-            "google-generativeai is required for provider='google'. Install with: pip install google-generativeai"
-        )
-    return genai
+        raise ImportError(f"google-genai is required for provider='google'. {_INSTALL_HINT}")
+    key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    return genai.Client(api_key=key) if key else genai.Client()
+
+
+def _init_bedrock(config: ExtractionConfig) -> Any:
+    """Amazon Bedrock in the customer's own AWS account, authenticated as whatever identity the
+    job runs under (IAM role on Glue/EMR/Databricks-on-AWS) — no key in the contract."""
+    import os
+
+    try:
+        import boto3
+    except ImportError:
+        raise ImportError(f"boto3 is required for provider='bedrock'. {_INSTALL_HINT}")
+    region = (
+        _extra(config, "region") or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    )
+    if not region:
+        raise ValueError("provider='bedrock' needs a region: set extraction.region or AWS_REGION")
+    _require_model(config, "bedrock", "model id")
+    return boto3.client("bedrock-runtime", region_name=region)
 
 
 _PROVIDER_INIT = {
     "openai": _init_openai,
     "anthropic": _init_anthropic,
-    "azure_openai": _init_openai,  # same SDK, different base_url
+    "azure_openai": _init_azure_openai,
     "google": _init_google,
+    "bedrock": _init_bedrock,
 }
 
 
@@ -156,12 +236,72 @@ def _render_prompt(template: str, row: Dict[str, Any]) -> str:
     return Template(template).render(**row)
 
 
+def _fields_prompt(config: ExtractionConfig, text: str) -> str:
+    """The model's instruction when the contract gives no template: return these fields, by
+    name and type, as one JSON object, from this text. Missing values are null, never guessed."""
+    lines = []
+    for f in getattr(config, "output_schema", None) or []:
+        name = getattr(f, "name", None) or (f.get("name") if isinstance(f, dict) else None)
+        if not name or name == "file_path":
+            continue
+        ftype = getattr(f, "type", None) or (f.get("type") if isinstance(f, dict) else None) or "string"
+        desc = getattr(f, "description", None) or (f.get("description") if isinstance(f, dict) else None)
+        lines.append(f"- {name} ({ftype})" + (f": {desc}" if desc else ""))
+    wanted = "\n".join(lines) if lines else "- every field the document states"
+    return (
+        "Extract these fields from the document below. Reply with one JSON object whose keys are "
+        "exactly the field names. Numbers and decimals as plain numbers without currency; dates "
+        "as YYYY-MM-DD; a field the document does not state is null.\n\n"
+        f"Fields:\n{wanted}\n\nDocument:\n{text}"
+    )
+
+
 def _prompt_hash(template: str) -> str:
     """SHA-256 hash of the prompt template for lineage reproducibility."""
-    return hashlib.sha256(template.encode("utf-8")).hexdigest()[:16]
+    # No template = the fields prompt (``_fields_prompt``); hash "" rather than crash on None.
+    return hashlib.sha256((template or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _instruction_hash(config: ExtractionConfig) -> str:
+    """The lineage hash of the instruction the model got: the contract's template, else the
+    fields prompt WITHOUT the document — the same for every document a contract reads, and
+    different when its fields change. Hashing the absent template gave every such contract
+    one hash (e3b0c442…, the hash of ""), 2026-11-05."""
+    return _prompt_hash(config.prompt_template or _fields_prompt(config, ""))
 
 
 # ── LLM Extraction ───────────────────────────────────────────────────────────
+
+
+def _is_reasoning_model(model: Optional[str]) -> bool:
+    """GPT-5 and o-series models take ``max_completion_tokens`` and only the default temperature."""
+    name = (model or "").lower().rsplit("/", 1)[-1]
+    return name.startswith("gpt-5") or bool(re.match(r"o\d", name))
+
+
+def _reasoning_retry_kwargs(kwargs: Dict[str, Any], exc: Exception) -> Optional[Dict[str, Any]]:
+    """The request re-shaped for a reasoning model, when the API refused ``max_tokens`` or
+    ``temperature``; ``None`` when the error is anything else (or it was already re-shaped)."""
+    text = str(exc).lower()
+    if "max_tokens" not in kwargs and "temperature" not in kwargs:
+        return None
+    if not ("unsupported" in text or "not supported" in text or "does not support" in text):
+        return None
+    if "max_tokens" not in text and "temperature" not in text:
+        return None
+    retry = {k: v for k, v in kwargs.items() if k not in ("max_tokens", "temperature")}
+    retry["max_completion_tokens"] = kwargs.get("max_tokens", kwargs.get("max_completion_tokens"))
+    return retry
+
+
+def _extract_azure_openai(
+    client: Any,
+    config: ExtractionConfig,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Azure OpenAI: the OpenAI request on the customer's resource; ``model`` is the deployment."""
+    return _extract_openai(client, config, prompt, system_prompt, provider="azure_openai")
 
 
 def _extract_openai(
@@ -169,6 +309,7 @@ def _extract_openai(
     config: ExtractionConfig,
     prompt: str,
     system_prompt: Optional[str] = None,
+    provider: str = "openai",
 ) -> Dict[str, Any]:
     """Call OpenAI API and return parsed JSON + usage metadata."""
     messages = []
@@ -176,17 +317,24 @@ def _extract_openai(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    kwargs: Dict[str, Any] = {
-        "model": config.model,
-        "messages": messages,
-        "temperature": config.temperature,
-        "max_tokens": config.max_tokens,
-    }
+    kwargs: Dict[str, Any] = {"model": config.model, "messages": messages}
+    if _is_reasoning_model(config.model):
+        # GPT-5 / o-series: max_completion_tokens only, and no temperature but the default.
+        kwargs["max_completion_tokens"] = config.max_tokens
+    else:
+        kwargs["temperature"] = config.temperature
+        kwargs["max_tokens"] = config.max_tokens
     if config.response_format == "json":
         kwargs["response_format"] = {"type": "json_object"}
 
     start = time.perf_counter()
-    response = client.chat.completions.create(**kwargs)
+    try:
+        response = client.chat.completions.create(**kwargs)
+    except Exception as exc:  # an Azure deployment name need not say which model is behind it
+        retry = _reasoning_retry_kwargs(kwargs, exc)
+        if retry is None:
+            raise
+        response = client.chat.completions.create(**retry)
     elapsed_ms = int((time.perf_counter() - start) * 1000)
 
     choice = response.choices[0]
@@ -201,16 +349,14 @@ def _extract_openai(
 
     # Lineage metadata
     extracted["_lakelogic_llm_model"] = response.model
-    extracted["_lakelogic_llm_provider"] = "openai"
-    extracted["_lakelogic_llm_prompt_hash"] = _prompt_hash(config.prompt_template)
+    extracted["_lakelogic_llm_provider"] = provider
+    extracted["_lakelogic_llm_prompt_hash"] = _instruction_hash(config)
     extracted["_lakelogic_llm_token_input"] = usage.prompt_tokens if usage else 0
     extracted["_lakelogic_llm_token_output"] = usage.completion_tokens if usage else 0
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
 
-    # Estimate cost (approximate, based on public pricing)
-    input_cost = (extracted["_lakelogic_llm_token_input"] / 1_000_000) * _get_input_price(config.model)
-    output_cost = (extracted["_lakelogic_llm_token_output"] / 1_000_000) * _get_output_price(config.model)
-    extracted["_lakelogic_llm_cost_usd"] = round(input_cost + output_cost, 6)
+    extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
 
     return extracted
 
@@ -242,12 +388,96 @@ def _extract_anthropic(
 
     extracted["_lakelogic_llm_model"] = response.model
     extracted["_lakelogic_llm_provider"] = "anthropic"
-    extracted["_lakelogic_llm_prompt_hash"] = _prompt_hash(config.prompt_template)
+    extracted["_lakelogic_llm_prompt_hash"] = _instruction_hash(config)
     extracted["_lakelogic_llm_token_input"] = response.usage.input_tokens
     extracted["_lakelogic_llm_token_output"] = response.usage.output_tokens
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
-    extracted["_lakelogic_llm_cost_usd"] = 0.0  # TODO: pricing table
+    extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
 
+    return extracted
+
+
+def _parse_model_json(raw_text: str) -> Dict[str, Any]:
+    """The model's JSON object; a reply fenced as ```json … ``` is unwrapped first."""
+    text = (raw_text or "").strip()
+    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {"_raw_response": raw_text, "_parse_error": True}
+    return parsed if isinstance(parsed, dict) else {"_raw_response": raw_text, "_parse_error": True}
+
+
+def _extract_google(
+    client: Any,
+    config: ExtractionConfig,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Gemini via ``google-genai``: ``client.models.generate_content``."""
+    gen_config: Dict[str, Any] = {"max_output_tokens": config.max_tokens, "temperature": config.temperature}
+    if config.response_format == "json":
+        gen_config["response_mime_type"] = "application/json"
+    if system_prompt:
+        gen_config["system_instruction"] = system_prompt
+
+    start = time.perf_counter()
+    response = client.models.generate_content(
+        model=_require_model(config, "google"), contents=prompt, config=gen_config
+    )
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    extracted = _parse_model_json(getattr(response, "text", "") or "")
+    usage = getattr(response, "usage_metadata", None)
+    extracted["_lakelogic_llm_model"] = config.model
+    extracted["_lakelogic_llm_provider"] = "google"
+    extracted["_lakelogic_llm_prompt_hash"] = _instruction_hash(config)
+    extracted["_lakelogic_llm_token_input"] = int(getattr(usage, "prompt_token_count", 0) or 0)
+    extracted["_lakelogic_llm_token_output"] = int(getattr(usage, "candidates_token_count", 0) or 0)
+    extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
+    extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
+    return extracted
+
+
+def _extract_bedrock(
+    client: Any,
+    config: ExtractionConfig,
+    prompt: str,
+    system_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Bedrock's Converse API — one request shape for every model family on Bedrock (Claude,
+    Nova, Llama, Mistral). Converse has no JSON mode, so the prompt asks for JSON."""
+    text = prompt
+    if config.response_format == "json":
+        text = f"{prompt}\n\nReply with a single JSON object and nothing else."
+    kwargs: Dict[str, Any] = {
+        "modelId": _require_model(config, "bedrock", "model id"),
+        "messages": [{"role": "user", "content": [{"text": text}]}],
+        "inferenceConfig": {"maxTokens": config.max_tokens, "temperature": config.temperature},
+    }
+    if system_prompt:
+        kwargs["system"] = [{"text": system_prompt}]
+
+    start = time.perf_counter()
+    response = client.converse(**kwargs)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    parts = ((response.get("output") or {}).get("message") or {}).get("content") or []
+    raw_text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+    extracted = _parse_model_json(raw_text)
+    usage = response.get("usage") or {}
+    extracted["_lakelogic_llm_model"] = config.model
+    extracted["_lakelogic_llm_provider"] = "bedrock"
+    extracted["_lakelogic_llm_prompt_hash"] = _instruction_hash(config)
+    extracted["_lakelogic_llm_token_input"] = int(usage.get("inputTokens", 0) or 0)
+    extracted["_lakelogic_llm_token_output"] = int(usage.get("outputTokens", 0) or 0)
+    extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
+    extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
     return extracted
 
 
@@ -310,7 +540,7 @@ def _extract_local(
 
     extracted["_lakelogic_llm_model"] = config.model
     extracted["_lakelogic_llm_provider"] = "local"
-    extracted["_lakelogic_llm_prompt_hash"] = _prompt_hash(config.prompt_template)
+    extracted["_lakelogic_llm_prompt_hash"] = _instruction_hash(config)
     extracted["_lakelogic_llm_token_input"] = 0
     extracted["_lakelogic_llm_token_output"] = 0
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
@@ -951,9 +1181,15 @@ def _extract_spacy(
 
 _PROVIDER_EXTRACT = {
     "openai": _extract_openai,
-    "azure_openai": _extract_openai,
+    "azure_openai": _extract_azure_openai,
     "anthropic": _extract_anthropic,
+    "google": _extract_google,
+    "bedrock": _extract_bedrock,
 }
+
+#: Providers that send each row's TEXT to a model. A documents source read by one of these is
+#: read to text first (``DataProcessor._model_document_frame``).
+MODEL_EXTRACT_PROVIDERS = frozenset(_PROVIDER_EXTRACT)
 
 
 # ── Cost Pricing Tables ──────────────────────────────────────────────────────
@@ -977,20 +1213,51 @@ _OUTPUT_PRICES: Dict[str, float] = {
 }
 
 
+def _table_price(table: Dict[str, float], model: str) -> Optional[float]:
+    """The table's price for a model — the LONGEST matching key, so ``gpt-4o-mini`` is not
+    priced as ``gpt-4o`` (the first-match loop did that, ~17x too high). None when unknown."""
+    name = (model or "").lower()
+    hits = [k for k in table if k in name]
+    return table[max(hits, key=len)] if hits else None
+
+
 def _get_input_price(model: str) -> float:
-    """Get per-1M-token input price for a model."""
-    for key, price in _INPUT_PRICES.items():
-        if key in model:
-            return price
-    return 0.0
+    """Per-1M-token input price for a model (0.0 when unknown — prefer ``_cost_usd``)."""
+    return _table_price(_INPUT_PRICES, model) or 0.0
 
 
 def _get_output_price(model: str) -> float:
-    """Get per-1M-token output price for a model."""
-    for key, price in _OUTPUT_PRICES.items():
-        if key in model:
-            return price
-    return 0.0
+    """Per-1M-token output price for a model (0.0 when unknown — prefer ``_cost_usd``)."""
+    return _table_price(_OUTPUT_PRICES, model) or 0.0
+
+
+def _contract_price(config: ExtractionConfig, name: str) -> Optional[float]:
+    value = getattr(config, name, None)
+    if value is None and getattr(config, "model_extra", None):
+        value = config.model_extra.get(name)
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _cost_usd(config: ExtractionConfig, tokens_in: int, tokens_out: int) -> Optional[float]:
+    """What one model call cost, in USD — or None when it cannot be known.
+
+    The contract's own prices win (``extraction.input_price_per_million`` /
+    ``output_price_per_million``: the customer's model, region and agreement); then Core's
+    table; otherwise None. A model with no known price used to report 0.0 — a confident
+    "free" for gpt-5, every Azure deployment, Anthropic, Gemini and Bedrock (2026-11-04).
+    """
+    price_in = _contract_price(config, "input_price_per_million")
+    price_out = _contract_price(config, "output_price_per_million")
+    if price_in is None:
+        price_in = _table_price(_INPUT_PRICES, config.model)
+    if price_out is None:
+        price_out = _table_price(_OUTPUT_PRICES, config.model)
+    if price_in is None or price_out is None:
+        return None
+    return round(tokens_in / 1_000_000 * price_in + tokens_out / 1_000_000 * price_out, 6)
 
 
 # ── Confidence Scoring ────────────────────────────────────────────────────────
@@ -1137,6 +1404,9 @@ def preprocess_row(
     file_path = str(row.get(file_col, ""))
     if not file_path:
         return row
+    if str(row.get(prep.text_output_column) or "").strip():
+        # Already read to text (``run_source`` reads each document once, remote files too).
+        return row
 
     content_type = prep.content_type
     preprocessor = _PREPROCESSORS.get(content_type)
@@ -1225,6 +1495,10 @@ def extract_row(
     provider = config.provider
     if config.prompt_template and provider not in ("unstructured", "spacy", "regex"):
         prompt = _render_prompt(config.prompt_template, row)
+    elif provider in _PROVIDER_EXTRACT:
+        # No template: the contract's own fields ARE the instruction. Sending the bare text
+        # gave the model no idea what to return (found on Databricks, 2026-11-04).
+        prompt = _fields_prompt(config, str(row.get(config.text_column or "text", "")))
     else:
         # For unstructured/spacy/regex: pass the text column value directly
         text_col = config.text_column or "text"
@@ -1256,7 +1530,7 @@ def extract_row(
     else:
         raise ValueError(
             f"Unknown extraction provider: {provider!r}. "
-            f"Supported: openai, anthropic, azure_openai, google, local, "
+            f"Supported: openai, anthropic, azure_openai, google, bedrock, local, "
             f"regex, unstructured, spacy, pdfplumber, rapidocr, easyocr"
         )
 
@@ -1398,6 +1672,7 @@ def extract_batch(
 
     results: List[Dict[str, Any]] = []
     total_cost = 0.0
+    unmeasured = 0  # calls whose price is unknown: not counted as $0
 
     for i, row in enumerate(rows):
         # Cost ceiling check
@@ -1415,7 +1690,11 @@ def extract_batch(
 
         try:
             result = extract_row(row, config, client)
-            total_cost += result.get("_lakelogic_llm_cost_usd", 0.0)
+            cost = result.get("_lakelogic_llm_cost_usd", 0.0)
+            if cost is None:
+                unmeasured += 1
+            else:
+                total_cost += cost
             results.append(result)
 
         except Exception as exc:
@@ -1426,6 +1705,18 @@ def extract_batch(
             row_copy[conf_col] = 0.0
             results.append(row_copy)
 
-    logger.info(f"Extraction complete: {len(results)} rows processed, total cost: ${total_cost:.4f}")
+    if unmeasured:
+        logger.info(
+            f"Extraction complete: {len(results)} rows processed; cost not measured for {unmeasured} "
+            f"(no price for model {config.model!r} — set extraction.input_price_per_million and "
+            f"output_price_per_million). Measured: ${total_cost:.4f}"
+        )
+        if config.max_cost_per_run:
+            logger.warning(
+                f"max_cost_per_run (${config.max_cost_per_run}) could not be enforced on "
+                f"{unmeasured} call(s) with no known price"
+            )
+    else:
+        logger.info(f"Extraction complete: {len(results)} rows processed, total cost: ${total_cost:.4f}")
 
     return results
