@@ -588,6 +588,56 @@ def _stamp_quarantine_lineage(
         return df
 
 
+ERROR_TEXT_COLUMN = "_lakelogic_error_text"
+_ERROR_TEXT_SEPARATOR = "; "
+
+
+def add_error_text(df: Any, errors_column: str = "_lakelogic_errors") -> Any:
+    """Add ``_lakelogic_error_text``: the row's rejection reasons joined into one string.
+
+    ``_lakelogic_errors`` is a list (a row can fail several rules). Readers that cannot see list
+    columns -- Fabric's SQL endpoint, and so every Power BI report on a lakehouse -- showed no
+    reason at all (Tagus Air, 2026-11-16). The list stays the authority; this is a readable copy.
+    A frame without the errors column, or of an unknown kind, is returned unchanged.
+    """
+    try:
+        cols = list(df.columns) if hasattr(df, "columns") else []
+    except Exception:
+        return df
+    if errors_column not in cols or ERROR_TEXT_COLUMN in cols:
+        return df
+    try:
+        if hasattr(df, "sparkSession"):
+            from pyspark.sql import functions as F
+            from pyspark.sql.types import ArrayType
+
+            dtype = df.schema[errors_column].dataType
+            src = F.col(errors_column)
+            text = F.concat_ws(_ERROR_TEXT_SEPARATOR, src) if isinstance(dtype, ArrayType) else src.cast("string")
+            return df.withColumn(ERROR_TEXT_COLUMN, text)
+        if _is_polars_frame(df):
+            import polars as pl
+
+            dtype = df.collect_schema()[errors_column] if hasattr(df, "collect_schema") else df.schema[errors_column]
+            src = pl.col(errors_column)
+            text = (src.list.join(_ERROR_TEXT_SEPARATOR) if isinstance(dtype, pl.List)
+                    else src.cast(pl.Utf8))
+            return df.with_columns(text.alias(ERROR_TEXT_COLUMN))
+        if type(df).__name__ == "DataFrame" and hasattr(df, "assign"):  # pandas
+
+            def _join(v):
+                if v is None:
+                    return None
+                if isinstance(v, (list, tuple)) or type(v).__name__ == "ndarray":
+                    return _ERROR_TEXT_SEPARATOR.join(str(x) for x in v if x is not None)
+                return str(v)
+
+            return df.assign(**{ERROR_TEXT_COLUMN: df[errors_column].map(_join)})
+    except Exception as exc:  # never lose quarantine rows over a convenience column
+        logger.warning(f"Could not add {ERROR_TEXT_COLUMN}: {exc}")
+    return df
+
+
 # ──
 def materialize_quarantine(
     df: Any,
@@ -630,6 +680,7 @@ def materialize_quarantine(
         _already_stamped = True
     if not _already_stamped:
         df = _stamp_quarantine_lineage(df, contract)
+    df = add_error_text(df)
 
     # ── Empty row guard (skip writing altogether to avoid writer crashes) ──
     try:

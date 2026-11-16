@@ -49,6 +49,7 @@ META_CONTRACT_NAME = "_lakelogic_contract_name"
 META_DOMAIN = "_lakelogic_domain"
 META_SYSTEM = "_lakelogic_system"
 META_ERRORS = "_lakelogic_errors"
+META_ERROR_TEXT = "_lakelogic_error_text"  # the errors list joined with "; " (readers without list types)
 META_EXTRACTION_CONFIDENCE = "_lakelogic_extraction_confidence"
 
 
