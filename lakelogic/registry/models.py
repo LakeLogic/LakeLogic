@@ -108,6 +108,9 @@ class DomainManifestV1(_StrictManifest):
     quarantine: Dict[str, Any] = Field(default_factory=dict)
     lineage: Dict[str, Any] = Field(default_factory=dict)
     materialization: Dict[str, Any] = Field(default_factory=dict)
+    # Business concepts the domain owns and has confirmed (written by the business ontology
+    # "Confirm concepts" flow): concept name -> its identifier, definition and aliases.
+    concepts: Dict[str, Any] = Field(default_factory=dict)
     server: Dict[str, Any] = Field(default_factory=dict)
 
     # ── data products (domain-only, not inherited) ───────────────────────────────
@@ -165,6 +168,10 @@ class SystemManifestV1(_StrictManifest):
 
     # ── structural (system-only) ─────────────────────────────────────────────
     contracts: List[RegistryContract] = Field(default_factory=list)
+    # How tables are addressed: "catalog" (catalog.schema.table) or "path" (storage URI). The
+    # runtime `DomainRegistry` reads it; the manifest rejected it, so every generated
+    # `_system.yaml` failed `registry validate` while running fine (2026-11-16).
+    storage_mode: Optional[str] = None
     storage: Optional[RegistryStorage] = None
     environments: Dict[str, EnvironmentConfig] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)

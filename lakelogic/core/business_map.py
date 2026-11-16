@@ -44,6 +44,21 @@ line per pair of entities: a name-only guess beside a stated line for the same p
 Questions are one per subject (an identifier name, a pair of entities, a group of unmapped
 contracts), each with ``impact`` = the data contracts its answer settles, ranked by impact and
 capped at ``question_limit``; ``coverage.questions_total`` counts all of them.
+
+Measures — each entity with an identifier also carries three lists, all exact column-name
+matches on that identifier (a shared name is a hint, never proof of the same meaning). Measured on
+an ID-like name (``_id``, ``_code`` …), a code a Gold dimension is keyed on (``cabin``), or — with no
+single identifier — the entity's composite key, matched in full (``measured_by``); ``status`` or ``Id``
+get empty lists:
+
+* ``appears_in`` — silver contracts with a column named like the identifier. Its length sizes the
+  entity's circle on the Business ontology page; it says how widely the identifier is used, not
+  how important the concept is.
+* ``curated_in`` — gold dimensions of the entity: mapped to it, or keyed on exactly its identifier.
+* ``facts`` — gold facts and roll-ups with a column named like the identifier.
+
+Whether a data product publishes the entity is not decided here: the platform reads declared
+products with its own reader and checks them against ``appears_in``-style column matches.
 """
 
 from __future__ import annotations
@@ -56,6 +71,14 @@ __all__ = ["derive_business_map"]
 #: Columns that look like an identifier. Only these drive name-only links and questions: a
 #: shared ``status`` or ``name`` column says nothing about identity.
 _ID_LIKE = re.compile(r"_(id|key|code|number|no|sk)$")
+#: A column that identifies something on its own (a booking's record_locator, an aircraft's registration).
+_STANDALONE_KEY = re.compile(r"_(id|token|locator|registration|tag|uuid|guid)$")
+#: A number that identifies only with its companions (flight_number needs a carrier and a date).
+_QUALIFIED_KEY = re.compile(r"_(number|no)$")
+#: The key of a calendar dimension: a shared calendar, not a business concept.
+_CALENDAR_KEYS = {"date_key", "date_sk", "date_id", "calendar_key", "calendar_date"}
+#: Column names too generic to measure a concept by, even when a dimension is keyed on them.
+_GENERIC_COLUMNS = {"id", "key", "code", "name", "status", "state", "type", "category", "reason", "value"}
 _STATE_RANK = {"inferred": 0, "declared": 1, "confirmed": 2}
 _LAYER_PREFIXES = ("bronze", "silver", "gold", "raw", "staging", "stg")
 _GOLD_KIND_PREFIXES = (("dim_", "dimension"), ("fact_", "fact"), ("fct_", "fact"))
@@ -94,6 +117,57 @@ def _title(stem: str) -> str:
 
 def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+_META_COLUMNS = {"system", "source_system", "ingested_at", "load_ts", "loaded_at", "updated_at", "created_at"}
+
+
+#: Link kinds the contracts state outright (a key, a join, SQL that joins): "observed".
+_OBSERVED_LINK_KINDS = {"join", "foreign_key", "sql_join", "annotation"}
+
+
+def link_evidence_state(rel: Dict[str, Any]) -> str:
+    """One of observed / suggested / confirmed — the business-facing evidence state of a link.
+
+    confirmed: the owning domain approved it (``_domain.yaml``); observed: a key or join the
+    contracts state; suggested: plausible only (a shared key, a reference column name, a read,
+    a shared name). The platform page, the Turtle export and MCP all read this field."""
+    if rel.get("state") == "confirmed":
+        return "confirmed"
+    return "observed" if rel.get("kind") in _OBSERVED_LINK_KINDS else "suggested"
+
+
+def concept_evidence_state(ent: Dict[str, Any]) -> str:
+    """confirmed: in a merged ``_domain.yaml`` (meaning approved); observed: its identifier is held
+    by a contract; suggested: named from patterns only."""
+    if ent.get("state") == "confirmed":
+        return "confirmed"
+    has_key = bool(ent.get("identifier_columns") or ent.get("identifier"))
+    held = len(ent.get("held_in") or []) + len(ent.get("appears_in") or [])
+    return "observed" if has_key and held else "suggested"
+
+
+def _reference_column(entity_name: str, identifier: Optional[str]) -> Optional[str]:
+    """``AccountId`` for an entity named Account keyed by a plain ``Id``; else None."""
+    if not identifier or identifier.lower() != "id":
+        return None
+    return "".join(w[:1].upper() + w[1:] for w in entity_name.split()) + "Id"
+
+
+def _sql_tables(sql: str) -> List[str]:
+    """Table names a transformation's SQL reads, without its own CTE names or ``source``."""
+    try:
+        import sqlglot
+        from sqlglot import exp
+
+        trees = [t for t in sqlglot.parse(sql) if t is not None]
+        ctes = {c.alias_or_name.lower() for t in trees for c in t.find_all(exp.CTE)}
+        names = {tb.name.lower() for t in trees for tb in t.find_all(exp.Table) if tb.name}
+    except Exception:  # noqa: BLE001 - unparseable SQL falls back to FROM/JOIN names
+        ctes = {m.lower() for m in re.findall(r"(?i)(?:with|,)\s*([a-z_][a-z0-9_]*)\s+as\s*\(", sql)}
+        names = {m.lower() for m in re.findall(r"(?i)\b(?:from|join)\s+([a-z_][a-z0-9_.]*)", sql)}
+        names = {n.split(".")[-1] for n in names}
+    return sorted(names - ctes - {"source"})
 
 
 def _evidence(kind: str, contract: Optional[str], column: Optional[str], detail: str) -> Dict[str, Any]:
@@ -456,11 +530,14 @@ def derive_business_map(
                 "identifier": None,
                 "grain": None,
                 "owner": None,
+                "owner_scope": None,
                 "state": state,
                 "properties": [],
                 "contracts": [],
                 "evidence": [],
                 "conflicts": [],
+                "shared_key": False,
+                "calendar": False,
             }
             entities[key] = ent
             alias_index[key] = key
@@ -609,6 +686,15 @@ def derive_business_map(
             # A business key over a warehouse surrogate (customer_id over customer_sk).
             single = [pc.key[0] for pc in mapped if len(pc.key) == 1 and pc.kind not in ("fact", "aggregate")]
             ent["identifier"] = next((k for k in single if not k.endswith("_sk")), single[0] if single else None)
+        # The columns that identify it: the single identifier, else the composite key of its own
+        # non-fact contract (silver first), else of any contract mapped to it (a gold-only fact).
+        if ent["identifier"]:
+            ent["identifier_columns"] = [ent["identifier"]]
+        else:
+            own = [p for p in mapped if len(p.key) > 1 and p.kind not in ("fact", "aggregate")]
+            own.sort(key=lambda p: (p.layer != "silver", p.name))
+            anyk = [p for p in mapped if len(p.key) > 1]
+            ent["identifier_columns"] = list((own or anyk)[0].key) if (own or anyk) else []
         if ent["grain"] is None:
             for pc in mapped:
                 if pc.grain:
@@ -616,6 +702,28 @@ def derive_business_map(
                     break
         if ent["owner"] is None:
             ent["owner"] = next((pc.owner for pc in mapped if pc.owner), None)
+            if ent["owner"]:
+                ent["owner_scope"] = "contract"
+        if ent["owner"] is None:
+            # Who answers for what it MEANS: the same resolver the platform routes questions with
+            # (contract → domain, then the domain file's legacy domain_owner/team). A domain that
+            # names an owner is not "not recorded".
+            canon = next((p for p in mapped if p.layer == "silver"), mapped[0] if mapped else None)
+            dom = (canon.domain if canon else None) or (ent["domains"][0] if ent["domains"] else None)
+            dom_own = ((domains or {}).get(dom) or {}).get("ownership") if dom else None
+            try:
+                from lakelogic.registry.ownership import resolve_route
+
+                route = resolve_route(
+                    "business_semantics",
+                    contract=(canon.raw.get("ownership") if canon and isinstance(canon.raw.get("ownership"), dict) else None),
+                    domain=dom_own if isinstance(dom_own, dict) else None,
+                )
+            except Exception:  # noqa: BLE001 - a malformed ownership block leaves the owner unknown
+                route = None
+            if route is not None and route.routable:
+                ent["owner"] = route.party.display
+                ent["owner_scope"] = route.scope
         props: Dict[str, Dict[str, Any]] = {}
         for pc in mapped:
             for f in pc.fields:
@@ -760,6 +868,141 @@ def derive_business_map(
                             break
                     relationship(target["name"], pc.entity, verb, card, "confirmed", ev)
 
+    # 4e. Inferred links beyond surrogate keys.
+    #   composite_key — another concept's contract holds the WHOLE composite key (one shared
+    #                   column such as flight_number is never enough).
+    #   sql_join      — a Gold fact's transformation SQL reads another concept's contract.
+    #   reads         — a Gold fact's declared source or links[] name another concept's contract.
+    for ent in sorted(entities.values(), key=lambda e: e["name"]):
+        cols = ent.get("identifier_columns") or []
+        if len(cols) < 2:
+            continue
+        for pc in sorted(parsed, key=lambda p: p.name):
+            if pc.entity and pc.entity != ent["name"] and all(c in pc.by_col for c in cols):
+                relationship(
+                    ent["name"], pc.entity, _NO_VERB, "unknown", "inferred",
+                    _evidence("composite_key", pc.name, ", ".join(cols),
+                              f"{pc.name} holds {ent['name']}'s whole key ({', '.join(cols)})"),
+                )
+    for pc in sorted(parsed, key=lambda p: p.name):
+        if not pc.entity or pc.layer != "gold" or pc.kind not in ("fact", "aggregate"):
+            continue
+        inputs: List[Tuple[str, str]] = []
+        for t in pc.raw.get("transformations") or []:
+            if isinstance(t, dict) and _s(t.get("sql")):
+                inputs += [(name, "sql_join") for name in _sql_tables(_s(t.get("sql")))]
+        links_decl = [_s(x.get("name")) for x in (pc.raw.get("links") or []) if isinstance(x, dict)]
+        inputs += [(name, "reads") for name in pc.reads + links_decl if name]
+        seen: set = set()
+        for name, kind in inputs:
+            src = resolve_contract(name)
+            if src is None or not src.entity or src.entity == pc.entity or (src.entity, kind) in seen:
+                continue
+            seen.add((src.entity, kind))
+            how = "its SQL reads" if kind == "sql_join" else "it reads"
+            relationship(
+                src.entity, pc.entity, _NO_VERB, "unknown", "inferred",
+                _evidence(kind, pc.name, None, f"{pc.name}: {how} {src.name}"),
+            )
+
+    #   reference_column — a concept keyed by a plain ``Id`` is referenced by ``<Name>Id`` in another
+    #                      concept's contract (Contact.AccountId -> Account), Salesforce's convention.
+    for ent in sorted(entities.values(), key=lambda e: e["name"]):
+        ref = _reference_column(ent["name"], ent.get("identifier"))
+        if not ref:
+            continue
+        for pc in sorted(parsed, key=lambda p: p.name):
+            if pc.entity and pc.entity != ent["name"] and ref in pc.by_col:
+                relationship(
+                    ent["name"], pc.entity, _NO_VERB, "unknown", "inferred",
+                    _evidence("reference_column", pc.name, ref, f"{pc.name}.{ref} references {ent['name']}.Id"),
+                )
+
+    # 4f. Shared keys. A business key carried by the Silver contracts of several concepts, with no
+    #     table of its own: a booking's record_locator, a passenger_token, an aircraft_registration,
+    #     an operated flight (carrier + flight_number + flight_date). It becomes a concept
+    #     (``shared_key: True``; suggested, since nothing states its meaning) linked to each concept
+    #     holding the WHOLE key (``shared_key``) and to each holding only its main column
+    #     (``partial_key``: a PNR segment's flight_number beside a marketing carrier and departure date).
+    #     A number needs companions (dates, or codes a Gold lookup is keyed on) present in at least
+    #     60% of the contracts holding it; one shared flight_number alone is never a concept.
+    silver = sorted((pc for pc in parsed if pc.layer == "silver" and pc.entity), key=lambda p: p.name)
+    own_keys = {
+        tuple(sorted(e.get("identifier_columns") or ([e["identifier"]] if e.get("identifier") else [])))
+        for e in entities.values()
+    } - {()}
+    owned_single = {k[0] for k in own_keys if len(k) == 1}
+    lookup_codes = {
+        e["identifier"] for k, e in entities.items()
+        if e.get("identifier") and members.get(k) and all(p.layer == "gold" and p.kind == "dimension" for p in members[k])
+    }
+
+    def holders(cols: List[str]) -> List[_Contract]:
+        return [pc for pc in silver if all(c in pc.by_col for c in cols)]
+
+    all_cols = sorted({c for pc in silver for c in pc.by_col})
+    for col in all_cols:
+        low = col.lower()
+        if low in _GENERIC_COLUMNS or low in _META_COLUMNS or col in owned_single or col.startswith("_") or col.endswith("_sk"):
+            continue
+        held_by = holders([col])
+        if len({pc.entity for pc in held_by}) < 2:
+            continue
+        if _STANDALONE_KEY.search(low):
+            key = [col]
+        elif _QUALIFIED_KEY.search(low):
+            need = max(2, -(-len(held_by) * 3 // 5))
+            companions = [
+                c for c in all_cols
+                if c != col and c.lower() not in _GENERIC_COLUMNS
+                and (c.lower().endswith("_date") or c in lookup_codes)
+                and sum(1 for pc in held_by if c in pc.by_col) >= need
+            ]
+            if not companions:
+                continue
+            key = sorted(companions + [col])
+        else:
+            continue
+        whole = holders(key)
+        if len({pc.entity for pc in whole}) < 2 or tuple(sorted(key)) in own_keys:
+            continue
+        name = _title(re.sub(r"_(id|token|number|no|uuid|guid)$", "", low))
+        # A concept already known by this name (or alias) keeps its own key — unless it has none and
+        # no contract: a domain-file concept confirmed FROM this shared key (Record locator renamed
+        # Booking reference). It takes the key over; skipping it lost the key and every link.
+        existing = find_entity(name) if name else None
+        if not name or (existing is not None and (
+            existing.get("identifier") or existing.get("identifier_columns") or members.get(_norm(existing["name"]))
+        )):
+            continue
+        ent = existing or entity(name, "inferred")
+        name = ent["name"]
+        ent["shared_key"] = True
+        ent["identifier_columns"] = key
+        doms = [pc.domain for pc in whole if pc.domain]
+        if not ent.get("domains"):
+            ent["domains"] = [max(sorted(set(doms)), key=doms.count)] if doms else []
+        own_keys.add(tuple(sorted(key)))
+        linked = set()
+        for pc in whole:
+            if pc.entity in linked:
+                continue
+            linked.add(pc.entity)
+            relationship(
+                name, pc.entity, _NO_VERB, "unknown", "inferred",
+                _evidence("shared_key", pc.name, ", ".join(key), f"{pc.name} holds the shared key ({', '.join(key)})"),
+            )
+        if len(key) > 1:
+            for pc in held_by:
+                if pc.entity in linked:
+                    continue
+                linked.add(pc.entity)
+                relationship(
+                    name, pc.entity, _NO_VERB, "unknown", "inferred",
+                    _evidence("partial_key", pc.name, col,
+                              f"{pc.name} holds {col} but not the whole key ({', '.join(key)})"),
+                )
+
     # 4b. Name-only matches (inferred, cardinality unknown): `<x>_id` equal to another entity's identifier.
     for pc in sorted(parsed, key=lambda p: p.name):
         if not pc.entity:
@@ -821,7 +1064,8 @@ def derive_business_map(
     #     pair (either direction) adds nothing; two name-only guesses keep one direction.
     def rel_kind(rel: Dict[str, Any]) -> str:
         kinds = {e["kind"] for e in rel["evidence"]}
-        for k in ("domain_file", "annotation", "foreign_key", "join"):
+        for k in ("domain_file", "annotation", "foreign_key", "join", "sql_join", "composite_key", "reference_column",
+                  "shared_key", "partial_key", "reads"):
             if k in kinds:
                 return k
         return "name_only"
@@ -841,6 +1085,7 @@ def derive_business_map(
             del relationships[(dst, src)]
     for rel in relationships.values():
         rel["kind"] = rel_kind(rel)
+        rel["evidence_state"] = link_evidence_state(rel)
 
     # 5. Questions — one per subject (an identifier name, a pair of concepts, a group of
     #    unmapped contracts), ranked by how many data contracts the answer settles.
@@ -930,6 +1175,90 @@ def derive_business_map(
     questions_by_kind: Dict[str, int] = {}
     for q in questions:
         questions_by_kind[q["kind"]] = questions_by_kind.get(q["kind"], 0) + 1
+
+    # 5b. Measures: where each entity's identifier appears (see module docstring).
+    for ent in entities.values():
+        ident = ent.get("identifier")
+        appears: List[str] = []
+        curated: List[str] = []
+        facts: List[str] = []
+        # The columns that identify the entity. A single identifier counts when it is ID-like
+        # (``_id``, ``_code`` …) or a Gold dimension is keyed on exactly it (a stated code such as
+        # ``cabin``); a shared ``status`` or ``Id`` says nothing. With no single identifier, the
+        # composite key of its own non-fact contract (silver first) — every column must be present.
+        key_cols: List[str] = []
+        if ident and ident.lower() not in _GENERIC_COLUMNS and (
+            _ID_LIKE.search(ident)
+            or any(pc.layer == "gold" and pc.kind == "dimension" and pc.key == [ident] for pc in parsed)
+        ):
+            key_cols = [ident]
+        elif not ident:
+            key_cols = list(ent.get("identifier_columns") or [])
+        # A plain ``Id`` key (Salesforce): measured by the ``<Name>Id`` reference column other
+        # contracts hold (AccountId for Account), plus the entity's own contracts, which hold Id.
+        ref = _reference_column(ent["name"], ident)
+        own_names = {p.name for p in members.get(_norm(ent["name"]), [])}
+        if ref and own_names:
+            key_cols = [ref]
+        ent["measured_by"] = key_cols
+        if key_cols:
+            for pc in parsed:
+                has = all(k in pc.by_col for k in key_cols) or (ref == key_cols[0] and pc.name in own_names)
+                if pc.layer == "silver" and has:
+                    appears.append(pc.name)
+                elif pc.layer == "gold" and pc.kind == "dimension" and (
+                    pc.entity == ent["name"] or pc.key == key_cols
+                ):
+                    curated.append(pc.name)
+                elif pc.layer == "gold" and pc.kind in ("fact", "aggregate") and has:
+                    facts.append(pc.name)
+        held = [
+            pc for pc in parsed
+            if key_cols and (all(k in pc.by_col for k in key_cols) or (ref == key_cols[0] and pc.name in own_names))
+        ]
+        mapped_here = members.get(_norm(ent["name"]), [])
+        # Every contract, any layer, holding the key; and the source systems behind them.
+        ent["held_in"] = sorted({pc.name for pc in held})
+        ent["systems"] = sorted({pc.system for pc in held + mapped_here if pc.system})
+        ent["appears_in"] = sorted(set(appears))
+        ent["curated_in"] = sorted(set(curated))
+        ent["facts"] = sorted(set(facts))
+
+    # 5c. Lookups. A concept whose every contract is a Gold dimension carrying only its code (and
+    #     at most one label) is an ATTRIBUTE of the concepts whose Silver contracts hold that code
+    #     (Cabin of Pnr segment), not a concept of its own. ``attribute_of`` names them; empty
+    #     means a concept. Same-valued role-players (Board point, Off point) are not merged: the
+    #     contracts do not say they share values, and a merge on name alone would be a guess.
+    by_contract = {pc.name: pc for pc in parsed}
+    for ent in entities.values():
+        mapped_here = members.get(_norm(ent["name"]), [])
+        ident = ent.get("identifier")
+        ent["attribute_of"] = []
+        if not ident or not mapped_here or not all(p.layer == "gold" and p.kind == "dimension" for p in mapped_here):
+            continue
+        business = {
+            col for p in mapped_here for col in p.by_col
+            if not col.endswith("_sk") and col.lower() not in _META_COLUMNS and not col.startswith("_")
+        }
+        if ident not in business or len(business) > 2:
+            continue
+        parents = sorted({
+            by_contract[n].entity for n in ent.get("appears_in") or []
+            if n in by_contract and by_contract[n].entity and by_contract[n].entity != ent["name"]
+        })
+        ent["attribute_of"] = parents
+    # 5d. A calendar dimension (keyed on date_key) is a shared calendar every daily roll-up joins,
+    #     not a business concept: ``calendar: True``, so a map does not draw it as a hub.
+    for key, ent in entities.items():
+        mapped_here = members.get(key, [])
+        ent["calendar"] = bool(
+            mapped_here and all(p.layer == "gold" and p.kind == "dimension" for p in mapped_here)
+            and ((ent.get("identifier") or "").lower() in _CALENDAR_KEYS
+                 or {c.lower() for c in ent.get("identifier_columns") or []} & _CALENDAR_KEYS)
+        )
+    for ent in entities.values():
+        # A shared key is held by contracts, but nothing states what it means: suggested.
+        ent["evidence_state"] = "suggested" if ent.get("shared_key") and ent.get("state") != "confirmed"             else concept_evidence_state(ent)
 
     # 6. Order everything deterministically.
     entity_list = sorted(entities.values(), key=lambda e: e["name"])

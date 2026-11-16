@@ -864,6 +864,18 @@
       ],
       "default": null
     },
+    "storage_mode": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Storage Mode"
+    },
     "system": {
       "title": "System",
       "type": "string"

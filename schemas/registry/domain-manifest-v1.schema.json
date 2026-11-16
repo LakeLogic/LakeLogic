@@ -435,6 +435,11 @@
       "title": "Compliance",
       "type": "object"
     },
+    "concepts": {
+      "additionalProperties": true,
+      "title": "Concepts",
+      "type": "object"
+    },
     "cost": {
       "additionalProperties": true,
       "title": "Cost",

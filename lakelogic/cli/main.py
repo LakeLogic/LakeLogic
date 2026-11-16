@@ -404,8 +404,8 @@ def validate(
         errors = []
         warnings = []
 
-        if not dc.info or not dc.info.name:
-            errors.append("Missing required field: info.name")
+        if not dc.info or not dc.info.title:
+            errors.append("Missing required field: info.title")
         if not dc.info or not dc.info.owner:
             warnings.append("Missing recommended field: info.owner")
         if not dc.info or not dc.info.version:
@@ -420,7 +420,7 @@ def validate(
             for warn in warnings:
                 typer.secho(f"  ⚠️  {warn}", fg=typer.colors.YELLOW)
 
-        typer.secho(f"✅ Contract structure valid: {dc.info.name}", fg=typer.colors.GREEN)
+        typer.secho(f"✅ Contract structure valid: {dc.info.title}", fg=typer.colors.GREEN)
 
         # Run gates if specified
         if gates:
@@ -1555,6 +1555,51 @@ def _write_or_print_contract(
     dest.write_text(text, encoding="utf-8")
     if verbose:
         typer.echo(typer.style(f"  ✔  Written: {dest}", fg=typer.colors.CYAN))
+
+
+@app.command("ontology", rich_help_panel="Data Tooling")
+def ontology(
+    contracts: Path = typer.Argument(..., help="Folder of contract YAML files (domain = first sub-folder)."),
+    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Output folder. SVG: default '.'; ttl: default an 'ontology' folder beside the contracts folder."),
+    stem: str = typer.Option("business_ontology", "--name", help="SVG file name stem: <name>_light.svg / <name>_dark.svg."),
+    domain: Optional[List[str]] = typer.Option(None, "--domain", "-d", help="Only concepts owned by this domain; repeat for several."),
+    fmt: str = typer.Option("svg", "--format", "-f", help="svg (picture) or ttl (RDF Turtle, one file per domain)."),
+    base: str = typer.Option("urn:lakelogic:ontology:", "--base", help="ttl: base IRI for concepts, e.g. https://example.com/ontology/."),
+    include_suggested: bool = typer.Option(False, "--include-suggested", help="ttl: also write Suggested concepts and links (plausible, not stated)."),
+):
+    """
+    The business ontology from contracts: a picture (SVG) or RDF Turtle per domain.
+
+    SVG: circle size is how many Silver contracts hold the concept's ID column; colour is the owning
+    domain; lines are the joins contracts declare — the platform's Business ontology page.
+
+    ttl: writes ontology/<domain>.ttl (a folder beside contracts/) plus ontology/index.ttl, which
+    imports them. Generated files: edit names and definitions in _domain.yaml, then regenerate.
+    Observed and Confirmed only, unless --include-suggested.
+
+    Examples
+    --------
+    lakelogic ontology contracts/ --out docs/images
+    lakelogic ontology contracts/ -d marketplace -d payments --name rides
+    lakelogic ontology contracts/ --format ttl --base https://rideflow.example/ontology/
+    """
+    if not contracts.is_dir():
+        typer.echo(f"Not a folder: {contracts}", err=True)
+        raise typer.Exit(code=1)
+    if fmt.lower() == "ttl":
+        from lakelogic.core.ontology_ttl import write_domain_ttl
+
+        for path in write_domain_ttl(str(contracts), str(out) if out else None, base, include_suggested, domain or None):
+            typer.echo(f"Wrote {path}")
+        return
+    if fmt.lower() != "svg":
+        typer.echo(f"Unknown format: {fmt} (use svg or ttl)", err=True)
+        raise typer.Exit(code=1)
+    from lakelogic.core.ontology_render import render_folder
+
+    light, dark = render_folder(str(contracts), str(out or Path(".")), stem, domain or None)
+    typer.echo(f"Wrote {light}")
+    typer.echo(f"Wrote {dark}")
 
 
 @app.command("export-odcs", rich_help_panel="Data Tooling")
