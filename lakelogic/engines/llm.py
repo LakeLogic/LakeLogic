@@ -152,8 +152,7 @@ def _init_azure_openai(config: ExtractionConfig) -> Any:
     key = os.environ.get("AZURE_OPENAI_API_KEY")
     if not endpoint:
         raise ValueError(
-            "provider='azure_openai' needs the resource endpoint: set extraction.endpoint "
-            "or AZURE_OPENAI_ENDPOINT"
+            "provider='azure_openai' needs the resource endpoint: set extraction.endpoint or AZURE_OPENAI_ENDPOINT"
         )
     if not key:
         raise ValueError("provider='azure_openai' needs AZURE_OPENAI_API_KEY in the environment")
@@ -192,9 +191,7 @@ def _init_bedrock(config: ExtractionConfig) -> Any:
         import boto3
     except ImportError:
         raise ImportError(f"boto3 is required for provider='bedrock'. {_INSTALL_HINT}")
-    region = (
-        _extra(config, "region") or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
-    )
+    region = _extra(config, "region") or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
     if not region:
         raise ValueError("provider='bedrock' needs a region: set extraction.region or AWS_REGION")
     _require_model(config, "bedrock", "model id")
@@ -356,7 +353,8 @@ def _extract_openai(
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
 
     extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
-        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"]
+    )
 
     return extracted
 
@@ -393,7 +391,8 @@ def _extract_anthropic(
     extracted["_lakelogic_llm_token_output"] = response.usage.output_tokens
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
     extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
-        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"]
+    )
 
     return extracted
 
@@ -439,7 +438,8 @@ def _extract_google(
     extracted["_lakelogic_llm_token_output"] = int(getattr(usage, "candidates_token_count", 0) or 0)
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
     extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
-        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"]
+    )
     return extracted
 
 
@@ -477,7 +477,8 @@ def _extract_bedrock(
     extracted["_lakelogic_llm_token_output"] = int(usage.get("outputTokens", 0) or 0)
     extracted["_lakelogic_llm_latency_ms"] = elapsed_ms
     extracted["_lakelogic_llm_cost_usd"] = _cost_usd(
-        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"])
+        config, extracted["_lakelogic_llm_token_input"], extracted["_lakelogic_llm_token_output"]
+    )
     return extracted
 
 

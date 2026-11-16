@@ -13,8 +13,14 @@ from lakelogic.core.ontology_render import layout, load_contract_folder, radius,
 
 
 def _c(name, key, fields, system, domain):
-    return {"name": name, "system": system, "_domain": domain, "primary_key": key,
-            "model": {"fields": [{"name": f} for f in fields]}, "info": {"title": name}}
+    return {
+        "name": name,
+        "system": system,
+        "_domain": domain,
+        "primary_key": key,
+        "model": {"fields": [{"name": f} for f in fields]},
+        "info": {"title": name},
+    }
 
 
 ESTATE = [
@@ -33,7 +39,7 @@ def test_sizes_are_measured_and_layout_is_deterministic():
     drv = next(p for p in a[0] if p["name"] == "Driver")
     assert drv["r"] == radius(3)  # driver_id is in three Silver contracts
     for i, p in enumerate(a[0]):
-        for q in a[0][i + 1:]:
+        for q in a[0][i + 1 :]:
             assert ((p["x"] - q["x"]) ** 2 + (p["y"] - q["y"]) ** 2) ** 0.5 > p["r"] + q["r"]
 
 
@@ -51,7 +57,9 @@ def test_domain_filter_keeps_colours():
     full = render_ontology_svg(m)
     only = render_ontology_svg(m, domains=["Payments"])
     assert ">Payout<" in only and ">Driver<" not in only
-    colour = lambda svg, name: re.search(rf'stroke="(#[0-9a-f]+)"[^>]*/>\s*(?:<circle[^>]*/>\s*)?<text[^>]*>{name}<', svg).group(1)  # noqa: E731
+    colour = lambda svg, name: re.search(
+        rf'stroke="(#[0-9a-f]+)"[^>]*/>\s*(?:<circle[^>]*/>\s*)?<text[^>]*>{name}<', svg
+    ).group(1)  # noqa: E731
     assert colour(full, "Payout") == colour(only, "Payout")
 
 
@@ -61,14 +69,17 @@ def test_folder_loader_reads_domains_and_skips_registry_files(tmp_path):
     (d / "silver_stripe_payouts.yaml").write_text("model:\n  fields:\n    - name: payout_id\n", encoding="utf-8")
     (d / "_system.yaml").write_text("model:\n  fields: []\n", encoding="utf-8")
     docs = load_contract_folder(str(tmp_path))
-    assert [(x["_domain"], x["_source_file"]) for x in docs] == [("payments", "payments/stripe/silver_stripe_payouts.yaml")]
+    assert [(x["_domain"], x["_source_file"]) for x in docs] == [
+        ("payments", "payments/stripe/silver_stripe_payouts.yaml")
+    ]
 
 
 def test_cli_writes_light_and_dark(tmp_path):
     src = tmp_path / "contracts" / "marketplace"
     src.mkdir(parents=True)
     (src / "silver_rideflow_riders.yaml").write_text(
-        "system: rideflow\nprimary_key: [rider_id]\nmodel:\n  fields:\n    - name: rider_id\n", encoding="utf-8")
+        "system: rideflow\nprimary_key: [rider_id]\nmodel:\n  fields:\n    - name: rider_id\n", encoding="utf-8"
+    )
     out = tmp_path / "out"
     r = CliRunner().invoke(app, ["ontology", str(tmp_path / "contracts"), "--out", str(out), "-d", "marketplace"])
     assert r.exit_code == 0, r.output
@@ -88,6 +99,7 @@ def test_gold_only_concepts_are_drawn_dashed_and_lines_avoid_circles():
     if gold_only:
         assert "Gold only" in svg and 'stroke-dasharray="5 4"' in svg
     from lakelogic.core.ontology_render import _measured, line_crossings, stated_links
+
     ents = _measured(m["entities"])
     links = stated_links(m["relationships"], {e["name"] for e in ents})
     placed, _ = layout(ents, links)

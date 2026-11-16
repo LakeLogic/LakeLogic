@@ -716,7 +716,9 @@ def derive_business_map(
 
                 route = resolve_route(
                     "business_semantics",
-                    contract=(canon.raw.get("ownership") if canon and isinstance(canon.raw.get("ownership"), dict) else None),
+                    contract=(
+                        canon.raw.get("ownership") if canon and isinstance(canon.raw.get("ownership"), dict) else None
+                    ),
                     domain=dom_own if isinstance(dom_own, dict) else None,
                 )
             except Exception:  # noqa: BLE001 - a malformed ownership block leaves the owner unknown
@@ -880,9 +882,17 @@ def derive_business_map(
         for pc in sorted(parsed, key=lambda p: p.name):
             if pc.entity and pc.entity != ent["name"] and all(c in pc.by_col for c in cols):
                 relationship(
-                    ent["name"], pc.entity, _NO_VERB, "unknown", "inferred",
-                    _evidence("composite_key", pc.name, ", ".join(cols),
-                              f"{pc.name} holds {ent['name']}'s whole key ({', '.join(cols)})"),
+                    ent["name"],
+                    pc.entity,
+                    _NO_VERB,
+                    "unknown",
+                    "inferred",
+                    _evidence(
+                        "composite_key",
+                        pc.name,
+                        ", ".join(cols),
+                        f"{pc.name} holds {ent['name']}'s whole key ({', '.join(cols)})",
+                    ),
                 )
     for pc in sorted(parsed, key=lambda p: p.name):
         if not pc.entity or pc.layer != "gold" or pc.kind not in ("fact", "aggregate"):
@@ -901,7 +911,11 @@ def derive_business_map(
             seen.add((src.entity, kind))
             how = "its SQL reads" if kind == "sql_join" else "it reads"
             relationship(
-                src.entity, pc.entity, _NO_VERB, "unknown", "inferred",
+                src.entity,
+                pc.entity,
+                _NO_VERB,
+                "unknown",
+                "inferred",
                 _evidence(kind, pc.name, None, f"{pc.name}: {how} {src.name}"),
             )
 
@@ -914,7 +928,11 @@ def derive_business_map(
         for pc in sorted(parsed, key=lambda p: p.name):
             if pc.entity and pc.entity != ent["name"] and ref in pc.by_col:
                 relationship(
-                    ent["name"], pc.entity, _NO_VERB, "unknown", "inferred",
+                    ent["name"],
+                    pc.entity,
+                    _NO_VERB,
+                    "unknown",
+                    "inferred",
                     _evidence("reference_column", pc.name, ref, f"{pc.name}.{ref} references {ent['name']}.Id"),
                 )
 
@@ -933,8 +951,11 @@ def derive_business_map(
     } - {()}
     owned_single = {k[0] for k in own_keys if len(k) == 1}
     lookup_codes = {
-        e["identifier"] for k, e in entities.items()
-        if e.get("identifier") and members.get(k) and all(p.layer == "gold" and p.kind == "dimension" for p in members[k])
+        e["identifier"]
+        for k, e in entities.items()
+        if e.get("identifier")
+        and members.get(k)
+        and all(p.layer == "gold" and p.kind == "dimension" for p in members[k])
     }
 
     def holders(cols: List[str]) -> List[_Contract]:
@@ -943,7 +964,13 @@ def derive_business_map(
     all_cols = sorted({c for pc in silver for c in pc.by_col})
     for col in all_cols:
         low = col.lower()
-        if low in _GENERIC_COLUMNS or low in _META_COLUMNS or col in owned_single or col.startswith("_") or col.endswith("_sk"):
+        if (
+            low in _GENERIC_COLUMNS
+            or low in _META_COLUMNS
+            or col in owned_single
+            or col.startswith("_")
+            or col.endswith("_sk")
+        ):
             continue
         held_by = holders([col])
         if len({pc.entity for pc in held_by}) < 2:
@@ -953,8 +980,10 @@ def derive_business_map(
         elif _QUALIFIED_KEY.search(low):
             need = max(2, -(-len(held_by) * 3 // 5))
             companions = [
-                c for c in all_cols
-                if c != col and c.lower() not in _GENERIC_COLUMNS
+                c
+                for c in all_cols
+                if c != col
+                and c.lower() not in _GENERIC_COLUMNS
                 and (c.lower().endswith("_date") or c in lookup_codes)
                 and sum(1 for pc in held_by if c in pc.by_col) >= need
             ]
@@ -971,9 +1000,12 @@ def derive_business_map(
         # no contract: a domain-file concept confirmed FROM this shared key (Record locator renamed
         # Booking reference). It takes the key over; skipping it lost the key and every link.
         existing = find_entity(name) if name else None
-        if not name or (existing is not None and (
-            existing.get("identifier") or existing.get("identifier_columns") or members.get(_norm(existing["name"]))
-        )):
+        if not name or (
+            existing is not None
+            and (
+                existing.get("identifier") or existing.get("identifier_columns") or members.get(_norm(existing["name"]))
+            )
+        ):
             continue
         ent = existing or entity(name, "inferred")
         name = ent["name"]
@@ -989,7 +1021,11 @@ def derive_business_map(
                 continue
             linked.add(pc.entity)
             relationship(
-                name, pc.entity, _NO_VERB, "unknown", "inferred",
+                name,
+                pc.entity,
+                _NO_VERB,
+                "unknown",
+                "inferred",
                 _evidence("shared_key", pc.name, ", ".join(key), f"{pc.name} holds the shared key ({', '.join(key)})"),
             )
         if len(key) > 1:
@@ -998,9 +1034,14 @@ def derive_business_map(
                     continue
                 linked.add(pc.entity)
                 relationship(
-                    name, pc.entity, _NO_VERB, "unknown", "inferred",
-                    _evidence("partial_key", pc.name, col,
-                              f"{pc.name} holds {col} but not the whole key ({', '.join(key)})"),
+                    name,
+                    pc.entity,
+                    _NO_VERB,
+                    "unknown",
+                    "inferred",
+                    _evidence(
+                        "partial_key", pc.name, col, f"{pc.name} holds {col} but not the whole key ({', '.join(key)})"
+                    ),
                 )
 
     # 4b. Name-only matches (inferred, cardinality unknown): `<x>_id` equal to another entity's identifier.
@@ -1064,8 +1105,18 @@ def derive_business_map(
     #     pair (either direction) adds nothing; two name-only guesses keep one direction.
     def rel_kind(rel: Dict[str, Any]) -> str:
         kinds = {e["kind"] for e in rel["evidence"]}
-        for k in ("domain_file", "annotation", "foreign_key", "join", "sql_join", "composite_key", "reference_column",
-                  "shared_key", "partial_key", "reads"):
+        for k in (
+            "domain_file",
+            "annotation",
+            "foreign_key",
+            "join",
+            "sql_join",
+            "composite_key",
+            "reference_column",
+            "shared_key",
+            "partial_key",
+            "reads",
+        ):
             if k in kinds:
                 return k
         return "name_only"
@@ -1187,9 +1238,13 @@ def derive_business_map(
         # ``cabin``); a shared ``status`` or ``Id`` says nothing. With no single identifier, the
         # composite key of its own non-fact contract (silver first) — every column must be present.
         key_cols: List[str] = []
-        if ident and ident.lower() not in _GENERIC_COLUMNS and (
-            _ID_LIKE.search(ident)
-            or any(pc.layer == "gold" and pc.kind == "dimension" and pc.key == [ident] for pc in parsed)
+        if (
+            ident
+            and ident.lower() not in _GENERIC_COLUMNS
+            and (
+                _ID_LIKE.search(ident)
+                or any(pc.layer == "gold" and pc.kind == "dimension" and pc.key == [ident] for pc in parsed)
+            )
         ):
             key_cols = [ident]
         elif not ident:
@@ -1206,14 +1261,13 @@ def derive_business_map(
                 has = all(k in pc.by_col for k in key_cols) or (ref == key_cols[0] and pc.name in own_names)
                 if pc.layer == "silver" and has:
                     appears.append(pc.name)
-                elif pc.layer == "gold" and pc.kind == "dimension" and (
-                    pc.entity == ent["name"] or pc.key == key_cols
-                ):
+                elif pc.layer == "gold" and pc.kind == "dimension" and (pc.entity == ent["name"] or pc.key == key_cols):
                     curated.append(pc.name)
                 elif pc.layer == "gold" and pc.kind in ("fact", "aggregate") and has:
                     facts.append(pc.name)
         held = [
-            pc for pc in parsed
+            pc
+            for pc in parsed
             if key_cols and (all(k in pc.by_col for k in key_cols) or (ref == key_cols[0] and pc.name in own_names))
         ]
         mapped_here = members.get(_norm(ent["name"]), [])
@@ -1237,28 +1291,38 @@ def derive_business_map(
         if not ident or not mapped_here or not all(p.layer == "gold" and p.kind == "dimension" for p in mapped_here):
             continue
         business = {
-            col for p in mapped_here for col in p.by_col
+            col
+            for p in mapped_here
+            for col in p.by_col
             if not col.endswith("_sk") and col.lower() not in _META_COLUMNS and not col.startswith("_")
         }
         if ident not in business or len(business) > 2:
             continue
-        parents = sorted({
-            by_contract[n].entity for n in ent.get("appears_in") or []
-            if n in by_contract and by_contract[n].entity and by_contract[n].entity != ent["name"]
-        })
+        parents = sorted(
+            {
+                by_contract[n].entity
+                for n in ent.get("appears_in") or []
+                if n in by_contract and by_contract[n].entity and by_contract[n].entity != ent["name"]
+            }
+        )
         ent["attribute_of"] = parents
     # 5d. A calendar dimension (keyed on date_key) is a shared calendar every daily roll-up joins,
     #     not a business concept: ``calendar: True``, so a map does not draw it as a hub.
     for key, ent in entities.items():
         mapped_here = members.get(key, [])
         ent["calendar"] = bool(
-            mapped_here and all(p.layer == "gold" and p.kind == "dimension" for p in mapped_here)
-            and ((ent.get("identifier") or "").lower() in _CALENDAR_KEYS
-                 or {c.lower() for c in ent.get("identifier_columns") or []} & _CALENDAR_KEYS)
+            mapped_here
+            and all(p.layer == "gold" and p.kind == "dimension" for p in mapped_here)
+            and (
+                (ent.get("identifier") or "").lower() in _CALENDAR_KEYS
+                or {c.lower() for c in ent.get("identifier_columns") or []} & _CALENDAR_KEYS
+            )
         )
     for ent in entities.values():
         # A shared key is held by contracts, but nothing states what it means: suggested.
-        ent["evidence_state"] = "suggested" if ent.get("shared_key") and ent.get("state") != "confirmed"             else concept_evidence_state(ent)
+        ent["evidence_state"] = (
+            "suggested" if ent.get("shared_key") and ent.get("state") != "confirmed" else concept_evidence_state(ent)
+        )
 
     # 6. Order everything deterministically.
     entity_list = sorted(entities.values(), key=lambda e: e["name"])

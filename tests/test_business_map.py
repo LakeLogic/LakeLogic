@@ -309,7 +309,9 @@ def test_questions_are_aggregated_ranked_and_capped() -> None:
 # ── Measures: appears_in / curated_in / facts ────────────────────────────────
 
 MEASURE_ESTATE = [
-    _contract("silver_rideflow_driver_profiles", ["driver_id"], ["driver_id", "city_code", "status"], system="rideflow"),
+    _contract(
+        "silver_rideflow_driver_profiles", ["driver_id"], ["driver_id", "city_code", "status"], system="rideflow"
+    ),
     _contract("silver_rideflow_trips", ["trip_id"], ["trip_id", "driver_id", "rider_id", "status"], system="rideflow"),
     _contract("silver_stripe_payouts", ["payout_id"], ["payout_id", "driver_id", "status"], system="stripe"),
     _contract("silver_checkr_checks", ["report_id"], ["report_id", "candidate_driver_id"], system="checkr"),
@@ -346,12 +348,23 @@ def test_measures_are_order_independent() -> None:
 
 # An airline estate: composite keys and code columns (Tagus Air shape).
 AIRLINE = [
-    _contract("silver_ssim_flight_legs", ["airline_designator", "flight_number", "leg_sequence", "period_from"],
-              ["airline_designator", "flight_number", "leg_sequence", "period_from", "service_type"], system="ssim"),
-    _contract("gold_fact_flight_legs", ["airline_designator", "flight_number", "leg_sequence", "period_from"],
-              ["airline_designator", "flight_number", "leg_sequence", "period_from"]),
-    _contract("silver_pss_pnr_segments", ["record_locator", "passenger_token", "segment_number"],
-              ["record_locator", "passenger_token", "segment_number", "cabin", "flight_number", "status"], system="pss"),
+    _contract(
+        "silver_ssim_flight_legs",
+        ["airline_designator", "flight_number", "leg_sequence", "period_from"],
+        ["airline_designator", "flight_number", "leg_sequence", "period_from", "service_type"],
+        system="ssim",
+    ),
+    _contract(
+        "gold_fact_flight_legs",
+        ["airline_designator", "flight_number", "leg_sequence", "period_from"],
+        ["airline_designator", "flight_number", "leg_sequence", "period_from"],
+    ),
+    _contract(
+        "silver_pss_pnr_segments",
+        ["record_locator", "passenger_token", "segment_number"],
+        ["record_locator", "passenger_token", "segment_number", "cabin", "flight_number", "status"],
+        system="pss",
+    ),
     _contract("gold_dim_cabin", ["cabin"], ["cabin_sk", "cabin"]),
     _contract("silver_crm_people", ["status"], ["status"], system="crm"),
     _contract("gold_dim_status", ["status"], ["status_sk", "status"]),
@@ -398,17 +411,29 @@ def test_gold_fact_sql_and_composite_keys_infer_links() -> None:
     estate = copy.deepcopy(AIRLINE) + [
         _contract("silver_movement_messages", ["message_id"], ["message_id", "carrier", "flight_number"], system="mvt"),
         dict(
-            _contract("gold_fact_connections_at_risk", ["record_locator", "passenger_token", "flight_date"],
-                      ["record_locator", "passenger_token", "flight_date"]),
-            transformations=[{"sql": "WITH legs AS (SELECT * FROM silver_ssim_flight_legs) "
-                                     "SELECT * FROM silver_pss_pnr_segments AS a JOIN legs AS l ON a.flight_number = l.flight_number"}],
+            _contract(
+                "gold_fact_connections_at_risk",
+                ["record_locator", "passenger_token", "flight_date"],
+                ["record_locator", "passenger_token", "flight_date"],
+            ),
+            transformations=[
+                {
+                    "sql": "WITH legs AS (SELECT * FROM silver_ssim_flight_legs) "
+                    "SELECT * FROM silver_pss_pnr_segments AS a JOIN legs AS l ON a.flight_number = l.flight_number"
+                }
+            ],
         ),
-        _contract("gold_fact_leg_delays", ["airline_designator", "flight_number", "leg_sequence", "period_from", "delay_code"],
-                  ["airline_designator", "flight_number", "leg_sequence", "period_from", "delay_code"]),
+        _contract(
+            "gold_fact_leg_delays",
+            ["airline_designator", "flight_number", "leg_sequence", "period_from", "delay_code"],
+            ["airline_designator", "flight_number", "leg_sequence", "period_from", "delay_code"],
+        ),
     ]
     m = derive_business_map(estate)
     kinds = {(r["from"], r["to"]): r["kind"] for r in m["relationships"]}
-    risk = next(e["name"] for e in m["entities"] if any(c["name"] == "gold_fact_connections_at_risk" for c in e["contracts"]))
+    risk = next(
+        e["name"] for e in m["entities"] if any(c["name"] == "gold_fact_connections_at_risk" for c in e["contracts"])
+    )
     sql_sources = {f for (f, t), k in kinds.items() if t == risk and k == "sql_join"}
     assert len(sql_sources) == 2  # flight leg and PNR segment, via the CTE and the join
     assert all(r["state"] == "inferred" for r in m["relationships"] if r["kind"] in ("sql_join", "composite_key"))
@@ -428,13 +453,22 @@ def test_plain_id_concepts_are_measured_and_linked_by_name_id_columns() -> None:
     m = derive_business_map(sf)
     acct = next(e for e in m["entities"] if any(c["name"] == "silver_salesforce_accounts" for c in e["contracts"]))
     assert acct["measured_by"] == [acct["name"].replace(" ", "") + "Id"]
-    assert set(acct["appears_in"]) == {"silver_salesforce_accounts", "silver_salesforce_contacts", "silver_salesforce_cases"}
+    assert set(acct["appears_in"]) == {
+        "silver_salesforce_accounts",
+        "silver_salesforce_contacts",
+        "silver_salesforce_cases",
+    }
     refs = [r for r in m["relationships"] if r["kind"] == "reference_column"]
     assert {(r["from"], r["state"]) for r in refs} >= {(acct["name"], "inferred")}
 
 
 def test_owner_falls_back_to_the_domain_files_owner() -> None:
-    estate = [dict(_contract("silver_rideflow_driver_profiles", ["driver_id"], ["driver_id"], system="rideflow"), _domain="marketplace")]
+    estate = [
+        dict(
+            _contract("silver_rideflow_driver_profiles", ["driver_id"], ["driver_id"], system="rideflow"),
+            _domain="marketplace",
+        )
+    ]
     domains = {"marketplace": {"ownership": {"domain_owner": "Platform Data Engineering"}}}
     driver = _by(derive_business_map(copy.deepcopy(estate), domains)["entities"], name="Driver")
     assert driver["owner"] == "Platform Data Engineering"
@@ -446,20 +480,35 @@ def test_owner_falls_back_to_the_domain_files_owner() -> None:
 
 # Shared keys: business keys several concepts carry with no table of their own (Tagus Air shape).
 SHARED = [
-    _contract("silver_revenue_coupons", ["ticket_number", "coupon_number"],
-              ["ticket_number", "coupon_number", "record_locator", "carrier", "flight_number", "flight_date"]),
-    _contract("silver_baggage_bag_events", ["event_id"],
-              ["event_id", "record_locator", "carrier", "flight_number", "flight_date"]),
-    _contract("silver_crew_duties", ["crew_id", "flight_number", "flight_date"],
-              ["crew_id", "carrier", "flight_number", "flight_date", "aircraft_registration", "status"]),
+    _contract(
+        "silver_revenue_coupons",
+        ["ticket_number", "coupon_number"],
+        ["ticket_number", "coupon_number", "record_locator", "carrier", "flight_number", "flight_date"],
+    ),
+    _contract(
+        "silver_baggage_bag_events",
+        ["event_id"],
+        ["event_id", "record_locator", "carrier", "flight_number", "flight_date"],
+    ),
+    _contract(
+        "silver_crew_duties",
+        ["crew_id", "flight_number", "flight_date"],
+        ["crew_id", "carrier", "flight_number", "flight_date", "aircraft_registration", "status"],
+    ),
     _contract("silver_mro_work_orders", ["work_order_id"], ["work_order_id", "aircraft_registration", "status"]),
-    _contract("silver_ssim_flight_legs", ["airline_designator", "flight_number", "leg_sequence"],
-              ["airline_designator", "flight_number", "leg_sequence"]),
+    _contract(
+        "silver_ssim_flight_legs",
+        ["airline_designator", "flight_number", "leg_sequence"],
+        ["airline_designator", "flight_number", "leg_sequence"],
+    ),
     _contract("gold_dim_carrier", ["carrier"], ["carrier_sk", "carrier"]),
     _contract("gold_dim_status", ["status"], ["status_sk", "status"]),
     _contract("gold_dim_date", ["date_key"], ["date_key", "calendar_date", "year", "month"]),
-    _contract("gold_fact_coupons_daily", ["date_key"],
-              [{"name": "date_key", "foreign_key": {"contract": "gold_dim_date", "column": "date_key"}}, "coupons"]),
+    _contract(
+        "gold_fact_coupons_daily",
+        ["date_key"],
+        [{"name": "date_key", "foreign_key": {"contract": "gold_dim_date", "column": "date_key"}}, "coupons"],
+    ),
 ]
 
 
@@ -475,7 +524,9 @@ def test_shared_keys_become_suggested_concepts_linking_their_holders() -> None:
     assert {kind for _, kind in flight_links} == {"shared_key", "partial_key"}
     # The schedule's flight_number without a carrier and date is a partial match, said as such.
     assert any(kind == "partial_key" for _, kind in flight_links)
-    assert all(r["evidence_state"] == "suggested" for r in m["relationships"] if r["kind"] in ("shared_key", "partial_key"))
+    assert all(
+        r["evidence_state"] == "suggested" for r in m["relationships"] if r["kind"] in ("shared_key", "partial_key")
+    )
 
 
 def test_generic_columns_never_make_or_complete_a_shared_key() -> None:
@@ -495,13 +546,17 @@ def test_a_calendar_dimension_is_marked_not_a_concept() -> None:
 
 
 def test_a_shared_key_confirmed_under_a_business_name_keeps_its_key_and_links() -> None:
-    domain_files = {"passenger": {"concepts": {"Booking reference": {
-        "definition": "A booking.", "also_called": ["Record locator", "PNR"]}}}}
+    domain_files = {
+        "passenger": {
+            "concepts": {"Booking reference": {"definition": "A booking.", "also_called": ["Record locator", "PNR"]}}
+        }
+    }
     m = derive_business_map(copy.deepcopy(SHARED), domain_files)
     ref = next(e for e in m["entities"] if e["name"] == "Booking reference")
     assert ref["identifier_columns"] == ["record_locator"] and ref["shared_key"] is True
     assert ref["appears_in"] == ["silver_baggage_bag_events", "silver_revenue_coupons"]
     assert ref["evidence_state"] == "confirmed"
-    assert {r["to"] for r in m["relationships"] if r["from"] == "Booking reference"} >= {"Bag event", "Coupon"} or \
-        any(r["from"] == "Booking reference" for r in m["relationships"])
+    assert {r["to"] for r in m["relationships"] if r["from"] == "Booking reference"} >= {"Bag event", "Coupon"} or any(
+        r["from"] == "Booking reference" for r in m["relationships"]
+    )
     assert not any(e["name"] == "Record locator" for e in m["entities"])

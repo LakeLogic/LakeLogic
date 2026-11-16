@@ -44,9 +44,9 @@ def _rows_to_frame(rows: list, like: Any) -> Any:
         from lakelogic.core.processor import DataProcessor
 
         schema, keys = DataProcessor._spark_schema_for_extracted_rows(rows)
-        schema = StructType([
-            StructField(f.name, DoubleType(), True) if f.name.endswith("_cost_usd") else f for f in schema.fields
-        ])
+        schema = StructType(
+            [StructField(f.name, DoubleType(), True) if f.name.endswith("_cost_usd") else f for f in schema.fields]
+        )
         data = [
             tuple((float(r[k]) if k.endswith("_cost_usd") and r.get(k) is not None else r.get(k)) for k in keys)
             for r in rows

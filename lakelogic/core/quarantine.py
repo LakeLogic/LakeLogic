@@ -620,8 +620,7 @@ def add_error_text(df: Any, errors_column: str = "_lakelogic_errors") -> Any:
 
             dtype = df.collect_schema()[errors_column] if hasattr(df, "collect_schema") else df.schema[errors_column]
             src = pl.col(errors_column)
-            text = (src.list.join(_ERROR_TEXT_SEPARATOR) if isinstance(dtype, pl.List)
-                    else src.cast(pl.Utf8))
+            text = src.list.join(_ERROR_TEXT_SEPARATOR) if isinstance(dtype, pl.List) else src.cast(pl.Utf8)
             return df.with_columns(text.alias(ERROR_TEXT_COLUMN))
         if type(df).__name__ == "DataFrame" and hasattr(df, "assign"):  # pandas
 

@@ -59,14 +59,17 @@ def load_contract_folder(root: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _measured(entities: Sequence[Dict[str, Any]], rels: Optional[Sequence[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+def _measured(
+    entities: Sequence[Dict[str, Any]], rels: Optional[Sequence[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
     """The concepts drawn, most-used first (the page's ``drawnEntities``). Measured concepts always;
     a gold-only one (no Silver contract holds it) as a dashed outline when a stated link joins it to
     a measured concept. Lookups (``attribute_of``) are details, not circles. Without ``rels`` every
     gold-only concept is kept. A shared key (no table of its own) is drawn dashed; a calendar
     dimension is never drawn, so daily roll-ups do not hang off it as a hub."""
     cands = [
-        e for e in entities
+        e
+        for e in entities
         if (e.get("contracts") or e.get("shared_key")) and not e.get("attribute_of") and not e.get("calendar")
     ]
     measured = {e["name"] for e in cands if e.get("appears_in")}
@@ -102,7 +105,7 @@ def line_crossings(placed: Sequence[Dict[str, Any]], links: Sequence[Dict[str, A
                 continue
             px, py = _closest(a, b, c)
             if math.hypot(c["x"] - px, c["y"] - py) < c["r"]:
-                out.append(f'{link["from"]}->{link["to"]} crosses {c["name"]}')
+                out.append(f"{link['from']}->{link['to']} crosses {c['name']}")
     return out
 
 
@@ -120,7 +123,11 @@ def owning_domain(e: Dict[str, Any]) -> Optional[str]:
 
 
 def stated_links(rels: Sequence[Dict[str, Any]], names: set) -> List[Dict[str, Any]]:
-    return [r for r in rels if r["from"] != r["to"] and r["from"] in names and r["to"] in names and r.get("kind") != "name_only"]
+    return [
+        r
+        for r in rels
+        if r["from"] != r["to"] and r["from"] in names and r["to"] in names and r.get("kind") != "name_only"
+    ]
 
 
 def layout(entities: Sequence[Dict[str, Any]], links: Sequence[Dict[str, Any]], iterations: int = 360):
@@ -129,8 +136,16 @@ def layout(entities: Sequence[Dict[str, Any]], links: Sequence[Dict[str, Any]], 
     for i, e in enumerate(_measured(entities)):
         angle = i * 2.399963
         dist = 0 if i == 0 else 110 * math.sqrt(i)
-        nodes.append({"name": e["name"], "x": math.cos(angle) * dist, "y": math.sin(angle) * dist * 1.25,
-                      "r": radius(len(e.get("appears_in") or [])), "vx": 0.0, "vy": 0.0})
+        nodes.append(
+            {
+                "name": e["name"],
+                "x": math.cos(angle) * dist,
+                "y": math.sin(angle) * dist * 1.25,
+                "r": radius(len(e.get("appears_in") or [])),
+                "vx": 0.0,
+                "vy": 0.0,
+            }
+        )
     index = {n["name"]: i for i, n in enumerate(nodes)}
     edges = [(index[l["from"]], index[l["to"]]) for l in links if l["from"] in index and l["to"] in index]
     for it in range(iterations):
@@ -146,13 +161,19 @@ def layout(entities: Sequence[Dict[str, Any]], links: Sequence[Dict[str, Any]], 
                 mn = a["r"] + b["r"] + 80
                 f = 6000 / (d * d) + ((mn - d) * 0.5 if d < mn else 0)
                 fx, fy = dx / d * f, dy / d * f
-                a["vx"] -= fx; a["vy"] -= fy; b["vx"] += fx; b["vy"] += fy  # noqa: E702
+                a["vx"] -= fx
+                a["vy"] -= fy
+                b["vx"] += fx
+                b["vy"] += fy  # noqa: E702
         for i, j in edges:
             a, b = nodes[i], nodes[j]
             dx, dy = b["x"] - a["x"], b["y"] - a["y"]
             d = max(0.01, math.hypot(dx, dy))
             f = (d - (a["r"] + b["r"] + 150)) * 0.02
-            a["vx"] += dx / d * f; a["vy"] += dy / d * f; b["vx"] -= dx / d * f; b["vy"] -= dy / d * f  # noqa: E702
+            a["vx"] += dx / d * f
+            a["vy"] += dy / d * f
+            b["vx"] -= dx / d * f
+            b["vy"] -= dy / d * f  # noqa: E702
         # Keep circles off lines they are not part of (a line through a circle reads as a link).
         for i, j in edges:
             a, b = nodes[i], nodes[j]
@@ -168,9 +189,12 @@ def layout(entities: Sequence[Dict[str, Any]], links: Sequence[Dict[str, Any]], 
                 f = (clear - d) * 1.2
                 ux, uy = (dx, dy) if d >= 0.02 else (-(b["y"] - a["y"]), b["x"] - a["x"])
                 u = max(0.01, math.hypot(ux, uy))
-                c["vx"] += ux / u * f; c["vy"] += uy / u * f  # noqa: E702
-                a["vx"] -= ux / u * f * 0.25; a["vy"] -= uy / u * f * 0.25  # noqa: E702
-                b["vx"] -= ux / u * f * 0.25; b["vy"] -= uy / u * f * 0.25  # noqa: E702
+                c["vx"] += ux / u * f
+                c["vy"] += uy / u * f  # noqa: E702
+                a["vx"] -= ux / u * f * 0.25
+                a["vy"] -= uy / u * f * 0.25  # noqa: E702
+                b["vx"] -= ux / u * f * 0.25
+                b["vy"] -= uy / u * f * 0.25  # noqa: E702
         for n in nodes:
             n["vx"] -= n["x"] * 0.008
             n["vy"] -= n["y"] * 0.005
@@ -192,10 +216,12 @@ def _label_lines(name: str) -> List[str]:
         return [name]
     mid = len(name) / 2
     best = min((i for i, ch in enumerate(name) if ch == " "), key=lambda i: abs(i - mid))
-    return [name[:best], name[best + 1:]]
+    return [name[:best], name[best + 1 :]]
 
 
-def render_ontology_svg(business_map: Dict[str, Any], theme: str = "light", domains: Optional[Sequence[str]] = None) -> str:
+def render_ontology_svg(
+    business_map: Dict[str, Any], theme: str = "light", domains: Optional[Sequence[str]] = None
+) -> str:
     """The ontology as a standalone SVG string in ``theme`` ("light" or "dark"), optionally only
     the concepts owned by ``domains`` (case-insensitive)."""
     t = THEMES[theme]
@@ -223,7 +249,9 @@ def render_ontology_svg(business_map: Dict[str, Any], theme: str = "light", doma
     ]
     for link in links:
         a, b = pos[link["from"]], pos[link["to"]]
-        o.append(f'<line x1="{a["x"]:.1f}" y1="{a["y"]:.1f}" x2="{b["x"]:.1f}" y2="{b["y"]:.1f}" stroke="{t["line"]}" stroke-width="1.2"/>')
+        o.append(
+            f'<line x1="{a["x"]:.1f}" y1="{a["y"]:.1f}" x2="{b["x"]:.1f}" y2="{b["y"]:.1f}" stroke="{t["line"]}" stroke-width="1.2"/>'
+        )
     for p in placed:
         e = by_name[p["name"]]
         c = colour[owning_domain(e) or "unassigned"]
@@ -233,37 +261,54 @@ def render_ontology_svg(business_map: Dict[str, Any], theme: str = "light", doma
         x, y, r = p["x"], p["y"], p["r"]
         o.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{t["bg"]}"/>')
         if gold:
-            o.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="none" stroke="{c}" stroke-width="1.5" stroke-dasharray="5 4"/>')
+            o.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="none" stroke="{c}" stroke-width="1.5" stroke-dasharray="5 4"/>'
+            )
         else:
-            o.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{c}" fill-opacity="{fill_op}" stroke="{c}" stroke-width="1.5"/>')
+            o.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{c}" fill-opacity="{fill_op}" stroke="{c}" stroke-width="1.5"/>'
+            )
         if e.get("curated_in"):
             o.append(f'<circle cx="{x:.1f}" cy="{y - r + 10:.1f}" r="3" fill="{c}"/>')
         fs = 19 if n >= 6 else 15
         lines = _label_lines(e["name"])
         for i, ln in enumerate(lines):
             ly = y + (i - (len(lines) - 1) / 2) * fs * 1.15 - 5
-            o.append(f'<text x="{x:.1f}" y="{ly:.1f}" font-size="{fs}" font-weight="600" fill="{t["ink"]}" '
-                     f'text-anchor="middle" dominant-baseline="middle">{escape(ln)}</text>')
+            o.append(
+                f'<text x="{x:.1f}" y="{ly:.1f}" font-size="{fs}" font-weight="600" fill="{t["ink"]}" '
+                f'text-anchor="middle" dominant-baseline="middle">{escape(ln)}</text>'
+            )
         cy = y + (len(lines) - 1) / 2 * fs * 1.15 + fs * 0.9
-        sub_label = f"Shared key · {n}" if shared else "Gold only" if gold else f'{n} {"contract" if n == 1 else "contracts"}'
-        o.append(f'<text x="{x:.1f}" y="{cy:.1f}" font-size="12.5" fill="{t["muted"]}" '
-                 f'text-anchor="middle" dominant-baseline="middle">{sub_label}</text>')
+        sub_label = (
+            f"Shared key · {n}" if shared else "Gold only" if gold else f"{n} {'contract' if n == 1 else 'contracts'}"
+        )
+        o.append(
+            f'<text x="{x:.1f}" y="{cy:.1f}" font-size="12.5" fill="{t["muted"]}" '
+            f'text-anchor="middle" dominant-baseline="middle">{sub_label}</text>'
+        )
     # Legend, top-left: domain colours and what size means.
     lx, ly = bx + 16, by + 24
     o.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="13" font-weight="600" fill="{t["ink"]}">Owning domain</text>')
     for i, d in enumerate(domains):
         yy = ly + 22 + i * 20
-        o.append(f'<circle cx="{lx + 6:.1f}" cy="{yy - 4:.1f}" r="5" fill="{colour[d]}" fill-opacity="{fill_op * 2}" stroke="{colour[d]}" stroke-width="1.5"/>')
-        o.append(f'<text x="{lx + 18:.1f}" y="{yy:.1f}" font-size="12" fill="{t["muted"]}">{escape(d.capitalize())}</text>')
+        o.append(
+            f'<circle cx="{lx + 6:.1f}" cy="{yy - 4:.1f}" r="5" fill="{colour[d]}" fill-opacity="{fill_op * 2}" stroke="{colour[d]}" stroke-width="1.5"/>'
+        )
+        o.append(
+            f'<text x="{lx + 18:.1f}" y="{yy:.1f}" font-size="12" fill="{t["muted"]}">{escape(d.capitalize())}</text>'
+        )
     base = ly + 22 + len(domains) * 20 + 10
     for i, line in enumerate(["Size: Silver contracts holding", "the concept's ID column."]):
-        o.append(f'<text x="{lx:.1f}" y="{base + i * 15:.1f}" font-size="11.5" fill="{t["muted"]}">{escape(line)}</text>')
+        o.append(
+            f'<text x="{lx:.1f}" y="{base + i * 15:.1f}" font-size="11.5" fill="{t["muted"]}">{escape(line)}</text>'
+        )
     o.append("</svg>")
     return "\n".join(o)
 
 
-def render_folder(root: str, out_dir: str, stem: str = "business_ontology",
-                  domains: Optional[Sequence[str]] = None) -> Tuple[str, str]:
+def render_folder(
+    root: str, out_dir: str, stem: str = "business_ontology", domains: Optional[Sequence[str]] = None
+) -> Tuple[str, str]:
     """Write ``{stem}_light.svg`` and ``{stem}_dark.svg`` for the contracts under ``root``."""
     from lakelogic.core.business_map import derive_business_map
 

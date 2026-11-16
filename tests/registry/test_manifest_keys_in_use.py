@@ -4,6 +4,7 @@ Every generated `_system.yaml` carries `storage_mode` (the runtime DomainRegistr
 domain confirmed through the business ontology carries `concepts`; the strict manifests rejected
 both, so 15 of 17 registry files failed validation while the pipelines ran fine.
 """
+
 from lakelogic.registry.models import DomainManifestV1, SystemManifestV1
 
 
@@ -13,8 +14,9 @@ def test_a_system_manifest_may_declare_its_storage_mode():
 
 
 def test_a_domain_manifest_may_list_its_confirmed_concepts():
-    m = DomainManifestV1.model_validate({"domain": "operations", "concepts": {
-        "Movement message": {"identifier": "message_id", "aliases": ["MVT"]}}})
+    m = DomainManifestV1.model_validate(
+        {"domain": "operations", "concepts": {"Movement message": {"identifier": "message_id", "aliases": ["MVT"]}}}
+    )
     assert "Movement message" in m.concepts
 
 

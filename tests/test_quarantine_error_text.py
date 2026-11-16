@@ -4,6 +4,7 @@
 the lakehouse could not show why a row was rejected. `_lakelogic_error_text` is the same reasons
 joined into one string.
 """
+
 import pandas as pd
 import polars as pl
 

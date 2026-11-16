@@ -196,7 +196,9 @@ def test_model_reader_on_pdfs_runs_through_run_source(tmp_path, monkeypatch):
 
     for i in (1, 2):
         (tmp_path / f"inv{i}.pdf").write_bytes(b"%PDF-1.4 fake")
-    monkeypatch.setitem(llm._PREPROCESSORS, "pdf", lambda path, opts: f"Invoice number: INV-{path[-5]}\nTotal: GBP 1{path[-5]}.50")
+    monkeypatch.setitem(
+        llm._PREPROCESSORS, "pdf", lambda path, opts: f"Invoice number: INV-{path[-5]}\nTotal: GBP 1{path[-5]}.50"
+    )
     prompts = []
 
     def fake_extract(client, config, prompt, system_prompt=None):
@@ -206,17 +208,30 @@ def test_model_reader_on_pdfs_runs_through_run_source(tmp_path, monkeypatch):
 
     monkeypatch.setitem(llm._PROVIDER_EXTRACT, "azure_openai", fake_extract)
     monkeypatch.setitem(llm._PROVIDER_INIT, "azure_openai", lambda cfg: object())
-    contract = DataContract(**{
-        "version": "1.0.0", "dataset": "bronze_invoices",
-        "source": {"type": "landing", "path": str(tmp_path / "*.pdf"), "format": "pdf"},
-        "extraction": {"provider": "azure_openai", "model": "gpt-5-mini",
-                       "preprocessing": {"content_type": "pdf", "file_column": "file_path",
-                                         "text_output_column": "document_text"},
-                       "text_column": "document_text"},
-        "model": {"fields": [{"name": "file_path", "type": "string"},
-                             {"name": "invoice_number", "type": "string", "description": "The invoice id."},
-                             {"name": "total", "type": "decimal"}]},
-    })
+    contract = DataContract(
+        **{
+            "version": "1.0.0",
+            "dataset": "bronze_invoices",
+            "source": {"type": "landing", "path": str(tmp_path / "*.pdf"), "format": "pdf"},
+            "extraction": {
+                "provider": "azure_openai",
+                "model": "gpt-5-mini",
+                "preprocessing": {
+                    "content_type": "pdf",
+                    "file_column": "file_path",
+                    "text_output_column": "document_text",
+                },
+                "text_column": "document_text",
+            },
+            "model": {
+                "fields": [
+                    {"name": "file_path", "type": "string"},
+                    {"name": "invoice_number", "type": "string", "description": "The invoice id."},
+                    {"name": "total", "type": "decimal"},
+                ]
+            },
+        }
+    )
     result = DataProcessor(contract, engine="polars").run_source()
     good = result.good
     assert sorted(good["invoice_number"].to_list()) == ["INV-1", "INV-2"]
@@ -226,8 +241,11 @@ def test_model_reader_on_pdfs_runs_through_run_source(tmp_path, monkeypatch):
 
 
 def test_fields_prompt_lists_fields_without_file_path():
-    cfg = ExtractionConfig(provider="openai", model="m", output_schema=[
-        {"name": "file_path", "type": "string"}, {"name": "total", "type": "decimal"}])
+    cfg = ExtractionConfig(
+        provider="openai",
+        model="m",
+        output_schema=[{"name": "file_path", "type": "string"}, {"name": "total", "type": "decimal"}],
+    )
     p = llm._fields_prompt(cfg, "TEXT")
     assert "- total (decimal)" in p and "file_path" not in p and p.endswith("TEXT")
 
@@ -267,15 +285,25 @@ def test_batch_with_unpriced_calls_does_not_crash(monkeypatch):
 def _doc_contract(**extraction_extra):
     from lakelogic.core.models import DataContract
 
-    return DataContract(**{
-        "version": "1.0.0", "dataset": "b",
-        "source": {"type": "landing", "path": "x/*.pdf", "format": "pdf"},
-        "extraction": {"provider": "azure_openai", "model": "m",
-                       "preprocessing": {"content_type": "pdf", "file_column": "file_path",
-                                         "text_output_column": "document_text"},
-                       "text_column": "document_text", **extraction_extra},
-        "model": {"fields": [{"name": "file_path", "type": "string"}, {"name": "total", "type": "decimal"}]},
-    })
+    return DataContract(
+        **{
+            "version": "1.0.0",
+            "dataset": "b",
+            "source": {"type": "landing", "path": "x/*.pdf", "format": "pdf"},
+            "extraction": {
+                "provider": "azure_openai",
+                "model": "m",
+                "preprocessing": {
+                    "content_type": "pdf",
+                    "file_column": "file_path",
+                    "text_output_column": "document_text",
+                },
+                "text_column": "document_text",
+                **extraction_extra,
+            },
+            "model": {"fields": [{"name": "file_path", "type": "string"}, {"name": "total", "type": "decimal"}]},
+        }
+    )
 
 
 def test_read_text_dropped_by_default():
@@ -301,8 +329,11 @@ def test_a_source_text_column_is_never_dropped():
 
 def test_instruction_hash_follows_the_fields_not_the_document():
     a = ExtractionConfig(provider="openai", model="m", output_schema=[{"name": "total", "type": "decimal"}])
-    b = ExtractionConfig(provider="openai", model="m", output_schema=[
-        {"name": "total", "type": "decimal"}, {"name": "vat", "type": "decimal"}])
+    b = ExtractionConfig(
+        provider="openai",
+        model="m",
+        output_schema=[{"name": "total", "type": "decimal"}, {"name": "vat", "type": "decimal"}],
+    )
     assert llm._instruction_hash(a) != llm._instruction_hash(b)
     assert llm._instruction_hash(a) != llm._prompt_hash("")
     assert llm._instruction_hash(a) == llm._instruction_hash(a)

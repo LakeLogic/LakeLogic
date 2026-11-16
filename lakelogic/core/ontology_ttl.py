@@ -49,7 +49,14 @@ _RANK = {"suggested": 0, "observed": 1, "confirmed": 2}
 
 def _lit(value: str) -> str:
     """A Turtle string literal (short form, escaped)."""
-    s = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    s = (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
     return f'"{s}"'
 
 
@@ -85,7 +92,9 @@ def _iri(base: str, domain: str, local: str) -> str:
     return f"<{base}{_slug(domain)}/{local}>"
 
 
-def _concepts(business_map: Dict[str, Any], include_suggested: bool) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
+def _concepts(
+    business_map: Dict[str, Any], include_suggested: bool
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     """Concepts to write (not lookups; with a contract or confirmed), and each one's domain."""
     keep: Dict[str, Dict[str, Any]] = {}
     owner: Dict[str, str] = {}
@@ -127,10 +136,15 @@ def render_domain_ttl(
     for p, iri in PREFIXES.items():
         out.append(f"@prefix {p}: <{iri}> .")
     out.append("")
-    out.append(_block(_scheme(base, domain), [
-        ("a", "skos:ConceptScheme"),
-        ("skos:prefLabel", _lit(domain.replace("_", " ").title())),
-    ]))
+    out.append(
+        _block(
+            _scheme(base, domain),
+            [
+                ("a", "skos:ConceptScheme"),
+                ("skos:prefLabel", _lit(domain.replace("_", " ").title())),
+            ],
+        )
+    )
     for name in mine:
         e = concepts[name]
         pairs: List[Tuple[str, str]] = [

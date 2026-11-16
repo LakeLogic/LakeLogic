@@ -12,8 +12,14 @@ from lakelogic.core.ontology_ttl import render_domain_ttl, render_index_ttl
 
 
 def _c(name, key, fields, system, domain, description=None, **extra):
-    c = {"name": name, "system": system, "_domain": domain, "primary_key": key,
-         "model": {"fields": [{"name": f} for f in fields]}, "info": {"title": name}}
+    c = {
+        "name": name,
+        "system": system,
+        "_domain": domain,
+        "primary_key": key,
+        "model": {"fields": [{"name": f} for f in fields]},
+        "info": {"title": name},
+    }
     if description:
         c["info"]["description"] = description
     c.update(extra)
@@ -21,8 +27,14 @@ def _c(name, key, fields, system, domain, description=None, **extra):
 
 
 ESTATE = [
-    _c("silver_rideflow_driver_profiles", ["driver_id"], ["driver_id", "city_code"], "rideflow", "marketplace",
-       description='A "driver" on the platform.\nOne row per driver.'),
+    _c(
+        "silver_rideflow_driver_profiles",
+        ["driver_id"],
+        ["driver_id", "city_code"],
+        "rideflow",
+        "marketplace",
+        description='A "driver" on the platform.\nOne row per driver.',
+    ),
     _c("silver_rideflow_trips", ["trip_id"], ["trip_id", "driver_id"], "rideflow", "marketplace"),
     _c("silver_stripe_payouts", ["payout_id"], ["payout_id", "driver_id"], "stripe", "payments"),
     _c("gold_dim_driver_profiles", ["driver_sk"], ["driver_sk", "driver_id"], "rideflow", "marketplace"),
@@ -64,8 +76,18 @@ def test_literals_are_escaped_and_output_is_stable():
 
 def test_suggested_is_left_out_unless_asked():
     m = derive_business_map(copy.deepcopy(ESTATE))
-    m["relationships"].append({"from": "Driver", "to": "Trip", "verb": "relates to", "cardinality": "unknown",
-                               "state": "inferred", "kind": "reads", "evidence_state": "suggested", "evidence": []})
+    m["relationships"].append(
+        {
+            "from": "Driver",
+            "to": "Trip",
+            "verb": "relates to",
+            "cardinality": "unknown",
+            "state": "inferred",
+            "kind": "reads",
+            "evidence_state": "suggested",
+            "evidence": [],
+        }
+    )
     assert "Driver_to_Trip" not in render_domain_ttl(m, "marketplace")
     assert "Driver_to_Trip" in render_domain_ttl(m, "marketplace", include_suggested=True)
 
@@ -79,8 +101,16 @@ def test_index_imports_every_domain():
 def test_cli_writes_one_file_per_domain_and_an_index(tmp_path):
     root = tmp_path / "contracts"
     for d, f, body in [
-        ("marketplace", "silver_rideflow_riders.yaml", "system: rideflow\nprimary_key: [rider_id]\nmodel:\n  fields:\n    - name: rider_id\n"),
-        ("payments", "silver_stripe_charges.yaml", "system: stripe\nprimary_key: [charge_id]\nmodel:\n  fields:\n    - name: charge_id\n    - name: rider_id\n"),
+        (
+            "marketplace",
+            "silver_rideflow_riders.yaml",
+            "system: rideflow\nprimary_key: [rider_id]\nmodel:\n  fields:\n    - name: rider_id\n",
+        ),
+        (
+            "payments",
+            "silver_stripe_charges.yaml",
+            "system: stripe\nprimary_key: [charge_id]\nmodel:\n  fields:\n    - name: charge_id\n    - name: rider_id\n",
+        ),
     ]:
         (root / d).mkdir(parents=True)
         (root / d / f).write_text(body, encoding="utf-8")
