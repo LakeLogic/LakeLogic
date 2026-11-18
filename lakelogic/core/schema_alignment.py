@@ -84,7 +84,15 @@ def plan_alignment(
             # key) is stored in the engine's own type, whatever the contract declares for it.
             continue
         (plan.widen if is_widening(old, new) else plan.rewrite).append((have[key][0], old, new))
-    plan.kept = [name for key, (name, _) in have.items() if key not in want and not key.startswith("_lakelogic")]
+    # Not "kept": the engine's own columns (`_lakelogic*`) and the ones it MANAGES (SCD2 dates,
+    # flag, version, surrogate key). They are never in the contract, so every SCD2 load after
+    # the first warned "in the table but not in the contract; new rows get null" six times -
+    # false, the engine fills them (fresh-agent test, 2026-11-18).
+    plan.kept = [
+        name
+        for key, (name, _) in have.items()
+        if key not in want and not key.startswith("_lakelogic") and key not in managed_l
+    ]
     return plan
 
 
@@ -118,6 +126,7 @@ def managed_columns(contract: Any) -> set:
             scd2.get("current_flag_field", "is_current"),
             scd2.get("version_column", "_version"),
             scd2.get("change_reason_column", "_change_reason"),
+            scd2.get("surrogate_key", "_sk"),  # SCD2 adds `_sk` unless told otherwise
         }
     for cfg in (scd2, getattr(mat, "scd1", None)):
         if isinstance(cfg, dict) and cfg.get("surrogate_key"):

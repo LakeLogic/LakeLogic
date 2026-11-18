@@ -45,6 +45,31 @@ FILE_STREAM_KINDS = frozenset({"files"})
 CLOUD_STREAM_KINDS = frozenset({"kinesis", "pubsub"})
 
 
+class DatasetRulesFailed(ValueError):
+    """A dataset rule failed and the contract says to stop (``fail_pipeline_on_dataset_error``).
+
+    An expected outcome, not a crash: the CLI prints it as one line and exits 1. A ValueError
+    subclass, so every caller that caught ValueError still does."""
+
+
+def _describe_dataset_failure(result: Dict[str, Any]) -> str:
+    """One failed dataset rule in words. A ``unique`` rule is compiled to "duplicates < 1", so
+    its raw result read ``order_id_unique=1 (expected < 1.0)``; it now reads
+    ``order_id_unique: 1 duplicate value(s)`` (fresh-agent test, 2026-11-18)."""
+    import re
+
+    name = str(result.get("name") or "rule")
+    value = str(result.get("value") or "")
+    got = re.match(r"^\s*(-?[\d.]+)\s*\(expected < 1(?:\.0)?\)\s*$", value)
+    if got and name.endswith("_unique"):
+        n = float(got.group(1))
+        return f"{name}: {int(n) if n.is_integer() else n} duplicate value(s)"
+    found = re.match(r"^\s*(.+?)\s*\((expected .+)\)\s*$", value)
+    if found:
+        return f"{name}: got {found.group(1)}, {found.group(2)}"
+    return f"{name}: {value}" if value else name
+
+
 _EXTENSION_FORMATS = {
     ".csv": "csv", ".tsv": "csv", ".parquet": "parquet", ".json": "json", ".jsonl": "ndjson",
     ".ndjson": "ndjson", ".xlsx": "excel", ".xls": "excel", ".xml": "xml", ".avro": "avro", ".orc": "orc",
@@ -2579,8 +2604,9 @@ class DataProcessor:
                 # Halt pipeline if configured
                 halt_on_fail = getattr(self.contract.quality, "fail_pipeline_on_dataset_error", False)
                 if halt_on_fail:
-                    raise ValueError(
-                        f"Pipeline halted: Dataset Quality rules failed in '{contract_title}'. Details: {details}"
+                    readable = "; ".join(_describe_dataset_failure(r) for r in failures)
+                    raise DatasetRulesFailed(
+                        f"Pipeline halted: Dataset Quality rules failed in '{contract_title}': {readable}"
                     )
 
         # Schema drift detection (ingest mode)

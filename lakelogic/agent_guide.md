@@ -107,24 +107,40 @@ in the output AND in quarantined rows.
 
 ## Run a whole system
 
-A system is a folder of contracts plus `_system.yaml` (needs at least `domain:` and `system:`;
-also storage roots, run log, defaults) and,
-for a domain, `_domain.yaml` (business names). Contracts declare `upstream`, and the runner
-orders them bronze → silver → gold.
+Fastest route: let LakeLogic build the project from your contracts, then run it.
+
+```bash
+lakelogic scaffold contracts/*.olc.yaml --out myproject --engine polars
+cd myproject && python run_pipeline.py
+```
+
+The registry file (`_registry.yaml`, or `_system.yaml`) **lists its contracts** - nothing is
+discovered by scanning folders:
+
+```yaml
+domain: sales                  # required
+system: shop                   # required
+storage_mode: path
+storage:
+  external_location_root: ./lake
+contracts:                     # every contract the system runs
+  - {layer: bronze, entity: orders, path: contracts/bronze/orders.yaml}
+  - {layer: silver, entity: orders, path: contracts/silver/orders.yaml, depends_on: [bronze_orders]}
+```
 
 ```python
 from lakelogic.core.registry import DomainRegistry
-from lakelogic.pipeline import LakehousePipeline
+from lakelogic.pipeline.runner import LakehousePipeline
 
-registry = DomainRegistry.from_yaml("contracts/sales/_system.yaml", environment="dev")
-LakehousePipeline(registry, engine="polars").run(target_layers="bronze,silver,gold")
+registry = DomainRegistry.from_yaml("myproject/_registry.yaml", environment="dev", storage_mode="path")
+LakehousePipeline(registry, engine="polars").run()          # target_layers="bronze,silver" to limit
 ```
 
-```bash
-lakelogic-driver --registry contracts/_registry.yaml --layers bronze,silver --engine polars
-```
+Or `lakelogic-driver --registry myproject/_registry.yaml --layers bronze,silver --engine polars`.
+"No contracts processed" means the `contracts:` list is empty or its paths are wrong (relative
+to the registry file). For business names, add a `_domain.yaml` beside it.
 
-Check a system file: `lakelogic registry validate <file>`; see where a value comes from:
+Check a registry: `lakelogic registry validate <file>`; see where a value comes from:
 `lakelogic registry explain <file> --key <dotted.key>`.
 
 ## Reading results
@@ -140,14 +156,12 @@ Check a system file: `lakelogic registry validate <file>`; see where a value com
 A failing **row** rule quarantines the row; a failing **dataset** rule fails the run only when
 `quality.fail_pipeline_on_dataset_error: true`.
 
-## Known gaps (being fixed)
+## Good to know
 
-State these to the user rather than working around them silently.
-
-- **SCD2 output**: dates may come out as strings, the first version starts at `1900-01-01`,
-  `_version` counts down (1 = current), and a second load warns that SCD2's own columns are
-  "not in the contract" - those warnings are harmless.
-- `olc validate` passing does not mean the contract runs. Run it on sample data.
+- `olc validate` checks a contract's shape, not that it runs. Run it on sample data.
+- **SCD2**: the first version of each key starts at `1900-01-01` ("valid since the beginning");
+  set `scd2.effective_from_default` to change it. `_version` 1 is the oldest; `is_current`
+  marks the live row; `effective_to` is `9999-12-31` while current.
 
 ## When it fails
 

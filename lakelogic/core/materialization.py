@@ -498,6 +498,11 @@ def _coerce_declared_temporal(table, contract, existing_schema=None):
         declared = {f.name: _resolve_arrow_type(f.type) for f in (_get_fields(contract) or []) if f.type}
     except Exception:  # noqa: BLE001 - no usable field list: nothing to coerce
         return table
+    # SCD2's own interval columns are timestamps even though no contract declares them: they
+    # landed as STRING (mixed "1900-01-01" / "2026-02-01T00:00:00") on the polars/pandas path,
+    # so `_version` and any `>= effective_from` join sorted text (fresh-agent test, 2026-11-18).
+    for name in _scd2_interval_columns(contract):
+        declared.setdefault(name, pa.timestamp("us"))
     existing = {f.name: f.type for f in existing_schema} if existing_schema is not None else {}
     for i, field in enumerate(table.schema):
         target = declared.get(field.name)
@@ -525,6 +530,17 @@ def _coerce_declared_temporal(table, contract, existing_schema=None):
             col = pa.array(parsed, type=target)
         table = table.set_column(i, pa.field(field.name, col.type), col)
     return table
+
+
+def _scd2_interval_columns(contract) -> List[str]:
+    """``effective_from`` / ``effective_to`` column names of an SCD2 contract, else []."""
+    mat = getattr(contract, "materialization", None)
+    if mat is None or str(getattr(mat, "strategy", "") or "").lower() != "scd2":
+        return []
+    cfg = getattr(mat, "scd2", None) or {}
+    if not isinstance(cfg, dict):
+        cfg = cfg.model_dump() if hasattr(cfg, "model_dump") else dict(cfg)
+    return [cfg.get("effective_from_field") or "effective_from", cfg.get("effective_to_field") or "effective_to"]
 
 
 def _parse_iso_temporal(value):

@@ -21,7 +21,7 @@ from loguru import logger
 import yaml
 import json
 
-from lakelogic.core.processor import DataProcessor
+from lakelogic.core.processor import DataProcessor, DatasetRulesFailed
 from lakelogic.cli.review import review_command
 from lakelogic.cli.review_reply import review_reply_command
 from lakelogic.cli.lint import lint_command
@@ -275,6 +275,14 @@ def run(
         except Exception as rl_exc:  # a log that cannot be written never fails the data
             logger.warning(f"Run log not written: {rl_exc}")
 
+    except DatasetRulesFailed as e:
+        # An expected outcome of the contract, not a crash: one line, exit 1 (it printed an
+        # 80-line traceback; fresh-agent test, 2026-11-18). --verbose still shows the trace.
+        if verbose:
+            logger.exception(str(e))
+        else:
+            logger.error(str(e))
+        raise typer.Exit(code=1)
     except Exception as e:  # pragma: no cover
         logger.exception(f"Fatal error during execution: {e}")  # pragma: no cover
         raise typer.Exit(code=1)  # pragma: no cover

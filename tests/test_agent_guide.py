@@ -76,3 +76,28 @@ def test_run_reads_the_contracts_source_path_when_source_is_omitted(tmp_path):
     }), encoding="utf-8")
     out = CliRunner().invoke(app, ["run", "--contract", str(contract)])
     assert out.exit_code == 0, out.output
+
+
+def test_a_failing_dataset_rule_is_one_readable_line(tmp_path):
+    import yaml
+
+    csv = tmp_path / "orders.csv"
+    csv.write_text("order_id,amount\n1,10\n1,20\n", encoding="utf-8")
+    contract = tmp_path / "orders.olc.yaml"
+    contract.write_text(yaml.safe_dump({
+        "version": "1.0.0", "info": {"title": "orders"},
+        "model": {"fields": [{"name": "order_id", "type": "integer"}, {"name": "amount", "type": "integer"}]},
+        "quality": {"fail_pipeline_on_dataset_error": True, "dataset_rules": [{"unique": "order_id"}]},
+    }), encoding="utf-8")
+    out = CliRunner().invoke(app, ["run", "-c", str(contract), "--source", str(csv)])
+    assert out.exit_code == 1
+    assert "Traceback" not in out.output
+
+
+def test_unique_failures_are_described_in_words():
+    from lakelogic.core.processor import _describe_dataset_failure
+
+    assert _describe_dataset_failure({"name": "order_id_unique", "value": "1 (expected < 1.0)"}) == \
+        "order_id_unique: 1 duplicate value(s)"
+    assert _describe_dataset_failure({"name": "min_rows", "value": "0 (expected > 1)"}) == \
+        "min_rows: got 0, expected > 1"
