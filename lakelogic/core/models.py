@@ -441,6 +441,11 @@ class QualityRule(_olcn.QualityRule):
 class Quality(_olcn.Quality):
     """Quality rule groups for row and dataset checks."""
 
+    #: With ``on_dataset_failure: quarantine``, set aside only the groups (by these columns) that
+    #: fail a dataset rule, not the whole batch (2026-11-18). Declared here until OLC carries it:
+    #: OLC's Quality drops unknown keys, so it never reached the runtime.
+    quarantine_scope: List[str] = Field(default_factory=list)
+
     row_rules: List[
         Union[
             QualityRule,
@@ -503,6 +508,10 @@ class Materialization(_olcn.Materialization):
         "dlt_destination",
         "dlt_credentials",
         "dlt_dataset_name",
+        # format: database (db_writer, 2026-11-18)
+        "connection",
+        "table",
+        "write",
     }
 
     @model_validator(mode="after")

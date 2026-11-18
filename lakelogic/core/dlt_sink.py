@@ -32,7 +32,31 @@ LOCAL_DESTINATIONS = {"duckdb", "filesystem", "motherduck", "weaviate"}
 
 #: Contract keys that configure the writer itself; every other ``dlt_*`` key is passed to the
 #: destination factory with the prefix removed (e.g. ``dlt_create_indexes: true``).
-_RESERVED = {"dlt_destination", "dlt_credentials", "dlt_dataset_name", "dlt_pipeline_name"}
+_RESERVED = {"dlt_destination", "dlt_credentials", "dlt_dataset_name", "dlt_pipeline_name",
+             # writer speed settings (2026-11-18), not destination options
+             "dlt_loader_file_format", "dlt_merge_strategy"}
+
+#: One dlt pipeline object per name, reused across writes in a process: building it each write
+#: cost a noticeable share of every small load (2026-11-18).
+_PIPELINES: Dict[str, Any] = {}
+
+_ARROW_TO_DLT = (
+    ("int", "bigint"), ("uint", "bigint"), ("float", "double"), ("double", "double"), ("bool", "bool"),
+    ("timestamp", "timestamp"), ("date", "date"), ("decimal", "decimal"), ("string", "text"), ("large_string", "text"),
+)
+
+
+def _column_hints(data: Any) -> Dict[str, Dict[str, str]]:
+    """dlt column types from the batch's Arrow schema, so each write's hints match the last
+    ("several column hints were different" was logged on every write)."""
+    hints: Dict[str, Dict[str, str]] = {}
+    for field in data.schema:
+        name = str(field.type)
+        for prefix, dlt_type in _ARROW_TO_DLT:
+            if name.startswith(prefix):
+                hints[field.name] = {"data_type": dlt_type}
+                break
+    return hints
 
 #: Destinations that store list/struct columns natively. Elsewhere (Postgres, SQL Server, ...)
 #: dlt's loader cannot write them — e.g. quarantine's ``_lakelogic_errors`` list — so they are
@@ -236,23 +260,44 @@ def write_dlt(
             "write_disposition": disposition,
         }
 
-    @dlt.resource(name=table, write_disposition=disposition, primary_key=pk or None)
+    # Speed settings (2026-11-18): `dlt_merge_strategy: upsert` updates rows in place instead of
+    # delete-insert; `dlt_loader_file_format: csv` loads Postgres with COPY. Both optional.
+    resource_disposition: Any = disposition
+    merge_strategy = config.get("dlt_merge_strategy")
+    if disposition == "merge" and merge_strategy:
+        resource_disposition = {"disposition": "merge", "strategy": str(merge_strategy)}
+
+    @dlt.resource(name=table, write_disposition=resource_disposition, primary_key=pk or None)
     def _rows():
         yield data
 
+    resource = _rows()
+    hints = _column_hints(data)
+    if hints and hasattr(resource, "apply_hints"):
+        resource.apply_hints(columns=hints)
+
     try:
-        pipeline = dlt.pipeline(
-            pipeline_name=pipeline_name(config, destination, dataset_name, table),
-            destination=dest,
-            dataset_name=dataset_name,
-        )
+        pname = pipeline_name(config, destination, dataset_name, table)
+        # Reused only for the SAME settings (credentials included, compared in memory only) and
+        # the same dlt factory - a changed connection must never write through an old pipeline.
+        cache_key = (pname, repr(sorted((k, str(v)) for k, v in config.items())), str(credentials))
+        cached = _PIPELINES.get(cache_key)
+        # The factory is held in the cache, so `is` cannot match a different (or freed) one.
+        if cached is not None and cached[0] is dlt.pipeline:
+            pipeline = cached[1]
+        else:
+            pipeline = dlt.pipeline(pipeline_name=pname, destination=dest, dataset_name=dataset_name)
+            _PIPELINES[cache_key] = (dlt.pipeline, pipeline)
         # dlt keeps a failed load on disk and, on the next run, retries it and IGNORES the new
         # data. Every LakeLogic write carries its whole batch, so a stale package is only ever
         # wrong: drop it before writing.
         if getattr(pipeline, "has_pending_data", False):
             logger.warning(f"dlt pipeline {pipeline.pipeline_name}: dropping a load left by an earlier failed run")
             pipeline.drop_pending_packages()
-        pipeline.run(_rows())
+        run_kwargs: Dict[str, Any] = {}
+        if config.get("dlt_loader_file_format"):
+            run_kwargs["loader_file_format"] = str(config["dlt_loader_file_format"])
+        pipeline.run(resource, **run_kwargs)
     except Exception as exc:
         secrets = [credentials] if isinstance(credentials, str) else list((credentials or {}).values())
         raise ValueError(f"dlt write to {destination} failed: {_scrub(str(exc), secrets)}") from None

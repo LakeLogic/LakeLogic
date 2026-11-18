@@ -87,6 +87,63 @@ def _dataset_failure_policy(quality: Any) -> str:
     return "stop" if getattr(quality, "fail_pipeline_on_dataset_error", False) else "continue"
 
 
+def _quarantine_failing_groups(adapter: Any, good_df: Any, failures: List[Dict[str, Any]], scope: List[str],
+                               dataset: Optional[str]) -> Optional[Tuple[Any, Any, str]]:
+    """Split the batch by ``quality.quarantine_scope``: rerun each failed dataset rule on every
+    group (the engine's own compiled SQL and bounds) and return ``(good rows, rows of the
+    groups that failed, reason)``. None - quarantine the whole batch - when the frame is not
+    Polars, a scope column is missing, or no single group fails on its own."""
+    try:
+        import polars as pl
+    except ImportError:  # pragma: no cover
+        return None
+    if not isinstance(good_df, pl.DataFrame) or not good_df.height or any(c not in good_df.columns for c in scope):
+        return None
+    failed_names = {r.get("name") for r in failures}
+    rules = [r for r in (adapter.get_dataset_rules() if hasattr(adapter, "get_dataset_rules") else [])
+             if getattr(r, "name", None) in failed_names and getattr(r, "sql", None)]
+    if not rules:
+        return None
+    bad_keys: Dict[Tuple[Any, ...], List[str]] = {}
+    for keys, group in good_df.group_by(scope, maintain_order=True):
+        ctx = pl.SQLContext(source=group, eager=True)
+        if dataset and dataset != "source":
+            ctx.register(dataset, group)
+        for rule in rules:
+            try:
+                val = ctx.execute(rule.sql.replace("{dataset}", dataset or "source")).row(0)[0]
+            except Exception:  # noqa: BLE001 - a rule that cannot run per group decides nothing
+                continue
+            if val is None:
+                ok = False
+            elif getattr(rule, "must_be_between", None):
+                lo, hi = rule.must_be_between
+                ok = lo <= val <= hi
+            elif getattr(rule, "must_be_less_than", None) is not None:
+                ok = val < rule.must_be_less_than
+            elif getattr(rule, "must_be_greater_than", None) is not None:
+                ok = val > rule.must_be_greater_than
+            else:
+                ok = True
+            if not ok:
+                bad_keys.setdefault(tuple(keys), []).append(rule.name)
+    if not bad_keys:
+        return None
+    marks = pl.DataFrame([dict(zip(scope, k)) for k in bad_keys], schema={c: good_df.schema[c] for c in scope})
+    failed = good_df.join(marks, on=scope, how="semi")
+    kept = good_df.join(marks, on=scope, how="anti")
+    if kept.height == 0:
+        # Every group failed: that is the whole batch, and it must be treated as one (nothing
+        # reaches the target, batch_quarantined is set), not as an empty "good" batch.
+        return None
+    shown = ", ".join(
+        "/".join(str(v) for v in k) + " (" + ", ".join(sorted(set(n))) + ")" for k, n in list(bad_keys.items())[:5]
+    )
+    if len(bad_keys) > 5:
+        shown += f" and {len(bad_keys) - 5} more"
+    return kept, failed, f"{len(bad_keys)} {'/'.join(scope)} group(s) failed: {shown}"
+
+
 def _quarantine_whole_batch(good_df: Any, bad_df: Any, reason: str) -> Tuple[Any, Any]:
     """Every row of the batch into quarantine: good rows join the bad ones, tagged with
     ``reason`` in the same columns a failed row carries. Returns ``(empty good, all bad)``.
@@ -2681,7 +2738,25 @@ class DataProcessor:
                     raise DatasetRulesFailed(
                         f"Pipeline halted: Dataset Quality rules failed in '{contract_title}': {readable}"
                     )
-                if policy == "quarantine":
+                scope = list(getattr(self.contract.quality, "quarantine_scope", None)
+                             or (getattr(self.contract.quality, "model_extra", None) or {}).get("quarantine_scope")
+                             or [])
+                scoped = (
+                    _quarantine_failing_groups(self.adapter, good_df, failures, scope, self.contract.dataset)
+                    if policy == "quarantine" and scope else None
+                )
+                if scoped is not None:
+                    # Only the groups that failed are set aside (quality.quarantine_scope); the
+                    # rest of the batch is written (2026-11-18: "only symbols that failed").
+                    good_df, failed_part, groups_reason = scoped
+                    _, failed_part = _quarantine_whole_batch(failed_part, None, f"Group rejected: {groups_reason}")
+                    import polars as _pl
+
+                    frames = [f for f in (bad_df, failed_part) if f is not None and f.height]
+                    bad_df = _pl.concat(frames, how="diagonal_relaxed") if frames else failed_part
+                    counts = self._compute_counts(df, good_df, bad_df)
+                    logger.warning(f"Groups quarantined for '{contract_title}': {groups_reason}. The rest is written.")
+                elif policy == "quarantine":
                     # The whole batch goes to quarantine with the rule as its reason; nothing
                     # reaches the target, and the run carries on (2026-11-18).
                     good_df, bad_df = _quarantine_whole_batch(good_df, bad_df, f"Batch rejected: {readable}")
@@ -6216,6 +6291,26 @@ class DataProcessor:
         except Exception:
             return 1
 
+    def _batch_fingerprint(self) -> Optional[str]:
+        """A stable key for the files this run read (path, size, modified time), or None when it
+        read no files (a DataFrame passed in). Same files -> same key on a retry."""
+        import hashlib
+        import os as _os
+
+        parts = []
+        for f in getattr(self, "_source_files", None) or []:
+            path = f.get("path") if isinstance(f, dict) else None
+            if not path:
+                continue
+            try:
+                st = _os.stat(path)
+                parts.append(f"{path}|{st.st_size}|{int(st.st_mtime)}")
+            except OSError:
+                parts.append(str(path))
+        if not parts:
+            return None
+        return hashlib.sha256("|".join(sorted(parts)).encode()).hexdigest()[:24]
+
     def _configures_run_log(self) -> bool:
         """Whether the contract names somewhere for a run log (a file, a folder or a table)."""
         metadata = getattr(self.contract, "metadata", None) or {}
@@ -6979,6 +7074,7 @@ class DataProcessor:
         target_path: Optional[Union[str, Path]] = None,
         *,
         batch_quarantined: Optional[bool] = None,
+        batch_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Materialize good data (and optionally quarantine) to configured targets.
@@ -7000,12 +7096,18 @@ class DataProcessor:
         if batch_quarantined is None:
             _last = getattr(self, "last_result", None)
             batch_quarantined = bool(getattr(self, "batch_quarantined", None)) and _last is not None and good_df is _last.good
+        # A stable id for this batch (the caller's, else the source files' fingerprint): a
+        # format: database append replaces a retried batch's own rows instead of doubling them,
+        # and quarantine replays of the same batch do not pile up (2026-11-18).
+        _batch_key = batch_key or self._batch_fingerprint()
         if batch_quarantined:
             from lakelogic.core.quarantine import has_destination as _q_has_destination
 
             written: Dict[str, Any] = {"target": None, "rows_written": 0, "batch_quarantined": True}
             if bad_df is not None and _q_has_destination(self.contract.quarantine):
-                written["quarantine"] = materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name)
+                written["quarantine"] = materialize_quarantine(
+                    bad_df, self.contract, engine_name=self.engine_name, batch_key=_batch_key
+                )
             elif bad_df is not None:
                 logger.warning(
                     "The quarantined batch was NOT saved: the contract sets no quarantine target. "
@@ -7026,7 +7128,7 @@ class DataProcessor:
                 self.contract,
                 target_path=target,
                 engine_name=self.engine_name,
-                incremental_metadata=getattr(self, "_incremental_metadata", None),
+                incremental_metadata={**(getattr(self, "_incremental_metadata", None) or {}), "batch_key": _batch_key},
                 is_reprocess=getattr(self, "_is_reprocess", False),
             )
 
@@ -7050,7 +7152,7 @@ class DataProcessor:
 
         if bad_df is not None and _q_has_destination(self.contract.quarantine):
             try:
-                materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name)
+                materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name, batch_key=_batch_key)
             except Exception as q_err:
                 # A stream commits its position after this returns, so carrying on would lose
                 # these rows for good: counted as bad, never saved, never read again (found

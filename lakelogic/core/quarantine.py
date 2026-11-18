@@ -653,8 +653,9 @@ def quarantine_dlt_config(q: Any) -> Dict[str, Any]:
 
 
 def writes_to_database(q: Any) -> bool:
-    """True when quarantine goes to a database through dlt (``format: dlt``) - no path needed."""
-    return q is not None and str(getattr(q, "format", None) or "").lower() == "dlt"
+    """True when quarantine goes to a database - through dlt (``format: dlt``) or the native
+    writer (``format: database``) - so no path is needed."""
+    return q is not None and str(getattr(q, "format", None) or "").lower() in ("dlt", "database")
 
 
 def has_destination(q: Any) -> bool:
@@ -695,6 +696,7 @@ def materialize_quarantine(
     output_format: Optional[str] = None,
     engine_name: Optional[str] = None,
     quarantine_mode: Optional[str] = None,
+    batch_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Materialize quarantined records to the quarantine target.
@@ -769,7 +771,14 @@ def materialize_quarantine(
     # ── Database (format: dlt): no path, the destination is the dlt_* settings ──
     # Checked BEFORE the target requirement: a database quarantine has no path, and requiring
     # one discarded every reject (fresh-agent test, 2026-11-18).
-    if writes_to_database(q) and output_format in (None, "dlt"):
+    if writes_to_database(q) and output_format in (None, "dlt", "database"):
+        if str(getattr(q, "format", "")).lower() == "database":
+            # Native writer (db_writer): always append, one transaction, rows carry their reasons.
+            from lakelogic.core.db_writer import write_database
+
+            dataset = contract.dataset or (getattr(contract.info, "table_name", None) if contract.info else None)
+            return write_database(df, q, strategy="append", batch_key=batch_key,
+                                  default_table=f"quarantine.quarantine_{dataset or 'data'}")
         return _write_quarantine_dlt(df, contract)
 
     # ── Path mode (default): write to quarantine.target ──

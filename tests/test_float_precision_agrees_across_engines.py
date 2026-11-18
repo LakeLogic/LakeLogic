@@ -33,8 +33,9 @@ SINGLE_FLOAT_DIALECTS = {"bigquery", "sqlite", "snowflake"}
 
 # Physical names that are 32- and 64-bit floating point. ``REAL`` here is
 # PostgreSQL's REAL (4 bytes) — SQLite's same-named 8-byte type is exempted above.
-BIT32 = {"float", "FLOAT", "float32", "Float32", "REAL", "FLOAT4"}
+BIT32 = {"float", "FLOAT", "float32", "Float32", "REAL", "FLOAT4", "FLOAT(24)"}  # FLOAT(24): SQL Server single
 BIT64 = {
+    "FLOAT(53)",  # SQL Server double precision
     "double",
     "DOUBLE",
     "float64",

@@ -766,6 +766,27 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
 
     record = _flatten_report(report)
 
+    if backend == "database":
+        # Native writer (db_writer): one row appended in one transaction. The connection is
+        # metadata.run_log_connection, else the output's own (materialization.connection).
+        import json as _json
+
+        import polars as pl
+
+        from lakelogic.core.db_writer import database_config, writer_for
+
+        connection = metadata.get("run_log_connection")
+        if not connection:
+            connection = database_config(getattr(contract, "materialization", None)).get("connection")
+        row = {
+            k: (_json.dumps(v, default=str) if isinstance(v, (dict, list, tuple)) else v)
+            for k, v in record.items()
+        }
+        frame = pl.DataFrame([row], infer_schema_length=1)
+        frame = frame.with_columns([pl.col(c).cast(pl.String) for c, t in frame.schema.items() if t == pl.Null])
+        written = writer_for(connection).write(frame, table=table_name, strategy="append")
+        return written["target"]
+
     if backend == "spark":
         try:
             from pyspark.sql import SparkSession

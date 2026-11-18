@@ -71,7 +71,7 @@ from typing import Dict, FrozenSet, Optional
 
 # Every SQL dialect the registry can render. `polars` is not here: it is not a
 # SQL dialect and has its own column on each row.
-DIALECTS = ("spark", "databricks", "duckdb", "sqlite", "snowflake", "bigquery", "postgresql")
+DIALECTS = ("spark", "databricks", "duckdb", "sqlite", "snowflake", "bigquery", "postgresql", "mysql", "mssql")
 
 # Dialects that collapse several widths onto one physical type. They are checked
 # for kind, not for exact width — see the module docstring.
@@ -160,6 +160,8 @@ _add(
         snowflake="VARCHAR",
         bigquery="STRING",
         postgresql="TEXT",
+        mysql="LONGTEXT",
+        mssql="NVARCHAR(MAX)",
     ),
     "text",
     "char",
@@ -177,6 +179,8 @@ _add(
         snowflake="VARCHAR",
         bigquery="STRING",
         postgresql="VARCHAR",
+        mysql="VARCHAR(255)",
+        mssql="NVARCHAR(4000)",
     )
 )
 
@@ -198,6 +202,8 @@ _add(
         # holds every value the contract allows. Widening is safe, narrowing
         # would silently truncate.
         postgresql="SMALLINT",
+        mysql="SMALLINT",
+        mssql="SMALLINT",
     ),
     "byte",
 )
@@ -215,6 +221,8 @@ _add(
         snowflake="SMALLINT",
         bigquery="INT64",
         postgresql="SMALLINT",
+        mysql="SMALLINT",
+        mssql="SMALLINT",
     ),
     "short",
 )
@@ -232,6 +240,8 @@ _add(
         snowflake="INTEGER",
         bigquery="INT64",
         postgresql="INTEGER",
+        mysql="INT",
+        mssql="INT",
     ),
     "integer",
     "int32",
@@ -250,6 +260,8 @@ _add(
         snowflake="BIGINT",
         bigquery="INT64",
         postgresql="BIGINT",
+        mysql="BIGINT",
+        mssql="BIGINT",
     ),
     "long",
     "int64",
@@ -270,6 +282,8 @@ _add(
         snowflake="FLOAT",
         bigquery="FLOAT64",
         postgresql="REAL",
+        mysql="FLOAT",
+        mssql="REAL",
     ),
     "float32",
     "real",
@@ -288,6 +302,8 @@ _add(
         snowflake="DOUBLE",
         bigquery="FLOAT64",
         postgresql="DOUBLE PRECISION",
+        mysql="DOUBLE",
+        mssql="FLOAT(53)",
     ),
     "float64",
     "number",
@@ -309,6 +325,8 @@ _add(
         snowflake="DOUBLE",
         bigquery="FLOAT64",
         postgresql="DOUBLE PRECISION",
+        mysql="DOUBLE",
+        mssql="FLOAT(53)",
     ),
     "numeric",
 )
@@ -327,6 +345,8 @@ _add(
         snowflake="BOOLEAN",
         bigquery="BOOL",
         postgresql="BOOLEAN",
+        mysql="BOOLEAN",
+        mssql="BIT",
     ),
     "bool",
 )
@@ -345,6 +365,8 @@ _add(
         snowflake="DATE",
         bigquery="DATE",
         postgresql="DATE",
+        mysql="DATE",
+        mssql="DATE",
     )
 )
 _add(
@@ -360,6 +382,8 @@ _add(
         snowflake="TIMESTAMP_NTZ",
         bigquery="TIMESTAMP",
         postgresql="TIMESTAMP",
+        mysql="DATETIME(6)",
+        mssql="DATETIME2",
     ),
     "datetime",
 )
@@ -376,6 +400,8 @@ _add(
         snowflake="TIMESTAMP_NTZ",
         bigquery="TIMESTAMP",
         postgresql="TIMESTAMP WITHOUT TIME ZONE",
+        mysql="DATETIME(6)",
+        mssql="DATETIME2",
     )
 )
 _add(
@@ -391,6 +417,8 @@ _add(
         snowflake="TIMESTAMP_TZ",
         bigquery="TIMESTAMP",
         postgresql="TIMESTAMP WITH TIME ZONE",
+        mysql="DATETIME(6)",
+        mssql="DATETIMEOFFSET",
     )
 )
 
@@ -408,6 +436,8 @@ _add(
         snowflake="BINARY",
         bigquery="BYTES",
         postgresql="BYTEA",
+        mysql="LONGBLOB",
+        mssql="VARBINARY(MAX)",
     )
 )
 _add(
@@ -423,6 +453,8 @@ _add(
         snowflake="VARIANT",
         bigquery="JSON",
         postgresql="JSONB",
+        mysql="JSON",
+        mssql="NVARCHAR(MAX)",
         # JSON is carried as text in a DataFrame on every engine; only the
         # stored column type differs. Declared, not implied.
         transport_kind=STRING,
@@ -442,6 +474,8 @@ _add(
         snowflake="ARRAY",
         bigquery="ARRAY<STRING>",
         postgresql="TEXT[]",
+        mysql="JSON",
+        mssql="NVARCHAR(MAX)",
     )
 )
 

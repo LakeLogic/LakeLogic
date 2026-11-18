@@ -65,7 +65,9 @@ set `source.format` for anything else.
 | Fail on any problem | `DataProcessor(…, strict=True)` |
 | Set a batch aside when a dataset rule fails, and carry on | contract `quality.on_dataset_failure: quarantine` (+ `source.post_ingestion: {on_error: move, archive_path: …}` so it is not read again) |
 | Reprocess a date range | `proc.run_source(reprocess_from="2026-01-01", reprocess_to="2026-01-31")` |
-| Write to Postgres / SQL Server | contract `materialization.format: dlt` + `dlt_destination` (see below) |
+| Write to a database dlt supports (any other) | contract `materialization.format: dlt` + `dlt_destination` (see below) |
+| Write to Postgres / MySQL / SQL Server / DuckDB / SQLite fast | `materialization.format: database` + `connection` + `table` (see "Write to a database fast") |
+| Set aside only the failing groups of a batch | `quality.on_dataset_failure: quarantine` + `quarantine_scope: [symbol]` |
 | Merge into Snowflake / BigQuery without moving data | `engine="snowflake"` / `"bigquery"` + `strategy: merge` + `target_path: table:…` |
 | Run a whole system (bronze → silver → gold) | `_system.yaml` + `LakehousePipeline` or `lakelogic-driver` (see below) |
 | Draft a contract from sample files | `lakelogic bootstrap --landing <dir> --output-dir contracts/` or `lakelogic.infer_contract(path)` |
@@ -115,6 +117,46 @@ Wherever output can be written, its **quarantine** and **run log** can be writte
 files, tables, or a database. Never skip rejects or logs because the target is not cloud storage.
 
 Snowflake and BigQuery with their own engine: see "Writing inside Snowflake / BigQuery" above.
+
+### Write to a database fast (`format: database`)
+
+Postgres, MySQL / MariaDB, SQL Server / Azure SQL, DuckDB and SQLite are written natively: a
+bulk load (Postgres `COPY`, SQL Server fast bulk insert, …) then one upsert statement (Postgres
+`ON CONFLICT`, MySQL `ON DUPLICATE KEY`, SQL Server `MERGE … HOLDLOCK`), in one transaction per
+batch. Measured on Postgres: a 1,200-row merge in about 0.02 s (dlt: about
+0.4 s), 100,000-row append in about 0.15 s. Choose **`database`** for loads into these databases; **`dlt`** for
+any other destination and for API sources.
+
+```yaml
+primary_key: [symbol, ts]            # needed for merge and for on_conflict: ignore
+materialization:
+  format: database
+  connection: env:PG_URL             # postgresql:// | mysql:// | mssql://…?TrustServerCertificate=yes | duckdb:/// | sqlite:///
+  table: market_data.market_bars     # schema.table; created from the data when missing
+  strategy: merge                    # append | merge | overwrite   (scd2: use dlt)
+  write:                             # all optional
+    on_conflict: error               # append only: error (default) | ignore
+    only_changed: true               # merge: unchanged rows are not rewritten (default true)
+    batch_size: 100000
+    create_table: true
+    allow_empty_overwrite: false     # overwrite with 0 rows is refused unless true
+quarantine:
+  format: database
+  connection: env:PG_URL
+  table: quarantine.quarantine_market_bars
+metadata:
+  run_log_backend: database
+  run_log_table: lakelogic.run_logs
+  run_log_connection: env:PG_URL     # defaults to materialization.connection
+```
+
+- A merge refuses a batch with the same key twice ("… appear more than once …"); add a
+  `deduplicate` step. A failed write is rolled back - nothing is half-written.
+- New columns are added (`ALTER TABLE ADD COLUMN`); `schema_policy.evolution: strict` refuses them.
+  Columns are never dropped or retyped.
+- **Retries:** an append without a key carries `_lakelogic_batch_key` (a fingerprint of the source
+  files, or `proc.materialize(good, bad, batch_key="…")`); a retried batch replaces its own rows.
+- Still on dlt? `dlt_loader_file_format: csv` and `dlt_merge_strategy: upsert` make it faster.
 
 | What | Cloud / files | Database (Postgres, SQL Server, …) |
 |---|---|---|

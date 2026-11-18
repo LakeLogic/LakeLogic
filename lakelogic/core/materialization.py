@@ -5298,6 +5298,22 @@ def _materialize_primary(
     if output_format:
         resolved_format = output_format
 
+    if (resolved_format or getattr(mat, "format", None) or "").lower() == "database":
+        # Native database writer (db_writer): COPY + one upsert statement per batch, in one
+        # transaction - the fast path dlt is not (2026-11-18). No file path, like dlt.
+        from lakelogic.core.db_writer import write_database
+        from lakelogic.core.models import effective_schema_policy
+
+        _evo_db = str(getattr(effective_schema_policy(contract), "evolution", None) or "allow").lower()
+        return write_database(
+            df,
+            mat,
+            strategy=mat.strategy,
+            primary_key=list(contract.primary_key or []),
+            batch_key=(incremental_metadata or {}).get("batch_key") if isinstance(incremental_metadata, dict) else None,
+            evolution=_evo_db,
+            default_table=getattr(mat, "table_name", None) or getattr(contract, "dataset", None),
+        )
     if (resolved_format or getattr(mat, "format", None) or "").lower() == "dlt":
         # A database target has no file path, so this runs before the path check below.
         # The contract's own dlt_* keys say where (dlt_sink: one writer, secrets resolved).
