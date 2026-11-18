@@ -66,6 +66,7 @@ set `source.format` for anything else.
 | Set a batch aside when a dataset rule fails, and carry on | contract `quality.on_dataset_failure: quarantine` (+ `source.post_ingestion: {on_error: move, archive_path: …}` so it is not read again) |
 | Reprocess a date range | `proc.run_source(reprocess_from="2026-01-01", reprocess_to="2026-01-31")` |
 | Write to Postgres / SQL Server | contract `materialization.format: dlt` + `dlt_destination` (see below) |
+| Merge into Snowflake / BigQuery without moving data | `engine="snowflake"` / `"bigquery"` + `strategy: merge` + `target_path: table:…` |
 | Run a whole system (bronze → silver → gold) | `_system.yaml` + `LakehousePipeline` or `lakelogic-driver` (see below) |
 | Draft a contract from sample files | `lakelogic bootstrap --landing <dir> --output-dir contracts/` or `lakelogic.infer_contract(path)` |
 | Profile data | `lakelogic profile …` or `lakelogic.profile(df)` |
@@ -79,15 +80,41 @@ set `source.format` for anything else.
 | `polars` (default) | Local files, fast single machine | |
 | `duckdb` | Local SQL-heavy work, DuckDB/DuckLake | |
 | `spark` | Databricks, Fabric, large data, Delta/Iceberg tables | pass an active session where needed |
-| `snowflake` | Data already in Snowflake | connection via `metadata.snowflake_*` |
-| `bigquery` | Data already in BigQuery | |
+| `snowflake` | Data already in Snowflake | connection via `metadata.snowflake_*`; writes in place (below) |
+| `bigquery` | Data already in BigQuery | writes in place (below) |
 
 The contract never names the engine; the caller does.
+
+### Writing inside Snowflake / BigQuery (native, no data leaves the warehouse)
+
+With `engine="snowflake"` or `engine="bigquery"` and a `table:` target in the same warehouse,
+the output is written by one SQL statement inside the warehouse - not fetched to the machine
+and pushed back.
+
+```yaml
+primary_key: [order_id]              # required for merge
+materialization:
+  strategy: merge                    # append | overwrite | merge (upsert) - all native
+  target_path: table:analytics.orders
+```
+
+| Strategy | Native in Snowflake | Native in BigQuery |
+|---|---|---|
+| `append` | yes (`INSERT`) | yes (`INSERT`) |
+| `overwrite` / `replace` | yes | yes (`CREATE OR REPLACE`) |
+| `merge` / `upsert` | yes (`MERGE INTO`) | yes (`MERGE`) |
+| `scd2` | no - goes through dlt | no - goes through dlt |
+
+A merge keeps one row per key from the batch, inserts new keys, and updates a matched row only
+when a business column changed - re-sending unchanged rows rewrites nothing. The target table is
+created when missing. Any other engine, or a file target, writes through the normal path.
 
 ## Where things are written
 
 Wherever output can be written, its **quarantine** and **run log** can be written there too —
 files, tables, or a database. Never skip rejects or logs because the target is not cloud storage.
+
+Snowflake and BigQuery with their own engine: see "Writing inside Snowflake / BigQuery" above.
 
 | What | Cloud / files | Database (Postgres, SQL Server, …) |
 |---|---|---|
