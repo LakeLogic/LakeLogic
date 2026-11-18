@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.2.0] — 2026-11-18
+
+### Documentation
+
+- Update changelog for v2.1.0
+
+### Deps
+
+- Open-lakehouse-contract >=0.32.0,<0.33.0 (typed dlt REST options)
 ## [2.1.0] — 2026-11-16
 
 ### Added
@@ -1200,6 +1209,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.2.0]: https://github.com/lakelogic/LakeLogic/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/lakelogic/LakeLogic/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/lakelogic/LakeLogic/compare/v1.90.0...v2.0.0
 [1.90.0]: https://github.com/lakelogic/LakeLogic/compare/v1.89.0...v1.90.0
