@@ -3,7 +3,7 @@ name = "lakelogic"
 version = "2.3.1"
 description = "Run YAML data contracts with Polars, DuckDB or Spark. Validate data, apply transformations and quarantine failed rows."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11.5"
 # authors = [{ name = "LakeLogic Team", email = "lakelogic@gmail.com" }]
 license = { text = "Apache-2.0" }
 keywords = [
