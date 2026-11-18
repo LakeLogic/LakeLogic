@@ -63,6 +63,7 @@ set `source.format` for anything else.
 | Choose an engine | `engine="duckdb"` / `"spark"` / `"snowflake"` / `"bigquery"` / `"polars"`; CLI `--engine` |
 | Apply a layer's overrides | `stage="silver"`; CLI `--stage silver` |
 | Fail on any problem | `DataProcessor(…, strict=True)` |
+| Set a batch aside when a dataset rule fails, and carry on | contract `quality.on_dataset_failure: quarantine` (+ `source.post_ingestion: {on_error: move, archive_path: …}` so it is not read again) |
 | Reprocess a date range | `proc.run_source(reprocess_from="2026-01-01", reprocess_to="2026-01-31")` |
 | Write to Postgres / SQL Server | contract `materialization.format: dlt` + `dlt_destination` (see below) |
 | Run a whole system (bronze → silver → gold) | `_system.yaml` + `LakehousePipeline` or `lakelogic-driver` (see below) |
@@ -153,8 +154,14 @@ Check a registry: `lakelogic registry validate <file>`; see where a value comes 
 | `result.trace` | Step-by-step trace (when `trace=True`) |
 | `proc.last_report` | Counts, dataset-rule outcomes, run id, timings |
 
-A failing **row** rule quarantines the row; a failing **dataset** rule fails the run only when
-`quality.fail_pipeline_on_dataset_error: true`.
+A failing **row** rule quarantines the row. A failing **dataset** rule does what
+`quality.on_dataset_failure` says:
+
+| Value | The batch (everything one run reads) | The run |
+|---|---|---|
+| `continue` (default) | written; the failure is reported | carries on |
+| `stop` (= `fail_pipeline_on_dataset_error: true`) | nothing written | fails (`DatasetRulesFailed`) |
+| `quarantine` | every row goes to quarantine, reason `Batch rejected: …`; nothing reaches the target | carries on; `proc.batch_quarantined` / `last_report["batch_quarantined"]` say so |
 
 ## Good to know
 

@@ -3207,14 +3207,24 @@ class LakehousePipeline:
                         f"Validation failures:\n{_detail_str}"
                     )
 
-            logger.debug(f"✅ Materialized {row_count} rows for {c.entity}")
-            layers_with_new_data.add(layer)
+            _batch_reason = getattr(processor, "batch_quarantined", None)
+            if _batch_reason:
+                # A failed dataset rule set the whole batch aside (on_dataset_failure:
+                # quarantine): nothing reached the target, so downstream has no new data, and
+                # its landing files are NOT cleaned up as a success - they go to the error
+                # folder (on_error: move) or stay where they are (2026-11-18).
+                _status = "batch_quarantined"
+                # Its landing files were already moved (or left) by the processor's run_source.
+                logger.warning(f"  🚧 {c.entity} [{layer}] batch quarantined: {_batch_reason}")
+            else:
+                logger.debug(f"✅ Materialized {row_count} rows for {c.entity}")
+                layers_with_new_data.add(layer)
 
-            # ── Post-ingestion cleanup (Bronze only) ────────────────────────
-            # After a successful Bronze commit, execute the landing zone
-            # lifecycle action (delete / archive / retain).
-            if layer == "bronze":
-                self._execute_post_ingestion_cleanup(c, processor)
+                # ── Post-ingestion cleanup (Bronze only) ────────────────────────
+                # After a successful Bronze commit, execute the landing zone
+                # lifecycle action (delete / archive / retain).
+                if layer == "bronze":
+                    self._execute_post_ingestion_cleanup(c, processor)
 
             summary.append(
                 c.entity,

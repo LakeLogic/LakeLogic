@@ -70,6 +70,61 @@ def _describe_dataset_failure(result: Dict[str, Any]) -> str:
     return f"{name}: {value}" if value else name
 
 
+def _dataset_failure_policy(quality: Any) -> str:
+    """``continue`` / ``stop`` / ``quarantine``: ``quality.on_dataset_failure``, else ``stop``
+    when the older ``fail_pipeline_on_dataset_error`` is set, else ``continue``."""
+    if quality is None:
+        return "continue"
+    policy = getattr(quality, "dataset_failure_policy", None)
+    if isinstance(policy, str):
+        return policy
+    explicit = getattr(quality, "on_dataset_failure", None)
+    if explicit:
+        return str(explicit)
+    return "stop" if getattr(quality, "fail_pipeline_on_dataset_error", False) else "continue"
+
+
+def _quarantine_whole_batch(good_df: Any, bad_df: Any, reason: str) -> Tuple[Any, Any]:
+    """Every row of the batch into quarantine: good rows join the bad ones, tagged with
+    ``reason`` in the same columns a failed row carries. Returns ``(empty good, all bad)``.
+    Rows already quarantined keep their own reasons."""
+    try:
+        import polars as pl
+
+        if isinstance(good_df, pl.DataFrame):
+            tagged = good_df.with_columns(
+                pl.lit([reason], dtype=pl.List(pl.Utf8)).alias("_lakelogic_errors"),
+                pl.lit(["dataset"], dtype=pl.List(pl.Utf8)).alias("_lakelogic_categories"),
+                pl.lit("active").alias("quarantine_state"),
+                pl.lit(False).alias("quarantine_reprocessed"),
+            )
+            frames = [f for f in (bad_df, tagged) if f is not None and f.height]
+            all_bad = pl.concat(frames, how="diagonal_relaxed") if frames else tagged
+            return good_df.clear(), all_bad
+    except ImportError:  # pragma: no cover - polars is a core dependency
+        pass
+    if hasattr(good_df, "sparkSession"):  # pragma: no cover - needs a Spark session
+        from pyspark.sql import functions as F
+
+        tagged = (
+            good_df.withColumn("_lakelogic_errors", F.array(F.lit(reason)))
+            .withColumn("_lakelogic_categories", F.array(F.lit("dataset")))
+            .withColumn("quarantine_state", F.lit("active"))
+            .withColumn("quarantine_reprocessed", F.lit(False))
+        )
+        all_bad = bad_df.unionByName(tagged, allowMissingColumns=True) if bad_df is not None else tagged
+        return good_df.limit(0), all_bad
+    import pandas as pd
+
+    tagged = good_df.copy()
+    tagged["_lakelogic_errors"] = [[reason] for _ in range(len(tagged))]
+    tagged["_lakelogic_categories"] = [["dataset"] for _ in range(len(tagged))]
+    tagged["quarantine_state"] = "active"
+    tagged["quarantine_reprocessed"] = False
+    all_bad = pd.concat([bad_df, tagged], ignore_index=True) if bad_df is not None else tagged
+    return good_df.iloc[0:0], all_bad
+
+
 _EXTENSION_FORMATS = {
     ".csv": "csv", ".tsv": "csv", ".parquet": "parquet", ".json": "json", ".jsonl": "ndjson",
     ".ndjson": "ndjson", ".xlsx": "excel", ".xls": "excel", ".xml": "xml", ".avro": "avro", ".orc": "orc",
@@ -1552,6 +1607,7 @@ class DataProcessor:
         self.adapter.engine_name = self.engine_name
         self.adapter.trace_enabled = self.trace_enabled
         self.last_report: Optional[Dict[str, Any]] = None
+        self.batch_quarantined: Optional[str] = None
         self.last_run_id: Optional[str] = None
         self.pipeline_run_id: Optional[str] = pipeline_run_id
         self.last_source_path: Optional[str] = None
@@ -2134,6 +2190,8 @@ class DataProcessor:
         # Only reset if not already set (streaming / incremental callers pre-set it).
         if not self.last_run_id:
             self.last_run_id = str(_uuid4())
+        # Set when a failed dataset rule quarantined this batch (on_dataset_failure: quarantine).
+        self.batch_quarantined: Optional[str] = None
 
         start_time = time.perf_counter()
         start_time_utc = time.time()
@@ -2601,12 +2659,22 @@ class DataProcessor:
                 msg = f"LakeLogic Dataset Quality Check failed in '{contract_title}': {details}"
                 self.notify(event="dataset_quality_check", message=msg)
 
-                # Halt pipeline if configured
-                halt_on_fail = getattr(self.contract.quality, "fail_pipeline_on_dataset_error", False)
-                if halt_on_fail:
-                    readable = "; ".join(_describe_dataset_failure(r) for r in failures)
+                # What a failed dataset rule does to the batch (quality.on_dataset_failure).
+                readable = "; ".join(_describe_dataset_failure(r) for r in failures)
+                policy = _dataset_failure_policy(self.contract.quality)
+                if policy == "stop":
                     raise DatasetRulesFailed(
                         f"Pipeline halted: Dataset Quality rules failed in '{contract_title}': {readable}"
+                    )
+                if policy == "quarantine":
+                    # The whole batch goes to quarantine with the rule as its reason; nothing
+                    # reaches the target, and the run carries on (2026-11-18).
+                    good_df, bad_df = _quarantine_whole_batch(good_df, bad_df, f"Batch rejected: {readable}")
+                    self.batch_quarantined = readable
+                    counts = self._compute_counts(df, good_df, bad_df)
+                    logger.warning(
+                        f"Batch quarantined for '{contract_title}': {readable}. "
+                        "Nothing is written to the target; the run carries on."
                     )
 
         # Schema drift detection (ingest mode)
@@ -2774,6 +2842,10 @@ class DataProcessor:
             # Per-contract SLO checks are deferred to the pipeline level.
             slos = []
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
+        if self.batch_quarantined:
+            # Counted apart from quarantined ROWS: a batch rejected by a dataset rule.
+            self.last_report["batch_quarantined"] = True
+            self.last_report["batch_quarantine_reason"] = self.batch_quarantined
 
         # Extract pre-transform filter string for run log
         pre_filters = []
@@ -4831,7 +4903,12 @@ class DataProcessor:
         # cleanup but works for standalone DataProcessor.run_source() calls.
         _src_cfg = self.contract.source if self.contract.source else None
         _pi = getattr(_src_cfg, "post_ingestion", None) if _src_cfg else None
-        if _pi and getattr(_pi, "action", "retain") != "retain":
+        if getattr(self, "batch_quarantined", None):
+            # A failed dataset rule set this batch aside: its files are NOT cleaned up as a
+            # success. With on_error: move they go to <archive>/<table>/error/ so the next run
+            # does not read and reject them again; otherwise they stay in landing (2026-11-18).
+            self._move_quarantined_batch_files(_src_cfg, str(path))
+        elif _pi and getattr(_pi, "action", "retain") != "retain":
             _action = _pi.action
             _source_path = str(path)
             _archive_path = getattr(_pi, "archive_path", None)
@@ -4848,6 +4925,34 @@ class DataProcessor:
                     )
 
         return result
+
+    def _move_quarantined_batch_files(self, source_cfg: Any, source_path: str) -> None:
+        """Send a quarantined batch's landing files to the error folder (``on_error: move``),
+        or leave them in landing. Never raises: the batch is already in quarantine."""
+        from pathlib import Path as _Path
+
+        from lakelogic.pipeline import landing_lifecycle as _ll
+
+        files = [f["path"] for f in (self._source_files or []) if "path" in f and _Path(f["path"]).exists()]
+        if not files:
+            return
+        try:
+            src_dict = source_cfg.model_dump() if hasattr(source_cfg, "model_dump") else dict(source_cfg or {})
+            server = getattr(self.contract, "server", None)
+            server_dict = server.model_dump() if hasattr(server, "model_dump") else server
+            policy = _ll.resolve_policy(src_dict, server_dict, None)
+            if policy.on_error != "move":
+                logger.warning(
+                    f"The quarantined batch's {len(files)} file(s) stay in landing "
+                    "(set source.post_ingestion.on_error: move to set them aside)."
+                )
+                return
+            entity = self.contract.dataset or (getattr(self.contract.info, "table_name", None) if self.contract.info else None)
+            moved = _ll.move_failed(files, policy, entity=entity or "table", landing_path=source_path)
+            if moved:
+                logger.warning(f"Moved the quarantined batch's {moved} file(s) to the error folder.")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not move the quarantined batch's files: {exc}")
 
     def _post_ingestion_cleanup(self, source_path: str, action: str, *, archive_path: Optional[str] = None) -> None:
         """Clean up landing zone files after a successful run.
@@ -6854,6 +6959,22 @@ class DataProcessor:
         Returns:
             Materialization metadata.
         """
+        # A batch a dataset rule quarantined (on_dataset_failure: quarantine) writes NOTHING to
+        # the target - an empty frame through `overwrite` would wipe the table - only its rows
+        # to quarantine.
+        if getattr(self, "batch_quarantined", None):
+            from lakelogic.core.quarantine import has_destination as _q_has_destination
+
+            written: Dict[str, Any] = {"target": None, "rows_written": 0, "batch_quarantined": True}
+            if bad_df is not None and _q_has_destination(self.contract.quarantine):
+                written["quarantine"] = materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name)
+            elif bad_df is not None:
+                logger.warning(
+                    "The quarantined batch was NOT saved: the contract sets no quarantine target. "
+                    "Set `quarantine: {target: …}` (or `format: dlt`) to keep it."
+                )
+            return written
+
         # Avoid wrapping URIs or table: paths in Path() — it corrupts slashes on Windows
         target = target_path
         if target_path and not isinstance(target_path, Path):
