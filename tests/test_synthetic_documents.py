@@ -132,3 +132,14 @@ def test_word_and_image_documents_carry_the_mark(tmp_path):
 
     assert is_synthetic_document(_write_docx(tmp_path / "a", "T", ["Name: X"]))
     assert is_synthetic_document(_write_image(tmp_path / "b", "T", ["Name: X"]))
+
+
+def test_image_documents_use_the_extension_the_contract_reads(tmp_path):
+    """A contract reading `*.jpg` gets JPEGs, still marked synthetic; no extension means PNG."""
+    pytest.importorskip("PIL")
+    from lakelogic.core.synthetic_documents import _image_ext, _write_image, is_synthetic_document
+
+    assert _image_ext({"source": {"path": "receipts/*.jpg"}}) == "jpg"
+    assert _image_ext({"source": {"format": "image"}}) == "png"
+    jpg = _write_image(tmp_path / "r", "T", ["Total: 9.99"], "jpg")
+    assert jpg.suffix == ".jpg" and is_synthetic_document(jpg)

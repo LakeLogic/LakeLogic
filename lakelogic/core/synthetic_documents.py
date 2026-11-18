@@ -222,7 +222,9 @@ def generate_documents(
             if line is not None:
                 lines.append(line)
         stem = out / f"{prefix}_{seed}_{index:04d}"
-        written.append(_WRITERS[fmt](stem, f"{title} (Synthetic - Test Data)", lines))
+        doc_title = f"{title} (Synthetic - Test Data)"
+        written.append(_write_image(stem, doc_title, lines, _image_ext(doc)) if fmt == "image"
+                       else _WRITERS[fmt](stem, doc_title, lines))
     return written
 
 
@@ -263,8 +265,16 @@ def _write_docx(stem: Path, title: str, lines: List[str]) -> Path:
     return path
 
 
-def _write_image(stem: Path, title: str, lines: List[str]) -> Path:
-    """A clean, large-type PNG that OCR reads back: a stand-in for a photographed or scanned
+def _image_ext(doc: Dict[str, Any]) -> str:
+    """The image extension the contract's source path reads (``receipts/*.jpg`` -> ``jpg``); PNG
+    when the path names none. Seeding always wrote PNG, so a contract reading ``*.jpg`` matched
+    none of its own test documents (2026-11-18)."""
+    ext = str((doc.get("source") or {}).get("path") or "").rsplit(".", 1)[-1].lower()
+    return ext if ext in _IMAGE_EXTS else "png"
+
+
+def _write_image(stem: Path, title: str, lines: List[str], ext: str = "png") -> Path:
+    """A clean, large-type image that OCR reads back: a stand-in for a photographed or scanned
     document, so the Test stage proves the contract — not OCR on a poor scan."""
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -284,12 +294,18 @@ def _write_image(stem: Path, title: str, lines: List[str]) -> Path:
     draw = ImageDraw.Draw(img)
     for i, text in enumerate(rows):
         draw.text((50, 40 + i * 90), text, fill="black", font=_font(44))
-    from PIL.PngImagePlugin import PngInfo
+    path = stem.with_suffix(f".{ext}")
+    if ext == "png":
+        from PIL.PngImagePlugin import PngInfo
 
-    info = PngInfo()
-    info.add_text("Keywords", SYNTHETIC_DOCUMENT_MARK)
-    path = stem.with_suffix(".png")
-    img.save(path, pnginfo=info)
+        info = PngInfo()
+        info.add_text("Keywords", SYNTHETIC_DOCUMENT_MARK)
+        img.save(path, pnginfo=info)
+    else:
+        # Other formats carry the mark in EXIF ImageDescription (0x010E), which JPEG, TIFF and WebP keep.
+        exif = Image.Exif()
+        exif[0x010E] = SYNTHETIC_DOCUMENT_MARK
+        img.save(path, exif=exif)
     return path
 
 
@@ -312,11 +328,13 @@ def is_synthetic_document(path: Union[str, Path]) -> bool:
 
             with zipfile.ZipFile(p) as z:
                 return SYNTHETIC_DOCUMENT_MARK in z.read("docProps/core.xml").decode("utf-8", "ignore")
-        if suffix == ".png":
+        if suffix.lstrip(".") in _IMAGE_EXTS:
             from PIL import Image
 
             with Image.open(p) as img:
-                return img.info.get("Keywords") == SYNTHETIC_DOCUMENT_MARK
+                if img.info.get("Keywords") == SYNTHETIC_DOCUMENT_MARK:
+                    return True
+                return img.getexif().get(0x010E) == SYNTHETIC_DOCUMENT_MARK
     except Exception:
         return False
     return False

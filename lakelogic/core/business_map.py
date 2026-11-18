@@ -746,7 +746,15 @@ def derive_business_map(
         ent["properties"] = sorted(props.values(), key=lambda p: (not p["key"], p["name"]))
         if ent["definition"] is None:
             values: Dict[str, List[str]] = {}
-            for pc in mapped:
+            # The entity's own record first: silver, then gold, dimensions before facts. Taking
+            # the first contract in name order quoted a cross-domain gold mart's build note
+            # ("Per-driver 360 view assembled from THREE source domains...") as what a Driver
+            # IS (2026-11-18). A glossary definition, set above, still wins over all of these.
+            by_closeness = sorted(
+                mapped,
+                key=lambda p: (_LAYER_ORDER.get(p.layer, 2), 0 if p.kind == "dimension" else 1, p.name),
+            )
+            for pc in by_closeness:
                 if pc.layer in ("bronze",) or pc.kind == "aggregate" or not pc.description:
                     continue
                 values.setdefault(pc.description, []).append(pc.name)

@@ -130,6 +130,14 @@ def test_conflicting_definitions_flagged() -> None:
     assert set(customer["conflicts"][0]["values"]) == {"A person who requests trips.", "A registered rider account."}
 
 
+def test_definition_comes_from_the_entity_own_silver_contract_not_a_gold_table() -> None:
+    """With no glossary entry, a concept's definition is its silver contract's description. Name
+    order put gold first and quoted a cross-domain mart's build note as what a Driver is."""
+    m = derive_business_map(copy.deepcopy(CONTRACTS), copy.deepcopy(DOMAINS))
+    customer = _by(m["entities"], name="Customer")
+    assert customer["definition"] == "A person who requests trips."
+
+
 def test_same_identifier_question_and_unmapped_contract() -> None:
     m = derive_business_map(copy.deepcopy(CONTRACTS), copy.deepcopy(DOMAINS))
     same = [q for q in m["questions"] if q["kind"] == "same_identifier"]
