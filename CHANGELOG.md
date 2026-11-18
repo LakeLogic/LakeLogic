@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.3.0] — 2026-11-18
+
+### Added
+
+- Lakelogic agent-guide; quarantine + run log to a database; masked quarantine
+
+### Documentation
+
+- Update changelog for v2.2.0
 ## [2.2.0] — 2026-11-18
 
 ### Documentation
@@ -1209,6 +1218,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.3.0]: https://github.com/lakelogic/LakeLogic/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/lakelogic/LakeLogic/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/lakelogic/LakeLogic/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/lakelogic/LakeLogic/compare/v1.90.0...v2.0.0
