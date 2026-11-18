@@ -766,7 +766,7 @@ def test_process_single_contract_spark_conversion_and_fail_on_quarantine(monkeyp
             bad = FakeDataFrame(["id", "nullable"])
             return types.SimpleNamespace(good=good, bad=bad)
 
-        def materialize(self, good_df, bad_df):
+        def materialize(self, good_df, bad_df, **kwargs):
             materialized.append((good_df, bad_df))
 
     converted = []
@@ -1129,7 +1129,7 @@ def test_process_single_contract_success_and_failure_logging(monkeypatch):
             self.run_source_kwargs = kwargs
             return FakeResult()
 
-        def materialize(self, good, bad):
+        def materialize(self, good, bad, **kwargs):
             self.materialized.append((good, bad))
 
     monkeypatch.setattr(runner, "DataProcessor", FakeProcessor)

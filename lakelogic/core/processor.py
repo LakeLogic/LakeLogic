@@ -66,7 +66,10 @@ def _describe_dataset_failure(result: Dict[str, Any]) -> str:
         return f"{name}: {int(n) if n.is_integer() else n} duplicate value(s)"
     found = re.match(r"^\s*(.+?)\s*\((expected .+)\)\s*$", value)
     if found:
-        return f"{name}: got {found.group(1)}, {found.group(2)}"
+        # "expected < 1.0" -> "must be < 1": whole numbers without ".0", plainer words.
+        got = re.sub(r"(\d)\.0\b", r"\1", found.group(1))
+        must = re.sub(r"(\d)\.0\b", r"\1", found.group(2)).replace("expected", "must be", 1)
+        return f"{name}: got {got}, {must}"
     return f"{name}: {value}" if value else name
 
 
@@ -2583,7 +2586,19 @@ class DataProcessor:
             # them. `n/a` is preserved deliberately: an unmeasured source must never
             # render as a confident 0.
             _src_display = source_total if source_total is not None else "n/a"
-            if quality_enabled:
+            # Say the FINAL outcome: a failed dataset rule under on_dataset_failure: quarantine
+            # sets the whole batch aside just below, and "ok=3 qtn=0" printed before "Batch
+            # quarantined" contradicted it (2026-11-18).
+            _batch_bound = (
+                _dataset_failure_policy(self.contract.quality) == "quarantine"
+                and any(not r.get("passed") for r in (getattr(self.adapter, "dataset_rule_results", None) or []))
+            )
+            if quality_enabled and _batch_bound:
+                logger.info(
+                    f"Run complete{tags_display} | src={_src_display} rows={total} ok=0 "
+                    f"qtn={total}{_dropped_line}{_added_line} (batch quarantined: a dataset rule failed)"
+                )
+            elif quality_enabled:
                 logger.info(
                     f"Run complete{tags_display} | "
                     f"src={_src_display} rows={total} ok={counts.get('good')} "
@@ -2842,10 +2857,16 @@ class DataProcessor:
             # Per-contract SLO checks are deferred to the pipeline level.
             slos = []
         self.last_report = self._build_report(contract_title, counts, slos, row_rule_failures, drift)
+        # Every run says how it ended, in the run log's `status` (it was empty for normal runs,
+        # and a quarantined batch looked like 100% failed rows; 2026-11-18). A run that fails
+        # raises before here; capture_failure() records "failed".
+        self.last_report.setdefault("status", "success")
         if self.batch_quarantined:
             # Counted apart from quarantined ROWS: a batch rejected by a dataset rule.
+            self.last_report["status"] = "batch_quarantined"
             self.last_report["batch_quarantined"] = True
             self.last_report["batch_quarantine_reason"] = self.batch_quarantined
+            self.last_report["error_message"] = f"Batch rejected: {self.batch_quarantined}"
 
         # Extract pre-transform filter string for run log
         pre_filters = []
@@ -3182,6 +3203,11 @@ class DataProcessor:
         Returns:
             ValidationResult object (unpacks to good_df, bad_df).
         """
+        # A DataFrame handed to run_source is run as data, not read as a path: `source or …`
+        # asked a Polars frame for its truth value and crashed ("the truth value of a
+        # DataFrame is ambiguous", 2026-11-18). run(df) is the documented call for frames.
+        if source is not None and not isinstance(source, (str, Path)) and hasattr(source, "columns"):
+            return self.run(source)
         self._active_trace_steps = []
         self._run_log_already_written = False
         # False until the rows are read and handed to run(): a failure before that point is a
@@ -3237,7 +3263,7 @@ class DataProcessor:
         if _reader and not _staged:
             return getattr(self, _reader)()
 
-        path_val = source or (self.contract.source.path if self.contract.source else None)
+        path_val = source if source is not None else (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path found in contract.")
         _warn_engine_options_unused(self.contract.source, self.engine_name)
@@ -6947,6 +6973,8 @@ class DataProcessor:
         good_df: Any,
         bad_df: Optional[Any] = None,
         target_path: Optional[Union[str, Path]] = None,
+        *,
+        batch_quarantined: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Materialize good data (and optionally quarantine) to configured targets.
@@ -6962,7 +6990,13 @@ class DataProcessor:
         # A batch a dataset rule quarantined (on_dataset_failure: quarantine) writes NOTHING to
         # the target - an empty frame through `overwrite` would wipe the table - only its rows
         # to quarantine.
-        if getattr(self, "batch_quarantined", None):
+        # Decided by THESE frames, not by whatever run came last: the last run's flag stopped a
+        # later materialize of other, combined data and lost 99 good symbols (2026-11-18).
+        # Applies when the frames are the last run's own result, or when the caller says so.
+        if batch_quarantined is None:
+            _last = getattr(self, "last_result", None)
+            batch_quarantined = bool(getattr(self, "batch_quarantined", None)) and _last is not None and good_df is _last.good
+        if batch_quarantined:
             from lakelogic.core.quarantine import has_destination as _q_has_destination
 
             written: Dict[str, Any] = {"target": None, "rows_written": 0, "batch_quarantined": True}
@@ -9055,7 +9089,7 @@ class DataProcessor:
 
         import polars as pl
 
-        path_val = source or (self.contract.source.path if self.contract.source else None)
+        path_val = source if source is not None else (self.contract.source.path if self.contract.source else None)
         if not path_val:
             raise ValueError("No source path provided and no path in contract.")
         path = self._resolve_source_path(path_val)

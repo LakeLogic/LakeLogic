@@ -2536,8 +2536,9 @@ def write_run_log(
 
             logger.info(f"Wrote run log to {log_path}")
 
+    table_target = None
     if _write_table:
-        _write_run_log_table(report, contract, engine_name=engine_name)
+        table_target = _write_run_log_table(report, contract, engine_name=engine_name)
 
     # ── Secondary target fan-out for run logs ────────────────────────────────────
     # If the contract inherited global secondary_targets (via materialization._all),
@@ -2911,7 +2912,11 @@ def write_run_log(
             f"enabled={observatory_cfg.get('enabled') if isinstance(observatory_cfg, dict) else 'N/A'}"
         )
 
-    return str(log_path) if log_path else None
+    # Where the log went: the file, else the table (e.g. the dlt target). It returned None after
+    # a table/database write, though the agent guide says it returns where the log went.
+    if log_path:
+        return str(log_path)
+    return str(table_target) if table_target else None
 
 
 #: Which run-log rows carry a usable watermark. COALESCE: a run logged with no status is not a failure

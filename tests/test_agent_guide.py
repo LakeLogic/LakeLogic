@@ -100,4 +100,4 @@ def test_unique_failures_are_described_in_words():
     assert _describe_dataset_failure({"name": "order_id_unique", "value": "1 (expected < 1.0)"}) == \
         "order_id_unique: 1 duplicate value(s)"
     assert _describe_dataset_failure({"name": "min_rows", "value": "0 (expected > 1)"}) == \
-        "min_rows: got 0, expected > 1"
+        "min_rows: got 0, must be > 1"

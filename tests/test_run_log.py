@@ -308,7 +308,8 @@ def test_write_run_log_to_sqlite_table_and_fetch_precise_state(tmp_path: Path, m
 
     result = write_run_log(report, contract, engine_name="polars", run_log_mode="table")
 
-    assert result is None
+    # Returns where the log went (it returned None after a table write; 2026-11-18).
+    assert result and "run_logs" in result
     assert (tmp_path / "db" / "run_logs.sqlite").exists()
     assert (
         get_last_run_watermark(
@@ -357,7 +358,7 @@ def test_write_run_log_to_duckdb_and_ignore_failed_or_reprocess_rows(tmp_path: P
     write_run_log(reprocess, contract, engine_name="polars", run_log_mode="table")
     result = write_run_log(success, contract, engine_name="polars", run_log_mode="table")
 
-    assert result is None
+    assert result and "run_logs" in result
     assert (tmp_path / "db" / "run_logs.duckdb").exists()
     assert (
         get_last_run_watermark(
