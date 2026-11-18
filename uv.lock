@@ -3432,7 +3432,7 @@ wheels = [
 
 [[package]]
 name = "lakelogic"
-version = "2.0.0"
+version = "2.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "deltalake" },
@@ -3847,7 +3847,7 @@ requires-dist = [
     { name = "nbformat", marker = "extra == 'notebook'", specifier = ">=5.9.0" },
     { name = "onnxruntime", marker = "extra == 'documents'", specifier = ">=1.17.0" },
     { name = "onnxruntime", marker = "extra == 'extraction-ocr'", specifier = ">=1.17.0" },
-    { name = "open-lakehouse-contract", extras = ["models"], specifier = ">=0.31.0,<0.32.0" },
+    { name = "open-lakehouse-contract", extras = ["models"], specifier = ">=0.32.0,<0.33.0" },
     { name = "openai", marker = "extra == 'ai'", specifier = ">=1.0.0" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1.0" },
     { name = "openpyxl", marker = "extra == 'documents'", specifier = ">=3.1.0" },
@@ -5444,15 +5444,15 @@ wheels = [
 
 [[package]]
 name = "open-lakehouse-contract"
-version = "0.31.2"
+version = "0.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/67/938445bbc2d9a7b675ef5399ff4f07bf35c1176f1c5effcf7bc6cb824a81/open_lakehouse_contract-0.31.2.tar.gz", hash = "sha256:e54bd47aa94ef5e9b8cdf0912032a9d7cfb8eca6f0edeb0684af4441bad78ac0", size = 386673, upload-time = "2026-11-16T18:15:21.909Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/0a/380477ae81aea5b9e2b2e2ffa4e390b2b966552cc5688989bcd262929593/open_lakehouse_contract-0.32.0.tar.gz", hash = "sha256:97de642d62e652e17dcbaaeddda30a36a28c6602c59ad26d90bccbc178e3339c", size = 387952, upload-time = "2026-11-18T11:57:34.871Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8b/d4/174747f2712894a7d05ac84f81f2f393d1ceee8036ad05a5737ce295e854/open_lakehouse_contract-0.31.2-py3-none-any.whl", hash = "sha256:8f2b78a4967a4c2d3301b5244eb5374aea9379f7bb9364fe0160510443af9a9e", size = 393644, upload-time = "2026-11-16T18:15:20.435Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/0c/224ab500174cb53fcc837faf80dd6d51eadfcecaa9dbbc9484354bbcd3a4/open_lakehouse_contract-0.32.0-py3-none-any.whl", hash = "sha256:35344c41155f3c6679667de53ac84e3d5c08248d44302d75407e1a563c43307b", size = 394924, upload-time = "2026-11-18T11:57:33.626Z" },
 ]
 
 [package.optional-dependencies]
