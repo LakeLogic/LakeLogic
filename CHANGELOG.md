@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.4.0] — 2026-11-18
+
+### Added
+
+- On_dataset_failure: quarantine sets a failed batch aside and carries on
+
+### Documentation
+
+- Update changelog for v2.3.2
 ## [2.3.2] — 2026-11-18
 
 ### Build
@@ -1236,6 +1245,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.4.0]: https://github.com/lakelogic/LakeLogic/compare/v2.3.2...v2.4.0
 [2.3.2]: https://github.com/lakelogic/LakeLogic/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/lakelogic/LakeLogic/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/lakelogic/LakeLogic/compare/v2.2.0...v2.3.0
