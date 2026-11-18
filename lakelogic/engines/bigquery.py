@@ -162,7 +162,7 @@ class BigQueryAdapter(EngineAdapter):
     # Strategies the native writer implements. Anything else is refused rather than
     # quietly downgraded — writing an append where the contract asked for a merge is
     # a data error, not a performance one.
-    _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace"}
+    _NATIVE_WRITE_STRATEGIES = {"append", "overwrite", "replace", "merge", "upsert"}
 
     def materialize_native(self, target_table: str, strategy: str = "overwrite") -> Dict[str, Any]:
         """Write this run's accepted rows to ``target_table`` INSIDE BigQuery.
@@ -190,7 +190,9 @@ class BigQueryAdapter(EngineAdapter):
         client = self._get_client()
         target = self._quote_table(target_table)
 
-        if strategy == "append":
+        if strategy in ("merge", "upsert"):
+            sql = self._merge_sql(client, target)
+        elif strategy == "append":
             sql = f"INSERT INTO {target} SELECT * FROM {self.good_table}"
         else:  # overwrite / replace
             sql = f"CREATE OR REPLACE TABLE {target} AS SELECT * FROM {self.good_table}"
@@ -210,6 +212,43 @@ class BigQueryAdapter(EngineAdapter):
             "strategy": strategy,
             "server_side": True,
         }
+
+    def _merge_sql(self, client: Any, target: str) -> str:
+        """``MERGE`` of this run's accepted rows into ``target`` on the contract's primary key,
+        inside BigQuery (2026-11-18: merges went warehouse -> pandas -> dlt -> warehouse).
+
+        The same shape as Snowflake's (``write_in_place``): the target is created from the
+        result's schema when missing; the batch keeps one row per key; a matched row is updated
+        only when a business column changed (``IS DISTINCT FROM``), so re-sending unchanged
+        rows rewrites nothing and LakeLogic's own ``_lakelogic_*`` columns do not count as a
+        change."""
+        keys = list(getattr(self.contract, "primary_key", None) or [])
+        if not keys:
+            raise ValueError("merge needs the contract's primary_key.")
+        schema = client.query(f"SELECT * FROM {self.good_table} LIMIT 0", job_config=self._job_config()).result().schema
+        cols = [f.name for f in schema]
+        missing = [k for k in keys if k not in cols]
+        if missing:
+            raise ValueError(f"merge key column(s) {missing} are not in the result.")
+        self._execute(client, f"CREATE TABLE IF NOT EXISTS {target} AS SELECT * FROM {self.good_table} LIMIT 0")
+
+        def q(c: str) -> str:
+            return f"`{c}`"
+
+        part = ", ".join(q(k) for k in keys)
+        on = " AND ".join(f"t.{q(k)} = s.{q(k)}" for k in keys)
+        non_keys = [c for c in cols if c not in keys]
+        sets = ", ".join(f"{q(c)} = s.{q(c)}" for c in non_keys)
+        business = [c for c in non_keys if not c.lower().startswith("_lakelogic_")]
+        changed = " OR ".join(f"t.{q(c)} IS DISTINCT FROM s.{q(c)}" for c in business)
+        insert_cols = ", ".join(q(c) for c in cols)
+        insert_vals = ", ".join(f"s.{q(c)}" for c in cols)
+        return (
+            f"MERGE {target} t USING (SELECT * FROM {self.good_table} WHERE TRUE "
+            f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {part}) = 1) s ON {on} "
+            + (f"WHEN MATCHED AND ({changed}) THEN UPDATE SET {sets} " if sets and changed else "")
+            + f"WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})"
+        )
 
     def _get_client(self):
         """

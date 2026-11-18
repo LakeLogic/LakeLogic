@@ -6937,8 +6937,12 @@ class DataProcessor:
             return None
 
         strategy = str(getattr(mat, "strategy", "append") or "append").lower()
-        if strategy not in self._NATIVE_MATERIALIZE_STRATEGIES:
-            return None  # e.g. merge/scd2 — the dlt path still owns these
+        # What this engine can write in place: its own list (Snowflake and BigQuery merge
+        # natively), else the safe default. A fixed {append, overwrite, replace} sent every
+        # merge back out through pandas and dlt although the engine had MERGE (2026-11-18).
+        allowed = getattr(adapter, "_NATIVE_WRITE_STRATEGIES", None) or self._NATIVE_MATERIALIZE_STRATEGIES
+        if strategy not in allowed:
+            return None  # e.g. scd2 — the dlt path still owns these
 
         target_str = str(target if target is not None else (getattr(mat, "target_path", None) or ""))
         if not target_str:
