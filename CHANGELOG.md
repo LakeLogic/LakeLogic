@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.3.1] — 2026-11-18
+
+### Documentation
+
+- Update changelog for v2.3.0
+
+### Fixed
+
+- SCD2 typed intervals and version order; registry docs; one-line dataset-rule failure
 ## [2.3.0] — 2026-11-18
 
 ### Added
@@ -1218,6 +1227,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.3.1]: https://github.com/lakelogic/LakeLogic/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/lakelogic/LakeLogic/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/lakelogic/LakeLogic/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/lakelogic/LakeLogic/compare/v2.0.0...v2.1.0
