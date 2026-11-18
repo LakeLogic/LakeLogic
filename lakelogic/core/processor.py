@@ -7601,7 +7601,10 @@ class DataProcessor:
         )
 
         adapter = DltAdapter(self.contract.source, contract_title)
-        arrow_table = adapter.extract(previous_state=previous_state)
+        # A re-load from a date (backfill): `run_source(reprocess_from=...)`, or the pipeline's
+        # LAKELOGIC_START_FROM parameter. That run starts there instead of the saved position.
+        start_from = getattr(self, "_reprocess_from", None) or os.environ.get("LAKELOGIC_START_FROM") or None
+        arrow_table = adapter.extract(previous_state=previous_state, start_from=start_from)
 
         # Save state so run() can embed it into the log and the materialize phase
         self._pending_dlt_state_json = getattr(adapter, "dlt_state_json", None)

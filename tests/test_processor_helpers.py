@@ -972,7 +972,7 @@ def test_processor_run_dlt_source_uses_previous_state_and_runs_validation(monkey
         def __init__(self, source, contract_title):
             self.dlt_state_json = '{"cursor": "next"}'
 
-        def extract(self, previous_state=None):
+        def extract(self, previous_state=None, start_from=None):
             extracted_states.append(previous_state)
             return pa.table({"id": [1, 2]})
 

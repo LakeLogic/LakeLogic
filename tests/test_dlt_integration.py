@@ -352,8 +352,12 @@ class TestDltAdapter:
             lambda tmp_dir, pipeline_obj: {"tmp_dir": tmp_dir, "pipeline": pipeline_obj},
         )
 
+        # A STABLE destination per pipeline under the working directory (2026-11-17): a fresh
+        # temporary folder each run reset dlt's incremental state.
+        monkeypatch.chdir(tmp_path)
+        stable = tmp_path / ".lakelogic" / "dlt_pipelines" / "lakelogic_test__extract"
         result = adapter._run_verified_source({"api_key": "x"})
-        assert result == {"tmp_dir": tmp_path, "pipeline": pipeline}
+        assert result == {"tmp_dir": stable, "pipeline": pipeline}
         assert adapter.dlt_state_json == "{}"
 
         def decorated_source(**credentials):
@@ -364,7 +368,7 @@ class TestDltAdapter:
         setattr(fake_module, "decorated", decorated_source)
         adapter.cfg = DltSourceConfig(source="missing_source")
         monkeypatch.setattr(_dlt_mod.importlib, "import_module", lambda name, package=None: fake_module)
-        assert adapter._run_verified_source({}) == {"tmp_dir": tmp_path, "pipeline": pipeline}
+        assert adapter._run_verified_source({}) == {"tmp_dir": stable, "pipeline": pipeline}
 
     def test_run_verified_source_import_and_state_restore_failures(self, monkeypatch, tmp_path):
         from lakelogic.adapters.dlt_adapter import DltAdapter
@@ -411,7 +415,17 @@ class TestDltAdapter:
             ),
         )
         adapter = DltAdapter(src, "test")
-        pipeline = types.SimpleNamespace(state={"cursor": 1}, run=lambda *args, **kwargs: None)
+        import contextlib
+
+        live_state = {"cursor": 1}
+
+        @contextlib.contextmanager
+        def managed_state():
+            # dlt's WRITABLE state: what the run actually reads. `pipeline.state` is a copy.
+            yield live_state
+
+        pipeline = types.SimpleNamespace(state=live_state, run=lambda *args, **kwargs: None,
+                                         managed_state=managed_state)
         fake_dlt = types.SimpleNamespace(
             pipeline=lambda **kwargs: pipeline,
             destinations=types.SimpleNamespace(filesystem=lambda bucket_url: {"bucket_url": bucket_url}),
@@ -428,12 +442,13 @@ class TestDltAdapter:
             "_collect_parquet_files",
             lambda tmp_dir, pipeline_obj: {"tmp_dir": tmp_dir, "pipeline": pipeline_obj},
         )
-        result = adapter._run_rest_api({"api_key": "secret"}, previous_state=json.dumps({"saved": True}))
-        assert result == {"tmp_dir": tmp_path, "pipeline": pipeline}
-        assert (
-            adapter.dlt_state_json == '{"cursor": 1, "saved": true}'
-            or adapter.dlt_state_json == '{"saved": true, "cursor": 1}'
-        )
+        monkeypatch.chdir(tmp_path)
+        stable = tmp_path / ".lakelogic" / "dlt_pipelines" / "lakelogic_test__extract"
+        saved = {"rest_api": {"resources": {"users": {"incremental": {"id": {"last_value": 9}}}}}}
+        result = adapter._run_rest_api({"api_key": "secret"}, previous_state=json.dumps({"sources": saved}))
+        assert result == {"tmp_dir": stable, "pipeline": pipeline}
+        # The run log's cursors reach the state the run reads.
+        assert json.loads(adapter.dlt_state_json) == {"cursor": 1, "sources": saved}
 
         class FakePA:
             class ArrowInvalid(Exception):
@@ -498,6 +513,7 @@ class TestDltAdapter:
         parquet_dir.mkdir(exist_ok=True)
         (parquet_dir / "a.parquet").write_text("x", encoding="utf-8")
         (parquet_dir / "b.parquet").write_text("y", encoding="utf-8")
+        adapter._tables = []  # collecting on its own, not after a REST run that names its tables
         combined = DltAdapter._collect_parquet_files(adapter, parquet_dir, pipeline)
         assert hasattr(combined, "num_rows")
         assert any("auto-casting columns" in message for message in info_messages)
