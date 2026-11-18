@@ -35,6 +35,7 @@ app = typer.Typer(
         "LakeLogic — Consistent Data Contracts across engines.\n\n"
         "A contract runtime for validating, materializing, and governing\n"
         "data across Polars, Pandas, DuckDB, Spark, Snowflake, and BigQuery.\n\n"
+        "[bold]AI agents:[/bold] run [bold]lakelogic agent-guide[/bold] first (contract format: [bold]olc guide[/bold]).\n\n"
         "[dim]Use [bold]lakelogic [COMMAND] --help[/bold] for detailed usage on any command.[/dim]"
     ),
     add_completion=False,
@@ -51,6 +52,9 @@ app.command(name="lint", rich_help_panel="Governance")(lint_command)
 from lakelogic.cli.scaffold_cmd import scaffold_command  # noqa: E402
 
 app.command(name="scaffold", rich_help_panel="Data Tooling")(scaffold_command)
+from lakelogic.cli.agent_guide_cmd import agent_guide_command  # noqa: E402
+
+app.command(name="agent-guide", rich_help_panel="Help")(agent_guide_command)
 from lakelogic.cli.migrate_options_cmd import migrate_options_command  # noqa: E402
 
 app.command(name="migrate-options", rich_help_panel="Governance")(migrate_options_command)
@@ -89,11 +93,12 @@ def _csv_ready(df: Any) -> Any:
 @app.command(rich_help_panel="Contract Execution")
 def run(
     contract: Path = typer.Option(..., "--contract", "-c", help="Path to the contract YAML file."),
-    source: Path = typer.Option(
-        ...,
+    source: Optional[Path] = typer.Option(
+        None,
         "--source",
         "-s",
-        help="Path to the source data file (CSV/Parquet) or table name for warehouse engines.",
+        help="Path to the source data file (CSV/Parquet) or table name for warehouse engines. "
+        "Omit it to read the contract's source.path.",
     ),
     engine: str = typer.Option(
         "polars",
@@ -235,7 +240,7 @@ def run(
         filter=split_long_message,
     )
 
-    if engine not in ["snowflake", "bigquery"]:
+    if engine not in ["snowflake", "bigquery"] and source is not None and "*" not in str(source):
         if not source.exists():
             logger.error(f"Source file not found: {source}")
             raise typer.Exit(code=1)
@@ -261,6 +266,14 @@ def run(
             out_fmt = _resolve_output_format(output_bad, output_format)
             _write_output(bad_df, output_bad, out_fmt, engine)
             logger.info(f"Saved quarantined records to {output_bad}")
+
+        # The CLI owns the whole run, so it writes the run log the contract configures.
+        try:
+            where = processor.write_run_log()
+            if where:
+                logger.info(f"Run log written to {where}")
+        except Exception as rl_exc:  # a log that cannot be written never fails the data
+            logger.warning(f"Run log not written: {rl_exc}")
 
     except Exception as e:  # pragma: no cover
         logger.exception(f"Fatal error during execution: {e}")  # pragma: no cover
@@ -1058,9 +1071,13 @@ def help_command(topic: Optional[str] = typer.Argument(None)):
     """
     base = """LakeLogic Help
 
+Every command, how to run a contract, and where output goes:
+  lakelogic agent-guide
+
 Commands:
   run          Run a contract against a source file.
   bootstrap    Generate starter contracts and a registry from a landing zone.
+  agent-guide  The full guide (for people and AI agents).
   help         Show help for a command (driver, bootstrap).
 
 Examples:

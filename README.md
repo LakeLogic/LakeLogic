@@ -20,6 +20,10 @@ Test locally, check contract changes in CI and run pipelines in your supported e
 
 **OLC defines the contract. LakeLogic Core executes it.** Core is the open-source reference runtime; supported features vary by engine and storage format. See the [capability matrix](https://docs.lakelogic.io/capabilities.html).
 
+> **Using an AI agent?** After `pip install lakelogic`, have it run `lakelogic agent-guide`:
+> install extras, running a contract, where output, quarantine and run logs go (files, tables or
+> databases), and every command. For the contract format: `olc guide`.
+
 [**Run the Colab quickstart**](https://colab.research.google.com/github/LakeLogic/LakeLogic/blob/main/examples/colab/00_quickstart.ipynb) · [Documentation](https://docs.lakelogic.io/) · [Examples](https://docs.lakelogic.io/examples.html)
 
 ![LakeLogic Architecture](https://raw.githubusercontent.com/LakeLogic/LakeLogic/main/docs/assets/lakelogic_architecture.png)

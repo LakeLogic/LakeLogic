@@ -638,6 +638,55 @@ def add_error_text(df: Any, errors_column: str = "_lakelogic_errors") -> Any:
 
 
 # ──
+def quarantine_dlt_config(q: Any) -> Dict[str, Any]:
+    """The ``dlt_*`` settings of a quarantine block, declared or extra.
+
+    OLC 0.33 DECLARES ``dlt_destination`` / ``dlt_credentials`` / ``dlt_dataset_name`` /
+    ``dlt_pipeline_name`` on quarantine; before, they were extras. Reading only ``model_extra``
+    lost the destination the moment they were declared (2026-11-18)."""
+    out = {k: v for k, v in dict(getattr(q, "model_extra", None) or {}).items() if k.startswith("dlt_")}
+    for key in ("dlt_destination", "dlt_credentials", "dlt_dataset_name", "dlt_pipeline_name"):
+        value = getattr(q, key, None)
+        if value is not None:
+            out[key] = value
+    return out
+
+
+def writes_to_database(q: Any) -> bool:
+    """True when quarantine goes to a database through dlt (``format: dlt``) - no path needed."""
+    return q is not None and str(getattr(q, "format", None) or "").lower() == "dlt"
+
+
+def has_destination(q: Any) -> bool:
+    """Whether quarantined rows have somewhere to go: a path/table ``target``, or a database.
+    The ONE check the processor uses before saving or warning that rows were discarded."""
+    return q is not None and bool(getattr(q, "target", None) or writes_to_database(q))
+
+
+def _write_quarantine_dlt(df: Any, contract) -> Dict[str, Any]:
+    """Quarantine to a database through the one dlt writer (dlt_sink): secret references
+    resolved, passwords scrubbed from errors. Table = ``quarantine.table``, else ``dlt_dataset_name``."""
+    import pyarrow as pa
+
+    from lakelogic.core.dlt_sink import write_dlt
+
+    q = contract.quarantine
+    dlt_config = quarantine_dlt_config(q)
+    dlt_config.setdefault("dlt_dataset_name", "quarantine")
+    # Table = quarantine.table, else the dataset name - the default existing contracts write to.
+    q_table_name = getattr(q, "table", None) or dlt_config["dlt_dataset_name"]
+    dlt_config.setdefault("dlt_pipeline_name", f"lakelogic_{q_table_name}_quarantine")
+    if isinstance(df, pa.Table) or hasattr(df, "to_arrow"):
+        frame = df
+    elif hasattr(df, "to_pandas"):
+        frame = df.to_pandas()
+    else:
+        frame = _to_pandas(df)
+    written = write_dlt(frame, table_name=q_table_name, config=dlt_config, strategy="append", require_credentials=False)
+    logger.info(f"Wrote {written['rows_written']} quarantined rows via dlt to {written['target']}")
+    return {k: written[k] for k in ("target", "rows_written", "format", "dlt_destination")}
+
+
 def materialize_quarantine(
     df: Any,
     contract,
@@ -716,6 +765,12 @@ def materialize_quarantine(
                 table_name,
                 engine_name=engine_name,
             )
+
+    # ── Database (format: dlt): no path, the destination is the dlt_* settings ──
+    # Checked BEFORE the target requirement: a database quarantine has no path, and requiring
+    # one discarded every reject (fresh-agent test, 2026-11-18).
+    if writes_to_database(q) and output_format in (None, "dlt"):
+        return _write_quarantine_dlt(df, contract)
 
     # ── Path mode (default): write to quarantine.target ──
     if not q.target:
@@ -1085,26 +1140,7 @@ def materialize_quarantine(
     # it sat after and was therefore dead code (the allowlist always raised
     # 'Unsupported quarantine format dlt' first).
     if resolved_format == "dlt":
-        # One dlt writer (dlt_sink): secret references resolved, passwords scrubbed from errors.
-        import pyarrow as pa
-
-        from lakelogic.core.dlt_sink import write_dlt
-
-        dlt_config = dict(getattr(contract.quarantine, "model_extra", None) or {})
-        dlt_config.setdefault("dlt_dataset_name", "quarantine")
-        q_table_name = getattr(contract.quarantine, "table", None) or dlt_config["dlt_dataset_name"]
-        dlt_config.setdefault("dlt_pipeline_name", f"lakelogic_{q_table_name}_quarantine")
-        if isinstance(df, pa.Table) or hasattr(df, "to_arrow"):
-            frame = df
-        elif hasattr(df, "to_pandas"):
-            frame = df.to_pandas()
-        else:
-            frame = _to_pandas(df)
-        written = write_dlt(
-            frame, table_name=q_table_name, config=dlt_config, strategy="append", require_credentials=False
-        )
-        logger.info(f"Wrote {written['rows_written']} quarantined rows via dlt to {written['target']}")
-        return {k: written[k] for k in ("target", "rows_written", "format", "dlt_destination")}
+        return _write_quarantine_dlt(df, contract)
 
     # ── File formats: csv / parquet ───────────────────────────────────────────
     if resolved_format not in ["csv", "parquet"]:

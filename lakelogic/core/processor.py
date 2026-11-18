@@ -45,6 +45,25 @@ FILE_STREAM_KINDS = frozenset({"files"})
 CLOUD_STREAM_KINDS = frozenset({"kinesis", "pubsub"})
 
 
+_EXTENSION_FORMATS = {
+    ".csv": "csv", ".tsv": "csv", ".parquet": "parquet", ".json": "json", ".jsonl": "ndjson",
+    ".ndjson": "ndjson", ".xlsx": "excel", ".xls": "excel", ".xml": "xml", ".avro": "avro", ".orc": "orc",
+}
+
+
+def _format_from_extension(path: str) -> Optional[str]:
+    """The format a file path's extension names (``orders.csv`` -> ``csv``), or None for a folder,
+    a glob without one, or an unknown extension. Compressed files use the inner extension."""
+    p = path.lower().rstrip("/\\")
+    for comp in (".gz", ".bz2", ".zst", ".snappy"):
+        if p.endswith(comp):
+            p = p[: -len(comp)]
+    for ext, fmt in _EXTENSION_FORMATS.items():
+        if p.endswith(ext):
+            return fmt
+    return None
+
+
 def _sqlite_absolute(uri: Optional[str]) -> Optional[str]:
     """``sqlite:///data/x.db`` is RELATIVE (SQLAlchemy's convention) — ConnectorX read it as ``/data``.
 
@@ -2296,6 +2315,7 @@ class DataProcessor:
                     hash_salt=os.environ.get("LAKELOGIC_PII_SALT", ""),
                 )
                 good_df = engine.apply(good_df, user_groups=user_groups)
+                bad_df = self._mask_quarantine(engine, bad_df, user_groups, pii_fields)
 
                 # Extract PII vault DataFrame for dual-write if any fields
                 # specify pii_vault
@@ -3460,6 +3480,16 @@ class DataProcessor:
                         )
                         or ""
                     ).lower()
+                    # The file's own extension outranks the OUTPUT format. With no source block,
+                    # `materialization.format: delta` made `run_source("orders.csv")` open the CSV
+                    # as a Delta table (fresh-agent test, 2026-11-18). An explicit source.format
+                    # still wins; a folder with no extension (a Delta table) still falls back.
+                    _src_fmt_declared = (
+                        getattr(self.contract.source, "format", None) if getattr(self.contract, "source", None) else None
+                    )
+                    _ext_fmt = _format_from_extension(str(path))
+                    if not _src_fmt_declared and _ext_fmt:
+                        source_fmt = _ext_fmt
 
                     # Use scan_* (lazy) by default for formats that support it.
                     # This enables predicate/projection pushdown and query
@@ -3803,6 +3833,9 @@ class DataProcessor:
                             )
                             or ""
                         ).lower()
+                        # The file's extension outranks the output format (same rule as above).
+                        if not _src_fmt_declared and _ext_fmt:
+                            source_fmt = _ext_fmt
 
                         if not self._is_uri_path(path):
                             p_obj = Path(path)
@@ -5982,6 +6015,68 @@ class DataProcessor:
         except Exception as e:  # noqa: BLE001 - reporting never fails the load that already happened
             logger.warning(f"Could not write the stream run log: {e}")
 
+    def _mask_quarantine(self, engine: Any, bad_df: Any, user_groups: Any, pii_fields: list) -> Any:
+        """Mask quarantined rows as the good rows are masked.
+
+        Quarantine kept the raw values of every field the contract declared personal, so a
+        `masking` rule protected the table and leaked through the rejects (fresh-agent test,
+        2026-11-18). A rejected row can hold a value the strategy cannot take (it failed its
+        type), so when masking the rejects fails, those columns are BLANKED rather than
+        written raw - fail closed, the rule the good rows already follow."""
+        if bad_df is None or not self._compute_counts_safe_len(bad_df):
+            return bad_df
+        try:
+            return engine.apply(bad_df, user_groups=user_groups)
+        except Exception as exc:
+            names = [f.name for f in pii_fields if f.name in list(getattr(bad_df, "columns", []))]
+            logger.warning(f"Masking quarantined rows failed ({exc}); blanking {', '.join(names)} in quarantine.")
+            try:
+                import polars as pl
+
+                if isinstance(bad_df, pl.DataFrame):
+                    return bad_df.with_columns([pl.lit(None, dtype=pl.Utf8).alias(n) for n in names])
+            except ImportError:
+                pass
+            if hasattr(bad_df, "withColumn"):  # Spark
+                from pyspark.sql import functions as F
+
+                for n in names:
+                    bad_df = bad_df.withColumn(n, F.lit(None).cast("string"))
+                return bad_df
+            if hasattr(bad_df, "assign"):  # pandas
+                return bad_df.assign(**{n: None for n in names})
+            raise RuntimeError(
+                f"Could not mask or blank personal fields in quarantined rows: {', '.join(names)}"
+            ) from exc
+
+    @staticmethod
+    def _compute_counts_safe_len(df: Any) -> int:
+        """Row count of a frame, 1 when it cannot be counted cheaply (so it is still masked)."""
+        try:
+            if hasattr(df, "sparkSession"):
+                return 1
+            return len(df)
+        except Exception:
+            return 1
+
+    def _configures_run_log(self) -> bool:
+        """Whether the contract names somewhere for a run log (a file, a folder or a table)."""
+        metadata = getattr(self.contract, "metadata", None) or {}
+        return any(metadata.get(k) for k in ("run_log_path", "run_log_dir", "run_log_table"))
+
+    def write_run_log(self) -> Optional[Any]:
+        """Write the last run's log where the contract's ``metadata`` says (a JSON folder/file, a
+        table, or a database via ``run_log_backend: dlt``). Returns where it went, or None when
+        the contract configures no run log.
+
+        Explicit, not automatic: a batch ``run()`` never wrote one (fresh-agent test,
+        2026-11-18), but generated pipelines call ``write_run_log`` themselves after ``run()``,
+        so writing inside ``run()`` logged every run twice. ``lakelogic run`` calls this."""
+        if self.last_report is None or not self._configures_run_log():
+            return None
+        return write_run_log(self.last_report, self.contract, engine_name=self.engine_name,
+                             run_log_mode=self._run_log_mode)
+
     def _write_empty_run_log(self, stage: str = "no_new_data") -> None:
         """Write a minimal run log entry for runs that found no new data.
 
@@ -6751,7 +6846,9 @@ class DataProcessor:
             )
 
         _q = getattr(self.contract, "quarantine", None)
-        if bad_df is not None and not (_q and _q.target) and not getattr(self, "_warned_quarantine_unsaved", False):
+        from lakelogic.core.quarantine import has_destination as _q_has_destination
+
+        if bad_df is not None and not _q_has_destination(_q) and not getattr(self, "_warned_quarantine_unsaved", False):
             try:
                 _n_bad = bad_df.count() if hasattr(bad_df, "sparkSession") else len(bad_df)
             except Exception:  # pragma: no cover - a frame we cannot count is still a frame
@@ -6766,7 +6863,7 @@ class DataProcessor:
                     "(and their reasons)."
                 )
 
-        if bad_df is not None and self.contract.quarantine and self.contract.quarantine.target:
+        if bad_df is not None and _q_has_destination(self.contract.quarantine):
             try:
                 materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name)
             except Exception as q_err:
