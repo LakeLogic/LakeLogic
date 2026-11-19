@@ -15,7 +15,10 @@ Vocabulary (RDF 1.1 Turtle, so current tools read it):
   ``ll:sourceContract``, ``ll:hasDetail`` (code lookups such as Cabin), ``ll:evidence``;
 * a link is an ``owl:ObjectProperty`` with ``rdfs:domain`` / ``rdfs:range``, ``ll:foundBy`` (how
   Core knows it), ``ll:joinKey``, ``ll:sourceContract`` and ``ll:evidence``. It is written in the
-  file of the domain that owns its ``from`` concept and names the other concept by its IRI.
+  file of the domain that owns its ``from`` concept and names the other concept by its IRI;
+* a declared metric is an ``ll:Metric`` with ``ll:measures`` (its concept), ``ll:expression``,
+  ``ll:unit``, ``ll:additivity`` and ``ll:sourceContract``, written beside the concept it measures.
+  Only metrics a contract declares: none is inferred here (ontology-metrics-v1).
 
 Evidence: ``ll:Observed`` (the contracts state it), ``ll:Suggested`` (plausible only) and
 ``ll:Confirmed`` (the owning domain approved its meaning). Suggested concepts and links are left
@@ -168,6 +171,21 @@ def render_domain_ttl(
         pairs.append(("ll:evidence", _EVIDENCE[_evidence(e, "concept")]))
         out.append("")
         out.append(_block(_iri(base, domain, _local(name)), pairs))
+        for m in sorted(e.get("metrics") or [], key=lambda x: (x["name"].lower(), x["contract"])):
+            mpairs: List[Tuple[str, str]] = [
+                ("a", "ll:Metric"),
+                ("rdfs:label", _lit(m["name"])),
+                ("ll:measures", _iri(base, domain, _local(name))),
+                ("ll:expression", _lit(m["expression"])),
+            ]
+            if m.get("unit"):
+                mpairs.append(("ll:unit", _lit(m["unit"])))
+            mpairs.append(("ll:additivity", _lit(m.get("additivity") or "additive")))
+            if m.get("description"):
+                mpairs.append(("rdfs:comment", _lit(m["description"])))
+            mpairs.append(("ll:sourceContract", _lit(m["contract"])))
+            out.append("")
+            out.append(_block(_iri(base, domain, f"{_local(name)}_metric_{_local(m['name'])}_{_local(m['contract'])}"), mpairs))
 
     links = []
     for r in business_map.get("relationships") or []:

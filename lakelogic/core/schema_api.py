@@ -219,6 +219,7 @@ class _ContractValidator:
         self._check_materialization(d.get("materialization"), "materialization")
         self._check_service_levels(d.get("service_levels"), "service_levels")
         self._check_downstream(d.get("downstream", []), "downstream")
+        self._check_metrics(d.get("metrics"), d.get("model"))
         errors = self._issues
         return ValidationResult(
             valid=not any(e.severity == "error" for e in errors),
@@ -285,6 +286,22 @@ class _ContractValidator:
         "custom",
         "internal",
     }
+
+    def _check_metrics(self, metrics: Any, model: Any) -> None:
+        """Declared metrics (ontology-metrics-v1), by the Open Lakehouse Contract's own rule
+        (``olc.models.metrics.metric_problems``), so Core and the standard accept the same blocks."""
+        if metrics is None:
+            return
+        if not isinstance(metrics, list):
+            self._err("metrics", "'metrics' must be a list")
+            return
+        try:
+            from olc.models.metrics import metric_problems
+        except ImportError:  # an older open-lakehouse-contract: the standard has no metrics rule yet
+            return
+        fields = [f.get("name") for f in ((model or {}).get("fields") or []) if isinstance(f, dict)]
+        for problem in metric_problems(metrics, fields):
+            self._err("metrics", problem)
 
     def _check_downstream(self, downstream: Any, path: str) -> None:
         """Validate downstream consumer declarations."""

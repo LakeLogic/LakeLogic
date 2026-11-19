@@ -1332,6 +1332,59 @@ def derive_business_map(
             "suggested" if ent.get("shared_key") and ent.get("state") != "confirmed" else concept_evidence_state(ent)
         )
 
+    # 5d. Declared metrics (ontology-metrics-v1). A metric lives on the gold contract it is computed
+    #     from; it is attached to the concept its ``of:`` names, else to the concept that contract
+    #     maps to. Declared, so "observed". An ``of:`` naming no concept here falls back to the
+    #     contract's own concept and keeps the name it gave in ``of_unresolved``, so the mismatch is
+    #     visible: dropping the metric hid six RideFlow metrics declared ``of: Trip`` beside a concept
+    #     named "Trip completed" (2026-11-18). The same name with a different expression is a conflict
+    #     listing both sources; LakeLogic does not pick a winner.
+    by_contract: Dict[str, Dict[str, Any]] = {}
+    for ent in entities.values():
+        ent["metrics"] = []
+        ent["metric_conflicts"] = []
+        for c in ent["contracts"]:
+            by_contract.setdefault(c["name"], ent)
+    for pc in parsed:
+        declared = pc.raw.get("metrics")
+        if not isinstance(declared, list):
+            continue
+        for m in declared:
+            if not isinstance(m, dict) or not _s(m.get("name")) or not _s(m.get("expression")):
+                continue
+            unresolved = None
+            target = entities.get(alias_index.get(_norm(_s(m.get("of"))), "")) if _s(m.get("of")) else None
+            if target is None:
+                if _s(m.get("of")):
+                    unresolved = _s(m.get("of"))
+                target = by_contract.get(pc.name)
+            if target is None:
+                continue
+            target["metrics"].append({
+                "name": _s(m.get("name")),
+                "expression": _s(m.get("expression")),
+                "unit": _s(m.get("unit")) or None,
+                "additivity": _s(m.get("additivity")) or "additive",
+                "description": _s(m.get("description")) or None,
+                "also_called": sorted({_s(a) for a in (m.get("also_called") or []) if _s(a)}),
+                "contract": pc.name,
+                "source_file": pc.source_file,
+                "grain": list(pc.key or []),
+                "evidence_state": "observed",
+                "of_unresolved": unresolved,
+            })
+    for ent in entities.values():
+        ent["metrics"].sort(key=lambda m: (m["name"].lower(), m["contract"]))
+        seen: Dict[str, List[Dict[str, Any]]] = {}
+        for m in ent["metrics"]:
+            seen.setdefault(m["name"].lower(), []).append(m)
+        for same in seen.values():
+            if len({" ".join(m["expression"].lower().split()) for m in same}) > 1:
+                ent["metric_conflicts"].append({
+                    "name": same[0]["name"],
+                    "sources": [{"contract": m["contract"], "expression": m["expression"]} for m in same],
+                })
+
     # 6. Order everything deterministically.
     entity_list = sorted(entities.values(), key=lambda e: e["name"])
     for ent in entity_list:

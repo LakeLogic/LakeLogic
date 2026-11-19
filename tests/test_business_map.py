@@ -568,3 +568,75 @@ def test_a_shared_key_confirmed_under_a_business_name_keeps_its_key_and_links() 
         r["from"] == "Booking reference" for r in m["relationships"]
     )
     assert not any(e["name"] == "Record locator" for e in m["entities"])
+
+
+# ── declared metrics on concepts (ontology-metrics-v1, 2026-11-18) ─────────────────────────────
+def _metric_contracts(revenue_expr="SUM(gross_revenue_amount)"):
+    trip = {"info": {"title": "Silver Trips", "table_name": "silver_trips"}, "layer": "silver",
+            "model": {"fields": [{"name": "trip_id", "type": "string", "primary_key": True}]}}
+    fact = {"info": {"title": "Gold Fact Revenue Daily", "table_name": "gold_fact_revenue_daily"}, "layer": "gold",
+            "model": {"fields": [{"name": "trip_id", "type": "string"}, {"name": "gross_revenue_amount", "type": "double"}]},
+            "metrics": [{"name": "Revenue", "of": "Trip", "expression": revenue_expr, "unit": "GBP"},
+                        {"name": "Nowhere", "of": "No such concept", "expression": "COUNT(*)"}]}
+    return [trip, fact]
+
+
+def test_a_declared_metric_appears_on_the_concept_its_of_names():
+    from lakelogic.core.business_map import derive_business_map
+
+    trip = next(e for e in derive_business_map(_metric_contracts())["entities"] if e["name"] == "Trip")
+    assert [m["name"] for m in trip["metrics"]] == ["Revenue"]
+    m = trip["metrics"][0]
+    assert m["expression"] == "SUM(gross_revenue_amount)" and m["unit"] == "GBP"
+    assert m["contract"] == "gold_fact_revenue_daily" and m["evidence_state"] == "observed"
+    assert trip["metric_conflicts"] == []
+
+
+def test_an_of_naming_no_concept_is_not_attached_and_no_metrics_is_an_empty_list():
+    from lakelogic.core.business_map import derive_business_map
+
+    ents = derive_business_map(_metric_contracts())["entities"]
+    assert all("Nowhere" not in [m["name"] for m in e["metrics"]] for e in ents)
+    assert all(isinstance(e["metrics"], list) for e in ents)
+
+
+def test_the_same_metric_name_with_two_expressions_is_a_conflict_with_both_sources():
+    from lakelogic.core.business_map import derive_business_map
+
+    contracts = _metric_contracts()
+    other = {**contracts[1], "info": {"title": "Gold Fact Revenue Monthly", "table_name": "gold_fact_revenue_monthly"},
+             "metrics": [{"name": "Revenue", "of": "Trip", "expression": "SUM(net_revenue_amount)"}]}
+    trip = next(e for e in derive_business_map(contracts + [other])["entities"] if e["name"] == "Trip")
+    assert [c["name"] for c in trip["metric_conflicts"]] == ["Revenue"]
+    assert {s["contract"] for s in trip["metric_conflicts"][0]["sources"]} == {"gold_fact_revenue_daily", "gold_fact_revenue_monthly"}
+
+
+def test_the_ttl_carries_each_declared_metric_on_its_concept():
+    from lakelogic.core.business_map import derive_business_map
+    from lakelogic.core.ontology_ttl import render_domain_ttl
+
+    bm = derive_business_map(_metric_contracts())
+    domains = {d for e in bm["entities"] for d in (e.get("domains") or [])} or {"unassigned"}
+    ttl = "".join(render_domain_ttl(bm, d, include_suggested=True) for d in domains)
+    assert "a ll:Metric" in ttl and '"SUM(gross_revenue_amount)"' in ttl and '"GBP"' in ttl
+    assert "Nowhere" not in ttl
+
+
+def test_core_validation_refuses_a_metric_naming_a_missing_column_or_itself():
+    from lakelogic.core.schema_api import validate_contract
+
+    bad = {**_metric_contracts()[1], "version": "1.0.0",
+           "metrics": [{"name": "Revenue", "expression": "SUM(net_amount)"}, {"name": "Loop", "expression": "Loop + 1"}]}
+    msgs = [e.message for e in validate_contract(bad).errors if e.field == "metrics"]
+    assert any("'Revenue' names column 'net_amount'" in m for m in msgs)
+    assert any("'Loop' refers to itself" in m for m in msgs)
+
+
+def test_a_metric_whose_of_names_no_concept_lands_on_its_contracts_concept_flagged():
+    from lakelogic.core.business_map import derive_business_map
+
+    trip, fact = _metric_contracts()
+    fact = {**fact, "entity": "Trip", "metrics": [{"name": "Fares", "of": "Ride", "expression": "SUM(gross_revenue_amount)"}]}
+    ent = next(e for e in derive_business_map([trip, fact])["entities"] if e["name"] == "Trip")
+    m = next(x for x in ent["metrics"] if x["name"] == "Fares")
+    assert m["of_unresolved"] == "Ride"
