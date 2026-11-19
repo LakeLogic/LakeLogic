@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.5.0] — 2026-11-19
+
+### Added
+
+- Open-lakehouse-contract 0.35; business map, ontology and schema API updates
+- Format: database - native writer for Postgres, MySQL, SQL Server, DuckDB, SQLite
+- Merge inside the warehouse on Snowflake and BigQuery
+
+### Build
+
+- Lock open-lakehouse-contract 0.35.0
+
+### Documentation
+
+- **agent-guide**: Snowflake and BigQuery write in place, including merge
+- Update changelog for v2.4.0
+
+### Fixed
+
+- Run_source(df), batch flag carry-over, run-log status, write_run_log return, final run summary, plainer reasons
 ## [2.4.0] — 2026-11-18
 
 ### Added
@@ -1245,6 +1265,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.5.0]: https://github.com/lakelogic/LakeLogic/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/lakelogic/LakeLogic/compare/v2.3.2...v2.4.0
 [2.3.2]: https://github.com/lakelogic/LakeLogic/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/lakelogic/LakeLogic/compare/v2.3.0...v2.3.1
