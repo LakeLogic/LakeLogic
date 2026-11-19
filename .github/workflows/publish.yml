@@ -155,3 +155,46 @@ jobs:
 
             - name: Publish to PyPI
               run: uv publish --trusted-publishing always
+
+    # A GitHub Release for every version that reached PyPI (2026-11-19). It runs only after the
+    # publish job succeeds, so a Release never exists for a version PyPI does not have. Notes are
+    # this tag's commits since the previous tag (bump and changelog commits left out) - the
+    # changelog workflow writes CHANGELOG.md after the tag, so it is not ready in time. rc / a / b
+    # versions are marked Pre-release. Re-running is safe: an existing Release is left alone.
+    github-release:
+        name: GitHub Release
+        needs: pypi-publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Create the release from this tag's commits
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ github.ref_name }}
+              run: |
+                  set -euo pipefail
+                  if gh release view "$TAG" >/dev/null 2>&1; then
+                      echo "Release $TAG already exists"
+                      exit 0
+                  fi
+                  prev=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+                  range="$TAG"
+                  if [ -n "$prev" ]; then range="$prev..$TAG"; fi
+                  {
+                      echo "## What's changed"
+                      echo
+                      git log "$range" --no-merges --pretty='- %s' | grep -v -E '^- (bump: |docs: update changelog)' || true
+                      echo
+                      if [ -n "$prev" ]; then
+                          echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${TAG}"
+                      fi
+                  } > notes.md
+                  pre=""
+                  case "$TAG" in *rc*|*a[0-9]*|*b[0-9]*) pre="--prerelease" ;; esac
+                  gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag $pre
