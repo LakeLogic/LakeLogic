@@ -10,7 +10,7 @@ from loguru import logger
 from lakelogic.core.markers import CARRIED_MARKERS
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
-from lakelogic.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter, null_means_no_rows
 from ..core import types as _types
 
 
@@ -1090,7 +1090,9 @@ class BigQueryAdapter(EngineAdapter):
             passed = True
             expected = ""
             if val is None:
-                passed = False
+                passed = null_means_no_rows(
+                    sql, lambda q: list(client.query(self._rewrite_functions(q), job_config=self._job_config()).result())[0][0],
+                    dialect="bigquery")
             elif rule.must_be_between:
                 passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                 expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"

@@ -539,6 +539,16 @@ def _cost_is_measured(report: Dict[str, Any]) -> bool:
     return confidence != "none"
 
 
+
+def _duckdb_schema_ref(con, schema: str) -> str:
+    """A DuckDB file's stem names its catalog: ``ws.duckdb`` with schema ``ws`` made ``ws.t``
+    ambiguous and every run-log read and write failed. Qualify with the catalog then."""
+    try:
+        catalog = con.execute("SELECT current_database()").fetchone()[0]
+    except Exception:  # noqa: BLE001
+        return schema
+    return f'"{catalog}".{schema}' if str(catalog).lower() == str(schema).lower() else schema
+
 def _cap_error_message(value: Any) -> Optional[str]:
     """One concise line: the first line of the message, capped."""
     if value is None:
@@ -650,6 +660,8 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "status": report.get("status"),
         "error_message": _cap_error_message(report.get("error_message")),
         "error_traceback": _cap_traceback(report.get("error_traceback")),
+        # Why groups were set aside (quality.quarantine_scope) on a `success_with_rejects` run.
+        "rejects_reason": _cap_error_message(report.get("groups_quarantined_reason")),
         # Stamped on EVERY run, not just failures. It was previously set only by
         # capture_failure(), so the column was null for every successful run —
         # exactly backwards: "which build is actually running in production" is a
@@ -712,6 +724,7 @@ _RUN_LOG_TABLE_COLUMNS = [
     ("status", "VARCHAR"),
     ("error_message", "VARCHAR"),
     ("error_traceback", "VARCHAR"),
+    ("rejects_reason", "VARCHAR"),
     ("lakelogic_version", "VARCHAR"),
     ("source_path", "VARCHAR"),
     ("counts_source", "INTEGER"),
@@ -832,6 +845,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 StructField("status", StringType(), True),
                 StructField("error_message", StringType(), True),
                 StructField("error_traceback", StringType(), True),
+                StructField("rejects_reason", StringType(), True),
                 StructField("lakelogic_version", StringType(), True),
                 StructField("source_path", StringType(), True),
                 StructField("counts_source", LongType(), True),
@@ -920,6 +934,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                     ("status", "STRING"),
                     ("error_message", "STRING"),
                     ("error_traceback", "STRING"),
+                    ("rejects_reason", "STRING"),
                     ("lakelogic_version", "STRING"),
                     ("dlt_state_json", "STRING"),
                     ("slo_json", "STRING"),
@@ -1006,8 +1021,9 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 )
         con = duckdb.connect(database=str(db_path))
         if schema_name:
-            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-            full_table = f"{schema_name}.{table_only}"
+            schema_ref = _duckdb_schema_ref(con, schema_name)
+            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_ref}")
+            full_table = f"{schema_ref}.{table_only}"
         else:
             full_table = table_only
         con.execute(f"""
@@ -1029,6 +1045,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 status VARCHAR,
                 error_message VARCHAR,
                 error_traceback VARCHAR,
+                rejects_reason VARCHAR,
                 lakelogic_version VARCHAR,
                 source_path VARCHAR,
                 counts_source BIGINT,
@@ -1072,6 +1089,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS max_watermark_value VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS dlt_state_json VARCHAR")
             con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS slo_json VARCHAR")
+            con.execute(f"ALTER TABLE {full_table} ADD COLUMN IF NOT EXISTS rejects_reason VARCHAR")
         except Exception:
             pass
         columns = [
@@ -1092,6 +1110,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "status",
             "error_message",
             "error_traceback",
+            "rejects_reason",
             "lakelogic_version",
             "source_path",
             "counts_source",
@@ -1153,6 +1172,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 status TEXT,
                 error_message TEXT,
                 error_traceback TEXT,
+                rejects_reason TEXT,
                 lakelogic_version TEXT,
                 source_path TEXT,
                 counts_source INTEGER,
@@ -1187,6 +1207,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("domain", "TEXT"),
                 ("system", "TEXT"),
                 ("environment", "TEXT"),
+                ("rejects_reason", "TEXT"),
                 ("data_layer", "TEXT"),
                 ("counts_source", "INTEGER"),
                 ("counts_good", "INTEGER"),
@@ -1227,6 +1248,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
             "status",
             "error_message",
             "error_traceback",
+            "rejects_reason",
             "lakelogic_version",
             "source_path",
             "counts_source",
@@ -1310,6 +1332,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("data_layer", pa.string()),
                 ("status", pa.string()),
                 ("error_message", pa.string()),
+                ("rejects_reason", pa.string()),
                 ("source_path", pa.string()),
                 ("counts_source", pa.int64()),
                 ("counts_total", pa.int64()),
@@ -1454,6 +1477,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("data_layer", pa.string()),
                 ("status", pa.string()),
                 ("error_message", pa.string()),
+                ("rejects_reason", pa.string()),
                 ("source_path", pa.string()),
                 ("counts_source", pa.int64()),
                 ("counts_total", pa.int64()),
@@ -1528,6 +1552,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
                 ("data_layer", pa.string()),
                 ("status", pa.string()),
                 ("error_message", pa.string()),
+                ("rejects_reason", pa.string()),
                 ("source_path", pa.string()),
                 ("counts_source", pa.int64()),
                 ("counts_total", pa.int64()),
@@ -1866,8 +1891,9 @@ def _write_slo_checks_table(
             table_only = parts[-1]
         con = duckdb.connect(database=str(db_path))
         if schema_name:
-            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-            full_table = f"{schema_name}.{table_only}"
+            schema_ref = _duckdb_schema_ref(con, schema_name)
+            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_ref}")
+            full_table = f"{schema_ref}.{table_only}"
         else:
             full_table = table_only
         con.execute(f"""
@@ -2599,6 +2625,7 @@ def write_run_log(
                 ("data_layer", pa.string()),
                 ("status", pa.string()),
                 ("error_message", pa.string()),
+                ("rejects_reason", pa.string()),
                 ("source_path", pa.string()),
                 ("counts_source", pa.int64()),
                 ("counts_total", pa.int64()),
@@ -2996,7 +3023,7 @@ def get_last_run_watermark(
             if len(parts) >= 2:
                 schema_name = parts[-2]
                 table_only = parts[-1]
-                full_table = f"{schema_name}.{table_only}"
+                full_table = f"{_duckdb_schema_ref(con, schema_name)}.{table_only}"
             else:
                 full_table = table_name
             if _use_precise:
@@ -3280,7 +3307,7 @@ def get_last_run_dlt_state(
             table_name = _prepare_table_name(table_value, backend)
             parts = table_name.split(".")
             if len(parts) >= 2:
-                full_table = f"{parts[-2]}.{parts[-1]}"
+                full_table = f"{_duckdb_schema_ref(con, parts[-2])}.{parts[-1]}"
             else:
                 full_table = table_name
             if _use_precise:

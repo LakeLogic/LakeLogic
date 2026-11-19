@@ -155,7 +155,19 @@ metadata:
 - New columns are added (`ALTER TABLE ADD COLUMN`); `schema_policy.evolution: strict` refuses them.
   Columns are never dropped or retyped.
 - **Retries:** an append without a key carries `_lakelogic_batch_key` (a fingerprint of the source
-  files, or `proc.materialize(good, bad, batch_key="…")`); a retried batch replaces its own rows.
+  files - path, size and modified time - or `proc.materialize(good, bad, batch_key="…")`); a
+  retried batch replaces its own rows. A file that is rewritten is a new batch: its rows are added.
+  `run(df)` has no files, so pass `batch_key=` to make a DataFrame append retry-safe.
+  Quarantined rows are keyed row by row by their content when there is no batch key: a re-run
+  does not add the same rejects again (database, Delta, parquet, csv, duckdb, sqlite quarantine).
+- A merge leaves a declared column the batch does not carry as it is in the table (Delta too).
+- A primary key column cannot be null: such rows are quarantined (`<column>_required`).
+- MySQL and SQL Server cannot store NaN or infinity; a target write is refused before it starts.
+  Quarantine them first: `<column> BETWEEN -1.7e308 AND 1.7e308` (the quarantine stores them as NULL).
+- A dataset rule whose WHERE matches no rows (`SELECT SUM(x) FROM source WHERE x < 0`) passes:
+  nothing broke it. Rows that match but give NULL still fail (unmeasured).
+- A quarantine write that fails sets the run status `quarantine_not_saved`.
+- A table dropped or recreated outside LakeLogic is found again on the next write.
 - Still on dlt? `dlt_loader_file_format: csv` and `dlt_merge_strategy: upsert` make it faster.
 
 | What | Cloud / files | Database (Postgres, SQL Server, …) |
@@ -231,6 +243,7 @@ A failing **row** rule quarantines the row. A failing **dataset** rule does what
 | `continue` (default) | written; the failure is reported | carries on |
 | `stop` (= `fail_pipeline_on_dataset_error: true`) | nothing written | fails (`DatasetRulesFailed`) |
 | `quarantine` | every row goes to quarantine, reason `Batch rejected: …`; nothing reaches the target | carries on; `proc.batch_quarantined` / `last_report["batch_quarantined"]` say so |
+| `quarantine` + `quarantine_scope` | only the failing groups go to quarantine, reason `Group rejected: …`; the rest is written | carries on; run log `status: success_with_rejects`, `rejects_reason: 1 symbol group(s) failed: …` |
 
 ## Good to know
 

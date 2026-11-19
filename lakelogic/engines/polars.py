@@ -8,7 +8,7 @@ import polars as pl
 from loguru import logger
 
 from lakelogic.core.markers import CARRIED_MARKERS
-from lakelogic.engines.base import EngineAdapter, TransformationFailed, struct_drift_errors
+from lakelogic.engines.base import EngineAdapter, TransformationFailed, struct_drift_errors, null_means_no_rows
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
@@ -750,7 +750,13 @@ class PolarsAdapter(EngineAdapter):
                         # cast stays as the final fallback so nothing that parsed before regresses.
                         _t = pl.col(field.name).str.strip_chars()
                         _target = pl.Datetime("us") if dtype == pl.Date else dtype
+                        # With an offset ("…+02:00", "…Z") first: parsed as an instant and converted
+                        # to the target's zone, so a timestamp_tz keeps the moment it names
+                        # (2026-11-19). Naive forms after, read as UTC wall time.
                         _cands = [
+                            _t.str.to_datetime(fmt, strict=False, time_zone="UTC").cast(_target, strict=False)
+                            for fmt in ("%Y-%m-%dT%H:%M:%S%.f%:z", "%Y-%m-%d %H:%M:%S%.f%:z", "%Y-%m-%dT%H:%M:%S%.f%z")
+                        ] + [
                             _t.str.to_datetime(fmt, strict=False).cast(_target, strict=False)
                             for fmt in (
                                 "%Y-%m-%d %H:%M:%S%.f",
@@ -1214,7 +1220,7 @@ class PolarsAdapter(EngineAdapter):
                 passed = True
                 expected = ""
                 if val is None:
-                    passed = False
+                    passed = null_means_no_rows(sql, lambda q: ctx.execute(q).collect().row(0)[0])
                 elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                     expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"

@@ -346,7 +346,7 @@ def test_processor_materialize_quarantine_failure_and_trace_helpers(monkeypatch)
     )
     monkeypatch.setattr(proc_mod.logger, "warning", lambda message: warnings.append(message))
 
-    assert processor.materialize("good_df", "bad_df") == {"target": "ok"}
+    assert processor.materialize("good_df", "bad_df") == {"target": "ok", "quarantine_error": "quarantine boom"}  # reported, not silent (2026-11-19)
     assert any("Quarantine write failed" in message for message in warnings)
 
     processor._active_trace_steps = []

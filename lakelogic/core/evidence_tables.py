@@ -158,7 +158,12 @@ def _write_duckdb(target: str, database: str, records, cols) -> str:
     con = duckdb.connect(database=str(db_path))
     try:
         if "." in target:
-            con.execute(f"CREATE SCHEMA IF NOT EXISTS {target.split('.')[0]}")
+            from lakelogic.core.run_log import _duckdb_schema_ref
+
+            schema, _, table = target.rpartition(".")
+            schema_ref = _duckdb_schema_ref(con, schema.split(".")[-1])
+            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_ref}")
+            target = f"{schema_ref}.{table}"
         ddl = ", ".join(f"{c} {ddl_type(t, 'duckdb')}" for c, t in cols.items())
         con.execute(f"CREATE TABLE IF NOT EXISTS {target} ({ddl})")
         # A table created before a column was added gains it, so an older estate keeps writing.

@@ -20,7 +20,7 @@ from typing import Any, List, Tuple
 from loguru import logger
 
 from lakelogic.core.markers import CARRIED_MARKERS
-from lakelogic.engines.base import EngineAdapter, TransformationFailed, struct_drift_errors
+from lakelogic.engines.base import EngineAdapter, TransformationFailed, struct_drift_errors, null_means_no_rows
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
 from ..core import types as _types
@@ -1402,7 +1402,7 @@ class DuckDBAdapter(EngineAdapter):
                 passed = True
                 expected = ""
                 if val is None:
-                    passed = False
+                    passed = null_means_no_rows(sql, lambda q: self.con.sql(q).fetchone()[0])
                 elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                     expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"

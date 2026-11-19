@@ -229,7 +229,11 @@ def _write_quarantine_table_duckdb(df: Any, contract, table_name: str, metadata:
     con = duckdb.connect(database=str(db_path))
     try:
         if schema_name:
-            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+            from lakelogic.core.run_log import _duckdb_schema_ref
+
+            schema_ref = _duckdb_schema_ref(con, schema_name)
+            full_table = f"{schema_ref}.{table_only}"
+            con.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_ref}")
 
         con.register("incoming_quarantine", pdf)
 
@@ -269,7 +273,15 @@ def _write_quarantine_table_duckdb(df: Any, contract, table_name: str, metadata:
                 except Exception as e:
                     logger.warning(f"Could not add column '{col}' to quarantine table: {e}")
 
-        con.execute(f"INSERT INTO {full_table} SELECT * FROM incoming_quarantine")
+        from lakelogic.core.db_writer import BATCH_KEY_COLUMN
+
+        if BATCH_KEY_COLUMN in pdf.columns:
+            # A re-run's rejects replace their own earlier copies (see _forget_earlier_batch).
+            con.execute(f'DELETE FROM {full_table} WHERE "{BATCH_KEY_COLUMN}" IN '
+                        f'(SELECT DISTINCT "{BATCH_KEY_COLUMN}" FROM incoming_quarantine)')
+        # By name: an older table gained columns at its end, in a different order.
+        cols = ", ".join(f'"{c}"' for c in pdf.columns)
+        con.execute(f"INSERT INTO {full_table} ({cols}) SELECT {cols} FROM incoming_quarantine")
     finally:
         con.close()
 
@@ -309,6 +321,20 @@ def _write_quarantine_table_sqlite(df: Any, contract, table_name: str, metadata:
     table_name = _prepare_table_name(table_name, "sqlite")
     conn = sqlite3.connect(str(db_path))
     try:
+        from lakelogic.core.db_writer import BATCH_KEY_COLUMN
+
+        existing = [r[1] for r in conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()]
+        if existing:
+            for col in pdf.columns:  # an older table: add what it lacks, or to_sql fails
+                if col not in existing:
+                    conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}"')
+            if BATCH_KEY_COLUMN in pdf.columns:
+                keys = [k for k in pdf[BATCH_KEY_COLUMN].dropna().unique().tolist()]
+                for i in range(0, len(keys), 500):
+                    chunk = keys[i:i + 500]
+                    conn.execute(f'DELETE FROM "{table_name}" WHERE "{BATCH_KEY_COLUMN}" IN '
+                                 f'({", ".join("?" for _ in chunk)})', chunk)
+            conn.commit()
         pdf.to_sql(table_name, conn, if_exists="append", index=False)
     finally:
         conn.close()
@@ -688,6 +714,50 @@ def _write_quarantine_dlt(df: Any, contract) -> Dict[str, Any]:
     return {k: written[k] for k in ("target", "rows_written", "format", "dlt_destination")}
 
 
+def _forget_earlier_batch(df: Any, target_file: Any, fmt: str, batch_key: str) -> Any:
+    """Stamp ``_lakelogic_batch_key`` on the rejects and remove rows an earlier write of the
+    same batch left in a Delta table or a parquet/csv file. Returns the stamped frame."""
+    import polars as pl
+
+    from lakelogic.core.db_writer import BATCH_KEY_COLUMN, ROW_KEYS, _keys_to_replace
+    from lakelogic.core.materialization import _is_remote_path, _build_storage_options
+
+    df = df.collect() if hasattr(df, "collect") and not isinstance(df, pl.DataFrame) else df
+    if batch_key != ROW_KEYS:  # per-row keys arrive already stamped
+        df = df.with_columns(pl.lit(batch_key).alias(BATCH_KEY_COLUMN))
+    keys = _keys_to_replace(df, batch_key)
+    if not keys:
+        return df
+    remote = _is_remote_path(target_file)
+    opts = _build_storage_options(None) if remote else None
+    try:
+        if fmt == "delta":
+            from deltalake import DeltaTable
+
+            try:
+                table = DeltaTable(str(target_file), storage_options=opts)
+            except Exception:  # noqa: BLE001 - no table yet: nothing to forget
+                return df
+            if BATCH_KEY_COLUMN in [f.name for f in table.schema().fields]:
+                for i in range(0, len(keys), 500):
+                    listed = ", ".join("'" + k.replace("'", "''") + "'" for k in keys[i:i + 500])
+                    table.delete(f"{BATCH_KEY_COLUMN} IN ({listed})")
+            return df
+        if not remote and not Path(str(target_file)).exists():
+            return df
+        read = pl.read_csv if fmt == "csv" else pl.read_parquet
+        existing = read(str(target_file), **({"storage_options": opts} if remote else {}))
+        if BATCH_KEY_COLUMN in existing.columns:
+            kept = existing.filter(pl.col(BATCH_KEY_COLUMN).is_null() | ~pl.col(BATCH_KEY_COLUMN).cast(pl.String).is_in(keys))
+            if kept.height != existing.height:
+                from lakelogic.core.materialization import _write_frame
+
+                _write_frame(kept, target_file, fmt)
+    except Exception as exc:  # noqa: BLE001 - never lose rejects over the clean-up
+        logger.warning(f"Could not remove the earlier copy of this batch's rejects: {exc}")
+    return df
+
+
 def materialize_quarantine(
     df: Any,
     contract,
@@ -778,7 +848,8 @@ def materialize_quarantine(
 
             dataset = contract.dataset or (getattr(contract.info, "table_name", None) if contract.info else None)
             return write_database(df, q, strategy="append", batch_key=batch_key,
-                                  default_table=f"quarantine.quarantine_{dataset or 'data'}")
+                                  default_table=f"quarantine.quarantine_{dataset or 'data'}",
+                                  non_finite="null")  # a NaN-rejecting rule's rows must still be kept
         return _write_quarantine_dlt(df, contract)
 
     # ── Path mode (default): write to quarantine.target ──
@@ -896,6 +967,14 @@ def materialize_quarantine(
     # duckdb` in _system.yaml routes here instead of erroring at the file-format
     # dispatch below. The target path is reused as the duckdb/sqlite file
     # directory; a default table name `quarantine_rows` is created.
+    if resolved_format in ("duckdb", "sqlite") and batch_key and write_mode == "append" and _is_polars_frame(df):
+        import polars as _pl
+
+        from lakelogic.core.db_writer import BATCH_KEY_COLUMN as _BK, ROW_KEYS as _RK
+
+        df = df.collect() if hasattr(df, "collect") and not isinstance(df, _pl.DataFrame) else df
+        if batch_key != _RK:
+            df = df.with_columns(_pl.lit(batch_key).alias(_BK))
     if resolved_format in ("duckdb", "sqlite"):
         try:
             from pathlib import Path as _P
@@ -919,6 +998,12 @@ def materialize_quarantine(
                 return _write_quarantine_table_sqlite(df, contract, tbl_name, _table_metadata)
         except Exception as exc:
             raise ValueError(f"{resolved_format} quarantine backend failed: {exc}") from exc
+
+    # ── Re-runs: a batch's rejects replace its own earlier rejects ──────────
+    # The database quarantine already did this; files and Delta appended the same rejects on
+    # every re-run (SYM0042: 13, 26, 39 rows; 2026-11-19).
+    if batch_key and write_mode == "append" and _is_polars_frame(df) and resolved_format in ("delta", "csv", "parquet"):
+        df = _forget_earlier_batch(df, target_file, resolved_format, batch_key)
 
     # ── Delta format (Polars / DuckDB via deltalake) ──────────────────────────
     if resolved_format == "delta":

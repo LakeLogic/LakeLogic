@@ -67,6 +67,7 @@ and keeps its precision.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Dict, FrozenSet, Optional
 
 # Every SQL dialect the registry can render. `polars` is not here: it is not a
@@ -642,10 +643,18 @@ def polars_dtype(contract_type: str):
     """
     import polars as pl
 
-    name = spec_for(contract_type).polars
+    spec = spec_for(contract_type)
+    name = spec.polars
     dtype = getattr(pl, name, None)
     if dtype is None:  # pragma: no cover - a Polars rename would be a hard error
         raise UnknownContractType(f"polars has no dtype named {name!r} (contract type {contract_type!r})")
+    if name == "Datetime":
+        # The zone comes from the SAME row's Arrow type (timestamp[us, tz=UTC] for timestamp_tz).
+        # A bare pl.Datetime dropped it: timestamp_tz was cast to a naive timestamp, so market
+        # data lost its UTC and a Postgres TIMESTAMPTZ column received naive values (2026-11-19).
+        m = re.match(r"timestamp\[(\w+)(?:,\s*tz=([^\]]+))?\]", spec.arrow or "")
+        if m:
+            return pl.Datetime(m.group(1), m.group(2).strip() if m.group(2) else None)
     return dtype
 
 

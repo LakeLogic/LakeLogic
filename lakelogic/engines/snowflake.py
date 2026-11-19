@@ -11,7 +11,7 @@ from loguru import logger
 from lakelogic.core.markers import CARRIED_MARKERS
 from lakelogic.core.models import runtime_category
 from lakelogic.core.plain_values import plain_text
-from lakelogic.engines.base import EngineAdapter
+from lakelogic.engines.base import EngineAdapter, null_means_no_rows
 from ..core import types as _types
 
 _ENV_PATTERN = re.compile(r"^\${ENV:([A-Z0-9_]+)}$")
@@ -1139,13 +1139,15 @@ class SnowflakeAdapter(EngineAdapter):
                 # `{dataset}` / `{source}` name the table under test, as on every other engine;
                 # unreplaced, Snowflake fails at the brace (live run 2026-10-18: "unexpected
                 # 'dataset'" on every fact with an orphan-key rule).
-                cursor.execute(rule.sql.replace("{dataset}", view).replace("{source}", view))
+                _rule_sql = rule.sql.replace("{dataset}", view).replace("{source}", view)
+                cursor.execute(_rule_sql)
                 val = cursor.fetchone()[0] if cursor.rowcount != 0 else None
 
                 passed = True
                 expected = ""
                 if val is None:
-                    passed = False
+                    passed = null_means_no_rows(
+                        _rule_sql, lambda q: (cursor.execute(q), cursor.fetchone()[0])[1], dialect="snowflake")
                 elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                     expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"

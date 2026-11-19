@@ -747,6 +747,22 @@ def _resolve_target(contract, override_path: Optional[Path] = None) -> Tuple[Opt
     return target_path, output_format
 
 
+def _arrow_to_pandas_exact(table: Any) -> Any:
+    """Arrow -> pandas with integer columns as nullable pandas integers (exact, null-safe)."""
+    import pandas as pd
+    import pyarrow as pa
+
+    ints = {
+        pa.int8(): pd.Int8Dtype(), pa.int16(): pd.Int16Dtype(), pa.int32(): pd.Int32Dtype(),
+        pa.int64(): pd.Int64Dtype(), pa.uint8(): pd.UInt8Dtype(), pa.uint16(): pd.UInt16Dtype(),
+        pa.uint32(): pd.UInt32Dtype(), pa.uint64(): pd.UInt64Dtype(),
+    }
+    nullable_ints = {f.name for f in table.schema if f.type in ints and table.column(f.name).null_count}
+    if not nullable_ints:
+        return table.to_pandas()  # nothing to protect: keep the ordinary numpy dtypes
+    return table.to_pandas(types_mapper=lambda t: ints.get(t))
+
+
 def _to_pandas(df: Any) -> Any:
     """
     Convert a dataframe-like object into a pandas DataFrame.
@@ -768,6 +784,12 @@ def _to_pandas(df: Any) -> Any:
         return pd.DataFrame(df)
     if isinstance(df, dict):
         return pd.DataFrame([df])
+    if hasattr(df, "to_arrow") and hasattr(df, "to_pandas"):
+        # Integer columns stay INTEGER (pandas' nullable Int64 & co.). The default conversion turns
+        # an integer column holding a null into float64, which cannot hold every 64-bit integer:
+        # 9007199254740993 was written to Delta as 9007199254740992 on append, merge and overwrite
+        # whenever the batch had a null in that column (type matrix, 2026-11-19).
+        return _arrow_to_pandas_exact(df.to_arrow())
     if hasattr(df, "to_pandas"):
         return df.to_pandas()
     if hasattr(df, "toPandas"):
@@ -1003,6 +1025,7 @@ def _write_frame(
 
     if output_format == "csv":
         if hasattr(df, "write_csv"):
+            df = _csv_safe(df)
             df.write_csv(path_str)
         elif hasattr(df, "to_csv"):
             df.to_csv(path_str, index=False)
@@ -1248,6 +1271,25 @@ def _frame_has_columns(df: Any) -> bool:
     return True
 
 
+def _csv_safe(df: Any) -> Any:
+    """CSV has no lists or structs: write them as JSON text. Every CSV quarantine failed on its
+    list of reasons ("CSV format does not support nested data", found 2026-11-19)."""
+    try:
+        import json
+
+        import polars as pl
+
+        if isinstance(df, pl.DataFrame):
+            nested = [c for c, t in df.schema.items() if isinstance(t, (pl.List, pl.Array, pl.Struct))]
+            if nested:
+                return df.with_columns(
+                    [pl.Series(c, [None if v is None else json.dumps(v, default=str) for v in df[c].to_list()],
+                               dtype=pl.String) for c in nested])
+    except ImportError:  # pragma: no cover
+        pass
+    return df
+
+
 def _append_without_pandas(df: Any, target_file: Path, output_format: str) -> int:
     try:
         import polars as pl
@@ -1268,12 +1310,13 @@ def _append_without_pandas(df: Any, target_file: Path, output_format: str) -> in
         read_opts = {"storage_options": _build_storage_options(None)} if remote else {}
         if output_format == "csv":
             existing = pl.read_csv(read_from, **read_opts)
-            combined = pl.concat([existing, df], how="vertical")
+            # The file holds lists as JSON text; the new rows must too before they can stack.
+            combined = pl.concat([existing, _csv_safe(df)], how="diagonal_relaxed")  # a column added since (e.g. _lakelogic_batch_key) is not a failure
             _write_frame(combined, target_file, output_format)
             return int(combined.height)
         elif output_format == "parquet":
             existing = pl.read_parquet(read_from, **read_opts)
-            combined = pl.concat([existing, df], how="vertical")
+            combined = pl.concat([existing, df], how="diagonal_relaxed")
             _write_frame(combined, target_file, output_format)
             return int(combined.height)
         elif output_format == "delta":

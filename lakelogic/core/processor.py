@@ -105,33 +105,65 @@ def _quarantine_failing_groups(adapter: Any, good_df: Any, failures: List[Dict[s
     if not rules:
         return None
     bad_keys: Dict[Tuple[Any, ...], List[str]] = {}
-    for keys, group in good_df.group_by(scope, maintain_order=True):
+
+    def _ok(rule: Any, val: Any) -> bool:
+        if val is None:
+            return False
+        if getattr(rule, "must_be_between", None):
+            lo, hi = rule.must_be_between
+            return lo <= val <= hi
+        if getattr(rule, "must_be_less_than", None) is not None:
+            return val < rule.must_be_less_than
+        if getattr(rule, "must_be_greater_than", None) is not None:
+            return val > rule.must_be_greater_than
+        return True
+
+    # One GROUP BY query per rule where the rule is a plain aggregate (the common case): one SQL
+    # call per group cost 0.76 s for 1,000 symbols (2026-11-19). Rules it cannot rewrite safely
+    # keep the per-group loop below.
+    looped = []
+    for rule in rules:
+        grouped = _grouped_rule_values(rule.sql.replace("{dataset}", dataset or "source"), good_df, scope, dataset)
+        if grouped is None:
+            looped.append(rule)
+            continue
+        values, empty_value = grouped
+        values = {_group_key(k): v for k, v in values.items()}
+        for keys in good_df.select(scope).unique(maintain_order=True).iter_rows():
+            gk = _group_key(keys)
+            if gk not in values and empty_value is None:
+                continue  # the rule's WHERE matched none of this group's rows: nothing broke it
+            if not _ok(rule, values.get(gk, empty_value)):
+                bad_keys.setdefault(tuple(keys), []).append(rule.name)
+    rules = looped
+    for keys, group in (good_df.group_by(scope, maintain_order=True) if rules else []):
         ctx = pl.SQLContext(source=group, eager=True)
         if dataset and dataset != "source":
             ctx.register(dataset, group)
         for rule in rules:
+            _sql = rule.sql.replace("{dataset}", dataset or "source")
             try:
-                val = ctx.execute(rule.sql.replace("{dataset}", dataset or "source")).row(0)[0]
+                val = ctx.execute(_sql).row(0)[0]
             except Exception:  # noqa: BLE001 - a rule that cannot run per group decides nothing
                 continue
             if val is None:
-                ok = False
-            elif getattr(rule, "must_be_between", None):
-                lo, hi = rule.must_be_between
-                ok = lo <= val <= hi
-            elif getattr(rule, "must_be_less_than", None) is not None:
-                ok = val < rule.must_be_less_than
-            elif getattr(rule, "must_be_greater_than", None) is not None:
-                ok = val > rule.must_be_greater_than
-            else:
-                ok = True
-            if not ok:
+                from lakelogic.engines.base import null_means_no_rows
+
+                if null_means_no_rows(_sql, lambda q: ctx.execute(q).row(0)[0]):
+                    continue
+            if not _ok(rule, val):
                 bad_keys.setdefault(tuple(keys), []).append(rule.name)
     if not bad_keys:
         return None
     marks = pl.DataFrame([dict(zip(scope, k)) for k in bad_keys], schema={c: good_df.schema[c] for c in scope})
-    failed = good_df.join(marks, on=scope, how="semi")
-    kept = good_df.join(marks, on=scope, how="anti")
+    # A NULL scope value is a group too: a plain join never matches NULL, so a failing NULL
+    # group was neither quarantined nor held back and its rows reached the target (2026-11-19).
+    try:
+        failed = good_df.join(marks, on=scope, how="semi", nulls_equal=True)
+        kept = good_df.join(marks, on=scope, how="anti", nulls_equal=True)
+    except TypeError:  # polars before 1.24 calls it join_nulls
+        failed = good_df.join(marks, on=scope, how="semi", join_nulls=True)
+        kept = good_df.join(marks, on=scope, how="anti", join_nulls=True)
     if kept.height == 0:
         # Every group failed: that is the whole batch, and it must be treated as one (nothing
         # reaches the target, batch_quarantined is set), not as an empty "good" batch.
@@ -142,6 +174,50 @@ def _quarantine_failing_groups(adapter: Any, good_df: Any, failures: List[Dict[s
     if len(bad_keys) > 5:
         shown += f" and {len(bad_keys) - 5} more"
     return kept, failed, f"{len(bad_keys)} {'/'.join(scope)} group(s) failed: {shown}"
+
+
+def _group_key(keys) -> tuple:
+    """A group key that finds itself again: NaN never equals NaN, so a NaN group looked up by
+    value fell back to the empty-group answer and its failing rows passed (2026-11-19)."""
+    return tuple("__ll_nan__" if isinstance(v, float) and v != v else v for v in keys)
+
+
+def _grouped_rule_values(sql: str, frame: Any, scope: List[str], dataset: Optional[str]):
+    """``({group key tuple: value}, value for a group the WHERE leaves empty)`` from ONE query,
+    or None when the rule is not a single-aggregate SELECT over one table (no GROUP BY,
+    HAVING, join, subquery, window or DISTINCT) and must be checked group by group."""
+    try:
+        import polars as pl
+        import sqlglot
+        from sqlglot import exp
+
+        tree = sqlglot.parse_one(sql, read="duckdb")
+        if not isinstance(tree, exp.Select) or len(tree.expressions) != 1:
+            return None
+        if any(tree.args.get(k) for k in ("group", "having", "joins", "distinct", "qualify", "order", "limit")):
+            return None
+        if tree.find(exp.Subquery) or tree.find(exp.Window) or len(list(tree.find_all(exp.Select))) > 1:
+            return None
+        if not tree.expressions[0].find(exp.AggFunc):
+            return None
+        names = [f"__ll_g{i}" for i in range(len(scope))]
+        grouped = tree.copy()
+        grouped.set("expressions", [exp.alias_(tree.expressions[0].copy(), "__ll_v")] +
+                    [exp.alias_(exp.column(c, quoted=True), n) for c, n in zip(scope, names)])
+        grouped.set("group", exp.Group(expressions=[exp.column(c, quoted=True) for c in scope]))
+
+        def _run(df):
+            ctx = pl.SQLContext(source=df, eager=True)
+            if dataset and dataset != "source":
+                ctx.register(dataset, df)
+            return ctx
+
+        out = _run(frame).execute(grouped.sql(dialect="duckdb"))
+        empty = _run(frame.clear()).execute(sql).row(0)[0]
+        values = {tuple(r[1:]): r[0] for r in out.select(["__ll_v"] + names).iter_rows()}
+        return values, empty
+    except Exception:  # noqa: BLE001 - anything unusual is checked group by group
+        return None
 
 
 def _quarantine_whole_batch(good_df: Any, bad_df: Any, reason: str) -> Tuple[Any, Any]:
@@ -1668,6 +1744,7 @@ class DataProcessor:
         self.adapter.trace_enabled = self.trace_enabled
         self.last_report: Optional[Dict[str, Any]] = None
         self.batch_quarantined: Optional[str] = None
+        self.groups_quarantined: Optional[str] = None
         self.last_run_id: Optional[str] = None
         self.pipeline_run_id: Optional[str] = pipeline_run_id
         self.last_source_path: Optional[str] = None
@@ -2238,6 +2315,12 @@ class DataProcessor:
             ValidationResult object (unpacks to good_df, bad_df).
         """
         self._validation_started = True
+        if source_path is None:
+            # A DataFrame handed in read no files. Keeping the previous run_source()'s file list
+            # gave these rows that load's retry key, so writing them DELETED the file's rows
+            # (append replaces its own batch). Found 2026-11-19.
+            self._source_files = []
+            self._fingerprint_files = []
         if reset_trace or not hasattr(self, "_active_trace_steps"):
             self._active_trace_steps = []
         contract_title = self.contract.info.title if self.contract.info else (self.contract.dataset or "unknown")
@@ -2252,6 +2335,7 @@ class DataProcessor:
             self.last_run_id = str(_uuid4())
         # Set when a failed dataset rule quarantined this batch (on_dataset_failure: quarantine).
         self.batch_quarantined: Optional[str] = None
+        self.groups_quarantined: Optional[str] = None
 
         start_time = time.perf_counter()
         start_time_utc = time.time()
@@ -2650,7 +2734,14 @@ class DataProcessor:
                 _dataset_failure_policy(self.contract.quality) == "quarantine"
                 and any(not r.get("passed") for r in (getattr(self.adapter, "dataset_rule_results", None) or []))
             )
-            if quality_enabled and _batch_bound:
+            _scoped = list(getattr(self.contract.quality, "quarantine_scope", None) or []) if self.contract.quality else []
+            if quality_enabled and _batch_bound and _scoped:
+                # Only the failing groups are set aside (decided just below); not "ok=0".
+                logger.info(
+                    f"Run complete{tags_display} | src={_src_display} rows={total}{_dropped_line}{_added_line} "
+                    f"(a dataset rule failed: failing {'/'.join(_scoped)} groups are quarantined)"
+                )
+            elif quality_enabled and _batch_bound:
                 logger.info(
                     f"Run complete{tags_display} | src={_src_display} rows={total} ok=0 "
                     f"qtn={total}{_dropped_line}{_added_line} (batch quarantined: a dataset rule failed)"
@@ -2755,6 +2846,7 @@ class DataProcessor:
                     frames = [f for f in (bad_df, failed_part) if f is not None and f.height]
                     bad_df = _pl.concat(frames, how="diagonal_relaxed") if frames else failed_part
                     counts = self._compute_counts(df, good_df, bad_df)
+                    self.groups_quarantined = groups_reason
                     logger.warning(f"Groups quarantined for '{contract_title}': {groups_reason}. The rest is written.")
                 elif policy == "quarantine":
                     # The whole batch goes to quarantine with the rule as its reason; nothing
@@ -2942,6 +3034,12 @@ class DataProcessor:
             self.last_report["batch_quarantined"] = True
             self.last_report["batch_quarantine_reason"] = self.batch_quarantined
             self.last_report["error_message"] = f"Batch rejected: {self.batch_quarantined}"
+        elif self.groups_quarantined:
+            # Some groups (quality.quarantine_scope) were set aside: "success" hid them from
+            # monitoring, which saw only a row count (2026-11-19).
+            self.last_report["status"] = "success_with_rejects"
+            self.last_report["groups_quarantined_reason"] = self.groups_quarantined
+            # The run log's `rejects_reason` column; error_message stays empty on a success.
 
         # Extract pre-transform filter string for run log
         pre_filters = []
@@ -3542,6 +3640,15 @@ class DataProcessor:
                     self._run_log_already_written = True
                     return ValidationResult(self._empty_frame(), self._empty_frame(), self._empty_frame())
         self._source_files = source_files or []
+        # One named local file (no wildcard) is not expanded, so it was missing from the list and
+        # its load had no retry key: a retried append doubled the rows. Fingerprint it too.
+        self._fingerprint_files = list(self._source_files)
+        if not self._fingerprint_files and path and not self._is_uri_path(str(path)):
+            try:
+                if Path(str(path)).is_file():
+                    self._fingerprint_files = [{"path": str(path)}]
+            except OSError:
+                pass
         self._source_max_mtime = None
         # Cleared per source load: the file-provider branches below set it so the
         # EXTRACTION HOOK in run() does not extract a second time from rows that
@@ -6291,6 +6398,54 @@ class DataProcessor:
         except Exception:
             return 1
 
+    def _without_absent_columns_for_merge(self, good_df: Any) -> Any:
+        """A ``format: database`` merge updates every column it is given. A declared column the
+        batch did not carry is filled with NULL during validation, so the merge overwrote the
+        stored values with NULL (data loss, 2026-11-19). Leave those columns out of the merge:
+        matched rows keep their values and new rows get NULL, as an insert would."""
+        mat = getattr(self.contract, "materialization", None)
+        if (getattr(mat, "format", None) or "").lower() not in ("database", "delta"):
+            return good_df
+        if (getattr(mat, "strategy", None) or "").lower() not in ("merge", "upsert"):
+            return good_df
+        last = getattr(self, "last_result", None)
+        if last is None or good_df is not last.good:
+            return good_df  # a frame the caller built: its columns are what the caller means
+        drift = getattr(self.adapter, "schema_drift", None) or {}
+        keys = {str(k) for k in (self.contract.primary_key or [])}
+        absent = [c for c in drift.get("missing_fields") or [] if c not in keys and c in getattr(good_df, "columns", [])]
+        if not absent:
+            return good_df
+        logger.warning(f"The batch has no {absent}: the merge leaves those columns as they are in the table.")
+        return good_df.drop(*absent) if hasattr(good_df, "sparkSession") else good_df.drop(absent)
+
+    def _with_row_keys(self, frame: Any) -> Tuple[Any, Optional[str]]:
+        """Key each rejected row by its own content, for a batch with no file fingerprint and no
+        caller ``batch_key`` (a DataFrame run): a re-sent reject replaces itself instead of
+        piling up (SYM0042: 13, 26, 39 rows), even when the rest of the reject set changed
+        (one key for the whole set appended it again; 2026-11-19). Ignores the columns that
+        differ per run (LakeLogic's own and lineage stamps). Quarantine only: two identical
+        TARGET batches may both be wanted, two identical rejects are one.
+        Returns ``(frame, batch_key)``; ``(frame, None)`` when it cannot key the rows."""
+        try:
+            import polars as pl
+
+            from lakelogic.core.db_writer import BATCH_KEY_COLUMN, ROW_KEYS
+
+            if not isinstance(frame, pl.DataFrame) or not frame.height:
+                return frame, None
+            skip = set(self.adapter._lineage_columns()) if hasattr(self.adapter, "_lineage_columns") else set()
+            cols = [c for c in frame.columns
+                    if not c.startswith("_lakelogic") and c not in skip
+                    and c not in ("quarantine_state", "quarantine_reprocessed")]
+            if not cols:
+                return frame, None
+            keys = frame.select(cols).hash_rows(seed=0, seed_1=1, seed_2=2, seed_3=3)
+            return frame.with_columns(
+                (pl.lit("row-") + keys.cast(pl.String)).alias(BATCH_KEY_COLUMN)), ROW_KEYS
+        except Exception:  # noqa: BLE001 - no key just means a plain append
+            return frame, None
+
     def _batch_fingerprint(self) -> Optional[str]:
         """A stable key for the files this run read (path, size, modified time), or None when it
         read no files (a DataFrame passed in). Same files -> same key on a retry."""
@@ -6298,7 +6453,10 @@ class DataProcessor:
         import os as _os
 
         parts = []
-        for f in getattr(self, "_source_files", None) or []:
+        files = getattr(self, "_source_files", None) or []
+        if not files and getattr(self, "_fingerprint_files", None):
+            files = self._fingerprint_files
+        for f in files:
             path = f.get("path") if isinstance(f, dict) else None
             if not path:
                 continue
@@ -7105,9 +7263,25 @@ class DataProcessor:
 
             written: Dict[str, Any] = {"target": None, "rows_written": 0, "batch_quarantined": True}
             if bad_df is not None and _q_has_destination(self.contract.quarantine):
-                written["quarantine"] = materialize_quarantine(
-                    bad_df, self.contract, engine_name=self.engine_name, batch_key=_batch_key
-                )
+                _q_df, _q_key = (bad_df, _batch_key) if _batch_key else self._with_row_keys(bad_df)
+                try:
+                    written["quarantine"] = materialize_quarantine(
+                        _q_df, self.contract, engine_name=self.engine_name, batch_key=_q_key,
+                    )
+                except Exception as q_err:
+                    # Same outcome as a failed row-level quarantine write: the run log says so.
+                    # It raised here, so no status was set and the caller's run log never ran.
+                    if getattr(self, "quarantine_must_persist", False):
+                        raise RuntimeError(
+                            f"Quarantine write failed, so this micro-batch was not committed and will be retried: {q_err}"
+                        ) from q_err
+                    logger.warning(f"Quarantine write failed for a rejected batch: {q_err}. Its rows were NOT saved.")
+                    _report = getattr(self, "last_report", None)
+                    if isinstance(_report, dict):
+                        _report["status"] = "quarantine_not_saved"
+                        _report["error_message"] = (
+                            f"Batch rejected: {self.batch_quarantined}; quarantine write failed: {q_err}")[:2000]
+                    written["quarantine_error"] = str(q_err)
             elif bad_df is not None:
                 logger.warning(
                     "The quarantined batch was NOT saved: the contract sets no quarantine target. "
@@ -7121,6 +7295,7 @@ class DataProcessor:
             target_str = str(target_path)
             if not target_str.startswith("table:") and "://" not in target_str:
                 target = Path(target_path)
+        good_df = self._without_absent_columns_for_merge(good_df)
         result = self._try_native_materialize(target)
         if result is None:
             result = materialize_dataframe(
@@ -7152,7 +7327,8 @@ class DataProcessor:
 
         if bad_df is not None and _q_has_destination(self.contract.quarantine):
             try:
-                materialize_quarantine(bad_df, self.contract, engine_name=self.engine_name, batch_key=_batch_key)
+                _q_df, _q_key = (bad_df, _batch_key) if _batch_key else self._with_row_keys(bad_df)
+                materialize_quarantine(_q_df, self.contract, engine_name=self.engine_name, batch_key=_q_key)
             except Exception as q_err:
                 # A stream commits its position after this returns, so carrying on would lose
                 # these rows for good: counted as bad, never saved, never read again (found
@@ -7166,6 +7342,14 @@ class DataProcessor:
                     f"Bad records were validated but could not be persisted to the quarantine target. "
                     f"Consider resetting the quarantine Delta table if schema has diverged."
                 )
+                # A warning alone let the run log say "success" while its rejects were lost
+                # (every second CSV quarantine, 2026-11-19). The run log carries it now.
+                _report = getattr(self, "last_report", None)
+                if isinstance(_report, dict):
+                    _report["status"] = "quarantine_not_saved"
+                    _report["error_message"] = f"Quarantine write failed: {q_err}"[:2000]
+                if isinstance(result, dict):
+                    result["quarantine_error"] = str(q_err)
 
             # ── Secondary target fan-out for quarantine ──────────────────────
             try:
@@ -7720,9 +7904,10 @@ class DataProcessor:
             logger.debug(f"Polars error extraction failed: {exc}")
 
         try:
-            import pandas as pd
-
-            if isinstance(bad_df, pd.DataFrame) and error_col in bad_df.columns:
+            # Only a pandas frame needs pandas: importing it to ask cost 0.78 s on the first
+            # Polars run of every process (2026-11-19).
+            pd = sys.modules.get("pandas") if type(bad_df).__module__.startswith("pandas") else None
+            if pd is not None and isinstance(bad_df, pd.DataFrame) and error_col in bad_df.columns:
                 if cat_col in bad_df.columns:
                     # Explode both columns side-by-side; .explode on a list
                     # of columns keeps row alignment in pandas ≥1.3.

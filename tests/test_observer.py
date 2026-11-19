@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import types
 
+import httpx
+
 from lakelogic.core import observer
 
 
@@ -38,7 +40,7 @@ def test_remote_observer_requires_url_and_swallows_errors(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-    monkeypatch.setattr(observer.httpx, "Client", FailingClient)
+    monkeypatch.setattr(httpx, "Client", FailingClient)
     remote = observer.RemoteObserver("https://api.example")
     remote.report({"counts": {}, "slos": {}})
     assert any("Remote reporting skipped: network down" in message for message in debug_messages)
@@ -68,7 +70,7 @@ def test_remote_observer_posts_payload_and_headers(monkeypatch):
             sent["headers"] = headers
             return types.SimpleNamespace(status_code=200)
 
-    monkeypatch.setattr(observer.httpx, "Client", FakeClient)
+    monkeypatch.setattr(httpx, "Client", FakeClient)
     report = {
         "run_id": "run-1",
         "pipeline_run_id": "pipe-1",

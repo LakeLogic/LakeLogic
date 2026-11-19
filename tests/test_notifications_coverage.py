@@ -107,7 +107,10 @@ def test_aws_cached_and_no_profile_and_binary(monkeypatch):
 def test_gcp_missing_deps_and_missing_project(monkeypatch):
     monkeypatch.delenv("GCP_PROJECT", raising=False)
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
-    monkeypatch.setitem(sys.modules, "google", None)
+    # Block the submodules too: once an earlier test imported google.cloud, blocking only
+    # "google" let the import succeed and this test failed in a full run only.
+    for mod in ("google", "google.cloud", "google.cloud.secretmanager"):
+        monkeypatch.setitem(sys.modules, mod, None)
     with pytest.raises(ValueError, match="GCP Secret Manager dependencies not installed"):
         nb._resolve_gcp_secret("my-secret", {"gcp_project": "test-project"})
 

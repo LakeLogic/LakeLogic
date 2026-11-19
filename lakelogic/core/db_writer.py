@@ -37,6 +37,18 @@ from urllib.parse import urlparse
 from loguru import logger
 
 BATCH_KEY_COLUMN = "_lakelogic_batch_key"
+#: ``batch_key=ROW_KEYS``: the rows already carry their own key in BATCH_KEY_COLUMN (one per row,
+#: e.g. quarantined rows keyed by content); a re-sent row replaces itself even when the rest of
+#: the set changed. One key for the whole set appended a reject again when its set shrank.
+ROW_KEYS = "__per_row__"
+
+
+def _keys_to_replace(frame, batch_key: Optional[str]) -> List[str]:
+    if batch_key == ROW_KEYS:
+        if BATCH_KEY_COLUMN not in frame.columns:
+            return []
+        return [k for k in frame[BATCH_KEY_COLUMN].unique().to_list() if k is not None]
+    return [batch_key] if batch_key else []
 _WRITE_KEYS = {"on_conflict", "only_changed", "batch_size", "create_table", "allow_empty_overwrite"}
 _STRATEGIES = {"append", "merge", "upsert", "overwrite", "replace"}
 
@@ -141,7 +153,50 @@ def _ddl(dtype: Any, dialect: str, is_key: bool = False) -> str:
     return registry.ddl_type(ctype, dialect)
 
 
-class PostgresWriter:
+def _timestamps_as_text(df):
+    """Each timestamp column as ISO text in ITS OWN kind: a zoned column as UTC with "+00:00", a
+    naive one with no offset. One format with %z for every column failed on any naive timestamp
+    ("cannot format NaiveDateTime"), so every contract with a timestamp column could not be
+    written (2026-11-19)."""
+    import polars as pl
+
+    exprs = []
+    for name, dtype in df.schema.items():
+        if dtype == pl.Binary:
+            # CSV cannot carry bytes ("datatype binary cannot be written to CSV"): bytea hex text.
+            exprs.append(pl.concat_str([pl.lit(r"\x"), pl.col(name).bin.encode("hex")]).alias(name))
+            continue
+        if not isinstance(dtype, pl.Datetime):
+            continue
+        if dtype.time_zone:
+            exprs.append(pl.col(name).dt.convert_time_zone("UTC").dt.strftime("%Y-%m-%dT%H:%M:%S%.f+00:00").alias(name))
+        else:
+            exprs.append(pl.col(name).dt.strftime("%Y-%m-%dT%H:%M:%S%.f").alias(name))
+    return df.with_columns(exprs) if exprs else df
+
+
+
+_GONE = ("does not exist", "doesn't exist", "invalid object name", "no such table", "undefined_table",
+         "undefinedtable", "invalidschemaname")
+
+
+class _ForgetsDroppedTables:
+    """The table cache lives as long as the writer. A table or schema dropped or recreated
+    outside LakeLogic (a migration) made every write fail with "does not exist" until the
+    process restarted. On that error, forget the cached table and try once more (2026-11-19)."""
+
+    def write(self, df: Any, **kwargs: Any) -> Dict[str, Any]:
+        try:
+            return self._write_once(df, **kwargs)
+        except DatabaseWriteError as exc:
+            if not self._known or not any(g in str(exc).lower() for g in _GONE):
+                raise
+            logger.info(f"A cached table is gone ({exc}); re-checking the table and retrying once.")
+            self._known.clear()
+            return self._write_once(df, **kwargs)
+
+
+class PostgresWriter(_ForgetsDroppedTables):
     """Postgres through psycopg2: ``COPY`` (CSV) into the target or a staging table, then one
     ``INSERT … ON CONFLICT`` statement, all in one transaction."""
 
@@ -232,18 +287,19 @@ class PostgresWriter:
         cols = sql.SQL(", ").join(map(sql.Identifier, df.columns))
         stmt = sql.SQL("COPY {} ({}) FROM STDIN WITH (FORMAT csv, HEADER false)").format(target_sql, cols)
         stmt_text = stmt.as_string(cur)
+        df = _timestamps_as_text(df)
         for start in range(0, max(df.height, 1), batch_size):
             chunk = df.slice(start, batch_size)
             if chunk.height == 0:
                 break
             buf = io.BytesIO()
             # Strings quoted, so an empty string stays "" and only a null is NULL.
-            chunk.write_csv(buf, include_header=False, quote_style="non_numeric", datetime_format="%Y-%m-%dT%H:%M:%S%.f%z")
+            chunk.write_csv(buf, include_header=False, quote_style="non_numeric")
             buf.seek(0)
             cur.copy_expert(stmt_text, buf)
 
     # -- write ------------------------------------------------------------------------------ #
-    def write(
+    def _write_once(
         self,
         df: Any,
         *,
@@ -272,7 +328,7 @@ class PostgresWriter:
         batch_size = int(opts.get("batch_size") or 100_000)
 
         frame = _to_polars(df)
-        if batch_key and strategy == "append" and not pk:
+        if batch_key and batch_key != ROW_KEYS and strategy == "append" and not pk:
             import polars as pl
 
             frame = frame.with_columns(pl.lit(batch_key).alias(BATCH_KEY_COLUMN))
@@ -307,9 +363,12 @@ class PostgresWriter:
                 col_list = sql.SQL(", ").join(map(sql.Identifier, cols))
                 if strategy == "append" and on_conflict != "ignore":
                     if batch_key and not pk:
-                        cur.execute(sql.SQL("DELETE FROM {} WHERE {} = %s").format(target, sql.Identifier(BATCH_KEY_COLUMN)),
-                                    (batch_key,))
-                        result["replaced_rows"] = cur.rowcount
+                        result["replaced_rows"] = 0
+                        keys = _keys_to_replace(frame, batch_key)
+                        for i in range(0, len(keys), 1000):
+                            cur.execute(sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
+                                target, sql.Identifier(BATCH_KEY_COLUMN)), (keys[i:i + 1000],))
+                            result["replaced_rows"] += cur.rowcount
                     self._copy(cur, target, frame, batch_size)
                     result.update(rows_written=frame.height, inserted=frame.height, updated=0)
                 elif strategy in ("overwrite", "replace"):
@@ -444,10 +503,10 @@ class _EmbeddedWriter:
         if on_conflict == "ignore" and not pk:
             raise DatabaseWriteError("write.on_conflict: ignore needs the contract's primary_key.")
         frame = _to_polars(df)
-        if self.dialect == "sqlite":  # sqlite3 takes no dates/datetimes as values from Polars rows
+        if self.dialect == "sqlite":  # sqlite3 takes no dates/datetimes/decimals as values from Polars rows
             frame = frame.with_columns([pl.col(c).cast(pl.String) for c, t in frame.schema.items()
-                                        if t in (pl.Date, pl.Time) or isinstance(t, pl.Datetime)])
-        if batch_key and strategy == "append" and not pk:
+                                        if t in (pl.Date, pl.Time) or isinstance(t, (pl.Datetime, pl.Decimal))])
+        if batch_key and batch_key != ROW_KEYS and strategy == "append" and not pk:
             frame = frame.with_columns(pl.lit(batch_key).alias(BATCH_KEY_COLUMN))
         if strategy in ("merge", "upsert") and frame.height:
             counts = frame.group_by(pk).len()
@@ -464,6 +523,13 @@ class _EmbeddedWriter:
         if self.dialect == "sqlite":
             schema = None
         target = f"{_q(schema)}.{_q(name)}" if schema else _q(name)
+        schema_ref = _q(schema) if schema else None
+        if schema and self.dialect == "duckdb":
+            # The file's stem names its catalog: a schema of the same name (sales.duckdb with
+            # schema sales) made "sales"."t" ambiguous and every write failed. Qualify fully.
+            catalog = self._exec("SELECT current_database()").fetchone()[0]
+            schema_ref = f"{_q(catalog)}.{_q(schema)}"
+            target = f"{schema_ref}.{_q(name)}"
         conn = self._connection()
         result: Dict[str, Any] = {"target": f"{self.dialect}:{schema + '.' if schema else ''}{name}",
                                   "format": "database", "dialect": self.dialect, "strategy": strategy}
@@ -474,7 +540,7 @@ class _EmbeddedWriter:
                 if not opts.get("create_table", True):
                     raise DatabaseWriteError(f"Table {table} does not exist and write.create_table is false.")
                 if schema:
-                    self._exec(f"CREATE SCHEMA IF NOT EXISTS {_q(schema)}")
+                    self._exec(f"CREATE SCHEMA IF NOT EXISTS {schema_ref}")
                 cols = [f"{_q(c)} {_ddl(t, self.dialect, c in pk)}" for c, t in frame.schema.items()]
                 if pk:
                     cols.append(f"PRIMARY KEY ({', '.join(_q(k) for k in pk)})")
@@ -492,7 +558,11 @@ class _EmbeddedWriter:
                 result.update(rows_written=frame.height)
             elif strategy == "append" and on_conflict != "ignore":
                 if batch_key and not pk:
-                    self._exec(f"DELETE FROM {target} WHERE {_q(BATCH_KEY_COLUMN)} = ?", (batch_key,))
+                    keys = _keys_to_replace(frame, batch_key)
+                    for i in range(0, len(keys), 500):
+                        chunk = keys[i:i + 500]
+                        self._exec(f"DELETE FROM {target} WHERE {_q(BATCH_KEY_COLUMN)} IN ({', '.join('?' for _ in chunk)})",
+                                   chunk)
                 self._insert(target, frame)
                 result.update(rows_written=frame.height)
             else:
@@ -559,7 +629,7 @@ def _url_parts(url: str) -> Dict[str, Any]:
             "query": {k: v[-1] for k, v in parse_qs(u.query).items()}}
 
 
-class _ServerWriter:
+class _ServerWriter(_ForgetsDroppedTables):
     """Shared flow for MySQL and SQL Server: create/evolve the table, then load and apply in one
     transaction. Subclasses supply the dialect's SQL."""
 
@@ -583,7 +653,7 @@ class _ServerWriter:
 
         return _scrub(str(exc), [self._url, _url_parts(self._url)["password"]])
 
-    def write(self, df: Any, *, table: str, strategy: str = "append", primary_key: Sequence[str] = (),
+    def _write_once(self, df: Any, *, table: str, strategy: str = "append", primary_key: Sequence[str] = (),
               write: Optional[Mapping[str, Any]] = None, batch_key: Optional[str] = None,
               evolution: str = "allow") -> Dict[str, Any]:
         import polars as pl
@@ -594,9 +664,10 @@ class _ServerWriter:
             raise DatabaseWriteError(f"Strategy '{strategy}' is not supported by format: database on {self.dialect}.")
         pk = list(primary_key or [])
         frame = _to_polars(df)
-        if batch_key and strategy == "append" and not pk:
+        if batch_key and batch_key != ROW_KEYS and strategy == "append" and not pk:
             frame = frame.with_columns(pl.lit(batch_key).alias(BATCH_KEY_COLUMN))
         _check_batch(frame, table, strategy, pk, opts)
+        frame = self._check_finite(frame, table, nullify=str(opts.get("non_finite") or "") == "null")
         schema, name = _split_table(table)
         result: Dict[str, Any] = {"target": f"{self.dialect}:{schema + '.' if schema else ''}{name}",
                                   "format": "database", "dialect": self.dialect, "strategy": strategy}
@@ -617,8 +688,12 @@ class _ServerWriter:
                 result.update(rows_written=frame.height, inserted=frame.height, updated=0)
             elif strategy == "append" and on_conflict != "ignore":
                 if batch_key and not pk:
-                    cur.execute(f"DELETE FROM {self._t(schema, name)} WHERE {self._q(BATCH_KEY_COLUMN)} = {self._mark}",
-                                (batch_key,))
+                    keys = _keys_to_replace(frame, batch_key)
+                    for i in range(0, len(keys), 500):
+                        chunk = keys[i:i + 500]
+                        marks = ", ".join(self._mark for _ in chunk)
+                        cur.execute(f"DELETE FROM {self._t(schema, name)} WHERE {self._q(BATCH_KEY_COLUMN)} IN ({marks})",
+                                    tuple(chunk))
                 self._load(cur, self._t(schema, name), frame)
                 result.update(rows_written=frame.height, inserted=frame.height, updated=0)
             else:
@@ -633,6 +708,31 @@ class _ServerWriter:
             raise DatabaseWriteError(f"Write to {result['target']} failed and was rolled back: {self._scrub(exc)}") from None
         logger.info(f"Wrote {result.get('rows_written', 0)} row(s) to {result['target']} ({strategy})")
         return result
+
+    def _check_finite(self, frame, table: str, nullify: bool = False):
+        """MySQL and SQL Server have no NaN or infinity. The driver failed mid-write with
+        'nan can not be used with MySQL' / 'Numeric value out of range'; storing NULL instead
+        would change the data silently. Refuse before writing, naming the columns."""
+        import polars as pl
+
+        bad = []
+        for c, t in frame.schema.items():
+            if t in (pl.Float32, pl.Float64):
+                n = frame.select((pl.col(c).is_nan() | pl.col(c).is_infinite()).sum()).item()
+                if n:
+                    bad.append(f"{c} ({n} row(s))")
+        if bad and nullify:
+            logger.warning(f"{self.dialect} has no NaN or infinity: stored as NULL in {table} ({', '.join(bad)}).")
+            floats = [c for c, t in frame.schema.items() if t in (pl.Float32, pl.Float64)]
+            return frame.with_columns([
+                pl.when(pl.col(c).is_nan() | pl.col(c).is_infinite()).then(None).otherwise(pl.col(c)).alias(c)
+                for c in floats])
+        if bad:
+            raise DatabaseWriteError(
+                f"{self.dialect} cannot store NaN or infinity; {table} would receive them in "
+                f"{', '.join(bad)}. Quarantine them with a row rule such as "
+                f"`<column> BETWEEN -1.7e308 AND 1.7e308`, or replace them in a transformation.")
+        return frame
 
     def _ensure(self, cur, schema, name, frame, pk, create: bool, evolution: str) -> None:
         key = f"{schema}.{name}"
@@ -659,7 +759,17 @@ class _ServerWriter:
         cur.execute(f"CREATE TABLE {self._t(schema, name)} ({', '.join(cols)})")
         logger.info(f"Created {schema}.{name}")
 
+    @staticmethod
+    def _row_schema(frame) -> Dict[str, Any]:
+        """The column types as they are sent (decimals become text in :meth:`_rows`)."""
+        return dict(frame.schema)
+
     def _rows(self, frame) -> List[tuple]:
+        import polars as pl
+
+        dec = [c for c, t in frame.schema.items() if isinstance(t, pl.Decimal)]
+        if dec:  # exact text: pyodbc's fast path refused Decimal ("loses precision"); the server converts
+            frame = frame.with_columns([pl.col(c).cast(pl.String) for c in dec])
         return frame.rows()
 
 
@@ -698,7 +808,7 @@ class MySQLWriter(_ServerWriter):
         tz = [c for c, t in frame.schema.items() if isinstance(t, pl.Datetime) and t.time_zone]
         if tz:  # MySQL DATETIME has no zone: store UTC
             frame = frame.with_columns([pl.col(c).dt.convert_time_zone("UTC").dt.replace_time_zone(None) for c in tz])
-        return frame.rows()
+        return super()._rows(frame)
 
     def _load(self, cur, target: str, frame) -> None:
         cols = ", ".join(self._q(c) for c in frame.columns)
@@ -771,9 +881,26 @@ class SQLServerWriter(_ServerWriter):
     def _load(self, cur, target: str, frame) -> None:
         if not frame.height:
             return
+        import polars as pl
+        import pyodbc
+
         cols = ", ".join(self._q(c) for c in frame.columns)
         marks = ", ".join(["?"] * len(frame.columns))
         cur.fast_executemany = True
+        # Every column's SQL type declared up front. pyodbc's fast path GUESSES otherwise, and each
+        # guess lost data silently (type matrix, 2026-11-19): text went as single-byte VARCHAR
+        # ("✓ 日本" stored as "? ??"), datetimes lost their microseconds, and an empty/null binary
+        # was guessed VARCHAR, which SQL Server refused for VARBINARY.
+        def _size(t):
+            if t == pl.Binary:
+                return (pyodbc.SQL_VARBINARY, 0, 0)
+            if t in (pl.String, pl.Utf8) or isinstance(t, pl.Decimal):  # decimals arrive as exact text
+                return (pyodbc.SQL_WVARCHAR, 0, 0)
+            if isinstance(t, pl.Datetime) and not t.time_zone:
+                return (pyodbc.SQL_TYPE_TIMESTAMP, 27, 7)
+            return None
+
+        cur.setinputsizes([_size(t) for t in self._row_schema(frame).values()])
         cur.executemany(f"INSERT INTO {target} ({cols}) VALUES ({marks})", self._rows(frame))
 
     def _apply(self, cur, schema, name, frame, pk, strategy, only_changed) -> Dict[str, Any]:
@@ -849,13 +976,19 @@ def writer_for(connection: Any) -> Any:
 
 def write_database(df: Any, block: Any, *, strategy: str = "append", primary_key: Iterable[str] = (),
                    batch_key: Optional[str] = None, evolution: str = "allow",
-                   default_table: Optional[str] = None) -> Dict[str, Any]:
-    """Write ``df`` as a ``format: database`` block (materialization or quarantine) says."""
+                   default_table: Optional[str] = None, non_finite: str = "refuse") -> Dict[str, Any]:
+    """Write ``df`` as a ``format: database`` block (materialization or quarantine) says.
+    ``non_finite="null"`` (quarantine): NaN/infinity become NULL where the database has no
+    such value, instead of the write being refused - the rows a finite-check rule rejected must
+    still be kept, with their reasons."""
     cfg = database_config(block)
     table = cfg.get("table") or default_table
     if not table:
         raise DatabaseWriteError("format: database needs `table:` (schema.table).")
+    write_opts = dict(cfg.get("write") or {})
+    if non_finite == "null":
+        write_opts.setdefault("non_finite", "null")
     return writer_for(cfg.get("connection")).write(
-        df, table=table, strategy=strategy, primary_key=list(primary_key or []), write=cfg.get("write"),
+        df, table=table, strategy=strategy, primary_key=list(primary_key or []), write=write_opts,
         batch_key=batch_key, evolution=evolution,
     )

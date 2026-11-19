@@ -1,4 +1,4 @@
-import httpx
+# httpx is imported where it is used: at module level it cost 0.18 s on every first run.
 import os
 from typing import Dict, Any, Optional
 from loguru import logger
@@ -90,6 +90,8 @@ class RemoteObserver:
             headers = {"X-LakeLogic-Version": __version__}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
+
+            import httpx
 
             with httpx.Client(timeout=2.0) as client:
                 response = client.post(

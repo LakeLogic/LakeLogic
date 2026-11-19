@@ -33,7 +33,17 @@ def target(request, tmp_path, monkeypatch):
 
         def query(sql_text):
             writer = writer_for("env:LL_DB_URL")
-            cur = writer._connection().cursor()
+            conn = writer._connection()
+            if request.param == "mssql":  # pyodbc cannot fetch DATETIMEOFFSET without a converter
+                import datetime as _dt
+                import struct
+
+                def _dto(raw):
+                    y, mo, d, h, mi, s, ns, tzh, tzm = struct.unpack("<6hI2h", raw)
+                    return _dt.datetime(y, mo, d, h, mi, s, ns // 1000, _dt.timezone(_dt.timedelta(hours=tzh, minutes=tzm)))
+
+                conn.add_output_converter(-155, _dto)
+            cur = conn.cursor()
             cur.execute(sql_text)
             rows = [tuple(r) for r in cur.fetchall()]
             writer._connection().commit()
@@ -212,3 +222,35 @@ def test_processor_writes_output_quarantine_and_run_log_through_the_writer(targe
     assert query(f"SELECT symbol FROM {table}") == [("A",)]
     assert query(f"SELECT symbol FROM {contract['quarantine']['table']}") == [("B",)]
     assert query(f"SELECT status FROM {contract['metadata']['run_log_table']}") == [("success",)]
+
+
+def test_timestamp_and_timestamp_tz_columns_are_written(target):
+    """A timestamp_tz lost its zone in the cast and the Postgres writer formatted every timestamp
+    with an offset, so ANY contract with a timestamp column failed to write (2026-11-19)."""
+    import datetime as dt
+
+    from lakelogic import DataProcessor
+
+    conn, table, query = target
+    contract = {
+        "version": "1.0.0", "info": {"title": "bars"}, "dataset": "bars", "primary_key": ["symbol", "ts"],
+        "model": {"fields": [{"name": "symbol", "type": "string"}, {"name": "ts", "type": "timestamp_tz"},
+                             {"name": "seen", "type": "timestamp"}, {"name": "px", "type": "double"}]},
+        "materialization": {"format": "database", "connection": conn, "table": table, "strategy": "merge"},
+    }
+    plus2 = dt.timezone(dt.timedelta(hours=2))
+    df = pl.DataFrame({"symbol": ["A"], "ts": [dt.datetime(2026, 11, 18, 17, 0, tzinfo=plus2)],
+                       "seen": [dt.datetime(2026, 11, 18, 9, 30)], "px": [1.0]})
+    proc = DataProcessor(contract, engine="polars")
+    result = proc.run(df)
+    assert result.good.schema["ts"] == pl.Datetime("us", "UTC")          # the zone survives the cast
+    proc.materialize(result.good, result.bad)
+    proc.materialize(result.good, result.bad)                            # merge again: no error, no dupes
+    rows = query(f"SELECT ts, seen FROM {table}")
+    assert len(rows) == 1
+    ts, seen = rows[0]
+    ts = ts if isinstance(ts, dt.datetime) else dt.datetime.fromisoformat(str(ts))
+    utc = ts.astimezone(dt.timezone.utc).replace(tzinfo=None) if ts.tzinfo else ts
+    assert utc == dt.datetime(2026, 11, 18, 15, 0)                        # 17:00+02:00 is 15:00 UTC
+    seen = seen if isinstance(seen, dt.datetime) else dt.datetime.fromisoformat(str(seen))
+    assert seen.replace(tzinfo=None) == dt.datetime(2026, 11, 18, 9, 30)

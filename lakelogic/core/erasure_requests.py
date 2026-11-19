@@ -102,6 +102,17 @@ def _connect(backend: str, database: str):
     return sqlite3.connect(str(database))
 
 
+def _local_target(con, backend: str, target: str) -> str:
+    """``schema.table`` with the catalog added when a DuckDB file shares the schema's name
+    (``ws.duckdb`` + ``ws.requests`` was ambiguous)."""
+    if backend != "duckdb" or "." not in target:
+        return target
+    from lakelogic.core.run_log import _duckdb_schema_ref
+
+    schema, _, table = target.rpartition(".")
+    return f"{_duckdb_schema_ref(con, schema.split('.')[-1])}.{table}"
+
+
 def _check_backend(backend: str) -> bool:
     if backend in _SUPPORTED:
         return True
@@ -132,9 +143,10 @@ def ensure_requests_table(metadata: Dict[str, Any], engine_name: Optional[str] =
         return target
     con = _connect(backend, database)
     try:
+        local = _local_target(con, backend, target)
         if backend == "duckdb" and "." in target:
-            con.execute(f"CREATE SCHEMA IF NOT EXISTS {target.split('.')[0]}")
-        con.execute(f"CREATE TABLE IF NOT EXISTS {target} ({_ddl(backend)})")
+            con.execute(f"CREATE SCHEMA IF NOT EXISTS {local.rpartition('.')[0]}")
+        con.execute(f"CREATE TABLE IF NOT EXISTS {local} ({_ddl(backend)})")
         if backend == "sqlite":
             con.commit()
     finally:
@@ -165,7 +177,7 @@ def read_open_requests(
         return [r.asDict() for r in rows]
     con = _connect(backend, database)
     try:
-        rows = con.execute(sql).fetchall()
+        rows = con.execute(sql.replace(f"FROM {target} ", f"FROM {_local_target(con, backend, target)} ", 1)).fetchall()
     finally:
         con.close()
     return [dict(zip(REQUEST_COLUMNS, r)) for r in rows]
@@ -205,10 +217,11 @@ def mark_requests(
     con = _connect(backend, database)
     ts = now if backend == "duckdb" else now.isoformat()
     touched = 0
+    local = _local_target(con, backend, target)
     try:
         for rid, st in outcomes.items():
             cur = con.execute(
-                f"UPDATE {target} SET status = ?, processed_at = ?, run_id = ? "
+                f"UPDATE {local} SET status = ?, processed_at = ?, run_id = ? "
                 f"WHERE request_id = ? AND status IN ({open_st})",
                 [st, ts, run_id, rid],
             )

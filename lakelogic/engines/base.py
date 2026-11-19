@@ -201,6 +201,43 @@ def _checked_unique_columns(sql: Optional[str]) -> Optional[set]:
     return None
 
 
+
+def matched_rows_sql(sql: str, dialect: str = "duckdb") -> Optional[str]:
+    """``SELECT COUNT(*)`` over the same FROM/WHERE as a single-aggregate dataset rule, or None
+    when the rule is not that simple shape. A rule like ``SELECT SUM(amt) FROM source WHERE
+    amt < 0`` returns NULL when NO row matches - nothing broke the rule - and that NULL failed
+    every clean batch (and every healthy quarantine_scope group; 2026-11-19)."""
+    try:
+        from sqlglot import exp
+
+        tree = sqlglot.parse_one(sql, read=dialect)
+        if not isinstance(tree, exp.Select) or len(tree.expressions) != 1 or not tree.args.get("where"):
+            return None
+        if any(tree.args.get(k) for k in ("group", "having", "joins", "distinct", "qualify", "limit")):
+            return None
+        if tree.find(exp.Subquery) or tree.find(exp.Window) or len(list(tree.find_all(exp.Select))) > 1:
+            return None
+        if not tree.expressions[0].find(exp.AggFunc):
+            return None
+        counted = tree.copy()
+        counted.set("expressions", [exp.Count(this=exp.Star())])
+        counted.set("order", None)
+        return counted.sql(dialect=dialect)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def null_means_no_rows(sql: str, run, dialect: str = "duckdb") -> bool:
+    """True when a dataset rule's NULL result is only "its WHERE matched no rows" (a pass);
+    False when rows matched and still gave NULL (unmeasured - a failure)."""
+    count_sql = matched_rows_sql(sql, dialect)
+    if count_sql is None:
+        return False
+    try:
+        return int(run(count_sql) or 0) == 0
+    except Exception:  # noqa: BLE001
+        return False
+
 class TransformationFailed(RuntimeError):
     """A contract transformation errored. The run stops: the output would not be what the contract says.
 
@@ -413,12 +450,16 @@ class EngineAdapter(ABC):
             # reported against two rules.
             already_not_null = _not_null_columns(declared + field_rules)
             covered = self._shorthand_covered_fields()
+            # A primary key column cannot be null: the key identifies the row, and the database
+            # writer's table makes it NOT NULL, so one null key failed the WHOLE batch's write
+            # instead of quarantining that row (2026-11-19).
+            pk_cols = {str(c).lower() for c in (getattr(self.contract, "primary_key", None) or []) if c}
             for field in self.contract.model.fields:
                 # `enforce_required: false` turns off the automatic required checks ONLY. It
                 # used to skip every field-level rule too, because both sat under this flag.
                 if (
                     enforce_required
-                    and field.required
+                    and (field.required or field.name.lower() in pk_cols)
                     and field.name not in scd2_injected
                     and field.name.lower() not in already_not_null
                 ):
