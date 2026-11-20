@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.6.0] — 2026-11-20
+
+### Added
+
+- ODCS customProperties as the spec's list, one database connection per thread
+
+### Documentation
+
+- Update changelog for v2.5.1
 ## [2.5.1] — 2026-11-19
 
 ### CI/CD
@@ -1278,6 +1287,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.6.0]: https://github.com/lakelogic/LakeLogic/compare/v2.5.1...v2.6.0
 [2.5.1]: https://github.com/lakelogic/LakeLogic/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/lakelogic/LakeLogic/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/lakelogic/LakeLogic/compare/v2.3.2...v2.4.0
