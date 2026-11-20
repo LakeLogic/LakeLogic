@@ -254,3 +254,34 @@ def test_timestamp_and_timestamp_tz_columns_are_written(target):
     assert utc == dt.datetime(2026, 11, 18, 15, 0)                        # 17:00+02:00 is 15:00 UTC
     seen = seen if isinstance(seen, dt.datetime) else dt.datetime.fromisoformat(str(seen))
     assert seen.replace(tzinfo=None) == dt.datetime(2026, 11, 18, 9, 30)
+
+
+def test_threads_writing_at_once_each_use_their_own_connection(target):
+    """One writer per URL is shared by the process; its connection used to be too, so threads
+    writing in parallel interleaved on one psycopg2/pymysql/pyodbc connection (2026-11-20).
+    Eight threads race to create the table and append; every row lands, each on its own
+    connection."""
+    import threading
+
+    conn, table, query = target
+    writer = writer_for(conn)
+    seen, errors = set(), []
+    start = threading.Barrier(8)
+
+    def work(i):
+        try:
+            start.wait()
+            seen.add(id(writer._connection()))
+            rows = [(f"S{i}", t, float(t)) for t in range(25)]
+            writer.write(_bars(rows), table=table, primary_key=["symbol", "ts"])
+        except Exception as exc:  # noqa: BLE001 - collected and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors
+    assert query(f"SELECT count(*) FROM {table}")[0][0] == 8 * 25
+    assert len(seen) == 8

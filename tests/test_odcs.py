@@ -317,8 +317,9 @@ def test_odcs_roundtrip_export_and_reimport():
     assert email["classification"]
     assert email["criticalDataElement"] is True
     # execution context carried for round-trip
-    assert doc["customProperties"]["lakelogic"]["tier"] == "silver"
-    assert doc["customProperties"]["lakelogic"]["source"]["path"] == "abfss://bronze/customers"
+    ll_ctx = next(p["value"] for p in doc["customProperties"] if p["property"] == "lakelogic")
+    assert ll_ctx["tier"] == "silver"
+    assert ll_ctx["source"]["path"] == "abfss://bronze/customers"
 
     # Re-import yields an equivalent executable contract
     reimported = DataContract(**doc)
@@ -357,3 +358,68 @@ def test_odcs_export_reads_pre_olc_014_data_product_keys():
     both = DataContract(version="1.0", info={"title": "o", "data_product": "p_new"}, metadata={"data_product": "p_old"})
     assert to_odcs(both)["dataProduct"] == "p_new"
     assert "dataProduct" not in to_odcs(DataContract(**base))
+
+
+# ── customProperties is a LIST of {property, value} in ODCS v3 (2026-11-20) ──────────────
+# Exports wrote a {name: value} mapping, which the ODCS schema rejects; a standard file's list
+# was ignored on import, so its properties and the lakelogic overrides were silently lost.
+
+
+def _odcs_schema(version):
+    import json
+    from pathlib import Path
+
+    import pytest
+
+    try:
+        import datacontract
+    except ImportError:
+        pytest.skip("datacontract (which ships the ODCS JSON schemas) is not installed")
+    path = Path(datacontract.__file__).parent / "schemas" / f"odcs-{version}.schema.json"
+    if not path.exists():
+        pytest.skip(f"ODCS {version} schema not shipped by this datacontract version")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+import pytest  # noqa: E402
+
+
+# 3.1+ requires a `type: sql` check to be a QUERY compared with an operator (e.g.
+# `SELECT COUNT(*) ... WHERE NOT (<rule>)` with `mustBe: 0`). The export writes the bare row
+# predicate, valid only under 3.0.2. Known, not hidden: fixing it changes the export AND needs
+# the import to reverse it.
+_SQL_QUALITY_SHAPE = pytest.mark.xfail(
+    strict=True, reason="row rules export as a bare predicate; ODCS 3.1+ wants a query plus an operator")
+
+
+@pytest.mark.parametrize("version", ["3.0.2",
+                                     pytest.param("3.1.0", marks=_SQL_QUALITY_SHAPE),
+                                     pytest.param("3.2.0", marks=_SQL_QUALITY_SHAPE)])
+def test_export_is_valid_against_the_official_odcs_schema(version):
+    import json
+
+    jsonschema = pytest.importorskip("jsonschema")
+    doc = json.loads(json.dumps(DataContract(**REAL_ODCS_V3).to_odcs(), default=str))
+    errors = sorted(jsonschema.Draft201909Validator(_odcs_schema(version)).iter_errors(doc), key=str)
+    assert not errors, [f"{list(e.path)}: {e.message[:200]}" for e in errors]
+
+
+def test_standard_list_custom_properties_are_read_and_written_back():
+    doc = dict(REAL_ODCS_V3)
+    doc["customProperties"] = [
+        {"property": "costCentre", "value": "CC-42"},
+        {"property": "lakelogic", "value": {"tier": "gold"}},
+    ]
+    contract = DataContract(**doc)
+    assert contract.tier == "gold"  # the lakelogic item still drives execution
+    out = contract.to_odcs()["customProperties"]
+    assert {"property": "costCentre", "value": "CC-42"} in out  # another tool's property survives
+    assert next(p["value"] for p in out if p["property"] == "lakelogic")["tier"] == "gold"
+
+
+def test_older_mapping_form_still_imports():
+    doc = dict(REAL_ODCS_V3)
+    doc["customProperties"] = {"costCentre": "CC-42", "lakelogic": {"tier": "gold"}}
+    contract = DataContract(**doc)
+    assert contract.tier == "gold"
+    assert {"property": "costCentre", "value": "CC-42"} in contract.to_odcs()["customProperties"]

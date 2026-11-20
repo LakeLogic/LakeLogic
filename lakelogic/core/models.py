@@ -1154,13 +1154,14 @@ def _convert_odcs_to_lakelogic(data: Dict[str, Any]) -> Dict[str, Any]:
         ll["metadata"] = metadata
 
     # ── customProperties.lakelogic overrides — applied LAST (they win) ───────
+    # ODCS v3 defines customProperties as a LIST of {property, value}. Exports before 2026-11
+    # wrote a {name: value} mapping, which fails the ODCS schema; both are read. A list item
+    # this module does not know is kept verbatim and written back on export, never dropped.
     custom = data.get("customProperties")
     consumed.add("customProperties")
-    ll_custom = custom.get("lakelogic") if isinstance(custom, dict) else None
-    if isinstance(custom, dict):
-        others = {k: v for k, v in custom.items() if k != "lakelogic"}
-        if others:
-            metadata.setdefault("odcs_custom_properties", others)
+    ll_custom, others = _odcs_split_custom_properties(custom)
+    if others:
+        metadata.setdefault("odcs_custom_properties", others)
     if isinstance(ll_custom, dict):
         for k, v in ll_custom.items():
             if k == "quality" and isinstance(v, dict) and isinstance(ll.get("quality"), dict):
@@ -1325,10 +1326,33 @@ def to_odcs(contract: "DataContract") -> Dict[str, Any]:
             lakelogic_ctx["materialization"] = mat_dump
     if info and getattr(info, "target_layer", None):
         lakelogic_ctx["target_layer"] = info.target_layer
+    # A LIST of {property, value} (ODCS v3 CustomProperties). The other tools' properties an
+    # import kept are written back first, unchanged; LakeLogic's own context is one item.
+    custom_props: List[Dict[str, Any]] = [
+        dict(p) for p in (meta.get("odcs_custom_properties") or [])
+        if isinstance(p, dict) and p.get("property") != "lakelogic"
+    ]
     if lakelogic_ctx:
-        odcs["customProperties"] = {"lakelogic": lakelogic_ctx}
+        custom_props.append({"property": "lakelogic", "value": lakelogic_ctx})
+    if custom_props:
+        odcs["customProperties"] = custom_props
 
     return odcs
+
+
+def _odcs_split_custom_properties(custom: Any) -> tuple:
+    """``(lakelogic context or None, the other properties as [{property, value}])``.
+
+    Reads the ODCS v3 list form and the mapping form older LakeLogic exports wrote."""
+    if isinstance(custom, dict):
+        items = [{"property": k, "value": v} for k, v in custom.items()]
+    elif isinstance(custom, list):
+        items = [i for i in custom if isinstance(i, dict) and "property" in i]
+    else:
+        return None, []
+    ll = next((i.get("value") for i in items if i.get("property") == "lakelogic"), None)
+    others = [i for i in items if i.get("property") != "lakelogic"]
+    return (ll if isinstance(ll, dict) else None), others
 
 
 def _rule_to_odcs_quality(rule: Any, is_dataset: bool) -> Optional[Dict[str, Any]]:

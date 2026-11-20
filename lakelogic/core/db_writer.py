@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import io
 import re
+import threading
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
@@ -180,6 +181,56 @@ _GONE = ("does not exist", "doesn't exist", "invalid object name", "no such tabl
          "undefinedtable", "invalidschemaname")
 
 
+class _PerThreadConnection:
+    """One database connection PER THREAD, not one per writer.
+
+    ``writer_for`` hands every caller in the process the same writer for a URL, and the writer
+    held a single connection - so threads writing in parallel shared it, and psycopg2, pymysql
+    and pyodbc connections are not safe for concurrent use: interleaved transactions, "another
+    command is already in progress", lost commits (2026-11-20). ``_conn`` now reads and writes a
+    thread-local slot, so each thread opens its own on first use; ``close()`` closes them all."""
+
+    def _slot(self) -> threading.local:
+        local = self.__dict__.get("_tl")
+        if local is None:
+            local = self.__dict__.setdefault("_tl", threading.local())
+        return local
+
+    @property
+    def _conn(self):
+        return getattr(self._slot(), "conn", None)
+
+    @_conn.setter
+    def _conn(self, conn) -> None:
+        self._slot().conn = conn
+        if conn is not None:
+            with _REGISTRY_LOCK:
+                self.__dict__.setdefault("_opened", []).append(conn)
+
+    def close(self) -> None:
+        """Close every thread's connection. A thread that writes again afterwards reconnects."""
+        with _REGISTRY_LOCK:
+            opened, self.__dict__["_opened"] = list(self.__dict__.get("_opened", [])), []
+        for conn in opened:
+            try:
+                if not getattr(conn, "closed", False):
+                    conn.close()
+            except Exception:  # noqa: BLE001 - best effort; a dead connection is already closed
+                pass
+        self.__dict__["_tl"] = threading.local()
+
+    def __del__(self) -> None:  # pragma: no cover - best effort
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+_REGISTRY_LOCK = threading.Lock()
+
+_EXISTS = ("already exists", "there is already an object", "duplicate key value violates unique constraint \"pg_type")
+
+
 class _ForgetsDroppedTables:
     """The table cache lives as long as the writer. A table or schema dropped or recreated
     outside LakeLogic (a migration) made every write fail with "does not exist" until the
@@ -189,14 +240,20 @@ class _ForgetsDroppedTables:
         try:
             return self._write_once(df, **kwargs)
         except DatabaseWriteError as exc:
-            if not self._known or not any(g in str(exc).lower() for g in _GONE):
+            text = str(exc).lower()
+            if self._known and any(g in text for g in _GONE):
+                logger.info(f"A cached table is gone ({exc}); re-checking the table and retrying once.")
+            elif any(e in text for e in _EXISTS):
+                # Two threads saw the table missing and both created it; the other one won.
+                # The table is there now, so re-check and write (2026-11-20).
+                logger.info(f"The table was created by another writer ({exc}); retrying once.")
+            else:
                 raise
-            logger.info(f"A cached table is gone ({exc}); re-checking the table and retrying once.")
             self._known.clear()
             return self._write_once(df, **kwargs)
 
 
-class PostgresWriter(_ForgetsDroppedTables):
+class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
     """Postgres through psycopg2: ``COPY`` (CSV) into the target or a staging table, then one
     ``INSERT … ON CONFLICT`` statement, all in one transaction."""
 
@@ -223,16 +280,6 @@ class PostgresWriter(_ForgetsDroppedTables):
             except Exception as exc:  # noqa: BLE001 - said plainly, secrets scrubbed
                 raise DatabaseWriteError(f"Could not connect to Postgres: {self._scrub(exc)}") from None
         return self._conn
-
-    def close(self) -> None:
-        if self._conn is not None and not self._conn.closed:
-            self._conn.close()
-
-    def __del__(self) -> None:  # pragma: no cover - best effort
-        try:
-            self.close()
-        except Exception:
-            pass
 
     def _scrub(self, exc: Any) -> str:
         from lakelogic.core.dlt_sink import _scrub
@@ -443,24 +490,56 @@ class _EmbeddedWriter:
     def __init__(self, url: str, dialect: str) -> None:
         self.dialect = dialect
         self._path = re.sub(r"^[a-z0-9+]+:///?", "", url, flags=re.I) or ":memory:"
-        self._conn = None
+        self._base = None          # DuckDB: the one database connection threads take cursors from
+        self._shared = None        # in-memory SQLite: the one connection, used in turn
+        self._local = threading.local()
+        self._opened: List[Any] = []
+        self._lock = threading.RLock()
+        self._memory_sqlite = self.dialect == "sqlite" and self._path in (":memory:", "")
 
     def _connection(self):
-        if self._conn is None:
+        """This thread's connection.
+
+        DuckDB: a ``cursor()`` per thread off ONE connection - DuckDB's own rule for threads,
+        and the only way an in-memory database stays one database. SQLite on a file: its own
+        connection per thread. In-memory SQLite: a second connection would be a second, empty
+        database, so there is one, and ``write`` takes it in turn."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            return conn
+        with self._lock:
             if self.dialect == "duckdb":
                 import duckdb
 
-                self._conn = duckdb.connect(self._path)
+                if self._base is None:
+                    self._base = duckdb.connect(self._path)
+                conn = self._base.cursor()
             else:
                 import sqlite3
 
-                self._conn = sqlite3.connect(self._path)
-        return self._conn
+                if self._memory_sqlite:
+                    if self._shared is None:
+                        self._shared = sqlite3.connect(self._path, check_same_thread=False)
+                    conn = self._shared
+                else:
+                    conn = sqlite3.connect(self._path)
+            if conn is not self._shared or conn not in self._opened:
+                self._opened.append(conn)
+        self._local.conn = conn
+        return conn
 
     def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            opened, self._opened = self._opened, []
+            if self._base is not None:
+                opened.append(self._base)
+            self._base = self._shared = None
+            self._local = threading.local()
+        for conn in opened:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - best effort
+                pass
 
     def _exec(self, sql_text: str, params: Sequence[Any] = ()):
         return self._connection().execute(sql_text, list(params))
@@ -487,7 +566,23 @@ class _EmbeddedWriter:
             marks = ", ".join("?" for _ in frame.columns)
             self._connection().executemany(f"INSERT INTO {target} ({cols}) VALUES ({marks})", frame.rows())
 
-    def write(self, df: Any, *, table: str, strategy: str = "append", primary_key: Sequence[str] = (),
+    def write(self, df: Any, **kwargs: Any) -> Dict[str, Any]:
+        # DuckDB and SQLite take ONE writer at a time: parallel writes fail with "write-write
+        # conflict" / "database is locked". Threads keep their own connections (reads stay
+        # parallel); writes from this process take turns.
+        with self._lock:
+            return self._write_retrying(df, **kwargs)
+
+    def _write_retrying(self, df: Any, **kwargs: Any) -> Dict[str, Any]:
+        try:
+            return self._write_once(df, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - only the creation race is retried
+            if not any(e in str(exc).lower() for e in _EXISTS):
+                raise
+            logger.info(f"The table was created by another writer ({exc}); retrying once.")
+            return self._write_once(df, **kwargs)
+
+    def _write_once(self, df: Any, *, table: str, strategy: str = "append", primary_key: Sequence[str] = (),
               write: Optional[Mapping[str, Any]] = None, batch_key: Optional[str] = None,
               evolution: str = "allow") -> Dict[str, Any]:
         import polars as pl
@@ -629,7 +724,7 @@ def _url_parts(url: str) -> Dict[str, Any]:
             "query": {k: v[-1] for k, v in parse_qs(u.query).items()}}
 
 
-class _ServerWriter(_ForgetsDroppedTables):
+class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
     """Shared flow for MySQL and SQL Server: create/evolve the table, then load and apply in one
     transaction. Subclasses supply the dialect's SQL."""
 
@@ -640,13 +735,6 @@ class _ServerWriter(_ForgetsDroppedTables):
         self._url = url
         self._conn = None
         self._known: Dict[str, List[str]] = {}
-
-    def close(self) -> None:
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            finally:
-                self._conn = None
 
     def _scrub(self, exc: Any) -> str:
         from lakelogic.core.dlt_sink import _scrub
@@ -953,9 +1041,16 @@ def writer_for(connection: Any) -> Any:
     url = resolve_credentials(connection)
     if not isinstance(url, str):
         raise DatabaseWriteError("format: database `connection` must resolve to a connection URL.")
-    cached = _WRITERS.get(url)
-    if cached is not None:
-        return cached
+    with _REGISTRY_LOCK:
+        cached = _WRITERS.get(url)
+        if cached is not None:
+            return cached
+        writer = _new_writer(url)
+        _WRITERS[url] = writer
+        return writer
+
+
+def _new_writer(url: str) -> Any:
     dialect = dialect_of(url)
     if dialect == "postgresql":
         writer = PostgresWriter(url)
@@ -970,7 +1065,6 @@ def writer_for(connection: Any) -> Any:
             f"format: database does not support '{dialect}' yet (supported: postgresql, mysql, mssql, duckdb, "
             "sqlite). Use format: dlt for this database."
         )
-    _WRITERS[url] = writer
     return writer
 
 
