@@ -3586,6 +3586,7 @@ demo = [
     { name = "polars" },
     { name = "pyarrow" },
     { name = "pypandoc-binary" },
+    { name = "pytz" },
     { name = "rapidocr" },
     { name = "reportlab" },
     { name = "spacy" },
@@ -3650,6 +3651,7 @@ engines = [
     { name = "openpyxl" },
     { name = "polars" },
     { name = "pyarrow" },
+    { name = "pytz" },
     { name = "sqlglot" },
     { name = "xlrd" },
 ]
@@ -3945,6 +3947,7 @@ requires-dist = [
     { name = "python-pptx", marker = "extra == 'documents'", specifier = ">=1.0.0" },
     { name = "pytz", marker = "extra == 'all'", specifier = ">=2023.3" },
     { name = "pytz", marker = "extra == 'duckdb'", specifier = ">=2023.3" },
+    { name = "pytz", marker = "extra == 'engines'", specifier = ">=2023.3" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidocr", marker = "extra == 'documents'", specifier = ">=3.0.0" },
     { name = "rapidocr", marker = "extra == 'extraction-ocr'", specifier = ">=3.0.0" },
