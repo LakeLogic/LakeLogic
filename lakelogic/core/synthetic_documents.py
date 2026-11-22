@@ -135,7 +135,8 @@ def _render_line(pattern: str, value: str) -> Optional[str]:
 
 def _regex_parser():
     try:  # Python 3.11+
-        from re import _constants as c, _parser as p  # type: ignore[attr-defined]
+        from re import _constants as c  # type: ignore[attr-defined]
+        from re import _parser as p
     except ImportError:  # pragma: no cover - older Pythons
         import sre_constants as c  # type: ignore[no-redef]
         import sre_parse as p  # type: ignore[no-redef]
@@ -456,7 +457,8 @@ def _real_dates(text: str, rng: random.Random, state: Optional[Dict[str, Any]] =
 
     ``state`` (one per document) keeps the dates IN ORDER: each date falls after the last one, so
     a licence's expiry is never before its holder's birth."""
-    from datetime import date as _date, timedelta
+    from datetime import date as _date
+    from datetime import timedelta
 
     state = state if state is not None else {}
 
