@@ -55,6 +55,10 @@ dependencies = [
     # <2 (2026-10-23): DuckDB 2.0 removed relation.fetchone(), which Core calls in 43 places;
     # a fresh install got 2.0 and every DuckDB run failed. Moving to DuckDB 2 is its own task.
     "duckdb>=0.9.0,<2",
+    # DuckDB imports pytz for timezone values and pandas 3 no longer installs it, so a fresh
+    # install failed on the first timestamp with a time zone (2026-11-22). Databricks Runtime
+    # ships pytz, so a loose floor adds nothing there.
+    "pytz>=2023.3",
     "typer>=0.9.0",
     # >=1.0.0, not >=0.15.0. Three reasons, all observed rather than assumed:
     #  - polars declares `deltalake>=1.0.0` for its own delta extra, so the old floor
@@ -100,7 +104,6 @@ cli = [
 engines = [
     "polars>=0.20.0,<2",
     "duckdb>=0.9.0,<2",
-    "pytz>=2023.3",  # DuckDB imports it for timezone values; pandas 3 no longer brings it
     "pyarrow>=23.0.1",
     "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
@@ -136,7 +139,7 @@ delta = [
     "google-cloud-storage>=2.10.0",  # GCP GCS access
 ]
 polars = ["polars>=0.20.0,<2", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
-duckdb = ["duckdb>=0.9.0,<2", "pandas>=2.0.0", "pytz>=2023.3", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
+duckdb = ["duckdb>=0.9.0,<2", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
 spark = ["pyspark>=3.3.0"]
 # SQLAlchemy alone — every `source.type: database` contract needs it, whatever the
 # driver, because the batched (`fetch_size`) path builds an SQLAlchemy engine and hands
@@ -231,7 +234,6 @@ all = [
     "typer>=0.9.0",
     "polars>=0.20.0,<2",
     "duckdb>=0.9.0,<2",
-    "pytz>=2023.3",  # DuckDB imports it for timezone values; pandas 3 no longer brings it
     "pyarrow>=23.0.1",
     "deltalake>=1.0.0",
     "sqlglot>=20.0.0",
