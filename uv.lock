@@ -3512,6 +3512,7 @@ all = [
     { name = "openpyxl" },
     { name = "polars" },
     { name = "pyarrow" },
+    { name = "pytz" },
     { name = "sqlglot" },
     { name = "typer" },
     { name = "xlrd" },
@@ -3639,6 +3640,7 @@ duckdb = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "pyarrow" },
+    { name = "pytz" },
     { name = "xlrd" },
 ]
 engines = [
@@ -3941,6 +3943,8 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "python-docx", marker = "extra == 'documents'", specifier = ">=1.1.0" },
     { name = "python-pptx", marker = "extra == 'documents'", specifier = ">=1.0.0" },
+    { name = "pytz", marker = "extra == 'all'", specifier = ">=2023.3" },
+    { name = "pytz", marker = "extra == 'duckdb'", specifier = ">=2023.3" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidocr", marker = "extra == 'documents'", specifier = ">=3.0.0" },
     { name = "rapidocr", marker = "extra == 'extraction-ocr'", specifier = ">=3.0.0" },
