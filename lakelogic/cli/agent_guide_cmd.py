@@ -13,6 +13,14 @@ from typing import Optional
 import typer
 
 GUIDE_PATH = Path(__file__).resolve().parents[1] / "agent_guide.md"
+#: WHEN to use LakeLogic, not how: the standing rules an agent follows in a governed repository.
+#: First in the guide, and the section `scaffold` writes into AGENTS.md / CLAUDE.md (2026-11-24).
+RULES_PATH = Path(__file__).resolve().parents[1] / "agent_rules.md"
+
+#: The marked block LakeLogic owns inside an agent-instructions file. Everything outside it is
+#: the repository's own and is never touched; writing again replaces only the block.
+SECTION_START = "<!-- lakelogic:start -->"
+SECTION_END = "<!-- lakelogic:end -->"
 
 
 def _first_line(text: Optional[str]) -> str:
@@ -45,22 +53,48 @@ def command_table() -> str:
     return "\n".join(out) + "\n"
 
 
+def standing_rules() -> str:
+    return RULES_PATH.read_text(encoding="utf-8").rstrip() + "\n"
+
+
 def full_guide() -> str:
-    return GUIDE_PATH.read_text(encoding="utf-8").rstrip() + "\n\n" + command_table()
+    guide = GUIDE_PATH.read_text(encoding="utf-8").rstrip()
+    # The rules go straight after the guide's title and opening paragraphs, before Install: an
+    # agent that reads only the top of the file still learns when to use LakeLogic.
+    head, sep, rest = guide.partition("\n## ")
+    body = f"{head.rstrip()}\n\n{standing_rules()}\n## {rest}" if sep else f"{guide}\n\n{standing_rules()}"
+    return body.rstrip() + "\n\n" + command_table()
+
+
+def write_section(path: Path, text: str) -> str:
+    """Put ``text`` in ``path`` between the LakeLogic markers. Creates the file if missing,
+    replaces an existing LakeLogic block, or appends one; returns "created", "updated" or
+    "added". Content outside the markers is kept byte for byte."""
+    block = f"{SECTION_START}\n{text.rstrip()}\n{SECTION_END}\n"
+    if not path.exists():
+        path.write_text(block, encoding="utf-8")
+        return "created"
+    current = path.read_text(encoding="utf-8")
+    start, end = current.find(SECTION_START), current.find(SECTION_END)
+    if start != -1 and end > start:
+        path.write_text(current[:start] + block.rstrip("\n") + current[end + len(SECTION_END):], encoding="utf-8")
+        return "updated"
+    sep = "" if current.endswith("\n\n") else ("\n" if current.endswith("\n") else "\n\n")
+    path.write_text(current + sep + block, encoding="utf-8")
+    return "added"
 
 
 def agent_guide_command(
     write: Optional[Path] = typer.Option(
-        None, "--write", help="Save the guide to this file (e.g. AGENTS.md) instead of printing it."
+        None, "--write", help="Write the guide into this file (e.g. AGENTS.md) between LakeLogic markers; the rest of the file is kept."
     ),
 ) -> None:
-    """How an AI agent uses LakeLogic: install, run a contract, outputs, every command."""
+    """How an AI agent uses LakeLogic: when to use it, install, run a contract, outputs, every command."""
     text = full_guide()
     if write is None:
         typer.echo(text)
         return
-    if write.exists():
-        typer.echo(f"{write} exists; not overwritten. Choose another path or remove it first.", err=True)
-        raise typer.Exit(1)
-    write.write_text(text, encoding="utf-8")
-    typer.echo(f"Wrote {write}")
+    # An existing AGENTS.md is the repository's own: refusing it meant the guide reached only
+    # empty repos. Only the marked LakeLogic block is written; the rest is left as it was.
+    outcome = write_section(write, text)
+    typer.echo(f"{outcome.capitalize()} the LakeLogic section in {write}")

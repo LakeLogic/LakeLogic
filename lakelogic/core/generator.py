@@ -214,6 +214,7 @@ _TEST_CASE_TYPES = {
     "EDGE_CASE_AI": "AI-generated edge case value",
     "EDGE_CASE_BUILTIN": "Built-in edge case from profile index",
     "EMPTY_STRING": "Empty string on a text field",
+    "COMPARISON_VIOLATION": "Two-column rule broken (e.g. dropoff_at before pickup_at)",
 }
 
 
@@ -6134,7 +6135,18 @@ class DataGenerator:
         # fields put "/song.bmp" paths, future birth dates and unicode names into rows whose
         # only declared rule was `not_null: licence_number` (2026-10-03).
         ruled = self._declared_rule_fields(field_rules) if invalid else []
-        target = self._rng.choice(ruled) if ruled else None
+        # TWO-COLUMN RULES ARE TARGETS TOO (`dropoff_at >= pickup_at`, `clicks <= impressions`).
+        # Only single-column rules were ever broken, and every coherence pass put comparisons
+        # back in order, so a test of such a rule reported "caught 0" on every run (2026-11-24).
+        comparisons = self._row_rule_comparisons() if invalid else []
+        cmp_target: Optional[Tuple[str, str, str]] = None
+        target = None
+        if ruled or comparisons:
+            pick = self._rng.randrange(len(ruled) + len(comparisons))
+            if pick < len(ruled):
+                target = ruled[pick]
+            else:
+                cmp_target = comparisons[pick - len(ruled)]
 
         for field in self._fields:
             name: str = field.get("name", "col")
@@ -6146,6 +6158,11 @@ class DataGenerator:
             # A SQL rule without an `IS NULL OR` guard rejects nulls exactly like `required`.
             required: bool = bool(field.get("required", False) or rules.get("not_null"))
             nullable: bool = not required
+
+            if cmp_target is not None:
+                # A valid row first; the comparison is broken once coherence has run.
+                row[name] = self._make_valid_value(name, ftype, rules, nullable, sample_pools=sample_pools)
+                continue
 
             if target is not None:
                 if name == target:
@@ -6174,7 +6191,17 @@ class DataGenerator:
         # After all fields are generated, patch dependent fields whose value
         # should match the driver field. Only for valid rows — invalid rows
         # keep their deliberately broken values.
-        if target is not None:
+        if cmp_target is not None:
+            self._apply_correlations(row)
+            self._apply_temporal_ordering(row)
+            self._apply_column_comparisons(row, field_rules)
+            self._apply_field_consistency(row)
+            self._apply_city_coherence(row, field_rules)
+            self._apply_geo_alignment(row)
+            info = self._break_comparison(row, cmp_target, field_rules, sample_pools)
+            if info is not None:
+                test_cases.append(info)
+        elif target is not None:
             # Coherence passes for the realistic fields; the broken value is put back after.
             broken = row.get(target)
             self._apply_correlations(row)
@@ -7007,6 +7034,74 @@ class DataGenerator:
                 val += self._rng.choice(string.ascii_lowercase)
         return val
 
+    def _row_rule_comparisons(self) -> List[Tuple[str, str, str]]:
+        """``(smaller, op, larger)`` for every two-column comparison the contract's SQL row
+        rules declare, as this contract's own field names. Once each, in rule order."""
+        names = {str(f.get("name", "")).lower(): f.get("name") for f in self._fields if f.get("name")}
+        out: List[Tuple[str, str, str]] = []
+        for rule in self._quality.get("row_rules") or []:
+            sql = rule.get("sql") if isinstance(rule, dict) else None
+            if not sql:
+                continue
+            for smaller, op, larger in _sql_rule_constraints(sql)[1]:
+                a, b = names.get(smaller.lower()), names.get(larger.lower())
+                if a and b and a != b and (a, op, b) not in out:
+                    out.append((a, op, b))
+        return out
+
+    def _break_comparison(
+        self,
+        row: Dict[str, Any],
+        comparison: Tuple[str, str, str],
+        field_rules: Dict[str, Dict[str, Any]],
+        sample_pools: Optional[Dict[str, List[Any]]] = None,
+    ) -> Optional[TestCaseInfo]:
+        """Make ``row`` break ``smaller <op> larger``: a timestamp ``larger`` moved to before
+        ``smaller`` (by a realistic gap), or a number ``smaller`` set above ``larger``. Both
+        columns are given values first, since a null passes the rule's ``IS NULL`` guard."""
+        smaller, op, larger = comparison
+        types = {f.get("name"): (f.get("type") or "string").lower() for f in self._fields}
+        for col in (smaller, larger):
+            if row.get(col) is None:
+                row[col] = self._make_valid_value(
+                    col, types.get(col, "string"), field_rules.get(col, {}), False, sample_pools=sample_pools
+                )
+        low, high = row.get(smaller), row.get(larger)
+        if low is None or high is None:
+            return None
+        low_dt = self._parse_temporal(low)
+        if low_dt is not None and self._parse_temporal(high) is not None:
+            date_only = (isinstance(low, str) and len(low) == 10) or (
+                isinstance(low, date) and not isinstance(low, datetime)
+            )
+            moved = low_dt - (
+                timedelta(days=self._rng.randint(1, 7)) if date_only else timedelta(minutes=self._rng.randint(5, 90))
+            )
+            if isinstance(high, str):
+                row[larger] = moved.date().isoformat() if date_only else moved.isoformat()
+            elif isinstance(high, datetime):
+                row[larger] = moved
+            else:
+                row[larger] = moved.date()
+            value = row[larger]
+            description = f"{larger} before {smaller}"
+        elif all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (low, high)):
+            if isinstance(low, int) and isinstance(high, int):
+                row[smaller] = high + self._rng.randint(1, 10)
+            else:
+                row[smaller] = round(float(high) + self._rng.uniform(0.01, 10.0), 4)
+            value = row[smaller]
+            description = f"{smaller} above {larger}"
+        else:
+            return None
+        return TestCaseInfo(
+            type="COMPARISON_VIOLATION",
+            field=larger if low_dt is not None else smaller,
+            value=value,
+            description=description,
+            contract_rule=f"quality.row_rules ({smaller} {op} {larger})",
+        )
+
     def _declared_rule_fields(self, field_rules: Dict[str, Dict[str, Any]]) -> List[str]:
         """Fields the contract declares a breakable rule on: required / not_null, accepted
         values, a range, a length or a pattern. Only these are broken in a rule-breaking row.
@@ -7387,7 +7482,7 @@ class DataGenerator:
 
         value = fn(**kwargs)
         # Faker's pyfloat can ignore right_digits when a value is nudged into min/max
-        # (4.415903208264697 for right_digits=1), so round it here.
+        # (4.4159032... for right_digits=1), so round it here.
         if method_name == "pyfloat" and isinstance(value, float) and "right_digits" in kwargs:
             value = round(value, int(kwargs["right_digits"]))
         return value

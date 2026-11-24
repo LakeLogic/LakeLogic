@@ -73,6 +73,14 @@ def scaffold_command(
         logger.error("scaffold failed: {}", exc)
         raise typer.Exit(code=1)
     typer.echo(f"Scaffolded {len(result.files)} file(s) into {result.out_dir}")
+    # Every scaffolded project teaches its AI agents the standing rules from day one: a coding
+    # agent working here writes a contract for a new table and tests a rule before it ships,
+    # without being asked (2026-11-24). Claude Code reads CLAUDE.md; most others read AGENTS.md.
+    from lakelogic.cli.agent_guide_cmd import standing_rules, write_section
+
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        write_section(Path(result.out_dir) / name, standing_rules())
+    typer.echo("Agent instructions: AGENTS.md and CLAUDE.md (LakeLogic standing rules)")
     if target == "fabric":
         typer.echo("Run it: upload to your lakehouse Files/ and import notebooks/ (see README.md)")
     elif target == "databricks":
