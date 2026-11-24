@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.6.2] — 2026-11-24
+
+### Added
+
+- **agents**: Standing rules tell AI agents when to use LakeLogic
+
+### Documentation
+
+- Update changelog for v2.6.1
+
+### Fixed
+
+- **generator**: Broken rows break two-column rules too
 ## [2.6.1] — 2026-11-22
 
 ### Build
@@ -1303,6 +1316,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.6.2]: https://github.com/lakelogic/LakeLogic/compare/v2.6.1...v2.6.2
 [2.6.1]: https://github.com/lakelogic/LakeLogic/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/lakelogic/LakeLogic/compare/v2.5.1...v2.6.0
 [2.5.1]: https://github.com/lakelogic/LakeLogic/compare/v2.5.0...v2.5.1
