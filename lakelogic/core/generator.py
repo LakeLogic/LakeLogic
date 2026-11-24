@@ -7482,7 +7482,7 @@ class DataGenerator:
 
         value = fn(**kwargs)
         # Faker's pyfloat can ignore right_digits when a value is nudged into min/max
-        # (4.415903208264697 for right_digits=1), so round it here.
+        # (4.4159032... for right_digits=1), so round it here.
         if method_name == "pyfloat" and isinstance(value, float) and "right_digits" in kwargs:
             value = round(value, int(kwargs["right_digits"]))
         return value
