@@ -753,7 +753,8 @@ def _forget_earlier_batch(df: Any, target_file: Any, fmt: str, batch_key: str) -
         read = pl.read_csv if fmt == "csv" else pl.read_parquet
         existing = read(str(target_file), **({"storage_options": opts} if remote else {}))
         if BATCH_KEY_COLUMN in existing.columns:
-            kept = existing.filter(pl.col(BATCH_KEY_COLUMN).is_null() | ~pl.col(BATCH_KEY_COLUMN).cast(pl.String).is_in(keys))
+            key = pl.col(BATCH_KEY_COLUMN)
+            kept = existing.filter(key.is_null() | ~key.cast(pl.String).is_in(keys))
             if kept.height != existing.height:
                 from lakelogic.core.materialization import _write_frame
 

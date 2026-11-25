@@ -66,8 +66,8 @@ and keeps its precision.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, Optional
 
 # Every SQL dialect the registry can render. `polars` is not here: it is not a

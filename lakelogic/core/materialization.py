@@ -787,7 +787,7 @@ def _to_pandas(df: Any) -> Any:
     if hasattr(df, "to_arrow") and hasattr(df, "to_pandas"):
         # Integer columns stay INTEGER (pandas' nullable Int64 & co.). The default conversion turns
         # an integer column holding a null into float64, which cannot hold every 64-bit integer:
-        # 9007199254740993 was written to Delta as 9007199254740992 on append, merge and overwrite
+        # 2**53 + 1 was written to Delta as 2**53 on append, merge and overwrite
         # whenever the batch had a null in that column (type matrix, 2026-11-19).
         return _arrow_to_pandas_exact(df.to_arrow())
     if hasattr(df, "to_pandas"):
@@ -1311,7 +1311,8 @@ def _append_without_pandas(df: Any, target_file: Path, output_format: str) -> in
         if output_format == "csv":
             existing = pl.read_csv(read_from, **read_opts)
             # The file holds lists as JSON text; the new rows must too before they can stack.
-            combined = pl.concat([existing, _csv_safe(df)], how="diagonal_relaxed")  # a column added since (e.g. _lakelogic_batch_key) is not a failure
+            # A column added since (e.g. _lakelogic_batch_key) is not a failure.
+            combined = pl.concat([existing, _csv_safe(df)], how="diagonal_relaxed")
             _write_frame(combined, target_file, output_format)
             return int(combined.height)
         elif output_format == "parquet":
