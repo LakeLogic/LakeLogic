@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [2.6.3] — 2026-11-25
+
+### CI/CD
+
+- **notebooks**: Pin Java 17 for Spark; 08h reads Delta history as a list
+
+### Documentation
+
+- Update changelog for v2.6.2
+
+### Fixed
+
+- **ci**: Ruff clean; local targets check disk not fsspec; migrate declares ruamel.yaml; CI installs the extras the suite tests
+- **core**: Non-Spark scd1 merge keeps surrogate key and unknown member; spark_type_name works without pyspark
+
+### Styling
+
+- **core**: Lint fixes; reword comment the PII scanner read as a card number
 ## [2.6.2] — 2026-11-24
 
 ### Added
@@ -1316,6 +1334,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 <!-- Link definitions -->
+[2.6.3]: https://github.com/lakelogic/LakeLogic/compare/v2.6.2...v2.6.3
 [2.6.2]: https://github.com/lakelogic/LakeLogic/compare/v2.6.1...v2.6.2
 [2.6.1]: https://github.com/lakelogic/LakeLogic/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/lakelogic/LakeLogic/compare/v2.5.1...v2.6.0
