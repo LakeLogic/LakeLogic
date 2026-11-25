@@ -209,7 +209,9 @@ def test_grouped_scope_check_matches_group_by_group(sql, cmp):
         slow = proc_mod._quarantine_failing_groups(adapter, df, [{"name": "r"}], ["sym"], "bars")
     finally:
         proc_mod._grouped_rule_values = orig
-    norm = (lambda res: None if res is None else (sorted(map(str, res[1]["sym"].to_list())), res[2]))
+    def norm(res):
+        return None if res is None else (sorted(map(str, res[1]["sym"].to_list())), res[2])
+
     assert norm(fast) == norm(slow)
 
 

@@ -35,7 +35,8 @@ app = typer.Typer(
         "LakeLogic — Consistent Data Contracts across engines.\n\n"
         "A contract runtime for validating, materializing, and governing\n"
         "data across Polars, Pandas, DuckDB, Spark, Snowflake, and BigQuery.\n\n"
-        "[bold]AI agents:[/bold] run [bold]lakelogic agent-guide[/bold] first (contract format: [bold]olc guide[/bold]).\n\n"
+        "[bold]AI agents:[/bold] run [bold]lakelogic agent-guide[/bold] first "
+        "(contract format: [bold]olc guide[/bold]).\n\n"
         "[dim]Use [bold]lakelogic [COMMAND] --help[/bold] for detailed usage on any command.[/dim]"
     ),
     add_completion=False,

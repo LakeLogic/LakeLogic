@@ -39,9 +39,12 @@ def _holds_data(target: Any) -> bool:
     2026-10-14). A cloud path is checked through fsspec; if the storage cannot be asked, the run
     stops, because "could not tell" must never be read as "empty".
     """
-    if not isinstance(target, URIPath):
-        return Path(target).exists()
     uri = str(target)
+    # A local folder can arrive wrapped as URIPath (a `table:` target resolved under
+    # LAKELOGIC_TABLE_ROOT). Ask the disk: fsspec is an optional extra, and without it a
+    # plain local merge stopped with "could not tell whether ... holds data".
+    if not isinstance(target, URIPath) or not _is_remote_path(uri):
+        return Path(uri).exists()
     try:
         import fsspec
 

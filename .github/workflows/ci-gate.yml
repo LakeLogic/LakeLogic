@@ -61,7 +61,11 @@ jobs:
           # bigquery: the native-materialization tests drive a fake client, but the
           # code under test calls _job_config(), which builds a real QueryJobConfig.
           # Without google-cloud-bigquery those two tests fail on the import inside it.
-          uv pip install --system -e ".[dev,cli,engines,bigquery]"
+          # The optional extras the suite exercises: sql/postgresql (batched reads, db writer),
+          # synthetic (Faker-backed generator rules), documents (PDF/Office/OCR extraction),
+          # ai (Azure OpenAI client) and fsspec (cloud "holds data" checks). Without them those
+          # tests failed on import, which hid real failures among the noise.
+          uv pip install --system -e ".[dev,cli,engines,bigquery,sql,postgresql,synthetic,documents,ai]" fsspec
           uv pip install --system pytest pytest-cov
 
       - name: Run Tests

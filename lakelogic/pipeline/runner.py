@@ -3191,7 +3191,9 @@ class LakehousePipeline:
                     logger.debug(f"DDL check failed for {c.entity}: {ddl_e}")
             else:
                 # Its own batch: the processor knows whether a dataset rule quarantined it.
-                processor.materialize(df_good, df_bad, batch_quarantined=bool(getattr(processor, "batch_quarantined", None)))
+                processor.materialize(
+                    df_good, df_bad, batch_quarantined=bool(getattr(processor, "batch_quarantined", None))
+                )
 
             if rows_bad and rows_bad > 0:
                 _q_config = getattr(processor.contract, "quarantine", None)

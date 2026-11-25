@@ -307,7 +307,10 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
                 raise DatabaseWriteError(f"Table {key} does not exist and write.create_table is false.")
             if schema:
                 cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
-            cols = [sql.SQL("{} {}").format(sql.Identifier(c), sql.SQL(_ddl(t, "postgresql", c in primary_key))) for c, t in df.schema.items()]
+            cols = [
+                sql.SQL("{} {}").format(sql.Identifier(c), sql.SQL(_ddl(t, "postgresql", c in primary_key)))
+                for c, t in df.schema.items()
+            ]
             if primary_key:
                 cols.append(sql.SQL("PRIMARY KEY ({})").format(sql.SQL(", ").join(map(sql.Identifier, primary_key))))
             cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(ident, sql.SQL(", ").join(cols)))
@@ -424,7 +427,9 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
                     result.update(rows_written=frame.height, inserted=frame.height, updated=0)
                 else:
                     stg = sql.Identifier("_ll_stg")
-                    cur.execute(sql.SQL("CREATE TEMP TABLE {} (LIKE {} INCLUDING DEFAULTS) ON COMMIT DROP").format(stg, target))
+                    cur.execute(
+                        sql.SQL("CREATE TEMP TABLE {} (LIKE {} INCLUDING DEFAULTS) ON COMMIT DROP").format(stg, target)
+                    )
                     self._copy(cur, stg, frame, batch_size)
                     conflict = sql.SQL(", ").join(map(sql.Identifier, pk))
                     if strategy == "append":  # on_conflict: ignore
@@ -440,10 +445,16 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
             raise
         except Exception as exc:  # noqa: BLE001 - rolled back, said plainly, secrets scrubbed
             conn.rollback()
-            raise DatabaseWriteError(f"Write to {result['target']} failed and was rolled back: {self._scrub(exc)}") from None
+            raise DatabaseWriteError(
+                f"Write to {result['target']} failed and was rolled back: {self._scrub(exc)}"
+            ) from None
         logger.info(
             f"Wrote {result.get('rows_written', 0)} row(s) to {result['target']} ({strategy}"
-            + (f": {result.get('inserted', 0)} inserted, {result.get('updated', 0)} updated" if strategy in ("merge", "upsert") else "")
+            + (
+                f": {result.get('inserted', 0)} inserted, {result.get('updated', 0)} updated"
+                if strategy in ("merge", "upsert")
+                else ""
+            )
             + ")"
         )
         return result
@@ -456,7 +467,9 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
         col_list = sql.SQL(", ").join(map(sql.Identifier, cols))
         conflict = sql.SQL(", ").join(map(sql.Identifier, pk))
         if non_keys:
-            sets = sql.SQL(", ").join(sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(c), sql.Identifier(c)) for c in non_keys)
+            sets = sql.SQL(", ").join(
+                sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(c), sql.Identifier(c)) for c in non_keys
+            )
             action = sql.SQL("DO UPDATE SET {}").format(sets)
             if only_changed and business:
                 left = sql.SQL(", ").join(sql.SQL("{}.{}").format(target, sql.Identifier(c)) for c in business)
@@ -625,7 +638,7 @@ class _EmbeddedWriter:
             catalog = self._exec("SELECT current_database()").fetchone()[0]
             schema_ref = f"{_q(catalog)}.{_q(schema)}"
             target = f"{schema_ref}.{_q(name)}"
-        conn = self._connection()
+        self._connection()
         result: Dict[str, Any] = {"target": f"{self.dialect}:{schema + '.' if schema else ''}{name}",
                                   "format": "database", "dialect": self.dialect, "strategy": strategy}
         try:
@@ -656,8 +669,11 @@ class _EmbeddedWriter:
                     keys = _keys_to_replace(frame, batch_key)
                     for i in range(0, len(keys), 500):
                         chunk = keys[i:i + 500]
-                        self._exec(f"DELETE FROM {target} WHERE {_q(BATCH_KEY_COLUMN)} IN ({', '.join('?' for _ in chunk)})",
-                                   chunk)
+                        self._exec(
+                            f"DELETE FROM {target} WHERE {_q(BATCH_KEY_COLUMN)} "
+                            f"IN ({', '.join('?' for _ in chunk)})",
+                            chunk,
+                        )
                 self._insert(target, frame)
                 result.update(rows_written=frame.height)
             else:
@@ -676,7 +692,9 @@ class _EmbeddedWriter:
                         changed = " OR ".join(f"{target}.{_q(c)} IS DISTINCT FROM excluded.{_q(c)}" for c in business)
                         action += f" WHERE {changed}"
                 where = " WHERE true" if self.dialect == "sqlite" else ""  # sqlite's upsert parse rule
-                self._exec(f"INSERT INTO {target} ({cols}) SELECT {cols} FROM {stg}{where} ON CONFLICT ({conflict}) {action}")
+                self._exec(
+                    f"INSERT INTO {target} ({cols}) SELECT {cols} FROM {stg}{where} ON CONFLICT ({conflict}) {action}"
+                )
                 self._exec(f"DROP TABLE {stg}")
                 result.update(rows_written=frame.height)
             self._exec("COMMIT")
@@ -780,8 +798,10 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
                     for i in range(0, len(keys), 500):
                         chunk = keys[i:i + 500]
                         marks = ", ".join(self._mark for _ in chunk)
-                        cur.execute(f"DELETE FROM {self._t(schema, name)} WHERE {self._q(BATCH_KEY_COLUMN)} IN ({marks})",
-                                    tuple(chunk))
+                        cur.execute(
+                            f"DELETE FROM {self._t(schema, name)} WHERE {self._q(BATCH_KEY_COLUMN)} IN ({marks})",
+                            tuple(chunk),
+                        )
                 self._load(cur, self._t(schema, name), frame)
                 result.update(rows_written=frame.height, inserted=frame.height, updated=0)
             else:
@@ -793,7 +813,9 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
             raise
         except Exception as exc:  # noqa: BLE001
             conn.rollback()
-            raise DatabaseWriteError(f"Write to {result['target']} failed and was rolled back: {self._scrub(exc)}") from None
+            raise DatabaseWriteError(
+                f"Write to {result['target']} failed and was rolled back: {self._scrub(exc)}"
+            ) from None
         logger.info(f"Wrote {result.get('rows_written', 0)} row(s) to {result['target']} ({strategy})")
         return result
 
@@ -835,7 +857,9 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
             if new and evolution == "strict":
                 raise DatabaseWriteError(f"{key} has no column(s) {new} and schema_policy.evolution is strict.")
             for c in new:
-                cur.execute(f"ALTER TABLE {self._t(schema, name)} ADD {self._q(c)} {_ddl(frame.schema[c], self.dialect)}")
+                cur.execute(
+                    f"ALTER TABLE {self._t(schema, name)} ADD {self._q(c)} {_ddl(frame.schema[c], self.dialect)}"
+                )
                 existing.append(c)
         self._known[key] = existing
 
@@ -870,7 +894,9 @@ class MySQLWriter(_ServerWriter):
             try:
                 import pymysql
             except ImportError as exc:
-                raise DatabaseWriteError("format: database on MySQL needs pymysql: pip install \"lakelogic[mysql]\"") from exc
+                raise DatabaseWriteError(
+                    "format: database on MySQL needs pymysql: pip install \"lakelogic[mysql]\""
+                ) from exc
             p = _url_parts(self._url)
             self._conn = pymysql.connect(host=p["host"], port=p["port"] or 3306, user=p["user"], password=p["password"],
                                          database=p["database"], autocommit=False, charset="utf8mb4")
@@ -916,7 +942,9 @@ class MySQLWriter(_ServerWriter):
             if strategy == "append":  # on_conflict: ignore
                 cur.execute(f"INSERT INTO {target} ({cols}) SELECT {cols} FROM {stg} s "
                             f"WHERE NOT EXISTS (SELECT 1 FROM {target} t WHERE {on})")
-                return {"rows_written": new_rows, "inserted": new_rows, "updated": 0, "skipped": frame.height - new_rows}
+                return {
+                    "rows_written": new_rows, "inserted": new_rows, "updated": 0, "skipped": frame.height - new_rows
+                }
             non_keys = [c for c in frame.columns if c not in pk]
             sets = ", ".join(f"{self._q(c)} = s_new.{self._q(c)}" for c in non_keys) or \
                 ", ".join(f"{self._q(k)} = {self._q(k)}" for k in pk)
@@ -938,14 +966,19 @@ class SQLServerWriter(_ServerWriter):
             try:
                 import pyodbc
             except ImportError as exc:
-                raise DatabaseWriteError("format: database on SQL Server needs pyodbc: pip install \"lakelogic[azuresql]\"") from exc
+                raise DatabaseWriteError(
+                    "format: database on SQL Server needs pyodbc: pip install \"lakelogic[azuresql]\""
+                ) from exc
             p = _url_parts(self._url)
             q = p["query"]
-            driver = q.get("driver") or next((d for d in reversed(pyodbc.drivers()) if "ODBC Driver" in d), "SQL Server")
+            driver = q.get("driver") or next(
+                (d for d in reversed(pyodbc.drivers()) if "ODBC Driver" in d), "SQL Server"
+            )
             server = f"{p['host']},{p['port']}" if p["port"] else p["host"]
             parts = [f"DRIVER={{{driver}}}", f"SERVER={server}", f"DATABASE={p['database'] or 'master'}",
                      f"UID={p['user']}", f"PWD={p['password']}"]
-            if str(q.get("TrustServerCertificate", q.get("trust_server_certificate", ""))).lower() in ("yes", "true", "1"):
+            trust = q.get("TrustServerCertificate", q.get("trust_server_certificate", ""))
+            if str(trust).lower() in ("yes", "true", "1"):
                 parts.append("TrustServerCertificate=yes")
             if q.get("Encrypt"):
                 parts.append(f"Encrypt={q['Encrypt']}")
@@ -1002,22 +1035,28 @@ class SQLServerWriter(_ServerWriter):
             on = " AND ".join(f"t.{self._q(k)} = s.{self._q(k)}" for k in pk)
             if strategy == "append":  # on_conflict: ignore
                 cur.execute(f"INSERT INTO {target} ({', '.join(cols)}) SELECT {', '.join('s.' + c for c in cols)} "
-                            f"FROM {stg} s WHERE NOT EXISTS (SELECT 1 FROM {target} t WITH (UPDLOCK, HOLDLOCK) WHERE {on})")
+                            f"FROM {stg} s WHERE NOT EXISTS "
+                            f"(SELECT 1 FROM {target} t WITH (UPDLOCK, HOLDLOCK) WHERE {on})")
                 n = int(cur.rowcount)
                 return {"rows_written": n, "inserted": n, "updated": 0, "skipped": frame.height - n}
             non_keys = [c for c in frame.columns if c not in pk]
             business = [c for c in non_keys if not c.lower().startswith("_lakelogic_")]
             sets = ", ".join(f"t.{self._q(c)} = s.{self._q(c)}" for c in non_keys)
             # "Only changed" as EXCEPT: NULL-safe and on every SQL Server version.
-            changed = (f" AND EXISTS (SELECT {', '.join('s.' + self._q(c) for c in business)} "
-                       f"EXCEPT SELECT {', '.join('t.' + self._q(c) for c in business)})") if only_changed and business else ""
+            changed = (
+                (f" AND EXISTS (SELECT {', '.join('s.' + self._q(c) for c in business)} "
+                 f"EXCEPT SELECT {', '.join('t.' + self._q(c) for c in business)})")
+                if only_changed and business
+                else ""
+            )
             matched = f"WHEN MATCHED{changed} THEN UPDATE SET {sets} " if sets else ""
             cur.execute(
                 f"SET NOCOUNT ON; DECLARE @a TABLE (act NVARCHAR(10)); "
                 f"MERGE {target} WITH (HOLDLOCK) AS t USING {stg} AS s ON {on} {matched}"
                 f"WHEN NOT MATCHED THEN INSERT ({', '.join(cols)}) VALUES ({', '.join('s.' + c for c in cols)}) "
                 f"OUTPUT $action INTO @a; "
-                f"SELECT SUM(CASE WHEN act = 'INSERT' THEN 1 ELSE 0 END), SUM(CASE WHEN act = 'UPDATE' THEN 1 ELSE 0 END) FROM @a;"
+                f"SELECT SUM(CASE WHEN act = 'INSERT' THEN 1 ELSE 0 END), "
+                f"SUM(CASE WHEN act = 'UPDATE' THEN 1 ELSE 0 END) FROM @a;"
             )
             ins, upd = cur.fetchone()
             ins, upd = int(ins or 0), int(upd or 0)

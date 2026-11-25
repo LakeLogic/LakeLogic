@@ -185,7 +185,8 @@ def render_domain_ttl(
                 mpairs.append(("rdfs:comment", _lit(m["description"])))
             mpairs.append(("ll:sourceContract", _lit(m["contract"])))
             out.append("")
-            out.append(_block(_iri(base, domain, f"{_local(name)}_metric_{_local(m['name'])}_{_local(m['contract'])}"), mpairs))
+            metric_local = f"{_local(name)}_metric_{_local(m['name'])}_{_local(m['contract'])}"
+            out.append(_block(_iri(base, domain, metric_local), mpairs))
 
     links = []
     for r in business_map.get("relationships") or []:
