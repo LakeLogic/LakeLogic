@@ -657,7 +657,12 @@ def add_error_text(df: Any, errors_column: str = "_lakelogic_errors") -> Any:
                     return _ERROR_TEXT_SEPARATOR.join(str(x) for x in v if x is not None)
                 return str(v)
 
-            return df.assign(**{ERROR_TEXT_COLUMN: df[errors_column].map(_join)})
+            import pandas as pd
+
+            # An object Series built from the list, not `.map`: pandas 3 infers a string dtype
+            # from `.map` and turns a row with no errors (None) into NaN.
+            values = [_join(v) for v in df[errors_column].tolist()]
+            return df.assign(**{ERROR_TEXT_COLUMN: pd.Series(values, index=df.index, dtype=object)})
     except Exception as exc:  # never lose quarantine rows over a convenience column
         logger.warning(f"Could not add {ERROR_TEXT_COLUMN}: {exc}")
     return df

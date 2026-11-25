@@ -98,16 +98,18 @@ def plan_alignment(
 
 def contract_spark_types(contract: Any) -> Dict[str, str]:
     """``{column: spark type}`` for every declared field whose type maps to Spark."""
-    from lakelogic.core.types import spark_type_object
+    # Names, not pyspark objects: the delta-rs path runs without pyspark installed, and the
+    # object route returned no types at all there (see types.spark_type_name).
+    from lakelogic.core.types import spark_type_name
 
     out: Dict[str, str] = {}
     for f in getattr(getattr(contract, "model", None), "fields", None) or []:
         try:
-            t = spark_type_object(str(getattr(f, "type", "") or ""))
+            t = spark_type_name(str(getattr(f, "type", "") or ""))
         except Exception:  # noqa: BLE001 - an unmapped type is left alone, never guessed
             t = None
         if t is not None:
-            out[f.name] = t.simpleString()
+            out[f.name] = t
     return out
 
 
@@ -349,10 +351,11 @@ def _spark_name(type_name: str) -> str:
     if _DECIMAL.fullmatch(type_name):
         return type_name
     try:
-        from lakelogic.core.types import spark_type_object
+        # The name, without pyspark (types.spark_type_name): through the object route a
+        # delta-rs-only install compared Delta's raw `integer` with the contract's `int`.
+        from lakelogic.core.types import spark_type_name
 
-        t = spark_type_object(type_name)
-        return t.simpleString() if t is not None else type_name
+        return spark_type_name(type_name) or type_name
     except Exception:  # noqa: BLE001 - a name the registry does not know is compared as written
         return type_name
 

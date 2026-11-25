@@ -4276,6 +4276,47 @@ def _materialize_spark_dataframe(  # pragma: no cover
     return {"target": target_str, "rows_written": df.count(), "format": output_format}
 
 
+def _scd1_seeded_arrow(frame: Any, primary_key: List[str], scd1_cfg: Dict[str, Any], contract: Any) -> Any:
+    """Incoming rows as Arrow with the SCD1 surrogate key (and, when configured, the unknown
+    member) added — ``_merge_frames`` against an empty table, the file path's own recipe."""
+    import pyarrow as pa
+
+    pdf = _to_pandas(frame)
+    merged = _merge_frames(pdf[:0], pdf, primary_key, scd1_cfg=scd1_cfg)
+    unknown_cfg = scd1_cfg.get("unknown_member") or {}
+    if unknown_cfg and unknown_cfg.get("enabled", True):
+        merged = _inject_unknown_member_pandas(merged, primary_key, scd1_cfg, unknown_cfg)
+    table = _sanitize_arrow_nulls(pa.Table.from_pandas(merged, preserve_index=False))
+    return _coerce_declared_temporal(table, contract)
+
+
+def _ensure_scd1_unknown_member_deltars(
+    target: str, primary_key: List[str], scd1_cfg: Dict[str, Any], contract: Any, storage_options: Any
+) -> None:
+    """Append the SCD1 unknown member to a delta-rs table that lacks it (idempotent by key)."""
+    unknown_cfg = scd1_cfg.get("unknown_member") or {}
+    if not unknown_cfg or not unknown_cfg.get("enabled", True):
+        return
+    from deltalake import DeltaTable
+
+    sk = scd1_cfg["surrogate_key"]
+    sentinel = str(unknown_cfg.get("surrogate_key_value", "-1"))
+    dt = DeltaTable(target, storage_options=storage_options)
+    current = dt.to_pandas(columns=[sk]) if sk in dt.schema().to_arrow().names else None
+    if current is not None and (current[sk].astype(str) == sentinel).any():
+        return
+    import pyarrow as pa
+
+    empty = pa.schema(dt.schema().to_arrow()).empty_table().to_pandas()
+    with_unknown = _inject_unknown_member_pandas(empty, primary_key, scd1_cfg, unknown_cfg)
+    table = _sanitize_arrow_nulls(pa.Table.from_pandas(with_unknown, preserve_index=False))
+    try:
+        table = table.cast(pa.schema(dt.schema().to_arrow()))
+    except Exception:  # noqa: BLE001 - append as built; schema_mode merges
+        pass
+    _safe_write_deltalake(target, table, mode="append", schema_mode="merge", storage_options=storage_options)
+
+
 def _scd1_config(mat) -> Dict[str, Any]:
     """The contract's ``materialization.scd1`` block as a dict, with a top-level
     ``materialization.unknown_member`` folded in when ``scd1`` declares none."""
@@ -5877,6 +5918,13 @@ def _materialize_primary(
                             storage_options=_dt_opts,
                         )
                     else:
+                        _scd1 = _scd1_config(mat)
+                        if _scd1.get("surrogate_key"):
+                            # The key is a hash of the primary key, so the incoming rows carry the
+                            # same key the table holds; the unknown member is added once, below.
+                            arrow_data = _scd1_seeded_arrow(
+                                arrow_data.to_pandas(), primary_key, {**_scd1, "unknown_member": {}}, contract
+                            )
                         (
                             dt.merge(
                                 source=arrow_data,
@@ -5888,6 +5936,8 @@ def _materialize_primary(
                             .when_not_matched_insert_all()
                             .execute()
                         )
+                        if _scd1.get("surrogate_key"):
+                            _ensure_scd1_unknown_member_deltars(target_str, primary_key, _scd1, contract, _dt_opts)
                     rows_written = len(arrow_data)
             else:
                 # First write — seed the table
@@ -5906,6 +5956,12 @@ def _materialize_primary(
                     arrow_data = _sanitize_arrow_nulls(arrow_data)
                     arrow_data = _coerce_declared_temporal(arrow_data, contract)
                     rows_written = len(merged)
+                elif _scd1_config(mat).get("surrogate_key"):
+                    # A type-1 dimension's first write: the surrogate key and unknown member,
+                    # as every other merge path writes them. This one wrote neither, so on any
+                    # non-Spark runtime each fact's lookup of the dimension read -1 (2026-11-24).
+                    arrow_data = _scd1_seeded_arrow(pdf, primary_key, _scd1_config(mat), contract)
+                    rows_written = len(arrow_data)
                 else:
                     rows_written = len(arrow_data)
                 _safe_write_deltalake(

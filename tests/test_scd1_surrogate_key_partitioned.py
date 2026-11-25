@@ -87,3 +87,25 @@ def test_partitioned_delta_merge_writes_the_surrogate_key(tmp_path):
     out = _read(target, "delta")
     real = out[out[SK] != "-1"]
     assert sorted(real[SK]) == sorted([_hash("A"), _hash("B")])
+
+
+@pytest.mark.parametrize("engine", ["pandas", "polars"])
+def test_unpartitioned_delta_merge_writes_the_surrogate_key(tmp_path, engine):
+    """The plain (unpartitioned) delta-rs merge wrote neither the key nor the unknown member,
+    on the first write or after: every non-Spark run of a type-1 dimension left the facts that
+    look it up on -1 (seen on the RideFlow vehicle-type dimension, 2026-11-24)."""
+    pytest.importorskip("deltalake")
+    if engine == "polars":
+        pl = pytest.importorskip("polars")
+    target = tmp_path / "dim_reason"
+    contract = _contract([])
+    for batch in (["A", "B"], ["B", "C"], ["C"]):
+        frame = pd.DataFrame({SK: [None] * len(batch), "reason": batch})
+        if engine == "polars":
+            frame = pl.from_pandas(frame)
+        materialize_dataframe(frame, contract, target, output_format="delta", engine_name=engine)
+    out = _read(target, "delta")
+    keyed = dict(zip(out["reason"], out[SK]))
+    assert keyed["A"] == _hash("A") and keyed["C"] == _hash("C")
+    assert (out[SK] == "-1").sum() == 1, "one unknown member, however many runs"
+    assert out[SK].is_unique and out[SK].notna().all()
