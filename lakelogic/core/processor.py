@@ -2734,7 +2734,9 @@ class DataProcessor:
                 _dataset_failure_policy(self.contract.quality) == "quarantine"
                 and any(not r.get("passed") for r in (getattr(self.adapter, "dataset_rule_results", None) or []))
             )
-            _scoped = list(getattr(self.contract.quality, "quarantine_scope", None) or []) if self.contract.quality else []
+            _scoped = (
+                list(getattr(self.contract.quality, "quarantine_scope", None) or []) if self.contract.quality else []
+            )
             if quality_enabled and _batch_bound and _scoped:
                 # Only the failing groups are set aside (decided just below); not "ok=0".
                 logger.info(
@@ -3791,7 +3793,9 @@ class DataProcessor:
                     # as a Delta table (fresh-agent test, 2026-11-18). An explicit source.format
                     # still wins; a folder with no extension (a Delta table) still falls back.
                     _src_fmt_declared = (
-                        getattr(self.contract.source, "format", None) if getattr(self.contract, "source", None) else None
+                        getattr(self.contract.source, "format", None)
+                        if getattr(self.contract, "source", None)
+                        else None
                     )
                     _ext_fmt = _format_from_extension(str(path))
                     if not _src_fmt_declared and _ext_fmt:
@@ -5155,7 +5159,9 @@ class DataProcessor:
                     "(set source.post_ingestion.on_error: move to set them aside)."
                 )
                 return
-            entity = self.contract.dataset or (getattr(self.contract.info, "table_name", None) if self.contract.info else None)
+            entity = self.contract.dataset or (
+                getattr(self.contract.info, "table_name", None) if self.contract.info else None
+            )
             moved = _ll.move_failed(files, policy, entity=entity or "table", landing_path=source_path)
             if moved:
                 logger.warning(f"Moved the quarantined batch's {moved} file(s) to the error folder.")
@@ -6413,7 +6419,9 @@ class DataProcessor:
             return good_df  # a frame the caller built: its columns are what the caller means
         drift = getattr(self.adapter, "schema_drift", None) or {}
         keys = {str(k) for k in (self.contract.primary_key or [])}
-        absent = [c for c in drift.get("missing_fields") or [] if c not in keys and c in getattr(good_df, "columns", [])]
+        absent = [
+            c for c in drift.get("missing_fields") or [] if c not in keys and c in getattr(good_df, "columns", [])
+        ]
         if not absent:
             return good_df
         logger.warning(f"The batch has no {absent}: the merge leaves those columns as they are in the table.")
@@ -7253,7 +7261,9 @@ class DataProcessor:
         # Applies when the frames are the last run's own result, or when the caller says so.
         if batch_quarantined is None:
             _last = getattr(self, "last_result", None)
-            batch_quarantined = bool(getattr(self, "batch_quarantined", None)) and _last is not None and good_df is _last.good
+            batch_quarantined = (
+                bool(getattr(self, "batch_quarantined", None)) and _last is not None and good_df is _last.good
+            )
         # A stable id for this batch (the caller's, else the source files' fingerprint): a
         # format: database append replaces a retried batch's own rows instead of doubling them,
         # and quarantine replays of the same batch do not pile up (2026-11-18).
@@ -7273,7 +7283,8 @@ class DataProcessor:
                     # It raised here, so no status was set and the caller's run log never ran.
                     if getattr(self, "quarantine_must_persist", False):
                         raise RuntimeError(
-                            f"Quarantine write failed, so this micro-batch was not committed and will be retried: {q_err}"
+                            "Quarantine write failed, so this micro-batch was not committed "
+                            f"and will be retried: {q_err}"
                         ) from q_err
                     logger.warning(f"Quarantine write failed for a rejected batch: {q_err}. Its rows were NOT saved.")
                     _report = getattr(self, "last_report", None)

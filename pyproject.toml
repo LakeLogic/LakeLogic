@@ -1,6 +1,6 @@
 [project]
 name = "lakelogic"
-version = "2.6.2"
+version = "2.6.3"
 description = "Run YAML data contracts with Polars, DuckDB or Spark. Validate data, apply transformations and quarantine failed rows."
 readme = "README.md"
 requires-python = ">=3.11.5"
@@ -99,6 +99,7 @@ dependencies = [
 # CLI — only needed for `lakelogic` command, not notebooks
 cli = [
     "typer>=0.9.0",
+    "ruamel.yaml>=0.18.0",  # `lakelogic migrate` keeps comments and layout; PyYAML drops them
 ]
 # Engine extras — install what you need: pip install lakelogic[engines]
 engines = [
@@ -451,7 +452,7 @@ dev = [
 # ---------------------------------------------------------------------------
 [tool.commitizen]
 name            = "cz_conventional_commits"
-version         = "2.6.2"
+version         = "2.6.3"
 version_scheme  = "pep440"
 tag_format      = "v$version"
 update_changelog_on_bump = false

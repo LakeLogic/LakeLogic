@@ -574,7 +574,8 @@ def _extract_unstructured(
         from unstructured.partition.text import partition_text
     except ImportError:
         raise ImportError(
-            "unstructured is required for provider='unstructured' (Python 3.11+). Install with: pip install 'lakelogic[extraction]'"
+            "unstructured is required for provider='unstructured' (Python 3.11+). "
+            "Install with: pip install 'lakelogic[extraction]'"
         )
 
     start = time.perf_counter()

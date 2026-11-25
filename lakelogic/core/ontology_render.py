@@ -147,7 +147,7 @@ def layout(entities: Sequence[Dict[str, Any]], links: Sequence[Dict[str, Any]], 
             }
         )
     index = {n["name"]: i for i, n in enumerate(nodes)}
-    edges = [(index[l["from"]], index[l["to"]]) for l in links if l["from"] in index and l["to"] in index]
+    edges = [(index[lk["from"]], index[lk["to"]]) for lk in links if lk["from"] in index and lk["to"] in index]
     for it in range(iterations):
         cool = 1 - it / iterations
         for i in range(len(nodes)):
@@ -250,7 +250,8 @@ def render_ontology_svg(
     for link in links:
         a, b = pos[link["from"]], pos[link["to"]]
         o.append(
-            f'<line x1="{a["x"]:.1f}" y1="{a["y"]:.1f}" x2="{b["x"]:.1f}" y2="{b["y"]:.1f}" stroke="{t["line"]}" stroke-width="1.2"/>'
+            f'<line x1="{a["x"]:.1f}" y1="{a["y"]:.1f}" x2="{b["x"]:.1f}" y2="{b["y"]:.1f}" '
+            f'stroke="{t["line"]}" stroke-width="1.2"/>'
         )
     for p in placed:
         e = by_name[p["name"]]
@@ -262,11 +263,13 @@ def render_ontology_svg(
         o.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{t["bg"]}"/>')
         if gold:
             o.append(
-                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="none" stroke="{c}" stroke-width="1.5" stroke-dasharray="5 4"/>'
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="none" stroke="{c}" '
+                f'stroke-width="1.5" stroke-dasharray="5 4"/>'
             )
         else:
             o.append(
-                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{c}" fill-opacity="{fill_op}" stroke="{c}" stroke-width="1.5"/>'
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{c}" fill-opacity="{fill_op}" '
+                f'stroke="{c}" stroke-width="1.5"/>'
             )
         if e.get("curated_in"):
             o.append(f'<circle cx="{x:.1f}" cy="{y - r + 10:.1f}" r="3" fill="{c}"/>')
@@ -292,7 +295,8 @@ def render_ontology_svg(
     for i, d in enumerate(domains):
         yy = ly + 22 + i * 20
         o.append(
-            f'<circle cx="{lx + 6:.1f}" cy="{yy - 4:.1f}" r="5" fill="{colour[d]}" fill-opacity="{fill_op * 2}" stroke="{colour[d]}" stroke-width="1.5"/>'
+            f'<circle cx="{lx + 6:.1f}" cy="{yy - 4:.1f}" r="5" fill="{colour[d]}" '
+            f'fill-opacity="{fill_op * 2}" stroke="{colour[d]}" stroke-width="1.5"/>'
         )
         o.append(
             f'<text x="{lx + 18:.1f}" y="{yy:.1f}" font-size="12" fill="{t["muted"]}">{escape(d.capitalize())}</text>'

@@ -86,7 +86,10 @@ def write_section(path: Path, text: str) -> str:
 
 def agent_guide_command(
     write: Optional[Path] = typer.Option(
-        None, "--write", help="Write the guide into this file (e.g. AGENTS.md) between LakeLogic markers; the rest of the file is kept."
+        None,
+        "--write",
+        help="Write the guide into this file (e.g. AGENTS.md) between LakeLogic markers; "
+        "the rest of the file is kept.",
     ),
 ) -> None:
     """How an AI agent uses LakeLogic: when to use it, install, run a contract, outputs, every command."""

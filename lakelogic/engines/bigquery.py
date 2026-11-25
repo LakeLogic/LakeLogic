@@ -1091,7 +1091,10 @@ class BigQueryAdapter(EngineAdapter):
             expected = ""
             if val is None:
                 passed = null_means_no_rows(
-                    sql, lambda q: list(client.query(self._rewrite_functions(q), job_config=self._job_config()).result())[0][0],
+                    sql,
+                    lambda q: list(
+                        client.query(self._rewrite_functions(q), job_config=self._job_config()).result()
+                    )[0][0],
                     dialect="bigquery")
             elif rule.must_be_between:
                 passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]

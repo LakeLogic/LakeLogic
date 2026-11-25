@@ -47,7 +47,8 @@ def seed(engine, table: str, start: int, n: int, at: datetime):
         if start == 0:
             con.execute(
                 sa.text(
-                    f"CREATE TABLE {table} (id BIGINT PRIMARY KEY, city VARCHAR(40), fare FLOAT, updated_at {'DATETIME2' if DB == 'azuresql' else 'TIMESTAMP'})"
+                    f"CREATE TABLE {table} (id BIGINT PRIMARY KEY, city VARCHAR(40), fare FLOAT, "
+                    f"updated_at {'DATETIME2' if DB == 'azuresql' else 'TIMESTAMP'})"
                 )
             )
         rows = [

@@ -66,8 +66,8 @@ and keeps its precision.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, Optional
 
 # Every SQL dialect the registry can render. `polars` is not here: it is not a
@@ -681,6 +681,33 @@ _SPARK_OBJECT_BY_ARROW = {
     "timestamp[us, tz=UTC]": "TimestampType",
     "binary": "BinaryType",
 }
+
+
+_SPARK_SIMPLE_BY_OBJECT = {
+    "StringType": "string",
+    "ByteType": "tinyint",
+    "ShortType": "smallint",
+    "IntegerType": "int",
+    "LongType": "bigint",
+    "FloatType": "float",
+    "DoubleType": "double",
+    "BooleanType": "boolean",
+    "DateType": "date",
+    "TimestampType": "timestamp",
+    "BinaryType": "binary",
+}
+
+
+def spark_type_name(contract_type: str) -> Optional[str]:
+    """The Spark type NAME (``simpleString``) for a contract type, or None if unmapped.
+
+    The same row as ``spark_type_object``, without importing pyspark. Schema alignment on the
+    delta-rs path compares names only, and calling ``spark_type_object`` there made a pandas /
+    Polars / DuckDB install without pyspark see a contract with no types: declared columns were
+    not added, type changes did not stop the run and ``migrate`` changed nothing, all silently.
+    """
+    name = _SPARK_OBJECT_BY_ARROW.get(spec_for(contract_type).arrow)
+    return _SPARK_SIMPLE_BY_OBJECT.get(name) if name else None
 
 
 def spark_type_object(contract_type: str):

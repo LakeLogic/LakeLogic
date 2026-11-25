@@ -57,9 +57,11 @@ def test_domain_filter_keeps_colours():
     full = render_ontology_svg(m)
     only = render_ontology_svg(m, domains=["Payments"])
     assert ">Payout<" in only and ">Driver<" not in only
-    colour = lambda svg, name: re.search(
-        rf'stroke="(#[0-9a-f]+)"[^>]*/>\s*(?:<circle[^>]*/>\s*)?<text[^>]*>{name}<', svg
-    ).group(1)  # noqa: E731
+    def colour(svg, name):
+        return re.search(
+            rf'stroke="(#[0-9a-f]+)"[^>]*/>\s*(?:<circle[^>]*/>\s*)?<text[^>]*>{name}<', svg
+        ).group(1)
+
     assert colour(full, "Payout") == colour(only, "Payout")
 
 

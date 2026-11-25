@@ -47,6 +47,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Spark 4.0 needs Java 17/21. The runner's default JDK moved past that, and Hadoop's
+      # client then dies on startup ("getSubject is not supported"), failing 12_streaming_benchmark.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 

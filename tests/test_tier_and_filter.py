@@ -218,7 +218,11 @@ class TestTranspilation:
         """DuckDB DATEDIFF should be transpiled to Postgres EXTRACT."""
         dummy_adapter.engine_dialect = "postgres"
         result = dummy_adapter._transpile("DATEDIFF('day', a, b)")
-        assert "EXTRACT" in result.upper() or "epoch" in result.lower()
+        # Older sqlglot emits EXTRACT(epoch ...); newer emits date subtraction, which in
+        # Postgres IS the day count. Both are correct; DATEDIFF itself is not Postgres.
+        up = result.upper()
+        assert "DATEDIFF" not in up
+        assert "EXTRACT" in up or "EPOCH" in up or "AS DATE) - CAST(" in up
 
     def test_transpile_returns_string(self, dummy_adapter):
         """Transpile should always return a string, not a list."""

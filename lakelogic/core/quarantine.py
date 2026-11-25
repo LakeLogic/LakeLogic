@@ -657,7 +657,12 @@ def add_error_text(df: Any, errors_column: str = "_lakelogic_errors") -> Any:
                     return _ERROR_TEXT_SEPARATOR.join(str(x) for x in v if x is not None)
                 return str(v)
 
-            return df.assign(**{ERROR_TEXT_COLUMN: df[errors_column].map(_join)})
+            import pandas as pd
+
+            # An object Series built from the list, not `.map`: pandas 3 infers a string dtype
+            # from `.map` and turns a row with no errors (None) into NaN.
+            values = [_join(v) for v in df[errors_column].tolist()]
+            return df.assign(**{ERROR_TEXT_COLUMN: pd.Series(values, index=df.index, dtype=object)})
     except Exception as exc:  # never lose quarantine rows over a convenience column
         logger.warning(f"Could not add {ERROR_TEXT_COLUMN}: {exc}")
     return df
@@ -748,7 +753,8 @@ def _forget_earlier_batch(df: Any, target_file: Any, fmt: str, batch_key: str) -
         read = pl.read_csv if fmt == "csv" else pl.read_parquet
         existing = read(str(target_file), **({"storage_options": opts} if remote else {}))
         if BATCH_KEY_COLUMN in existing.columns:
-            kept = existing.filter(pl.col(BATCH_KEY_COLUMN).is_null() | ~pl.col(BATCH_KEY_COLUMN).cast(pl.String).is_in(keys))
+            key = pl.col(BATCH_KEY_COLUMN)
+            kept = existing.filter(key.is_null() | ~key.cast(pl.String).is_in(keys))
             if kept.height != existing.height:
                 from lakelogic.core.materialization import _write_frame
 
