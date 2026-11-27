@@ -4990,7 +4990,12 @@ def _write_iceberg_via_catalog(df, table_identifier: str, contract, mat, strateg
     try:
         from pyiceberg.catalog import load_catalog
     except ImportError:
-        raise ValueError("Catalog-registered Iceberg writes require pyiceberg: pip install pyiceberg")
+        raise ValueError("Catalog-registered Iceberg writes need the iceberg extra: pip install 'lakelogic[iceberg]'")
+    if strategy in ("merge", "scd2", "upsert"):
+        try:
+            import pandas  # noqa: F401 - merge / scd2 run the shared frame logic
+        except ImportError:
+            raise ValueError(f"An Iceberg {strategy} needs pandas: pip install 'lakelogic[iceberg]'") from None
     import pyarrow as pa
 
     metadata = getattr(contract, "metadata", None) or {}

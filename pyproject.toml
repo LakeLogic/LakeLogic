@@ -142,6 +142,11 @@ delta = [
 polars = ["polars>=0.20.0,<2", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
 duckdb = ["duckdb>=0.9.0,<2", "pandas>=2.0.0", "pyarrow>=23.0.1", "deltalake>=1.0.0", "lxml>=4.9.0", "openpyxl>=3.1.0", "xlrd>=2.0.1"]
 spark = ["pyspark>=3.3.0"]
+# Iceberg tables in a catalog (REST / Lakekeeper / Polaris, AWS Glue) from Polars or DuckDB. pandas
+# because merge and SCD2 run the shared frame logic (_merge_frames / _scd2_frames); a fresh install
+# with only pyiceberg failed every merge (found 2026-11-27, Open Lakehouse proof in a clean container).
+# Same pyiceberg range as the test pin (<0.12: newer needs pyarrow >= 15 paths Databricks lacks).
+iceberg = ["pyiceberg[pyarrow]>=0.11.1,<0.12", "pandas>=2.0.0", "pyarrow>=23.0.1"]
 # SQLAlchemy alone — every `source.type: database` contract needs it, whatever the
 # driver, because the batched (`fetch_size`) path builds an SQLAlchemy engine and hands
 # polars a live connection to iterate. SQLite needs NOTHING else, which is why this is a
