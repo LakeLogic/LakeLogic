@@ -159,3 +159,31 @@ def test_inheritable_keys_allowed_on_both_manifests():
         }
     )
     assert m.compliance["data_residency"] == "EU"
+
+
+def test_source_system_block_is_accepted_on_a_system_manifest():
+    """`source_system` says what the system IS (2026-11-26); OLC owns its shape."""
+    m = SystemManifestV1.model_validate({
+        "system": "sage",
+        "source_system": {"name": "Sage 200", "kind": "erp", "vendor": "Sage", "formats": ["table"]},
+    })
+    assert m.source_system.name == "Sage 200"
+    assert m.source_system.kind == "erp"
+    assert SystemManifestV1.model_validate({"system": "s"}).source_system is None
+
+
+def test_source_system_refuses_an_unknown_kind():
+    with pytest.raises(ValueError, match="saas_api"):
+        SystemManifestV1.model_validate({"system": "s", "source_system": {"kind": "crm"}})
+
+
+def test_source_system_does_not_belong_on_a_domain_manifest():
+    with pytest.raises(ValueError, match="source_system"):
+        DomainManifestV1.model_validate({"domain": "d", "source_system": {"name": "Sage"}})
+
+
+def test_runtime_registry_reads_source_system():
+    from lakelogic.core.registry import DomainRegistry
+
+    reg = DomainRegistry.model_validate({"domain": "d", "system": "sage", "source_system": {"name": "Sage 200"}})
+    assert reg.source_system == {"name": "Sage 200"}

@@ -28,7 +28,7 @@ parse. See ``tests/registry/test_manifests.py``.
 The *legal key set* on each file follows the resolution spec
 (``docs/contracts/inheritance.md``): every **inheritable** key and every **identity
 scalar** may appear on either file; the **structural** keys (``contracts``, ``storage``,
-``environments``, ``metadata``, ``external_sources``, ``system``) belong to the system
+``environments``, ``metadata``, ``external_sources``, ``source_system``, ``system``) belong to the system
 manifest only.
 """
 
@@ -46,6 +46,11 @@ from lakelogic.core.registry import (
     RegistrySLO,
     RegistryStorage,
 )
+
+try:  # OLC 0.36 declares `source_system`; older OLC installs accept it as a plain mapping.
+    from olc.models.registry_v1 import SourceSystem
+except ImportError:  # pragma: no cover - removed once the OLC floor is >=0.36
+    SourceSystem = Dict[str, Any]  # type: ignore[misc,assignment]
 
 
 class _StrictManifest(BaseModel):
@@ -177,6 +182,9 @@ class SystemManifestV1(_StrictManifest):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     external_sources: List[Dict[str, Any]] = Field(default_factory=list)
     cloud: Optional[CloudReporting] = None
+    # What the system IS (name, kind, vendor, formats): the OLC block, reused so there is one
+    # definition. Optional; the slug in `system` stays the identity (2026-11-26).
+    source_system: Optional[SourceSystem] = None
 
     # ── identity scalars (a system may override; domain wins on mismatch) ────────
     bronze_layer: Optional[str] = None

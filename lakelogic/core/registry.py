@@ -633,6 +633,8 @@ class DomainRegistry(BaseModel):
     retention: Dict[str, str] = Field(default_factory=dict)  # ISO 8601 periods per layer, e.g. {bronze: P7D}
     # Cross-domain lineage: upstream tables not managed by this registry
     external_sources: List[Dict[str, Any]] = Field(default_factory=list)
+    # What the system IS: name, kind, vendor, formats (OLC `source_system`). Read, not acted on.
+    source_system: Dict[str, Any] = Field(default_factory=dict)
 
     # Internal state
     _registry_dir: Optional[Path] = None

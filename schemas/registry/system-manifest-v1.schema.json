@@ -686,6 +686,115 @@
       },
       "title": "SLORowCountConfig",
       "type": "object"
+    },
+    "SourceSystem": {
+      "additionalProperties": true,
+      "description": "What a system IS \u2014 the source behind one ``_system.yaml`` (2026-11-26).\n\nIn a LakeLogic estate one system folder is one source system, and ``system:`` (the\nslug) stays its identity. Until this block the slug was all a system recorded, so the\nestate showed ``google_analytics`` and guessed the vendor's logo from the name.\n\nNamed ``source_system``, not ``source``: a bronze contract's ``source:`` block already\nmeans how to read the landing zone, and one word must not mean two things.\n\nExample YAML::\n\n    system: google_analytics\n    source_system:\n      name: Google Analytics 4\n      kind: saas_api\n      vendor: Google\n      formats: [json]\n      connection: ga4-prod",
+      "properties": {
+        "connection": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connection"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "formats": {
+          "items": {
+            "enum": [
+              "csv",
+              "json",
+              "parquet",
+              "avro",
+              "xml",
+              "excel",
+              "pdf",
+              "docx",
+              "image",
+              "table",
+              "stream",
+              "other"
+            ],
+            "type": "string"
+          },
+          "title": "Formats",
+          "type": "array"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "erp",
+                "app_database",
+                "saas_api",
+                "file_drop",
+                "stream",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "vendor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vendor"
+        }
+      },
+      "title": "SourceSystem",
+      "type": "object"
     }
   },
   "additionalProperties": true,
@@ -846,6 +955,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/RegistrySLO"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "source_system": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourceSystem"
         },
         {
           "type": "null"

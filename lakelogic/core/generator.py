@@ -3456,6 +3456,58 @@ def _sql_number(text: str) -> Any:
     return float(text) if "." in text else int(text)
 
 
+_COND_IDENT = r"([A-Za-z_][A-Za-z0-9_]*)"
+_COND_LIT = r"('(?:[^']|'')*'|-?\d+(?:\.\d+)?)"
+
+
+def _cond_literal(token: str) -> Any:
+    token = token.strip()
+    if token.startswith("'"):
+        return token[1:-1].replace("''", "'")
+    return float(token) if "." in token else int(token)
+
+
+def _conditional_rule_atoms(sql: str) -> Optional[List[Tuple[str, str, Any]]]:
+    """A row rule written as an OR of simple tests over two or more columns, or None.
+
+    This is how contracts write "if A then B": ``status IS NULL OR status <> 'paid' OR
+    arrival_date IS NOT NULL``. ``_sql_rule_constraints`` skips a top-level OR on purpose
+    (neither side alone is required), so nothing made valid rows satisfy it and a clean
+    sample failed its own silver rule (2026-11-27).
+
+    Returns ``(column, op, value)`` atoms with op one of ``is_null``, ``not_null``, ``eq``,
+    ``ne``, ``in``, ``not_in``. Only a rule whose every term is one of those, naming at
+    least two columns, is returned; anything else is never guessed at.
+    """
+    text = " ".join(str(sql or "").split())
+    text = re.sub(r'"([A-Za-z_][A-Za-z0-9_]*)"|`([A-Za-z_][A-Za-z0-9_]*)`', lambda m: m.group(1) or m.group(2), text)
+    terms = _split_top_level(_strip_outer_parens(text), "OR")
+    if len(terms) < 2:
+        return None
+    atoms: List[Tuple[str, str, Any]] = []
+    for raw in terms:
+        term = _strip_outer_parens(raw.strip())
+        m = re.fullmatch(rf"{_COND_IDENT} IS (NOT )?NULL", term, flags=re.IGNORECASE)
+        if m:
+            atoms.append((m.group(1), "not_null" if m.group(2) else "is_null", None))
+            continue
+        m = re.fullmatch(rf"{_COND_IDENT}\s*(=|<>|!=)\s*{_COND_LIT}", term, flags=re.IGNORECASE)
+        if m:
+            atoms.append((m.group(1), "eq" if m.group(2) == "=" else "ne", _cond_literal(m.group(3))))
+            continue
+        m = re.fullmatch(rf"{_COND_IDENT} (NOT )?IN \((.+)\)", term, flags=re.IGNORECASE)
+        if m:
+            items = re.findall(_COND_LIT, m.group(3))
+            if not items:
+                return None
+            atoms.append((m.group(1), "not_in" if m.group(2) else "in", tuple(_cond_literal(i) for i in items)))
+            continue
+        return None
+    if len({a[0].lower() for a in atoms}) < 2:
+        return None
+    return atoms
+
+
 @lru_cache(maxsize=2048)
 def _sql_rule_constraints(
     sql: str,
@@ -6195,6 +6247,7 @@ class DataGenerator:
             self._apply_correlations(row)
             self._apply_temporal_ordering(row)
             self._apply_column_comparisons(row, field_rules)
+            self._apply_conditional_rules(row, field_rules, sample_pools)
             self._apply_field_consistency(row)
             self._apply_city_coherence(row, field_rules)
             self._apply_geo_alignment(row)
@@ -6215,6 +6268,7 @@ class DataGenerator:
             self._apply_correlations(row)
             self._apply_temporal_ordering(row)
             self._apply_column_comparisons(row, field_rules)
+            self._apply_conditional_rules(row, field_rules, sample_pools)
             self._apply_field_consistency(row)
             # Before geo alignment, so coordinates snap to the city this pass settles on.
             self._apply_city_coherence(row, field_rules)
@@ -6420,6 +6474,73 @@ class DataGenerator:
                     if op == "<" and value >= high:
                         value = round(high - 0.001, 4)
                     row[smaller] = value
+
+    def _apply_conditional_rules(
+        self,
+        row: Dict[str, Any],
+        field_rules: Dict[str, Dict[str, Any]],
+        sample_pools: Optional[Dict[str, List[Any]]] = None,
+    ) -> None:
+        """Make a valid row satisfy "if A then B" rules (see ``_conditional_rule_atoms``).
+
+        A row that already passes is left alone. Otherwise the cheapest truthful repair wins:
+        fill a column the rule wants present, else empty one it allows empty, else move the
+        condition column to a value that releases the rule. Filling first keeps the condition
+        distribution (how many payouts are ``paid``) as generated.
+        """
+        by_lower = {str(k).lower(): k for k in row}
+        types = {f.get("name"): (f.get("type") or "string").lower() for f in self._fields}
+        required = {f.get("name") for f in self._fields if f.get("required")}
+
+        def holds(col: str, op: str, val: Any) -> bool:
+            v = row.get(col)
+            if op == "is_null":
+                return v is None
+            if op == "not_null":
+                return v is not None
+            if v is None:
+                return False  # SQL: a comparison with NULL is not true
+            sv = str(v)
+            if op == "eq":
+                return sv == str(val)
+            if op == "ne":
+                return sv != str(val)
+            vals = {str(x) for x in val}
+            return (sv in vals) if op == "in" else (sv not in vals)
+
+        for rule in self._quality.get("row_rules") or []:
+            sql = rule.get("sql") if isinstance(rule, dict) else None
+            atoms = _conditional_rule_atoms(sql) if sql else None
+            if not atoms:
+                continue
+            atoms = [(by_lower.get(c.lower()), op, v) for c, op, v in atoms]
+            if any(c is None for c, _, _ in atoms):
+                continue
+            if any(holds(c, op, v) for c, op, v in atoms):
+                continue
+            rank = {"not_null": 0, "eq": 1, "in": 1, "is_null": 2, "ne": 3, "not_in": 3}
+            for col, op, val in sorted(atoms, key=lambda a: rank[a[1]]):
+                rules = field_rules.get(col, {})
+                if op == "not_null":
+                    row[col] = self._make_valid_value(
+                        col, types.get(col, "string"), rules, False, sample_pools=sample_pools
+                    )
+                elif op == "eq":
+                    row[col] = val
+                elif op == "in":
+                    row[col] = self._rng.choice(list(val))
+                elif op == "is_null":
+                    if col in required or rules.get("not_null"):
+                        continue
+                    row[col] = None
+                else:
+                    banned = {str(val)} if op == "ne" else {str(x) for x in val}
+                    choices = [a for a in (rules.get("accepted_values") or []) if str(a) not in banned]
+                    if not choices:
+                        continue
+                    row[col] = self._rng.choice(choices)
+                if holds(col, op, val):
+                    break
 
     @staticmethod
     def _parse_temporal(val: Any) -> Optional[datetime]:

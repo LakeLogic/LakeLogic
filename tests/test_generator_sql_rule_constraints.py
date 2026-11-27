@@ -126,3 +126,51 @@ def test_a_name_profile_does_not_override_a_declared_range(monkeypatch):
     instance = DataGenerator({"rider_rating": "double"}, seed=3)
     value = instance._make_valid_value("rider_rating", "double", {"min": 1.0, "max": 5.0}, nullable=False)
     assert 1.0 <= value <= 5.0
+
+
+# ── "if A then B" rules: an OR of simple tests across columns (2026-11-27) ───────────────
+
+from lakelogic.core.generator import _conditional_rule_atoms  # noqa: E402
+
+
+def test_an_implication_rule_reads_as_atoms():
+    assert _conditional_rule_atoms("status IS NULL OR status <> 'paid' OR arrival_date IS NOT NULL") == [
+        ("status", "is_null", None),
+        ("status", "ne", "paid"),
+        ("arrival_date", "not_null", None),
+    ]
+    assert _conditional_rule_atoms("kind NOT IN ('a','b') OR ref IS NULL") == [
+        ("kind", "not_in", ("a", "b")),
+        ("ref", "is_null", None),
+    ]
+
+
+@pytest.mark.parametrize("sql", [
+    "status IS NULL OR status IN ('a','b')",          # one column: a domain, not an implication
+    "amount > 0 OR arrival_date IS NOT NULL",         # a range term is not understood here
+    "status = 'paid' AND arrival_date IS NOT NULL",   # no top-level OR
+])
+def test_rules_outside_the_shape_are_not_guessed(sql):
+    assert _conditional_rule_atoms(sql) is None
+
+
+def test_clean_rows_satisfy_an_implication_rule(tmp_path):
+    """Stripe Payouts quarantined 3 of 200 clean rows: status 'paid' with no arrival_date."""
+    contract = {
+        "info": {"title": "payouts"},
+        "model": {"fields": [
+            {"name": "payout_id", "type": "string", "required": True},
+            {"name": "status", "type": "string", "accepted_values": ["paid", "pending", "failed"]},
+            {"name": "arrival_date", "type": "date"},
+        ]},
+        "quality": {"row_rules": [{
+            "name": "paid_payout_has_arrival_date",
+            "sql": "status IS NULL OR status <> 'paid' OR arrival_date IS NOT NULL",
+        }]},
+    }
+    path = tmp_path / "c.yaml"
+    path.write_text(yaml.safe_dump(contract), encoding="utf-8")
+    for seed in range(5):
+        rows = DataGenerator(str(path), seed=seed).generate(rows=300, invalid_ratio=0.0, output_format="polars").to_dicts()
+        assert not [r for r in rows if r["status"] == "paid" and r["arrival_date"] is None]
+        assert any(r["status"] == "paid" for r in rows), "the condition must still occur"
