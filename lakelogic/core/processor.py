@@ -87,8 +87,9 @@ def _dataset_failure_policy(quality: Any) -> str:
     return "stop" if getattr(quality, "fail_pipeline_on_dataset_error", False) else "continue"
 
 
-def _quarantine_failing_groups(adapter: Any, good_df: Any, failures: List[Dict[str, Any]], scope: List[str],
-                               dataset: Optional[str]) -> Optional[Tuple[Any, Any, str]]:
+def _quarantine_failing_groups(
+    adapter: Any, good_df: Any, failures: List[Dict[str, Any]], scope: List[str], dataset: Optional[str]
+) -> Optional[Tuple[Any, Any, str]]:
     """Split the batch by ``quality.quarantine_scope``: rerun each failed dataset rule on every
     group (the engine's own compiled SQL and bounds) and return ``(good rows, rows of the
     groups that failed, reason)``. None - quarantine the whole batch - when the frame is not
@@ -100,8 +101,11 @@ def _quarantine_failing_groups(adapter: Any, good_df: Any, failures: List[Dict[s
     if not isinstance(good_df, pl.DataFrame) or not good_df.height or any(c not in good_df.columns for c in scope):
         return None
     failed_names = {r.get("name") for r in failures}
-    rules = [r for r in (adapter.get_dataset_rules() if hasattr(adapter, "get_dataset_rules") else [])
-             if getattr(r, "name", None) in failed_names and getattr(r, "sql", None)]
+    rules = [
+        r
+        for r in (adapter.get_dataset_rules() if hasattr(adapter, "get_dataset_rules") else [])
+        if getattr(r, "name", None) in failed_names and getattr(r, "sql", None)
+    ]
     if not rules:
         return None
     bad_keys: Dict[Tuple[Any, ...], List[str]] = {}
@@ -136,7 +140,7 @@ def _quarantine_failing_groups(adapter: Any, good_df: Any, failures: List[Dict[s
             if not _ok(rule, values.get(gk, empty_value)):
                 bad_keys.setdefault(tuple(keys), []).append(rule.name)
     rules = looped
-    for keys, group in (good_df.group_by(scope, maintain_order=True) if rules else []):
+    for keys, group in good_df.group_by(scope, maintain_order=True) if rules else []:
         ctx = pl.SQLContext(source=group, eager=True)
         if dataset and dataset != "source":
             ctx.register(dataset, group)
@@ -202,8 +206,11 @@ def _grouped_rule_values(sql: str, frame: Any, scope: List[str], dataset: Option
             return None
         names = [f"__ll_g{i}" for i in range(len(scope))]
         grouped = tree.copy()
-        grouped.set("expressions", [exp.alias_(tree.expressions[0].copy(), "__ll_v")] +
-                    [exp.alias_(exp.column(c, quoted=True), n) for c, n in zip(scope, names)])
+        grouped.set(
+            "expressions",
+            [exp.alias_(tree.expressions[0].copy(), "__ll_v")]
+            + [exp.alias_(exp.column(c, quoted=True), n) for c, n in zip(scope, names)],
+        )
         grouped.set("group", exp.Group(expressions=[exp.column(c, quoted=True) for c in scope]))
 
         def _run(df):
@@ -262,8 +269,17 @@ def _quarantine_whole_batch(good_df: Any, bad_df: Any, reason: str) -> Tuple[Any
 
 
 _EXTENSION_FORMATS = {
-    ".csv": "csv", ".tsv": "csv", ".parquet": "parquet", ".json": "json", ".jsonl": "ndjson",
-    ".ndjson": "ndjson", ".xlsx": "excel", ".xls": "excel", ".xml": "xml", ".avro": "avro", ".orc": "orc",
+    ".csv": "csv",
+    ".tsv": "csv",
+    ".parquet": "parquet",
+    ".json": "json",
+    ".jsonl": "ndjson",
+    ".ndjson": "ndjson",
+    ".xlsx": "excel",
+    ".xls": "excel",
+    ".xml": "xml",
+    ".avro": "avro",
+    ".orc": "orc",
 }
 
 
@@ -2765,9 +2781,8 @@ class DataProcessor:
             # Say the FINAL outcome: a failed dataset rule under on_dataset_failure: quarantine
             # sets the whole batch aside just below, and "ok=3 qtn=0" printed before "Batch
             # quarantined" contradicted it (2026-11-18).
-            _batch_bound = (
-                _dataset_failure_policy(self.contract.quality) == "quarantine"
-                and any(not r.get("passed") for r in (getattr(self.adapter, "dataset_rule_results", None) or []))
+            _batch_bound = _dataset_failure_policy(self.contract.quality) == "quarantine" and any(
+                not r.get("passed") for r in (getattr(self.adapter, "dataset_rule_results", None) or [])
             )
             _scoped = (
                 list(getattr(self.contract.quality, "quarantine_scope", None) or []) if self.contract.quality else []
@@ -2866,12 +2881,15 @@ class DataProcessor:
                     raise DatasetRulesFailed(
                         f"Pipeline halted: Dataset Quality rules failed in '{contract_title}': {readable}"
                     )
-                scope = list(getattr(self.contract.quality, "quarantine_scope", None)
-                             or (getattr(self.contract.quality, "model_extra", None) or {}).get("quarantine_scope")
-                             or [])
+                scope = list(
+                    getattr(self.contract.quality, "quarantine_scope", None)
+                    or (getattr(self.contract.quality, "model_extra", None) or {}).get("quarantine_scope")
+                    or []
+                )
                 scoped = (
                     _quarantine_failing_groups(self.adapter, good_df, failures, scope, self.contract.dataset)
-                    if policy == "quarantine" and scope else None
+                    if policy == "quarantine" and scope
+                    else None
                 )
                 if scoped is not None:
                     # Only the groups that failed are set aside (quality.quarantine_scope); the
@@ -6478,14 +6496,17 @@ class DataProcessor:
             if not isinstance(frame, pl.DataFrame) or not frame.height:
                 return frame, None
             skip = set(self.adapter._lineage_columns()) if hasattr(self.adapter, "_lineage_columns") else set()
-            cols = [c for c in frame.columns
-                    if not c.startswith("_lakelogic") and c not in skip
-                    and c not in ("quarantine_state", "quarantine_reprocessed")]
+            cols = [
+                c
+                for c in frame.columns
+                if not c.startswith("_lakelogic")
+                and c not in skip
+                and c not in ("quarantine_state", "quarantine_reprocessed")
+            ]
             if not cols:
                 return frame, None
             keys = frame.select(cols).hash_rows(seed=0, seed_1=1, seed_2=2, seed_3=3)
-            return frame.with_columns(
-                (pl.lit("row-") + keys.cast(pl.String)).alias(BATCH_KEY_COLUMN)), ROW_KEYS
+            return frame.with_columns((pl.lit("row-") + keys.cast(pl.String)).alias(BATCH_KEY_COLUMN)), ROW_KEYS
         except Exception:  # noqa: BLE001 - no key just means a plain append
             return frame, None
 
@@ -6527,8 +6548,9 @@ class DataProcessor:
         so writing inside ``run()`` logged every run twice. ``lakelogic run`` calls this."""
         if self.last_report is None or not self._configures_run_log():
             return None
-        return write_run_log(self.last_report, self.contract, engine_name=self.engine_name,
-                             run_log_mode=self._run_log_mode)
+        return write_run_log(
+            self.last_report, self.contract, engine_name=self.engine_name, run_log_mode=self._run_log_mode
+        )
 
     def _write_empty_run_log(self, stage: str = "no_new_data") -> None:
         """Write a minimal run log entry for runs that found no new data.
@@ -7311,7 +7333,10 @@ class DataProcessor:
                 _q_df, _q_key = (bad_df, _batch_key) if _batch_key else self._with_row_keys(bad_df)
                 try:
                     written["quarantine"] = materialize_quarantine(
-                        _q_df, self.contract, engine_name=self.engine_name, batch_key=_q_key,
+                        _q_df,
+                        self.contract,
+                        engine_name=self.engine_name,
+                        batch_key=_q_key,
                     )
                 except Exception as q_err:
                     # Same outcome as a failed row-level quarantine write: the run log says so.
@@ -7326,7 +7351,8 @@ class DataProcessor:
                     if isinstance(_report, dict):
                         _report["status"] = "quarantine_not_saved"
                         _report["error_message"] = (
-                            f"Batch rejected: {self.batch_quarantined}; quarantine write failed: {q_err}")[:2000]
+                            f"Batch rejected: {self.batch_quarantined}; quarantine write failed: {q_err}"
+                        )[:2000]
                     written["quarantine_error"] = str(q_err)
             elif bad_df is not None:
                 logger.warning(

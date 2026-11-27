@@ -5,6 +5,7 @@ shapes ("1900-01-01" and "2026-02-01T00:00:00"), `_version` numbered against tim
 sorted that text, and six "in the table but not in the contract" warnings on every load after
 the first, for columns SCD2 itself writes.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -19,14 +20,20 @@ def _contract(target: str) -> dict:
         "dataset": "customers",
         "info": {"title": "Customers", "target_layer": "silver"},
         "primary_key": ["customer_id"],
-        "model": {"fields": [
-            {"name": "customer_id", "type": "integer"},
-            {"name": "name", "type": "string"},
-            {"name": "address", "type": "string"},
-            {"name": "updated_at", "type": "timestamp"},
-        ]},
-        "materialization": {"strategy": "scd2", "format": "delta", "target_path": target,
-                            "scd2": {"track_columns": ["name", "address"], "timestamp_field": "updated_at"}},
+        "model": {
+            "fields": [
+                {"name": "customer_id", "type": "integer"},
+                {"name": "name", "type": "string"},
+                {"name": "address", "type": "string"},
+                {"name": "updated_at", "type": "timestamp"},
+            ]
+        },
+        "materialization": {
+            "strategy": "scd2",
+            "format": "delta",
+            "target_path": target,
+            "scd2": {"track_columns": ["name", "address"], "timestamp_field": "updated_at"},
+        },
     }
 
 
@@ -54,6 +61,6 @@ def test_two_loads_give_typed_ordered_history_without_false_warnings(tmp_path):
     assert dim.schema["effective_from"] == pl.Datetime("us")
     assert dim.schema["effective_to"] == pl.Datetime("us")
     ann = dim.filter(pl.col("customer_id") == 1)
-    assert ann["address"].to_list() == ["1 High St", "9 New Ave"]     # version 1 is the oldest
+    assert ann["address"].to_list() == ["1 High St", "9 New Ave"]  # version 1 is the oldest
     assert ann["is_current"].to_list() == [False, True]
     assert not [w for w in warnings if "not in the contract" in w], warnings

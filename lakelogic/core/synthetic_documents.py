@@ -192,8 +192,10 @@ def _is_space_class(sub: Any) -> bool:
     if name == "LITERAL":
         return chr(arg) in " \t"
     if name == "IN":
-        return all((str(o) == "CATEGORY" and str(a) == "CATEGORY_SPACE")
-                   or (str(o) == "LITERAL" and chr(a) in " \t") for o, a in arg)
+        return all(
+            (str(o) == "CATEGORY" and str(a) == "CATEGORY_SPACE") or (str(o) == "LITERAL" and chr(a) in " \t")
+            for o, a in arg
+        )
     return False
 
 
@@ -414,13 +416,23 @@ def generate_documents(
             # ("Incident ID MSI-…", "Location BOA …").
             before = line.split(expected, 1)[0] if expected and expected in line else ""
             has_label = bool(labelled) or bool(re.search(r"[A-Za-z]{2,}", before))
-            parts.append({"name": field["name"], "pattern": pattern, "expected": expected,
-                          "text": line, "label": None if has_label else _field_label(field["name"])})
+            parts.append(
+                {
+                    "name": field["name"],
+                    "pattern": pattern,
+                    "expected": expected,
+                    "text": line,
+                    "label": None if has_label else _field_label(field["name"]),
+                }
+            )
             so_far += "\n" + line
         lines = _labelled_lines(doc_title, parts)
         stem = out / f"{prefix}_{seed}_{index:04d}"
-        written.append(_write_image(stem, doc_title, lines, _image_ext(doc)) if fmt == "image"
-                       else _WRITERS[fmt](stem, doc_title, lines))
+        written.append(
+            _write_image(stem, doc_title, lines, _image_ext(doc))
+            if fmt == "image"
+            else _WRITERS[fmt](stem, doc_title, lines)
+        )
     return written
 
 
@@ -474,13 +486,13 @@ def _real_dates(text: str, rng: random.Random, state: Optional[Dict[str, Any]] =
     for shape, fmt in _DATE_SHAPES:
         text = shape.sub(lambda m, f=fmt: next_date(m, f), text)
     # "6 June 2021": a day, a month NAME and a year, with the spacing the text already had.
-    text = _MONTH_SHAPE.sub(
-        lambda m: _with_spacing(next_date(m, "%d %B %Y"), m.group(2), m.group(4)), text)
+    text = _MONTH_SHAPE.sub(lambda m: _with_spacing(next_date(m, "%d %B %Y"), m.group(2), m.group(4)), text)
     return _TIME_SHAPE.sub(lambda _m: f"{rng.randint(0, 23):02d}:{rng.randint(0, 59):02d}", text)
 
 
-def _layout_text(pattern: str, value: str, so_far: str, rng: random.Random,
-                 dates: Optional[Dict[str, Any]] = None) -> Optional[str]:
+def _layout_text(
+    pattern: str, value: str, so_far: str, rng: random.Random, dates: Optional[Dict[str, Any]] = None
+) -> Optional[str]:
     """The text a layout pattern needs for one field, written into the document so far.
 
     The bare value first, when the document already holds the context the pattern wants before
@@ -533,6 +545,7 @@ def _labelled_lines(title: str, parts: List[Dict[str, Any]]) -> List[str]:
     pattern (``^([A-Z]{3})$`` wants the code alone), on the line above. Each is kept only if the
     whole document still extracts every field exactly — a label such as "Holder name" must never
     become the holder's name."""
+
     def render(choice: Dict[str, str]) -> List[str]:
         out: List[str] = []
         for part in parts:

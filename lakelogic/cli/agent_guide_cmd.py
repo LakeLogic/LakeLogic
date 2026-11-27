@@ -5,6 +5,7 @@ the guide that ships in the wheel (``lakelogic/agent_guide.md``) plus a table of
 generated from the CLI itself, so a new command can never be missing from what agents read.
 ``--write AGENTS.md`` saves it where agents look for standing instructions.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,11 +45,21 @@ def command_table() -> str:
         sub = group.typer_instance
         for cmd in sub.registered_commands:
             name = cmd.name or (cmd.callback.__name__.replace("_", "-") if cmd.callback else "")
-            rows.append((f"lakelogic {group.name} {name}",
-                         _first_line(cmd.help or (cmd.callback.__doc__ if cmd.callback else ""))))
+            rows.append(
+                (
+                    f"lakelogic {group.name} {name}",
+                    _first_line(cmd.help or (cmd.callback.__doc__ if cmd.callback else "")),
+                )
+            )
     rows.append(("lakelogic-driver", "Run a registry of contracts bronze → silver → gold (`lakelogic-driver --help`)."))
-    out = ["## Every command", "", "Options for any command: `lakelogic <command> --help`.", "",
-           "| Command | What it does |", "|---|---|"]
+    out = [
+        "## Every command",
+        "",
+        "Options for any command: `lakelogic <command> --help`.",
+        "",
+        "| Command | What it does |",
+        "|---|---|",
+    ]
     out += [f"| `{n}` | {h} |" for n, h in sorted(rows)]
     return "\n".join(out) + "\n"
 
@@ -77,7 +88,7 @@ def write_section(path: Path, text: str) -> str:
     current = path.read_text(encoding="utf-8")
     start, end = current.find(SECTION_START), current.find(SECTION_END)
     if start != -1 and end > start:
-        path.write_text(current[:start] + block.rstrip("\n") + current[end + len(SECTION_END):], encoding="utf-8")
+        path.write_text(current[:start] + block.rstrip("\n") + current[end + len(SECTION_END) :], encoding="utf-8")
         return "updated"
     sep = "" if current.endswith("\n\n") else ("\n" if current.endswith("\n") else "\n\n")
     path.write_text(current + sep + block, encoding="utf-8")
@@ -88,8 +99,7 @@ def agent_guide_command(
     write: Optional[Path] = typer.Option(
         None,
         "--write",
-        help="Write the guide into this file (e.g. AGENTS.md) between LakeLogic markers; "
-        "the rest of the file is kept.",
+        help="Write the guide into this file (e.g. AGENTS.md) between LakeLogic markers; the rest of the file is kept.",
     ),
 ) -> None:
     """How an AI agent uses LakeLogic: when to use it, install, run a contract, outputs, every command."""

@@ -756,9 +756,14 @@ def _arrow_to_pandas_exact(table: Any) -> Any:
     import pyarrow as pa
 
     ints = {
-        pa.int8(): pd.Int8Dtype(), pa.int16(): pd.Int16Dtype(), pa.int32(): pd.Int32Dtype(),
-        pa.int64(): pd.Int64Dtype(), pa.uint8(): pd.UInt8Dtype(), pa.uint16(): pd.UInt16Dtype(),
-        pa.uint32(): pd.UInt32Dtype(), pa.uint64(): pd.UInt64Dtype(),
+        pa.int8(): pd.Int8Dtype(),
+        pa.int16(): pd.Int16Dtype(),
+        pa.int32(): pd.Int32Dtype(),
+        pa.int64(): pd.Int64Dtype(),
+        pa.uint8(): pd.UInt8Dtype(),
+        pa.uint16(): pd.UInt16Dtype(),
+        pa.uint32(): pd.UInt32Dtype(),
+        pa.uint64(): pd.UInt64Dtype(),
     }
     nullable_ints = {f.name for f in table.schema if f.type in ints and table.column(f.name).null_count}
     if not nullable_ints:
@@ -1286,8 +1291,15 @@ def _csv_safe(df: Any) -> Any:
             nested = [c for c, t in df.schema.items() if isinstance(t, (pl.List, pl.Array, pl.Struct))]
             if nested:
                 return df.with_columns(
-                    [pl.Series(c, [None if v is None else json.dumps(v, default=str) for v in df[c].to_list()],
-                               dtype=pl.String) for c in nested])
+                    [
+                        pl.Series(
+                            c,
+                            [None if v is None else json.dumps(v, default=str) for v in df[c].to_list()],
+                            dtype=pl.String,
+                        )
+                        for c in nested
+                    ]
+                )
     except ImportError:  # pragma: no cover
         pass
     return df

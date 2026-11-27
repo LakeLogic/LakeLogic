@@ -1375,19 +1375,21 @@ def derive_business_map(
                 target = by_contract.get(pc.name)
             if target is None:
                 continue
-            target["metrics"].append({
-                "name": _s(m.get("name")),
-                "expression": _s(m.get("expression")),
-                "unit": _s(m.get("unit")) or None,
-                "additivity": _s(m.get("additivity")) or "additive",
-                "description": _s(m.get("description")) or None,
-                "also_called": sorted({_s(a) for a in (m.get("also_called") or []) if _s(a)}),
-                "contract": pc.name,
-                "source_file": pc.source_file,
-                "grain": list(pc.key or []),
-                "evidence_state": "observed",
-                "of_unresolved": unresolved,
-            })
+            target["metrics"].append(
+                {
+                    "name": _s(m.get("name")),
+                    "expression": _s(m.get("expression")),
+                    "unit": _s(m.get("unit")) or None,
+                    "additivity": _s(m.get("additivity")) or "additive",
+                    "description": _s(m.get("description")) or None,
+                    "also_called": sorted({_s(a) for a in (m.get("also_called") or []) if _s(a)}),
+                    "contract": pc.name,
+                    "source_file": pc.source_file,
+                    "grain": list(pc.key or []),
+                    "evidence_state": "observed",
+                    "of_unresolved": unresolved,
+                }
+            )
     for ent in entities.values():
         ent["metrics"].sort(key=lambda m: (m["name"].lower(), m["contract"]))
         seen: Dict[str, List[Dict[str, Any]]] = {}
@@ -1395,10 +1397,12 @@ def derive_business_map(
             seen.setdefault(m["name"].lower(), []).append(m)
         for same in seen.values():
             if len({" ".join(m["expression"].lower().split()) for m in same}) > 1:
-                ent["metric_conflicts"].append({
-                    "name": same[0]["name"],
-                    "sources": [{"contract": m["contract"], "expression": m["expression"]} for m in same],
-                })
+                ent["metric_conflicts"].append(
+                    {
+                        "name": same[0]["name"],
+                        "sources": [{"contract": m["contract"], "expression": m["expression"]} for m in same],
+                    }
+                )
 
     # 6. Order everything deterministically.
     entity_list = sorted(entities.values(), key=lambda e: e["name"])

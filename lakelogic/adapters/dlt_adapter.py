@@ -95,7 +95,6 @@ def _fill_params(value: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-
 def _option(model: Any, key: str) -> Any:
     """An option of a contract model as a plain value: a typed field (OLC >= 0.29 types the dlt
     endpoint's ``incremental``, ``paginator_config``, ``data_selector``, ``primary_key`` and the
@@ -106,6 +105,8 @@ def _option(model: Any, key: str) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(exclude_none=True)
     return value
+
+
 class DltAdapter:
     """Contract-driven dlt pipeline executor.
 
@@ -384,8 +385,7 @@ class DltAdapter:
             if kind == "bearer" and ("token" in credentials or "api_key" in credentials):
                 return {"type": "bearer", "token": credentials.get("token") or credentials["api_key"]}
             if kind == "http_basic" and "username" in credentials and "password" in credentials:
-                return {"type": "http_basic", "username": credentials["username"],
-                        "password": credentials["password"]}
+                return {"type": "http_basic", "username": credentials["username"], "password": credentials["password"]}
             if kind == "oauth2_client_credentials" and {"client_id", "client_secret"} <= set(credentials):
                 return {
                     "type": "oauth2_client_credentials",
@@ -464,7 +464,8 @@ class DltAdapter:
         # ...skipping dlt's own `_dlt*` tables (state, loads, versions), which stay in the
         # stable destination between runs and are not the source's rows.
         parquet_files = [
-            f for f in tmp_dir.rglob("*.parquet")
+            f
+            for f in tmp_dir.rglob("*.parquet")
             if not any(part.startswith("_dlt") for part in f.relative_to(tmp_dir).parts)
         ]
         # REST mode knows its tables: keep only theirs (a child table's folder is

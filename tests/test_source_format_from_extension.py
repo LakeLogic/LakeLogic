@@ -3,6 +3,7 @@
 With no `source` block, `materialization.format: delta` made `run_source("orders.csv")` open the
 CSV as a Delta table ("Invalid table location … orders.csv"), found by a fresh-agent test.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -10,10 +11,18 @@ import pytest
 from lakelogic.core.processor import _format_from_extension
 
 
-@pytest.mark.parametrize("path,fmt", [
-    ("data/orders.csv", "csv"), ("x.parquet", "parquet"), ("x.jsonl", "ndjson"), ("x.csv.gz", "csv"),
-    ("lake/orders_delta", None), ("landing/*.csv", "csv"), ("x.unknown", None),
-])
+@pytest.mark.parametrize(
+    "path,fmt",
+    [
+        ("data/orders.csv", "csv"),
+        ("x.parquet", "parquet"),
+        ("x.jsonl", "ndjson"),
+        ("x.csv.gz", "csv"),
+        ("lake/orders_delta", None),
+        ("landing/*.csv", "csv"),
+        ("x.unknown", None),
+    ],
+)
 def test_extension_names_the_format(path, fmt):
     assert _format_from_extension(path) == fmt
 

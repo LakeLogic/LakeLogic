@@ -3,6 +3,7 @@
 Postgres runs when LAKELOGIC_TEST_PG_URL names a THROWAWAY database (tables under schema
 ll_test are dropped); DuckDB and SQLite always run, in a temp folder.
 """
+
 from __future__ import annotations
 
 import os
@@ -16,8 +17,8 @@ from lakelogic.core import db_writer  # noqa: E402
 from lakelogic.core.db_writer import DatabaseWriteError, writer_for  # noqa: E402
 
 PG = os.environ.get("LAKELOGIC_TEST_PG_URL")
-MYSQL = os.environ.get("LAKELOGIC_TEST_MYSQL_URL")   # mysql://user:pw@host:port/db (throwaway)
-MSSQL = os.environ.get("LAKELOGIC_TEST_MSSQL_URL")   # mssql://user:pw@host:port/db?TrustServerCertificate=yes
+MYSQL = os.environ.get("LAKELOGIC_TEST_MYSQL_URL")  # mysql://user:pw@host:port/db (throwaway)
+MSSQL = os.environ.get("LAKELOGIC_TEST_MSSQL_URL")  # mssql://user:pw@host:port/db?TrustServerCertificate=yes
 
 
 @pytest.fixture(params=["postgresql", "mysql", "mssql", "duckdb", "sqlite"])
@@ -40,7 +41,9 @@ def target(request, tmp_path, monkeypatch):
 
                 def _dto(raw):
                     y, mo, d, h, mi, s, ns, tzh, tzm = struct.unpack("<6hI2h", raw)
-                    return _dt.datetime(y, mo, d, h, mi, s, ns // 1000, _dt.timezone(_dt.timedelta(hours=tzh, minutes=tzm)))
+                    return _dt.datetime(
+                        y, mo, d, h, mi, s, ns // 1000, _dt.timezone(_dt.timedelta(hours=tzh, minutes=tzm))
+                    )
 
                 conn.add_output_converter(-155, _dto)
             cur = conn.cursor()
@@ -72,6 +75,7 @@ def target(request, tmp_path, monkeypatch):
         def query(sql_text):
             writer = writer_for("env:LL_DB_URL")
             return writer._exec(sql_text).fetchall()
+
     yield "env:LL_DB_URL", table, query
     for w in db_writer._WRITERS.values():
         w.close()
@@ -99,7 +103,7 @@ def test_append_twice_with_a_key_errors_and_writes_nothing_more(target):
     _write(conn, table, df, primary_key=["symbol", "ts"])
     with pytest.raises(DatabaseWriteError):
         _write(conn, table, _bars([("A", 1, 1.0), ("Z", 9, 9.0)]), primary_key=["symbol", "ts"])
-    assert query(f"SELECT count(*) FROM {table}")[0][0] == 1          # rolled back, Z not written
+    assert query(f"SELECT count(*) FROM {table}")[0][0] == 1  # rolled back, Z not written
 
 
 def test_append_on_conflict_ignore_keeps_the_count(target):
@@ -114,7 +118,7 @@ def test_a_retried_batch_replaces_itself(target):
     conn, table, query = target
     df = _bars([("A", 1, 1.0), ("B", 1, 2.0)])
     _write(conn, table, df, batch_key="file-1@2026-11-18")
-    _write(conn, table, df, batch_key="file-1@2026-11-18")           # retry: same key
+    _write(conn, table, df, batch_key="file-1@2026-11-18")  # retry: same key
     _write(conn, table, _bars([("C", 1, 3.0)]), batch_key="file-2")
     assert query(f"SELECT count(*) FROM {table}")[0][0] == 3
 
@@ -126,7 +130,7 @@ def test_merge_inserts_updates_and_skips_unchanged(target):
     out = _write(conn, table, _bars([("A", 1, 1.0), ("A", 2, 2.5), ("B", 1, 9.0)]), strategy="merge", primary_key=pk)
     rows = sorted(query(f"SELECT symbol, ts, px FROM {table}"))
     assert rows == [("A", 1, 1.0), ("A", 2, 2.5), ("B", 1, 9.0)]
-    if out.get("updated") is not None:                                 # Postgres counts them
+    if out.get("updated") is not None:  # Postgres counts them
         assert out["inserted"] == 1 and out["updated"] == 1
 
 
@@ -206,14 +210,25 @@ def test_processor_writes_output_quarantine_and_run_log_through_the_writer(targe
     conn, table, query = target
     prefix = table.rsplit(".", 1)[0] + "." if "." in table else ""
     contract = {
-        "version": "1.0.0", "info": {"title": "bars"}, "dataset": "bars", "primary_key": ["symbol", "ts"],
-        "model": {"fields": [{"name": "symbol", "type": "string"}, {"name": "ts", "type": "integer"},
-                             {"name": "close", "type": "double"}]},
+        "version": "1.0.0",
+        "info": {"title": "bars"},
+        "dataset": "bars",
+        "primary_key": ["symbol", "ts"],
+        "model": {
+            "fields": [
+                {"name": "symbol", "type": "string"},
+                {"name": "ts", "type": "integer"},
+                {"name": "close", "type": "double"},
+            ]
+        },
         "quality": {"row_rules": [{"name": "close_positive", "sql": "close > 0"}]},
         "materialization": {"format": "database", "connection": conn, "table": table, "strategy": "merge"},
         "quarantine": {"format": "database", "connection": conn, "table": f"{prefix}q_{table.rsplit('.', 1)[-1]}"},
-        "metadata": {"run_log_table": f"{prefix}log_{table.rsplit('.', 1)[-1]}", "run_log_backend": "database",
-                     "run_log_connection": conn},
+        "metadata": {
+            "run_log_table": f"{prefix}log_{table.rsplit('.', 1)[-1]}",
+            "run_log_backend": "database",
+            "run_log_connection": conn,
+        },
     }
     proc = DataProcessor(contract, engine="polars")
     result = proc.run(pl.DataFrame({"symbol": ["A", "B"], "ts": [1, 1], "close": [1.0, -5.0]}))
@@ -233,25 +248,40 @@ def test_timestamp_and_timestamp_tz_columns_are_written(target):
 
     conn, table, query = target
     contract = {
-        "version": "1.0.0", "info": {"title": "bars"}, "dataset": "bars", "primary_key": ["symbol", "ts"],
-        "model": {"fields": [{"name": "symbol", "type": "string"}, {"name": "ts", "type": "timestamp_tz"},
-                             {"name": "seen", "type": "timestamp"}, {"name": "px", "type": "double"}]},
+        "version": "1.0.0",
+        "info": {"title": "bars"},
+        "dataset": "bars",
+        "primary_key": ["symbol", "ts"],
+        "model": {
+            "fields": [
+                {"name": "symbol", "type": "string"},
+                {"name": "ts", "type": "timestamp_tz"},
+                {"name": "seen", "type": "timestamp"},
+                {"name": "px", "type": "double"},
+            ]
+        },
         "materialization": {"format": "database", "connection": conn, "table": table, "strategy": "merge"},
     }
     plus2 = dt.timezone(dt.timedelta(hours=2))
-    df = pl.DataFrame({"symbol": ["A"], "ts": [dt.datetime(2026, 11, 18, 17, 0, tzinfo=plus2)],
-                       "seen": [dt.datetime(2026, 11, 18, 9, 30)], "px": [1.0]})
+    df = pl.DataFrame(
+        {
+            "symbol": ["A"],
+            "ts": [dt.datetime(2026, 11, 18, 17, 0, tzinfo=plus2)],
+            "seen": [dt.datetime(2026, 11, 18, 9, 30)],
+            "px": [1.0],
+        }
+    )
     proc = DataProcessor(contract, engine="polars")
     result = proc.run(df)
-    assert result.good.schema["ts"] == pl.Datetime("us", "UTC")          # the zone survives the cast
+    assert result.good.schema["ts"] == pl.Datetime("us", "UTC")  # the zone survives the cast
     proc.materialize(result.good, result.bad)
-    proc.materialize(result.good, result.bad)                            # merge again: no error, no dupes
+    proc.materialize(result.good, result.bad)  # merge again: no error, no dupes
     rows = query(f"SELECT ts, seen FROM {table}")
     assert len(rows) == 1
     ts, seen = rows[0]
     ts = ts if isinstance(ts, dt.datetime) else dt.datetime.fromisoformat(str(ts))
     utc = ts.astimezone(dt.timezone.utc).replace(tzinfo=None) if ts.tzinfo else ts
-    assert utc == dt.datetime(2026, 11, 18, 15, 0)                        # 17:00+02:00 is 15:00 UTC
+    assert utc == dt.datetime(2026, 11, 18, 15, 0)  # 17:00+02:00 is 15:00 UTC
     seen = seen if isinstance(seen, dt.datetime) else dt.datetime.fromisoformat(str(seen))
     assert seen.replace(tzinfo=None) == dt.datetime(2026, 11, 18, 9, 30)
 

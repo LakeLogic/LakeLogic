@@ -1,5 +1,6 @@
 """Parallel stream sinks on one Kafka topic (2026-11-27): worker i of N reads only its partitions,
 under its own checkpoint; changing N resumes from the previous layout."""
+
 from __future__ import annotations
 
 import pytest
@@ -12,15 +13,27 @@ DATA = {0: _events(30), 1: _events(40), 2: _events(50), 3: _events(60)}  # 180 e
 
 
 def _worker(i, n, data=DATA):
-    return KafkaOffsetSource("trips", consumer=_FakeKafkaConsumer("trips", data), tp_factory=_SimpleTP,
-                             max_poll_records=25, worker_index=i, worker_count=n)
+    return KafkaOffsetSource(
+        "trips",
+        consumer=_FakeKafkaConsumer("trips", data),
+        tp_factory=_SimpleTP,
+        max_poll_records=25,
+        worker_index=i,
+        worker_count=n,
+    )
 
 
 def _run(store, i, n, data=DATA):
     keys = stream_worker_keys("trips", i, n)
     proc = _FakeProcessor()
-    s = StreamSink(source=_worker(i, n, data), processor=proc, checkpoint=store, checkpoint_key=keys["key"],
-                   seed_keys=keys["seeds"], batch_size=50).run("available_now")
+    s = StreamSink(
+        source=_worker(i, n, data),
+        processor=proc,
+        checkpoint=store,
+        checkpoint_key=keys["key"],
+        seed_keys=keys["seeds"],
+        batch_size=50,
+    ).run("available_now")
     return s, proc
 
 
@@ -28,8 +41,8 @@ def test_two_workers_split_the_partitions_with_no_overlap_or_gap(tmp_path):
     store = SQLiteCheckpointStore(tmp_path / "ck.sqlite")
     s0, p0 = _run(store, 0, 2)
     s1, p1 = _run(store, 1, 2)
-    assert s0.cursor == {"trips:0": 30, "trips:2": 50}   # even partitions
-    assert s1.cursor == {"trips:1": 40, "trips:3": 60}   # odd partitions
+    assert s0.cursor == {"trips:0": 30, "trips:2": 50}  # even partitions
+    assert s1.cursor == {"trips:1": 40, "trips:3": 60}  # odd partitions
     assert s0.source_count + s1.source_count == 180
     assert store.load("stream::trips#0/2").cursor == s0.cursor
     assert store.load("stream::trips#1/2").cursor == s1.cursor
@@ -65,8 +78,16 @@ def test_going_from_two_sinks_to_three_seeds_each_partition_from_whoever_had_it(
 
 
 def test_more_workers_than_partitions_leaves_the_extra_worker_idle():
-    src = KafkaOffsetSource("t", consumer=_FakeKafkaConsumer("t", {0: _events(3)}), tp_factory=_SimpleTP,
-                            worker_index=1, worker_count=2, drain=True, drain_idle_timeout_s=0.1, poll_timeout_ms=10)
+    src = KafkaOffsetSource(
+        "t",
+        consumer=_FakeKafkaConsumer("t", {0: _events(3)}),
+        tp_factory=_SimpleTP,
+        worker_index=1,
+        worker_count=2,
+        drain=True,
+        drain_idle_timeout_s=0.1,
+        poll_timeout_ms=10,
+    )
     src.seek(None)
     assert src.current_cursor() == {} and list(src.stream()) == []
 

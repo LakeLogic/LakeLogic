@@ -163,10 +163,12 @@ def test_inheritable_keys_allowed_on_both_manifests():
 
 def test_source_system_block_is_accepted_on_a_system_manifest():
     """`source_system` says what the system IS (2026-11-26); OLC owns its shape."""
-    m = SystemManifestV1.model_validate({
-        "system": "sage",
-        "source_system": {"name": "Sage 200", "kind": "erp", "vendor": "Sage", "formats": ["table"]},
-    })
+    m = SystemManifestV1.model_validate(
+        {
+            "system": "sage",
+            "source_system": {"name": "Sage 200", "kind": "erp", "vendor": "Sage", "formats": ["table"]},
+        }
+    )
     assert m.source_system.name == "Sage 200"
     assert m.source_system.kind == "erp"
     assert SystemManifestV1.model_validate({"system": "s"}).source_system is None

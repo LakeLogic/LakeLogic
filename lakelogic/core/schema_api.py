@@ -305,7 +305,8 @@ class _ContractValidator:
         fields = [f["name"] for f in defs]
         try:
             problems = metric_problems(
-                metrics, fields,
+                metrics,
+                fields,
                 field_types={f["name"]: str(f.get("type") or "") for f in defs},
                 keys=[primary_key] if isinstance(primary_key, str) else list(primary_key or []),
                 references=[f["name"] for f in defs if f.get("foreign_key")],

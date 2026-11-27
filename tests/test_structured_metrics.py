@@ -1,5 +1,6 @@
 """Structured metrics (OLC, 2026-11-27): Core reads parts through OLC's generator and checks them
 with OLC's rule, so a contract with parts is not silently dropped from the business map."""
+
 import pytest
 
 pytest.importorskip("olc.models.metrics")
@@ -23,10 +24,19 @@ def test_parts_become_an_expression_and_expressions_stay():
 
 
 def _contract(metrics):
-    return {"version": "1.0.0", "info": {"title": "Fact Coupons"}, "primary_key": ["coupon_id"],
-            "model": {"fields": [{"name": "coupon_id", "type": "string"}, {"name": "fare_amount", "type": "float"},
-                                 {"name": "currency", "type": "string"}]},
-            "metrics": metrics}
+    return {
+        "version": "1.0.0",
+        "info": {"title": "Fact Coupons"},
+        "primary_key": ["coupon_id"],
+        "model": {
+            "fields": [
+                {"name": "coupon_id", "type": "string"},
+                {"name": "fare_amount", "type": "float"},
+                {"name": "currency", "type": "string"},
+            ]
+        },
+        "metrics": metrics,
+    }
 
 
 def test_core_validation_uses_the_olc_rule_with_types_and_keys():
@@ -34,6 +44,12 @@ def test_core_validation_uses_the_olc_rule_with_types_and_keys():
     assert not bad.valid and any("across currencies" in e.message for e in bad.errors)
     key = validate_contract(_contract([{"name": "Coupons", "aggregation": "sum", "expr": "coupon_id"}]))
     assert any("a key" in e.message for e in key.errors)
-    ok = validate_contract(_contract([{"name": "Fare", "aggregation": "sum", "expr": "fare_amount", "dimensions": ["currency"]},
-                                      {"name": "Coupons", "aggregation": "count_distinct", "expr": "coupon_id"}]))
+    ok = validate_contract(
+        _contract(
+            [
+                {"name": "Fare", "aggregation": "sum", "expr": "fare_amount", "dimensions": ["currency"]},
+                {"name": "Coupons", "aggregation": "count_distinct", "expr": "coupon_id"},
+            ]
+        )
+    )
     assert not [e for e in ok.errors if e.field == "metrics"]

@@ -32,17 +32,31 @@ LOCAL_DESTINATIONS = {"duckdb", "filesystem", "motherduck", "weaviate"}
 
 #: Contract keys that configure the writer itself; every other ``dlt_*`` key is passed to the
 #: destination factory with the prefix removed (e.g. ``dlt_create_indexes: true``).
-_RESERVED = {"dlt_destination", "dlt_credentials", "dlt_dataset_name", "dlt_pipeline_name",
-             # writer speed settings (2026-11-18), not destination options
-             "dlt_loader_file_format", "dlt_merge_strategy"}
+_RESERVED = {
+    "dlt_destination",
+    "dlt_credentials",
+    "dlt_dataset_name",
+    "dlt_pipeline_name",
+    # writer speed settings (2026-11-18), not destination options
+    "dlt_loader_file_format",
+    "dlt_merge_strategy",
+}
 
 #: One dlt pipeline object per name, reused across writes in a process: building it each write
 #: cost a noticeable share of every small load (2026-11-18).
 _PIPELINES: Dict[str, Any] = {}
 
 _ARROW_TO_DLT = (
-    ("int", "bigint"), ("uint", "bigint"), ("float", "double"), ("double", "double"), ("bool", "bool"),
-    ("timestamp", "timestamp"), ("date", "date"), ("decimal", "decimal"), ("string", "text"), ("large_string", "text"),
+    ("int", "bigint"),
+    ("uint", "bigint"),
+    ("float", "double"),
+    ("double", "double"),
+    ("bool", "bool"),
+    ("timestamp", "timestamp"),
+    ("date", "date"),
+    ("decimal", "decimal"),
+    ("string", "text"),
+    ("large_string", "text"),
 )
 
 
@@ -57,6 +71,7 @@ def _column_hints(data: Any) -> Dict[str, Dict[str, str]]:
                 hints[field.name] = {"data_type": dlt_type}
                 break
     return hints
+
 
 #: Destinations that store list/struct columns natively. Elsewhere (Postgres, SQL Server, ...)
 #: dlt's loader cannot write them — e.g. quarantine's ``_lakelogic_errors`` list — so they are

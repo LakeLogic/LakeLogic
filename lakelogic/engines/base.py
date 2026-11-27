@@ -201,7 +201,6 @@ def _checked_unique_columns(sql: Optional[str]) -> Optional[set]:
     return None
 
 
-
 def matched_rows_sql(sql: str, dialect: str = "duckdb") -> Optional[str]:
     """``SELECT COUNT(*)`` over the same FROM/WHERE as a single-aggregate dataset rule, or None
     when the rule is not that simple shape. A rule like ``SELECT SUM(amt) FROM source WHERE
@@ -237,6 +236,7 @@ def null_means_no_rows(sql: str, run, dialect: str = "duckdb") -> bool:
         return int(run(count_sql) or 0) == 0
     except Exception:  # noqa: BLE001
         return False
+
 
 class TransformationFailed(RuntimeError):
     """A contract transformation errored. The run stops: the output would not be what the contract says.

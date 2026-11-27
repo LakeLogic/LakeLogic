@@ -11,6 +11,7 @@ Desktop port forwarding, which caps bulk throughput at a few MB/s): 1,200-row me
 12,000-row merge all changed < 0.5 s, none changed < 0.4 s with 0 rows rewritten, append
 100,000 rows < 1.0 s, native >= 5x faster than dlt on a 1,200-row merge.
 """
+
 from __future__ import annotations
 
 import os
@@ -50,8 +51,9 @@ def dlt_writer(table: str):
 
     schema, name = table.split(".")
     cfg = {"dlt_destination": "postgres", "dlt_credentials": f"env:{URL_ENV}", "dlt_dataset_name": schema}
-    return lambda df, strategy="merge": write_dlt(df, table_name=name, config=cfg, strategy=strategy,
-                                                  primary_key=["symbol", "ts"])
+    return lambda df, strategy="merge": write_dlt(
+        df, table_name=name, config=cfg, strategy=strategy, primary_key=["symbol", "ts"]
+    )
 
 
 def dlt_fast_writer(table: str):
@@ -59,10 +61,16 @@ def dlt_fast_writer(table: str):
     from lakelogic.core.dlt_sink import write_dlt
 
     schema, name = table.split(".")
-    cfg = {"dlt_destination": "postgres", "dlt_credentials": f"env:{URL_ENV}", "dlt_dataset_name": schema,
-           "dlt_loader_file_format": "csv", "dlt_merge_strategy": "upsert"}
-    return lambda df, strategy="merge": write_dlt(df, table_name=name, config=cfg, strategy=strategy,
-                                                  primary_key=["symbol", "ts"])
+    cfg = {
+        "dlt_destination": "postgres",
+        "dlt_credentials": f"env:{URL_ENV}",
+        "dlt_dataset_name": schema,
+        "dlt_loader_file_format": "csv",
+        "dlt_merge_strategy": "upsert",
+    }
+    return lambda df, strategy="merge": write_dlt(
+        df, table_name=name, config=cfg, strategy=strategy, primary_key=["symbol", "ts"]
+    )
 
 
 def run(label: str, make, n_symbols: int) -> dict:
@@ -84,8 +92,10 @@ def main() -> int:
     conn = psycopg2.connect(os.environ[URL_ENV])
     conn.autocommit = True
     with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA IF EXISTS bench_native CASCADE; DROP SCHEMA IF EXISTS bench_dlt CASCADE; "
-                    "DROP SCHEMA IF EXISTS bench_dlt_fast CASCADE")
+        cur.execute(
+            "DROP SCHEMA IF EXISTS bench_native CASCADE; DROP SCHEMA IF EXISTS bench_dlt CASCADE; "
+            "DROP SCHEMA IF EXISTS bench_dlt_fast CASCADE"
+        )
     sizes = [int(s) for s in (sys.argv[1:] or ["100", "1000"])]
     results = []
     for n in sizes:
@@ -97,7 +107,9 @@ def main() -> int:
                 print(f"{label} skipped: {exc}")
     print(f"{'writer':<10}{'rows':>8}{'first':>9}{'same':>9}{'changed':>9}{'append':>9}")
     for r in results:
-        print(f"{r['writer']:<10}{r['rows']:>8}{r['first']:>9.3f}{r['same']:>9.3f}{r['changed']:>9.3f}{r['append']:>9.3f}")
+        print(
+            f"{r['writer']:<10}{r['rows']:>8}{r['first']:>9.3f}{r['same']:>9.3f}{r['changed']:>9.3f}{r['append']:>9.3f}"
+        )
     return 0
 
 

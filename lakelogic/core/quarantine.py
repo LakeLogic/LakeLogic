@@ -277,8 +277,10 @@ def _write_quarantine_table_duckdb(df: Any, contract, table_name: str, metadata:
 
         if BATCH_KEY_COLUMN in pdf.columns:
             # A re-run's rejects replace their own earlier copies (see _forget_earlier_batch).
-            con.execute(f'DELETE FROM {full_table} WHERE "{BATCH_KEY_COLUMN}" IN '
-                        f'(SELECT DISTINCT "{BATCH_KEY_COLUMN}" FROM incoming_quarantine)')
+            con.execute(
+                f'DELETE FROM {full_table} WHERE "{BATCH_KEY_COLUMN}" IN '
+                f'(SELECT DISTINCT "{BATCH_KEY_COLUMN}" FROM incoming_quarantine)'
+            )
         # By name: an older table gained columns at its end, in a different order.
         cols = ", ".join(f'"{c}"' for c in pdf.columns)
         con.execute(f"INSERT INTO {full_table} ({cols}) SELECT {cols} FROM incoming_quarantine")
@@ -331,9 +333,11 @@ def _write_quarantine_table_sqlite(df: Any, contract, table_name: str, metadata:
             if BATCH_KEY_COLUMN in pdf.columns:
                 keys = [k for k in pdf[BATCH_KEY_COLUMN].dropna().unique().tolist()]
                 for i in range(0, len(keys), 500):
-                    chunk = keys[i:i + 500]
-                    conn.execute(f'DELETE FROM "{table_name}" WHERE "{BATCH_KEY_COLUMN}" IN '
-                                 f'({", ".join("?" for _ in chunk)})', chunk)
+                    chunk = keys[i : i + 500]
+                    conn.execute(
+                        f'DELETE FROM "{table_name}" WHERE "{BATCH_KEY_COLUMN}" IN ({", ".join("?" for _ in chunk)})',
+                        chunk,
+                    )
             conn.commit()
         pdf.to_sql(table_name, conn, if_exists="append", index=False)
     finally:
@@ -745,7 +749,7 @@ def _forget_earlier_batch(df: Any, target_file: Any, fmt: str, batch_key: str) -
                 return df
             if BATCH_KEY_COLUMN in [f.name for f in table.schema().fields]:
                 for i in range(0, len(keys), 500):
-                    listed = ", ".join("'" + k.replace("'", "''") + "'" for k in keys[i:i + 500])
+                    listed = ", ".join("'" + k.replace("'", "''") + "'" for k in keys[i : i + 500])
                     table.delete(f"{BATCH_KEY_COLUMN} IN ({listed})")
             return df
         if not remote and not Path(str(target_file)).exists():
@@ -853,9 +857,14 @@ def materialize_quarantine(
             from lakelogic.core.db_writer import write_database
 
             dataset = contract.dataset or (getattr(contract.info, "table_name", None) if contract.info else None)
-            return write_database(df, q, strategy="append", batch_key=batch_key,
-                                  default_table=f"quarantine.quarantine_{dataset or 'data'}",
-                                  non_finite="null")  # a NaN-rejecting rule's rows must still be kept
+            return write_database(
+                df,
+                q,
+                strategy="append",
+                batch_key=batch_key,
+                default_table=f"quarantine.quarantine_{dataset or 'data'}",
+                non_finite="null",
+            )  # a NaN-rejecting rule's rows must still be kept
         return _write_quarantine_dlt(df, contract)
 
     # ── Path mode (default): write to quarantine.target ──

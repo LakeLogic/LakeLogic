@@ -539,7 +539,6 @@ def _cost_is_measured(report: Dict[str, Any]) -> bool:
     return confidence != "none"
 
 
-
 def _duckdb_schema_ref(con, schema: str) -> str:
     """A DuckDB file's stem names its catalog: ``ws.duckdb`` with schema ``ws`` made ``ws.t``
     ambiguous and every run-log read and write failed. Qualify with the catalog then."""
@@ -548,6 +547,7 @@ def _duckdb_schema_ref(con, schema: str) -> str:
     except Exception:  # noqa: BLE001
         return schema
     return f'"{catalog}".{schema}' if str(catalog).lower() == str(schema).lower() else schema
+
 
 def _cap_error_message(value: Any) -> Optional[str]:
     """One concise line: the first line of the message, capped."""
@@ -791,10 +791,7 @@ def _write_run_log_table(report: Dict[str, Any], contract, engine_name: Optional
         connection = metadata.get("run_log_connection")
         if not connection:
             connection = database_config(getattr(contract, "materialization", None)).get("connection")
-        row = {
-            k: (_json.dumps(v, default=str) if isinstance(v, (dict, list, tuple)) else v)
-            for k, v in record.items()
-        }
+        row = {k: (_json.dumps(v, default=str) if isinstance(v, (dict, list, tuple)) else v) for k, v in record.items()}
         frame = pl.DataFrame([row], infer_schema_length=1)
         frame = frame.with_columns([pl.col(c).cast(pl.String) for c, t in frame.schema.items() if t == pl.Null])
         written = writer_for(connection).write(frame, table=table_name, strategy="append")

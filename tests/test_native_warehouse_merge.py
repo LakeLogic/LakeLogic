@@ -4,6 +4,7 @@ Both engines could write in place, but the processor allowed only append/overwri
 onto that path, so every merge was fetched into pandas and shipped back through dlt. Snowflake
 already had MERGE INTO; BigQuery gets one of the same shape.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -33,8 +34,12 @@ class _BQClient:
 def _bq(cols, primary_key=("id",)):
     from lakelogic.engines.bigquery import BigQueryAdapter
 
-    contract = DataContract(version="1.0.0", dataset="orders", primary_key=list(primary_key),
-                            model={"fields": [{"name": c, "type": "string"} for c in cols]})
+    contract = DataContract(
+        version="1.0.0",
+        dataset="orders",
+        primary_key=list(primary_key),
+        model={"fields": [{"name": c, "type": "string"} for c in cols]},
+    )
     a = BigQueryAdapter(contract)
     a.good_table = "lg_good_abc"
     a._session_id = "sess-1"
@@ -48,11 +53,11 @@ def test_bigquery_merge_is_one_statement_inside_bigquery():
     out = a.materialize_native("proj.ds.orders", strategy="merge")
     merge = next(s for s in client.sql if s.startswith("MERGE"))
     assert "ON t.`id` = s.`id`" in merge
-    assert "QUALIFY ROW_NUMBER() OVER (PARTITION BY `id`" in merge               # one row per key
-    assert "t.`name` IS DISTINCT FROM s.`name`" in merge                          # only changed rows
-    assert "_lakelogic_processed_at` IS DISTINCT FROM" not in merge               # not a change
-    assert "`_lakelogic_processed_at` = s.`_lakelogic_processed_at`" in merge     # but still refreshed
-    assert any(s.startswith("CREATE TABLE IF NOT EXISTS") for s in client.sql)    # target created
+    assert "QUALIFY ROW_NUMBER() OVER (PARTITION BY `id`" in merge  # one row per key
+    assert "t.`name` IS DISTINCT FROM s.`name`" in merge  # only changed rows
+    assert "_lakelogic_processed_at` IS DISTINCT FROM" not in merge  # not a change
+    assert "`_lakelogic_processed_at` = s.`_lakelogic_processed_at`" in merge  # but still refreshed
+    assert any(s.startswith("CREATE TABLE IF NOT EXISTS") for s in client.sql)  # target created
     assert out["server_side"] is True and out["strategy"] == "merge"
 
 

@@ -603,7 +603,8 @@ class StreamSink:
             logger.info(
                 f"[StreamSink {self.checkpoint_key}] resuming from broker cursor "
                 f"{start if start else '(earliest)'}"
-                + (" (seeded from the previous worker layout)" if start and not prior else "") + "."
+                + (" (seeded from the previous worker layout)" if start and not prior else "")
+                + "."
             )
         elif prior is not None and self.cursor_fn is None and isinstance(prior.cursor, int):
             # Default (count) cursor → resume by skipping already-processed records.

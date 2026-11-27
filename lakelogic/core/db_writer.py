@@ -27,6 +27,7 @@ Retry safety for append: when a ``batch_key`` is given (the caller's id, or one 
 source files), the table carries ``_lakelogic_batch_key`` and a retried batch first deletes its
 own earlier rows, so it is never doubled.
 """
+
 from __future__ import annotations
 
 import io
@@ -50,6 +51,8 @@ def _keys_to_replace(frame, batch_key: Optional[str]) -> List[str]:
             return []
         return [k for k in frame[BATCH_KEY_COLUMN].unique().to_list() if k is not None]
     return [batch_key] if batch_key else []
+
+
 _WRITE_KEYS = {"on_conflict", "only_changed", "batch_size", "create_table", "allow_empty_overwrite"}
 _STRATEGIES = {"append", "merge", "upsert", "overwrite", "replace"}
 
@@ -82,8 +85,16 @@ def database_config(block: Any) -> Dict[str, Any]:
 def dialect_of(url: str) -> str:
     """The database a connection URL names: ``postgresql``, ``duckdb``, ``sqlite``, …"""
     scheme = (urlparse(url).scheme or "").split("+", 1)[0].lower()
-    return {"postgres": "postgresql", "postgresql": "postgresql", "duckdb": "duckdb", "sqlite": "sqlite",
-            "mysql": "mysql", "mariadb": "mysql", "mssql": "mssql", "sqlserver": "mssql"}.get(scheme, scheme)
+    return {
+        "postgres": "postgresql",
+        "postgresql": "postgresql",
+        "duckdb": "duckdb",
+        "sqlite": "sqlite",
+        "mysql": "mysql",
+        "mariadb": "mysql",
+        "mssql": "mssql",
+        "sqlserver": "mssql",
+    }.get(scheme, scheme)
 
 
 def _split_table(table: str) -> Tuple[Optional[str], str]:
@@ -176,9 +187,15 @@ def _timestamps_as_text(df):
     return df.with_columns(exprs) if exprs else df
 
 
-
-_GONE = ("does not exist", "doesn't exist", "invalid object name", "no such table", "undefined_table",
-         "undefinedtable", "invalidschemaname")
+_GONE = (
+    "does not exist",
+    "doesn't exist",
+    "invalid object name",
+    "no such table",
+    "undefined_table",
+    "undefinedtable",
+    "invalidschemaname",
+)
 
 
 class _PerThreadConnection:
@@ -228,7 +245,7 @@ class _PerThreadConnection:
 
 _REGISTRY_LOCK = threading.Lock()
 
-_EXISTS = ("already exists", "there is already an object", "duplicate key value violates unique constraint \"pg_type")
+_EXISTS = ("already exists", "there is already an object", 'duplicate key value violates unique constraint "pg_type')
 
 
 class _ForgetsDroppedTables:
@@ -273,7 +290,7 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
                 import psycopg2
             except ImportError as exc:
                 raise DatabaseWriteError(
-                    "format: database on Postgres needs psycopg2: pip install \"lakelogic[postgresql]\""
+                    'format: database on Postgres needs psycopg2: pip install "lakelogic[postgresql]"'
                 ) from exc
             try:
                 self._conn = psycopg2.connect(self._url)
@@ -287,8 +304,9 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
         return _scrub(str(exc), self._secrets + [self._url])
 
     # -- table ---------------------------------------------------------------------------- #
-    def _ensure_table(self, cur, schema: Optional[str], table: str, df, primary_key: Sequence[str],
-                      create: bool, evolution: str) -> List[str]:
+    def _ensure_table(
+        self, cur, schema: Optional[str], table: str, df, primary_key: Sequence[str], create: bool, evolution: str
+    ) -> List[str]:
         from psycopg2 import sql
 
         key = f"{schema}.{table}"
@@ -323,8 +341,11 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
                     f"{key} has no column(s) {new} and schema_policy.evolution is strict; add them or relax it."
                 )
             for c in new:  # never dropped, never retyped
-                cur.execute(sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
-                    ident, sql.Identifier(c), sql.SQL(_ddl(df.schema[c], "postgresql"))))
+                cur.execute(
+                    sql.SQL("ALTER TABLE {} ADD COLUMN {} {}").format(
+                        ident, sql.Identifier(c), sql.SQL(_ddl(df.schema[c], "postgresql"))
+                    )
+                )
                 existing.append(c)
                 logger.info(f"{key}: added column {c}")
         self._known[key] = existing
@@ -404,8 +425,12 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
         schema, name = _split_table(table)
         target = sql.Identifier(schema, name) if schema else sql.Identifier(name)
         conn = self._connection()
-        result: Dict[str, Any] = {"target": f"postgres:{schema + '.' if schema else ''}{name}", "format": "database",
-                                  "dialect": self.dialect, "strategy": strategy}
+        result: Dict[str, Any] = {
+            "target": f"postgres:{schema + '.' if schema else ''}{name}",
+            "format": "database",
+            "dialect": self.dialect,
+            "strategy": strategy,
+        }
         try:
             with conn.cursor() as cur:
                 self._ensure_table(cur, schema, name, frame, pk, bool(opts.get("create_table", True)), evolution)
@@ -416,8 +441,12 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
                         result["replaced_rows"] = 0
                         keys = _keys_to_replace(frame, batch_key)
                         for i in range(0, len(keys), 1000):
-                            cur.execute(sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
-                                target, sql.Identifier(BATCH_KEY_COLUMN)), (keys[i:i + 1000],))
+                            cur.execute(
+                                sql.SQL("DELETE FROM {} WHERE {} = ANY(%s)").format(
+                                    target, sql.Identifier(BATCH_KEY_COLUMN)
+                                ),
+                                (keys[i : i + 1000],),
+                            )
                             result["replaced_rows"] += cur.rowcount
                     self._copy(cur, target, frame, batch_size)
                     result.update(rows_written=frame.height, inserted=frame.height, updated=0)
@@ -433,10 +462,17 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
                     self._copy(cur, stg, frame, batch_size)
                     conflict = sql.SQL(", ").join(map(sql.Identifier, pk))
                     if strategy == "append":  # on_conflict: ignore
-                        cur.execute(sql.SQL("INSERT INTO {} ({}) SELECT {} FROM {} ON CONFLICT ({}) DO NOTHING").format(
-                            target, col_list, col_list, stg, conflict))
-                        result.update(rows_written=cur.rowcount, inserted=cur.rowcount, updated=0,
-                                      skipped=frame.height - cur.rowcount)
+                        cur.execute(
+                            sql.SQL("INSERT INTO {} ({}) SELECT {} FROM {} ON CONFLICT ({}) DO NOTHING").format(
+                                target, col_list, col_list, stg, conflict
+                            )
+                        )
+                        result.update(
+                            rows_written=cur.rowcount,
+                            inserted=cur.rowcount,
+                            updated=0,
+                            skipped=frame.height - cur.rowcount,
+                        )
                     else:
                         result.update(self._merge(cur, target, stg, cols, pk, bool(opts.get("only_changed", True))))
             conn.commit()
@@ -475,7 +511,8 @@ class PostgresWriter(_PerThreadConnection, _ForgetsDroppedTables):
                 left = sql.SQL(", ").join(sql.SQL("{}.{}").format(target, sql.Identifier(c)) for c in business)
                 right = sql.SQL(", ").join(sql.SQL("EXCLUDED.{}").format(sql.Identifier(c)) for c in business)
                 action = sql.SQL("{} WHERE ({}) IS DISTINCT FROM ({})").format(
-                    action, sql.SQL("ROW({})").format(left), sql.SQL("ROW({})").format(right))
+                    action, sql.SQL("ROW({})").format(left), sql.SQL("ROW({})").format(right)
+                )
         else:
             action = sql.SQL("DO NOTHING")
         stmt = sql.SQL(
@@ -503,8 +540,8 @@ class _EmbeddedWriter:
     def __init__(self, url: str, dialect: str) -> None:
         self.dialect = dialect
         self._path = re.sub(r"^[a-z0-9+]+:///?", "", url, flags=re.I) or ":memory:"
-        self._base = None          # DuckDB: the one database connection threads take cursors from
-        self._shared = None        # in-memory SQLite: the one connection, used in turn
+        self._base = None  # DuckDB: the one database connection threads take cursors from
+        self._shared = None  # in-memory SQLite: the one connection, used in turn
         self._local = threading.local()
         self._opened: List[Any] = []
         self._lock = threading.RLock()
@@ -561,7 +598,9 @@ class _EmbeddedWriter:
         if self.dialect == "duckdb":
             rows = self._exec(
                 "SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? "
-                "ORDER BY ordinal_position", (schema or "main", table)).fetchall()
+                "ORDER BY ordinal_position",
+                (schema or "main", table),
+            ).fetchall()
         else:
             rows = [(r[1],) for r in self._exec(f"PRAGMA table_info({_q(table)})").fetchall()]
         return [r[0] for r in rows]
@@ -595,9 +634,17 @@ class _EmbeddedWriter:
             logger.info(f"The table was created by another writer ({exc}); retrying once.")
             return self._write_once(df, **kwargs)
 
-    def _write_once(self, df: Any, *, table: str, strategy: str = "append", primary_key: Sequence[str] = (),
-              write: Optional[Mapping[str, Any]] = None, batch_key: Optional[str] = None,
-              evolution: str = "allow") -> Dict[str, Any]:
+    def _write_once(
+        self,
+        df: Any,
+        *,
+        table: str,
+        strategy: str = "append",
+        primary_key: Sequence[str] = (),
+        write: Optional[Mapping[str, Any]] = None,
+        batch_key: Optional[str] = None,
+        evolution: str = "allow",
+    ) -> Dict[str, Any]:
         import polars as pl
 
         opts = dict(write or {})
@@ -612,8 +659,13 @@ class _EmbeddedWriter:
             raise DatabaseWriteError("write.on_conflict: ignore needs the contract's primary_key.")
         frame = _to_polars(df)
         if self.dialect == "sqlite":  # sqlite3 takes no dates/datetimes/decimals as values from Polars rows
-            frame = frame.with_columns([pl.col(c).cast(pl.String) for c, t in frame.schema.items()
-                                        if t in (pl.Date, pl.Time) or isinstance(t, (pl.Datetime, pl.Decimal))])
+            frame = frame.with_columns(
+                [
+                    pl.col(c).cast(pl.String)
+                    for c, t in frame.schema.items()
+                    if t in (pl.Date, pl.Time) or isinstance(t, (pl.Datetime, pl.Decimal))
+                ]
+            )
         if batch_key and batch_key != ROW_KEYS and strategy == "append" and not pk:
             frame = frame.with_columns(pl.lit(batch_key).alias(BATCH_KEY_COLUMN))
         if strategy in ("merge", "upsert") and frame.height:
@@ -623,7 +675,8 @@ class _EmbeddedWriter:
                 first = bad.row(0, named=True)
                 raise DatabaseWriteError(
                     f"{bad.height} key(s) appear more than once in this batch, e.g. "
-                    f"({', '.join(str(first[k]) for k in pk)}); a merge needs one row per key.")
+                    f"({', '.join(str(first[k]) for k in pk)}); a merge needs one row per key."
+                )
         if strategy in ("overwrite", "replace") and frame.height == 0 and not opts.get("allow_empty_overwrite"):
             raise DatabaseWriteError(f"Refusing to overwrite {table} with 0 rows (it would empty the table).")
 
@@ -639,8 +692,12 @@ class _EmbeddedWriter:
             schema_ref = f"{_q(catalog)}.{_q(schema)}"
             target = f"{schema_ref}.{_q(name)}"
         self._connection()
-        result: Dict[str, Any] = {"target": f"{self.dialect}:{schema + '.' if schema else ''}{name}",
-                                  "format": "database", "dialect": self.dialect, "strategy": strategy}
+        result: Dict[str, Any] = {
+            "target": f"{self.dialect}:{schema + '.' if schema else ''}{name}",
+            "format": "database",
+            "dialect": self.dialect,
+            "strategy": strategy,
+        }
         try:
             self._exec("BEGIN")
             existing = self._columns(schema, name)
@@ -668,10 +725,9 @@ class _EmbeddedWriter:
                 if batch_key and not pk:
                     keys = _keys_to_replace(frame, batch_key)
                     for i in range(0, len(keys), 500):
-                        chunk = keys[i:i + 500]
+                        chunk = keys[i : i + 500]
                         self._exec(
-                            f"DELETE FROM {target} WHERE {_q(BATCH_KEY_COLUMN)} "
-                            f"IN ({', '.join('?' for _ in chunk)})",
+                            f"DELETE FROM {target} WHERE {_q(BATCH_KEY_COLUMN)} IN ({', '.join('?' for _ in chunk)})",
                             chunk,
                         )
                 self._insert(target, frame)
@@ -728,7 +784,8 @@ def _check_batch(frame, table: str, strategy: str, pk: List[str], opts: Mapping[
             first = bad.row(0, named=True)
             raise DatabaseWriteError(
                 f"{bad.height} key(s) appear more than once in this batch, e.g. "
-                f"({', '.join(str(first[k]) for k in pk)}); a merge needs one row per key.")
+                f"({', '.join(str(first[k]) for k in pk)}); a merge needs one row per key."
+            )
     if strategy in ("overwrite", "replace") and frame.height == 0 and not opts.get("allow_empty_overwrite"):
         raise DatabaseWriteError(f"Refusing to overwrite {table} with 0 rows (it would empty the table).")
 
@@ -737,9 +794,14 @@ def _url_parts(url: str) -> Dict[str, Any]:
     from urllib.parse import parse_qs, unquote
 
     u = urlparse(url)
-    return {"host": u.hostname or "localhost", "port": u.port, "user": unquote(u.username or ""),
-            "password": unquote(u.password or ""), "database": (u.path or "/").lstrip("/") or None,
-            "query": {k: v[-1] for k, v in parse_qs(u.query).items()}}
+    return {
+        "host": u.hostname or "localhost",
+        "port": u.port,
+        "user": unquote(u.username or ""),
+        "password": unquote(u.password or ""),
+        "database": (u.path or "/").lstrip("/") or None,
+        "query": {k: v[-1] for k, v in parse_qs(u.query).items()},
+    }
 
 
 class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
@@ -759,9 +821,17 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
 
         return _scrub(str(exc), [self._url, _url_parts(self._url)["password"]])
 
-    def _write_once(self, df: Any, *, table: str, strategy: str = "append", primary_key: Sequence[str] = (),
-              write: Optional[Mapping[str, Any]] = None, batch_key: Optional[str] = None,
-              evolution: str = "allow") -> Dict[str, Any]:
+    def _write_once(
+        self,
+        df: Any,
+        *,
+        table: str,
+        strategy: str = "append",
+        primary_key: Sequence[str] = (),
+        write: Optional[Mapping[str, Any]] = None,
+        batch_key: Optional[str] = None,
+        evolution: str = "allow",
+    ) -> Dict[str, Any]:
         import polars as pl
 
         opts = dict(write or {})
@@ -775,8 +845,12 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
         _check_batch(frame, table, strategy, pk, opts)
         frame = self._check_finite(frame, table, nullify=str(opts.get("non_finite") or "") == "null")
         schema, name = _split_table(table)
-        result: Dict[str, Any] = {"target": f"{self.dialect}:{schema + '.' if schema else ''}{name}",
-                                  "format": "database", "dialect": self.dialect, "strategy": strategy}
+        result: Dict[str, Any] = {
+            "target": f"{self.dialect}:{schema + '.' if schema else ''}{name}",
+            "format": "database",
+            "dialect": self.dialect,
+            "strategy": strategy,
+        }
         try:
             conn = self._connection()
         except DatabaseWriteError:
@@ -796,7 +870,7 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
                 if batch_key and not pk:
                     keys = _keys_to_replace(frame, batch_key)
                     for i in range(0, len(keys), 500):
-                        chunk = keys[i:i + 500]
+                        chunk = keys[i : i + 500]
                         marks = ", ".join(self._mark for _ in chunk)
                         cur.execute(
                             f"DELETE FROM {self._t(schema, name)} WHERE {self._q(BATCH_KEY_COLUMN)} IN ({marks})",
@@ -805,8 +879,7 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
                 self._load(cur, self._t(schema, name), frame)
                 result.update(rows_written=frame.height, inserted=frame.height, updated=0)
             else:
-                result.update(self._apply(cur, schema, name, frame, pk, strategy,
-                                          bool(opts.get("only_changed", True))))
+                result.update(self._apply(cur, schema, name, frame, pk, strategy, bool(opts.get("only_changed", True))))
             conn.commit()
         except DatabaseWriteError:
             conn.rollback()
@@ -834,14 +907,18 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
         if bad and nullify:
             logger.warning(f"{self.dialect} has no NaN or infinity: stored as NULL in {table} ({', '.join(bad)}).")
             floats = [c for c, t in frame.schema.items() if t in (pl.Float32, pl.Float64)]
-            return frame.with_columns([
-                pl.when(pl.col(c).is_nan() | pl.col(c).is_infinite()).then(None).otherwise(pl.col(c)).alias(c)
-                for c in floats])
+            return frame.with_columns(
+                [
+                    pl.when(pl.col(c).is_nan() | pl.col(c).is_infinite()).then(None).otherwise(pl.col(c)).alias(c)
+                    for c in floats
+                ]
+            )
         if bad:
             raise DatabaseWriteError(
                 f"{self.dialect} cannot store NaN or infinity; {table} would receive them in "
                 f"{', '.join(bad)}. Quarantine them with a row rule such as "
-                f"`<column> BETWEEN -1.7e308 AND 1.7e308`, or replace them in a transformation.")
+                f"`<column> BETWEEN -1.7e308 AND 1.7e308`, or replace them in a transformation."
+            )
         return frame
 
     def _ensure(self, cur, schema, name, frame, pk, create: bool, evolution: str) -> None:
@@ -864,8 +941,10 @@ class _ServerWriter(_PerThreadConnection, _ForgetsDroppedTables):
         self._known[key] = existing
 
     def _create(self, cur, schema, name, frame, pk) -> None:
-        cols = [f"{self._q(c)} {_ddl(t, self.dialect, c in pk)}" + (" NOT NULL" if c in pk else "")
-                for c, t in frame.schema.items()]
+        cols = [
+            f"{self._q(c)} {_ddl(t, self.dialect, c in pk)}" + (" NOT NULL" if c in pk else "")
+            for c, t in frame.schema.items()
+        ]
         if pk:
             cols.append(f"PRIMARY KEY ({', '.join(self._q(k) for k in pk)})")
         cur.execute(f"CREATE TABLE {self._t(schema, name)} ({', '.join(cols)})")
@@ -895,11 +974,18 @@ class MySQLWriter(_ServerWriter):
                 import pymysql
             except ImportError as exc:
                 raise DatabaseWriteError(
-                    "format: database on MySQL needs pymysql: pip install \"lakelogic[mysql]\""
+                    'format: database on MySQL needs pymysql: pip install "lakelogic[mysql]"'
                 ) from exc
             p = _url_parts(self._url)
-            self._conn = pymysql.connect(host=p["host"], port=p["port"] or 3306, user=p["user"], password=p["password"],
-                                         database=p["database"], autocommit=False, charset="utf8mb4")
+            self._conn = pymysql.connect(
+                host=p["host"],
+                port=p["port"] or 3306,
+                user=p["user"],
+                password=p["password"],
+                database=p["database"],
+                autocommit=False,
+                charset="utf8mb4",
+            )
         return self._conn
 
     @staticmethod
@@ -912,8 +998,11 @@ class MySQLWriter(_ServerWriter):
     def _columns(self, cur, schema, name) -> List[str]:
         if schema:
             cur.execute(f"CREATE DATABASE IF NOT EXISTS {self._q(schema)}")
-        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = COALESCE(%s, DATABASE()) "
-                    "AND table_name = %s ORDER BY ordinal_position", (schema, name))
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = COALESCE(%s, DATABASE()) "
+            "AND table_name = %s ORDER BY ordinal_position",
+            (schema, name),
+        )
         return [r[0] for r in cur.fetchall()]
 
     def _rows(self, frame) -> List[tuple]:
@@ -940,17 +1029,25 @@ class MySQLWriter(_ServerWriter):
             cur.execute(f"SELECT COUNT(*) FROM {stg} s WHERE NOT EXISTS (SELECT 1 FROM {target} t WHERE {on})")
             new_rows = int(cur.fetchone()[0])
             if strategy == "append":  # on_conflict: ignore
-                cur.execute(f"INSERT INTO {target} ({cols}) SELECT {cols} FROM {stg} s "
-                            f"WHERE NOT EXISTS (SELECT 1 FROM {target} t WHERE {on})")
+                cur.execute(
+                    f"INSERT INTO {target} ({cols}) SELECT {cols} FROM {stg} s "
+                    f"WHERE NOT EXISTS (SELECT 1 FROM {target} t WHERE {on})"
+                )
                 return {
-                    "rows_written": new_rows, "inserted": new_rows, "updated": 0, "skipped": frame.height - new_rows
+                    "rows_written": new_rows,
+                    "inserted": new_rows,
+                    "updated": 0,
+                    "skipped": frame.height - new_rows,
                 }
             non_keys = [c for c in frame.columns if c not in pk]
-            sets = ", ".join(f"{self._q(c)} = s_new.{self._q(c)}" for c in non_keys) or \
-                ", ".join(f"{self._q(k)} = {self._q(k)}" for k in pk)
+            sets = ", ".join(f"{self._q(c)} = s_new.{self._q(c)}" for c in non_keys) or ", ".join(
+                f"{self._q(k)} = {self._q(k)}" for k in pk
+            )
             # MySQL changes nothing (and counts 0) for a row whose values are the same.
-            cur.execute(f"INSERT INTO {target} ({cols}) SELECT * FROM (SELECT {cols} FROM {stg}) AS s_new "
-                        f"ON DUPLICATE KEY UPDATE {sets}")
+            cur.execute(
+                f"INSERT INTO {target} ({cols}) SELECT * FROM (SELECT {cols} FROM {stg}) AS s_new "
+                f"ON DUPLICATE KEY UPDATE {sets}"
+            )
             updated = max(0, (int(cur.rowcount) - new_rows) // 2)
             return {"rows_written": new_rows + updated, "inserted": new_rows, "updated": updated}
         finally:
@@ -967,7 +1064,7 @@ class SQLServerWriter(_ServerWriter):
                 import pyodbc
             except ImportError as exc:
                 raise DatabaseWriteError(
-                    "format: database on SQL Server needs pyodbc: pip install \"lakelogic[azuresql]\""
+                    'format: database on SQL Server needs pyodbc: pip install "lakelogic[azuresql]"'
                 ) from exc
             p = _url_parts(self._url)
             q = p["query"]
@@ -975,8 +1072,13 @@ class SQLServerWriter(_ServerWriter):
                 (d for d in reversed(pyodbc.drivers()) if "ODBC Driver" in d), "SQL Server"
             )
             server = f"{p['host']},{p['port']}" if p["port"] else p["host"]
-            parts = [f"DRIVER={{{driver}}}", f"SERVER={server}", f"DATABASE={p['database'] or 'master'}",
-                     f"UID={p['user']}", f"PWD={p['password']}"]
+            parts = [
+                f"DRIVER={{{driver}}}",
+                f"SERVER={server}",
+                f"DATABASE={p['database'] or 'master'}",
+                f"UID={p['user']}",
+                f"PWD={p['password']}",
+            ]
             trust = q.get("TrustServerCertificate", q.get("trust_server_certificate", ""))
             if str(trust).lower() in ("yes", "true", "1"):
                 parts.append("TrustServerCertificate=yes")
@@ -995,8 +1097,11 @@ class SQLServerWriter(_ServerWriter):
     def _columns(self, cur, schema, name) -> List[str]:
         s = schema or "dbo"
         cur.execute(f"IF SCHEMA_ID(?) IS NULL EXEC('CREATE SCHEMA {self._q(s)}')", (s,))
-        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? "
-                    "ORDER BY ordinal_position", (s, name))
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? "
+            "ORDER BY ordinal_position",
+            (s, name),
+        )
         return [r[0] for r in cur.fetchall()]
 
     def _load(self, cur, target: str, frame) -> None:
@@ -1008,6 +1113,7 @@ class SQLServerWriter(_ServerWriter):
         cols = ", ".join(self._q(c) for c in frame.columns)
         marks = ", ".join(["?"] * len(frame.columns))
         cur.fast_executemany = True
+
         # Every column's SQL type declared up front. pyodbc's fast path GUESSES otherwise, and each
         # guess lost data silently (type matrix, 2026-11-19): text went as single-byte VARCHAR
         # ("✓ 日本" stored as "? ??"), datetimes lost their microseconds, and an empty/null binary
@@ -1034,9 +1140,11 @@ class SQLServerWriter(_ServerWriter):
             cols = [self._q(c) for c in frame.columns]
             on = " AND ".join(f"t.{self._q(k)} = s.{self._q(k)}" for k in pk)
             if strategy == "append":  # on_conflict: ignore
-                cur.execute(f"INSERT INTO {target} ({', '.join(cols)}) SELECT {', '.join('s.' + c for c in cols)} "
-                            f"FROM {stg} s WHERE NOT EXISTS "
-                            f"(SELECT 1 FROM {target} t WITH (UPDLOCK, HOLDLOCK) WHERE {on})")
+                cur.execute(
+                    f"INSERT INTO {target} ({', '.join(cols)}) SELECT {', '.join('s.' + c for c in cols)} "
+                    f"FROM {stg} s WHERE NOT EXISTS "
+                    f"(SELECT 1 FROM {target} t WITH (UPDLOCK, HOLDLOCK) WHERE {on})"
+                )
                 n = int(cur.rowcount)
                 return {"rows_written": n, "inserted": n, "updated": 0, "skipped": frame.height - n}
             non_keys = [c for c in frame.columns if c not in pk]
@@ -1044,8 +1152,10 @@ class SQLServerWriter(_ServerWriter):
             sets = ", ".join(f"t.{self._q(c)} = s.{self._q(c)}" for c in non_keys)
             # "Only changed" as EXCEPT: NULL-safe and on every SQL Server version.
             changed = (
-                (f" AND EXISTS (SELECT {', '.join('s.' + self._q(c) for c in business)} "
-                 f"EXCEPT SELECT {', '.join('t.' + self._q(c) for c in business)})")
+                (
+                    f" AND EXISTS (SELECT {', '.join('s.' + self._q(c) for c in business)} "
+                    f"EXCEPT SELECT {', '.join('t.' + self._q(c) for c in business)})"
+                )
                 if only_changed and business
                 else ""
             )
@@ -1107,9 +1217,17 @@ def _new_writer(url: str) -> Any:
     return writer
 
 
-def write_database(df: Any, block: Any, *, strategy: str = "append", primary_key: Iterable[str] = (),
-                   batch_key: Optional[str] = None, evolution: str = "allow",
-                   default_table: Optional[str] = None, non_finite: str = "refuse") -> Dict[str, Any]:
+def write_database(
+    df: Any,
+    block: Any,
+    *,
+    strategy: str = "append",
+    primary_key: Iterable[str] = (),
+    batch_key: Optional[str] = None,
+    evolution: str = "allow",
+    default_table: Optional[str] = None,
+    non_finite: str = "refuse",
+) -> Dict[str, Any]:
     """Write ``df`` as a ``format: database`` block (materialization or quarantine) says.
     ``non_finite="null"`` (quarantine): NaN/infinity become NULL where the database has no
     such value, instead of the write being refused - the rows a finite-check rule rejected must
@@ -1122,6 +1240,11 @@ def write_database(df: Any, block: Any, *, strategy: str = "append", primary_key
     if non_finite == "null":
         write_opts.setdefault("non_finite", "null")
     return writer_for(cfg.get("connection")).write(
-        df, table=table, strategy=strategy, primary_key=list(primary_key or []), write=write_opts,
-        batch_key=batch_key, evolution=evolution,
+        df,
+        table=table,
+        strategy=strategy,
+        primary_key=list(primary_key or []),
+        write=write_opts,
+        batch_key=batch_key,
+        evolution=evolution,
     )

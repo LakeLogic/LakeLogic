@@ -189,12 +189,22 @@ def test_layout_documents_read_back_every_field(tmp_path):
         "info": {"title": "Licences"},
         "source": {"type": "landing", "format": "pdf", "path": "landing/*.pdf"},
         "extraction": {"provider": "pdfplumber"},
-        "model": {"fields": [
-            {"name": "licence_no", "type": "string", "extraction_task": "metadata",
-             "extraction_examples": [r"([A-Z]{3}\d{6}[A-Z])"]},
-            {"name": "service", "type": "string", "extraction_task": "metadata",
-             "extraction_examples": [r"Receipt:\s*[A-Z]\d{6}\s*\n([^\n]+)"]},
-        ]},
+        "model": {
+            "fields": [
+                {
+                    "name": "licence_no",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"([A-Z]{3}\d{6}[A-Z])"],
+                },
+                {
+                    "name": "service",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"Receipt:\s*[A-Z]\d{6}\s*\n([^\n]+)"],
+                },
+            ]
+        },
     }
     paths = generate_documents(contract, tmp_path, rows=3)
     import pdfplumber
@@ -215,16 +225,34 @@ def _layout_contract():
         "info": {"title": "Licences"},
         "source": {"type": "landing", "format": "pdf", "path": "landing/*.pdf"},
         "extraction": {"provider": "pdfplumber"},
-        "model": {"fields": [
-            {"name": "licence_no", "type": "string", "extraction_task": "metadata",
-             "extraction_examples": [r"([A-Z]{3}\d{6}[A-Z])"]},
-            {"name": "issuing_city", "type": "string", "extraction_task": "metadata",
-             "extraction_examples": [r"^([A-Z]{3})$"]},
-            {"name": "date_of_birth", "type": "string", "extraction_task": "metadata",
-             "extraction_examples": [r"(\d{2}/\d{2}/\d{4})(?=[\s\S]*\d{2}/\d{2}/\d{4})"]},
-            {"name": "expiry_date", "type": "string", "extraction_task": "metadata",
-             "extraction_examples": [r"\d{2}/\d{2}/\d{4}[\s\S]*?(\d{2}/\d{2}/\d{4})"]},
-        ]},
+        "model": {
+            "fields": [
+                {
+                    "name": "licence_no",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"([A-Z]{3}\d{6}[A-Z])"],
+                },
+                {
+                    "name": "issuing_city",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"^([A-Z]{3})$"],
+                },
+                {
+                    "name": "date_of_birth",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"(\d{2}/\d{2}/\d{4})(?=[\s\S]*\d{2}/\d{2}/\d{4})"],
+                },
+                {
+                    "name": "expiry_date",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"\d{2}/\d{2}/\d{4}[\s\S]*?(\d{2}/\d{2}/\d{4})"],
+                },
+            ]
+        },
     }
 
 
@@ -276,9 +304,18 @@ def test_a_space_pattern_writes_one_space():
 def test_a_pattern_label_is_not_said_twice(tmp_path):
     from lakelogic.core.synthetic_documents import generate_documents
 
-    contract = {**_layout_contract(), "model": {"fields": [
-        {"name": "incident_id", "type": "string", "extraction_task": "metadata",
-         "extraction_examples": [r"Incident\s*ID\s*([A-Z]{3}-\d{8}-\d{3})"]},
-    ]}}
+    contract = {
+        **_layout_contract(),
+        "model": {
+            "fields": [
+                {
+                    "name": "incident_id",
+                    "type": "string",
+                    "extraction_task": "metadata",
+                    "extraction_examples": [r"Incident\s*ID\s*([A-Z]{3}-\d{8}-\d{3})"],
+                },
+            ]
+        },
+    }
     text = _pdf_text(generate_documents(contract, tmp_path, rows=1)[0])
     assert "Incident id:" not in text and "Incident ID " in text

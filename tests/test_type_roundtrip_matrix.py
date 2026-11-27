@@ -9,6 +9,7 @@ compares value by value.
 Server databases run when LAKELOGIC_TEST_PG_URL / _MYSQL_URL / _MSSQL_URL name throwaway
 databases; DuckDB, SQLite, Parquet and Delta always run.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -36,18 +37,32 @@ COLUMNS = {
     "c_bigint": ("bigint", [9007199254740993, -5, None], [9007199254740993, -5, None]),
     "c_float": ("float", [1.5, -0.25, None], [1.5, -0.25, None]),
     "c_double": ("double", [1234567.890123, -1e-9, None], [1234567.890123, -1e-9, None]),
-    "c_decimal": ("decimal(18,4)", [Decimal("12345.6789"), Decimal("-0.0001"), None],
-                  [Decimal("12345.6789"), Decimal("-0.0001"), None]),
+    "c_decimal": (
+        "decimal(18,4)",
+        [Decimal("12345.6789"), Decimal("-0.0001"), None],
+        [Decimal("12345.6789"), Decimal("-0.0001"), None],
+    ),
     "c_boolean": ("boolean", [True, False, None], [True, False, None]),
-    "c_date": ("date", [dt.date(2026, 11, 18), dt.date(1999, 1, 1), None],
-               [dt.date(2026, 11, 18), dt.date(1999, 1, 1), None]),
-    "c_ts": ("timestamp", [dt.datetime(2026, 11, 18, 9, 30, 15, 123456), dt.datetime(2000, 1, 1), None],
-             [dt.datetime(2026, 11, 18, 9, 30, 15, 123456), dt.datetime(2000, 1, 1), None]),
-    "c_ts_ntz": ("timestamp_ntz", [dt.datetime(2026, 11, 18, 9, 30), dt.datetime(1970, 1, 2), None],
-                 [dt.datetime(2026, 11, 18, 9, 30), dt.datetime(1970, 1, 2), None]),
-    "c_ts_tz": ("timestamp_tz", [dt.datetime(2026, 11, 18, 17, 0, tzinfo=PLUS2),
-                                 dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc), None],
-                [dt.datetime(2026, 11, 18, 15, 0), dt.datetime(2026, 1, 1), None]),   # compared in UTC
+    "c_date": (
+        "date",
+        [dt.date(2026, 11, 18), dt.date(1999, 1, 1), None],
+        [dt.date(2026, 11, 18), dt.date(1999, 1, 1), None],
+    ),
+    "c_ts": (
+        "timestamp",
+        [dt.datetime(2026, 11, 18, 9, 30, 15, 123456), dt.datetime(2000, 1, 1), None],
+        [dt.datetime(2026, 11, 18, 9, 30, 15, 123456), dt.datetime(2000, 1, 1), None],
+    ),
+    "c_ts_ntz": (
+        "timestamp_ntz",
+        [dt.datetime(2026, 11, 18, 9, 30), dt.datetime(1970, 1, 2), None],
+        [dt.datetime(2026, 11, 18, 9, 30), dt.datetime(1970, 1, 2), None],
+    ),
+    "c_ts_tz": (
+        "timestamp_tz",
+        [dt.datetime(2026, 11, 18, 17, 0, tzinfo=PLUS2), dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc), None],
+        [dt.datetime(2026, 11, 18, 15, 0), dt.datetime(2026, 1, 1), None],
+    ),  # compared in UTC
     "c_binary": ("binary", [b"\x00\x01\xff", b"", None], [b"\x00\x01\xff", b"", None]),
     "c_json": ("json", ['{"a": 1, "b": [1, 2]}', "[1, 2]", None], [{"a": 1, "b": [1, 2]}, [1, 2], None]),
 }
@@ -77,11 +92,18 @@ def _frame():
 
 def _contract(materialization: dict) -> dict:
     fields = [{"name": "id", "type": "bigint"}] + [{"name": n, "type": t} for n, (t, _v, _e) in COLUMNS.items()]
-    return {"version": "1.0.0", "info": {"title": "types"}, "dataset": "types", "primary_key": ["id"],
-            "model": {"fields": fields}, "materialization": materialization}
+    return {
+        "version": "1.0.0",
+        "info": {"title": "types"},
+        "dataset": "types",
+        "primary_key": ["id"],
+        "model": {"fields": fields},
+        "materialization": materialization,
+    }
 
 
 # ── reading back, normalised to plain Python ────────────────────────────────────────────────── #
+
 
 def _norm(ctype: str, value):
     if value is None:
@@ -95,8 +117,11 @@ def _norm(ctype: str, value):
     if ctype == "boolean":
         return bool(int(value)) if isinstance(value, (int, str)) and str(value) in ("0", "1") else bool(value)
     if ctype == "date":
-        return value if isinstance(value, dt.date) and not isinstance(value, dt.datetime) else \
-            (value.date() if isinstance(value, dt.datetime) else dt.date.fromisoformat(str(value)[:10]))
+        return (
+            value
+            if isinstance(value, dt.date) and not isinstance(value, dt.datetime)
+            else (value.date() if isinstance(value, dt.datetime) else dt.date.fromisoformat(str(value)[:10]))
+        )
     if ctype.startswith("timestamp"):
         if not isinstance(value, dt.datetime):
             value = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -143,9 +168,11 @@ def _check(rows_by_id: dict, skip=frozenset()) -> list:
 
 # ── targets ─────────────────────────────────────────────────────────────────────────────────── #
 
-SERVER_URLS = {"postgresql": os.environ.get("LAKELOGIC_TEST_PG_URL"),
-               "mysql": os.environ.get("LAKELOGIC_TEST_MYSQL_URL"),
-               "mssql": os.environ.get("LAKELOGIC_TEST_MSSQL_URL")}
+SERVER_URLS = {
+    "postgresql": os.environ.get("LAKELOGIC_TEST_PG_URL"),
+    "mysql": os.environ.get("LAKELOGIC_TEST_MYSQL_URL"),
+    "mssql": os.environ.get("LAKELOGIC_TEST_MSSQL_URL"),
+}
 
 
 def _db_rows(url_env: str, table: str):
@@ -223,7 +250,7 @@ def test_every_type_round_trips(engine, target, strategy, source, tmp_path, monk
     if source == "text":
         contract["model"]["fields"] = [f for f in contract["model"]["fields"] if f["name"] != "c_binary"]
     frame = _frame() if source == "typed" else _text_frame()
-    runs = 1 if strategy == "append" else 2   # merge/overwrite twice: idempotent, no type drift
+    runs = 1 if strategy == "append" else 2  # merge/overwrite twice: idempotent, no type drift
     for _ in range(runs):
         proc = DataProcessor(contract, engine=engine)
         result = proc.run(frame)
@@ -231,7 +258,11 @@ def test_every_type_round_trips(engine, target, strategy, source, tmp_path, monk
         proc.materialize(result.good, result.bad)
 
     if target in ("parquet", "delta"):
-        frame = pl.read_delta(str(tmp_path / "out")) if target == "delta" else pl.read_parquet(str(tmp_path / "out" / "**" / "*.parquet"))
+        frame = (
+            pl.read_delta(str(tmp_path / "out"))
+            if target == "delta"
+            else pl.read_parquet(str(tmp_path / "out" / "**" / "*.parquet"))
+        )
         rows = frame.to_dicts()
     else:
         rows = _db_rows("LL_RT_URL", table)

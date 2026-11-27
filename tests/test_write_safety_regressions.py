@@ -8,6 +8,7 @@
 5. quarantine_scope let a failing group through when its scope value was NULL.
 6. A merge whose batch lacked a declared column overwrote the stored values with NULL.
 """
+
 from __future__ import annotations
 
 import os
@@ -43,8 +44,13 @@ def _rows(sql):
 
 
 def _contract(mat, fields=(("sym", "string"), ("px", "double")), pk=None, **extra):
-    c = {"version": "1.0.0", "info": {"title": "ws"}, "dataset": "ws",
-         "model": {"fields": [{"name": n, "type": t} for n, t in fields]}, "materialization": mat}
+    c = {
+        "version": "1.0.0",
+        "info": {"title": "ws"},
+        "dataset": "ws",
+        "model": {"fields": [{"name": n, "type": t} for n, t in fields]},
+        "materialization": mat,
+    }
     if pk:
         c["primary_key"] = pk
     c.update(extra)
@@ -54,8 +60,10 @@ def _contract(mat, fields=(("sym", "string"), ("px", "double")), pk=None, **extr
 def test_retried_append_from_one_named_file_does_not_double(tmp_path, monkeypatch):
     csv = tmp_path / "trades.csv"
     csv.write_text("sym,px\nA,1.0\nB,2.0\n", encoding="utf-8")
-    c = _contract({**_duck(tmp_path, monkeypatch), "strategy": "append"},
-                  source={"type": "landing", "path": str(csv), "format": "csv"})
+    c = _contract(
+        {**_duck(tmp_path, monkeypatch), "strategy": "append"},
+        source={"type": "landing", "path": str(csv), "format": "csv"},
+    )
     for _ in range(2):
         p = DataProcessor(c, engine="polars")
         r = p.run_source()
@@ -66,8 +74,10 @@ def test_retried_append_from_one_named_file_does_not_double(tmp_path, monkeypatc
 def test_dataframe_run_after_run_source_does_not_delete_the_files_rows(tmp_path, monkeypatch):
     csv = tmp_path / "trades.csv"
     csv.write_text("sym,px\nA,1.0\nB,2.0\n", encoding="utf-8")
-    c = _contract({**_duck(tmp_path, monkeypatch), "strategy": "append"},
-                  source={"type": "landing", "path": str(csv), "format": "csv"})
+    c = _contract(
+        {**_duck(tmp_path, monkeypatch), "strategy": "append"},
+        source={"type": "landing", "path": str(csv), "format": "csv"},
+    )
     p = DataProcessor(c, engine="polars")
     r = p.run_source()
     p.materialize(r.good, r.bad)
@@ -87,11 +97,17 @@ def test_null_primary_key_is_quarantined_not_a_failed_batch(tmp_path, monkeypatc
 
 
 def test_null_scope_group_that_fails_is_quarantined():
-    c = _contract({"format": "parquet", "target_path": "unused", "strategy": "append"},
-                  quality={"on_dataset_failure": "quarantine", "quarantine_scope": ["sym"],
-                           "dataset_rules": [{"name": "px_positive", "sql": "SELECT MIN(px) FROM source",
-                                              "must_be_greater_than": 0}]})
-    r = DataProcessor(c, engine="polars").run(pl.DataFrame({"sym": ["A", "A", None, None], "px": [1.0, 2.0, -1.0, 3.0]}))
+    c = _contract(
+        {"format": "parquet", "target_path": "unused", "strategy": "append"},
+        quality={
+            "on_dataset_failure": "quarantine",
+            "quarantine_scope": ["sym"],
+            "dataset_rules": [{"name": "px_positive", "sql": "SELECT MIN(px) FROM source", "must_be_greater_than": 0}],
+        },
+    )
+    r = DataProcessor(c, engine="polars").run(
+        pl.DataFrame({"sym": ["A", "A", None, None], "px": [1.0, 2.0, -1.0, 3.0]})
+    )
     assert sorted(r.good["sym"].to_list()) == ["A", "A"]
     assert len(r.bad) == 2
 
@@ -125,8 +141,11 @@ def test_nan_and_infinity_are_refused_before_writing(env, monkeypatch):
     monkeypatch.setenv("LL_WS_URL", url)
     w = db_writer.writer_for("env:LL_WS_URL")
     with pytest.raises(db_writer.DatabaseWriteError, match=r"NaN or infinity.*px \(2 row"):
-        w.write(pl.DataFrame({"sym": ["A", "B", "C"], "px": [1.0, float("nan"), float("inf")]}),
-                table="ll_ws.nan_t", strategy="append")
+        w.write(
+            pl.DataFrame({"sym": ["A", "B", "C"], "px": [1.0, float("nan"), float("inf")]}),
+            table="ll_ws.nan_t",
+            strategy="append",
+        )
 
 
 def test_duckdb_schema_named_like_the_file_is_written(tmp_path, monkeypatch):
@@ -139,13 +158,29 @@ def test_duckdb_schema_named_like_the_file_is_written(tmp_path, monkeypatch):
 
 
 def _bars_contract(mat, qmat):
-    return {"version": "1.0.0", "info": {"title": "bars"}, "dataset": "bars", "primary_key": ["sym", "i"],
-            "model": {"fields": [{"name": "sym", "type": "string"}, {"name": "i", "type": "int"},
-                                 {"name": "lo", "type": "double"}, {"name": "hi", "type": "double"}]},
-            "quality": {"on_dataset_failure": "quarantine", "quarantine_scope": ["sym"],
-                        "dataset_rules": [{"name": "hi_ge_lo", "sql": "SELECT COUNT(*) FROM source WHERE hi < lo",
-                                           "must_be_less_than": 1}]},
-            "quarantine": qmat, "materialization": mat}
+    return {
+        "version": "1.0.0",
+        "info": {"title": "bars"},
+        "dataset": "bars",
+        "primary_key": ["sym", "i"],
+        "model": {
+            "fields": [
+                {"name": "sym", "type": "string"},
+                {"name": "i", "type": "int"},
+                {"name": "lo", "type": "double"},
+                {"name": "hi", "type": "double"},
+            ]
+        },
+        "quality": {
+            "on_dataset_failure": "quarantine",
+            "quarantine_scope": ["sym"],
+            "dataset_rules": [
+                {"name": "hi_ge_lo", "sql": "SELECT COUNT(*) FROM source WHERE hi < lo", "must_be_less_than": 1}
+            ],
+        },
+        "quarantine": qmat,
+        "materialization": mat,
+    }
 
 
 def test_rejected_groups_are_reported_and_not_requarantined_on_rerun(tmp_path, monkeypatch):
@@ -153,8 +188,9 @@ def test_rejected_groups_are_reported_and_not_requarantined_on_rerun(tmp_path, m
     its rejects again (13, 26, 39 rows)."""
     mat = {**_duck(tmp_path, monkeypatch), "strategy": "merge"}
     c = _bars_contract(mat, {"format": "database", "connection": "env:LL_WS_URL", "table": "ws.rejects"})
-    df = pl.DataFrame({"sym": ["A"] * 3 + ["B"] * 3, "i": [1, 2, 3] * 2, "lo": [1.0] * 6,
-                       "hi": [2.0, 2.0, 2.0, 0.5, 2.0, 2.0]})
+    df = pl.DataFrame(
+        {"sym": ["A"] * 3 + ["B"] * 3, "i": [1, 2, 3] * 2, "lo": [1.0] * 6, "hi": [2.0, 2.0, 2.0, 0.5, 2.0, 2.0]}
+    )
     for _ in range(3):
         p = DataProcessor(c, engine="polars")
         r = p.run(df)
@@ -186,21 +222,38 @@ def test_table_dropped_outside_lakelogic_is_recreated(env, monkeypatch):
     assert w.write(df, table="ll_ws.dropped", strategy="merge", primary_key=["k"])["rows_written"] == 1
 
 
-@pytest.mark.parametrize("sql,cmp", [
-    ("SELECT COUNT(*) FROM source WHERE hi < lo", {"must_be_less_than": 1}),
-    ("SELECT MIN(lo) FROM source WHERE hi > 100", {"must_be_greater_than": 0}),   # empty WHERE -> NULL -> fails
-    ("SELECT AVG(hi) FROM source", {"must_be_between": [1.0, 3.0]}),
-    ("SELECT COUNT(*) FROM (SELECT * FROM source WHERE hi < lo) x", {"must_be_less_than": 1}),  # loop path
-])
+@pytest.mark.parametrize(
+    "sql,cmp",
+    [
+        ("SELECT COUNT(*) FROM source WHERE hi < lo", {"must_be_less_than": 1}),
+        ("SELECT MIN(lo) FROM source WHERE hi > 100", {"must_be_greater_than": 0}),  # empty WHERE -> NULL -> fails
+        ("SELECT AVG(hi) FROM source", {"must_be_between": [1.0, 3.0]}),
+        ("SELECT COUNT(*) FROM (SELECT * FROM source WHERE hi < lo) x", {"must_be_less_than": 1}),  # loop path
+    ],
+)
 def test_grouped_scope_check_matches_group_by_group(sql, cmp):
     """The one-query GROUP BY path must reject exactly the groups the per-group loop rejects."""
     from lakelogic.core import processor as proc_mod
 
-    df = pl.DataFrame({"sym": ["A", "A", "B", "B", None, None, "C"],
-                       "lo": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-                       "hi": [2.0, 2.0, 0.5, 2.0, 0.2, 9.0, 150.0]})
-    rule = type("R", (), {"name": "r", "sql": sql, "must_be_between": None, "must_be_less_than": None,
-                          "must_be_greater_than": None, **cmp})()
+    df = pl.DataFrame(
+        {
+            "sym": ["A", "A", "B", "B", None, None, "C"],
+            "lo": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            "hi": [2.0, 2.0, 0.5, 2.0, 0.2, 9.0, 150.0],
+        }
+    )
+    rule = type(
+        "R",
+        (),
+        {
+            "name": "r",
+            "sql": sql,
+            "must_be_between": None,
+            "must_be_less_than": None,
+            "must_be_greater_than": None,
+            **cmp,
+        },
+    )()
     adapter = type("A", (), {"get_dataset_rules": lambda self: [rule]})()
     fast = proc_mod._quarantine_failing_groups(adapter, df, [{"name": "r"}], ["sym"], "bars")
     orig = proc_mod._grouped_rule_values
@@ -209,6 +262,7 @@ def test_grouped_scope_check_matches_group_by_group(sql, cmp):
         slow = proc_mod._quarantine_failing_groups(adapter, df, [{"name": "r"}], ["sym"], "bars")
     finally:
         proc_mod._grouped_rule_values = orig
+
     def norm(res):
         return None if res is None else (sorted(map(str, res[1]["sym"].to_list())), res[2])
 
@@ -217,9 +271,14 @@ def test_grouped_scope_check_matches_group_by_group(sql, cmp):
 
 def test_duckdb_run_log_schema_named_like_the_file(tmp_path):
     """ws.duckdb with run_log_table ws.runs: "ws.runs" was ambiguous in the run log too."""
-    c = _contract({"format": "parquet", "target_path": str(tmp_path / "out"), "strategy": "append"},
-                  metadata={"run_log_backend": "duckdb", "run_log_table": "ws.runs",
-                            "run_log_database": str(tmp_path / "ws.duckdb")})
+    c = _contract(
+        {"format": "parquet", "target_path": str(tmp_path / "out"), "strategy": "append"},
+        metadata={
+            "run_log_backend": "duckdb",
+            "run_log_table": "ws.runs",
+            "run_log_database": str(tmp_path / "ws.duckdb"),
+        },
+    )
     for _ in range(2):
         p = DataProcessor(c, engine="polars")
         r = p.run(pl.DataFrame({"sym": ["A"], "px": [1.0]}))
@@ -234,10 +293,15 @@ def test_duckdb_run_log_schema_named_like_the_file(tmp_path):
 
 @pytest.mark.parametrize("backend", ["duckdb", "sqlite"])
 def test_rejects_reason_reaches_the_run_log_table(backend, tmp_path):
-    c = _bars_contract({"format": "parquet", "target_path": str(tmp_path / "out"), "strategy": "append"},
-                       {"format": "parquet", "target": str(tmp_path / "q")})
-    c["metadata"] = {"run_log_backend": backend, "run_log_table": "runs",
-                     "run_log_database": str(tmp_path / f"rl.{backend}")}
+    c = _bars_contract(
+        {"format": "parquet", "target_path": str(tmp_path / "out"), "strategy": "append"},
+        {"format": "parquet", "target": str(tmp_path / "q")},
+    )
+    c["metadata"] = {
+        "run_log_backend": backend,
+        "run_log_table": "runs",
+        "run_log_database": str(tmp_path / f"rl.{backend}"),
+    }
     p = DataProcessor(c, engine="polars")
     r = p.run(pl.DataFrame({"sym": ["A", "B"], "i": [1, 1], "lo": [1.0, 1.0], "hi": [2.0, 0.5]}))
     p.materialize(r.good, r.bad)
@@ -259,8 +323,10 @@ def test_rejects_reason_reaches_the_run_log_table(backend, tmp_path):
 def test_file_quarantine_is_not_duplicated_on_rerun(fmt, tmp_path):
     if fmt == "delta":
         pytest.importorskip("deltalake")
-    c = _bars_contract({"format": "parquet", "target_path": str(tmp_path / "out"), "strategy": "append"},
-                       {"format": fmt, "target": str(tmp_path / "q")})
+    c = _bars_contract(
+        {"format": "parquet", "target_path": str(tmp_path / "out"), "strategy": "append"},
+        {"format": fmt, "target": str(tmp_path / "q")},
+    )
     df = pl.DataFrame({"sym": ["A", "A", "B", "B"], "i": [1, 2, 1, 2], "lo": [1.0] * 4, "hi": [2.0, 2.0, 0.5, 2.0]})
     for _ in range(3):
         p = DataProcessor(c, engine="polars")
@@ -274,22 +340,34 @@ def test_file_quarantine_is_not_duplicated_on_rerun(fmt, tmp_path):
 
 # ── Second adversarial pass (2026-11-19) ────────────────────────────────────────────────────── #
 
+
 def _rule_contract(scope_type, rule, cmp, quality_extra=None):
-    q = {"on_dataset_failure": "quarantine", "quarantine_scope": ["g"],
-         "dataset_rules": [{"name": "d", "sql": rule, **cmp}]}
+    q = {
+        "on_dataset_failure": "quarantine",
+        "quarantine_scope": ["g"],
+        "dataset_rules": [{"name": "d", "sql": rule, **cmp}],
+    }
     q.update(quality_extra or {})
-    return {"version": "1.0.0", "info": {"title": "t"}, "dataset": "t",
-            "model": {"fields": [{"name": "g", "type": scope_type}, {"name": "amt", "type": "double"}]},
-            "quality": q}
+    return {
+        "version": "1.0.0",
+        "info": {"title": "t"},
+        "dataset": "t",
+        "model": {"fields": [{"name": "g", "type": scope_type}, {"name": "amt", "type": "double"}]},
+        "quality": q,
+    }
 
 
 def test_reject_set_that_shrinks_does_not_duplicate(tmp_path, monkeypatch):
     """One key for the whole reject set: when run 2 rejected fewer rows, the remaining reject
     was stored a second time."""
     mat = {**_duck(tmp_path, monkeypatch), "strategy": "merge"}
-    c = _contract(mat, fields=(("id", "int"), ("v", "double")), pk=["id"],
-                  quality={"row_rules": [{"name": "v_pos", "sql": "v > 0"}]},
-                  quarantine={"format": "database", "connection": "env:LL_WS_URL", "table": "ws.rejects"})
+    c = _contract(
+        mat,
+        fields=(("id", "int"), ("v", "double")),
+        pk=["id"],
+        quality={"row_rules": [{"name": "v_pos", "sql": "v > 0"}]},
+        quarantine={"format": "database", "connection": "env:LL_WS_URL", "table": "ws.rejects"},
+    )
     for vs in ([-1.0, -2.0, 3.0], [-1.0, 2.0, 3.0], [-1.0, -2.0, 3.0]):
         p = DataProcessor(c, engine="polars")
         r = p.run(pl.DataFrame({"id": [10, 11, 12], "v": vs}))
@@ -301,7 +379,8 @@ def test_reject_set_that_shrinks_does_not_duplicate(tmp_path, monkeypatch):
 def test_nan_scope_group_that_fails_is_quarantined(engine):
     c = _rule_contract("double", "SELECT COUNT(*) - COUNT(DISTINCT amt) FROM source", {"must_be_less_than": 1})
     r = DataProcessor(c, engine=engine).run(
-        pl.DataFrame({"g": [float("nan")] * 2 + [1.0, 2.0, 2.0], "amt": [1.0, 1.0, 2.0, 3.0, 3.0]}))
+        pl.DataFrame({"g": [float("nan")] * 2 + [1.0, 2.0, 2.0], "amt": [1.0, 1.0, 2.0, 3.0, 3.0]})
+    )
     assert r.good.select("g", "amt").rows() == [(1.0, 2.0)]
 
 
@@ -315,7 +394,9 @@ def test_rule_whose_where_matches_nothing_passes(engine):
     assert len(clean.good) == 1 and len(clean.bad) == 0
     # Rows matched but the value is NULL: unmeasured, still a failure.
     c2 = _rule_contract("string", "SELECT AVG(amt) FROM source WHERE g = 'B'", {"must_be_greater_than": 0})
-    unmeasured = DataProcessor(c2, engine=engine).run(pl.DataFrame({"g": ["B"], "amt": [None]}, schema={"g": pl.String, "amt": pl.Float64}))
+    unmeasured = DataProcessor(c2, engine=engine).run(
+        pl.DataFrame({"g": ["B"], "amt": [None]}, schema={"g": pl.String, "amt": pl.Float64})
+    )
     assert len(unmeasured.bad) == 1
 
 
@@ -328,11 +409,15 @@ def test_nan_rejects_are_kept_in_a_mysql_or_sqlserver_quarantine(env, monkeypatc
     import uuid as _uuid
 
     table = f"ll_ws.q_{_uuid.uuid4().hex[:6]}"
-    c = {"version": "1.0.0", "info": {"title": "t"}, "dataset": "t",
-         "model": {"fields": [{"name": "id", "type": "int"}, {"name": "v", "type": "double"}]},
-         "quality": {"row_rules": [{"name": "finite", "sql": "v BETWEEN -1.7e308 AND 1.7e308"}]},
-         "quarantine": {"format": "database", "connection": "env:LL_WS_URL", "table": table},
-         "materialization": {"format": "parquet", "target_path": "unused", "strategy": "append"}}
+    c = {
+        "version": "1.0.0",
+        "info": {"title": "t"},
+        "dataset": "t",
+        "model": {"fields": [{"name": "id", "type": "int"}, {"name": "v", "type": "double"}]},
+        "quality": {"row_rules": [{"name": "finite", "sql": "v BETWEEN -1.7e308 AND 1.7e308"}]},
+        "quarantine": {"format": "database", "connection": "env:LL_WS_URL", "table": table},
+        "materialization": {"format": "parquet", "target_path": "unused", "strategy": "append"},
+    }
     p = DataProcessor(c, engine="polars")
     r = p.run(pl.DataFrame({"id": [1, 2, 3], "v": [1.0, float("nan"), float("inf")]}))
     assert len(r.bad) == 2

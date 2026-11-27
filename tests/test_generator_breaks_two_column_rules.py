@@ -5,6 +5,7 @@ the rule a broken row breaks, and every coherence pass put comparisons back in o
 sandbox test of ``dropoff_at >= pickup_at`` generated 200 rows and reported "caught 0" on every
 run (2026-11-24). Comparisons are now targets like any declared rule.
 """
+
 import pytest
 import yaml
 
@@ -50,7 +51,9 @@ def _failures(frame):
         ") FROM trips"
     )
     return {
-        sql: con.execute(f"SELECT count(*), count(*) FILTER (WHERE _is_invalid) FROM t WHERE ({sql}) IS NOT TRUE").fetchone()
+        sql: con.execute(
+            f"SELECT count(*), count(*) FILTER (WHERE _is_invalid) FROM t WHERE ({sql}) IS NOT TRUE"
+        ).fetchone()
         for sql in RULES
     }
 

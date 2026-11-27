@@ -13,10 +13,19 @@ from lakelogic.core.types import spark_type_name
 @pytest.mark.parametrize(
     "contract_type, expected",
     [
-        ("string", "string"), ("int", "int"), ("integer", "int"), ("long", "bigint"),
-        ("short", "smallint"), ("byte", "tinyint"), ("double", "double"), ("float", "float"),
-        ("boolean", "boolean"), ("date", "date"), ("timestamp", "timestamp"),
-        ("timestamp_ntz", "timestamp"), ("binary", "binary"),
+        ("string", "string"),
+        ("int", "int"),
+        ("integer", "int"),
+        ("long", "bigint"),
+        ("short", "smallint"),
+        ("byte", "tinyint"),
+        ("double", "double"),
+        ("float", "float"),
+        ("boolean", "boolean"),
+        ("date", "date"),
+        ("timestamp", "timestamp"),
+        ("timestamp_ntz", "timestamp"),
+        ("binary", "binary"),
     ],
 )
 def test_names_match_spark_without_pyspark(contract_type, expected):

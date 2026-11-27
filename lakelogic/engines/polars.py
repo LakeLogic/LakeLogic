@@ -753,18 +753,26 @@ class PolarsAdapter(EngineAdapter):
                         # With an offset ("…+02:00", "…Z") first: parsed as an instant and converted
                         # to the target's zone, so a timestamp_tz keeps the moment it names
                         # (2026-11-19). Naive forms after, read as UTC wall time.
-                        _cands = [
-                            _t.str.to_datetime(fmt, strict=False, time_zone="UTC").cast(_target, strict=False)
-                            for fmt in ("%Y-%m-%dT%H:%M:%S%.f%:z", "%Y-%m-%d %H:%M:%S%.f%:z", "%Y-%m-%dT%H:%M:%S%.f%z")
-                        ] + [
-                            _t.str.to_datetime(fmt, strict=False).cast(_target, strict=False)
-                            for fmt in (
-                                "%Y-%m-%d %H:%M:%S%.f",
-                                "%Y-%m-%dT%H:%M:%S%.f",
-                                "%Y-%m-%dT%H:%M:%S%.fZ",
-                                "%Y-%m-%d",
-                            )
-                        ] + [pl.col(field.name).cast(_target, strict=False)]
+                        _cands = (
+                            [
+                                _t.str.to_datetime(fmt, strict=False, time_zone="UTC").cast(_target, strict=False)
+                                for fmt in (
+                                    "%Y-%m-%dT%H:%M:%S%.f%:z",
+                                    "%Y-%m-%d %H:%M:%S%.f%:z",
+                                    "%Y-%m-%dT%H:%M:%S%.f%z",
+                                )
+                            ]
+                            + [
+                                _t.str.to_datetime(fmt, strict=False).cast(_target, strict=False)
+                                for fmt in (
+                                    "%Y-%m-%d %H:%M:%S%.f",
+                                    "%Y-%m-%dT%H:%M:%S%.f",
+                                    "%Y-%m-%dT%H:%M:%S%.fZ",
+                                    "%Y-%m-%d",
+                                )
+                            ]
+                            + [pl.col(field.name).cast(_target, strict=False)]
+                        )
                         cast_expr = pl.coalesce(_cands)
                         if dtype == pl.Date:
                             cast_expr = cast_expr.dt.date()

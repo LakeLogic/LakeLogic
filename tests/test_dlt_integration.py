@@ -424,8 +424,9 @@ class TestDltAdapter:
             # dlt's WRITABLE state: what the run actually reads. `pipeline.state` is a copy.
             yield live_state
 
-        pipeline = types.SimpleNamespace(state=live_state, run=lambda *args, **kwargs: None,
-                                         managed_state=managed_state)
+        pipeline = types.SimpleNamespace(
+            state=live_state, run=lambda *args, **kwargs: None, managed_state=managed_state
+        )
         fake_dlt = types.SimpleNamespace(
             pipeline=lambda **kwargs: pipeline,
             destinations=types.SimpleNamespace(filesystem=lambda bucket_url: {"bucket_url": bucket_url}),

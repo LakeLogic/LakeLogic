@@ -389,12 +389,14 @@ import pytest  # noqa: E402
 # predicate, valid only under 3.0.2. Known, not hidden: fixing it changes the export AND needs
 # the import to reverse it.
 _SQL_QUALITY_SHAPE = pytest.mark.xfail(
-    strict=True, reason="row rules export as a bare predicate; ODCS 3.1+ wants a query plus an operator")
+    strict=True, reason="row rules export as a bare predicate; ODCS 3.1+ wants a query plus an operator"
+)
 
 
-@pytest.mark.parametrize("version", ["3.0.2",
-                                     pytest.param("3.1.0", marks=_SQL_QUALITY_SHAPE),
-                                     pytest.param("3.2.0", marks=_SQL_QUALITY_SHAPE)])
+@pytest.mark.parametrize(
+    "version",
+    ["3.0.2", pytest.param("3.1.0", marks=_SQL_QUALITY_SHAPE), pytest.param("3.2.0", marks=_SQL_QUALITY_SHAPE)],
+)
 def test_export_is_valid_against_the_official_odcs_schema(version):
     import json
 

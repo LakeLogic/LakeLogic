@@ -5,6 +5,7 @@ reject (the processor saved quarantine only when ``target`` was set), and that w
 declaring the ``dlt_*`` keys, reading them from ``model_extra`` lost the destination. Wherever
 data can be written, its rejects can be written too.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -20,8 +21,12 @@ def _contract(db_path: str) -> dict:
         "dataset": "orders",
         "model": {"fields": [{"name": "order_id", "type": "integer"}, {"name": "amount", "type": "integer"}]},
         "quality": {"row_rules": [{"name": "amount_positive", "sql": "amount > 0"}]},
-        "quarantine": {"format": "dlt", "dlt_destination": "duckdb", "dlt_credentials": db_path,
-                       "dlt_dataset_name": "rejects"},
+        "quarantine": {
+            "format": "dlt",
+            "dlt_destination": "duckdb",
+            "dlt_credentials": db_path,
+            "dlt_dataset_name": "rejects",
+        },
     }
 
 
@@ -40,13 +45,16 @@ def test_declared_dlt_keys_reach_the_writer():
     c = DataContract(**_contract("x.duckdb"))
     assert has_destination(c.quarantine)
     assert quarantine_dlt_config(c.quarantine) == {
-        "dlt_destination": "duckdb", "dlt_credentials": "x.duckdb", "dlt_dataset_name": "rejects"}
+        "dlt_destination": "duckdb",
+        "dlt_credentials": "x.duckdb",
+        "dlt_dataset_name": "rejects",
+    }
 
 
 def test_rejects_land_in_the_named_database(tmp_path, monkeypatch):
     from lakelogic import DataProcessor
 
-    monkeypatch.chdir(tmp_path)          # a stray database would appear here
+    monkeypatch.chdir(tmp_path)  # a stray database would appear here
     db = str(tmp_path / "lake.duckdb")
     (tmp_path / "orders.csv").write_text("order_id,amount\n1,10\n2,-5\n3,-1\n", encoding="utf-8")
     proc = DataProcessor(_contract(db), engine="polars")
@@ -83,8 +91,13 @@ def test_a_standalone_run_writes_its_run_log_to_a_database(tmp_path, monkeypatch
     db = str(tmp_path / "lake.duckdb")
     (tmp_path / "orders.csv").write_text("order_id,amount\n1,10\n2,-5\n", encoding="utf-8")
     c = _contract(db)
-    c["metadata"] = {"run_log_table": "run_logs", "run_log_backend": "dlt", "dlt_destination": "duckdb",
-                     "dlt_credentials": db, "dlt_dataset_name": "ops"}
+    c["metadata"] = {
+        "run_log_table": "run_logs",
+        "run_log_backend": "dlt",
+        "dlt_destination": "duckdb",
+        "dlt_credentials": db,
+        "dlt_dataset_name": "ops",
+    }
     proc = DataProcessor(c, engine="polars")
     proc.run_source(str(tmp_path / "orders.csv"))
     proc.write_run_log()

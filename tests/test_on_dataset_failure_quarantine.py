@@ -2,6 +2,7 @@
 run carries on (owner, 2026-11-18: "keep certain batch[es] and carry on ... a production use
 case"). Row rules are unchanged.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -39,7 +40,7 @@ def test_a_failed_batch_is_set_aside_and_the_others_land(tmp_path, engine):
 
     batches = [
         _batch(tmp_path, "b1.csv", "1,10\n2,20\n"),
-        _batch(tmp_path, "b2.csv", "3,30\n3,31\n4,-1\n"),      # duplicate 3: fails unique
+        _batch(tmp_path, "b2.csv", "3,30\n3,31\n4,-1\n"),  # duplicate 3: fails unique
         _batch(tmp_path, "b3.csv", "5,50\n"),
     ]
     outcomes = []
@@ -51,17 +52,17 @@ def test_a_failed_batch_is_set_aside_and_the_others_land(tmp_path, engine):
 
     assert [o[0] is not None for o in outcomes] == [False, True, False]
     reason, good_n, bad_n, report = outcomes[1]
-    assert good_n == 0 and bad_n == 3                  # the WHOLE batch, including the row-rule reject
+    assert good_n == 0 and bad_n == 3  # the WHOLE batch, including the row-rule reject
     assert "order_id_unique: 1 duplicate value(s)" in reason
     assert report["batch_quarantined"] is True
 
     target = pl.read_delta(str(tmp_path / "target")).sort("order_id")
-    assert target["order_id"].to_list() == [1, 2, 5]   # batches 1 and 3; nothing from batch 2
+    assert target["order_id"].to_list() == [1, 2, 5]  # batches 1 and 3; nothing from batch 2
     quarantined = pl.read_parquet(str(tmp_path / "quarantine" / "*.parquet"))
     assert sorted(quarantined["order_id"].to_list()) == [3, 3, 4]
     errors = [e for row in quarantined["_lakelogic_errors"].to_list() for e in row]
     assert any(e.startswith("Batch rejected: order_id_unique") for e in errors)
-    assert "Rule failed: amount_positive (amount > 0)" in errors   # row reason kept
+    assert "Rule failed: amount_positive (amount > 0)" in errors  # row reason kept
 
 
 def test_continue_and_stop_are_unchanged(tmp_path):
@@ -99,18 +100,28 @@ def test_a_pipeline_moves_the_quarantined_batch_files_and_carries_on(tmp_path):
     (landing / "batch.csv").write_text("order_id,amount\n3,30\n3,31\n", encoding="utf-8")
     contract = _contract(tmp_path)
     contract["info"] |= {"domain": "sales", "system": "shop", "target_layer": "bronze"}
-    contract["source"] = {"type": "landing", "path": str(landing), "format": "csv",
-                          "post_ingestion": {"action": "archive", "on_error": "move",
-                                             "archive_path": str(tmp_path / "archive")}}
+    contract["source"] = {
+        "type": "landing",
+        "path": str(landing),
+        "format": "csv",
+        "post_ingestion": {"action": "archive", "on_error": "move", "archive_path": str(tmp_path / "archive")},
+    }
     (tmp_path / "orders.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
-    (tmp_path / "_registry.yaml").write_text(yaml.safe_dump({
-        "domain": "sales", "system": "shop", "storage_mode": "path",
-        "storage": {"external_location_root": str(tmp_path / "lake")},
-        "contracts": [{"layer": "bronze", "entity": "orders", "path": "orders.yaml"}],
-    }), encoding="utf-8")
+    (tmp_path / "_registry.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "domain": "sales",
+                "system": "shop",
+                "storage_mode": "path",
+                "storage": {"external_location_root": str(tmp_path / "lake")},
+                "contracts": [{"layer": "bronze", "entity": "orders", "path": "orders.yaml"}],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     registry = DomainRegistry.from_yaml(str(tmp_path / "_registry.yaml"), environment="dev", storage_mode="path")
-    LakehousePipeline(registry, engine="polars").run()     # carries on: no exception
+    LakehousePipeline(registry, engine="polars").run()  # carries on: no exception
 
     assert not (landing / "batch.csv").exists()
     assert list((tmp_path / "archive").rglob("error/**/batch.csv")), "the batch file should be in error/"

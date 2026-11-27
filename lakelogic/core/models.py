@@ -1329,7 +1329,8 @@ def to_odcs(contract: "DataContract") -> Dict[str, Any]:
     # A LIST of {property, value} (ODCS v3 CustomProperties). The other tools' properties an
     # import kept are written back first, unchanged; LakeLogic's own context is one item.
     custom_props: List[Dict[str, Any]] = [
-        dict(p) for p in (meta.get("odcs_custom_properties") or [])
+        dict(p)
+        for p in (meta.get("odcs_custom_properties") or [])
         if isinstance(p, dict) and p.get("property") != "lakelogic"
     ]
     if lakelogic_ctx:

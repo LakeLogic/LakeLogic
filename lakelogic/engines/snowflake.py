@@ -1147,7 +1147,8 @@ class SnowflakeAdapter(EngineAdapter):
                 expected = ""
                 if val is None:
                     passed = null_means_no_rows(
-                        _rule_sql, lambda q: (cursor.execute(q), cursor.fetchone()[0])[1], dialect="snowflake")
+                        _rule_sql, lambda q: (cursor.execute(q), cursor.fetchone()[0])[1], dialect="snowflake"
+                    )
                 elif rule.must_be_between:
                     passed = rule.must_be_between[0] <= val <= rule.must_be_between[1]
                     expected = f"(expected {rule.must_be_between[0]} to {rule.must_be_between[1]})"

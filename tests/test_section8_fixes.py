@@ -1,4 +1,5 @@
 """Fixes found by an agent running LakeLogic 2.4.0 in a trading app (2026-11-18)."""
+
 from __future__ import annotations
 
 import pytest
@@ -32,7 +33,7 @@ def test_the_last_batch_flag_does_not_block_other_data(tmp_path):
     from lakelogic import DataProcessor
 
     proc = DataProcessor(_contract(tmp_path, on_dataset_failure="quarantine"), engine="polars")
-    proc.run(pl.DataFrame({"symbol": ["A", "A"], "ts": [1, 2]}))           # fails unique -> quarantined
+    proc.run(pl.DataFrame({"symbol": ["A", "A"], "ts": [1, 2]}))  # fails unique -> quarantined
     assert proc.batch_quarantined
     combined = pl.DataFrame({"symbol": ["B", "C"], "ts": [1, 1]})
     written = proc.materialize(combined, None)
@@ -50,7 +51,7 @@ def test_the_run_log_says_a_batch_was_quarantined(tmp_path):
     assert proc.last_report["status"] == "batch_quarantined"
     assert proc.last_report["error_message"].startswith("Batch rejected: symbol_unique")
     where = proc.write_run_log()
-    assert where and where.endswith(".json")                              # says where it went
+    assert where and where.endswith(".json")  # says where it went
 
     ok = DataProcessor(_contract(tmp_path), engine="polars")
     ok.run(pl.DataFrame({"symbol": ["A", "B"], "ts": [1, 2]}))
@@ -65,8 +66,13 @@ def test_write_run_log_returns_the_database_target(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = str(tmp_path / "lake.duckdb")
     c = _contract(tmp_path)
-    c["metadata"] = {"run_log_table": "run_logs", "run_log_backend": "dlt", "dlt_destination": "duckdb",
-                     "dlt_credentials": db, "dlt_dataset_name": "ops"}
+    c["metadata"] = {
+        "run_log_table": "run_logs",
+        "run_log_backend": "dlt",
+        "dlt_destination": "duckdb",
+        "dlt_credentials": db,
+        "dlt_dataset_name": "ops",
+    }
     proc = DataProcessor(c, engine="polars")
     proc.run(pl.DataFrame({"symbol": ["A"], "ts": [1]}))
     where = proc.write_run_log()
@@ -85,7 +91,8 @@ def test_the_run_complete_line_says_the_final_outcome(tmp_path):
     sink = logger.add(lambda m: lines.append(m.record["message"]), level="INFO")
     try:
         DataProcessor(_contract(tmp_path, on_dataset_failure="quarantine"), engine="polars").run(
-            pl.DataFrame({"symbol": ["A", "A"], "ts": [1, 2]}))
+            pl.DataFrame({"symbol": ["A", "A"], "ts": [1, 2]})
+        )
     finally:
         logger.remove(sink)
     complete = [m for m in lines if m.startswith("Run complete")]
@@ -95,5 +102,7 @@ def test_the_run_complete_line_says_the_final_outcome(tmp_path):
 def test_sql_rule_reasons_read_plainly():
     from lakelogic.core.processor import _describe_dataset_failure
 
-    assert _describe_dataset_failure({"name": "one_bar_per_time", "value": "1 (expected < 1.0)"}) == \
-        "one_bar_per_time: got 1, must be < 1"
+    assert (
+        _describe_dataset_failure({"name": "one_bar_per_time", "value": "1 (expected < 1.0)"})
+        == "one_bar_per_time: got 1, must be < 1"
+    )
