@@ -99,6 +99,19 @@ def _s(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _metric_expression(metric: Dict[str, Any], declared: List[Any]) -> str:
+    """A metric's SQL aggregate: its expression, or, for a structured metric (aggregation + expr,
+    or a ratio), the one OLC generates from the parts. An OLC release before structured metrics
+    has no generator: the metric then has no expression and is skipped, as before."""
+    if _s(metric.get("expression")):
+        return _s(metric.get("expression"))
+    try:
+        from olc.models.metrics import metric_expression
+    except ImportError:
+        return ""
+    return metric_expression(metric, [d for d in declared if isinstance(d, dict)])
+
+
 def _singular(word: str) -> str:
     if word.endswith("ies") and len(word) > 4:
         return word[:-3] + "y"
@@ -1350,6 +1363,8 @@ def derive_business_map(
         if not isinstance(declared, list):
             continue
         for m in declared:
+            # A structured metric (parts, 2026-11-27) stores no expression: OLC generates it.
+            m = {**m, "expression": _metric_expression(m, declared)} if isinstance(m, dict) else m
             if not isinstance(m, dict) or not _s(m.get("name")) or not _s(m.get("expression")):
                 continue
             unresolved = None

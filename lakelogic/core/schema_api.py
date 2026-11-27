@@ -219,7 +219,7 @@ class _ContractValidator:
         self._check_materialization(d.get("materialization"), "materialization")
         self._check_service_levels(d.get("service_levels"), "service_levels")
         self._check_downstream(d.get("downstream", []), "downstream")
-        self._check_metrics(d.get("metrics"), d.get("model"))
+        self._check_metrics(d.get("metrics"), d.get("model"), d.get("primary_key"))
         errors = self._issues
         return ValidationResult(
             valid=not any(e.severity == "error" for e in errors),
@@ -287,9 +287,11 @@ class _ContractValidator:
         "internal",
     }
 
-    def _check_metrics(self, metrics: Any, model: Any) -> None:
-        """Declared metrics (ontology-metrics-v1), by the Open Lakehouse Contract's own rule
-        (``olc.models.metrics.metric_problems``), so Core and the standard accept the same blocks."""
+    def _check_metrics(self, metrics: Any, model: Any, primary_key: Any = None) -> None:
+        """Declared metrics (ontology-metrics-v1; structured, 2026-11-27), by the Open Lakehouse
+        Contract's own rule (``olc.models.metrics.metric_problems``), so Core and the standard
+        accept the same blocks. Column types, the key and dimension references go with the names,
+        so the rule can refuse a sum of a key or across currencies."""
         if metrics is None:
             return
         if not isinstance(metrics, list):
@@ -299,8 +301,18 @@ class _ContractValidator:
             from olc.models.metrics import metric_problems
         except ImportError:  # an older open-lakehouse-contract: the standard has no metrics rule yet
             return
-        fields = [f.get("name") for f in ((model or {}).get("fields") or []) if isinstance(f, dict)]
-        for problem in metric_problems(metrics, fields):
+        defs = [f for f in ((model or {}).get("fields") or []) if isinstance(f, dict) and f.get("name")]
+        fields = [f["name"] for f in defs]
+        try:
+            problems = metric_problems(
+                metrics, fields,
+                field_types={f["name"]: str(f.get("type") or "") for f in defs},
+                keys=[primary_key] if isinstance(primary_key, str) else list(primary_key or []),
+                references=[f["name"] for f in defs if f.get("foreign_key")],
+            )
+        except TypeError:  # an OLC release before structured metrics: names only
+            problems = metric_problems(metrics, fields)
+        for problem in problems:
             self._err("metrics", problem)
 
     def _check_downstream(self, downstream: Any, path: str) -> None:
