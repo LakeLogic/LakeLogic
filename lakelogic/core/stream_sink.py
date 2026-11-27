@@ -30,7 +30,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Union
 
 from loguru import logger
 
@@ -451,9 +451,14 @@ class StreamSink:
         cursor_fn: Optional[Callable[[Dict[str, Any]], Any]] = None,
         target_path: Optional[Union[str, Path]] = None,
         processor: Any = None,
+        seed_keys: Sequence[str] = (),
     ):
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
+        # Where a worker with no checkpoint of its own starts: the latest stored offset of each
+        # partition across these keys (the previous worker layout), so changing the number of
+        # parallel sinks neither re-reads from the start nor skips anything.
+        self.seed_keys = list(seed_keys)
         self.source = source
         self.engine = engine
         self.batch_size = batch_size
@@ -477,6 +482,20 @@ class StreamSink:
         self.processor.quarantine_must_persist = True
 
     # -- helpers ---------------------------------------------------------------
+
+    def _seed_cursor(self) -> Optional[Dict[str, int]]:
+        """The furthest committed offset per partition across ``seed_keys``, or None."""
+        merged: Dict[str, int] = {}
+        for key in self.seed_keys:
+            try:
+                ckpt = self.checkpoint.load(key)
+            except Exception:  # noqa: BLE001 - an unreadable old key seeds nothing
+                continue
+            if ckpt is not None and isinstance(ckpt.cursor, dict):
+                for part, offset in ckpt.cursor.items():
+                    if isinstance(offset, int) and offset > merged.get(part, -1):
+                        merged[part] = offset
+        return merged or None
 
     def _default_key(self) -> str:
         contract = getattr(self.processor, "contract", None)
@@ -579,10 +598,12 @@ class StreamSink:
         skip = 0
 
         if offset_aware:
-            self.source.seek(prior.cursor if prior else None)
+            start = prior.cursor if prior else self._seed_cursor()
+            self.source.seek(start)
             logger.info(
                 f"[StreamSink {self.checkpoint_key}] resuming from broker cursor "
-                f"{prior.cursor if prior else '(earliest)'}."
+                f"{start if start else '(earliest)'}"
+                + (" (seeded from the previous worker layout)" if start and not prior else "") + "."
             )
         elif prior is not None and self.cursor_fn is None and isinstance(prior.cursor, int):
             # Default (count) cursor → resume by skipping already-processed records.
@@ -752,8 +773,16 @@ class KafkaOffsetSource:
         drain: bool = False,
         consumer: Any = None,
         tp_factory: Optional[Callable[[str, int], Any]] = None,
+        worker_index: int = 0,
+        worker_count: int = 1,
         **kafka_config: Any,
     ):
+        # Parallel sinks on one topic: worker ``i`` of ``n`` reads only the partitions where
+        # ``partition % n == i`` and commits only their offsets, under its own checkpoint key.
+        if worker_count < 1 or not (0 <= worker_index < worker_count):
+            raise ValueError(f"worker {worker_index} of {worker_count}: needs 0 <= worker < workers")
+        self.worker_index = worker_index
+        self.worker_count = worker_count
         self.topic = topic
         self.value_deserializer = value_deserializer
         self.poll_timeout_ms = poll_timeout_ms
@@ -793,11 +822,15 @@ class KafkaOffsetSource:
 
     # -- offset-aware protocol -------------------------------------------------
 
+    def owns(self, partition: int) -> bool:
+        """Is ``partition`` this worker's share (always True for a single worker)?"""
+        return int(partition) % self.worker_count == self.worker_index
+
     def seek(self, cursor: Optional[Dict[str, int]]) -> None:
-        """Assign all partitions of the topic and seek to the stored offsets.
-        A partition absent from ``cursor`` is left at ``auto_offset_reset``."""
+        """Assign this worker's partitions of the topic (all of them for one worker) and seek to
+        the stored offsets. A partition absent from ``cursor`` is left at ``auto_offset_reset``."""
         partitions = self.consumer.partitions_for_topic(self.topic) or set()
-        tps = [self._tp(self.topic, p) for p in sorted(partitions)]
+        tps = [self._tp(self.topic, p) for p in sorted(partitions) if self.owns(p)]
         if not tps:
             self._assigned = True
             return

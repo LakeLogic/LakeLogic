@@ -539,7 +539,42 @@ def _kafka_stream_settings(source: Any) -> Dict[str, Any]:
         "processing_time": o.get("processing_time"),
         "max_offsets_per_trigger": o.get("max_offsets_per_trigger"),
         "auth": auth,
+        # Parallel sinks on one topic (non-Spark engines): ``workers: N`` in the contract; each
+        # process says which one it is with LAKELOGIC_STREAM_WORKER (0 .. N-1).
+        **_stream_worker(o),
     }
+
+
+def _stream_worker(o: Dict[str, Any]) -> Dict[str, int]:
+    """``{"workers": N, "worker": i}``: N from ``source.options.workers`` (default 1), i from the
+    LAKELOGIC_STREAM_WORKER environment variable. With N > 1 a missing or out-of-range i is
+    refused: every worker reading everything would double-process the topic."""
+    workers = int(o.get("workers") or 1)
+    if workers < 1:
+        raise ValueError("source.options.workers must be 1 or more")
+    raw = os.environ.get("LAKELOGIC_STREAM_WORKER")
+    if workers == 1:
+        return {"workers": 1, "worker": 0}
+    if raw is None or not str(raw).strip().isdigit() or not (0 <= int(raw) < workers):
+        raise ValueError(
+            f"source.options.workers is {workers}: set LAKELOGIC_STREAM_WORKER to this process's number "
+            f"(0 to {workers - 1}), one per process"
+        )
+    return {"workers": workers, "worker": int(raw)}
+
+
+#: The largest earlier worker count a new layout is seeded from (see StreamSink.seed_keys).
+MAX_SEED_WORKERS = 16
+
+
+def stream_worker_keys(name: str, worker: int, workers: int) -> Dict[str, Any]:
+    """This worker's checkpoint key and the keys of every other layout it may seed from."""
+    base = f"stream::{name}"
+    layouts = [base] + [f"{base}#{j}/{m}" for m in range(2, MAX_SEED_WORKERS + 1) for j in range(m)]
+    key = base if workers == 1 else f"{base}#{worker}/{workers}"
+    # Every key of every OTHER layout (the same layout's other workers own other partitions).
+    seeds = [k for k in layouts if not (k == base and workers == 1) and not k.endswith(f"/{workers}")]
+    return {"key": key, "seeds": seeds}
 
 
 class ValidationResult:
@@ -9147,8 +9182,11 @@ class DataProcessor:
                 group_id=cfg["group_id"],
                 auto_offset_reset=cfg["starting_offsets"],
                 value_deserializer=_json.loads,
+                worker_index=cfg["worker"],
+                worker_count=cfg["workers"],
                 **{renamed.get(k, k): v for k, v in auth.items()},
             )
+            keys = stream_worker_keys(name, cfg["worker"], cfg["workers"])
             # Object storage (s3://, abfss://, gs://) → the durable store; a local path → SQLite.
             if "://" not in checkpoint:
                 db = checkpoint if checkpoint.endswith((".sqlite", ".db")) else checkpoint + ".sqlite"
@@ -9158,7 +9196,8 @@ class DataProcessor:
                 engine=self.engine_name,
                 processor=self,
                 checkpoint=checkpoint_store_for(checkpoint),
-                checkpoint_key=f"stream::{name}",
+                checkpoint_key=keys["key"],
+                seed_keys=keys["seeds"],
                 batch_size=cfg["batch_size"],
             )
             s = sink.run("continuous" if continuous else "available_now")
